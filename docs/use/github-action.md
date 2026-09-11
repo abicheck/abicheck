@@ -46,28 +46,35 @@ an unsupported combination fails immediately with a clear error instead of
 after a multi-minute toolchain install, and instead of silently falling
 back to a different, unrequested behavior.
 
-| Capability | `compare` | `dump` | `scan` | `deps-tree` / `deps-compare` |
+`mode: scan` itself is retired outright (ADR-068's Action-input-lifecycle
+amendment, D8 hard removal) — setting it fails the step immediately, naming
+the replacement for your shape. See [Migrating from `mode:
+scan`](#migrating-from-mode-scan) below if you're updating an existing
+workflow.
+
+| Capability | `compare`, two-sided | `compare`, audit-only | `dump` | `deps-tree` / `deps-compare` |
 |---|:--:|:--:|:--:|:--:|
-| Single binary/snapshot | yes | yes | yes | yes |
+| Single binary/snapshot | yes | yes (`new-library` only) | yes | yes |
 | Directory/package (`new-library`/`old-library`) | yes (fans out per-library) | **error** | **error** | — |
-| Source-only (no `new-library`, via `sources`/`build-info`/`compile-db`) | — | yes | — | — |
-| `format: sarif` | yes (single pair only) | n/a (always JSON) | **error** | **error** |
-| `format: html` | yes (single pair only) | n/a (always JSON) | **error** | yes (dependency-stack report) |
-| `format: json` | yes | n/a (always JSON) | yes | yes |
-| `format: markdown` / `text` | yes | n/a (always JSON) | `text` only | `markdown` only |
-| `upload-sarif: true` | yes (needs `format: sarif`) | **error** | **error** | **error** |
-| `pr-comment` | yes | no-op | yes | no-op |
+| Source-only (no `new-library`, via `sources`/`build-info`/`compile-db`) | — | — | yes | — |
+| `format: sarif` | yes (single pair only) | yes | n/a (always JSON) | **error** |
+| `format: html` | yes (single pair only) | **error** | n/a (always JSON) | yes (dependency-stack report) |
+| `format: review` | yes (single pair only) | **error** | n/a (always JSON) | **error** |
+| `format: json` | yes | yes | n/a (always JSON) | yes |
+| `format: markdown` | yes | yes | n/a (always JSON) | `markdown` only |
+| `format: junit` / `oneline` | yes | yes | n/a (always JSON) | **error** |
+| `upload-sarif: true` | yes (needs `format: sarif`) | yes (needs `format: sarif`) | **error** | **error** |
+| `pr-comment` | yes | yes | no-op | no-op |
 
 For a multi-library release directory (several `.so`/`.dll`/`.dylib` files),
 use `mode: compare` with a directory/package operand — it fans out to a
 per-library comparison automatically (see [Package comparison
 inputs](#package-comparison-inputs-compare-mode-directorypackage-operands-only)
-below). `dump` and `scan` have no such fan-out: dump each library
-individually (one step per binary, or a matrix), and scan one representative
-artifact at a time, or run `compare` for the binary side and `scan --sources`
-separately for the source/API side (see [Choose Your
-Workflow](../start/choose-your-workflow.md) for weighing that split against a single
-combined step). If the release also carries build-emitted source facts (a
+below). `dump` and `compare`'s own audit-only shape have no such fan-out:
+dump/audit each library individually (one step per binary, or a matrix) —
+see [Choose Your Workflow](../start/choose-your-workflow.md) for weighing
+that split against a single combined step. If the release also carries
+build-emitted source facts (a
 shared `abicheck_inputs/` pack from one build), see [Source Scans →
 Recommended flow: a multi-library release with one shared facts
 pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
@@ -85,9 +92,9 @@ from `action.yml`), see the
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `mode` | no | `compare` (default), `dump`, `scan`, `deps-tree`, or `deps-compare` |
-| `old-library` | yes (compare) | Path to old library, JSON snapshot, ABICC dump, directory, or package (a directory/package fans out to a per-library comparison automatically — no separate mode) |
-| `new-library` | yes (compare, dump\*, scan, deps-tree, deps-compare) | Path to new library, binary, or JSON snapshot. **Directory/package is `compare`-only** — `dump` and `scan` each analyse exactly one artifact and reject a directory/package with a fail-fast error, before any dependency install. \*`dump` may omit `new-library` entirely for a source-only dump (`sources`/`build-info`/`compile-db` given instead). See [Mode/input compatibility](#modeinput-compatibility) below. |
+| `mode` | no | `compare` (default), `dump`, `deps-tree`, or `deps-compare`. `scan` is retired outright (ADR-068) — see [Migrating from `mode: scan`](#migrating-from-mode-scan). |
+| `old-library` | no | Path to old library, JSON snapshot, ABICC dump, directory, or package (a directory/package fans out to a per-library comparison automatically — no separate mode). Omit it (and `abi-baseline`) on a `compare` step to run the audit-only shape (`compare --no-baseline`) against `new-library` alone instead. |
+| `new-library` | yes (compare, dump\*, deps-tree, deps-compare) | Path to new library, binary, or JSON snapshot. **Directory/package is `compare`-only, and only for the two-sided shape** — `dump` and `compare`'s own audit-only shape each analyse exactly one artifact and reject a directory/package with a fail-fast error, before any dependency install. \*`dump` may omit `new-library` entirely for a source-only dump (`sources`/`build-info`/`compile-db` given instead). See [Mode/input compatibility](#modeinput-compatibility) below. |
 
 ### Header inputs
 
@@ -109,7 +116,7 @@ from `action.yml`), see the
 
     The deeper layers — **L3** build context, **L4** source-ABI replay, and
     **L5** source graphs — are now first-class Action inputs. Use the
-    `sources`/`build-info`/`compile-db` inputs in `scan` or `dump` mode and
+    `sources`/`build-info`/`compile-db` inputs in `compare` or `dump` mode and
     abicheck collects them inline; no separate CLI steps are required. See
     [Source scans](#source-scans-build-source-evidence) below and the
     [Build Info & Sources](../learn/build-source-data.md) concept guide.
@@ -150,12 +157,12 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump/scan modes, and compare mode with a single-pair operand): `auto`, `castxml`, `clang`, or `hybrid`. `scan` has no CLI of its own left at all (this Action always translates it to `compare`/`compare --no-baseline`, ADR-068) — like `dump` and single-pair `compare` (Phase 7 removed this flag from the CLI entirely), this Action folds it into a synthesized `.abicheck.yml` `compile:` block forwarded via `--config` instead (along with gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc/lang, when any of those are also set — combining this group with `build-config` is supported: the synthesized `compile:` block merges into a copy of the named build-config, and this Action's input wins on a key conflict). Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context on any mode (set `.abicheck.yml`'s `compile.ast_frontend_fallback`/`compile.frontend_context` directly instead if `extra-args` isn't reaching the mode you need — those two flags have no CLI of their own on any mode). Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
-| `gcc-path` | — | Path to cross-compiler binary (dump/scan modes, and compare mode with a single-pair operand) — see `ast-frontend` above for how this reaches every mode now that the underlying `--compiler` CLI flag is gone from all of them, `scan` included |
-| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump/scan modes, and compare mode with a single-pair operand) — same note as gcc-path above; a full gcc-path wins if both are set, since the merged `compile.compiler` config key can only hold one |
-| `gcc-options` | — | Extra flags for the header frontend (dump/scan modes, and compare mode with a single-pair operand) — folds into the same synthesized `compile:` block `ast-frontend` above describes, on every mode including `scan` (which has no CLI of its own left to forward a raw `--compiler-option` flag to any more). A real, accepted narrowing from an earlier Action version: `scan`'s own now-removed `--compiler-option` CLI flag forwarded a whitespace-containing flag (e.g. `-DMSG="hello world"`) verbatim, since a raw CLI arg isn't subject to `compile.options`' own one-atom-per-entry, whitespace-free contract — `scan` has no such CLI path left to take advantage of that any more, so a whitespace-containing flag on `scan` is now rejected with a clear error the identical way it already was on `dump`/single-pair `compare` |
-| `sysroot` | — | Alternative system root (dump/scan/deps-tree modes, and compare mode with a single-pair operand) — same note as gcc-path above for dump/scan/compare; `deps-tree` keeps its own direct `--sysroot` forwarding, unaffected (it is not part of this compile-context group at all) |
-| `nostdinc` | `false` | Skip standard include paths (dump/scan modes, and compare mode with a single-pair operand) — same Phase 7 note as gcc-path above |
+| `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump mode, and compare mode with a single-pair operand — both the two-sided and audit-only shapes): `auto`, `castxml`, `clang`, or `hybrid`. Like `dump` and single-pair `compare`, this Action folds it into a synthesized `.abicheck.yml` `compile:` block forwarded via `--config` instead (along with gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc/lang, when any of those are also set — combining this group with `build-config` is supported: the synthesized `compile:` block merges into a copy of the named build-config, and this Action's input wins on a key conflict). Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context on any mode (set `.abicheck.yml`'s `compile.ast_frontend_fallback`/`compile.frontend_context` directly instead if `extra-args` isn't reaching the mode you need — those two flags have no CLI of their own on any mode). Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
+| `gcc-path` | — | Path to cross-compiler binary (dump mode, and compare mode with a single-pair operand) — see `ast-frontend` above for how this reaches every mode now that the underlying `--compiler` CLI flag is gone from all of them |
+| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode, and compare mode with a single-pair operand) — same note as gcc-path above; a full gcc-path wins if both are set, since the merged `compile.compiler` config key can only hold one |
+| `gcc-options` | — | Extra flags for the header frontend (dump mode, and compare mode with a single-pair operand) — folds into the same synthesized `compile:` block `ast-frontend` above describes. A whitespace-containing flag (e.g. `-DMSG="hello world"`) is rejected with a clear error, since a raw CLI arg isn't subject to `compile.options`' own one-atom-per-entry, whitespace-free contract. |
+| `sysroot` | — | Alternative system root (dump/deps-tree modes, and compare mode with a single-pair operand) — same note as gcc-path above for dump/compare; `deps-tree` keeps its own direct `--sysroot` forwarding, unaffected (it is not part of this compile-context group at all) |
+| `nostdinc` | `false` | Skip standard include paths (dump mode, and compare mode with a single-pair operand) — same note as gcc-path above |
 
 A directory/package (release/bundle) `compare` operand does not support
 these six inputs — the per-library fan-out never threads this L2 compile
@@ -174,44 +181,37 @@ Reference](../reference/github-action-inputs.md) for the exact wording.
 | `search-path` | — | Additional library search directories (space-separated) |
 | `ld-library-path` | — | Simulated `LD_LIBRARY_PATH` (colon-separated) |
 
-### Source-scan and build-source evidence (scan / dump modes)
+### Source-scan and build-source evidence (compare / dump modes)
 
 These inputs drive [source intelligence](../learn/build-source-data.md) —
-L3 build context, L4 source-ABI replay, and L5 source graphs — through the
-`scan` orchestrator, or fold the same evidence into a `dump` snapshot. L4/L5
-need `clang` (installed automatically by `dependency-source: system` or
-`conda-forge-clang20` — plain `conda-forge`, the default, doesn't provision
-clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
+L3 build context, L4 source-ABI replay, and L5 source graphs — through
+`compare` (both the two-sided and audit-only shapes), or fold the same
+evidence into a `dump` snapshot. L4/L5 need `clang` (installed automatically
+by `dependency-source: system` or `conda-forge-clang20` — plain
+`conda-forge`, the default, doesn't provision clang); without it collection
+degrades gracefully and L0–L2 stay authoritative.
 
 | Input | Modes | Description |
 |-------|-------|-------------|
-| `sources` | scan, dump | Source checkout/tree; drives L4 replay and graph collection. With a source-level depth and no compile DB, `abicheck` auto-detects the build system (CMake/Bazel) and runs the query itself to emit one — no flag, no manual build. |
-| `build-info` | scan, dump | Out-of-tree L3 context: a build dir, a `compile_commands.json`, or a collected evidence pack. |
-| `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
-| `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
+| `sources` | compare (both shapes), dump | Source checkout/tree; drives L4 replay and graph collection. With a source-level depth and no compile DB, `abicheck` auto-detects the build system (CMake/Bazel) and runs the query itself to emit one — no flag, no manual build. For `compare`, this feeds the new (candidate) side only — the old side's evidence is expected to already be embedded in whatever `old-library` snapshot was resolved; not applicable to a directory/package operand. |
+| `build-info` | compare (both shapes), dump | Out-of-tree L3 context: a build dir, a `compile_commands.json`, or a collected evidence pack. Same new-side-only note as `sources` above. |
+| `compile-db` | compare (both shapes; dump folds into `build-info`) | Explicit `compile_commands.json` path. |
+| `build-config` | compare (both shapes), dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
 | `allow-build-query` | — | Deprecated and ignored (the `--allow-build-query` dump flag it fed was always a no-op and has since been removed outright). Kept registered only for back-compat with an existing workflow that still sets it. |
-| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omitting it in scan mode means `headers` — pin `build`/`source` explicitly, since scan no longer escalates from the changed-path seed (ADR-068 (b)). |
-| `against` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). Maps to `--against`. Omit it (and `abi-baseline`) on a step to run a single-build hygiene lint instead — `scan` already runs audit-only whenever no baseline is given. |
-| `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
-| `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
-| `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
-| `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
+| `depth` | compare (both shapes), dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omitting it means `headers` — pin `build`/`source` explicitly (there is no risk-driven `auto` escalation any more, ADR-068 (b)). |
+| `since` | compare, two-sided shape only | Focus the run's source-evidence scope on files changed vs a git ref (e.g. `origin/main`). Rejected outright for the audit-only shape (`compare --no-baseline` does not implement revision-range evidence scoping, ADR-068 D2) and for a directory/package operand. |
+| `changed-path` | compare, two-sided shape only | Changed path(s) to focus the run's source-evidence scope on (space-separated; alternative to `since`). Same audit-only/directory-package rejection as `since` above. |
+| `budget` | compare, two-sided shape only | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. Rejected outright for the audit-only shape (`compare --no-baseline`'s wall-clock guard isn't wired to that path yet, ADR-068 D2). |
+| `against` | — | **Retired** (ADR-068's Action-input-lifecycle amendment, D8 hard removal): this applied only to the now-removed `mode: scan`. Set `old-library` (or `abi-baseline`) under `mode: compare` instead — setting `against` is now a hard error naming that replacement. |
+| `crosscheck` | — | **Retired** (ADR-068 D8, hard removal): `scan --crosscheck`'s `KEY=LEVEL` promotion syntax is gone along with `mode: scan` itself. Every cross-source check it used to gate already reaches `compare` as an ordinary finding — use `policy`/`.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` to control one check's severity instead. Setting `crosscheck` is now a hard error naming that replacement. |
 | `risk-rules` | — | **Retired** (ADR-068 (b)): `scan --risk-rules` and the risk-driven `auto` depth escalation it fed are gone. Pin `depth:` explicitly instead; setting this input is an error. |
-
-!!! note "format in scan mode"
-    `scan` supports `format: text` (default) or `json`; any other value is a
-    hard error raised before any dependency install (see [Mode/input
-    compatibility](#modeinput-compatibility)). `scan` has no CLI of its own
-    left at all (ADR-068) — `text` is rendered through `compare`'s own
-    markdown renderer, for both a baseline scan and an audit-only one; it is
-    not a separate plain-text report format.
 
 !!! tip "Consuming build-emitted source facts (wrapper / Clang plugin)"
     If your **product build** emits its own `abicheck_inputs/` pack — via the
     `abicheck-cc` compiler wrapper or the optional
     [Clang plugin](../learn/build-source-data.md) (both write the identical
     schema) — there is no separate ingestion step. Pass the pack directory
-    directly in `sources` or `build-info` (scan/dump mode); abicheck
+    directly in `sources` or `build-info` (compare/dump mode); abicheck
     auto-detects it and folds it in with no re-parse. The Action does not run
     the wrapper/plugin itself (that happens in your build). The standalone
     `merge` CLI command that used to expose this is gone — see
@@ -221,11 +221,11 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif` is only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects it with a clear error (choose `markdown` or `json` instead). `html` is available in `compare` (same single-pair restriction) and in `deps-tree`/`deps-compare` (a dependency-stack report); `scan` supports only `text`/`json` — `text` is rendered through `compare`'s own markdown renderer (scan has no CLI of its own left, ADR-068), not a separate plain-text format, for both a baseline scan and an audit-only one. Requesting an unsupported format for the mode is a **hard error**, raised before any dependency install — it used to silently fall back to a supported format with only a warning, which is unsafe for CI (see [Mode/input compatibility](#modeinput-compatibility)). |
+| `format` | `markdown` | Output format: `markdown`, `json`, `sarif`, `html`, `junit`, `review`, or `oneline`. `sarif`/`html`/`review` are only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects them with a clear error (choose `markdown`, `json`, or `junit` instead). `compare`'s audit-only shape (`old-library`/`abi-baseline` both omitted) narrows this further, to `json`/`markdown`/`sarif`/`junit`/`oneline` — `html`/`review` are two-sided-report renderers with no audit-only equivalent. `html` is also available in `deps-tree`/`deps-compare` (a dependency-stack report). Requesting an unsupported format for the mode/shape is a **hard error**, raised before any dependency install — it used to silently fall back to a supported format with only a warning, which is unsafe for CI (see [Mode/input compatibility](#modeinput-compatibility)). |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
-| `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output. Exits 0 for a resolvable preview — but an invalid flag combination or an unsatisfiable requested depth/evidence contract still exits nonzero, same as the real run would (see the [inputs reference](../reference/github-action-inputs.md) for the one deliberate exception, an unresolved baseline). Maps to `--dry-run`; supported by every mode. In scan mode this also prints the projected per-layer cost. |
-| `estimate` | `false` | **Deprecated.** scan mode only. Functional alias for `dry-run: 'true'` — prefer `dry-run` directly, which applies to every mode. |
-| `audit` | `false` | **Deprecated.** scan mode only. Forces a single-build hygiene lint by skipping `--against` even when `against`/`abi-baseline` is configured elsewhere in the workflow. Prefer omitting `against`/`abi-baseline` on the step instead — `scan` already runs audit-only whenever no baseline is given. |
+| `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output. Exits 0 for a resolvable preview — but an invalid flag combination or an unsatisfiable requested depth/evidence contract still exits nonzero, same as the real run would (see the [inputs reference](../reference/github-action-inputs.md) for the one deliberate exception, an unresolved baseline). Maps to `--dry-run`; supported by every mode, including compare's audit-only shape. |
+| `estimate` | — | **Retired** (ADR-068's Action-input-lifecycle amendment, D8 hard removal): this applied only to the now-removed `mode: scan`, as a `dry-run` alias. Use `dry-run: 'true'` instead, which applies to every mode. Setting `estimate` is now a hard error naming that replacement. |
+| `audit` | — | **Retired** (ADR-068's Action-input-lifecycle amendment, D8 hard removal): this applied only to the now-removed `mode: scan`, forcing a one-build audit-only run. Under `mode: compare`, simply omit `old-library`/`abi-baseline` to run an audit-only `compare --no-baseline`; set `severity-preset` (e.g. `default`) if this job should still gate on a `BREAKING`/`API_BREAK`-classified finding the way `mode: scan`'s own audit mode always did. Setting `audit` is now a hard error naming that replacement. |
 | `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
 | `policy-file` | — | Custom YAML policy file |
 | `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`) |
@@ -256,7 +256,7 @@ suppression:
 | `severity-addition` | — | Severity for additions: `error`, `warning`, or `info` (compare mode only) |
 | `extra-args` | `''` | Additional CLI arguments passed to abicheck |
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
-| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons; scan mode for a single artifact). No-op outside `pull_request` events. |
+| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons and the audit-only shape). No-op outside `pull_request` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |

@@ -603,12 +603,16 @@ jobs:
       - name: Run abicheck compare audit-only WITH severity-preset (must gate, exit 3)
         id: abi-with-preset
         uses: ./
+        # AUDIT_GATE fails the step unconditionally (no fail-on-* input
+        # governs it, action/run.sh) -- fail-on-breaking: false has no
+        # effect on this axis, so continue-on-error is what actually lets
+        # the job reach the assertion step below (Codex review, PR #1223).
+        continue-on-error: true
         with:
           mode: compare
           new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
           severity-preset: default
           install-deps: false
-          fail-on-breaking: false  # don't fail the test job on the expected AUDIT_GATE
 
       - name: Verify the run gates at exit 3 (AUDIT_GATE) with severity-preset set
         shell: bash
