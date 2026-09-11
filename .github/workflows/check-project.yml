@@ -995,13 +995,14 @@ jobs:
           # longer forwarded here. checks[].analysis.assurance (RunPlanCheck.
           # analysis_assurance, product-gaps audit §3) is still validated at
           # run-plan generation time (project_targets.py's
-          # analysis_assurance_gate.py still accepts only 'complete'), but a
-          # cell declaring it is no longer enforced by this workflow -- a
-          # tracked, documented gap (see check-target/action.yml's own
-          # require-complete-analysis docstring) rather than a silent
-          # behavior change, pending a config-overlay replacement analogous
-          # to the CLI's own release-topology inputs (dso-only/
-          # fail-on-removed-library).
+          # analysis_assurance_gate.py still accepts only 'complete') and is
+          # now enforced again too: check-target's own
+          # analysis-assurance-complete input (the config-overlay
+          # replacement that former docstring named as a tracked gap) merges
+          # an assurance.require_complete: true fragment into whatever
+          # build-config the internal analysis step reads, the same effect a
+          # project author's own .abicheck.yml line would have.
+          analysis-assurance-complete: ${{ matrix.analysis_assurance == 'complete' && 'true' || 'false' }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}

@@ -13,20 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Product-gaps audit §3's "real effect" half, now a **retirement** pin
-(rulings.py deferred-option followup): the ``require-complete-analysis``
-forwarding chain this file used to assert (``check-project.yml``'s
-``matrix.analysis_assurance`` -> ``check-target``'s own
-``require-complete-analysis`` input -> the nested root-Action analysis
-step) is gone. The CLI's own ``compare --require-complete-analysis`` flag
-it terminated at was demoted to a config-only ``.abicheck.yml``
-``assurance.require_complete: true`` with no CLI or Action-input override,
-so the whole chain has nothing left to forward to -- see
-``actions/check-target/action.yml``'s own ``require-complete-analysis``
-input docstring and ``.github/workflows/check-project.yml``'s own comment
-at its former call site for the documented, tracked gap this leaves
-(``checks[].analysis.assurance: complete`` is still validated at run-plan
-generation time but no longer enforced by this Action chain).
+"""Product-gaps audit §3's "real effect" half, now a **retirement +
+config-overlay replacement** pin (rulings.py deferred-option followup, later
+closed by a Codex review finding on the require-complete-analysis retirement
+PR itself).
+
+The ``require-complete-analysis`` forwarding chain this file used to assert
+(``check-project.yml``'s ``matrix.analysis_assurance`` -> ``check-target``'s
+own ``require-complete-analysis`` input -> the nested root-Action analysis
+step) is gone for good: the CLI's own ``compare --require-complete-analysis``
+flag it terminated at was demoted to a config-only ``.abicheck.yml``
+``assurance.require_complete: true`` with no CLI or Action-input override, so
+a boolean *flag* has nothing left to forward to. But
+``checks[].analysis.assurance: complete`` (RunPlanCheck.analysis_assurance,
+still validated at run-plan generation time by
+``analysis_assurance_gate.py``) is enforced again through a **different**
+chain -- ``check-project.yml``'s ``matrix.analysis_assurance`` ->
+``check-target``'s own ``analysis-assurance-complete`` input -> a
+"Generate assurance-overlay config" step that merges
+``assurance: {require_complete: true}`` into whatever ``build-config`` the
+internal analysis step reads. See ``actions/check-target/action.yml``'s own
+``analysis-assurance-complete`` input docstring and
+``abicheck/buildsource/analysis_assurance_gate.py``'s module docstring for
+the full account.
 
 Split out of ``tests/test_reusable_workflows.py`` purely to respect that
 file's ``architecture/debt.yaml`` ``no_growth`` baseline -- see this repo's
@@ -56,9 +65,7 @@ def _load(path: Path) -> dict[str, Any]:
 
 
 class TestRequireCompleteAnalysisRetired:
-    def test_check_project_no_longer_forwards_matrix_analysis_assurance(
-        self,
-    ) -> None:
+    def test_check_project_no_longer_forwards_the_retired_flag(self) -> None:
         data = _load(CHECK_PROJECT)
         steps = data["jobs"]["check"]["steps"]
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
@@ -74,12 +81,82 @@ class TestRequireCompleteAnalysisRetired:
         description = data["inputs"]["require-complete-analysis"]["description"]
         assert "RETIRED" in description
 
-    def test_check_target_action_no_longer_forwards_to_the_root_action(self) -> None:
-        """The nested root-Action analysis step has nothing left to
-        forward to (its own require-complete-analysis input is retired
-        too), so this cell's own conditional forward is gone outright."""
+    def test_check_target_action_no_longer_forwards_the_retired_flag(self) -> None:
+        """The nested root-Action analysis step has nothing left to forward
+        the retired flag to (its own require-complete-analysis input is
+        retired too), so this cell's own conditional forward stays gone."""
         data = _load(CHECK_TARGET_ACTION)
         analysis_step = next(
             s for s in data["runs"]["steps"] if s.get("name") == "Run analysis"
         )
         assert "require-complete-analysis" not in analysis_step["with"]
+
+
+class TestAnalysisAssuranceCompleteConfigOverlay:
+    """The config-overlay replacement that closed the tracked gap the module
+    docstring above (and this file's own former revision) used to describe:
+    ``checks[].analysis.assurance: complete`` is enforced again, through
+    ``analysis-assurance-complete`` rather than a boolean CLI/Action flag.
+    """
+
+    def test_check_project_forwards_matrix_analysis_assurance(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = data["jobs"]["check"]["steps"]
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        forwarded = run_step["with"]["analysis-assurance-complete"]
+        assert "matrix.analysis_assurance" in forwarded
+        assert "'complete'" in forwarded
+
+    def test_check_target_action_declares_the_new_input(self) -> None:
+        data = _load(CHECK_TARGET_ACTION)
+        assert "analysis-assurance-complete" in data["inputs"]
+        assert data["inputs"]["analysis-assurance-complete"]["default"] == "false"
+
+    def test_check_target_action_has_overlay_generation_step(self) -> None:
+        data = _load(CHECK_TARGET_ACTION)
+        steps = data["runs"]["steps"]
+        overlay_step = next(s for s in steps if s.get("id") == "assurance_overlay")
+        assert overlay_step["if"] == "inputs.analysis-assurance-complete == 'true'"
+        # Never allowed to silently swallow a real failure (e.g. a
+        # build-config that doesn't parse to a YAML mapping) -- it must run
+        # with continue-on-error so the always-run finalize step still
+        # executes, and "Run analysis" must be gated on its outcome instead.
+        assert overlay_step["continue-on-error"] is True
+
+    def test_run_analysis_uses_the_generated_overlay_as_build_config(self) -> None:
+        data = _load(CHECK_TARGET_ACTION)
+        analysis_step = next(
+            s for s in data["runs"]["steps"] if s.get("name") == "Run analysis"
+        )
+        build_config = analysis_step["with"]["build-config"]
+        assert "steps.assurance_overlay.outcome" in build_config
+        assert "check-target-assurance-config.yml" in build_config
+        assert "inputs.build-config" in build_config
+
+    def test_run_analysis_gated_on_overlay_not_failing(self) -> None:
+        data = _load(CHECK_TARGET_ACTION)
+        analysis_step = next(
+            s for s in data["runs"]["steps"] if s.get("name") == "Run analysis"
+        )
+        assert "steps.assurance_overlay.outcome != 'failure'" in analysis_step["if"]
+
+    def test_finalize_step_reads_overlay_outcome_for_operational_error(
+        self,
+    ) -> None:
+        data = _load(CHECK_TARGET_ACTION)
+        finalize_step = next(
+            s
+            for s in data["runs"]["steps"]
+            if s.get("name") == "Write report envelope and finalize"
+        )
+        assert "ASSURANCE_OVERLAY_OUTCOME" in finalize_step["env"]
+        assert (
+            finalize_step["env"]["ASSURANCE_OVERLAY_OUTCOME"]
+            == "${{ steps.assurance_overlay.outcome }}"
+        )
+
+    def test_run_sh_surfaces_overlay_failure_as_operational_error(self) -> None:
+        run_sh = (_REPO_ROOT / "actions" / "check-target" / "run.sh").read_text(
+            encoding="utf-8"
+        )
+        assert 'ASSURANCE_OVERLAY_OUTCOME" == "failure"' in run_sh

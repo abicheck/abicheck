@@ -298,15 +298,32 @@ inputs:
       to). The root Action's input it mapped onto is gone: P0.4's
       orthogonal ANALYSIS_INCOMPLETE axis is config-only now,
       `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or
-      Action-input override. This also means `checks[].analysis.assurance`
-      (product-gaps audit §3) is validated at run-plan generation time
-      (project_targets.py's analysis_assurance_gate.py still accepts only
-      'complete') but is no longer enforced by this Action -- a tracked,
-      documented gap (see check-project.yml's own comment at its call
-      site) rather than a silent behavior change, pending a config-overlay
-      replacement analogous to dso-only/fail-on-removed-library's. Still
-      declared so a workflow that sets it gets an explicit `::error::`
-      instead of a silently-ignored input.
+      Action-input override. Still declared so a workflow that sets it
+      gets an explicit `::error::` instead of a silently-ignored input.
+      See `analysis-assurance-complete` below for how
+      `checks[].analysis.assurance: complete` (product-gaps audit §3) is
+      now enforced instead.
+    required: false
+    default: 'false'
+  analysis-assurance-complete:
+    description: >
+      Set to 'true' when this cell declared `checks[].analysis.assurance:
+      complete` (RunPlanCheck.analysis_assurance, validated at run-plan
+      generation time by project_targets.py's analysis_assurance_gate.py,
+      which still accepts only 'complete'). This is the config-overlay
+      replacement `require-complete-analysis` above's own docstring used
+      to name as a tracked gap: since neither a CLI flag nor an Action
+      input can carry `assurance.require_complete` any more (see that
+      input's docstring), this Action instead merges an
+      `assurance: {require_complete: true}` fragment into whichever
+      build-config the internal analysis step would otherwise read
+      (`build-config`, possibly none) -- the same config-only mechanism a
+      project author's own `.abicheck.yml` line would produce, so a
+      declared 'complete' cell is enforced the identical way. check-project.yml
+      is the intended caller (it already validates and carries
+      `checks[].analysis.assurance` on the run-plan); a direct check-target
+      caller may also set this explicitly. Ignored (no overlay generated)
+      when not exactly 'true'.
     required: false
     default: 'false'
   extra-args:
@@ -616,6 +633,67 @@ runs:
     # Deleting any stale file first, unconditionally (not gated on this
     # step's own `if:` below), closes that window regardless of whether
     # analysis runs this time.
+    # ── Assurance overlay: config-overlay replacement for the retired ───────
+    # require-complete-analysis input/flag (see that input's own docstring
+    # above), analogous to the CLI's own release-topology inputs
+    # (dso-only/fail-on-removed-library). `analysis-assurance-complete`
+    # carries `checks[].analysis.assurance == 'complete'` (RunPlanCheck.
+    # analysis_assurance) forwarded from check-project.yml's own run-plan
+    # cell; since P0.4's ANALYSIS_INCOMPLETE axis is config-only now (no CLI
+    # flag or Action input can set it), the only way left to honor a
+    # declared 'complete' cell is to merge an
+    # `assurance: {require_complete: true}` fragment into whichever
+    # build-config the internal analysis step below would otherwise read --
+    # the same effect a project author's own `.abicheck.yml` line would
+    # have, produced here instead of requiring the author to hand-author it.
+    # Runs after "Install abicheck" so `yaml` (a hard abicheck dependency,
+    # `buildsource/build_config.py`) is guaranteed importable regardless of
+    # what the runner's own system Python carries. Placed BEFORE "Clean
+    # stale analysis output" so that step still runs immediately before
+    # "Run analysis" (tests/test_action_check_target.py pins that adjacency
+    # so no other step can write check-target-analysis.json in between) --
+    # this step writes a different file (check-target-assurance-config.yml)
+    # and does not need that same adjacency guarantee.
+    - name: Generate assurance-overlay config
+      id: assurance_overlay
+      if: inputs.analysis-assurance-complete == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        BASE_CONFIG: ${{ inputs.build-config }}
+      run: |
+        set -euo pipefail
+        PY="$(command -v python3 || command -v python)"
+        "$PY" - <<'PYSCRIPT'
+        import os
+
+        import yaml
+
+        base_path = os.environ.get("BASE_CONFIG", "")
+        data: dict = {}
+        if base_path:
+            with open(base_path, encoding="utf-8") as fh:
+                loaded = yaml.safe_load(fh)
+            if loaded is not None:
+                if not isinstance(loaded, dict):
+                    raise SystemExit(
+                        f"::error::{base_path} does not parse to a YAML mapping "
+                        "-- cannot merge an assurance.require_complete overlay "
+                        "into it."
+                    )
+                data = loaded
+        assurance = data.get("assurance")
+        if not isinstance(assurance, dict):
+            assurance = {}
+        # Additive over whatever the base config already declared under
+        # assurance: -- only require_complete is forced to true, exactly the
+        # one field this overlay exists to set.
+        assurance["require_complete"] = True
+        data["assurance"] = assurance
+        with open("check-target-assurance-config.yml", "w", encoding="utf-8") as fh:
+            yaml.safe_dump(data, fh, sort_keys=False)
+        PYSCRIPT
+
     - name: Clean stale analysis output
       shell: bash
       run: rm -f check-target-analysis.json
@@ -626,7 +704,8 @@ runs:
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
         steps.collect_verify.outcome != 'failure' &&
         steps.collect_replay.outcome != 'failure' &&
-        steps.consumer_context.outcome != 'failure'
+        steps.consumer_context.outcome != 'failure' &&
+        steps.assurance_overlay.outcome != 'failure'
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
@@ -660,7 +739,11 @@ runs:
         sources: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
         build-info: ${{ steps.consumer_context.outcome == 'success' && '' || ((inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info) }}
         compile-db: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-db }}
-        build-config: ${{ inputs.build-config }}
+        # "Generate assurance-overlay config" above (this step is skipped
+        # entirely when analysis-assurance-complete != 'true', in which case
+        # its own outcome reads 'skipped' and this falls back to the plain
+        # build-config input unchanged).
+        build-config: ${{ steps.assurance_overlay.outcome == 'success' && 'check-target-assurance-config.yml' || inputs.build-config }}
         depth: ${{ inputs.requested-depth }}
         used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
         required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract-file || '' }}
@@ -712,5 +795,6 @@ runs:
         COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
         COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
         CONSUMER_CONTEXT_OUTCOME: ${{ steps.consumer_context.outcome }}
+        ASSURANCE_OVERLAY_OUTCOME: ${{ steps.assurance_overlay.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

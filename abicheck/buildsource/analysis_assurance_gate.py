@@ -31,17 +31,21 @@ writing e.g. ``analysis: {assurance: partial}`` got a structurally-valid
 config that silently did nothing, ever -- exactly the "declared but
 unhonored setting" failure the project-checks contract exists to prevent.
 
-**Known, tracked gap (rulings.py deferred-option followup):** this module's
-own validation (below) still accepts ``'complete'`` at run-plan generation
-time, but the Action layer (``actions/check-target/action.yml``,
-``.github/workflows/check-project.yml``) that used to translate a declared
-``'complete'`` into the CLI's own boolean gate no longer does -- the CLI's
-flag it forwarded to is gone, and building a config-overlay replacement
-(the way ``dso-only``/``fail-on-removed-library`` get one) is out of this
-followup's scope. A declared ``checks[].analysis.assurance: complete`` is
-therefore validated but currently unenforced by ``check-target``/
-``check-project.yml`` -- a documented gap, not a silent regression, until a
-config-overlay mechanism lands for it.
+This module's own validation (below) still accepts only ``'complete'`` at
+run-plan generation time. The Action layer used to translate a declared
+``'complete'`` value into the CLI's own now-retired boolean flag; since that
+flag is gone, ``actions/check-target/action.yml``'s
+``analysis-assurance-complete`` input is the config-overlay replacement (the
+way ``dso-only``/``fail-on-removed-library`` already have one): it merges an
+``assurance: {require_complete: true}`` fragment into whatever build-config
+the internal analysis step reads, the same effect a project author's own
+``.abicheck.yml`` line would have. ``.github/workflows/check-project.yml``
+forwards ``checks[].analysis.assurance == 'complete'`` into that input for
+every matrix cell, so a declared value is enforced end-to-end again. A
+caller of ``check-target`` directly (bypassing ``check-project.yml``) must
+set ``analysis-assurance-complete`` itself -- this module has no way to
+reach an Action input from here, so that remains the one caller-side step
+this validation cannot perform on its own behalf.
 
 Split into its own leaf module (rather than living inline in
 ``project_targets.py``) purely to respect that file's ``architecture/
