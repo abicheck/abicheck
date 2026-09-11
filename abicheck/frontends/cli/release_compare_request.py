@@ -137,6 +137,7 @@ class _GatePackApplicationLike(Protocol):
 __all__ = [
     "ReleaseCompareRequest",
     "ReleaseComparePlan",
+    "cleanup_release_compare_plan",
     "resolve_release_compare_plan",
 ]
 
@@ -215,11 +216,31 @@ class ReleaseComparePlan:
     old_inventory: PackageInventory | None = None
     new_inventory: PackageInventory | None = None
     degraded: StoredDegradedMembers | None = None
+    #: Every temporary directory this resolution allocated (package/debug-
+    #: package/devel-package extraction, stored-package-variant unpacking),
+    #: regardless of whether the caller supplied its own ``make_temp_dir``
+    #: or relied on the default one -- see :func:`cleanup_release_compare_plan`.
+    temp_dirs: tuple[Path, ...] = ()
 
     @property
     def compare_keys(self) -> list[str]:
         degraded_matched = self.degraded.matched if self.degraded is not None else {}
         return [k for k in self.scope.matched_keys if k not in degraded_matched]
+
+
+def cleanup_release_compare_plan(plan: ReleaseComparePlan) -> None:
+    """Remove every directory :func:`resolve_release_compare_plan` allocated
+    for *plan* (``plan.temp_dirs``) -- the direct-call counterpart of
+    ``compare_release_cmd``'s own tracked ``_make_temp_dir``/
+    ``_cleanup_temp_dirs`` pair (Codex review, PR #1215: a direct caller that
+    lets a package/debug-package/devel-package/stored-package operand use
+    the default ``make_temp_dir`` factory would otherwise leak the extracted
+    directories for the process's lifetime, since nothing else ever removes
+    them). A no-op, per entry, when a directory is already gone."""
+    import shutil
+
+    for path in plan.temp_dirs:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def resolve_release_compare_plan(
@@ -234,12 +255,15 @@ def resolve_release_compare_plan(
     markers, that ``compare_release_cmd`` itself now calls this function to
     perform, rather than repeating inline.
 
-    *make_temp_dir* defaults to a plain, untracked ``tempfile.mkdtemp``-
-    backed factory when omitted -- sufficient for a direct Python caller
-    that does not need cleanup tracking; ``compare_release_cmd`` passes its
-    own tracked factory so its ``finally`` block still removes every
-    directory this resolution allocates, unchanged from before this
-    function existed.
+    *make_temp_dir* defaults to a plain ``tempfile.mkdtemp``-backed factory
+    when omitted; every directory either factory creates -- the caller's own
+    or the default -- is recorded on the returned plan's ``temp_dirs``
+    (Codex review, PR #1215), so a direct caller can pass the plan to
+    :func:`cleanup_release_compare_plan` when done with it.
+    ``compare_release_cmd`` passes its own tracked factory and keeps
+    removing them in its own ``finally`` block exactly as before this
+    function existed; ``plan.temp_dirs`` duplicating that tracking for the
+    CLI path is harmless since the CLI never reads it.
     """
 
     def _do_extract(
@@ -257,9 +281,15 @@ def resolve_release_compare_plan(
     def _default_make_temp_dir(prefix: str) -> Path:
         return Path(tempfile.mkdtemp(prefix=prefix))
 
-    _make_temp_dir: Callable[[str], Path] = (
+    _base_make_temp_dir: Callable[[str], Path] = (
         make_temp_dir if make_temp_dir is not None else _default_make_temp_dir
     )
+    allocated_temp_dirs: list[Path] = []
+
+    def _make_temp_dir(prefix: str) -> Path:
+        path = _base_make_temp_dir(prefix)
+        allocated_temp_dirs.append(path)
+        return path
 
     (
         old_debug_dir,
@@ -373,4 +403,5 @@ def resolve_release_compare_plan(
         old_inventory=old_inventory,
         new_inventory=new_inventory,
         degraded=degraded,
+        temp_dirs=tuple(allocated_temp_dirs),
     )

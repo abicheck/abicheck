@@ -154,3 +154,70 @@ class TestReleaseCompareRequestParity:
         assert cli_plan.degraded == direct_plan.degraded
         # 5. the actual execution set agrees.
         assert cli_plan.compare_keys == direct_plan.compare_keys
+
+
+class TestTempDirTracking:
+    """Codex review (PR #1215): a direct caller that lets a package/
+    stored-package operand resolve through the default ``make_temp_dir``
+    factory must not leak the directories it allocates -- every directory
+    either factory creates is recorded on the resolved plan's ``temp_dirs``,
+    and :func:`cleanup_release_compare_plan` removes them.
+
+    No real stored ``ProjectSnapshot`` package fixture is built here --
+    ``_resolve_release_package_side`` (the one call site that actually
+    invokes ``make_temp_dir`` for a package operand) is patched to call it
+    directly, isolating the tracking wrapper's own contract from that
+    unrelated package-format machinery."""
+
+    def test_a_directory_ever_created_via_make_temp_dir_is_tracked(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        created: list[Path] = []
+
+        def _fake_resolve_release_package_side(side_dir, variant_id, make_temp_dir, *, side):
+            # Simulate what a real stored-package side does: ask for one
+            # temp dir, then decline (this fixture is not a real package).
+            path = make_temp_dir(f"abicheck_relpkg_{side}_")
+            created.append(path)
+            return None
+
+        with patch(
+            "abicheck.cli_compare_release_matrix._resolve_release_package_side",
+            side_effect=_fake_resolve_release_package_side,
+        ):
+            request = ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)
+            plan = resolve_release_compare_plan(request)
+
+        assert created  # the fake actually ran and asked for temp dirs
+        assert all(p.is_dir() for p in created)
+        assert set(plan.temp_dirs) == set(created)
+
+        from abicheck.frontends.cli.release_compare_request import (
+            cleanup_release_compare_plan,
+        )
+
+        cleanup_release_compare_plan(plan)
+        assert not any(p.exists() for p in created)
+
+    def test_cleanup_is_a_no_op_on_an_empty_plan(self, tmp_path: Path) -> None:
+        from abicheck.frontends.cli.release_compare_request import (
+            cleanup_release_compare_plan,
+        )
+
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        plan = resolve_release_compare_plan(
+            ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)
+        )
+        assert plan.temp_dirs == ()
+        cleanup_release_compare_plan(plan)  # must not raise
