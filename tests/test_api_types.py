@@ -610,3 +610,113 @@ class TestDebugFormatValidation:
 
     def test_none_stays_valid(self):
         assert self._request(None).validation_errors() == []
+
+
+class TestCompareRequestEnvMatrixPathCompat:
+    """Codex review, fresh evidence on PR #1221 ("compare --env-matrix
+    demotion to deployment: config key"): that PR's `CompareRequest`
+    demotion (ADR-068 D5) replaced the documented, released 0.4.0 field
+    `env_matrix_path: Path` outright with `env_matrix: EnvironmentMatrix`,
+    breaking a Tier-2 caller constructed exactly per the previously-
+    published shape (``CompareRequest(..., env_matrix_path=Path(...))``,
+    credited in ``CHANGELOG.md``'s 0.4.0 entry) with an immediate
+    ``TypeError`` at construction, not a graceful fallback -- despite that
+    PR's own ADR-068 amendment claiming the typed Python API was
+    unaffected. ``env_matrix_path`` is kept as a genuine, still-accepted
+    constructor parameter that ``__post_init__`` resolves into
+    ``env_matrix`` via ``workflows.input_resolution.load_env_matrix`` (the
+    same loader the retired CLI flag itself used), so both spellings now
+    construct an equivalent request. See ``tests/test_environment_drift.py::
+    TestLoadEnvMatrix::test_compare_request_carries_a_resolved_matrix_not_a_path``
+    for the sibling ``env_matrix=`` coverage this mirrors.
+    """
+
+    def test_env_matrix_path_resolves_to_the_same_matrix_env_matrix_would(
+        self, tmp_path
+    ) -> None:
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+
+        via_path = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=p,
+        )
+        via_value = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"}),
+        )
+        assert via_path.env_matrix is not None
+        assert via_path.env_matrix == via_value.env_matrix
+        # The path is consumed -- never left set alongside the resolved
+        # value, which would make a later `.replace()` see both fields
+        # populated and spuriously raise the "not both" usage error below.
+        assert via_path.env_matrix_path is None
+
+    def test_env_matrix_path_missing_file_raises_validation_error(
+        self, tmp_path
+    ) -> None:
+        with pytest.raises(ValidationError, match="Cannot read environment matrix"):
+            CompareRequest(
+                old=InputSpec(path=tmp_path / "old.so"),
+                new=InputSpec(path=tmp_path / "new.so"),
+                env_matrix_path=tmp_path / "nope.yaml",
+            )
+
+    def test_env_matrix_path_malformed_yaml_raises_validation_error(
+        self, tmp_path
+    ) -> None:
+        p = tmp_path / "env.yaml"
+        p.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+        with pytest.raises(ValidationError, match="Invalid environment matrix"):
+            CompareRequest(
+                old=InputSpec(path=tmp_path / "old.so"),
+                new=InputSpec(path=tmp_path / "new.so"),
+                env_matrix_path=p,
+            )
+
+    def test_passing_both_env_matrix_and_env_matrix_path_is_a_usage_error(
+        self, tmp_path
+    ) -> None:
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+
+        with pytest.raises(ValidationError, match="not both"):
+            CompareRequest(
+                old=InputSpec(path=tmp_path / "old.so"),
+                new=InputSpec(path=tmp_path / "new.so"),
+                env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"}),
+                env_matrix_path=p,
+            )
+
+    def test_request_stays_hashable_after_env_matrix_path_resolution(
+        self, tmp_path
+    ) -> None:
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=p,
+        )
+        assert isinstance(hash(req), int)
+        # `.replace()` on an already-resolved request must not re-trigger
+        # the "not both" usage error (the exact regression a naive
+        # `__post_init__` that didn't consume `env_matrix_path` would hit).
+        replaced = req.replace(lang="c")
+        assert replaced.lang == "c"
+        assert replaced.env_matrix == req.env_matrix
+
+    def test_no_env_matrix_path_or_value_is_a_pure_no_op(self, tmp_path) -> None:
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+        )
+        assert req.env_matrix is None
+        assert req.env_matrix_path is None

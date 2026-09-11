@@ -262,3 +262,21 @@
   (the same key/value convention its `Library Name`/`Version #1`/`Version
   #2` rows already use), omitted entirely -- never a placeholder -- when no
   `deployment:` contract governed the run.
+- **`CompareRequest.env_matrix_path` is restored as a backward-compatible
+  constructor parameter.** The `compare --env-matrix` demotion (ADR-068 D5)
+  replaced this documented, released 0.4.0 field outright with
+  `env_matrix: EnvironmentMatrix`, so a Tier-2 caller built exactly per the
+  previously-published `CompareRequest(..., env_matrix_path=Path(...))`
+  shape (credited in `CHANGELOG.md`'s own 0.4.0 entry) failed at
+  construction with `TypeError: unexpected keyword argument
+  'env_matrix_path'` — not a deprecation warning — contradicting that same
+  amendment's claim that the typed Python API was unaffected.
+  `env_matrix_path: Path | None` is kept as a genuine, still-accepted field;
+  `__post_init__` resolves it into `env_matrix` via the existing
+  `workflows.input_resolution.load_env_matrix` loader (the same one the
+  retired CLI flag used) whenever `env_matrix` itself wasn't also given,
+  and is then consumed (reset to `None`) so a later `.replace()` on an
+  already-resolved request can't see both fields populated and spuriously
+  raise. Passing both `env_matrix` and `env_matrix_path` together is a
+  clear `ValidationError` (ambiguous which one should apply) rather than a
+  silent, unstated precedence rule.

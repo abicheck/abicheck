@@ -699,7 +699,21 @@ release the way `--env-matrix` itself, a single-invocation flag, never did).
 The typed Python API's `compare(..., env_matrix=...)` parameter is
 unaffected: it is ordinary per-comparison evidence data, the same shape
 every other CONFIG-demoted field keeps as a typed-API parameter alongside
-its `.abicheck.yml` route — only the CLI flag surface and its
+its `.abicheck.yml` route. **Correction (Codex review, fresh evidence on
+this PR):** the claim above did not, as first written, extend to
+`CompareRequest`'s own constructor shape — this PR's first pass replaced the
+documented, released `env_matrix_path: Path` field outright with
+`env_matrix: EnvironmentMatrix`, so a Tier-2 caller built exactly per the
+previously-published `CompareRequest(..., env_matrix_path=Path(...))` shape
+(credited in `CHANGELOG.md`'s 0.4.0 entry) hit an immediate `TypeError` at
+construction, not a graceful fallback. Fixed in the same review round:
+`CompareRequest.env_matrix_path` is kept as a genuine, still-accepted
+constructor parameter that `__post_init__` resolves into `env_matrix` (via
+`workflows.input_resolution.load_env_matrix`, the same loader the retired
+CLI flag itself used), so both spellings now construct an equivalent
+request — see `abicheck/workflows/contracts.py`'s own field docstring and
+`tests/test_environment_drift.py::TestCompareRequestEnvMatrixPathCompat`.
+Only the CLI flag surface and its
 `--support-promise`-shaped strict-schema enforcement moved.
 `compare --require-complete-analysis` remains the one
 still-open, unimplemented deferral from this same list; see

@@ -177,6 +177,49 @@ class CompareRequest:
     # ``cli_compare_release_pairwise._run_compare_pair``), which a config-
     # only value with no request field cannot reach.
     env_matrix: EnvironmentMatrix | None = None
+    #: Backward-compatibility shim (Codex review, fresh evidence on this PR):
+    #: before this PR's ADR-068 D5 demotion, ``env_matrix_path: Path`` was
+    #: itself the documented, released ``CompareRequest`` field (see the
+    #: ``CHANGELOG.md`` 0.4.0 entry crediting
+    #: ``CompareRequest.env_matrix_path``, and this field's own long history
+    #: in ``git log`` well before this PR). The ADR-068 amendment's claim
+    #: that "the typed Python API is unaffected" was true for
+    #: ``checker.compare(..., env_matrix=...)`` but did not hold for this
+    #: dataclass's own constructor shape -- a real Tier-2 caller built
+    #: exactly like the documented ``CompareRequest(..., env_matrix_path=
+    #: Path(...))`` example now failed with ``TypeError`` at construction,
+    #: not a deprecation warning. Kept as a genuine, still-accepted
+    #: constructor parameter rather than silently dropped: ``__post_init__``
+    #: below resolves it into ``env_matrix`` the same way the old CLI flag
+    #: used to (via ``workflows.input_resolution.load_env_matrix``), so
+    #: every pre-existing ``env_matrix_path=`` caller keeps working
+    #: unchanged. ``None`` (the default) is a pure no-op. Supplying both
+    #: this and ``env_matrix`` is a usage error (raised eagerly) rather than
+    #: silently picking a winner -- there is no principled precedence
+    #: between "here is the resolved value" and "load it from this file" the
+    #: caller didn't ask for.
+    env_matrix_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.env_matrix_path is None:
+            return
+        if self.env_matrix is not None:
+            raise ValidationError(
+                "CompareRequest: pass either env_matrix or env_matrix_path, "
+                "not both (ambiguous which one should take effect)"
+            )
+        from .input_resolution import load_env_matrix
+
+        object.__setattr__(
+            self, "env_matrix", load_env_matrix(Path(self.env_matrix_path))
+        )
+        # Consume it: leaving `env_matrix_path` set would make a later
+        # `dataclasses.replace()` (this class's own `.replace()` included) on
+        # this already-resolved request re-run `__post_init__` with *both*
+        # fields non-`None` and spuriously raise the "not both" usage error
+        # above, even though the caller never passed `env_matrix` themselves.
+        object.__setattr__(self, "env_matrix_path", None)
+
     # ADR-050 D2: force a tentative diff through a genuine comparability-
     # contract mismatch (scope/profile fingerprint drift) instead of the
     # default hard ``ProfileMismatchError``/``ScopeMismatchError``. Opt-in;

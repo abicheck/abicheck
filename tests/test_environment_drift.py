@@ -1430,22 +1430,18 @@ class TestLoadEnvMatrix:
     def test_compare_request_carries_a_resolved_matrix_not_a_path(
         self, tmp_path
     ) -> None:
-        """ADR-020b / ADR-068 D5: `CompareRequest` no longer has an
-        `env_matrix_path` field to validate the existence of at all -- the
-        former `--env-matrix FILE` request-API field was demoted to
-        `.abicheck.yml`'s `deployment:` config key, and `CompareRequest.
-        env_matrix` now carries an already-*resolved* `EnvironmentMatrix`
-        (a genuine per-comparison classification input, unlike a fully
-        config-only key such as `bundle_system_providers`), not a path a
-        caller could typo. Round-trips through `validate()` cleanly since
-        there is no file to be missing any more."""
+        """ADR-020b / ADR-068 D5: the CLI's former `--env-matrix FILE` flag
+        was demoted to `.abicheck.yml`'s `deployment:` config key, and
+        `CompareRequest.env_matrix` carries an already-*resolved*
+        `EnvironmentMatrix`, not a path a caller could typo. Round-trips
+        through `validate()` cleanly since there is no file to be missing
+        any more. `env_matrix_path` itself is NOT gone (Codex review, fresh
+        evidence: it was the documented, released 0.4.0 field) -- it
+        survives as a backward-compat constructor param `__post_init__`
+        resolves into `env_matrix`; see `test_api_types.py::
+        TestCompareRequestEnvMatrixPathCompat` for that contract."""
         from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.environment_matrix import EnvironmentMatrix
-
-        assert not hasattr(CompareRequest(
-            old=InputSpec(path=tmp_path / "old.so"),
-            new=InputSpec(path=tmp_path / "new.so"),
-        ), "env_matrix_path")
 
         req = CompareRequest(
             old=InputSpec(path=tmp_path / "old.so"),
@@ -1454,6 +1450,9 @@ class TestLoadEnvMatrix:
         )
         assert req.env_matrix is not None
         assert req.env_matrix.runtime_floors == {"GLIBC": "2.28"}
+        # The compat field is consumed/normalized to None even when unset,
+        # never left dangling as a second source of truth.
+        assert req.env_matrix_path is None
         assert req.validation_errors() == []
 
 
