@@ -588,6 +588,18 @@ class ProfileMatrixEntry:
     #: ADR-065's own axis (schema 1.8): profiles with at least one check
     #: whose scope-completeness contribution is nonzero.
     scope_incomplete_profiles: tuple[str, ...] = ()
+    #: Subset of ``profiles`` whose only reports are *completed*
+    #: `compare --no-baseline` audits (ADR-068 D2:
+    #: ``TargetReport.completed_without_compatibility_verdict``) -- distinct
+    #: from both ``unanalyzed_profiles`` (nothing ran) and a profile absent
+    #: from every list (a real compatibility verdict was checked and found
+    #: clean). Without this, such a profile fell through every list here and
+    #: rendered as "clean on all checked profiles" -- a genuine compatibility
+    #: claim this shape never makes at all (Codex review, fresh evidence): an
+    #: audit reports no additions/removals/compatibility verdict, so nothing
+    #: was actually checked to *be* clean. Declared last, with a default, for
+    #: the same positional-construction-safety reason as the fields above.
+    audit_only_profiles: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -599,6 +611,7 @@ class ProfileMatrixEntry:
             "contract_incomplete_profiles": list(self.contract_incomplete_profiles),
             "analysis_incomplete_profiles": list(self.analysis_incomplete_profiles),
             "scope_incomplete_profiles": list(self.scope_incomplete_profiles),
+            "audit_only_profiles": list(self.audit_only_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 

@@ -681,6 +681,31 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         if evidence_contract_axis:
             audit_blocking_categories.add("evidence_contract_error")
         gate_exit_code = COVERAGE_INCOMPLETE_EXIT if audit_blocking_categories else 0
+        # A pinned evidence contract this audit could not satisfy
+        # (`run_outcome.operational: evidence_contract_error`, exit 7) means
+        # no valid analysis ran at all -- the identical operational-failure
+        # signal `check_report._classify_verdict` already checks before
+        # exempting a no-baseline report from operational-error status.
+        # Without checking it here too, this branch marked such a report
+        # `completed_without_compatibility_verdict=True` unconditionally,
+        # so the aggregate reported "complete coverage"/"audit completed"
+        # for a run whose own producer says it produced no valid result
+        # (Codex review, fresh evidence) -- the blocking gate alone doesn't
+        # correct that: an operational failure and a real gating finding
+        # are different facts, and a required-but-optional-gate report
+        # would have shown neither.
+        run_outcome_raw = data.get("run_outcome")
+        operational_status = (
+            run_outcome_raw.get("operational")
+            if isinstance(run_outcome_raw, Mapping)
+            else None
+        )
+        operationally_failed = isinstance(
+            operational_status, str
+        ) and operational_status not in (
+            "none",
+            "",
+        )
         # `analysis_assurance_exit_contribution`, the dedicated root key
         # `_analysis_assurance_exit()` reads, is a two-sided-report-only
         # field this shape never emits (its own assurance contribution
@@ -700,8 +725,15 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             library=data.get("library"),
             head_sha=head_sha,
             # A completed run, not an unavailable/unresolved one -- no
-            # "reason" a coverage report should surface as a gap.
-            reason=None,
+            # "reason" a coverage report should surface as a gap. Except
+            # when the audit itself failed operationally: that IS a gap
+            # worth surfacing, the same way every other operational
+            # sentinel branch in this module populates `reason`.
+            reason=(
+                f"audit did not complete: {operational_status}"
+                if operationally_failed
+                else None
+            ),
             path=path,
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
@@ -719,7 +751,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             # rather than special-cased to `None`.
             findings=parse_report_findings(data),
             effective_config_digest=effective_config_digest,
-            completed_without_compatibility_verdict=True,
+            completed_without_compatibility_verdict=not operationally_failed,
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a

@@ -351,6 +351,7 @@ class AggregateResult:
             contract_incomplete = []
             analysis_incomplete = []
             scope_incomplete = []
+            audit_only = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
@@ -407,6 +408,18 @@ class AggregateResult:
                     if not any(r.analyzed for r in reports):
                         unanalyzed.append(pid)
                     else:
+                        # At least one completed no-baseline audit and zero
+                        # real compatibility verdicts: this profile made no
+                        # compatibility claim at all, clean or otherwise --
+                        # flagged explicitly rather than left to fall through
+                        # every list and render as "clean" (Codex review,
+                        # fresh evidence), which would upgrade one-sided
+                        # audit completion into an unsupported compatibility
+                        # claim. Still independently `affected` when its
+                        # gate blocks -- the two facts are orthogonal, the
+                        # same way a `COMPATIBLE`-but-gated profile below is
+                        # both "affected" and has a real verdict.
+                        audit_only.append(pid)
                         gate_blocking = any(
                             r.gate is not None and r.gate.blocking for r in reports
                         )
@@ -431,6 +444,7 @@ class AggregateResult:
                     analysis_incomplete_profiles=tuple(analysis_incomplete),
                     scope_incomplete_profiles=tuple(scope_incomplete),
                     verdict_by_profile=verdict_by_profile,
+                    audit_only_profiles=tuple(audit_only),
                 )
             )
         return tuple(entries)
@@ -632,11 +646,21 @@ class AggregateResult:
         """One base target's row in the profile matrix.
 
         Four mutually exclusive shapes -- affected, clean everywhere, partly
-        clean with some profile never producing an analyzed result, and
-        nothing analyzed at all -- then two independent suffixes that qualify
-        whichever shape was chosen.
+        clean with some profile never producing an analyzed result or
+        producing no compatibility claim at all, and nothing "clean" at
+        all -- then independent suffixes that qualify whichever shape was
+        chosen.
         """
         unanalyzed = entry.unanalyzed_profiles
+        audit_only = entry.audit_only_profiles
+        # A profile is only "clean" if it produced a real, checked
+        # compatibility verdict -- neither unanalyzed (nothing ran) nor
+        # audit-only (a completed `compare --no-baseline` audit, ADR-068
+        # D2: it makes no compatibility claim at all, clean or otherwise).
+        # Folding the latter into "clean" would upgrade one-sided audit
+        # completion into a compatibility statement this shape never
+        # actually makes (Codex review, fresh evidence).
+        not_clean = set(unanalyzed) | set(audit_only)
         if entry.affected_profiles:
             line = (
                 f"  {entry.base_target}: affected on "
@@ -649,25 +673,39 @@ class AggregateResult:
                 # on" imply the unanalyzed one produced a result too
                 # (Codex review).
                 line += f"; no analyzed result on {', '.join(unanalyzed)}"
-        elif not unanalyzed:
+            if audit_only:
+                line += f"; audit-only (no compatibility verdict) on {', '.join(audit_only)}"
+        elif not not_clean:
             line = (
                 f"  {entry.base_target}: clean on all checked profiles "
                 f"({', '.join(entry.profiles)})"
             )
-        elif len(unanalyzed) < len(entry.profiles):
-            # Some profiles are clean, others never produced an
-            # analyzed result at all -- never call the latter
-            # "clean" (Codex review).
-            clean = [p for p in entry.profiles if p not in unanalyzed]
-            line = (
-                f"  {entry.base_target}: clean on {', '.join(clean)} "
-                f"(checked on {', '.join(entry.profiles)}); "
-                f"no analyzed result on {', '.join(unanalyzed)}"
-            )
-        else:
+        elif len(not_clean) < len(entry.profiles):
+            # Some profiles are clean, others never produced an analyzed
+            # result, or produced only an audit-only completion -- never
+            # call either of the latter two "clean" (Codex review).
+            clean = [p for p in entry.profiles if p not in not_clean]
+            line = f"  {entry.base_target}: clean on {', '.join(clean)} (checked on {', '.join(entry.profiles)})"
+            if unanalyzed:
+                line += f"; no analyzed result on {', '.join(unanalyzed)}"
+            if audit_only:
+                line += f"; audit-only (no compatibility verdict) on {', '.join(audit_only)}"
+        elif not audit_only:
             line = (
                 f"  {entry.base_target}: no analyzed result on any "
                 f"checked profile ({', '.join(entry.profiles)})"
+            )
+        elif not unanalyzed:
+            line = (
+                f"  {entry.base_target}: audit-only (no compatibility "
+                f"verdict) on all checked profiles ({', '.join(entry.profiles)})"
+            )
+        else:
+            line = (
+                f"  {entry.base_target}: no analyzed result on "
+                f"{', '.join(unanalyzed)}; audit-only (no compatibility "
+                f"verdict) on {', '.join(audit_only)} "
+                f"(checked on {', '.join(entry.profiles)})"
             )
         if entry.incomplete_profiles:
             line += f" [incomplete coverage on {', '.join(entry.incomplete_profiles)}]"

@@ -69,6 +69,7 @@ def _write_no_baseline_report(
     findings: list | None = None,
     prefix: str = "abi-report-",
     report_target_id: str | None = None,
+    operational: str | None = None,
 ) -> Path:
     """A real `compare --no-baseline` audit document
     (`report/no_baseline.py::_document_json`'s own shape): `verdict` is
@@ -79,7 +80,12 @@ def _write_no_baseline_report(
     *report_target_id*, when given, is written as the report's own
     self-identified `target_id` (a `check_id`-shaped value, for
     `profile_matrix` tests) -- otherwise the report carries none and the
-    aggregate falls back to the filename-derived *target_id*."""
+    aggregate falls back to the filename-derived *target_id*.
+
+    *operational*, when given, is written as `run_outcome.operational`
+    (e.g. `"evidence_contract_error"`) -- a real operational failure this
+    audit's own producer recorded, as opposed to the default clean/absent
+    case."""
     exit_axes = {
         "audit_gate": audit_gate_axis,
         "contract_coverage": 0,
@@ -100,6 +106,8 @@ def _write_no_baseline_report(
         "contract_coverage_exit_contribution": 0,
         "policy": "strict_abi",
     }
+    if operational is not None:
+        payload["run_outcome"] = {"operational": operational}
     if report_target_id is not None:
         payload["target_id"] = report_target_id
     path = d / f"{prefix}{target_id}.json"
@@ -278,3 +286,138 @@ class TestNoBaselineAuditTextRenderingAndProfileMatrix:
         entry = r.profile_matrix[0]
         assert entry.incomplete_profiles == ("profileA",)
         assert entry.unanalyzed_profiles == ("profileA",)
+
+
+class TestNoBaselineAuditOperationalFailure:
+    """Codex review, fourth round, fresh evidence: an audit that pinned an
+    evidence contract it could not satisfy (`run_outcome.operational:
+    evidence_contract_error`, exit 7) produced no valid analysis at all --
+    it must never read as a completed audit just because a gate axis
+    happened to be clean. `check_report._classify_verdict` already checks
+    the identical `run_outcome.operational` signal before exempting a
+    no-baseline report from operational-error status; `_load_report_file`'s
+    own no-baseline branch had no matching check at all."""
+
+    def test_evidence_contract_operational_failure_is_not_analyzed(
+        self, tmp_path: Path
+    ):
+        _write_no_baseline_report(
+            tmp_path, LINUX, operational="evidence_contract_error"
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is False
+        assert r.targets[0].completed_without_compatibility_verdict is False
+        assert r.targets[0].reason == "audit did not complete: evidence_contract_error"
+
+    def test_evidence_contract_operational_failure_leaves_coverage_incomplete(
+        self, tmp_path: Path
+    ):
+        _write_no_baseline_report(
+            tmp_path, LINUX, operational="evidence_contract_error"
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        coverage = r.to_dict()["coverage"]
+        assert coverage["status"] != "complete"
+        assert LINUX in coverage["missing_required_targets"]
+
+    def test_a_clean_operational_status_still_counts_as_a_completed_audit(
+        self, tmp_path: Path
+    ):
+        # "none" (and the field's own absence, covered by every other test
+        # in this file) must not be mistaken for a real failure.
+        _write_no_baseline_report(tmp_path, LINUX, operational="none")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is True
+        assert r.targets[0].completed_without_compatibility_verdict is True
+        assert r.targets[0].reason is None
+
+    def test_operational_failure_still_reports_a_gating_axis(self, tmp_path: Path):
+        # An operational failure and a real gating finding are different,
+        # non-exclusive facts -- the AUDIT_GATE axis must still gate even
+        # though the audit itself never completed.
+        _write_no_baseline_report(
+            tmp_path,
+            LINUX,
+            audit_gate_axis=3,
+            operational="evidence_contract_error",
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.exit_code() == 1
+        assert r.targets[0].analyzed is False
+
+
+class TestNoBaselineAuditOnlyProfileMatrix:
+    """Codex review, fourth round, fresh evidence: `profile_matrix` folded a
+    profile whose only reports were completed-but-verdict-less audits into
+    "clean on all checked profiles" -- a compatibility claim this shape
+    never actually makes (ADR-068 D2). `ProfileMatrixEntry.audit_only_
+    profiles` and `_render_profile_entry_line` now keep it distinct from
+    both a genuinely clean profile and an unanalyzed one."""
+
+    def test_audit_only_clean_profile_is_not_folded_into_clean(self, tmp_path: Path):
+        tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path, LINUX, prefix=f"abi-report-{LINUX}-", report_target_id=tid
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        entry = r.profile_matrix[0]
+        assert entry.audit_only_profiles == ("profileA",)
+        assert entry.unanalyzed_profiles == ()
+        assert entry.incomplete_profiles == ()
+
+    def test_audit_only_clean_profile_renders_as_audit_only_not_clean(
+        self, tmp_path: Path
+    ):
+        tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path, LINUX, prefix=f"abi-report-{LINUX}-", report_target_id=tid
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        text = r.render_text()
+        assert "audit-only (no compatibility verdict) on all checked profiles" in text
+        assert "clean on all checked profiles" not in text
+
+    def test_mixed_clean_and_audit_only_profiles_keeps_clean_narrow(
+        self, tmp_path: Path
+    ):
+        tid_a = f"{LINUX}@profileA#release@headers"
+        tid_b = f"{LINUX}@profileB#release@headers"
+        _write_no_baseline_report(
+            tmp_path, LINUX, prefix=f"abi-report-{LINUX}-a-", report_target_id=tid_a
+        )
+        _write_report(tmp_path, tid_b, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid_a, tid_b))
+        entry = r.profile_matrix[0]
+        assert entry.audit_only_profiles == ("profileA",)
+        assert "profileB" not in entry.audit_only_profiles
+        text = r.render_text()
+        assert "clean on profileB" in text
+        assert "audit-only (no compatibility verdict) on profileA" in text
+
+    def test_audit_only_profile_still_marked_affected_when_gate_blocks(
+        self, tmp_path: Path
+    ):
+        # audit_only and affected are orthogonal, non-exclusive facts: a
+        # gating audit is both "affected" (it blocked) and made no
+        # compatibility claim at all.
+        tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path,
+            LINUX,
+            prefix=f"abi-report-{LINUX}-",
+            report_target_id=tid,
+            audit_gate_axis=3,
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        entry = r.profile_matrix[0]
+        assert entry.affected_profiles == ("profileA",)
+        assert entry.audit_only_profiles == ("profileA",)
+
+    def test_audit_only_profiles_in_to_dict(self, tmp_path: Path):
+        tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path, LINUX, prefix=f"abi-report-{LINUX}-", report_target_id=tid
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        entry_dict = r.profile_matrix[0].to_dict()
+        assert entry_dict["audit_only_profiles"] == ["profileA"]
