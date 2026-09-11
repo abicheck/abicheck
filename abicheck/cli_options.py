@@ -23,7 +23,7 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
@@ -850,6 +850,69 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
     return _apply
 
 
+def compile_config_argv_tokens(
+    std: str | None, defines: Iterable[str], options: Iterable[str]
+) -> list[str]:
+    """Synthesize one ``compile.std``/``compile.defines``/``compile.options``
+    document's worth of compiler-argv tokens, in the exact order
+    :func:`merge_compile_config` itself folds them: ``[-std=<std>] +
+    [-D<define> ...] + <options...>``. A single source of truth for this
+    order matters because a same-flag conflict (e.g. two ``-std=`` tokens
+    from different documents) is decided by *relative position* in the
+    combined sequence, not by which field produced which token -- any
+    second, independent reimplementation of this order (as
+    ``action_config_overlay._merge_compile_block`` once had) risks
+    silently disagreeing with the real one (P1, Codex review, PR #1222
+    ninth round)."""
+    tokens: list[str] = [f"-std={std}"] if std else []
+    tokens += [f"-D{d}" for d in defines]
+    tokens += list(options)
+    return tokens
+
+
+def _as_compile_field_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    return [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value)]
+
+
+def merge_compile_std_fields(
+    checkout_blk: dict[str, object], sources_blk: dict[str, object]
+) -> dict[str, object] | None:
+    """The cross-key half of ``action_config_overlay._merge_compile_block``:
+    when a ``compile.std`` value on either raw ``compile:`` mapping
+    co-occurs with a ``compile.defines``/``compile.options`` value on
+    either mapping, all three share ONE effective argv sequence (see
+    :func:`compile_config_argv_tokens`) and must be resolved together,
+    sources-root's own tokens folded before checkout's (checkout's own
+    token ends up LAST and wins a same-flag conflict) -- exactly
+    ``merge_compile_config``'s real two-stage precedence, verified
+    directly: checkout ``std: c++17`` + sources ``options: [-std=c++23]``
+    resolves to ``('-std=c++23', '-std=c++17')`` (checkout wins). Returns
+    ``None`` when the two documents don't actually interact this way (each
+    of ``std``/``defines``/``options`` is then still correctly resolved by
+    its own independent per-key rule), else the replacement ``options``
+    field (possibly empty)."""
+
+    def _tokens(blk: dict[str, object]) -> list[str]:
+        std = blk.get("std")
+        return compile_config_argv_tokens(
+            str(std) if std else None,
+            _as_compile_field_list(blk.get("defines")),
+            _as_compile_field_list(blk.get("options")),
+        )
+
+    std_present = bool(checkout_blk.get("std")) or bool(sources_blk.get("std"))
+    lists_present = any(
+        _as_compile_field_list(blk.get(key))
+        for blk in (checkout_blk, sources_blk)
+        for key in ("defines", "options")
+    )
+    if not (std_present and lists_present):
+        return None
+    return {"options": _tokens(sources_blk) + _tokens(checkout_blk)}
+
+
 def merge_compile_config(
     cli_ctx: CompileContext,
     cli_includes: tuple[Path, ...],
@@ -980,17 +1043,15 @@ def merge_compile_config(
         # Config fields are structured metadata, not a shell-like option string.
         # Keep each synthesized flag as one literal argv entry so whitespace inside
         # a define/std value cannot be shlex-split into additional compiler
-        # options (for example plugin-loading flags).
-        config_tokens: list[str] = []
-        if bc.compile_std:
-            config_tokens.append(f"-std={bc.compile_std}")
-        config_tokens += [f"-D{d}" for d in bc.compile_defines]
-        # Phase 7 (compile.options — the demoted --compiler-option): raw
-        # pass-through tokens, appended after std/defines synthesis and
-        # before any surviving CLI --compiler-option tokens (scan only,
-        # since compare/dump no longer have the flag), same "config first,
-        # CLI wins a repeated flag" precedence as std/defines above.
-        config_tokens += list(bc.compile_options)
+        # options (for example plugin-loading flags). Phase 7 (compile.options
+        # — the demoted --compiler-option): raw pass-through tokens, appended
+        # after std/defines synthesis and before any surviving CLI
+        # --compiler-option tokens (scan only, since compare/dump no longer
+        # have the flag), same "config first, CLI wins a repeated flag"
+        # precedence as std/defines above.
+        config_tokens = compile_config_argv_tokens(
+            bc.compile_std, bc.compile_defines, bc.compile_options
+        )
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI

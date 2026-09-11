@@ -42,6 +42,8 @@ from abicheck.action_config_overlay import (
     strip_untrusted_execution_keys,
     validate_base_config,
 )
+from abicheck.cli_options import merge_compile_config
+from abicheck.dry_run_estimate import CompileContext
 
 
 class TestStripUntrustedExecutionKeys:
@@ -850,6 +852,191 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
             merge_compile=True,
         )
         assert base == original
+
+
+def _real_two_stage_gcc_option_tokens(
+    tmp_path: Path,
+    checkout_compile: dict[str, object],
+    sources_compile: dict[str, object],
+) -> tuple[str, ...]:
+    """Run the REAL two-stage ``merge_compile_config`` fold ``compare``'s own
+    per-side implicit dump performs -- checkout document folded onto a bare
+    ``CompileContext`` first, then the sources-root document folded on top
+    of THAT already-resolved context -- and return the resulting
+    ``gcc_option_tokens``. This is the oracle
+    ``test_std_and_options_cross_key_ordering_matches_real_pipeline`` below
+    checks the overlay's merged document against, rather than a
+    hand-derived expected tuple that could itself be wrong."""
+    import yaml
+
+    checkout_cfg = tmp_path / "checkout.abicheck.yml"
+    checkout_cfg.write_text(yaml.safe_dump({"compile": checkout_compile}))
+    sources_dir = tmp_path / "sources_root"
+    sources_dir.mkdir(exist_ok=True)
+    (sources_dir / ".abicheck.yml").write_text(
+        yaml.safe_dump({"compile": sources_compile})
+    )
+    ctx1, includes1 = merge_compile_config(CompileContext(), (), checkout_cfg, None)
+    ctx2, _ = merge_compile_config(ctx1, includes1, None, sources_dir)
+    return ctx2.gcc_option_tokens
+
+
+def _single_stage_gcc_option_tokens(
+    tmp_path: Path, name: str, compile_blk: dict[str, object]
+) -> tuple[str, ...]:
+    """Run a single ``merge_compile_config`` fold of *compile_blk* onto a
+    bare ``CompileContext`` -- what the nested "Run analysis" invocation
+    does when it re-parses an overlay-synthesized ``compile:`` block as an
+    ordinary, single ``--build-config`` document."""
+    import yaml
+
+    cfg = tmp_path / f"{name}.abicheck.yml"
+    cfg.write_text(yaml.safe_dump({"compile": compile_blk}))
+    ctx, _ = merge_compile_config(CompileContext(), (), cfg, None)
+    return ctx.gcc_option_tokens
+
+
+class TestApplySourcesRootConfigBlocksCompileStdOptionsOrdering:
+    """P1 finding (Codex review, fresh evidence, PR #1222 ninth round):
+    ``_merge_compile_block`` merged ``compile.std`` and ``compile.options``
+    as though they were independent fields, each with its own per-key
+    precedence rule. In reality ``merge_compile_config`` folds them into
+    ONE flattened compiler-argv sequence
+    (``[-std=<std>] + [-D<define> ...] + <options...>``) per document, and
+    decides a same-flag conflict by relative POSITION in that one combined
+    sequence across both documents -- never by which YAML key either side
+    used. A checkout ``std: c++17`` plus a sources-root
+    ``options: [-std=c++23]`` must resolve with the checkout's ``-std=``
+    winning (it is folded in LAST), exactly like every other genuine
+    checkout/sources-root conflict in this module -- the old per-key
+    merge produced the opposite, sources-winning order instead.
+
+    Every case below is checked directly against the REAL
+    ``merge_compile_config`` two-stage fold (see
+    ``_real_two_stage_gcc_option_tokens``), not a hand-derived expectation.
+    """
+
+    def test_reported_scenario_checkout_std_vs_sources_options(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario from the finding: checkout sets ``std:
+        c++17``; the sources-root document sets ``options: [-std=c++23]``
+        instead of ``std``. The real pipeline lets the checkout's token win
+        (folded in last); the overlay must reproduce that when its merged
+        document is later re-parsed by a single-stage fold."""
+        checkout_compile = {"std": "c++17"}
+        sources_compile = {"options": ["-std=c++23"]}
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+        assert expected == ("-std=c++23", "-std=c++17")  # pin the real oracle itself
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+        # And the resolved compiler standard is checkout's, not sources'.
+        assert actual[-1] == "-std=c++17"
+
+    def test_sources_std_vs_checkout_options(self, tmp_path: Path) -> None:
+        """The mirror image: sources-root sets ``std``, checkout expresses
+        its own ``-std=`` via ``options`` instead -- checkout's token is
+        still folded in last and still wins."""
+        checkout_compile = {"options": ["-std=c++20"]}
+        sources_compile = {"std": "c++23"}
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+
+    def test_std_and_defines_and_options_all_present_both_sides(
+        self, tmp_path: Path
+    ) -> None:
+        """A fuller mix -- ``std``, ``defines``, AND ``options`` set on BOTH
+        documents at once -- to check the general cross-key fold, not just
+        the two-field case the finding names directly."""
+        checkout_compile = {
+            "std": "c++17",
+            "defines": ["CHECKOUT_DEFINE=1"],
+            "options": ["-fno-exceptions"],
+        }
+        sources_compile = {
+            "std": "c++20",
+            "defines": ["SOURCES_DEFINE=1"],
+            "options": ["-DSOURCES_OPT"],
+        }
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+
+    def test_only_checkout_sets_std_sources_sets_nothing_relevant(
+        self, tmp_path: Path
+    ) -> None:
+        """No actual cross-key conflict (sources-root sets an unrelated
+        field) -- the fold must still reproduce the real pipeline's token
+        sequence, which here is simply checkout's own ``-std=``."""
+        checkout_compile = {"std": "c++20"}
+        sources_compile = {"include_dirs": ["/extra/include"]}
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+        # No std-involved conflict here -- `std` is free to stay a plain
+        # structured key rather than being folded into `options`.
+        assert merged.get("std") == "c++20"
+        assert merged.get("include_dirs") == ["/extra/include"]
+
+    def test_only_sources_sets_std_checkout_sets_nothing_relevant(
+        self, tmp_path: Path
+    ) -> None:
+        checkout_compile = {"sysroot": "/opt/sysroot"}
+        sources_compile = {"std": "c++23"}
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
 
 
 class TestApplySourcesRootConfigBlocksCompileReplace:

@@ -156,6 +156,7 @@ from pathlib import Path
 
 from .buildsource.build_config import BuildConfig
 from .bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
+from .cli_options import merge_compile_std_fields
 from .config_paths import project_root_for_config
 from .frontends.cli.commands.compare_bundle_facts_rejections import (
     resolve_max_json_object_nodes_cfg,
@@ -545,25 +546,19 @@ def _lower_config_str(value: object) -> object:
 
 
 #: ``compile:`` list-valued sub-keys ``merge_compile_config`` always
-#: CONCATENATES across the two folded documents rather than letting either
-#: replace the other -- never a plain override in either direction. Each
-#: entry's value is the concatenation order the real function produces:
-#: ``include_dirs`` appends the later (sources-root) document's entries
-#: after the earlier (checkout) document's own (``includes = tuple(cli_
-#: includes) + tuple(... bc.compile_include_dirs ...)`` -- both search
-#: paths are honored, so this is a pure ordering nicety, not a semantic
-#: conflict). ``defines``/``options`` synthesize each document's own
-#: literal ``-D``/pass-through argv tokens and prepend the CURRENT stage's
-#: own tokens ahead of whatever the prior stage already resolved
-#: (``gcc_option_tokens = tuple(config_tokens) + gcc_option_tokens``) --
-#: meaning the earlier (checkout) document's own tokens end up LAST in the
-#: final argv and therefore win a same-flag conflict (a compiler honors a
-#: repeated flag's final occurrence), the same "checkout wins a genuine
-#: conflict" direction the plain scalar fields below take. This overlay
-#: reproduces that ordering as data (sources-root entries first, checkout
-#: entries appended after) rather than reconstructing raw argv tokens, so
-#: ``compile.defines``/``compile.options`` stay legible, structured document
-#: keys instead of collapsing into ``compile.options`` token soup.
+#: CONCATENATES across the two folded documents, never a plain override in
+#: either direction. ``include_dirs`` appends sources-root's entries after
+#: checkout's own (a pure ordering nicety -- both paths are honored
+#: regardless). ``defines``/``options`` synthesize argv tokens and prepend
+#: the CURRENT stage's tokens ahead of the prior stage's already-resolved
+#: ones (``gcc_option_tokens = tuple(config_tokens) + gcc_option_tokens``),
+#: so checkout's own tokens end up LAST and win a same-flag conflict (a
+#: compiler honors a repeated flag's final occurrence) -- reproduced here
+#: as data (sources-root entries first, checkout appended after) rather
+#: than raw argv tokens, so these stay legible document keys instead of
+#: ``compile.options`` token soup. Correct in isolation from ``compile.std``
+#: only -- see :func:`cli_options.merge_compile_std_fields` (PR #1222
+#: ninth round).
 _COMPILE_SOURCES_FIRST_LIST_KEYS = frozenset({"defines", "options"})
 _COMPILE_CHECKOUT_FIRST_LIST_KEYS = frozenset({"include_dirs"})
 
@@ -581,23 +576,23 @@ def _merge_compile_block(
     Deliberately expressed over the raw ``compile:`` mapping rather than by
     round-tripping through a real ``CompileContext``: that dataclass fuses
     ``std``/``defines``/``options`` into opaque compiler-argv tokens for
-    feeding a header-AST subprocess, which cannot be losslessly
-    reconstructed back into ``compile.std``/``compile.defines``/``compile.
-    options`` document keys (and this overlay must keep them as such --
-    the nested "Run analysis" invocation's own ``load_build_config`` re-parses
-    this synthesized document exactly like any other project config).
+    feeding a header-AST subprocess, which cannot be losslessly reconstructed
+    back into ``compile.std``/``compile.defines``/``compile.options``
+    document keys (this overlay must keep them as such -- the nested "Run
+    analysis" invocation's own ``load_build_config`` re-parses this
+    synthesized document exactly like any other project config).
 
-    For every scalar key not covered by one of the buckets above (``std``,
-    ``sysroot``, ``compiler``) ``merge_compile_config`` only consults the
-    later-folded (sources-root) document's value when the earlier-folded
-    (checkout) one left the field unset/default -- an explicit checkout
-    value blocks the sources-root one from applying at all (``sysroot``/
-    ``compiler``: ``cli_ctx.<field> if cli_ctx.<field> is not None else
-    bc.<field>``). So the default rule here is: the checkout document's own
-    value wins when it sets one; the sources-root document's value fills
-    the field only when checkout leaves it unset. ``frontend`` is the one
-    exception to "checkout sets one" meaning "checkout blocks sources": its
-    own semantic-default value ``"auto"`` counts as unset too, per
+    For every scalar key not covered by one of the buckets above
+    (``sysroot``, ``compiler`` -- NOT ``std``, which only looks like one;
+    see :func:`cli_options.merge_compile_std_fields`) ``merge_compile_config``
+    only consults the later-folded (sources-root) document's value when the
+    earlier-folded (checkout) one left the field unset/default -- an
+    explicit checkout value blocks the sources-root one from applying at
+    all (``sysroot``/``compiler``: ``cli_ctx.<field> if cli_ctx.<field> is
+    not None else bc.<field>``). So the default rule here is: checkout's
+    own value wins when it sets one; sources-root fills the field only
+    when checkout leaves it unset. ``frontend`` is the one exception:
+    its own semantic-default value ``"auto"`` counts as unset too, per
     :data:`_COMPILE_AUTO_DEFAULT_KEYS`'s own docstring.
     """
 
@@ -613,7 +608,17 @@ def _merge_compile_block(
         return [value]
 
     merged: dict[str, object] = dict(checkout_blk)
+    std_fold = merge_compile_std_fields(checkout_blk, sources_blk)
+    combined_std_keys = frozenset({"std", "defines", "options"} if std_fold else ())
+    if std_fold is not None:
+        for k in ("std", "defines", "options"):
+            merged.pop(k, None)
+        if std_fold["options"]:
+            merged["options"] = std_fold["options"]
+
     for key in _COMPILE_SOURCES_FIRST_LIST_KEYS:
+        if key in combined_std_keys:
+            continue
         combined = _as_list(sources_blk.get(key)) + _as_list(checkout_blk.get(key))
         if combined:
             merged[key] = combined
@@ -626,6 +631,7 @@ def _merge_compile_block(
             key in _COMPILE_SOURCES_FIRST_LIST_KEYS
             or key in _COMPILE_CHECKOUT_FIRST_LIST_KEYS
             or key in _COMPILE_CHECKOUT_ONLY_KEYS
+            or key in combined_std_keys
         ):
             continue
         if key in _COMPILE_OR_KEYS:
@@ -637,12 +643,9 @@ def _merge_compile_block(
             and _lower_config_str(checkout_blk.get(key)) == "auto"
         ):
             merged[key] = value
-        # else: checkout already set this key to something other than its
-        # semantic-default sentinel and it isn't one of the "sources wins"
-        # keys above -- checkout's own value stays, matching merge_compile_
-        # config's real precedence for frontend/sysroot/compiler/std (the
-        # last of which is checkout-wins via the argv-ordering trick the
-        # list-key handling above already reproduces).
+        # else: checkout already set this non-default, non-"sources wins"
+        # key -- checkout's own value stays (frontend/sysroot/compiler;
+        # ``std`` only when not folded above).
     return merged
 
 
