@@ -469,6 +469,50 @@ concepts:
       extract/debug_layout_semantic_ir.py) -- deliberately does not widen
       AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
       function/variable/typedef identity remains unimplemented for both
+      -- see below for the third cohort's own, later revisit of the
+      "functions: declined for now" note above.
+
+      Third cohort landed (functions, 2026-09-11) -- revisits, but does not
+      contradict, the "declined for now" finding recorded just above: that
+      finding was about the SIGNATURE/matching-key problem specifically
+      (canonical_spelling's cross-backend agreement, bare-name-collision
+      matching) and correctly found no bug there to close, since
+      resolve_function_identity's CANONICAL tier already keys unambiguously
+      on the mangled name with no bare-name collision. This cohort migrates
+      something narrower and orthogonal: the ARCHITECTURAL invariant every
+      other migrated cohort already satisfies (a migrated module never
+      reads the legacy flat collection directly), applied to the one part
+      of _diff_functions that can be migrated without inventing new
+      normalizer output -- the old/new matching INDEX itself
+      (function_identity_index, abicheck/compare/functions.py, replacing
+      SymbolIdentityIndex.for_functions), forbidden from reading
+      AbiSnapshot.functions/.function_map directly by its own
+      MIGRATED_COHORTS entry. The resolved FindingIdentity for each
+      function is UNCHANGED -- still computed by
+      finding_identity.resolve_function_identity from the flat Function
+      object, never recomputed from EntityId.extra -- because, as this
+      cohort's own investigation confirmed, a function's identity has no
+      legacy-vs-IR duality to adjudicate at all: Function.entity_id is
+      resolved once, at parse time (entity_id_for_function), by every
+      producer alike, and extract/semantic_normalizer.py's own third slice
+      copies that exact value into SemanticIR rather than recomputing it,
+      so there is no second, independently-derived representation for a
+      real SemanticIR to disagree with (unlike typedefs'/constants' own
+      separately-resolved sidecar). Consequently this cutover is provably
+      behavior-preserving (verified in
+      tests/test_function_cutover.py, including through
+      diff_symbols._diff_functions via checker.compare), not a bug fix --
+      and does NOT migrate the richer per-parameter/return-type/cv/
+      virtual-method/ctor-dtor/hidden-friend comparisons in
+      diff_symbols.py, which stay on the legacy Function fields: those
+      would need CanonicalEntity to carry per-position facts (a
+      separately-addressable return-type spelling, ref_qualifier, variadic
+      status) it does not have today -- canonical_spelling combines a
+      whole signature into one opaque string -- and inventing that
+      normalizer output speculatively, with no detector ready to consume
+      it, is exactly what this phase's own non-goal warns against. See
+      abicheck/compare/functions.py's own module docstring for the full
+      account.
       formats.
       **2026-09-05 re-assessment correction:** both landed cohorts were
       *fidelity gates*, not authority transfers. typedef_index_pair and

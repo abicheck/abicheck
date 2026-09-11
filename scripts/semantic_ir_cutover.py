@@ -131,6 +131,19 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         forbidden_attributes=frozenset({"constants", "constant_entity_ids"}),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    MigratedCohort(
+        name="functions",
+        modules=("abicheck/compare/functions.py",),
+        # `compare/functions.py` migrates only the old/new *matching* index
+        # (`function_identity_index`, replacing `SymbolIdentityIndex.
+        # for_functions`) -- not a payload fact the way typedefs/constants
+        # did. See that module's own docstring for the full scoping
+        # account, including why a function's identity has no legacy-vs-IR
+        # duality the way `typedefs`/`typedef_entity_ids` or
+        # `constants`/`constant_entity_ids` do.
+        forbidden_attributes=frozenset({"functions", "function_map"}),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
 )
 
 #: `getattr` spellings that reach an attribute without an `ast.Attribute`
