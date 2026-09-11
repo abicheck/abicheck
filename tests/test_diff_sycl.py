@@ -815,11 +815,20 @@ class TestEnvironmentMatrixValidation:
         with pytest.raises(ValueError, match="'cuda' must be a dict"):
             EnvironmentMatrix.from_dict({"cuda": [1, 2]})
 
-    def test_str_coercion_in_backends(self):
-        """Numeric values in backends list get coerced to strings."""
+    def test_non_string_backends_rejected(self):
+        """Numeric values in backends list are rejected, not silently coerced.
+
+        Previously asserted the opposite (silent int->str coercion into the
+        resulting tuple), but `_validate_str_list_elements` now rejects a
+        non-``str`` element outright (Codex review, PR #1221): an unchecked
+        non-string element would otherwise reach a frozen, hashable
+        dataclass field and defer the real type error to hash time. See
+        `_validate_str_list_elements`'s own docstring in
+        `abicheck/environment_matrix.py`.
+        """
         from abicheck.environment_matrix import EnvironmentMatrix
-        m = EnvironmentMatrix.from_dict({"sycl": {"backends": [123]}})
-        assert m.sycl.backends == ("123",)
+        with pytest.raises(ValueError, match="sycl.backends.*must be strings"):
+            EnvironmentMatrix.from_dict({"sycl": {"backends": [123]}})
 
 
 # ---------------------------------------------------------------------------
