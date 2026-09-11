@@ -415,8 +415,8 @@ def closure_location_free_identity(identity: str) -> str:
 
 def closure_marker_files(identity: str) -> tuple[str, ...]:
     """The declaring-file *basename* of every closure/anonymous-tag marker
-    in *identity*, in order (``"w<(lambda at /a/foo.h:4:37)>"`` ->
-    ``("foo.h",)``); empty for an identity carrying no marker.
+    in *identity*, **in source order** (``"w<(lambda at /a/foo.h:4:37)>"``
+    -> ``("foo.h",)``); empty for an identity carrying no marker.
 
     The complement of :func:`closure_location_free_identity`: that function
     drops the basename along with the ``:line:col`` discriminator, and its
@@ -430,25 +430,31 @@ def closure_marker_files(identity: str) -> tuple[str, ...]:
     This function recovers exactly that evidence, so the move check can
     read it from the same place the coordinate shift itself is read from.
 
+    Normalizes ONCE through :func:`_normalize_graph_identity` and then
+    scans the single normalized marker form, rather than running one scan
+    per accepted spelling and concatenating (Codex review, PR #1229): two
+    independent scans return their matches grouped by which regex found
+    them, not in source order, so a mixed-spelling identity
+    (``Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>``) compared unequal
+    against the same two markers written in the other order -- and the raw
+    form's own path group could run greedily through a following
+    normalized marker, capturing ``a.h:1:2),(lambda:b.h`` as a "basename".
+    Order matters because the comparison is positional: marker *i* on the
+    old side is marker *i* on the new side.
+
     Basenames, not paths: two independently-rooted checkouts spell the same
     unmoved header differently (``/old/checkout/foo.h`` vs
     ``/new/checkout/foo.h``), and comparing those would manufacture a move
     out of a checkout root. The cost is the documented residual that a move
     keeping the same basename across directories stays invisible here --
-    the same limitation `graph_reconcile_outcome.coordinate_evidence`
+    the same limitation ``graph_reconcile_outcome.coordinate_evidence``
     already records.
-
-    Handles both spellings that reach a real graph node: the raw
-    ``lambda at <path>:<line>:<col>`` form and the
-    ``_normalize_graph_identity``-produced ``lambda:<basename>:<line>:<col>``
-    form.
     """
-    files: list[str] = []
-    for match in _BARE_ANON_TYPE_LOCATION_RE.finditer(identity):
-        files.append(_basename(match.group(2)))
-    for match in _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.finditer(identity):
-        files.append(_basename(match.group(0).split(":")[-3]))
-    return tuple(files)
+    normalized = _normalize_graph_identity(identity)
+    return tuple(
+        _basename(match.group(0).rsplit(":", 3)[-3])
+        for match in _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.finditer(normalized)
+    )
 
 
 def _basename(path: str) -> str:

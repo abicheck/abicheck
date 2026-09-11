@@ -21,3 +21,18 @@
   called two snapshots one capture while their serializations differed —
   and the digest-driven byte-identical coverage warning, the channel that
   residual is disclosed through, stayed silent.
+- **Marker extraction is order-correct across mixed spellings.**
+  `closure_marker_files` normalizes once and scans the single normalized
+  form, so an identity mixing the raw `lambda at path:line:col` and
+  normalized `lambda:basename:line:col` spellings yields its declaring
+  basenames in source order — two independent scans returned them grouped
+  by which regex matched, and the raw form's path group could run greedily
+  through a following normalized marker.
+- **A declaration that was renamed *and* moved reports the combined
+  outcome again.** The marker-carried move evidence is no longer disabled
+  during a rename, so the pair reports `declaration_identity_reconciled`
+  rather than a bare `declaration_renamed`.
+- **Snapshot content identity ignores runtime-only fields.** Calling
+  `AbiSnapshot.index()` on one side no longer makes two content-identical
+  snapshots report degraded assurance; `from_headers`' conditional
+  persistence is modelled explicitly.

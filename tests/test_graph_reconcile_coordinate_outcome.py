@@ -424,3 +424,96 @@ class TestMarkerCarriedLocationEvidence:
                 )
                 is None
             ), label
+
+
+class TestMixedMarkerSpellings:
+    """Codex review (PR #1229): `closure_marker_files` ran one scan per
+    accepted spelling and concatenated, so a mixed-spelling identity
+    returned its markers grouped by which regex matched rather than in
+    source order — and the raw form's own path group could run greedily
+    through a following normalized marker. Both make the positional
+    comparison answer differently for the same two markers written in a
+    different order.
+
+    The invariant, not the one reported pair: the extracted marker files
+    are exactly the declaring basenames in source order, whatever mix of
+    spellings the identity happens to use."""
+
+    #: The same two markers (`a.h` then `b.h`), written every way the
+    #: identity vocabulary accepts.
+    _SPELLINGS = (
+        "Pair<(lambda at a.h:1:2),(lambda at b.h:3:4)>",
+        "Pair<(lambda:a.h:1:2),(lambda:b.h:3:4)>",
+        "Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>",
+        "Pair<(lambda:a.h:1:2),(lambda at b.h:3:4)>",
+        "Pair<(lambda at /x/a.h:1:2),(lambda:b.h:3:4)>",
+    )
+
+    def test_every_spelling_extracts_the_same_ordered_basenames(self) -> None:
+        from abicheck.model.graph_identity import closure_marker_files
+
+        for spelling in self._SPELLINGS:
+            assert closure_marker_files(spelling) == ("a.h", "b.h"), spelling
+
+    def test_order_is_source_order_not_scan_order(self) -> None:
+        """The reversed identity must extract the reversed tuple — a
+        grouped-by-regex result would return the same tuple for both."""
+        from abicheck.model.graph_identity import closure_marker_files
+
+        assert closure_marker_files("Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>") == (
+            "a.h",
+            "b.h",
+        )
+        assert closure_marker_files("Pair<(lambda:b.h:3:4),(lambda at a.h:1:2)>") == (
+            "b.h",
+            "a.h",
+        )
+
+    def test_mixed_spellings_of_one_unmoved_pair_are_not_a_move(self) -> None:
+        """The consumer half: two coordinate-only versions referencing the
+        same `a.h`/`b.h` markers must not be classified as moved merely
+        because the two sides spell the markers differently."""
+        for old_qn in self._SPELLINGS:
+            for new_qn in self._SPELLINGS:
+                shifted = new_qn.replace(":1:2", ":7:8").replace(":3:4", ":9:10")
+                outcome = _classify_outcome(
+                    _identity(old_qn, "", "sig:x\x1fs"),
+                    _identity(shifted, "", "sig:x\x1fs"),
+                )
+                assert outcome == OUTCOME_COORDINATES_ONLY, (old_qn, shifted, outcome)
+
+
+class TestRenameAndMoveTogether:
+    """Codex review (PR #1229): gating the marker-move check on
+    `not renamed` disabled the only available move evidence exactly when a
+    declaration was renamed AND moved, emitting the catalog's combined
+    case (`declaration_identity_reconciled`) as a bare
+    `declaration_renamed`."""
+
+    def test_rename_plus_marker_move_is_reconciled(self) -> None:
+        outcome = _classify_outcome(
+            _identity("Old<(lambda at old.h:1:2)>", "", "sig:o\x1fs"),
+            _identity("New<(lambda at new.h:9:9)>", "", "sig:n\x1fs"),
+        )
+        assert outcome == OUTCOME_RECONCILED, outcome
+
+    def test_rename_without_a_marker_move_stays_renamed(self) -> None:
+        """The negative control: the same rename with the marker file
+        unchanged is a rename and nothing more."""
+        outcome = _classify_outcome(
+            _identity("Old<(lambda at f.h:1:2)>", "", "sig:o\x1fs"),
+            _identity("New<(lambda at f.h:9:9)>", "", "sig:n\x1fs"),
+        )
+        assert outcome == OUTCOME_RENAMED, outcome
+
+    def test_unalignable_marker_counts_make_no_move_claim(self) -> None:
+        """A rename that also changes how many markers the name carries
+        gives no positional correspondence to compare, so no move is
+        claimed from marker text alone."""
+        outcome = _classify_outcome(
+            _identity("Old<(lambda at old.h:1:2)>", "", "sig:o\x1fs"),
+            _identity(
+                "New<(lambda at new.h:9:9),(lambda at other.h:1:1)>", "", "sig:n\x1fs"
+            ),
+        )
+        assert outcome == OUTCOME_RENAMED, outcome

@@ -99,6 +99,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
+from ..model.snapshot_persistence import RUNTIME_ONLY_FIELDS, persisted_from_headers
 from .analysis_assurance_degraded_facts import degraded_reliability_facts
 
 if TYPE_CHECKING:
@@ -447,6 +448,16 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
     return kept
 
 
+def _is_snapshot(value: object) -> bool:
+    """Whether *value* is the ``AbiSnapshot`` the persistence rules above
+    describe. By duck-typed field presence rather than an ``isinstance``:
+    this module keeps its ``AbiSnapshot`` import type-only (see its own
+    header), and the recursion below walks nested declarations too, where
+    those rules do not apply.
+    """
+    return hasattr(value, "from_headers_inferred") and hasattr(value, "library")
+
+
 def _all_fields_equal(old: object, new: object) -> bool:
     """Deep equality over *every* field, ``compare=False`` ones included.
 
@@ -468,9 +479,26 @@ def _all_fields_equal(old: object, new: object) -> bool:
     if type(old) is not type(new):
         return False
     if dataclasses.is_dataclass(old) and not isinstance(old, type):
+        # Skip what the codec never persists (Codex review, PR #1229): the
+        # lazy lookup caches are populated by a mere `AbiSnapshot.index()`
+        # call, so comparing them made "was this side indexed yet" decide
+        # assurance -- two content-identical snapshots with equal canonical
+        # digests read `degraded` purely from cache access order. The names
+        # come from `AbiSnapshot.RUNTIME_ONLY_FIELDS`, declared beside the
+        # fields themselves and pinned against `snapshot_to_dict`'s own pop
+        # list by `tests/test_snapshot_runtime_only_fields.py`.
+        skip = set(RUNTIME_ONLY_FIELDS) if _is_snapshot(old) else set()
+        if _is_snapshot(old):
+            # Compared through `persisted_from_headers` below instead: its
+            # in-memory value is not its persisted value (the codec drops
+            # the key entirely when it was inferred), so comparing it here
+            # too would report two snapshots that persist identically as
+            # different content.
+            skip.add("from_headers")
         return all(
             _all_fields_equal(getattr(old, f.name), getattr(new, f.name))
             for f in dataclasses.fields(old)
+            if f.name not in skip
         )
     if isinstance(old, (list, tuple)):
         assert isinstance(new, (list, tuple))
@@ -523,6 +551,12 @@ def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     pins the pairing, so the disclosure cannot quietly disappear and leave
     this return claiming completeness alone.
     """
+    # `from_headers` is the one field whose *persisted* value is not its
+    # in-memory value: `snapshot_to_dict` drops the key entirely when it
+    # was merely inferred, so an inferred True and an explicit True are
+    # different persisted content even though both read True here.
+    if persisted_from_headers(old) != persisted_from_headers(new):
+        return False
     return _all_fields_equal(old, new)
 
 

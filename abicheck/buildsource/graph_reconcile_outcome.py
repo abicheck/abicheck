@@ -177,12 +177,22 @@ def _classify_outcome(
     # exactly as agreeing ones are. Marker counts always match here --
     # equal location-free keys imply it, since the key collapses every
     # marker to its bare form.
+    #
+    # Deliberately NOT gated on `not renamed` (Codex review, PR #1229): a
+    # declaration whose ordinary name AND declaring file both changed is
+    # the catalog's combined case, OUTCOME_RECONCILED -- disabling the only
+    # available move evidence during a rename emitted it as a bare
+    # OUTCOME_RENAMED instead, losing half of what the pair shows. Equal
+    # marker COUNTS are what makes the positional comparison meaningful,
+    # so the claim is made only when the two sides' markers can be aligned;
+    # under an ordinary coordinate shift equal counts are implied by the
+    # equal location-free keys, and under a rename they are checked.
+    old_markers = closure_marker_files(old_qn) if old_qn else ()
+    new_markers = closure_marker_files(new_qn) if new_qn else ()
     moved_by_marker = (
-        bool(old_qn)
-        and bool(new_qn)
-        and not renamed
-        and bool(closure_marker_files(old_qn))
-        and closure_marker_files(old_qn) != closure_marker_files(new_qn)
+        bool(old_markers)
+        and len(old_markers) == len(new_markers)
+        and old_markers != new_markers
     )
     moved = (
         bool(old_file) and bool(new_file) and old_file != new_file
