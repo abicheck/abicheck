@@ -126,6 +126,10 @@ class _LoadedReport:
     #: recomputed here -- ``None`` for a report that carries none (every
     #: `scan` report today, and an unreadable/malformed one).
     disposition_audit: Mapping[str, Any] | None = None
+    #: See :attr:`TargetReport.completed_without_compatibility_verdict` --
+    #: threaded through unchanged by ``execute.py``. ``False`` everywhere
+    #: except the ``no_baseline`` branch below.
+    completed_without_compatibility_verdict: bool = False
 
 
 def _malformed_gate_report(
@@ -715,6 +719,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             # rather than special-cased to `None`.
             findings=parse_report_findings(data),
             effective_config_digest=effective_config_digest,
+            completed_without_compatibility_verdict=True,
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a

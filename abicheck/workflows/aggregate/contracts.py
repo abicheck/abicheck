@@ -433,10 +433,27 @@ class TargetReport:
     #: (every `scan` report today). Declared last for the same positional-
     #: construction-safety reason as the fields above.
     disposition_audit: Mapping[str, Any] | None = None
+    #: True only for a `compare --no-baseline` audit that completed
+    #: (ADR-068 D2). That shape's `compatibility_verdict` is *always*
+    #: `None` by design -- an audit has no baseline to compare against, so
+    #: it has no compatibility verdict, gating or not -- which the
+    #: `compatibility_verdict is not None` test :attr:`analyzed` used alone
+    #: cannot tell apart from a report that never arrived at all. Without
+    #: this, a clean, completed, *required* audit read as
+    #: `CoverageStatus.EMPTY` and failed the aggregate at exit 1 even though
+    #: it ran successfully and found nothing to gate on (Codex review,
+    #: fresh evidence). Declared last for the same positional-construction-
+    #: safety reason as the fields above; `False` for every other report
+    #: shape, so this widens :attr:`analyzed` only for the one shape that
+    #: needs it and changes nothing else.
+    completed_without_compatibility_verdict: bool = False
 
     @property
     def analyzed(self) -> bool:
-        return self.compatibility_verdict is not None
+        return (
+            self.compatibility_verdict is not None
+            or self.completed_without_compatibility_verdict
+        )
 
     @property
     def profile_id(self) -> str | None:

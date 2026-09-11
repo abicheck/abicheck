@@ -158,3 +158,50 @@ class TestNoBaselineAuditGate:
         assert r.targets[0].findings is not None
         assert r.targets[0].findings.complete is True
         assert r.targets[0].findings.findings == ()
+
+    def test_a_clean_required_audit_is_analyzed_not_empty_coverage(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence: `TargetReport.analyzed` used to be
+        `compatibility_verdict is not None` alone, and an audit's
+        verdict is *always* `None` by design (ADR-068 D2) -- indistinguishable
+        from a report that never arrived. A clean, completed, required audit
+        must read as analyzed and the aggregate's coverage must be
+        `complete`, not `CoverageStatus.EMPTY`."""
+        _write_no_baseline_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is True
+        assert r.targets[0].compatibility_verdict is None  # still no fabricated verdict
+        assert r.exit_code() == 0
+        coverage = r.to_dict()["coverage"]
+        assert coverage["status"] == "complete"
+        assert coverage["analyzed_required_targets"] == 1
+        assert coverage["missing_required_targets"] == []
+
+    def test_audit_candidate_side_findings_reach_the_target_report(
+        self, tmp_path: Path
+    ):
+        """Codex review, fresh evidence: the audit's real candidate-side
+        findings (the ones that produced AUDIT_GATE) live in a root-level
+        `findings` array, an entirely different shape from the always-empty
+        `changes`. Discarding them broke cross-profile reconciliation and
+        display -- a reader could never see what actually gated."""
+        _write_no_baseline_report(
+            tmp_path,
+            LINUX,
+            audit_gate_axis=3,
+            findings=[
+                {
+                    "kind": "symbol_removed",
+                    "symbol": "libfoo_free",
+                    "description": "removed",
+                    "severity": "breaking",
+                }
+            ],
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].findings is not None
+        assert len(r.targets[0].findings.findings) == 1
+        finding = r.targets[0].findings.findings[0]
+        assert finding.kind == "symbol_removed"
+        assert finding.symbol == "libfoo_free"

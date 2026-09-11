@@ -113,6 +113,9 @@ def aggregate(
             findings=report.findings,
             effective_config_digest=report.effective_config_digest,
             disposition_audit=report.disposition_audit,
+            completed_without_compatibility_verdict=(
+                report.completed_without_compatibility_verdict
+            ),
         )
 
     targets = tuple(
