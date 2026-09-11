@@ -280,3 +280,44 @@ def test_content_identity_survives_an_unwalkable_value() -> None:
     assert _all_fields_equal([1, 2], [1, 2, 3]) is False
     assert _all_fields_equal({"a": 1}, {"b": 1}) is False
     assert _all_fields_equal(_Odd(), 3) is False
+
+
+def test_mapping_keys_are_compared_field_by_field_too() -> None:
+    """Codex review (PR #1229): `dict.keys()` equality is `__eq__`/
+    `__hash__`, which skips exactly the `compare=False` fields this
+    function exists to look past — so two `SemanticIR.occurrences`
+    mappings whose keys differ only in persisted non-identity payload
+    (an `OccurrenceId` whose enclosing `Record.access` went public →
+    private) compared equal while their canonical digests differed.
+
+    Stated over the key position generally — bare, nested as a value, and
+    nested as a key of a key — rather than only the reported shape, since
+    the defect is "the recursion skipped one position", not "one field was
+    wrong"."""
+    from abicheck.model.identity import Record
+    from abicheck.policy.analysis_assurance_schema_staleness import _all_fields_equal
+
+    public = Record(name="X", access="public")
+    private = Record(name="X", access="private")
+    # The premise: these ARE equal as dict keys, which is why the bug was
+    # invisible to `keys()` comparison.
+    assert public == private
+    assert {public: 1}.keys() == {private: 1}.keys()
+
+    assert not _all_fields_equal({public: 1}, {private: 1})
+    assert not _all_fields_equal({"k": {public: 1}}, {"k": {private: 1}})
+    assert not _all_fields_equal({public: {"v": 1}}, {private: {"v": 1}})
+    assert not _all_fields_equal([{public: 1}], [{private: 1}])
+
+    # The must-collapse half: genuinely identical keys still compare equal,
+    # so the fix cannot degrade into "every mapping differs".
+    assert _all_fields_equal({public: 1}, {Record(name="X", access="public"): 1})
+    other = Record(name="Y", access="public")
+    assert _all_fields_equal(
+        {public: 1, other: 2},
+        {Record(name="X", access="public"): 1, Record(name="Y", access="public"): 2},
+    )
+    # Two genuinely distinct keys (`public` and `private` are EQUAL keys and
+    # would collapse into one entry, which is the whole reason the payload
+    # difference was invisible), so this exercises the multi-key path.
+    assert len({public: 1, other: 2}) == 2

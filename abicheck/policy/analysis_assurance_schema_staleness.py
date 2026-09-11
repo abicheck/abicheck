@@ -507,8 +507,20 @@ def _all_fields_equal(old: object, new: object) -> bool:
         )
     if isinstance(old, dict):
         assert isinstance(new, dict)
-        return old.keys() == new.keys() and all(
-            _all_fields_equal(old[k], new[k]) for k in old
+        if old.keys() != new.keys():
+            return False
+        # Compare the KEY OBJECTS too, not just the values (Codex review,
+        # PR #1229): `dict.keys()` equality is `__eq__`/`__hash__`, which
+        # skips the same `compare=False` fields this whole function exists
+        # to look past -- a `SemanticIR.occurrences` key whose enclosing
+        # `Record.access` changed from public to private is a different
+        # persisted content and an equal dict key. `_new_keys_by_value`
+        # recovers each hash-equal counterpart's real object, since a dict
+        # lookup hands back the value, never the stored key.
+        new_keys = {k: k for k in new}
+        return all(
+            _all_fields_equal(k, new_keys[k]) and _all_fields_equal(old[k], new[k])
+            for k in old
         )
     return bool(old == new)
 
