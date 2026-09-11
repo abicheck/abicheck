@@ -670,6 +670,19 @@ runs:
       shell: bash
       env:
         BASE_CONFIG: ${{ inputs.build-config }}
+        # Codex review (P1), fresh evidence, PR #1222: needed so this step
+        # can detect a caller's own `extra-args: --config <path>` (used
+        # instead of the `build-config` input) and fold it into the
+        # overlay below as the merge base, rather than leaving it to reach
+        # the nested Action's own `extra-args` forwarding unchanged --
+        # which, once this step also starts forwarding a real overlay as
+        # `build-config` (see that input's own forwarding below), would
+        # collide with action/run.sh's `_cmd_has_config_flag &&
+        # _extra_args_has_config_flag` guard as TWO irreconcilable
+        # `--config` values and fail a check that worked before
+        # `analysis-assurance-complete` was enabled. See the "extra-args
+        # --config extraction" block below for the full mechanism.
+        EXTRA_ARGS: ${{ inputs.extra-args }}
         # The effective --sources root this run's own "Run analysis" step
         # below will actually pass (mirrors that step's own `sources:`
         # input formula exactly, see its comment there): a successful
@@ -844,6 +857,122 @@ runs:
         # qualification check a second time in this same step.
         if ! _is_path_already_qualified "$_assurance_out_path"; then
           _assurance_out_path="$PWD/$_assurance_out_path"
+        fi
+        # ── extra-args --config extraction (Codex review, P1, fresh ────────
+        # evidence, PR #1222): a caller who names a config via `extra-args:
+        # --config <path>` instead of the `build-config` input (both are
+        # otherwise-supported, independent ways to name a project config)
+        # used to reach the nested Action's own `extra-args` untouched,
+        # since this step forwarded an EMPTY `build-config` whenever
+        # `analysis-assurance-complete` was false. Now that this step
+        # forwards a real overlay as `build-config` instead (see that
+        # input's own forwarding below), the nested Action's compare CLI
+        # would see BOTH an overlay `--config` (from `build-config`) and
+        # the caller's own raw `--config` (from `extra-args`) --
+        # action/run.sh's `_cmd_has_config_flag && _extra_args_has_
+        # config_flag` guard rejects exactly that combination as two
+        # irreconcilable configs, breaking a check that worked before this
+        # input was enabled. Extract that config here instead, so it can be
+        # merged into the SAME overlay the explicit-`build-config` branch
+        # below already builds, and strip it from the `extra-args` this
+        # step forwards onward (see `effective-extra-args` output below) so
+        # the nested Action never sees a redundant second `--config`.
+        #
+        # Only when no explicit `build-config` was given: an explicit
+        # `build-config` input is a more specific, deliberate operator
+        # signal and keeps its existing precedent (a `build-config` +
+        # `extra-args --config` combination together is already, and
+        # remains, action/run.sh's own documented rejection -- see that
+        # guard's own docstring -- so this step leaves both untouched in
+        # that case rather than silently picking one).
+        #
+        # Mirrors action/run.sh's own `_extra_args_is_value_option`/
+        # `_extra_args_options` tokenizer closely enough to agree with it on
+        # what counts as a real `--config` FLAG (as opposed to some OTHER
+        # value-taking option's own literal value, e.g. `--policy --config`
+        # where `--config` is `--policy`'s value, not a flag) -- deliberately
+        # duplicated rather than sourced, the same "this step doesn't source
+        # run.sh" convention `_is_path_already_qualified` above already
+        # documents. Keeps this list in sync with run.sh's by hand; an
+        # unlisted value-taking option is misread as a bare flag, which can
+        # only under-recognize a `--config` occurrence -- never mis-attribute
+        # some other option's value as one (the same safe-by-construction
+        # direction run.sh's own docstring establishes).
+        _ct_extra_args_is_value_option() {
+          case "$1" in
+            --abi3 | --ast-frontend | --budget | \
+            --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
+            --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
+            --debug-format | --debug-info | --debug-root | --debuginfod-url | \
+            --depth | --devel-pkg | --dump-manifest | --format | \
+            --frontend-context | --header | --include | --instantiation-manifest | \
+            --lang | --ld-library-path | --manifest | --max-findings | \
+            --output | --output-dir | --pack | \
+            --pdb-path | --policy | --post-manifest | --probe-matrix | \
+            --public-header-dir | --required-symbol | \
+            --search-path | --severity-preset | --since | --sources | \
+            --suppress | --sysroot | --use-cases | --used-by | --variant | --version | --view | \
+            --write | -H | -I | -o)
+              return 0
+              ;;
+          esac
+          return 1
+        }
+        _ct_extra_args_config=""
+        _extra_args_without_config=()
+        if [[ -n "${EXTRA_ARGS:-}" ]]; then
+          _ct_pending=""
+          # shellcheck disable=SC2086  # word-splitting is the point; mirrors
+          # run.sh's own identical `set -- ${INPUT_EXTRA_ARGS:-}` in
+          # `_extra_args_options`.
+          set -- ${EXTRA_ARGS}
+          for _ct_arg in "$@"; do
+            if [[ -n "$_ct_pending" ]]; then
+              if [[ "$_ct_pending" == "--config" ]]; then
+                # On a REPEATED --config within extra-args alone, keep the
+                # LAST one -- the same "Click keeps only the last one"
+                # semantics extra-args would have had if forwarded raw and
+                # left to Click's own parsing.
+                _ct_extra_args_config="$_ct_arg"
+              else
+                _extra_args_without_config+=("$_ct_pending" "$_ct_arg")
+              fi
+              _ct_pending=""
+              continue
+            fi
+            if [[ "$_ct_arg" == --config=* ]]; then
+              _ct_extra_args_config="${_ct_arg#--config=}"
+              continue
+            fi
+            if _ct_extra_args_is_value_option "$_ct_arg"; then
+              _ct_pending="$_ct_arg"
+              continue
+            fi
+            _extra_args_without_config+=("$_ct_arg")
+          done
+          # A trailing --config with nothing after it (malformed usage the
+          # real CLI would itself reject) is dropped rather than re-added as
+          # a bare token -- there is no value to merge, and re-adding it
+          # would just reproduce the same collision this block exists to
+          # close.
+          if [[ -n "$_ct_pending" && "$_ct_pending" != "--config" ]]; then
+            _extra_args_without_config+=("$_ct_pending")
+          fi
+        fi
+        _effective_extra_args="${EXTRA_ARGS:-}"
+        if [[ -z "${BASE_CONFIG:-}" && -n "$_ct_extra_args_config" ]]; then
+          # Reassigns BASE_CONFIG itself (rather than introducing a
+          # separate "effective" variable) so the unconditional
+          # `_base_config_abs` absolutization right below -- shared
+          # verbatim with the plain explicit-build-config case -- treats an
+          # extra-args-derived config exactly like one named via
+          # `build-config` directly, with no separate code path to drift.
+          BASE_CONFIG="$_ct_extra_args_config"
+          if [[ ${#_extra_args_without_config[@]} -gt 0 ]]; then
+            _effective_extra_args="${_extra_args_without_config[*]}"
+          else
+            _effective_extra_args=""
+          fi
         fi
         _base_config_abs=""
         if [[ -n "${BASE_CONFIG:-}" ]]; then
@@ -1419,6 +1548,28 @@ runs:
         # which reads it back out as this step's own output rather than a
         # path re-derived (and therefore re-guessable) from a fixed string.
         echo "config-path=$_assurance_out_path" >> "$GITHUB_OUTPUT"
+        # The `extra-args` value "Run analysis" below should actually
+        # forward: identical to the raw input UNLESS this step just merged
+        # an `extra-args --config <path>` into the overlay above (see the
+        # "extra-args --config extraction" block above), in which case that
+        # `--config`/`--config=<path>` pair has already been folded into
+        # `config-path` and must not ALSO reach the nested Action raw --
+        # doing so would recreate the exact two-`--config` collision this
+        # step exists to close. `extra-args` can legitimately contain
+        # newlines (a YAML literal-block `|` value, per
+        # `_extra_args_options`'s own docstring in action/run.sh), so this
+        # uses GitHub's documented multiline-output delimiter form rather
+        # than a plain `key=value` line, which would silently corrupt (or
+        # be silently truncated by) an embedded newline. `mktemp -u` is
+        # already relied on elsewhere in this same step purely for its
+        # random-suffix generation (no file created), giving a delimiter
+        # nothing in `$_effective_extra_args` itself is expected to contain.
+        _extra_args_output_delim="ct_extra_args_$(basename "$(mktemp -u)")"
+        {
+          echo "effective-extra-args<<$_extra_args_output_delim"
+          printf '%s\n' "$_effective_extra_args"
+          echo "$_extra_args_output_delim"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Clean stale analysis output
       shell: bash
@@ -1488,7 +1639,17 @@ runs:
         # its docstring above) is validated to 'false' before this step can
         # ever run, and the root Action's own input it used to forward to is
         # gone too, so there is nothing left to forward here.
-        extra-args: ${{ inputs.extra-args }}
+        #
+        # "Generate assurance-overlay config" above (this step is skipped
+        # entirely when analysis-assurance-complete != 'true', in which case
+        # its own outcome reads 'skipped' and this falls back to the plain
+        # extra-args input unchanged) may have consumed a caller's own
+        # `extra-args: --config <path>` into the `build-config` overlay
+        # above (see that step's "extra-args --config extraction" comment) --
+        # forward its own `effective-extra-args` output in that case rather
+        # than the raw input, so a since-merged `--config` doesn't ALSO
+        # reach this invocation raw and collide with the overlay's own.
+        extra-args: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.effective-extra-args || inputs.extra-args }}
         format: 'json'
         output-file: 'check-target-analysis.json'
         add-job-summary: 'false'
