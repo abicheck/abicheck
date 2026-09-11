@@ -24,6 +24,12 @@ the process exit did; a member the default ``warn`` policy accepted is a
 ``<skipped>`` case -- still visible, never a green pass, never a failure
 the resolved policy did not produce (Codex review on the first cut, which
 emitted ``errors="1"`` for a warn-accepted ``unsupported`` member).
+
+Also owns :func:`append_env_matrix_suite` (Codex review, P2 follow-up,
+round-8), moved here from ``junit_report.py`` (at its own
+``architecture/debt.yaml`` ``no_growth`` baseline with no headroom) to keep
+this file's own established role: release-level JUnit projections of
+metadata that doesn't belong to any one per-library ``<testsuite>``.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from typing import Any
 
-__all__ = ["append_scope_suite"]
+__all__ = ["append_env_matrix_suite", "append_scope_suite"]
 
 SUITE_NAME = "abicheck.comparison_scope"
 
@@ -104,3 +110,39 @@ def append_scope_suite(
     suite.set("errors", str(errors))
     suite.set("skipped", str(tests - errors))
     return tests, errors
+
+
+def append_env_matrix_suite(root: ET.Element, digest: str | None) -> None:
+    """Append a release-level ``<testsuite name="abicheck.deployment">``
+    carrying the release-wide deployment-floor digest as a property.
+
+    A release-scoped value -- computed once by the caller directly from the
+    resolved ``EnvironmentMatrix``, the same way the JSON envelope's
+    ``env_matrix_source_sha256`` field and the Markdown "Deployment floor
+    digest" bullet are -- so it must not depend on any one per-library
+    comparison having completed. Rendered as its own dedicated, zero-test/
+    zero-error ``<testsuite>`` (so a CI dashboard's pass/fail counts are
+    unaffected) with a single ``<properties>``/``<property>`` pair, rather
+    than folded into an existing per-library testsuite's ``<properties>``
+    (``junit_report._add_env_matrix_property``), which only ever fires on a
+    per-library testsuite that a completed comparison actually produced --
+    exactly the gap this function exists to close for a release with zero
+    matched/completed pairs, where no per-library testsuite exists at all
+    to carry the property.
+
+    Omitted entirely (no empty suite) when *digest* is ``None`` -- a
+    release whose candidate declared no ``deployment:`` contract at all,
+    matching every other ``env_matrix_source_sha256`` projection's
+    "omitted, never null" convention.
+    """
+    if digest is None:
+        return
+    suite = ET.SubElement(root, "testsuite")
+    suite.set("name", "abicheck.deployment")
+    suite.set("tests", "0")
+    suite.set("failures", "0")
+    suite.set("errors", "0")
+    props = ET.SubElement(suite, "properties")
+    p = ET.SubElement(props, "property")
+    p.set("name", "env_matrix_source_sha256")
+    p.set("value", digest)

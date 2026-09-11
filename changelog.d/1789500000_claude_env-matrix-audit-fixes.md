@@ -117,3 +117,42 @@
   (also now used by `compare()`'s own stamping and
   `workflows.no_baseline_compare`'s post-hoc field replacement, replacing
   three independent inline computations with one).
+- **`.abicheck.yml`'s `deployment:` configuration namespace is now
+  registered in `docs/_meta/topics.yaml`.** The `compare --env-matrix`
+  demotion introduced this public config key but never registered it with
+  the doc-ownership registry, so the ownership/documentation-review
+  tooling had no `fact_sources` entry tracing the key back to
+  `abicheck/environment_matrix.py` the way `build:`/`compile:` already
+  trace to `abicheck/buildsource/build_config.py`. Added
+  `abicheck/environment_matrix.py` to the existing `config-keys` topic's
+  `fact_sources` (the topic already owning `reference/config-file.md`'s
+  `deployment:` section and `reference/config-keys-reference.md`).
+- **`deployment.compilers`/`sycl.backends`/`cuda.gpu_architectures` now
+  reject a non-string list element instead of silently accepting or
+  mis-coercing it.** `.abicheck.yml`'s `deployment: {compilers: [{name:
+  gcc}]}` (a list of dicts, not strings) previously passed `from_dict`'s
+  outer `isinstance(compilers, list)` check with the dict element left
+  untouched inside the resulting tuple; since `EnvironmentMatrix` is now a
+  genuinely frozen, hashable dataclass (the round-7 fix above), hashing a
+  `CompareRequest` carrying that matrix raised `TypeError: unhashable
+  type: 'dict'` at hash time, defeating the structural-hash guarantee for
+  a config `from_dict` had already accepted as valid. `sycl.backends`/
+  `cuda.gpu_architectures` had the identical outer-list-checked,
+  elements-unchecked shape, silently stringifying a wrong-shaped element
+  (e.g. `sycl.backends: [{driver: x}]`) into a nonsense backend name
+  instead of raising. All three now validate every element is a `str` and
+  raise a clear `ValueError` otherwise, in both lenient and `strict=True`
+  `from_dict` modes.
+- **A directory/package `compare-release`'s `env_matrix_source_sha256`
+  digest now reaches the Markdown and JUnit release reports too, not only
+  JSON.** The release-scoped digest (round-6/round-7 fixes above) was
+  forwarded only into the JSON release envelope: the Markdown report never
+  exposed it at all, and the JUnit report only exposed it indirectly
+  through completed per-library `<testsuite>`s, so a release with zero
+  matched/completed pairs lost the digest entirely even though the
+  identical invocation's JSON output recorded it correctly. Markdown now
+  renders a "Deployment floor digest" bullet (mirroring the two-sided
+  `compare` report's own Markdown projection); JUnit now renders a
+  dedicated, zero-test/zero-error `<testsuite name="abicheck.deployment">`
+  property (`abicheck.report.junit_scope.append_env_matrix_suite`) that
+  does not depend on any per-library comparison having completed.

@@ -220,6 +220,32 @@ _KNOWN_CUDA_KEYS = frozenset(
 )
 
 
+def _validate_str_list_elements(items: list[Any], label: str) -> list[Any]:
+    """Reject a non-``str`` element in an already list-typed field.
+
+    Checking that a field is a ``list`` at all is not sufficient to
+    guarantee the resulting tuple is hashable/well-typed: a YAML list of
+    mappings (``compilers: [{name: gcc}]``) passes the outer ``isinstance(...,
+    list)`` check but leaves a ``dict`` element inside, and since
+    :class:`EnvironmentMatrix`/:class:`SyclConstraints`/:class:`CudaConstraints`
+    are frozen, hashable dataclasses (their ``__hash__`` hashes ``compilers``/
+    ``backends``/``gpu_architectures`` directly as tuples), an unchecked
+    dict element raises ``TypeError: unhashable type: 'dict'`` only much
+    later, at hash time -- defeating the structural-hash guarantee for a
+    config that ``from_dict`` otherwise accepted as valid (Codex review,
+    PR #1221). Mirrors the explicit type checks
+    :func:`_parse_runtime_floors` already applies to ``WHEEL_ARCH``/
+    ``MUSLLINUX``/``WHEEL_CONTEXT`` rather than silently stringifying (or
+    accepting) a wrong shape.
+    """
+    for item in items:
+        if not isinstance(item, str):
+            raise ValueError(
+                f"'{label}' entries must be strings, got {type(item).__name__}: {item!r}"
+            )
+    return items
+
+
 def _check_unknown_keys(
     data: dict[str, Any], known: frozenset[str], label: str, *, strict: bool
 ) -> None:
@@ -254,9 +280,10 @@ def _parse_sycl_constraints(
         raise ValueError(
             f"'sycl.backends' must be a list, got {type(backends).__name__}"
         )
+    _validate_str_list_elements(backends, "sycl.backends")
     return SyclConstraints(
         implementation=str(sycl_data.get("implementation", "")),
-        backends=tuple(str(b) for b in backends),
+        backends=tuple(backends),
         min_pi_version=str(sycl_data.get("min_pi_version", "")),
     )
 
@@ -271,6 +298,7 @@ def _parse_cuda_constraints(
         raise ValueError(
             f"'cuda.gpu_architectures' must be a list, got {type(gpu_archs).__name__}"
         )
+    _validate_str_list_elements(gpu_archs, "cuda.gpu_architectures")
 
     driver_range_raw = cuda_data.get("driver_range")
     driver_range = None
@@ -289,7 +317,7 @@ def _parse_cuda_constraints(
         )
 
     return CudaConstraints(
-        gpu_architectures=tuple(str(a) for a in gpu_archs),
+        gpu_architectures=tuple(gpu_archs),
         driver_range=driver_range,
         toolkit_version=str(cuda_data.get("toolkit_version", "")),
         require_ptx=require_ptx,
@@ -542,6 +570,7 @@ class EnvironmentMatrix:
         compilers = data.get("compilers", [])
         if not isinstance(compilers, list):
             raise ValueError(f"'compilers' must be a list, got {type(compilers).__name__}")
+        _validate_str_list_elements(compilers, "compilers")
 
         sycl = _parse_sycl_constraints(sycl_data, strict=strict)
         cuda = _parse_cuda_constraints(cuda_data, strict=strict)
