@@ -895,6 +895,42 @@ else:
             # which root it names.
             if not sources_pairwise:
                 found_path = sources_found
+        elif sources_found is None:
+            # Codex review, P1, fresh evidence, PR #1222 ninth round: no
+            # `.abicheck.yml` exists ANYWHERE in the `--sources` tree at
+            # all -- distinct from the "a sources-root document exists
+            # but is empty/non-mapping" case just above, which already
+            # clears these same blocks via apply_sources_root_config_
+            # blocks' own empty-document handling. The real pipeline
+            # treats "no document" identically to "an empty document" for
+            # this purpose: embed_build_source()'s own `cfg_path =
+            # build_config or discover_build_config(raw_sources)` resolves
+            # to `None` either way, so `cfg` stays `None` and every one of
+            # build:/sources:(plural)/compile:/source:(singular)/debug: --
+            # whichever this function's own `_sources_root_blocks` says
+            # are sources-root-exclusive for this particular command/mode
+            # -- falls back to a bare `BuildConfig()`'s pure defaults,
+            # NEVER the checkout-root document's own values for those same
+            # keys. Leaving `base` untouched here (as a previous round
+            # did) let the checkout document's own build:/sources: survive
+            # into the generated overlay, which `embed.py` then applies as
+            # an explicit --config -- settings the real, non-overlay
+            # `--sources <dir>` invocation would never have picked up.
+            # Reuse the identical apply_sources_root_config_blocks
+            # clearing with `sources_doc=None` (its own docstring: a
+            # non-dict `sources_doc` clears every block in `blocks` except
+            # a `merge_compile=True` empty-fold, which is a correct no-op
+            # onto the checkout's own compile: -- see that function's
+            # docstring for why `compile:` is the one exception even
+            # here). Mirrors actions/check-target/action.yml's own
+            # identical `elif _sources_found is None:` branch so the two
+            # shared call sites cannot independently drift on this again.
+            base = apply_sources_root_config_blocks(
+                base,
+                None,
+                blocks=_sources_root_blocks,
+                merge_compile=sources_merge_compile,
+            )
 
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip (or, for the decode-node budget below, cap) each key that

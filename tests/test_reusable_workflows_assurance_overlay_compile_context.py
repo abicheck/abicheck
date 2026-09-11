@@ -602,3 +602,177 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         assert written["build"] == {"system": "cmake"}
         assert "build.query" in result.stderr
         assert "compile" not in written
+
+
+class TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
+    """P1 finding (Codex review, fresh evidence, PR #1222 ninth round): a
+    ``--sources`` tree with NO ``.abicheck.yml`` ANYWHERE in it at all
+    (``discover_build_config`` returns ``None``) previously left the
+    checkout-root document's own ``build:``/``sources:``/``compile:``/
+    ``source:``(singular)/``debug:`` (whichever this run's own
+    ``_sources_root_blocks`` names as sources-root-exclusive) untouched in
+    the generated overlay -- forwarding it as an explicit ``--config`` the
+    real, non-overlay ``--sources <dir>`` invocation would never have
+    applied. ``embed_build_source()``'s own ``cfg_path = build_config or
+    discover_build_config(raw_sources)`` resolves to ``None`` either way
+    (an existing-but-empty sources-root document, ALREADY covered by
+    ``TestAssuranceOverlayPromotesSourcesRootBuildAndSourcesBlocks``'s own
+    ``test_empty_sources_root_config_clears_the_checkout_root_blocks`` in
+    the sibling module, or no document at all), so every sources-root-
+    exclusive block must clear to pure defaults in both cases -- merely
+    enabling ``analysis.assurance: complete`` (this Action's own
+    ``analysis-assurance-complete`` input) must never change the collected
+    evidence and findings purely as a side effect of this overlay-
+    generation step. Split into this sibling module (rather than added to
+    ``tests/test_reusable_workflows_require_complete_analysis.py``, a
+    ``debt.yaml`` test-file ``no_growth``-tracked module already at its
+    line-count cap) for the same reason this module itself was split out --
+    see this module's own top docstring. See the identical fix (and test)
+    at ``action/run.sh``'s own equivalent
+    ``_merge_config_overlay_with_discovered_project_config`` call site in
+    ``tests/test_action_compile_context_parity.py::
+    TestCompileContextDiscoversSourcesRootOwnConfig::
+    test_no_sources_root_config_clears_to_defaults``."""
+
+    def test_default_single_sided_mode_clears_build_and_sources_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        """kind: target, baseline-channel: none (mode: scan, the "audit"
+        path -- ``SOURCES_PAIRWISE``/``SOURCES_MERGE_COMPILE`` both unset,
+        the default env this module's ``_run_overlay`` helper supplies) is
+        the single-document-exclusive shape: ``build:``/``sources:``/
+        ``compile:``/``source:``/``debug:`` are ALL sources-root-exclusive
+        here, so all five must clear to defaults when the ``--sources``
+        tree has no config of its own."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "severity:\n  preset: strict\n"
+            "build:\n  system: bazel\n"
+            "sources:\n  graph: summary\n"
+            "compile:\n  std: c++20\n"
+            "source:\n  method: headers\n"
+            "debug:\n  format: btf\n",
+            encoding="utf-8",
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        # Deliberately no `.abicheck.yml` at all under src_dir.
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "build" not in written
+        assert "sources" not in written
+        assert "compile" not in written
+        assert "source" not in written
+        assert "debug" not in written
+        # Every OTHER checkout-root setting survives untouched.
+        assert written["severity"] == {"preset": "strict"}
+
+    def test_single_sided_compare_mode_clears_build_sources_only(
+        self, tmp_path: Path
+    ) -> None:
+        """`mode: compare`'s single-sided shape (``SOURCES_MERGE_COMPILE:
+        true``) has a NARROWER sources-root-exclusive set than the default
+        above -- ``build:``/``sources:`` still clear to pure defaults, but
+        `compile:` stays untouched at the checkout's own value (an absent
+        sources-root document is a genuine no-op fold onto it, per
+        ``_merge_compile_block``'s documented empty-fold rule -- not a
+        clearing one), and `source:`/`debug:` are never in this mode's own
+        ``_sources_root_blocks`` at all, with or without a discovered
+        sources-root document."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n"
+            "sources:\n  graph: summary\n"
+            "compile:\n  std: c++20\n"
+            "source:\n  method: headers\n"
+            "debug:\n  format: btf\n",
+            encoding="utf-8",
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        # Deliberately no `.abicheck.yml` at all under src_dir.
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "build" not in written
+        assert "sources" not in written
+        assert written["compile"] == {"std": "c++20"}
+        assert written["source"] == {"method": "headers"}
+        assert written["debug"] == {"format": "btf"}
+
+
+class TestAssuranceOverlayEscapesWorkflowCommandInjection:
+    """P1 finding (Codex review, fresh evidence, PR #1222 tenth round):
+    every ``::error::``/``::warning::`` this step's own "Generate
+    assurance-overlay config" Python heredoc emits interpolated an
+    untrusted path (``ABICHECK_BASE_CONFIG``/``ABICHECK_SOURCES_ROOT`` --
+    fully controlled by a direct ``check-target`` caller, and a filesystem
+    path may legally contain a raw newline byte on Linux) or exception
+    text (a PyYAML parser error, which echoes attacker-controlled
+    config-file bytes verbatim) with no escaping at all. GitHub's runner
+    parses workflow commands line-by-line from stdout/stderr, so an
+    embedded literal newline lets the remainder of the value start a
+    *second*, attacker-authored command (e.g. a smuggled
+    ``::add-mask::...``) rather than being rendered as part of the single
+    intended annotation. Fixed by adding a ``_gha_escape`` helper to this
+    step's own heredoc, mirroring ``action/run.sh``'s own identical
+    helper (``%``->``%25``, CR->``%0D``, LF->``%0A``) rather than
+    inventing a new escaping scheme, and applying it to every
+    interpolated path/exception in this step's error-emission call
+    sites."""
+
+    def test_newline_in_explicit_build_config_path_does_not_smuggle_a_command(
+        self, tmp_path: Path
+    ) -> None:
+        """An explicit ``build-config`` naming a schema-invalid file whose
+        own path contains a literal newline must not let that newline
+        start a second workflow command line -- the whole error stays on
+        one logical ``::error::`` line, with the embedded newline rendered
+        as the literal ``%0A`` escape sequence instead."""
+        workspace = make_workspace(tmp_path)
+        evil_dir = workspace / "evil\n::add-mask::pwned"
+        evil_dir.mkdir()
+        build_config = evil_dir / "my-build-config.yml"
+        build_config.write_text("build:\n  query: 7\n", encoding="utf-8")
+        result = _run_overlay(workspace, {"BASE_CONFIG": str(build_config)})
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        # The raw newline the malicious path contained must never reach
+        # stderr unescaped -- every line but the first must NOT itself
+        # start a new `::`-prefixed workflow command (a real second
+        # `::error::`/`::add-mask::` line would mean the injection landed).
+        lines = result.stderr.splitlines()
+        assert not any(line.startswith("::") for line in lines[1:])
+        assert "%0A" in result.stderr
+
+    def test_newline_in_sources_root_path_does_not_smuggle_a_command(
+        self, tmp_path: Path
+    ) -> None:
+        """The sources-root parse-error path interpolates the discovered
+        sources-root config's own path and the PyYAML exception text --
+        both must be escaped too, exercised here via a sources-root
+        directory whose name embeds a literal newline and an unparsable
+        ``.abicheck.yml``."""
+        workspace = make_workspace(tmp_path)
+        src_dir = workspace / "src\n::add-mask::pwned"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text("build: [unterminated", encoding="utf-8")
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        lines = result.stderr.splitlines()
+        assert not any(line.startswith("::") for line in lines[1:])
+        assert "%0A" in result.stderr

@@ -878,6 +878,34 @@ runs:
         from abicheck.cli_helpers_compare import discover_project_config
         from abicheck.config_paths import discover_build_config
 
+        def _gha_escape(text: object) -> str:
+            # Codex review, P1, fresh evidence, PR #1222: every value
+            # interpolated into an `::error::`/`::warning::` workflow
+            # command below is untrusted -- a path derived from this step's
+            # own `ABICHECK_BASE_CONFIG`/`ABICHECK_SOURCES_ROOT` env (which
+            # a direct `check-target` caller/PR author fully controls, per
+            # action/AGENTS.md's "treat every INPUT_*/GITHUB_* as
+            # untrusted" rule -- a filesystem path may legally contain a
+            # raw newline byte), or the text of a PyYAML ParserError/
+            # ScannerError, which echoes attacker-controlled config-file
+            # bytes verbatim. GitHub's runner parses workflow commands
+            # line-by-line from stdout, so an embedded "\n" lets the
+            # remainder of an untrusted value start a *new* command line
+            # (e.g. a smuggled "::add-mask::..." or another
+            # "::error::..."), and an embedded "%" would similarly corrupt
+            # a real property-escaped value if this text were ever nested
+            # inside one. Escaping matches GitHub's own documented
+            # message-data escaping (%->%25, CR->%0D, LF->%0A) so the
+            # annotation always renders as the single, literal line
+            # intended -- never a second, attacker-authored command.
+            # Identical to (and shared-in-spirit with) action/run.sh's own
+            # `_gha_escape`, mirrored here rather than imported since this
+            # script runs as a standalone heredoc with no import path back
+            # to that shell function.
+            return (
+                str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            )
+
         def _validate_or_exit(doc: dict, source_desc: str) -> None:
             # Codex review (P2): a base document loaded below via a bare
             # `yaml.safe_load` is syntactically valid YAML, but was never run
@@ -906,8 +934,9 @@ runs:
                 validate_base_config(doc)
             except ValueError as exc:
                 raise SystemExit(
-                    f"::error::the config at {source_desc} is invalid: {exc}. "
-                    "Refusing to silently proceed with (or merge on top of) a "
+                    f"::error::the config at {_gha_escape(source_desc)} is "
+                    f"invalid: {_gha_escape(exc)}. Refusing to silently "
+                    "proceed with (or merge on top of) a "
                     "malformed project config -- fix the file or remove it."
                 ) from exc
 
@@ -941,9 +970,9 @@ runs:
             if loaded is not None:
                 if not isinstance(loaded, dict):
                     raise SystemExit(
-                        f"::error::{source_desc} does not parse to a YAML mapping "
-                        "-- cannot merge an assurance.require_complete overlay "
-                        "into it."
+                        f"::error::{_gha_escape(source_desc)} does not parse "
+                        "to a YAML mapping -- cannot merge an "
+                        "assurance.require_complete overlay into it."
                     )
                 _validate_or_exit(loaded, source_desc)
                 data = loaded
@@ -963,9 +992,9 @@ runs:
                 if loaded is not None:
                     if not isinstance(loaded, dict):
                         raise SystemExit(
-                            f"::error::{source_desc} does not parse to a YAML "
-                            "mapping -- cannot merge an assurance.require_complete "
-                            "overlay into it."
+                            f"::error::{_gha_escape(source_desc)} does not "
+                            "parse to a YAML mapping -- cannot merge an "
+                            "assurance.require_complete overlay into it."
                         )
                     _validate_or_exit(loaded, source_desc)
                     data = loaded
@@ -1093,9 +1122,9 @@ runs:
                     except Exception as exc:
                         raise SystemExit(
                             "::error::failed to parse the discovered "
-                            f"sources-root config {_sources_found}: {exc}. "
-                            "Refusing to silently proceed as if it were "
-                            "unconfigured."
+                            f"sources-root config {_gha_escape(_sources_found)}: "
+                            f"{_gha_escape(exc)}. Refusing to silently proceed "
+                            "as if it were unconfigured."
                         ) from exc
                     # An empty (or non-mapping) sources-root .abicheck.yml is
                     # not "no config found" -- the file still EXISTS, so
@@ -1150,6 +1179,46 @@ runs:
                     # no-op regardless of which root it names.
                     if not _sources_pairwise:
                         found_path = _sources_found
+                elif _sources_found is None:
+                    # Codex review, P1, fresh evidence, PR #1222 ninth
+                    # round: no `.abicheck.yml` exists ANYWHERE in the
+                    # `--sources` tree at all -- distinct from the
+                    # "a sources-root document exists but is empty/
+                    # non-mapping" case just above, which already clears
+                    # these same blocks via apply_sources_root_config_blocks'
+                    # own empty-document handling. The real pipeline treats
+                    # "no document" identically to "an empty document" for
+                    # this purpose: embed_build_source()'s own `cfg_path =
+                    # build_config or discover_build_config(raw_sources)`
+                    # resolves to `None` either way, so `cfg` stays `None`
+                    # and every one of build:/sources:(plural)/compile:/
+                    # source:(singular)/debug: -- whichever this step's own
+                    # `_sources_root_blocks` says are sources-root-exclusive
+                    # for this particular command/mode -- falls back to a
+                    # bare `BuildConfig()`'s pure defaults, NEVER the
+                    # checkout-root document's own values for those same
+                    # keys. Leaving `data` untouched here (as a previous
+                    # round did) let the checkout document's own build:/
+                    # sources: survive into the generated overlay, which
+                    # `embed.py` then applies as an explicit --config --
+                    # settings the real, non-overlay `--sources <dir>`
+                    # invocation would never have picked up. Reuse the
+                    # identical `apply_sources_root_config_blocks` clearing
+                    # with `sources_doc=None` (its own docstring: a
+                    # non-dict `sources_doc` clears every block in `blocks`
+                    # except a `merge_compile=True` empty-fold, which is a
+                    # correct no-op onto the checkout's own compile: -- see
+                    # that function's docstring for why `compile:` is the
+                    # one exception even here). Mirrors action/run.sh's own
+                    # identical `elif sources_found is None:` branch so the
+                    # two shared call sites cannot independently drift on
+                    # this again.
+                    data = apply_sources_root_config_blocks(
+                        data,
+                        None,
+                        blocks=_sources_root_blocks,
+                        merge_compile=_sources_merge_compile,
+                    )
             # Security (Codex review, third round): this discovered document
             # is PR-controlled, untrusted content -- exactly what
             # cli_options.py's compile.compiler gate and ADR-032 D5's
@@ -1225,7 +1294,7 @@ runs:
             assurance = {}
         elif not isinstance(assurance, dict):
             raise SystemExit(
-                f"::error::{source_desc}: assurance: must be "
+                f"::error::{_gha_escape(source_desc)}: assurance: must be "
                 "a mapping (or omitted/null), got "
                 f"{type(assurance).__name__} ({assurance!r}) -- cannot merge "
                 "an assurance.require_complete overlay into it."

@@ -367,4 +367,71 @@ class TestMergeConfigOverlayValidatesBaseConfigBeforeStripping:
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
         assert doc["severity"] == {"abi_breaking": "error"}
+
+
+class TestMergeConfigOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists:
+    """P1 finding (Codex review, fresh evidence, PR #1222 ninth round): a
+    ``--sources`` tree with NO ``.abicheck.yml`` anywhere in it at all
+    (``discover_build_config`` returns ``None``) previously left
+    ``_merge_config_overlay_with_discovered_project_config``'s ``base``
+    untouched -- so the checkout-root document's own ``build:``/
+    ``sources:``/``compile:``/``source:``/``debug:`` (whichever this run's
+    own ``_sources_root_blocks`` names as sources-root-exclusive) survived
+    into the synthesized ``--config`` overlay unchanged. The real,
+    non-overlay pipeline never falls back to the checkout document for
+    these blocks when a ``--sources`` tree is given and has no config of
+    its own -- ``embed_build_source()``'s own ``cfg_path = build_config or
+    discover_build_config(raw_sources)`` resolves to ``None`` either way,
+    so every one of those blocks falls back to a bare ``BuildConfig()``'s
+    pure defaults. See the identical fix (and test) at
+    ``actions/check-target/action.yml``'s own "Generate assurance-overlay
+    config" step in
+    ``tests/test_reusable_workflows_assurance_overlay_compile_context.py::
+    TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists``."""
+
+    def test_dump_mode_clears_all_five_sources_root_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        """`dump` (``ABICHECK_SOURCES_PAIRWISE``/``ABICHECK_SOURCES_MERGE_
+        COMPILE`` both unset) is the single-document-exclusive shape --
+        ``build:``/``sources:``/``compile:``/``source:``/``debug:`` are ALL
+        sources-root-exclusive here, so all five must clear to defaults
+        when the ``--sources`` tree has no config of its own. The
+        overlay's own synthesized ``compile.compiler`` (from
+        ``INPUT_GCC_PATH``) still applies afterwards -- clearing the
+        checkout's own ``compile:`` block does not remove the overlay's own
+        contribution to that same key."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n"
+            "sources:\n  graph: summary\n"
+            "compile:\n  std: c++20\n"
+            "source:\n  method: headers\n"
+            "debug:\n  format: btf\n"
+            "severity:\n  abi_breaking: error\n",
+            encoding="utf-8",
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        # Deliberately no `.abicheck.yml` at all under src_dir.
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(src_dir),
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert "build" not in doc
+        assert "sources" not in doc
+        assert "source" not in doc
+        assert "debug" not in doc
+        # The checkout's own `compile.std` is gone, but the overlay's own
+        # synthesized `compile.compiler` still applies.
+        assert doc["compile"] == {"compiler": "/opt/gcc-14/bin/g++"}
+        # Every other checkout-root setting survives untouched.
+        assert doc["severity"] == {"abi_breaking": "error"}
         assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"

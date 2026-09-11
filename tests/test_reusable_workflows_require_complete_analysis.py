@@ -670,12 +670,12 @@ class TestAssuranceOverlayPreservesUsableDiscoveredCompileDb:
         """``sources`` is normally a checkout-relative path too (e.g.
         ``sources: src``) -- the overlay step absolutizes ``SOURCES_ROOT``
         against ``$_real_pwd`` the same way it already does for
-        ``BASE_CONFIG`` (and the same way ``action/run.sh``'s own
-        ``add_compile_context_flags`` absolutizes its own ``sources_root``)."""
+        ``BASE_CONFIG``. PR #1222 ninth round: ``build.compile_db`` now
+        lives in the sources-root's own doc -- ``build:`` is exclusive."""
         workspace = make_workspace(tmp_path)
         src_dir = workspace / "src"
         src_dir.mkdir()
-        (workspace / ".abicheck.yml").write_text(
+        (src_dir / ".abicheck.yml").write_text(
             "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
         )
         (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
@@ -693,7 +693,8 @@ class TestAssuranceOverlayPreservesUsableDiscoveredCompileDb:
         ``tests/test_action_config_overlay.py`` for the symlink-escape
         case, tested at the primitive level) must never be treated as
         "resolves", matching the containment check
-        ``discovered_compile_db_resolves`` performs."""
+        ``discovered_compile_db_resolves`` performs. PR #1222 ninth round:
+        the traversing values now live in the sources-root's own doc."""
         workspace = make_workspace(tmp_path)
         sources_dir = workspace / "sources"
         sources_dir.mkdir()
@@ -702,7 +703,7 @@ class TestAssuranceOverlayPreservesUsableDiscoveredCompileDb:
         (outside_dir / "secret_compile_commands.json").write_text(
             "[]", encoding="utf-8"
         )
-        (workspace / ".abicheck.yml").write_text(
+        (sources_dir / ".abicheck.yml").write_text(
             "build:\n"
             "  compile_db: ../outside/secret_compile_commands.json\n"
             "  system: cmake\n",
