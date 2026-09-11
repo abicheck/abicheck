@@ -6403,3 +6403,52 @@ change touching `secondary_output.py` and every command that declares the
 option, not just this Action script), or (b) give `action/run.sh` a real,
 tested HTML-verdict extractor rather than reusing the markdown/text regex
 against markup it was never meant to parse.
+
+---
+
+## `abicheck scan` removal: `action/` still exposes a `mode: scan` that no longer works — not fixed here
+
+The `abicheck scan` root CLI command (and every module exclusive to it —
+`cli_scan*.py`, `service_scan.py`, `scan_engine.py`, `pr_comment_scan*.py`,
+`workflows/scan_*.py`) was removed outright: `python -m abicheck scan` now
+exits `64` ("No such command 'scan'"). `AGENTS.md`'s root-command surface,
+exit-code matrix, task-routing table, and module map were updated to match,
+and every doc/example/test reference to `scan` was rewritten onto `dump`/
+`compare` or given historical framing (`docs/use/scan-levels.md` became
+`docs/use/evidence-depth.md`; ten example cases — 143–151, 181 — had their
+`## abicheck command` sections rewritten onto the surviving crosscheck
+library call, since `abicheck.buildsource.crosscheck.run_crosschecks()`
+itself is *not* being removed, only its CLI front door).
+
+**`action/` (the composite GitHub Action) was deliberately left untouched
+and is now broken for real use of `mode: scan`.** `action.yml` still
+declares and documents a `mode: scan` input, and `action/run.sh` still
+builds and dispatches an `abicheck scan ...` command line for it — which
+will now fail against the real CLI with exit `64`, since the command it
+invokes no longer exists. `.github/workflows/test-action.yml` has (at the
+time of this writing) three jobs exercising `mode: scan`, and
+`tests/test_action_run_contract.py` still keeps `"scan"` in its
+`_KNOWN_SUBCOMMANDS` set (needed so `run.sh`'s own branch parser keeps
+segmenting `run.sh` correctly) while excluding it from
+`_VALIDATED_SUBCOMMANDS` — those Action-level tests currently pass only
+because they mock the CLI rather than invoking a real `abicheck` binary.
+
+This was a deliberate scope decision, not an oversight: removing `scan`'s
+own CLI implementation from `abicheck/` (and updating every doc, example,
+and test that referenced it) was already a substantially larger removal
+than initially scoped, and `action/`'s own `mode: scan` machinery
+(`action.yml`'s scan-specific inputs, `action/run.sh`'s scan branch,
+`action/AGENTS.md`, the three scan-mode Action test jobs, and
+`eval/scan_level_scaling.py`/`validation/scripts/{run_oneapi_scan,
+fp_depth_demo}.py`, which shell out to `abicheck scan` directly) is its own
+comparably-sized project. **Not fixed here.** The correct fix, whenever it
+is undertaken: delete `mode: scan`'s inputs/branch from `action.yml`/
+`action/run.sh`, delete the three `mode: scan` jobs from
+`test-action.yml`, remove `"scan"` from both
+`_KNOWN_SUBCOMMANDS`/`_VALIDATED_SUBCOMMANDS` (or rather just
+`_KNOWN_SUBCOMMANDS`, since it's already excluded from the validated set)
+in `tests/test_action_run_contract.py`, and either delete or repoint
+`eval/scan_level_scaling.py`/the two `validation/scripts/` entries onto
+`dump`/`compare`. Until then, a user (or CI workflow) invoking the
+composite Action with `mode: scan` will get a real, visible failure from
+the underlying CLI — it does not silently do the wrong thing.
