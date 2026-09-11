@@ -410,6 +410,7 @@
       ],
       "legacy_paths": [
         "abicheck/action_config_overlay.py",
+        "abicheck/action_config_overlay_compile.py",
         "abicheck/cli.py",
         "abicheck/cli_aggregate.py",
         "abicheck/cli_audit.py",
