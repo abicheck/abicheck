@@ -63,9 +63,11 @@ to both commands now. Neither does risk-driven `auto` depth, which was
 **retired** rather than mirrored (ADR-068's second 2026-09-09 amendment,
 ruling (b)): omitting `--depth` on `scan` now resolves to the fixed
 `headers` rung, exactly the default omitting it on `compare` always gave.
-`scan --build-target` is retired the same way (`dump --build-target` is
-unchanged). `--crosscheck KEY=error` promotion syntax is the one item
-left with no `compare` equivalent.
+`scan --build-target` was retired the same way, and `dump --build-target`
+was later retired outright too (a hard usage error, exit 64) — put root
+target(s) in `.abicheck.yml`'s `build.targets` instead, the only route left
+for either command. `--crosscheck KEY=error` promotion syntax is the one
+item left with no `compare` equivalent.
 
 The retired `scan ARTIFACT [OPTIONS]` command used to take the scanned
 binary/snapshot as a **positional** argument (not a flag), with `--against

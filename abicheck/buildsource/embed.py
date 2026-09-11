@@ -165,7 +165,10 @@ def embed_build_source(
             # tests/test_build_source_embed_errors.py.
             raise ValidationError(str(exc)) from exc
         # Programmatic overrides (no config file needed): build_query / build_compile_db /
-        # --build-target win over the .abicheck.yml values when supplied.
+        # build_targets (the typed-API InputSpec.build_targets parameter -- there is no
+        # CLI --build-target flag any more, it was removed; only .abicheck.yml's
+        # build.targets and this programmatic parameter remain) win over the
+        # .abicheck.yml values when supplied.
         if (
             build_query is not None
             or build_compile_db is not None

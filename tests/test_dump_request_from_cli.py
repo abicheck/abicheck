@@ -306,7 +306,6 @@ def _request(
         dump_manifest=None,
         sources=sources,
         build_info=build_info,
-        build_targets=(),
         include_dependencies=False,
         follow_deps=False,
         search_paths=(),

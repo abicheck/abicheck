@@ -33,23 +33,32 @@ from test_action_validate_inputs import VALIDATE_SH, _run_validate
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestBuildTargetScanApplicationIsGone:
-    """`build-target` remains a real `dump`-mode input; only its (now
-    nonexistent) `scan` application is gone, since `mode: scan` itself is
-    retired outright."""
+class TestBuildTargetIsRetiredOutright:
+    """`build-target` is retired on every mode now (hard removal, no
+    deprecation window): `scan --build-target` was retired first (ADR-068
+    (b)), and `dump --build-target` -- which this input mapped to for
+    `mode: dump` -- was retired next, once that removal resolved the
+    routing hazard that had deferred it. There is no longer a mode where
+    setting it merely warns (it used to warn outside `dump` and be silent
+    on `dump` -- see `test_action_validate_inputs.py`'s own
+    `TestModeScopedInputWarnings.test_build_target_fails_on_every_mode` for
+    the full per-mode matrix this module doesn't repeat)."""
 
-    def test_warns_outside_dump(self) -> None:
+    def test_fails_on_compare(self) -> None:
         result = _run_validate(
             {"INPUT_MODE": "compare", "INPUT_BUILD_TARGET": "//:math"}
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
         assert "build-target" in result.stdout
+        assert "build.targets" in result.stdout
 
-    def test_silent_on_dump(self) -> None:
+    def test_fails_on_dump(self) -> None:
         result = _run_validate({"INPUT_MODE": "dump", "INPUT_BUILD_TARGET": "//:math"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
+        assert "build-target" in result.stdout
+        assert "build.targets" in result.stdout
 
 
 class TestScopedComparisonInputsRejectedOnAuditOnly:
