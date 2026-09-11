@@ -147,15 +147,16 @@ class TestBuildTargetIsRetiredOnEveryMode:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestCompareNeverForwardsBuildTarget:
-    """`compare` has no `--build-target` flag at all (`dump`-only); setting
-    build-target on mode: compare (either shape) is simply never forwarded
-    -- there is no dedicated rejection for it (unlike the now-removed
-    mode: scan, ADR-068's Action-input-lifecycle amendment), since it was
-    never a documented compare capability to silently narrow."""
+class TestCompareRejectsBuildTarget:
+    """`compare` never had a `--build-target` flag at all (`dump`-only), but
+    the retirement check is unconditional across every mode (not just
+    `dump`/`scan`) -- so setting build-target on mode: compare (either
+    shape) is now a hard `::error::`, the same as `dump`, rather than a
+    silent no-op the way it used to be before this input existed for
+    `compare` at all."""
 
-    def test_absent_from_two_sided_compare(self) -> None:
-        cmd = _run_cmd(
+    def test_rejected_on_two_sided_compare(self) -> None:
+        result = _run_mode_branches(
             {
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": "old.so",
@@ -163,14 +164,18 @@ class TestCompareNeverForwardsBuildTarget:
                 "INPUT_BUILD_TARGET": "//:math",
             }
         )
-        assert "--build-target" not in cmd
+        assert result.returncode != 0
+        assert "build-target is retired" in result.stdout
+        assert "build.targets" in result.stdout
 
-    def test_absent_from_audit_only_compare(self) -> None:
-        cmd = _run_cmd(
+    def test_rejected_on_audit_only_compare(self) -> None:
+        result = _run_mode_branches(
             {
                 "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "lib.so",
                 "INPUT_BUILD_TARGET": "//:math",
             }
         )
-        assert "--build-target" not in cmd
+        assert result.returncode != 0
+        assert "build-target is retired" in result.stdout
+        assert "build.targets" in result.stdout

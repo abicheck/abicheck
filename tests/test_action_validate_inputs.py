@@ -1038,22 +1038,15 @@ class TestModeScopedInputWarnings:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
-    @pytest.mark.parametrize(
-        "mode", ["compare", "dump", "deps-tree", "deps-compare"]
-    )
+    @pytest.mark.parametrize("mode", ["compare", "dump", "deps-tree", "deps-compare"])
     def test_build_target_fails_on_every_mode(self, mode: str) -> None:
         """`build-target` is retired on every mode now (hard removal, no
         deprecation window): `scan --build-target` was retired first
         (ADR-068 (b)), and `dump --build-target` -- which this input mapped
-        to for `mode: dump` -- was retired next, once that removal resolved
-        the routing hazard that had deferred it. There is no longer a mode
-        where setting it merely warns. `mode: scan` itself is excluded from
-        this parametrization: it is now retired outright too, and its own
-        `case "$MODE" in scan) ... esac` arm fails the step (naming
-        `mode: scan is no longer supported`, not build-target) before this
-        script ever reaches the unconditional build-target check --
-        `TestUnknownModeIsRejected.test_scan_is_rejected_outright` pins that
-        arm's own message."""
+        to for `mode: dump` -- was retired next. `mode: scan` is excluded
+        here: its own `case` arm fails first with `mode: scan is no longer
+        supported`, not build-target (see
+        `TestUnknownModeIsRejected.test_scan_is_rejected_outright`)."""
         result = _run_validate({"INPUT_MODE": mode, "INPUT_BUILD_TARGET": "//:math"})
         assert result.returncode == 1, result.stdout + result.stderr
         assert "::error::" in result.stdout
