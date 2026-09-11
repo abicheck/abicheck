@@ -7893,7 +7893,7 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
 
-### ADR-061 gap F: ten nested `buildsource`/`impact` modules still carry no disposition
+### ADR-061 gap F: ten nested `buildsource`/`compat`/`impact` modules still carry no disposition
 
 [ADR-061](adr/061-responsibility-package-architecture.md)'s gap F requires
 every unclassified first-party module under `abicheck/` to carry one of
@@ -7961,7 +7961,8 @@ preserve.
   `check_architecture.py`'s AST walk sees); `policy` may not import
   `extract`.
 - `abicheck/buildsource/fact_set.py` (target: `extract`, alongside its
-  `source_abi.py` sibling) — blocked because it is imported directly by
+  `source_graph_build_source_abi.py` sibling) — blocked because it is
+  imported directly by
   *two* already-classified modules on different layers at once:
   `abicheck/analysis_assurance.py` (`policy`) and
   `abicheck/buildsource/source_diff.py` (`compare`) — neither may import
