@@ -449,13 +449,12 @@ class TestCompileContextPairwiseOldLibraryClassification:
         prior ``abicheck dump -o ...`` named it -- a direct old-library
         input, or what an ``abi-baseline`` auto-fetch always resolves
         ``old-library`` to) has no "other side" for a --sources tree's
-        compile:/source:/debug: to leak into: OLD does no header/debug
-        extraction at all. The earlier ``$MODE == "compare"`` check alone
-        could not see this and unconditionally treated every compare as
-        pairwise, silently discarding NEW's own sources-root
-        compile:/source:/debug: settings. Companion to the dump-mode
-        single-sided test in the sibling module, and the negative
-        (genuinely pairwise, live OLD) tests just above.
+        compile: to leak into: OLD does no header/debug extraction at all.
+        The earlier ``$MODE == "compare"`` check alone could not see this
+        and unconditionally treated every compare as pairwise, silently
+        discarding NEW's own sources-root compile: settings. Companion to
+        the dump-mode single-sided test in the sibling module, and the
+        negative (genuinely pairwise, live OLD) tests just above.
 
         ``_old_library_is_stored_snapshot`` is content-sniffed and
         simplified to its actual invariant (class docstring) -- so each
@@ -477,10 +476,26 @@ class TestCompileContextPairwiseOldLibraryClassification:
         test's own ``sysroot``, set by BOTH documents to different values)
         resolves to the CHECKOUT's value, not the sources-root's; only a
         key the checkout document does NOT set falls through to the
-        sources-root one. ``source:``/``debug:`` stay genuinely
-        single-document-exclusive (``resolved_cfg``'s own single load, no
-        second-stage fold), so those two keep asserting the sources-root's
-        value below."""
+        sources-root one.
+
+        ``source:``/``debug:`` are NOT the same shape as ``compile:``
+        here, despite both being "single-sided" in the pairwise sense (P1
+        finding, Codex review, fresh evidence, PR #1222 eighth round,
+        correcting this test's own previous assertion): unlike `dump`/
+        `scan --against`'s genuine single-document-exclusive resolution of
+        these two, `compare`'s own pipeline NEVER re-resolves `source:`/
+        `debug:` from NEW's ``--sources`` tree at all --
+        ``frontends/cli/commands/compare.py``'s
+        ``_embed_inline_source_side`` receives both as already-frozen
+        arguments (``_resolved_collect_mode``/``_resolved_debug``) computed
+        once from the CHECKOUT-side ``resolved_cfg``, before the
+        ``--sources`` tree is even considered. So the sources-root
+        document's own ``source:``/``debug:`` values below must be ignored
+        entirely for `compare` -- neither document here defines them at
+        the checkout level, so the real pipeline's own view has nothing
+        for either key, and the synthesized overlay must match that
+        (absent), not manufacture a value from NEW's tree the real
+        pipeline never reads."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -506,15 +521,53 @@ class TestCompileContextPairwiseOldLibraryClassification:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        # source:/debug: ARE single-document-exclusive here (no live "other
-        # side" to leak into), so the sources-root's own values win outright.
-        assert doc["source"] == {"method": "s6"}
-        assert doc["debug"] == {"format": "dwarf"}
+        # source:/debug: are NEVER sourced from NEW's --sources tree for
+        # `compare` -- neither document here sets them at the checkout
+        # level, so the real pipeline's own view (and this overlay) has
+        # nothing for either key.
+        assert "source" not in doc
+        assert "debug" not in doc
         # compile: is a genuine two-stage MERGE for `compare` (see the
         # docstring above) -- the checkout document's own `sysroot` was
         # independently resolved FIRST and wins this real conflict; the
         # sources-root's differing value never applies at all.
         assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
+
+    def test_sources_root_source_debug_never_leak_into_compare_with_stored_old_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion positive control for the fix above: when the
+        CHECKOUT document sets `source:`/`debug:`, those checkout values
+        must survive into the overlay UNCHANGED for `compare` against a
+        stored OLD snapshot -- even though NEW's own ``--sources`` tree
+        sets conflicting values of its own, which the real pipeline never
+        reads and this overlay must therefore ignore too."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "source:\n  method: headers\ndebug:\n  format: btf\n",
+            encoding="utf-8",
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "source:\n  method: s6\ndebug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
+        cmd, _ = _run_region_with_cwd(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_OLD_LIBRARY": "old.abicheck.json",
+            },
+            tmp_path,
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["source"] == {"method": "headers"}
+        assert doc["debug"] == {"format": "btf"}
 
     def test_compile_disjoint_keys_merge_under_compare_with_stored_old_snapshot(
         self, tmp_path: Path

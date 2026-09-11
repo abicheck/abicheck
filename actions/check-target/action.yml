@@ -1016,11 +1016,11 @@ runs:
             # replacing the whole block would silently drop a checkout-only
             # `compile:` setting (`compile.std`, an explicit
             # `include_dirs`, ...) the sources-root document doesn't happen
-            # to also specify. `build:`/`sources:`/`source:`/`debug:` stay
-            # genuine whole-block replacements -- each is a real
-            # single-document selection in the normal pipeline too. See
-            # `abicheck.action_config_overlay._merge_compile_block`'s own
-            # docstring for the exact per-field precedence reproduced.
+            # to also specify. `build:`/`sources:` stay genuine whole-block
+            # replacements -- each is a real single-document selection in
+            # the normal pipeline too. See `abicheck.action_config_overlay.
+            # _merge_compile_block`'s own docstring for the exact per-field
+            # precedence `compile:` reproduces.
             _sources_pairwise = (
                 os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
             )
@@ -1035,9 +1035,45 @@ runs:
             _sources_merge_compile = (
                 os.environ.get("ABICHECK_SOURCES_MERGE_COMPILE", "") == "true"
             )
+            # `source:`(singular)/`debug:` are NOT safe to promote from the
+            # sources-root document whenever this same `_sources_merge_
+            # compile` flag is set (Codex review, P1, fresh evidence, PR
+            # #1222 eighth round): that flag is true exactly for `mode:
+            # compare`'s own single-sided shape (a stored-snapshot old
+            # operand; see SOURCES_MERGE_COMPILE's own env docstring), and
+            # `compare`'s real pipeline never resolves `source:`/`debug:`
+            # from a per-side `--sources` tree's own document at all --
+            # unlike `compile:`, which the checkout-then-sources two-stage
+            # MERGE above genuinely folds. `frontends/cli/commands/
+            # compare.py`'s `_embed_inline_source_side` receives BOTH as
+            # already-frozen arguments (`_resolved_collect_mode`/
+            # `_resolved_debug`), computed once from the checkout-side
+            # `resolved_cfg` before any per-side tree is even considered,
+            # and forwards them verbatim to the nested dump invocation via
+            # its private `_resolved_collect_mode`/
+            # `_resolved_debug` hooks -- `frontends/cli/dump_debug_config.
+            # resolve_dump_debug_fields` only ever falls back to resolving
+            # a tree's own document when `resolved_debug` is `None`, which
+            # never happens on `compare`'s own call path. So promoting
+            # these two blocks here for `mode: compare` would let a
+            # sources-root document control this run's collection depth
+            # (`source:`) or debug-info extraction (`debug:`) in a way the
+            # real, non-overlay `compare` invocation never permits --
+            # exactly the kind of overlay-only side effect `analysis.
+            # assurance: complete` must never introduce. `dump`/`scan`
+            # (`_sources_merge_compile` unset) are unaffected: their own
+            # single-document selection genuinely takes `source:`/`debug:`
+            # from the `--sources` tree's own document exclusively
+            # (`resolve_dump_debug_config`'s `build_config or
+            # discover_build_config(sources)`), the identical shape
+            # `build:`/`sources:` already use -- see this function's own
+            # module docstring and `apply_sources_root_config_blocks`'s own
+            # docstring for the full account.
             _sources_root_blocks = (
                 ("build", "sources")
                 if _sources_pairwise
+                else ("build", "sources", "compile")
+                if _sources_merge_compile
                 else ("build", "sources", "compile", "source", "debug")
             )
             _sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")

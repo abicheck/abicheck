@@ -440,6 +440,62 @@ class TestDiscoveredCompileDbResolves:
         finally:
             os.chdir(cwd)
 
+    def test_a_glob_that_sorts_to_an_out_of_root_match_first_does_not_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 eighth
+        round): a glob matching BOTH an in-root file and an out-of-root
+        file must be judged by whichever match the real collector
+        (``buildsource/inline.py``'s ``sorted(sources.glob(cfg.
+        compile_db))``, first ``is_file()`` hit) actually selects -- not by
+        whether *some* contained match merely exists anywhere in the glob
+        result. ``"../*/compile_commands.json"`` against a ``sources_root``
+        named ``sources`` matches both ``sources/../aaa_outside/
+        compile_commands.json`` (escapes the root) and ``sources/../
+        sources/compile_commands.json`` (the root's own file, via the glob
+        matching ``sources`` itself as one of its own siblings) --
+        confirmed empirically that ``sorted()`` over the resulting
+        ``PosixPath`` objects places the ``aaa_outside`` entry first
+        (lexicographic path-component order: ``"aaa_outside" <
+        "sources"``). The previous implementation iterated the SAME two
+        matches in ``Path.glob``'s own (arbitrary) order and returned
+        ``True`` the moment it reached the in-root one -- exactly the gap
+        the finding reports: the overlay would validate this glob as
+        "explicit and resolved", while the real collector resolves the
+        SAME configured glob to the out-of-root database instead,
+        silently reading external compiler flags into the run."""
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        (sources / "compile_commands.json").write_text("[]", encoding="utf-8")
+        outside = tmp_path / "aaa_outside"
+        outside.mkdir()
+        (outside / "compile_commands.json").write_text("[]", encoding="utf-8")
+        assert not discovered_compile_db_resolves(
+            "../*/compile_commands.json", str(sources)
+        )
+
+    def test_a_glob_that_sorts_to_an_in_root_match_first_still_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive-control sibling of the test above: when the FIRST
+        sorted, ``is_file()`` match is the one contained within
+        ``sources_root``, the glob still resolves -- the fix must not
+        become blanket-hostile to every glob that can also match something
+        outside the root, only to one whose real, collector-selected match
+        actually escapes it. Naming the outside sibling ``zzz_outside``
+        (sorts AFTER ``sources``) flips which match is selected first
+        relative to the test above, while keeping the identical glob
+        pattern and directory shapes."""
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        (sources / "compile_commands.json").write_text("[]", encoding="utf-8")
+        outside = tmp_path / "zzz_outside"
+        outside.mkdir()
+        (outside / "compile_commands.json").write_text("[]", encoding="utf-8")
+        assert discovered_compile_db_resolves(
+            "../*/compile_commands.json", str(sources)
+        )
+
 
 class TestApplySourcesRootConfigBlocks:
     """Direct unit tests for the shared block-selection primitive PR #1222

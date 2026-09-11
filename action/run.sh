@@ -783,28 +783,26 @@ else:
     # (not merge into) the checkout-root document's own such blocks --
     # exactly as if no explicit --config had been in the way.
     #
-    # compile:/source:(singular)/debug: are conditionally included too --
-    # gated on ABICHECK_SOURCES_PAIRWISE (see this shell function's own $6
+    # compile: is conditionally included too -- gated on
+    # ABICHECK_SOURCES_PAIRWISE (see this shell function's own $6
     # docstring). A second Codex review (fresh evidence, PR #1159) caught
-    # that those three blocks are pair-wide for single-pair `compare`, not
-    # per-side: compile: flows through resolve_compile_context ("It applies
-    # to both sides", cli_compare_helpers.py), source:(singular).method
-    # resolves resolved_cfg.source_method (also pair-wide,
-    # cli_helpers_compare.py), and debug: resolves resolved_cfg.debug_format
-    # for both operands -- promoting them from a NEW-only sources-root
+    # that it is pair-wide for single-pair `compare`, not per-side: compile:
+    # flows through resolve_compile_context ("It applies to both sides",
+    # cli_compare_helpers.py) -- promoting it from a NEW-only sources-root
     # config there would silently apply NEW-only settings to OLD's own
     # parsing too. But a THIRD review round (fresh evidence, PR #1171) found
     # that blanket exclusion regressed `dump`/`scan --against`, which have
-    # no "other side" for these to leak into (dump has one operand; scan's
-    # own -H/-I have always applied only to the scanned ARTIFACT) -- for
-    # those, `merge_compile_config()`'s own docstring states the --sources
-    # tree's config IS the intended, ONLY source of compile: for that one
-    # operand, exactly like embed_build_source()'s build_config or
+    # no "other side" for it to leak into (dump has one operand; scan's own
+    # -H/-I have always applied only to the scanned ARTIFACT) -- for those,
+    # `merge_compile_config()`'s own docstring states the --sources tree's
+    # config IS the intended, ONLY source of compile: for that one operand,
+    # exactly like embed_build_source()'s build_config or
     # discover_build_config(sources) selection already is for build:/
     # sources:. So only "pairwise" callers (single-pair `compare`) exclude
-    # the three; every other caller (dump, scan) keeps promoting them,
-    # matching the ORIGINAL five-block version of this fix before the
-    # second review round overcorrected it for every mode at once.
+    # it; every other caller (dump, scan, and compare's own single-sided
+    # shape) keeps promoting it, matching the ORIGINAL five-block version of
+    # this fix before the second review round overcorrected it for every
+    # mode at once.
     sources_pairwise = os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
     # Codex review, fresh evidence, PR #1222 fourth round, second finding:
     # within the single-sided bucket, `compile:` does NOT always resolve
@@ -815,9 +813,37 @@ else:
     sources_merge_compile = (
         os.environ.get("ABICHECK_SOURCES_MERGE_COMPILE", "") == "true"
     )
+    # `source:`(singular)/`debug:` are excluded from sources-root promotion
+    # whenever `sources_merge_compile` is set (Codex review, P1, fresh
+    # evidence, PR #1222 eighth round) -- that flag is true exactly for
+    # `mode: compare`'s own single-sided shape (a stored-snapshot old
+    # operand; see `_compile_context_sources_merge_compile`'s own
+    # docstring), and unlike `compile:`, `compare`'s real pipeline never
+    # resolves `source:`/`debug:` from a per-side `--sources` tree's own
+    # document at all: `frontends/cli/commands/compare.py`'s
+    # `_embed_inline_source_side` receives both as already-frozen arguments
+    # (`_resolved_collect_mode`/`_resolved_debug`), computed once from the
+    # checkout-side `resolved_cfg` before any per-side tree is even
+    # considered, and forwards them verbatim to the nested dump invocation's
+    # own private hooks of the same name -- `frontends/cli/
+    # dump_debug_config.resolve_dump_debug_fields` only falls back to
+    # resolving a tree's own document when `resolved_debug` is `None`,
+    # which never happens on `compare`'s own call path. Promoting these two
+    # blocks here for `mode: compare` would therefore let a sources-root
+    # document control this run's collection depth (`source:`) or
+    # debug-info extraction (`debug:`) in a way the real, non-overlay
+    # `compare` invocation never permits. `dump`/`scan`
+    # (`sources_merge_compile` unset) are unaffected: their own
+    # single-document selection genuinely takes `source:`/`debug:` from the
+    # `--sources` tree's own document exclusively
+    # (`resolve_dump_debug_config`'s `build_config or
+    # discover_build_config(sources)`), the identical shape `build:`/
+    # `sources:` already use.
     _sources_root_blocks = (
         ("build", "sources")
         if sources_pairwise
+        else ("build", "sources", "compile")
+        if sources_merge_compile
         else ("build", "sources", "compile", "source", "debug")
     )
     sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")

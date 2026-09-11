@@ -66,15 +66,49 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
     style ``TestAssuranceOverlayPromotesSourcesRootBuildAndSourcesBlocks``
     above already uses, so a change to the underlying merge logic is
     caught the same way (not just asserting the workflow YAML's text).
+
+    P1 finding, PR #1222 eighth round (Codex review, fresh evidence):
+    within the single-sided (non-pairwise) bucket, ``source:``(singular)/
+    ``debug:`` do NOT resolve the same way ``compile:`` does. `compile:`
+    genuinely two-stage-merges a sources-root document on top of the
+    checkout config for BOTH `mode: compare`'s single-sided shape
+    (``SOURCES_MERGE_COMPILE: true``) and `dump`/`scan`'s single-document
+    shape (``SOURCES_MERGE_COMPILE`` unset) -- but `source:`/`debug:` are
+    single-document-selected off the sources-root tree ONLY for `dump`/
+    `scan`; `compare`'s own pipeline never re-resolves either from a
+    per-side ``--sources`` tree at all, always taking both from the
+    CHECKOUT project config alone. So the single-sided bucket is really
+    two cases, not one: `mode: compare` (``SOURCES_MERGE_COMPILE: true``)
+    promotes only ``build``/``sources``/``compile``; `dump`/`scan`
+    (``SOURCES_MERGE_COMPILE`` unset) promotes all five.
     """
 
-    def test_single_sided_kind_target_promotes_compile_source_debug(
+    def test_single_sided_kind_target_promotes_compile_but_not_source_debug(
         self, tmp_path: Path
     ) -> None:
         """kind: target (baseline-channel set, mode: compare against a
         stored snapshot) is single-sided -- SOURCES_PAIRWISE stays empty,
         exactly as ``inputs.kind == 'bundle' && inputs.baseline-channel !=
-        'none'`` evaluates for kind: target."""
+        'none'`` evaluates for kind: target -- but this step's own env
+        formula ALSO sets SOURCES_MERGE_COMPILE to ``true`` here
+        (``inputs.baseline-channel != 'none'``), which is `mode: compare`'s
+        own real single-sided signature.
+
+        P1 finding (Codex review, fresh evidence, PR #1222 eighth round):
+        this test used to state ``SOURCES_MERGE_COMPILE`` at its default
+        (empty) here -- silently mismodeling this step's own real env for
+        this exact kind/baseline-channel combination -- and asserted that
+        `source:`/`debug:` were promoted from the sources-root document,
+        which the real `compare` pipeline never does (it resolves both
+        exclusively from the CHECKOUT project config; see
+        ``apply_sources_root_config_blocks``'s own docstring). With
+        ``SOURCES_MERGE_COMPILE: true`` correctly stated, `compile:` is
+        still promoted (as a real per-field MERGE), `build:`/`sources:`
+        stay promoted, but `source:`/`debug:` must be ABSENT from the
+        overlay entirely -- the checkout document here defines neither, so
+        the real `compare` pipeline would see nothing for them, and the
+        overlay must not manufacture a value neither side actually
+        configured."""
         workspace = make_workspace(tmp_path)
         src_dir = workspace / "src"
         src_dir.mkdir()
@@ -91,14 +125,55 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
                 "BASE_CONFIG": "",
                 "SOURCES_ROOT": str(src_dir),
                 "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
             },
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["compile"] == {"std": "c++20"}
-        assert written["source"] == {"method": "replay"}
-        assert written["debug"] == {"format": "dwarf"}
+        assert "source" not in written
+        assert "debug" not in written
         assert written["build"] == {"system": "cmake"}
+
+    def test_single_sided_compare_mode_preserves_checkout_source_debug(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 eighth
+        round): the companion positive control for the fix above -- when
+        the CHECKOUT document (not the sources-root one) sets `source:`/
+        `debug:`, those checkout values must survive into the overlay
+        UNCHANGED for `mode: compare`'s single-sided shape
+        (SOURCES_MERGE_COMPILE: true), exactly matching the real
+        `compare` pipeline's own checkout-only resolution -- even though
+        the sources-root document sets conflicting values of its own,
+        which must be ignored entirely."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "source:\n  method: headers\ndebug:\n  format: btf\n",
+            encoding="utf-8",
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "source:\n  method: replay\n"
+            "debug:\n  format: dwarf\n"
+            "compile:\n  std: c++20\n",
+            encoding="utf-8",
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["source"] == {"method": "headers"}
+        assert written["debug"] == {"format": "btf"}
+        assert written["compile"] == {"std": "c++20"}
 
     def test_single_sided_audit_mode_promotes_compile_source_debug(
         self, tmp_path: Path
