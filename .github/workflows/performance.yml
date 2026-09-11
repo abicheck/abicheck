@@ -224,8 +224,14 @@ jobs:
             "${GATE[@]}" | tee reports/perf/scaling.txt
 
       - name: Run slow perf tests
+        # tests/test_perf_binary_scan.py used to run here too -- deleted
+        # with the `scan` command itself (ADR-068 Phase 6); it invoked the
+        # CLI directly with `["scan", ...]` and asserted scan's own JSON
+        # `coverage`/`pattern_scan` shape. No `compare`-side equivalent
+        # perf guard exists yet for `compare --depth binary`/`--depth
+        # headers` staying fast -- a real, tracked capability gap.
         run: |
-          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m slow
+          pytest tests/test_performance.py -v --tb=short -m slow
 
       - name: Write job summary
         if: always()

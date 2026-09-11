@@ -552,19 +552,23 @@ STEPS: tuple[Step, ...] = (
         # trips), so a serial run was pure wasted wall time on a multi-core
         # runner/machine and left this local step unable to reproduce CI's
         # actual timing behavior (Codex review, PR #1036).
-        # tests/test_performance.py, tests/test_perf_binary_scan.py, AND
+        # tests/test_performance.py AND
         # tests/test_header_scan_deadline_integration.py are excluded here
         # and covered by the separate "slow-perf" step below, run serially --
-        # see that step's own comment for why (Codex review, same PR, three
-        # rounds: the second and third files each caught in their own
-        # follow-up round).
+        # see that step's own comment for why (Codex review, PR #1036).
+        # tests/test_perf_binary_scan.py used to be excluded here too --
+        # deleted with the `scan` command itself (ADR-068 Phase 6); it
+        # invoked the CLI directly with `["scan", ...]` and asserted scan's
+        # own JSON `coverage`/`pattern_scan` shape. No `compare`-side
+        # equivalent perf guard exists yet for the identical
+        # `--depth binary`/`--depth headers` concern -- a real, tracked
+        # capability gap, not silently dropped.
         _py(
             "pytest",
             "tests/",
             "-m",
             "slow",
             "--ignore=tests/test_performance.py",
-            "--ignore=tests/test_perf_binary_scan.py",
             "--ignore=tests/test_header_scan_deadline_integration.py",
             "--tb=short",
             "-n",
@@ -578,24 +582,23 @@ STEPS: tuple[Step, ...] = (
     Step(
         "slow-perf",
         # Deliberately NOT parallelized, unlike "slow" above: every test in
-        # tests/test_performance.py, tests/test_perf_binary_scan.py, and
+        # tests/test_performance.py and
         # tests/test_header_scan_deadline_integration.py (whole-file
-        # `pytestmark = pytest.mark.slow` in the first two; the third has one
+        # `pytestmark = pytest.mark.slow` in the first; the second has one
         # `@pytest.mark.slow` test,
         # test_pathological_header_natural_cost_is_tracked, with its own 60s
         # ceiling) measures real wall-clock time against a fixed budget
-        # (2s/5s/30s, 3s/5s and 30s/45s, and 60s respectively) or fits a
-        # scaling exponent -- running them concurrently with other CPU-heavy
-        # tests makes scheduler contention part of the measurement, which can
-        # fail (or distort) the gate with no actual product regression.
-        # ci.yml's "Run slow tests" step keeps all three files serial,
-        # together, for the identical reason (Codex review, PR #1036);
-        # performance.yml's own dedicated job only covers the first two --
-        # an acknowledged, separate gap in that workflow, not fixed here.
+        # (2s/5s/30s and 60s respectively) or fits a scaling exponent --
+        # running them concurrently with other CPU-heavy tests makes
+        # scheduler contention part of the measurement, which can fail (or
+        # distort) the gate with no actual product regression. ci.yml's
+        # "Run slow tests" step keeps both files serial, together, for the
+        # identical reason (Codex review, PR #1036); performance.yml's own
+        # dedicated job only covers the first -- an acknowledged, separate
+        # gap in that workflow, not fixed here.
         _py(
             "pytest",
             "tests/test_performance.py",
-            "tests/test_perf_binary_scan.py",
             "tests/test_header_scan_deadline_integration.py",
             "-m",
             "slow",
