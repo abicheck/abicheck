@@ -104,25 +104,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ..model.graph_identity import closure_location_free_identity
 from .entity_identity import (
     IDENTITY_TIER_CANONICAL,
     CanonicalIdentity,
     resolve_identity_for_node,
 )
+from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabulary has always been importable from this module
+    _OUTCOME_PROSE,
+    COORDINATE_EVIDENCE_QUALIFIED_NAME,
+    OUTCOME_COORDINATES_ONLY,
+    OUTCOME_MOVED,
+    OUTCOME_RECONCILED,
+    OUTCOME_RENAMED,
+    _classify_outcome,
+    _project_relative_path,
+    coordinate_evidence,
+)
 
 if TYPE_CHECKING:
     from ..model.graph_facts import GraphNode
     from ..model.source_graph import SourceGraphSummary
-
-#: Reconciliation outcomes (ADR-048 D2) — distinct from plain
-#: node-add/node-remove, so a consumer can tell "the same entity, under a
-#: new name/location" from "an unrelated add and an unrelated remove that
-#: happen to be in the same diff".
-OUTCOME_RENAMED = "declaration_renamed"
-OUTCOME_MOVED = "declaration_moved"
-OUTCOME_RECONCILED = "declaration_identity_reconciled"
-OUTCOME_COORDINATES_ONLY = "declaration_coordinates_shifted"  # neither predicate fired -- distinct from OUTCOME_RECONCILED, where both did
 
 _MATCH_KIND_CANONICAL_ID = "canonical_id"
 _MATCH_KIND_ALIAS = "alias"
@@ -136,13 +137,6 @@ _RECONCILABLE_KINDS: frozenset[str] = frozenset(
     {"source_decl", "record_type", "enum_type", "typedef"}
 )
 
-#: OUTCOME_COORDINATES_ONLY-eligible kinds -- excludes "source_decl": a
-#: function's signature isn't exposed to resolve_identity_for_node in
-#: production, so "nothing else changed" can't be proven for one.
-_COORDINATE_ONLY_KINDS: frozenset[str] = frozenset(
-    {"record_type", "enum_type", "typedef"}
-)
-
 
 @dataclass(frozen=True)
 class ReconciledPair:
@@ -154,9 +148,14 @@ class ReconciledPair:
     outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED | OUTCOME_COORDINATES_ONLY
     old_identity: CanonicalIdentity
     new_identity: CanonicalIdentity
+    #: For an OUTCOME_COORDINATES_ONLY pair, which provider carried the
+    #: location evidence (``declaring_file`` | ``qualified_name``); None for
+    #: every other outcome. See ``graph_reconcile_outcome.
+    #: coordinate_evidence`` for why this is recorded rather than gated on.
+    coordinate_evidence: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "old_node_id": self.old_node.id,
             "new_node_id": self.new_node.id,
             "old_label": self.old_node.label,
@@ -164,6 +163,9 @@ class ReconciledPair:
             "match_kind": self.match_kind,
             "outcome": self.outcome,
         }
+        if self.coordinate_evidence is not None:
+            d["coordinate_evidence"] = self.coordinate_evidence
+        return d
 
 
 @dataclass
@@ -187,68 +189,6 @@ class GraphReconciliation:
             "true_added": [n.id for n in self.true_added],
             "true_removed": [n.id for n in self.true_removed],
         }
-
-
-def _path_segments(path: str) -> tuple[str, ...]:
-    """Plain-path split into segments, ignoring the root/self markers.
-
-    Normalizes ``\\`` to ``/`` first (same as
-    ``source_graph_findings._path_segments``/``source_graph.py``'s own
-    caller-file normalization): ``PurePosixPath`` treats a backslash as an
-    ordinary filename character, not a separator, so a Windows-style
-    declaring path (``C:\\old\\include\\api.h``) would never be split at
-    all -- silently defeating the project-root-marker search in
-    :func:`_project_relative_path` and comparing raw checkout roots
-    (Codex review).
-    """
-    from pathlib import PurePosixPath
-
-    posix = path.replace("\\", "/")
-    return tuple(p for p in PurePosixPath(posix).parts if p not in ("/", ".", ""))
-
-
-#: Conventional project-root directory names — a superset of
-#: :data:`abicheck.header_utils._INCLUDE_ROOT_NAMES` (which only needs
-#: ``include``/``inc`` for its narrower include-root-inference purpose;
-#: this also covers ``src``/``source``/``sources`` layouts). Used here as an
-#: anchor for stripping a checkout-root prefix from a single declaring-file
-#: path with no sibling to derive a shared prefix from (Codex review — see
-#: :func:`_project_relative_path`).
-_CONVENTIONAL_ROOT_MARKERS: frozenset[str] = frozenset(
-    {"include", "inc", "src", "source", "sources"}
-)
-
-
-def _project_relative_path(path: str) -> str:
-    """Best-effort project-relative form of a declaring-file/header path.
-
-    Two independently-rooted checkouts of the same tree (separate temp dirs
-    in a benchmark harness, or two CI job workspaces) share no absolute
-    root, so comparing raw absolute paths would misclassify an unmoved file
-    as "moved" purely because of where its tree happened to be checked out.
-
-    With more than one declaring file on a side, the shared checkout-root
-    prefix could in principle be derived structurally (comparing multiple
-    paths against each other) — but a single sample gives no such baseline,
-    and blindly reserving "everything but the basename" as an assumed
-    checkout root (an earlier version of this function did that) silently
-    hides a real cross-directory move that happens to keep the same
-    filename (Codex review: ``/tmp/old/src/foo.h`` -> ``/tmp/new/include/foo.h``
-    must not read as unmoved). Anchoring on the last conventional root-marker
-    segment instead (``include``/``inc``/``src``/``source``/``sources`` — the
-    same vocabulary :data:`abicheck.header_utils._INCLUDE_ROOT_NAMES` already
-    uses for a similar purpose) gets both cases right without needing a
-    second sample: it strips the checkout-root prefix when a recognizable
-    project-layout marker is present, and falls back to comparing the full
-    path (never silently "unmoved") when it isn't.
-    """
-    if not path:
-        return path
-    segs = _path_segments(path)
-    for i in range(len(segs) - 1, -1, -1):
-        if segs[i].lower() in _CONVENTIONAL_ROOT_MARKERS:
-            return "/".join(segs[i:])
-    return "/".join(segs)
 
 
 #: Node kinds whose ``label``/declaring-path fields are a filesystem path,
@@ -394,66 +334,6 @@ def _declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
     return result
 
 
-def _signature_tail(identity: CanonicalIdentity) -> str:
-    # normalized_signature's kind/arity/param-types tail, qn field stripped
-    # off (that field alone carries coordinate churn) -- comparable across
-    # a coordinate shift. Format: "sig:" + qn + "\x1f" + kind + "\x1f" + ...
-    return identity.normalized_signature.split("\x1f", 1)[-1]
-
-
-def _classify_outcome(
-    old_identity: CanonicalIdentity,
-    new_identity: CanonicalIdentity,
-    *,
-    old_declaring_file: str = "",
-    new_declaring_file: str = "",
-) -> str:
-    old_qn = old_identity.qualified_name
-    new_qn = new_identity.qualified_name
-    # source_relative is file#scope#name; the file prefix says "did the
-    # declaring file change" (falls back to _declaring_files' edge-derived
-    # file when the node carries none of its own).
-    old_file = (
-        _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
-        or old_declaring_file
-    )
-    new_file = (
-        _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
-        or new_declaring_file
-    )
-    old_key = closure_location_free_identity(old_qn)
-    new_key = closure_location_free_identity(new_qn)
-    renamed = bool(old_qn) and bool(new_qn) and old_key != new_key
-    moved = bool(old_file) and bool(new_file) and old_file != new_file
-    if renamed and not moved:
-        return OUTCOME_RENAMED
-    if moved and not renamed:
-        return OUTCOME_MOVED
-    if renamed and moved:
-        return OUTCOME_RECONCILED
-    # Neither fired: coordinate-only needs the raw name differed (normalized
-    # equal), an agreeing signature tail, AND a type-shaped kind -- a real
-    # source_decl producer tracks no param_types/mangled_name (Codex
-    # review), so a function's tail is vacuously equal and can't prove
-    # nothing else changed; only a type has no such hidden dimension.
-    same_sig = _signature_tail(old_identity) == _signature_tail(new_identity)
-    # bool(old_qn)/bool(new_qn)/bool(*_file) mirror renamed/moved's own
-    # guards above -- an absent name is a name gain/loss, and absent file
-    # evidence on either side is missing evidence, never proof the
-    # declaring file didn't change (AGENTS.md: weaker evidence narrows
-    # conclusions, it never upgrades to a clean/compatible claim).
-    coordinate_only = (
-        bool(old_qn)
-        and bool(new_qn)
-        and bool(old_file)
-        and bool(new_file)
-        and old_qn != new_qn
-        and same_sig
-        and old_identity.kind in _COORDINATE_ONLY_KINDS
-    )
-    return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
-
-
 #: One node kind's structural-context index: context -> the new-side node ids
 #: sharing it. Tier 3 builds it; the per-kind finalize step reads it back to
 #: tell an ambiguous new node from a genuine addition.
@@ -515,11 +395,19 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
+        old_declaring = self.old_declaring_files.get(oid, "")
+        new_declaring = self.new_declaring_files.get(new_id, "")
         outcome = _classify_outcome(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],
-            old_declaring_file=self.old_declaring_files.get(oid, ""),
-            new_declaring_file=self.new_declaring_files.get(new_id, ""),
+            old_declaring_file=old_declaring,
+            new_declaring_file=new_declaring,
+        )
+        evidence = coordinate_evidence(
+            kind_pass.old_ident[oid],
+            kind_pass.new_ident[new_id],
+            old_declaring_file=old_declaring,
+            new_declaring_file=new_declaring,
         )
         self.result.reconciled.append(
             ReconciledPair(
@@ -529,6 +417,7 @@ class _Reconciler:
                 outcome,
                 kind_pass.old_ident[oid],
                 kind_pass.new_ident[new_id],
+                evidence,
             )
         )
         self.matched_old.add(oid)
@@ -773,16 +662,6 @@ def reconcile_graph_diff(
     return reconcile_added_removed(diff.removed_nodes, diff.added_nodes, old, new)
 
 
-#: Human-readable outcome descriptions, keyed by :data:`OUTCOME_RENAMED`
-#: et al. — used by :func:`diff_graph_reconciliation_findings` below.
-_OUTCOME_PROSE: dict[str, str] = {
-    OUTCOME_RENAMED: "renamed",
-    OUTCOME_MOVED: "moved to a different declaring file",
-    OUTCOME_RECONCILED: "identity-reconciled (both name and location evidence changed)",
-    OUTCOME_COORDINATES_ONLY: "no material identity change (coordinate-only shift)",
-}
-
-
 def _public_reachable_ids(graph: SourceGraphSummary) -> frozenset[str]:
     """Every node id reachable from a public-API entry in *graph*, via the
     identical dependency-edge closure ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
@@ -876,6 +755,21 @@ def diff_graph_reconciliation_findings(
         old_label = pair.old_node.label or pair.old_node.id
         new_label = pair.new_node.label or pair.new_node.id
         prose = _OUTCOME_PROSE.get(pair.outcome, "identity-reconciled")
+        # State the weaker evidence rather than hiding it (Codex review, PR
+        # #1228): a coordinate-only pair with no declaring-file evidence on
+        # either side read its coordinate shift out of the qualified name,
+        # which cannot rule out a same-basename cross-directory move. The
+        # classification stays -- declining it makes OUTCOME_RECONCILED's
+        # strictly stronger "both name and location evidence changed" claim
+        # on the very same absent evidence -- but a reader sees what it
+        # rests on.
+        evidence_note = (
+            "; location evidence: the qualified name's own coordinates only "
+            "-- no declaring file was recorded on either side, so a move "
+            "that kept the same file basename would look identical to this"
+            if pair.coordinate_evidence == COORDINATE_EVIDENCE_QUALIFIED_NAME
+            else ""
+        )
         # Prefer the new side's declaring file (matches the rest of the L5
         # findings' [L5_SOURCE_GRAPH]-boundary convention in
         # source_graph_findings.py); fall back to the old side, then to the
@@ -895,7 +789,7 @@ def diff_graph_reconciliation_findings(
                 description=(
                     f"Graph evidence reconciles {old_label!r} (old) with "
                     f"{new_label!r} (new) as the same declaration, {prose} "
-                    f"(match evidence: {pair.match_kind}). This does not by "
+                    f"(match evidence: {pair.match_kind}{evidence_note}). This does not by "
                     "itself indicate a break — it explains what would "
                     "otherwise look like an unrelated add+remove pair in the "
                     "L5 graph diff; any artifact-level finding for either "

@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
@@ -1333,7 +1334,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: change_registry.py` already uses -- adding a class to a sibling needs no
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
-    _ANALYSIS_BUG_CLASSES + REPORT_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
+    _ANALYSIS_BUG_CLASSES
+    + GUARD_BUG_CLASSES
+    + REPORT_BUG_CLASSES
+    + TOOL_SURFACE_BUG_CLASSES
 )
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}

@@ -446,6 +446,45 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
     return kept
 
 
+def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """Whether *old* and *new* are provably the same content.
+
+    Plain ``AbiSnapshot`` dataclass equality (structural, every field).
+    Chosen over a serialized digest (``storage.snapshot_encode.
+    snapshot_content_digest``, this repo's existing content fingerprint)
+    because ``policy`` may not import ``storage`` (``architecture/
+    modules.yaml``: ``policy -> model, compare``), and because equality is
+    the stronger test of the two -- a digest can only ever agree with it,
+    after paying a full re-serialization. Soundness is what matters here,
+    and field-wise equality has it in the direction actually used: equal
+    ==> every input a pairwise detector reads agrees on both sides ==> no
+    pairwise finding is possible. The converse is neither claimed nor
+    needed: any inequality falls through to the ordinary degraded report,
+    which is the safe direction.
+
+    **The one residual, and where it is reported instead** (Codex review,
+    PR #1228): an ``AbiSnapshot`` is a lossy capture, so equal content
+    proves the two sides' *recorded evidence* is equal, not that the two
+    underlying artifacts are. Two genuinely different binaries whose stale
+    snapshots decode equal (the stale schema failed to record the one field
+    that differs) therefore read ``"clean"`` here. That case is not
+    silent, and deliberately is not this field's job: it is exactly the
+    population ``confidence.note_if_same_binary_compared`` already fires
+    on, from the identical signal (equal canonical serialization), with the
+    stronger claim -- "this comparison cannot detect a change even if one
+    was intended -- verify the correct snapshot files were provided" -- on
+    ``DiffResult.coverage_warnings``, which no suppression rule can remove.
+    Reporting the same residual a second time as schema staleness would
+    label it as a *vintage* problem, which it is not: the comparison is
+    equally blind at any vintage once both sides decode to the same
+    evidence. ``tests/test_analysis_assurance_content_identity.py``'s
+    ``test_content_identical_compare_still_warns_it_can_detect_nothing``
+    pins the pairing, so the disclosure cannot quietly disappear and leave
+    this return claiming completeness alone.
+    """
+    return old == new
+
+
 def schema_staleness_status(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> tuple[str, list[str]]:
@@ -483,16 +522,36 @@ def schema_staleness_status(
     would otherwise be the one context-status field self-pairing does NOT
     make safe by construction, purely because it asks a per-side question
     ("is THIS side's flag False") rather than a cross-side agreement
-    question. A user-supplied ``compare foo.so foo.so`` (two independently
-    parsed, merely content-identical snapshots) never hits this: real
-    identity, not equal content, is what this checks, and two separate
-    parses are always two separate objects.
+    question. That argument never depended on object
+    identity, and an earlier revision of this docstring wrongly carved the
+    two-operand case out ("two separate parses are always two separate
+    objects"). ONE stored snapshot file loaded twice -- ``compare
+    baseline.abi.json baseline.abi.json``, or a CI job re-checking an
+    unchanged cached baseline -- produces two distinct objects whose
+    content is nevertheless equal, and reporting that as ``"degraded"``
+    (flipping ``assurance.status`` complete -> partial, newly failing a job
+    gating on it) makes exactly the claim the ``old is new`` return already
+    rejects.
+
+    So the early return is widened from object identity to *provable
+    content identity* (:func:`_same_content`). That test is SOUND, not
+    heuristic: equal content means every input the pairwise detectors read
+    is equal on both sides, so no pairwise finding is possible, reliable
+    facts or not. It is deliberately NOT widened to "same input path" or
+    "same binary": two independent extractions of one binary can
+    legitimately differ in schema vintage, which is precisely the case this
+    field exists to report. It is also evaluated only AFTER
+    :func:`_pair_aware_degraded_facts` has returned something for at least
+    one side, so an ordinary clean comparison never pays for it; that path
+    is rare by construction.
     """
     if old is new:
         return "clean", []
     old_degraded = _pair_aware_degraded_facts(old, new)
     new_degraded = _pair_aware_degraded_facts(new, old)
     if not old_degraded and not new_degraded:
+        return "clean", []
+    if _same_content(old, new):
         return "clean", []
     notes: list[str] = []
     if old_degraded:
