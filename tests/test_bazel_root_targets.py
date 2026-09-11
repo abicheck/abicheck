@@ -470,6 +470,38 @@ def test_embed_side_build_source_forwards_build_targets(monkeypatch, tmp_path: P
 # ── CLI: `dump --build-target` (retired) ────────────────────────────────────
 
 
+def test_dump_source_only_succeeds_with_no_build_target_flag_or_config(
+    tmp_path: Path,
+):
+    """A plain `dump --sources` run (no `--build-target` -- gone -- and no
+    `.abicheck.yml` `build.targets` either) must still reach the real
+    `dump_source_only()` call cleanly now that `build_targets` is no longer
+    threaded through `dump_cmd`'s parameter list at all: this is the direct,
+    environment-independent regression check for that call-site edit (no
+    Bazel workspace, no config file, no subprocess mocking needed -- nothing
+    here selects a build system, so `dump_source_only` never has any
+    root-target scoping to apply either way). `.abicheck.yml`'s
+    `build.targets` case (with a real Bazel workspace and a mocked
+    subprocess) is `test_dot_abicheck_yml_build_targets_flow_into_dump_with_
+    no_cli_flag` below."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    out = tmp_path / "out.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["dump", "--sources", str(src), "-o", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+
 def test_dump_cli_build_target_flag_is_removed(tmp_path: Path):
     """`dump --build-target` is retired outright (hard removal, no
     deprecation window, no alias) once `scan`'s removal resolved the routing
