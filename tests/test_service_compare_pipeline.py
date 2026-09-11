@@ -23,6 +23,8 @@ one class, moved verbatim, matching the file's own debt-ledger target
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from abicheck.api_types import CompareRequest, InputSpec
@@ -520,3 +522,50 @@ class TestEnvMatrixPathValidatedBeforeExtraction:
         request = self._request(tmp_path, env_matrix_path=None)
         result = run_compare_request(request)
         assert result.diff is not None
+
+    def test_expired_deadline_fails_before_env_matrix_is_loaded(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review, fresh P2 finding on this round's own fix: moving
+        ``effective_env_matrix()`` ahead of ``resolve_compare_request`` (the
+        sibling test class above) must not itself run ahead of the deadline
+        check. ``deadline.deadline_scope`` only records the deadline in a
+        contextvar -- it never raises on entry, only ``deadline.check()``
+        does -- so a ``budget_s=0`` request must raise ``DeadlineExceeded``
+        from ``run_compare_request`` itself, before ``load_env_matrix`` ever
+        reads the (here, deliberately large) YAML file from disk.
+        """
+        from abicheck.deadline import DeadlineExceeded
+        from abicheck.service import run_compare_request
+        from abicheck.workflows.input_resolution import (
+            load_env_matrix as real_load_env_matrix,
+        )
+
+        load_calls: list[Path] = []
+
+        def _tracking_load_env_matrix(path):
+            load_calls.append(path)
+            return real_load_env_matrix(path)
+
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_env_matrix",
+            _tracking_load_env_matrix,
+        )
+
+        # Large enough that reading and parsing it would be real, measurable
+        # I/O if the deadline check didn't preempt it -- not just a toy
+        # one-line fixture that would pass even with the buggy ordering.
+        big = tmp_path / "env.yaml"
+        big.write_text(
+            "runtime_floors:\n"
+            + "".join(f'  GLIBC_{i}: "2.{i}"\n' for i in range(20000)),
+            encoding="utf-8",
+        )
+        import dataclasses
+
+        request = dataclasses.replace(
+            self._request(tmp_path, env_matrix_path=big), budget_s=0
+        )
+        with pytest.raises(DeadlineExceeded):
+            run_compare_request(request)
+        assert load_calls == []

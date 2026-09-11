@@ -792,11 +792,11 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     from . import deadline
 
     with deadline.deadline_scope(request.budget_s):
+        # deadline_scope never raises on entry -- check() before the file I/O below.
+        deadline.check()
         # Resolve env_matrix_path before resolve_compare_request's own
         # extraction work starts, so a bad path fails fast; threaded into
         # classify_compare_pair so the file isn't read a second time.
-        # __post_init__ still does zero file I/O -- this only reads it once
-        # a full run_compare_request call actually reaches this point.
         resolved_env_matrix = request.effective_env_matrix()
         pair = resolve_compare_request(request)
         return classify_compare_pair(
