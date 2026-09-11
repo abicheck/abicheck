@@ -893,6 +893,27 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         out = _downgrade_opaque_struct_changes([change], old, new)
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
+    def test_a_pointer_to_data_member_field_does_not_count_as_by_value_embedding(
+        self,
+    ) -> None:
+        """A seventh false positive (Codex review round 6, PR #1218): a
+        field declared as a pointer-to-data-member (``Handle Owner::*``)
+        stores a byte offset into ``Owner`` -- it does not embed a
+        ``Handle`` object at all -- but the ``::*`` scope qualifier sits
+        between the type name and its own sigil, past what the
+        cv-qualifier/whitespace skip in :func:`_sigil_follows` covers, so
+        this declarator was previously (mis)read as by-value. A genuinely
+        opaque type's own layout change must still be suppressed."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record(
+            "Wrapper", fields=[TypeField(name="ptr", type="Handle Owner::*")]
+        )
+        old = _snap([opaque_handle, wrapper])
+        new = _snap([opaque_handle, wrapper])
+        change = _struct_size_change("Handle", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
 
 # -- Primitive-level property tests: OpaqueTypeIndex.build ------------------
 

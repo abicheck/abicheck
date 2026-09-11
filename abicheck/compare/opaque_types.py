@@ -655,6 +655,16 @@ def _unqualified_type_token_matches(
 #: (``"Handle (Class::*)[3]"``).
 _DECLARATOR_GROUP_RE = re.compile(r"\(\s*(?:\w+(?:::\w+)*::\s*)?[*&]")
 
+#: An *un*-parenthesized pointer-to-data-member declarator -- ``"Handle
+#: Owner::*member"`` stores a byte offset into ``Owner``, not an embedded
+#: ``Handle`` object, but needs no grouping parens the way a pointer-to-
+#: member-function/array declarator does (:data:`_DECLARATOR_GROUP_RE`
+#: covers the latter). Codex review, PR #1218, round 6: this shape was
+#: previously read as by-value, since the ``::*`` scope qualifier sits
+#: between the type name and its own sigil, past what
+#: :data:`_CV_OR_SPACE_RE` skips.
+_MEMBER_POINTER_RE = re.compile(r"\w+(?:::\w+)*::\s*\*")
+
 
 def _sigil_follows(text: str, pos: int) -> bool:
     """Whether *text* has a ``*``/``&`` at *pos* -- either directly, after
@@ -663,12 +673,16 @@ def _sigil_follows(text: str, pos: int) -> bool:
     (either cv-qualifier order or spacing) both still find the ``*`` -- or
     wrapped in a declarator-grouping paren (:data:`_DECLARATOR_GROUP_RE`)
     immediately following, so ``"Handle (*)[3]"``'s pointer-to-array
-    declarator is found too."""
+    declarator is found too -- or an unparenthesized pointer-to-member
+    declarator (:data:`_MEMBER_POINTER_RE`), so ``"Handle Owner::*member"``
+    is found as well."""
     m = _CV_OR_SPACE_RE.match(text, pos)
     pos = m.end() if m else pos
     if pos < len(text) and text[pos] in "*&":
         return True
-    return _DECLARATOR_GROUP_RE.match(text, pos) is not None
+    if _DECLARATOR_GROUP_RE.match(text, pos) is not None:
+        return True
+    return _MEMBER_POINTER_RE.match(text, pos) is not None
 
 
 def _occurrence_is_indirect(text: str, end: int) -> bool:
