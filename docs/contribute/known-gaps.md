@@ -7370,12 +7370,18 @@ ADR amendment for the full reasoning each):
   no config equivalent existed for either command; that was already false
   by the time it was written (`.abicheck.yml`'s `build.targets` key existed
   and `dump --build-target` already consumed it, CLI-override-wins). `scan`
-  never had this flag at all, so nothing was dropped for it here. `dump`'s
-  own `--build-target` CLI flag was later removed outright (ADR-068 Phase 6
-  follow-up, once `scan`'s removal resolved the routing hazard that had
-  deferred it) — `.abicheck.yml`'s `build.targets` is now the *only*
-  front-end-reachable source for either command, with no CLI override left
-  to take precedence over it.
+  *did* have its own `--build-target` flag
+  (`changelog.d/20260816_113000_noreply_abicheck_scan_build_target.md`
+  records it being added), and it was retired first, in ADR-068's
+  2026-09-09 amendment (the `scan` retirement) — `dump`'s own
+  `--build-target` was deliberately left in place at that point precisely
+  because `scan` still existed and shared its plumbing, so pulling `dump`'s
+  copy first would have broken `scan`'s still-live flag. `dump`'s own
+  `--build-target` CLI flag was later removed outright too (ADR-068 Phase 6
+  follow-up, once `scan`'s full removal cleared the routing hazard that had
+  deferred `dump`'s own removal) — `.abicheck.yml`'s `build.targets` is now
+  the *only* front-end-reachable source for either command, with no CLI
+  override left to take precedence over it.
 - `--artifact-set`/`new-library-set` — ADR-065 S3's package component
   inventories (plan Prerequisite P5) are explicitly "Not started"; routing
   this onto `compare --no-baseline DIR` today would silently narrow its
