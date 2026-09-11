@@ -587,7 +587,11 @@ def _embed_inline_source_side(
     "candidate build) instead of OLD NEW; the OLD side is recorded with "
     "ADR-065's 'declared_absent' acquisition state. Replaces `scan`'s "
     "audit-only mode (no --against): reports candidate-side facts only -- "
-    "never an addition, a removal, or a compatibility verdict.",
+    "never an addition, a removal, or a compatibility verdict. "
+    "--severity-preset is the sole switch that arms this audit's own gate: "
+    "any preset other than 'info-only' contributes exit 3 the first time a "
+    "finding is BREAKING/API_BREAK-classified (ADR-068 2026-09-10 "
+    "amendment); omit it, or pass 'info-only', to opt out.",
 )
 # Set-input fan-out (ADR-037 D7): --dso-only, --output-dir only bite
 # when the operands are directories/packages; a no-op-with-warning otherwise.
@@ -805,6 +809,17 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     contributes exit 1 the same way, folded with the same max discipline.
     Without the flag, analysis_assurance is still always computed and
     reported in --format json, it just never affects the exit code.
+    \b
+    A third, independent orthogonal axis (ADR-068 2026-09-10 amendment):
+    under --no-baseline, this becomes an audit rather than a comparison, and
+    --severity-preset (any value other than 'info-only') opts that audit
+    into gating on its own findings, contributing exit 3
+    (AUDIT_GATE_EXIT_CODE) the first time a finding's effective verdict is
+    BREAKING or API_BREAK. Folded with the same max discipline as the axes
+    above -- it raises a clean 0 to 3 and never emits, or is confused for,
+    the compatibility family's own 2/4. Without --no-baseline, or with
+    --severity-preset info-only or omitted, this axis never contributes.
+    See docs/reference/exit-codes.md.
     \b
     Invalid invocation (bad arguments/options, unreadable or unrecognised
     input) exits 64, outside the result space above, so it is never mistaken
