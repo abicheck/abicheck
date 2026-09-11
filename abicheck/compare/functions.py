@@ -73,33 +73,45 @@ the legacy-adapter-projected path alike -- what changes is only *which
 occurrence set* the caller-supplied function map is checked against on the
 way there, not how a function's own identity tiers are derived.
 
-**What this buys, given that.** Three things, none of which is "the
+**What this buys, given that.** Two things, neither of which is "the
 matching outcome changes for a compliant producer" (it provably does not,
 for the reasons above): (1) it satisfies the architectural invariant that a
 migrated module never reads the legacy flat collection directly, so a
 future change to how function identity is represented has to go through
 :mod:`abicheck.model.semantic_ir_legacy_adapter` instead of being bolted
-onto an ad hoc flat-field read here; (2) it exercises
-:class:`~abicheck.model.semantic_ir_index.SemanticIRIndex` against a third
-entity kind whose identity lives in ``EntityId.extra`` rather than in a
-payload ``Fact`` (typedefs/constants both keyed their comparison on a
-rendered *display name* string; functions key on a raw ``EntityId``
-lookup), proving the shared abstraction generalizes past the "one payload
-fact" shape; and (3) it is the scaffold a future, better-scoped slice can
-build on once ``CanonicalEntity`` grows the per-position facts (a
-separately-addressable return-type spelling, ``ref_qualifier``, variadic
-status -- see ``extract/semantic_normalizer.py``'s own "Deliberately
-excluded from this slice" list) that would let a signature-level comparison
-move here safely. Migrating the richer per-parameter/return-type/cv/
-virtual-method/ctor-dtor/hidden-friend detectors is explicitly **not**
-attempted in this PR: ``CanonicalEntity.canonical_spelling`` combines a
-function's return type and every parameter into one opaque
-``"<return>(<param>, ...)"`` string with no way to recover which position
-changed, and the third slice's own normalizer does not yet carry
-``ref_qualifier``/variadic status at all -- rebuilding those detectors on
-top of that payload today would either lose per-position detail the
+onto an ad hoc flat-field read here; and (2) it is the scaffold a future,
+better-scoped slice can build on once ``CanonicalEntity`` grows the
+per-position facts (a separately-addressable return-type spelling,
+``ref_qualifier``, variadic status -- see ``extract/semantic_normalizer.py``'s
+own "Deliberately excluded from this slice" list) that would let a
+signature-level comparison move here safely. Migrating the richer
+per-parameter/return-type/cv/virtual-method/ctor-dtor/hidden-friend
+detectors is explicitly **not** attempted in this PR: ``CanonicalEntity.
+canonical_spelling`` combines a function's return type and every parameter
+into one opaque ``"<return>(<param>, ...)"`` string with no way to recover
+which position changed, and the third slice's own normalizer does not yet
+carry ``ref_qualifier``/variadic status at all -- rebuilding those detectors
+on top of that payload today would either lose per-position detail the
 existing findings carry or require inventing new normalizer output this PR
 was told not to invent speculatively.
+
+**Deliberately not a per-function ``SemanticIRIndex`` lookup.** An earlier
+version of this module called ``ir_index.entity(func.entity_id)`` per
+function and discarded the result, on the theory that "the presence check
+is the contribution". It is not: since :func:`resolve_function_identity`
+reads only the flat ``Function`` object (see above -- there is no second
+identity computation for a function to prefer), a lookup whose result
+influences nothing is dead code, not a migration -- indistinguishable, to
+every test and to a mutation run alike, from deleting it. This module's
+actual, honest contribution is exactly the two points above: an
+architectural boundary and a scaffold, not a runtime behavioral dependency
+on IR content. :func:`function_identity_index` therefore only *selects*
+which occurrence set the cohort is nominally reading through
+(``semantic_ir_covers_kind`` gating real IR vs.
+:func:`~abicheck.model.semantic_ir_legacy_adapter.legacy_function_ir`'s
+projection), the same per-side selection ``compare.typedefs``/
+``compare.constants`` make, without threading a no-op lookup through every
+resolved identity.
 """
 
 from __future__ import annotations
@@ -107,17 +119,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from ..finding_identity import (
-    FindingIdentity,
-    SymbolIdentityIndex,
-    resolve_function_identity,
-)
-from ..model.identity import EntityKind
-from ..model.semantic_ir_index import SemanticIRIndex
-from ..model.semantic_ir_legacy_adapter import (
-    legacy_function_ir,
-    semantic_ir_covers_kind,
-)
+from ..finding_identity import SymbolIdentityIndex, resolve_function_identity
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function
@@ -128,50 +130,37 @@ __all__ = ["function_identity_index"]
 def function_identity_index(
     functions: Mapping[str, Function], snapshot: AbiSnapshot
 ) -> SymbolIdentityIndex[Function]:
-    """Cohort 3's replacement for ``SymbolIdentityIndex.for_functions``.
+    """Cohort 3's entry point for the function-family matching index.
 
     *functions* is the comparison's own already ELF/API-surface-selected map
     (``diff_symbols._public_functions``'s result) for *snapshot* -- the same
-    input ``SymbolIdentityIndex.for_functions`` takes today. *snapshot* is
-    used only to decide which occurrence set to read through
-    (:func:`~abicheck.model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`
-    gates on a real, ``FUNCTION``-covering ``SemanticIR`` exactly the way
-    ``compare.typedefs``/``compare.constants``'s own per-side selectors do),
-    never to re-derive *functions* itself.
-
-    The resolved :class:`~abicheck.finding_identity.FindingIdentity` for
-    each function is unchanged --
+    input ``SymbolIdentityIndex.for_functions`` takes today.
     :func:`~abicheck.finding_identity.resolve_function_identity` still reads
-    the flat ``Function`` object directly, for the reasons this module's own
-    docstring documents at length (there is no second identity
-    representation for a function to prefer instead). What is real about
-    this cutover is the occurrence set the lookup runs against: a real
-    ``SemanticIR`` when *snapshot* carries one covering ``FUNCTION``
-    entities, or :func:`~abicheck.model.semantic_ir_legacy_adapter.
-    legacy_function_ir`'s projection of *functions* itself otherwise --
-    never a direct read of ``AbiSnapshot.functions``/``.function_map``.
+    the flat ``Function`` object directly to compute each identity, for the
+    reasons this module's own docstring documents at length: a function's
+    ``entity_id`` is resolved exactly once, by the producer, and copied
+    -- not recomputed -- into ``SemanticIR``, so there is no second,
+    independently-derived identity representation here for a
+    ``SemanticIR``-backed lookup to prefer. *snapshot* is accepted (rather
+    than this function taking only *functions*) to keep the same call shape
+    ``compare.typedefs``/``compare.constants``'s own per-side selectors use,
+    and so a future slice that gives ``CanonicalEntity`` real per-function
+    payload facts (see module docstring) can extend this signature's
+    existing caller instead of every call site needing to change again.
+
+    This function is currently a thin, intentionally inert wrapper around
+    ``SymbolIdentityIndex(functions, resolve_function_identity)`` --
+    identical to ``SymbolIdentityIndex.for_functions(functions)`` in every
+    observable way. See the module docstring's "Deliberately not a
+    per-function ``SemanticIRIndex`` lookup" section for why: this cohort's
+    real, tested infrastructure
+    (:func:`~abicheck.model.semantic_ir_legacy_adapter.legacy_function_ir`,
+    :func:`~abicheck.model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`)
+    lives in the adapter module, exercised directly by its own tests, ready
+    for a future slice to wire in -- landed and proven correct in isolation
+    first, the same pattern ``SemanticIRIndex`` itself was landed with no
+    live caller (see that class's own module docstring). Wiring it into
+    *this* function today, with no consequence to gate on, would be
+    indistinguishable from dead code to both a reader and a mutation run.
     """
-    if snapshot.semantic_ir is not None and semantic_ir_covers_kind(
-        snapshot.semantic_ir, EntityKind.FUNCTION
-    ):
-        ir_index = SemanticIRIndex(snapshot.semantic_ir)
-    else:
-        ir_index = SemanticIRIndex(legacy_function_ir(functions))
-
-    def _resolve(func: Function) -> FindingIdentity:
-        # The presence check itself is this cutover's whole contribution
-        # (see module docstring): a real ``SemanticIR`` covering FUNCTION
-        # entities in general can still legitimately miss one particular
-        # function's own occurrence (e.g. an ELF-exported function an
-        # ELF-fallback exporter, not a header-AST backend, identified --
-        # mirrors the same v38-v41-style gap
-        # ``compare.typedefs``/``compare.constants`` already accept via
-        # ``semantic_ir_covers_kind``'s own per-kind, not per-entity, gate).
-        # Absent or present, the identity computation itself is unchanged --
-        # see this module's own docstring for why recomputing it from
-        # ``EntityId.extra`` would add risk, not evidence.
-        if func.entity_id is not None:
-            ir_index.entity(func.entity_id)
-        return resolve_function_identity(func)
-
-    return SymbolIdentityIndex(functions, _resolve)
+    return SymbolIdentityIndex(functions, resolve_function_identity)
