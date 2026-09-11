@@ -560,6 +560,20 @@ pytest_add_cli_args = [
     # `mutmut run` for real) -- this PR's `serialization.py` change is what
     # first put this test file in scope.
     "--ignore=tests/test_action_run_sh_audit_gate.py",
+    # Same "subprocess re-enters the mutated tree with no mutmut config"
+    # failure class as the entry immediately above, tripped by this same
+    # ADR-061 gap E storage/snapshot_codec split PR (#1214) once its Round 5
+    # fix widened `only_mutate` to the new storage/snapshot_* modules:
+    # TestAuditOnlyScanUnaffectedWhenTheseInputsAreUnset::
+    # test_plain_audit_only_scan_still_succeeds shells out to a real
+    # `action/run.sh` + real `abicheck` binary subprocess the identical way,
+    # and the mutant tree's re-entrant subprocess can't find
+    # `pyproject.toml`'s `[tool.mutmut]` section from its scratch cwd either
+    # -- aborting `mutmut run`'s baseline stats collection before any mutant
+    # is generated. Not caused by this PR's own diff logic: the test passes
+    # cleanly outside mutmut (`pytest tests/test_action_run_sh_scan_no_
+    # baseline_capability_gap.py` -- 11/11).
+    "--ignore=tests/test_action_run_sh_scan_no_baseline_capability_gap.py",
     # Same failure class as the entry immediately above, one more real
     # `action/run.sh` + real `abicheck` binary subprocess test tripped by
     # this same G38 bundle-facts PR once it touched a second
