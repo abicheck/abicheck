@@ -349,7 +349,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
             "tests/test_explicit_source_extractor_propagation.py",
-            "tests/test_dump_scan_l3_comparability.py",
         ),
         known_gaps=(
             KnownGap(
@@ -367,21 +366,25 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "override, output/report options) — of these only the "
                     "frontend concern has since had any of this treatment, "
                     "and only for one chain: `--ast-frontend` -> the L4 "
-                    "source-ABI replay backend, where `scan` accepted the "
-                    "value and then ignored it "
+                    "source-ABI replay backend, where `scan` used to "
+                    "accept the value and then ignore it "
                     "(tests/test_explicit_source_extractor_propagation.py, "
                     "exhaustive over the frontend x env domain, grounded in "
-                    "_make_source_extractor, with the end-to-end half in "
-                    "tests/test_dump_scan_l3_comparability.py). The same "
+                    "_make_source_extractor). Its own end-to-end half "
+                    "(tests/test_dump_scan_l3_comparability.py, a real "
+                    "castxml `dump` baseline vs. a real `scan --against` "
+                    "candidate) and the production call site it exercised "
+                    "(`scan_engine._build_new_snapshot`) were both deleted "
+                    "with the `scan` command itself (ADR-068 Phase 6) -- "
+                    "the primitive-level coverage above still stands, but "
+                    "this chain now has no end-to-end coverage and no "
+                    "live production caller at all (a real, acknowledged "
+                    "capability gap, not silently dropped -- see "
+                    "test_explicit_source_extractor_propagation.py's own "
+                    "module docstring). The same "
                     "concern's *other* consumers (the L2 header parse, the "
-                    "preprocessor/pattern pre-scans) are untouched, and one "
-                    "frontend divergence is deliberately still open rather "
-                    "than closed: an UNFLAGGED `auto` resolves to clang for "
-                    "`scan` and castxml for `dump`/`compare`, which is a "
-                    "real default change to make deliberately (the CLI "
-                    "cleanup phase-two plan's PR 3A item 2), not a "
-                    "propagation bug to patch. consumer_compile was chosen "
-                    "as the first "
+                    "preprocessor/pattern pre-scans) are untouched. "
+                    "consumer_compile was chosen as the first "
                     "worked example specifically because #860/#883's own "
                     "history and this class's pre-existing seed tests "
                     "already pointed at it, not because it's necessarily "
@@ -511,61 +514,34 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    BugClass(
-        id="evidence.tier_shortcut_without_substitute",
-        invariant=(
-            "A cost shortcut that skips one evidence source because "
-            "another is expected to supply the same facts may only be "
-            "taken when that substitute source is actually present. With "
-            "the substitute absent, the shortcut leaves the run with "
-            "neither, and the loss is silent: the report still names the "
-            "tier that was requested. Two corollaries, each independently "
-            "falsified during review: an input that *names* the substitute "
-            "without feeding it to the consumer is not the substitute "
-            "(`--public-header-dir` is a provenance boundary, not an AST "
-            "input); and the question is per operand, since one shared "
-            "answer does not equalise two sides' evidence tiers, it only "
-            "decides which side gets starved."
-        ),
-        fixed_by=(1186,),
-        seed_tests=(
-            "tests/test_scan_depth_evidence_shortcut.py",
-            "tests/test_scan_compare_parity.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "depth": ("headers", "auto"),
-            "change": ("record", "enum", "symbol"),
-            "header_input": ("none", "provenance_only", "baseline_only"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Only the DWARF-vs-header-AST shortcut "
-                    "(`cli_scan_helpers._uses_debug_presence_only`) is "
-                    "covered. The same shape exists wherever one "
-                    "extractor is skipped on the expectation that a "
-                    "richer one runs; none of the L3/L4/L5 collect-mode "
-                    "decisions has an equivalent 'the substitute is "
-                    "actually present' guard or generalized test yet."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-            KnownGap(
-                description=(
-                    "`--depth binary` is excluded from the seed test's "
-                    "scan-vs-compare matrix: the two genuinely diverge "
-                    "there (`scan` extracts symbols only, "
-                    "`compare --depth binary` still reads DWARF and "
-                    "reports `type_size_changed`), which is a question "
-                    "about whether `compare`'s binary rung honours its "
-                    "own pin rather than about this shortcut. Predates "
-                    "ADR-068 Phase 4 on both sides and is untested."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-        ),
-    ),
+    # `evidence.tier_shortcut_without_substitute` (the DWARF-vs-header-AST
+    # cost-shortcut class fixed_by=(1186,)) was retired here, not
+    # retargeted, when ADR-068 Phase 6 deleted `scan` outright: its only two
+    # seed tests (`tests/test_scan_depth_evidence_shortcut.py`,
+    # `tests/test_scan_compare_parity.py`) exercised
+    # `cli_scan_helpers._uses_debug_presence_only` -- the scan-only decision
+    # function that computed *when* to set `dumper`'s `debug_presence_only`
+    # shortcut from scan's own depth/headers logic -- which was deleted with
+    # the rest of `cli_scan_helpers.py`. `debug_presence_only` itself is
+    # still a real, plumbed-through parameter
+    # (`dumper.py`/`service_dump_cache.py`/`service_dump_native.py`/
+    # `dumper_layout_backfill.py`/`workflows/input_resolution.py`), but a
+    # repo-wide audit at retirement time found no remaining production call
+    # site that ever passes `debug_presence_only=True` -- every live caller
+    # forwards the parameter at its default `False`, only tests set it
+    # directly. So the class this entry protected (a shortcut silently
+    # starving a run of evidence with no substitute present) currently has
+    # no reachable trigger from any command, and per this module's own
+    # schema docstring ("a class with no test is a 'Known gaps' AGENTS.md
+    # paragraph, not a registry entry") it does not belong here with an
+    # empty `seed_tests`. See `docs/contribute/known-gaps.md`'s
+    # "`scan --depth binary` and `compare --depth binary` see different
+    # evidence" entry for the full retirement note -- including what would
+    # need to be true (a real caller computing `debug_presence_only` from a
+    # depth/collect-mode decision again) for this to become a live registry
+    # entry once more, retargeted rather than restored verbatim, since the
+    # scan-specific invariant text above would need to be re-stated against
+    # whatever new caller reintroduces the shortcut.
     BugClass(
         id="evidence.silent_degradation_to_clean_verdict",
         invariant=(
