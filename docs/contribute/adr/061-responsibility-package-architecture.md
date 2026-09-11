@@ -1471,10 +1471,15 @@ real cycle. Confirmed by attempting the `model` reclassification directly
 against `scripts/check_architecture.py`, not by inspection alone. Stays
 `public_root_surfaces`-listed.
 
-`serialization` is unchanged — still gap E's open item (see that gap's own
-entry): its ~1500-line codec proper remains a deliberately out-of-scope,
-not-yet-attempted classification, recorded as `disposition: migrate` in
-`docs/contribute/known-gaps.md` rather than half-moved.
+`serialization`'s own gap-E item is now closed (closure package 6, see that
+gap's own entry): its ~1500-line codec proper moved to a real
+`storage`-classified home (`storage/snapshot_codec.py` and four siblings).
+The flat `serialization.py` facade itself stays `public_root_surfaces`-listed
+— confirmed, the same way this gap already confirmed `checker_policy`/
+`contract_gating`/`reclassify`, to be a genuine "no single layer" leaf: it is
+the one legal route through which the `workflows`/`policy` steps
+`storage.snapshot_codec.decode_snapshot`/`finalize_snapshot` cannot
+themselves run still execute.
 
 `header_only_dump` is unchanged and is not a gap-B instance at all on closer
 reading: its own module docstring already states, and this closure
@@ -1640,6 +1645,44 @@ orchestration conflation of the shape Phase 5 already solved for
   page, which now imports the moved names from `workflows.findings`
   instead (verified round-tripping) — every internal caller (CLI, tests)
   was switched to the new home in the same slice.
+- `serialization.py`'s own ~1500-line codec proper — the last open item this
+  gap and gap B's own closure status both named. **Closed (closure package
+  6):** the encode direction (`snapshot_to_dict`/`snapshot_to_json`/
+  `snapshot_content_digest`), the schema-version history/thresholds, the
+  declarations decode (functions/variables/types/enums/typedefs and their
+  entity-id sidecars), the seven `*_facts_reliable` flag computations, the
+  platform-block/provenance decode, and the final `AbiSnapshot(...)`
+  assembly all moved to a real `storage`-classified home —
+  `storage/snapshot_codec.py` plus four siblings
+  (`snapshot_schema_versions.py`, `snapshot_encode.py`,
+  `snapshot_decode_declarations.py`, `snapshot_reliability_flags.py`), split
+  purely to keep each file under the ADR-061 new-file production line
+  ceiling (mechanical extraction, verified against `check_architecture.py`
+  directly — a brand-new file has no adoption-debt exemption available, so
+  each sibling had to clear 800 lines on its own merits, not via a baseline).
+  `serialization.py` itself shrank from ~1550 lines to under 300 and now
+  joins `checker_policy`/`contract_gating`/`reclassify` as a confirmed (not
+  merely documented) "no single layer" leaf, for the identical structural
+  reason gap B's own closure status names for those three: it is the one
+  legal route through which two genuinely storage-illegal steps —
+  `workflows.snapshot_load.backfill_python_ext_from_evidence` (real
+  evidence-derived extraction, not a fact lookup) and
+  `policy.analysis_assurance_degraded_facts.degraded_reliability_facts` (an
+  assurance judgement over an already-decoded snapshot) — run in between
+  `storage.snapshot_codec.decode_snapshot` and
+  `storage.snapshot_codec.finalize_snapshot`. Reclassifying the facade
+  itself as `storage` would turn those two into real, gate-checked
+  `storage -> workflows`/`storage -> policy` direction violations, the same
+  way gap B's own investigation found for `checker_policy`/`contract_gating`/
+  `reclassify`. `serialization` therefore stays in
+  `architecture/modules.yaml`'s `public_root_surfaces` — it cannot move to
+  `facades` either (that list's 150-line cap and delegation-only shape don't
+  admit the warning/backfill orchestration `snapshot_from_dict` still does).
+  The one real `serialization.py <-> storage.bundle_facts_codec` cycle is
+  unchanged, still resolved dynamically via `importlib.import_module`, not a
+  new `IMPORT_CYCLE_ALLOWLIST` entry. `docs/contribute/known-gaps.md`'s
+  entry and `architecture/debt.yaml`'s `abicheck/serialization.py` baseline
+  were both updated to record the closure.
 
 The owners to establish are: `model` for snapshot/bundle value types and
 their invariants; `storage` for codecs, schemas, persistence, and schema
