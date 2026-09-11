@@ -58,27 +58,33 @@ incomplete pair-aware model: the failure direction is safe (a spurious
 ``"degraded"`` under-claims confidence; it can never fabricate a
 ``"complete"`` claim the P1 bug this module exists to fix was about).
 
-**Second known, accepted limitation (Codex review, PR #1209 round 4):**
-this module reads *whatever* ``old``/``new`` it is given -- it cannot tell
-whether either snapshot was already depth-projected (``policy.
+**Second known, accepted limitation (Codex review, PR #1209 round 4, revised
+round 9):** this module reads *whatever* ``old``/``new`` it is given -- it
+cannot tell whether either snapshot was already depth-projected (``policy.
 depth_projection``, e.g. a ``--depth binary`` comparison) before reaching
-here. Projection clears type/enum/typedef/constant data (when the snapshot
-isn't DWARF-sourced) but leaves ``functions``/``variables`` -- and their
-own ``Param.kind_fact``/cv facts -- intact, just demoted to ``ELF_ONLY``.
-So the real per-flag answer to "does this degraded flag still matter after
-projection" genuinely varies: ``param_kind_facts_reliable`` stays fully
-relevant (``diff_symbols._params_differ`` still runs against every
-surviving ELF-only function's params), while ``header_cv_facts_reliable``/
-``clang_vtable_facts_reliable``'s type-level consumers go silent exactly
-when projection cleared ``types`` (the non-DWARF-sourced case) -- making a
-blanket "ignore every flag once projected" answer wrong in the other
-direction (a false ``"clean"`` for the param-kind case). A correct fix
-needs ``effective_depth``/``dwarf_sourced`` threaded in here and a
-per-flag survival rule mirroring ``depth_projection``'s own family split,
-which is real, depth-projection-specific modeling this rollup does not
-attempt today. Left conservative for the same reason as the limitation
-above: over-reporting ``"degraded"`` after a depth projection is the safe
-direction, never a fabricated ``"complete"``.
+here, except where a projected snapshot's own post-projection SHAPE already
+answers the question directly (see :data:`_DEPTH_PROJECTION_PARAMS_CLEARED_
+FLAGS` below -- ``param_kind_facts_reliable`` is fixed as of round 9; the
+round-4 reply's claim that it "stays fully relevant... intact, just demoted
+to ELF_ONLY" was WRONG, disproven by fresh evidence: a non-DWARF-sourced
+projection clears ``Function.params`` to ``[]`` entirely, not merely
+demotes visibility, and ``diff_symbols._is_stripped_symbols_only`` -- the
+real detector's own gate -- fires on exactly that shape). What remains
+unfixed: ``header_cv_facts_reliable``/``clang_vtable_facts_reliable``'s
+type-level consumers (``diff_types.py``/``diff_vtable_layout.py`` and
+siblings) go silent once projection clears ``types`` (the non-DWARF-sourced
+case) but stay live when DWARF-sourced (kept wholesale, origin reset to
+``UNKNOWN``) -- and unlike the param-kind case, this module has not yet
+verified that EVERY real consumer of these two flags is type-map-gated the
+same way (``diff_layout.py``'s vtable-offset detector in particular has not
+been read closely enough to rule out a raw-DWARF-layout path independent of
+``types``). Given the "attempted twice, reverted twice" discipline
+`AGENTS.md`'s "Primitive-level property tests" section names for a
+heuristic that keeps finding one more counterexample, and this module's own
+first known limitation just above already accepting exactly this trade-off
+for a harder case, these two flags are left conservative rather than risk a
+third confident-but-wrong claim: over-reporting ``"degraded"`` after a depth
+projection is the safe direction, never a fabricated ``"complete"``.
 """
 
 from __future__ import annotations
@@ -175,29 +181,116 @@ def _other_side_confirms_pair_gate(other: AbiSnapshot, producer: str) -> bool:
     return _other_side_is_header_confirmed(other) and other.ast_producer == producer
 
 
+def _other_side_has_hybrid_deprecation_provenance(other: AbiSnapshot) -> bool:
+    """Whether *other*'s own ``fact_provenance`` dict actually recorded a
+    producer for AT LEAST ONE ``deprecated``/``is_scoped`` key (Codex
+    review, PR #1209 round 9, fresh evidence).
+
+    ``fact_producer``'s ``ast_producer == "hybrid"`` branch is ``snap.
+    fact_provenance.get(key)`` -- a per-declaration lookup, not a whole-
+    snapshot guarantee the way ``"castxml"``/``"clang"`` are (every fact on
+    a single-backend snapshot came from that one backend unconditionally).
+    A hybrid merge only stamps provenance for a declaration it actually
+    matched; treating ``ast_producer == "hybrid"`` alone as "known producer"
+    (the prior round's shape) could taint the status even when NO
+    declaration's fact_provenance carries a resolvable ``:deprecated``/
+    ``:is_scoped`` entry at all, in which case the detector never actually
+    reaches a single comparison.
+
+    Still a whole-snapshot rollup, not a per-declaration VALUE probe (unlike
+    ``clang_field_initializer_facts_reliable``'s documented, deliberately
+    unmodeled per-declaration/value-shape limitation): ``fact_provenance``
+    is itself an already-materialized snapshot-level ``dict[str, str]``
+    field (``model/snapshot.py``), so checking whether it contains ANY key
+    of the right shape is an existence scan over data already on the
+    object, not a new walk of declarations/types to resolve a value.
+    """
+    return any(
+        key.endswith(":deprecated") or key.endswith(":is_scoped")
+        for key in other.fact_provenance
+    )
+
+
 def _other_side_supports_known_producer_comparison(other: AbiSnapshot) -> bool:
     """Whether ``fact_provenance.fact_producer(other, <a deprecated/
     is_scoped key>)`` could resolve non-``None`` for SOME declaration --
     mirroring that function's own gating logic exactly (confirmed header
-    awareness, a positively known ``ast_producer``, and not itself an
-    unreliable confirmed-header "clang" producer for this same fact family)
-    rather than approximating it with header confirmation alone.
+    awareness, a positively known ``ast_producer``, not itself an
+    unreliable confirmed-header "clang" producer for this same fact family,
+    and -- for a "hybrid" producer specifically -- an actually-recorded
+    per-declaration provenance entry, see :func:`_other_side_has_hybrid_
+    deprecation_provenance`) rather than approximating it with header
+    confirmation alone.
     """
     if not _other_side_is_header_confirmed(other):
         return False
     if other.ast_producer == "clang" and not other.clang_deprecation_facts_reliable:
         return False
-    return other.ast_producer in ("castxml", "clang", "hybrid")
+    if other.ast_producer == "hybrid":
+        return _other_side_has_hybrid_deprecation_provenance(other)
+    return other.ast_producer in ("castxml", "clang")
+
+
+#: ``param_kind_facts_reliable`` (Codex review, PR #1209 round 9, fresh
+#: evidence -- disproves this module's own round-4/6 reply, which claimed
+#: this flag "stays fully relevant" post-projection; see the corrected
+#: module docstring above). Its one real consumer (``diff_symbols.
+#: _params_differ``, reading ``Param.kind_fact``) is called ONLY from
+#: ``_check_params_change``, which returns ``[]`` immediately whenever
+#: ``params_unconfirmed`` -- ``diff_symbols._is_stripped_symbols_only(old)
+#: or _is_stripped_symbols_only(new)`` -- before ``_params_differ`` is ever
+#: reached. ``policy.depth_projection._strip_header_and_above_evidence``
+#: sets exactly that shape for a non-DWARF-sourced ``--depth binary``
+#: projection: every surviving function's ``params`` is cleared to ``[]``
+#: and ``elf_only_mode`` is set, which is ``_is_stripped_symbols_only``'s
+#: own trigger condition (confirmed by reading both functions directly, not
+#: assumed). Unlike :data:`_PAIR_HEADER_ONLY_GATED_FLAGS`'s single-``other``
+#: question, this one is symmetric over BOTH sides (an OR, mirroring
+#: ``params_unconfirmed`` itself), so it is checked directly against
+#: ``snap``/``other`` in :func:`_pair_aware_degraded_facts` rather than
+#: through an ``other``-only helper.
+_DEPTH_PROJECTION_PARAMS_CLEARED_FLAGS: frozenset[str] = frozenset(
+    {"param_kind_facts_reliable"}
+)
+
+
+def _side_is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
+    """Mirrors ``diff_symbols._is_stripped_symbols_only`` exactly: a
+    stripped, symbols-only dump (``elf_only_mode`` set, no type-level
+    evidence at all) -- see that function's own docstring for the full
+    per-field rationale. Duplicated rather than imported, matching this
+    module's existing pattern for detector-gate logic (e.g.
+    :func:`_other_side_confirms_pair_gate`'s own ``_both_header_aware``
+    mirror).
+    """
+    if not getattr(snap, "elf_only_mode", False):
+        return False
+    if snap.types or snap.enums or snap.typedefs:
+        return False
+    dwarf = getattr(snap, "dwarf", None)
+    if dwarf is not None and (dwarf.structs or dwarf.enums):
+        return False
+    return bool(snap.functions or snap.variables)
+
+
+def _pair_params_unconfirmed(snap: AbiSnapshot, other: AbiSnapshot) -> bool:
+    """Mirrors ``diff_symbols._diff_functions``'/``_diff_pointer_levels``'
+    own ``params_unconfirmed = _is_stripped_symbols_only(old) or
+    _is_stripped_symbols_only(new)`` computation exactly -- symmetric over
+    both sides, unlike every other pair gate in this module.
+    """
+    return _side_is_stripped_symbols_only(snap) or _side_is_stripped_symbols_only(other)
 
 
 def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[str]:
     """*snap*'s own :func:`degraded_reliability_facts`, narrowed to drop a
     :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`/
-    :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS` entry whose one real
+    :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS`/
+    :data:`_DEPTH_PROJECTION_PARAMS_CLEARED_FLAGS` entry whose one real
     consumer never ran for this pair because *other* doesn't also clear the
     detector's own both-sides gate (see :func:`_other_side_confirms_pair_
     gate`/:func:`_other_side_is_header_confirmed`/:func:`_other_side_
-    supports_known_producer_comparison`).
+    supports_known_producer_comparison`/:func:`_pair_params_unconfirmed`).
     """
     kept = []
     for name in degraded_reliability_facts(snap):
@@ -212,6 +305,10 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
             continue
         if name in _PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS:
             if _other_side_supports_known_producer_comparison(other):
+                kept.append(name)
+            continue
+        if name in _DEPTH_PROJECTION_PARAMS_CLEARED_FLAGS:
+            if not _pair_params_unconfirmed(snap, other):
                 kept.append(name)
             continue
         kept.append(name)

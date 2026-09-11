@@ -34,6 +34,7 @@ from pathlib import Path
 
 from abicheck import checker
 from abicheck.analysis_assurance import AnalysisAssurance
+from abicheck.fact_provenance import func_fact_key
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.analysis_assurance_degraded_facts import (
     degraded_reliability_facts,
@@ -504,11 +505,15 @@ class TestSchemaStalenessStatus:
         self,
     ) -> None:
         """The positive mirror: an ``other`` side that IS confirmed header-
-        aware with a positively known, non-degraded producer (any of
-        castxml/clang/hybrid -- deprecated/is_scoped are cross-comparable,
-        so no producer MATCH is required, only that one is known) must
-        still taint the status -- the narrowing above must not over-exempt
-        a pair where the detector genuinely does run."""
+        aware with a positively known, non-degraded producer (castxml or
+        clang -- deprecated/is_scoped are cross-comparable, so no producer
+        MATCH is required, only that one is known) must still taint the
+        status -- the narrowing above must not over-exempt a pair where the
+        detector genuinely does run. "hybrid" is covered separately (round
+        9: a hybrid producer alone is not enough -- see
+        ``test_deprecation_flag_still_taints_with_hybrid_other_side_when_
+        provenance_recorded``/``test_deprecation_flag_never_taints_with_
+        hybrid_other_side_when_no_provenance_recorded``)."""
         old = AbiSnapshot(
             version="1.0",
             library="libfoo.so.1",
@@ -517,7 +522,7 @@ class TestSchemaStalenessStatus:
             ast_producer="clang",
             clang_deprecation_facts_reliable=False,
         )
-        for other_producer in ("castxml", "clang", "hybrid"):
+        for other_producer in ("castxml", "clang"):
             new = AbiSnapshot(
                 version="2.0",
                 library="libfoo.so.1",
@@ -532,6 +537,132 @@ class TestSchemaStalenessStatus:
                 other_producer,
                 aa.notes,
             )
+
+    def test_deprecation_flag_still_taints_with_hybrid_other_side_when_provenance_recorded(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 9, fresh evidence: a "hybrid"
+        producer alone is not enough -- ``fact_provenance.fact_producer``'s
+        hybrid branch is a per-declaration ``fact_provenance.get(key)``
+        lookup, not a whole-snapshot guarantee. When the other side's
+        ``fact_provenance`` DOES carry a real entry for a ``:deprecated``/
+        ``:is_scoped`` key, the detector genuinely can run and the flag must
+        still taint."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance={func_fact_key("_Z5pub_av", "deprecated"): "clang"},
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_deprecation_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_deprecation_flag_never_taints_with_hybrid_other_side_when_no_provenance_recorded(
+        self,
+    ) -> None:
+        """The mirror: a "hybrid" other side whose ``fact_provenance`` never
+        recorded ANY ``:deprecated``/``:is_scoped`` entry means ``fact_
+        producer(other, ...)`` resolves ``None`` for every declaration, so
+        the detector never runs for this pair at all -- reporting
+        "degraded" here would be the same spurious-signal shape round 8's
+        both-sides-degraded-clang case already covers, not a merely
+        conservative one."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+            # No fact_provenance entries at all -- unlike the case above.
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("clang_deprecation_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
+
+    def test_param_kind_flag_excluded_after_depth_projection_clears_params(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 9, fresh evidence: disproves this
+        module's own earlier (round 4) reply, which claimed ``param_kind_
+        facts_reliable`` "stays fully relevant... intact, just demoted to
+        ELF_ONLY" after ``--depth binary`` projection. A non-DWARF-sourced
+        projection (``policy.depth_projection._strip_header_and_above_
+        evidence``) clears every surviving function's ``params`` to ``[]``
+        entirely and sets ``elf_only_mode`` -- exactly ``diff_symbols._is_
+        stripped_symbols_only``'s own trigger condition, which short-
+        circuits ``_check_params_change`` (the sole reader of ``Param.
+        kind_fact``) before it is ever reached. Goes through the real,
+        public ``policy.depth_projection.project_snapshot_to_depth`` entry
+        point rather than hand-simulating the projection."""
+        from abicheck.model import Param, ParamKind
+        from abicheck.policy.depth_projection import project_snapshot_to_depth
+
+        fn = Function(
+            name="pub_a",
+            mangled="_Z5pub_avPi",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            params=[
+                Param(name="p", type="int*", kind=ParamKind.POINTER, pointer_depth=1)
+            ],
+        )
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            from_headers=True,
+            ast_producer="clang",
+            param_kind_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            from_headers=True,
+            ast_producer="clang",
+        )
+
+        # Baseline, unprojected: the flag genuinely matters.
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("param_kind_facts_reliable" in n for n in aa.notes), aa.notes
+
+        # Projected to --depth binary (non-DWARF-sourced, confirmed by
+        # reading the real projected shape below): params cleared, the flag
+        # can no longer matter.
+        old_projected = project_snapshot_to_depth(old, "binary")
+        new_projected = project_snapshot_to_depth(new, "binary")
+        assert old_projected.functions[0].params == []
+        assert old_projected.elf_only_mode is True
+
+        result2 = checker.compare(old_projected, new_projected)
+        aa2 = result2.analysis_assurance
+        assert aa2.schema_staleness_status == "clean"
+        assert not any("param_kind_facts_reliable" in n for n in aa2.notes), aa2.notes
 
     def test_self_diff_never_taints_the_no_baseline_audit(self) -> None:
         """Codex review, PR #1209 round 6: ``workflows.no_baseline_compare``
