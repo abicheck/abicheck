@@ -57,11 +57,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   primitive (used by `merge_compile_config` itself, closing the risk of a
   second, independent reimplementation drifting from it again) and a new
   `cli_options.merge_compile_std_fields` helper that folds `std`/`defines`/
-  `options` together whenever `std` on either document co-occurs with
-  `defines`/`options` on either document — the only situation where `std`'s
-  own flag can land out of its real relative position.
+  `options` together whenever both documents contribute at least one of
+  those three fields, preserving each document's compiler-token ordering.
 
--->
 <!--
 ### Performance
 

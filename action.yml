@@ -776,10 +776,9 @@ inputs:
       by passing --annotate to the abicheck CLI -- no second comparison is
       ever run to collect them, for either operand shape. Has no effect on
       dump/deps-tree/deps-compare. A dedicated input rather than
-      routing through extra-args, for the same reason
-      require-complete-analysis is: this Action's own detection of whether
-      annotations were requested is never ambiguous with some other
-      extra-args value.
+      routing through extra-args: this Action's own detection of whether
+      annotations were requested must never be ambiguous with some other
+      extra-args value, which a free-text passthrough can't guarantee.
     required: false
     default: 'false'
   annotate-additions:
