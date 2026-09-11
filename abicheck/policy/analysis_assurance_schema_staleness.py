@@ -53,6 +53,28 @@ False flag always taints, whichever the pair) rather than attempting an
 incomplete pair-aware model: the failure direction is safe (a spurious
 ``"degraded"`` under-claims confidence; it can never fabricate a
 ``"complete"`` claim the P1 bug this module exists to fix was about).
+
+**Second known, accepted limitation (Codex review, PR #1209 round 4):**
+this module reads *whatever* ``old``/``new`` it is given -- it cannot tell
+whether either snapshot was already depth-projected (``policy.
+depth_projection``, e.g. a ``--depth binary`` comparison) before reaching
+here. Projection clears type/enum/typedef/constant data (when the snapshot
+isn't DWARF-sourced) but leaves ``functions``/``variables`` -- and their
+own ``Param.kind_fact``/cv facts -- intact, just demoted to ``ELF_ONLY``.
+So the real per-flag answer to "does this degraded flag still matter after
+projection" genuinely varies: ``param_kind_facts_reliable`` stays fully
+relevant (``diff_symbols._params_differ`` still runs against every
+surviving ELF-only function's params), while ``header_cv_facts_reliable``/
+``clang_vtable_facts_reliable``'s type-level consumers go silent exactly
+when projection cleared ``types`` (the non-DWARF-sourced case) -- making a
+blanket "ignore every flag once projected" answer wrong in the other
+direction (a false ``"clean"`` for the param-kind case). A correct fix
+needs ``effective_depth``/``dwarf_sourced`` threaded in here and a
+per-flag survival rule mirroring ``depth_projection``'s own family split,
+which is real, depth-projection-specific modeling this rollup does not
+attempt today. Left conservative for the same reason as the limitation
+above: over-reporting ``"degraded"`` after a depth projection is the safe
+direction, never a fabricated ``"complete"``.
 """
 
 from __future__ import annotations
