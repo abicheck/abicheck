@@ -599,16 +599,58 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         )
         assert out["compile"]["defines"] == ["SOURCES=1", "CHECKOUT=1"]
 
-    def test_nostdinc_lets_sources_root_win_when_it_sets_one(self) -> None:
-        """``nostdinc`` is the one field ``merge_compile_config`` lets the
-        LATER-folded document's own value win outright (see
-        ``_COMPILE_SOURCES_WINS_KEYS``'s own docstring)."""
-        base = {"compile": {"nostdinc": True}}
-        sources_doc = {"compile": {"nostdinc": False}}
+    @pytest.mark.parametrize(
+        ("checkout_nostdinc", "sources_nostdinc", "expected"),
+        [
+            (True, True, True),
+            (True, False, True),
+            (False, True, True),
+            (False, False, False),
+        ],
+    )
+    def test_nostdinc_merges_with_or_semantics(
+        self, checkout_nostdinc: bool, sources_nostdinc: bool, expected: bool
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 fifth round):
+        ``nostdinc`` is NOT one of the fields where the later-folded
+        document's own value wins outright -- that precedence is real for
+        ``frontend_context`` (below), but ``nostdinc``'s actual two-call
+        shape (``cli_compare_helpers.py``'s ``nostdinc_explicit=
+        _nostdinc_explicit or compile_context.nostdinc`` feeding
+        ``cli_options.merge_compile_config``) combines the checkout and
+        sources-root values with OR semantics: an already-``True`` value
+        from EITHER document always survives. This parametrization is the
+        full 2x2 truth table verified directly against the real
+        ``merge_compile_config`` two-call sequence (see
+        ``action_config_overlay.py``'s ``_COMPILE_OR_KEYS`` docstring for
+        the exact enumeration this test mirrors) -- the previous version of
+        this test asserted only the ``(True, False) -> False`` cell, which
+        is exactly the regression: a checkout ``compile.nostdinc: true``
+        must never be cleared by a sources-root ``compile.nostdinc:
+        false``."""
+        base = {"compile": {"nostdinc": checkout_nostdinc}}
+        sources_doc = {"compile": {"nostdinc": sources_nostdinc}}
         out = apply_sources_root_config_blocks(
             base, sources_doc, blocks=("compile",), merge_compile=True
         )
-        assert out["compile"]["nostdinc"] is False
+        assert out["compile"]["nostdinc"] is expected
+
+    def test_nostdinc_checkout_true_survives_when_sources_root_omits_it(
+        self,
+    ) -> None:
+        """Companion to the OR-semantics parametrization above: when the
+        sources-root document doesn't mention ``nostdinc`` at all (as
+        opposed to explicitly setting ``false``), the checkout's own
+        ``true`` must still survive -- this was already correct before the
+        fix (the per-field loop only visits keys the sources document
+        actually sets) but is worth pinning explicitly alongside the
+        explicit-``false`` regression case."""
+        base = {"compile": {"nostdinc": True}}
+        sources_doc = {"compile": {"std": "c++20"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["nostdinc"] is True
 
     def test_frontend_context_lets_sources_root_win_when_it_sets_one(self) -> None:
         base = {"compile": {"frontend_context": "host"}}

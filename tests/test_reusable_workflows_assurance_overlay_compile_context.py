@@ -325,6 +325,78 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         assert written["compile"]["std"] == "c++20"
         assert written["compile"]["include_dirs"] == [str((src_dir / "foo").resolve())]
 
+    def test_single_sided_mode_merge_preserves_checkout_nostdinc_true(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 fifth round):
+        ``_merge_compile_block`` classified ``nostdinc`` alongside
+        ``frontend_context`` in ``_COMPILE_SOURCES_WINS_KEYS`` -- "the
+        later-folded (sources-root) document wins outright once it sets
+        one". That is ``frontend_context``'s real precedence, but not
+        ``nostdinc``'s: the real two-call shape
+        (``cli_compare_helpers.py``'s ``nostdinc_explicit=
+        _nostdinc_explicit or compile_context.nostdinc`` feeding
+        ``cli_options.merge_compile_config``) makes an already-``True``
+        checkout value survive a sources-root ``compile.nostdinc: false``
+        -- true wins from EITHER document, not just "whichever was folded
+        last". Before this fix, a checkout ``compile.nostdinc: true`` with
+        a sources-root ``compile.nostdinc: false`` collapsed to ``false``
+        in the merged overlay, silently re-enabling standard include paths
+        for the assurance-overlay run and changing the observed header
+        include environment (and therefore possibly the API/findings)
+        purely because ``analysis.assurance: complete`` triggered this
+        promotion path."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  nostdinc: true\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  nostdinc: false\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["nostdinc"] is True
+
+    def test_single_sided_mode_merge_nostdinc_false_when_neither_side_sets_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion negative control for the OR-semantics fix above: when
+        neither document opts into ``nostdinc``, the merged overlay must
+        stay ``false`` -- the fix must not accidentally always force
+        ``nostdinc`` on."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  std: c++20\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  nostdinc: false\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["nostdinc"] is False
+
     def test_ambiguous_sources_root_promotion_still_subject_to_stripping(
         self, tmp_path: Path
     ) -> None:

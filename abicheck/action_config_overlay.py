@@ -401,20 +401,38 @@ _COMPILE_CHECKOUT_ONLY_KEYS = frozenset(
 #: ``compile:`` sub-keys for which ``merge_compile_config`` lets the
 #: *later*-folded document's own value win outright once it sets one,
 #: rather than the earlier one persisting -- the reverse of every other
-#: scalar field below. ``nostdinc``: ``nostdinc = cli_ctx.nostdinc if
-#: nostdinc_explicit else bool(bc.compile_nostdinc)`` -- with no real CLI
-#: ``--nostdinc`` in play (true for this synthesized, config-only overlay),
-#: this unconditionally takes the CURRENT stage's own ``bc.compile_
-#: nostdinc`` (default ``False`` if unset), discarding whatever the prior
-#: stage resolved. ``frontend_context``: ``bc.compile_frontend_context or
-#: cli_ctx.frontend_context`` -- the current stage's own value wins
+#: scalar field below. ``frontend_context``: ``bc.compile_frontend_context
+#: or cli_ctx.frontend_context`` -- the current stage's own value wins
 #: whenever it sets one; only an *unset* current-stage value falls back to
 #: the prior stage's. Since the real pipeline always folds the checkout
 #: document first and a per-side ``--sources`` document second, "current
-#: stage" here is the sources-root document -- so for these two keys
+#: stage" here is the sources-root document -- so for this key
 #: specifically the sources-root document's own value should win over the
 #: checkout document's when both set one.
-_COMPILE_SOURCES_WINS_KEYS = frozenset({"nostdinc", "frontend_context"})
+_COMPILE_SOURCES_WINS_KEYS = frozenset({"frontend_context"})
+
+#: ``compile:`` sub-keys ``merge_compile_config`` effectively combines with
+#: OR semantics across the two folded documents -- an already-``True``
+#: value from either side always survives, never just "whichever document
+#: was folded last" (Codex review, PR #1222 fifth round: classifying
+#: ``nostdinc`` alongside ``frontend_context`` above made a sources-root
+#: ``compile.nostdinc: false`` silently clear a checkout ``compile.
+#: nostdinc: true``). ``nostdinc``'s real two-call shape is
+#: ``cli_compare_helpers.py``'s ``nostdinc_explicit=_nostdinc_explicit or
+#: compile_context.nostdinc`` feeding ``cli_options.merge_compile_config``'s
+#: ``nostdinc = cli_ctx.nostdinc if nostdinc_explicit else bool(bc.
+#: compile_nostdinc)`` for the second (sources-root) fold, where
+#: ``cli_ctx`` is the already-resolved checkout-stage context and ``bc`` is
+#: the sources-root document. Enumerating all four checkout/sources
+#: booleans against that exact expression: (F, F) -> explicit=F ->
+#: bc.compile_nostdinc=F; (F, T) -> explicit=F -> bc.compile_nostdinc=T;
+#: (T, F) -> explicit=T (forced by ``compile_context.nostdinc``) ->
+#: cli_ctx.nostdinc=T (the checkout value, sources' own ``False`` is never
+#: consulted); (T, T) -> explicit=T -> cli_ctx.nostdinc=T. Every row equals
+#: ``checkout or sources`` -- true wins from either document, unlike
+#: ``frontend_context``'s "later document, if it sets one, replaces the
+#: earlier" precedence above.
+_COMPILE_OR_KEYS = frozenset({"nostdinc"})
 
 #: ``compile:`` list-valued sub-keys ``merge_compile_config`` always
 #: CONCATENATES across the two folded documents rather than letting either
@@ -447,7 +465,7 @@ def _merge_compile_block(
     ``cli_options.merge_compile_config`` folds a ``sources=``-supplied
     document on top of an already-resolved (CLI + checkout-config)
     ``CompileContext`` -- see that function's own precedence for each
-    field, and the three key-bucket constants above for the exact rule
+    field, and the key-bucket constants above for the exact rule
     transcribed for each.
 
     Deliberately expressed over the raw ``compile:`` mapping rather than by
@@ -459,7 +477,7 @@ def _merge_compile_block(
     the nested "Run analysis" invocation's own ``load_build_config`` re-parses
     this synthesized document exactly like any other project config).
 
-    For every scalar key not covered by one of the three buckets above
+    For every scalar key not covered by one of the buckets above
     (``frontend``, ``std``, ``sysroot``, ``compiler``) ``merge_compile_
     config`` only consults the later-folded (sources-root) document's value
     when the earlier-folded (checkout) one left the field unset/default --
@@ -499,7 +517,9 @@ def _merge_compile_block(
             or key in _COMPILE_CHECKOUT_ONLY_KEYS
         ):
             continue
-        if key in _COMPILE_SOURCES_WINS_KEYS:
+        if key in _COMPILE_OR_KEYS:
+            merged[key] = bool(checkout_blk.get(key)) or bool(value)
+        elif key in _COMPILE_SOURCES_WINS_KEYS:
             merged[key] = value
         elif key not in checkout_blk:
             merged[key] = value
@@ -593,7 +613,7 @@ def apply_sources_root_config_blocks(
     ``include_dirs``, ...), changing the compiled/analyzed surface purely
     because this promotion ran. :func:`_merge_compile_block` reproduces
     ``merge_compile_config``'s real per-field precedence instead (see its
-    own docstring and the three key-bucket constants above it for exactly
+    own docstring and the key-bucket constants above it for exactly
     which side wins for which key).
 
     A non-``dict`` *sources_doc* (``None`` for an empty file, or any other
