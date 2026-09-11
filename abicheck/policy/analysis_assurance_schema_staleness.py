@@ -17,10 +17,13 @@
 ``model.snapshot_reliability.degraded_reliability_facts`` marks stale.
 
 Split out of ``analysis_assurance.py`` (which sits at this repo's
-``architecture/debt.yaml`` no-growth baseline) rather than added there --
-mirrors ``analysis_assurance_layout.py``'s own split for the identical
-reason, and this module depends only on ``model.AbiSnapshot`` plus
-``model.snapshot_reliability``, a real leaf.
+``architecture/debt.yaml`` no-growth baseline) rather than added there, and
+placed under the real ``policy`` package -- not a new flat-root legacy
+sibling -- per this repo's "valid extraction" rule (``abicheck/AGENTS.md``
+"Working with legacy large modules": name a responsibility and its
+destination package, add no new legacy/debt-ledger entry). This module
+depends only on ``model.AbiSnapshot`` plus ``model.snapshot_reliability``,
+within ``policy``'s own ``may_import`` (Codex review, PR #1209).
 
 **The gap this closes:** loading a snapshot whose own ``schema_version``
 predates this abicheck's, or one re-saved since without ever being
@@ -33,16 +36,33 @@ all: a run with one or more degraded facts still read
 missing signal, computed from the exact same table the load-time warning
 uses (via ``degraded_reliability_facts``) so the two can never
 independently drift on what counts as "degraded".
+
+**Known, accepted limitation (Codex review, PR #1209):**
+``clang_field_initializer_facts_reliable``'s True downstream cost is
+per-declaration and value-shape-dependent
+(``diff_default_value_reliability._fingerprint_comparison_unreliable``
+only actually suppresses a comparison when the two sides' fingerprint
+*generations* differ AND the specific field's own value is fingerprint-
+shaped -- two same-vintage legacy snapshots compare their fingerprints
+just fine). Modeling that accurately would mean walking every field's own
+resolved value/producer here, which conflicts with this module's (and the
+pre-existing load-time warning's) deliberate "rollup over already-computed
+snapshot-level fields, never a new per-declaration probe" contract -- see
+``analysis_assurance.py``'s own module docstring. Left conservative (a
+False flag always taints, whichever the pair) rather than attempting an
+incomplete pair-aware model: the failure direction is safe (a spurious
+``"degraded"`` under-claims confidence; it can never fabricate a
+``"complete"`` claim the P1 bug this module exists to fix was about).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .model.snapshot_reliability import degraded_reliability_facts
+from ..model.snapshot_reliability import degraded_reliability_facts
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot
+    from ..model import AbiSnapshot
 
 __all__ = ["schema_staleness_status"]
 

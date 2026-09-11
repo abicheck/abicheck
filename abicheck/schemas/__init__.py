@@ -878,7 +878,14 @@ _ARTIFACT_NAMES = frozenset(
 #:       instead of every ``COMPATIBLE`` finding (unrelated to 3.15 above,
 #:       a different, already-released feature). Old value =
 #:       compatible_additions + quality_issues.
-REPORT_SCHEMA_VERSION = "4.0"  #: 4.0 -- see the comment immediately above.
+#: 4.1 -- additive ``analysis_assurance.schema_staleness_status``
+#:       (``"clean"``/``"degraded"``, mirroring the block's other
+#:       ``*_context_status`` fields): whether either snapshot carries a
+#:       ``*_facts_reliable`` flag ``model.snapshot_reliability.
+#:       degraded_reliability_facts`` marks stale. Folds into the existing
+#:       ``status``/``notes`` the same way every context-status field
+#:       already does; unaffected for a run with no stale fact.
+REPORT_SCHEMA_VERSION = "4.1"  #: 4.1 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of the public scan dict shape:

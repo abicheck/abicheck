@@ -1761,6 +1761,11 @@
         "l3_context_status": {
           "type": "string"
         },
+        "schema_staleness_status": {
+          "type": "string",
+          "enum": ["clean", "degraded"],
+          "description": "Schema 4.1: whether either compared snapshot carries a *_facts_reliable flag model.snapshot_reliability.degraded_reliability_facts marks stale."
+        },
         "fact_set_comparability": {
           "type": "string"
         },

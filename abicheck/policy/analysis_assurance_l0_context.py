@@ -16,10 +16,13 @@
 """Per-side L0 binary/export-table presence status.
 
 Split out of ``analysis_assurance.py`` (which sits at this repo's
-``architecture/debt.yaml`` no-growth baseline) rather than added there --
-mirrors ``analysis_assurance_layout.py``'s/``analysis_assurance_schema_
-staleness.py``'s own splits for the identical reason, and this module
-depends only on ``model.AbiSnapshot``, a real leaf.
+``architecture/debt.yaml`` no-growth baseline) rather than added there, and
+placed under the real ``policy`` package -- not a new flat-root legacy
+sibling -- per this repo's "valid extraction" rule (``abicheck/AGENTS.md``
+"Working with legacy large modules": name a responsibility and its
+destination package, add no new legacy/debt-ledger entry). This module
+depends only on ``model.AbiSnapshot``, within ``policy``'s own
+``may_import`` (Codex review, PR #1209).
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot
+    from ..model import AbiSnapshot
 
 __all__ = ["l0_context_status"]
 
