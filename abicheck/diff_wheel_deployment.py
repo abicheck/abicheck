@@ -48,6 +48,7 @@ from .model.binary_naming import strip_vendor_hash
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata
 from .model.macho_facts import MachoMetadata
+from .model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 
 #: Declared-floor key for :func:`check_macos_deployment_target_floor`, in the
 #: same ``runtime_floors``/``EnvironmentMatrix`` mapping G10/G27's other
@@ -245,6 +246,27 @@ _ARCH_CLAIM_TO_MACHO_CPU_TYPE: dict[str, frozenset[str]] = {
     "x86_64": frozenset({"X86_64"}),
     "arm64": frozenset({"ARM64"}),
 }
+
+#: Drift guard (Codex review, PR #1221, Finding 1): `model.wheel_arch_claims.
+#: WHEEL_ARCH_CLAIMS` is `environment_matrix.py`'s -- a different
+#: architecture layer that may not import this (``compare``-layer) module --
+#: independent source of truth for which ``WHEEL_ARCH`` tokens are valid to
+#: *declare*. If a new claim were added to only one of the two dicts above
+#: (or only to `WHEEL_ARCH_CLAIMS` itself), a strict config could accept a
+#: token this detector still treats as unrecognized (or vice versa) without
+#: either side raising anything. Checked at import time so the two can never
+#: silently diverge again.
+if (
+    _ARCH_CLAIM_TO_ELF_MACHINE.keys() | _ARCH_CLAIM_TO_MACHO_CPU_TYPE.keys()
+    != WHEEL_ARCH_CLAIMS
+):
+    # A plain `if`/`raise` rather than `assert`, so this drift guard still
+    # fires under `python -O` (which strips bare `assert` statements).
+    raise AssertionError(
+        "diff_wheel_deployment's per-claim dicts and "
+        "model.wheel_arch_claims.WHEEL_ARCH_CLAIMS have drifted apart -- "
+        "update WHEEL_ARCH_CLAIMS to match"
+    )
 
 
 def check_wheel_tag_architecture_mismatch(

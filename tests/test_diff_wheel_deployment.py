@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_wheel_deployment import (
+    _ARCH_CLAIM_TO_ELF_MACHINE,
+    _ARCH_CLAIM_TO_MACHO_CPU_TYPE,
     check_macos_deployment_target_floor,
     check_wheel_closure_dependency_violation,
     check_wheel_rpath_not_portable,
@@ -34,6 +36,7 @@ from abicheck.elf_metadata import ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot
+from abicheck.model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 
 
 def _macho(**kwargs) -> MachoMetadata:
@@ -60,6 +63,38 @@ def _elf_snap(elf: ElfMetadata, **kwargs) -> AbiSnapshot:
 
 def _kinds(changes) -> set[ChangeKind]:
     return {c.kind for c in changes}
+
+
+class TestWheelArchClaimsVocabularyStaysInSync:
+    """Codex review, PR #1221, Finding 1: `environment_matrix.py`'s
+    `WHEEL_ARCH` config-parse validation and this module's own per-claim
+    detection dicts must recognize exactly the same architecture tokens --
+    otherwise a strict config could accept a token this detector still
+    silently treats as "no claim declared" (or reject one it actually
+    would have checked). `model.wheel_arch_claims.WHEEL_ARCH_CLAIMS` is the
+    single source of truth both read; this pins the union identity
+    directly (the same invariant `diff_wheel_deployment.py` asserts at
+    import time) so a future edit to either side that breaks it fails a
+    test, not just an import-time `AssertionError` a developer has to trace
+    back."""
+
+    def test_union_of_per_claim_dicts_equals_the_shared_vocabulary(self) -> None:
+        assert (
+            _ARCH_CLAIM_TO_ELF_MACHINE.keys() | _ARCH_CLAIM_TO_MACHO_CPU_TYPE.keys()
+            == WHEEL_ARCH_CLAIMS
+        )
+
+    def test_every_recognized_claim_is_actually_checkable(self) -> None:
+        """Every token `EnvironmentMatrix.from_dict` will accept as a
+        `WHEEL_ARCH` value must map to at least one real ELF or Mach-O
+        detection rule here -- an entry in `WHEEL_ARCH_CLAIMS` with no
+        corresponding detector dict entry would be a config-accepted claim
+        this module can never actually flag a mismatch for."""
+        for claim in WHEEL_ARCH_CLAIMS:
+            assert (
+                claim in _ARCH_CLAIM_TO_ELF_MACHINE
+                or claim in _ARCH_CLAIM_TO_MACHO_CPU_TYPE
+            )
 
 
 class TestMacosDeploymentTargetFloorUnit:

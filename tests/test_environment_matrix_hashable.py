@@ -42,8 +42,6 @@ mutation raises / a ``tuple`` has no in-place mutation method), not merely
 
 from __future__ import annotations
 
-from types import MappingProxyType
-
 import pytest
 from hypothesis import given, strategies as st
 
@@ -194,9 +192,20 @@ def test_property_hash_is_a_pure_function_of_content(
 
 
 class TestGenuineImmutability:
-    def test_runtime_floors_is_a_mapping_proxy_not_a_plain_dict(self) -> None:
+    def test_runtime_floors_is_not_a_plain_mutable_dict(self) -> None:
+        """`runtime_floors` is frozen into `model.frozen_str_dict.FrozenStrDict`
+        (Codex review, PR #1221, Finding 2 follow-up) rather than a
+        `types.MappingProxyType`: a `dict` *subclass*, so `dataclasses.
+        asdict()` recognizes and recurses into it natively (producing a
+        JSON-serializable plain-dict-shaped result) instead of falling back
+        to `copy.deepcopy`, which -- even with `MappingProxyType`'s own
+        `copyreg` reducer registered -- would reconstruct another proxy, not
+        a plain `dict`. `type(matrix.runtime_floors) is not dict` still
+        holds (it's a dedicated subclass, not literally `dict`), and item
+        assignment still raises (see the next test)."""
         matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
-        assert isinstance(matrix.runtime_floors, MappingProxyType)
+        assert isinstance(matrix.runtime_floors, dict)
+        assert type(matrix.runtime_floors) is not dict
 
     def test_runtime_floors_item_assignment_raises(self) -> None:
         matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})

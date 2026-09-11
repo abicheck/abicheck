@@ -25,10 +25,14 @@ fix:
   pickle reducer, so ``copy.deepcopy(matrix)`` and ``pickle.dumps(matrix)``
   both raised ``TypeError: cannot pickle 'mappingproxy' object`` --
   propagating through any ``CompareRequest`` (a documented, embeddable
-  public type) carrying a real declared-deployment-floor contract. Fixed
-  via ``__getstate__``/``__setstate__`` (see ``environment_matrix.py``'s
-  own docstring for why that pair, not switching away from
-  ``MappingProxyType``).
+  public type) carrying a real declared-deployment-floor contract. Fixed by
+  registering a ``copyreg`` reducer for ``types.MappingProxyType`` itself
+  (see ``environment_matrix.py``'s own ``_reduce_mapping_proxy``
+  docstring). A PR #1221 follow-up round then found that reducer left
+  ``dataclasses.asdict()`` over this field still not JSON-safe (it
+  reconstructs *another* proxy, not a plain dict) -- closed by switching
+  ``runtime_floors`` itself away from ``MappingProxyType`` entirely, to the
+  dedicated ``model.frozen_str_dict.FrozenStrDict`` dict-subclass (see its own docstring).
 - **Finding 3**: freezing only the mutable *collection* fields left the
   dataclasses themselves ordinarily mutable (``matrix.target_os = "x"``),
   which is the identical hash-invariant violation the collection freeze
@@ -44,6 +48,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 import pickle
 
 import pytest
@@ -54,6 +59,7 @@ from abicheck.environment_matrix import (
     EnvironmentMatrix,
     SyclConstraints,
 )
+from abicheck.model.frozen_str_dict import FrozenStrDict
 
 # ---------------------------------------------------------------------------
 # Fixed-example tests: the reported shape and its immediate neighbors.
@@ -156,12 +162,19 @@ class TestPickle:
         restored = pickle.loads(pickle.dumps(matrix))
         assert hash(restored) == hash(matrix)
 
-    def test_pickle_result_runtime_floors_is_a_mapping_proxy(self) -> None:
-        from types import MappingProxyType
-
+    def test_pickle_result_runtime_floors_stays_frozen_dict_subclass(self) -> None:
+        """`runtime_floors` round-trips as `model.frozen_str_dict.FrozenStrDict`
+        (Codex review, PR #1221, Finding 2 follow-up), not a
+        `types.MappingProxyType` -- see `test_environment_matrix_hashable.
+        py::TestGenuineImmutability` for why the field switched away from a
+        proxy. Still genuinely immutable after the round trip: a plain
+        `dict` would not raise on item assignment here."""
         matrix = _populated_matrix()
         restored = pickle.loads(pickle.dumps(matrix))
-        assert isinstance(restored.runtime_floors, MappingProxyType)
+        assert isinstance(restored.runtime_floors, dict)
+        assert type(restored.runtime_floors) is not dict
+        with pytest.raises(TypeError):
+            restored.runtime_floors["GLIBC"] = "9.9"  # type: ignore[index]
 
 
 class TestAsdictStillWorks:
@@ -179,6 +192,35 @@ class TestAsdictStillWorks:
         d = dataclasses.asdict(matrix)
         assert d["target_os"] == "linux"
         assert d["runtime_floors"] == {"GLIBC": "2.28", "CXXABI": "1.3.13"}
+
+    def test_asdict_over_a_populated_matrix_is_json_serializable(self) -> None:
+        """Codex review, PR #1221, Finding 2: a *direct* ``dataclasses.
+        asdict()`` call -- the shape arbitrary code elsewhere may reach for
+        without knowing to prefer ``EnvironmentMatrix.to_dict()`` -- must
+        produce a plain-JSON-serializable structure, not merely avoid
+        raising. ``runtime_floors`` previously survived ``asdict()`` (the
+        earlier ``copyreg`` fix) but the result was still a
+        ``MappingProxyType``, which ``json.dumps()`` cannot serialize."""
+        matrix = _populated_matrix()
+        d = dataclasses.asdict(matrix)
+        serialized = json.dumps(d)
+        assert json.loads(serialized)["runtime_floors"] == {
+            "GLIBC": "2.28",
+            "CXXABI": "1.3.13",
+        }
+
+    def test_asdict_over_an_empty_matrix_is_json_serializable(self) -> None:
+        matrix = EnvironmentMatrix()
+        assert json.loads(json.dumps(dataclasses.asdict(matrix)))["runtime_floors"] == {}
+
+    def test_asdict_runtime_floors_matches_to_dict_runtime_floors(self) -> None:
+        """``asdict()``'s ``runtime_floors`` and ``to_dict()``'s own
+        ``runtime_floors`` must agree byte-for-byte once serialized -- the
+        two paths must never quietly diverge on what this field contains."""
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        via_asdict = json.dumps(dataclasses.asdict(matrix)["runtime_floors"])
+        via_to_dict = json.dumps(matrix.to_dict()["runtime_floors"])
+        assert json.loads(via_asdict) == json.loads(via_to_dict)
 
 
 # ---------------------------------------------------------------------------
@@ -289,3 +331,79 @@ def test_property_pickled_matrix_stays_frozen(matrix: EnvironmentMatrix) -> None
 @given(matrix=_matrices())
 def test_property_deepcopy_hash_matches_original(matrix: EnvironmentMatrix) -> None:
     assert hash(copy.deepcopy(matrix)) == hash(matrix)
+
+
+# ---------------------------------------------------------------------------
+# `model.frozen_str_dict.FrozenStrDict` itself: a reusable primitive, tested directly against its
+# own contract (root AGENTS.md's "Primitive-level property tests"), not only
+# through its one current caller (`EnvironmentMatrix.runtime_floors`).
+# ---------------------------------------------------------------------------
+
+_str_dicts = st.dictionaries(_short_text, _short_text, max_size=5)
+
+
+class TestFrozenStrDictContract:
+    def test_construction_preserves_contents(self) -> None:
+        assert dict(FrozenStrDict({"a": "1", "b": "2"})) == {"a": "1", "b": "2"}
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda d: d.__setitem__("x", "y"),
+            lambda d: d.__delitem__("a"),
+            lambda d: d.update({"x": "y"}),
+            lambda d: d.pop("a"),
+            lambda d: d.popitem(),
+            lambda d: d.clear(),
+            lambda d: d.setdefault("x", "y"),
+        ],
+        ids=["setitem", "delitem", "update", "pop", "popitem", "clear", "setdefault"],
+    )
+    def test_every_mutator_raises(self, mutate) -> None:  # type: ignore[no-untyped-def]
+        d = FrozenStrDict({"a": "1"})
+        with pytest.raises(TypeError):
+            mutate(d)
+
+    def test_json_serializable_directly(self) -> None:
+        d = FrozenStrDict({"a": "1", "b": "2"})
+        assert json.loads(json.dumps(d)) == {"a": "1", "b": "2"}
+
+    def test_json_serializable_via_asdict_of_a_containing_dataclass(self) -> None:
+        @dataclasses.dataclass
+        class Holder:
+            floors: dict = dataclasses.field(default_factory=dict)
+
+        holder = Holder(floors=FrozenStrDict({"GLIBC": "2.28"}))
+        d = dataclasses.asdict(holder)
+        assert json.loads(json.dumps(d)) == {"floors": {"GLIBC": "2.28"}}
+
+    @given(data=_str_dicts)
+    def test_property_deepcopy_round_trips_and_stays_frozen(
+        self, data: dict[str, str]
+    ) -> None:
+        d = FrozenStrDict(data)
+        cloned = copy.deepcopy(d)
+        assert dict(cloned) == data
+        with pytest.raises(TypeError):
+            cloned["new"] = "value"
+
+    @given(data=_str_dicts)
+    def test_property_pickle_round_trips_and_stays_frozen(
+        self, data: dict[str, str]
+    ) -> None:
+        d = FrozenStrDict(data)
+        restored = pickle.loads(pickle.dumps(d))
+        assert dict(restored) == data
+        with pytest.raises(TypeError):
+            restored["new"] = "value"
+
+    @given(data=_str_dicts)
+    def test_property_hashable_and_order_independent(self, data: dict[str, str]) -> None:
+        forward = FrozenStrDict(data)
+        reversed_ = FrozenStrDict(dict(reversed(list(data.items()))))
+        assert hash(forward) == hash(reversed_)
+
+    @given(data=_str_dicts)
+    def test_property_json_round_trip_is_lossless(self, data: dict[str, str]) -> None:
+        d = FrozenStrDict(data)
+        assert json.loads(json.dumps(d)) == data

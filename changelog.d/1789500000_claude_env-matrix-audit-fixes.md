@@ -156,3 +156,53 @@
   dedicated, zero-test/zero-error `<testsuite name="abicheck.deployment">`
   property (`abicheck.report.junit_scope.append_env_matrix_suite`) that
   does not depend on any per-library comparison having completed.
+- **`deployment.runtime_floors.WHEEL_ARCH` now rejects an unrecognized
+  architecture token, not just a wrong-shaped value.** The round-8 fix above
+  validated `WHEEL_ARCH`'s value is a `str`, but never that the string is
+  one `diff_wheel_deployment.check_wheel_tag_architecture_mismatch` actually
+  recognizes -- `WHEEL_ARCH: x86-64` (a hyphen typo for `x86_64`) loaded
+  successfully into a valid `EnvironmentMatrix`, and that detector silently
+  treats an unrecognized claim identically to "no claim declared", reporting
+  nothing even against a binary of a visibly different architecture --
+  silently disabling the hard wheel-architecture-mismatch gate a strict
+  config believes it enabled. `abicheck/model/wheel_arch_claims.py` is a new
+  leaf module holding the exact vocabulary the detector's own per-claim
+  dicts (`_ARCH_CLAIM_TO_ELF_MACHINE`/`_ARCH_CLAIM_TO_MACHO_CPU_TYPE`)
+  recognize, imported by both `environment_matrix.py`'s config-parse
+  validation and `diff_wheel_deployment.py` itself (which now asserts at
+  import time that its own dicts' keys union to exactly that vocabulary),
+  so the two can no longer independently drift on what's supported. Raises
+  `ValueError` naming the rejected token and listing every valid one, in
+  both lenient and `strict=True` `from_dict` modes.
+- **A direct `dataclasses.asdict()` call over an `EnvironmentMatrix` is now
+  JSON-serializable without needing `to_dict()`.** The round-7
+  `copyreg`-reducer fix above made `pickle`/`copy.deepcopy` safe for
+  `types.MappingProxyType`, but `dataclasses.asdict()`'s own field recursion
+  falls back to `copy.deepcopy` for a `MappingProxyType`-typed field too --
+  which, even with that reducer registered, reconstructs *another*
+  `MappingProxyType`, not a plain, JSON-serializable `dict`, so
+  `json.dumps(dataclasses.asdict(matrix))` still raised `TypeError: Object
+  of type mappingproxy is not JSON serializable`. `runtime_floors` now uses
+  a dedicated `dict` subclass, `abicheck.model.frozen_str_dict.
+  FrozenStrDict` (immutable -- every mutator raises -- and hashable, like
+  the `MappingProxyType` it replaces), which `asdict()`'s own
+  `isinstance(obj, dict)` branch recognizes and recurses into natively,
+  producing a plain-dict-shaped, directly JSON-serializable result with no
+  `to_dict()` unwrapping required.
+- **`EnvironmentMatrix`'s plain scalar fields (`abi_version`,
+  `libstdcxx_dual_abi`, `target_os`, `target_arch`) now reject a
+  wrong-shaped value instead of silently accepting it.** Unlike every list-
+  and mapping-typed field on this dataclass (all validated by prior rounds
+  above), these four scalar `str | None` fields were assigned straight from
+  the raw config dict with no type check at all -- `deployment: {abi_version:
+  {bad: shape}}` loaded successfully into a frozen, hashable
+  `EnvironmentMatrix`, and `hash(matrix)` (and hashing any `CompareRequest`
+  containing it) then raised `TypeError: unhashable type: 'dict'` far from
+  where the bad value was read. Rather than hand-writing a fifth
+  field-specific check, `abicheck/model/dataclass_scalar_validation.py` is a
+  new leaf module that derives which fields to validate directly from the
+  dataclass's own `str`/`str | None` type hints (`typing.get_type_hints` +
+  `dataclasses.fields`), so a scalar field added to `EnvironmentMatrix` in
+  the future is validated automatically instead of needing its own
+  dedicated fix next time. Raises `ValueError` in both lenient and
+  `strict=True` `from_dict` modes; a well-typed matrix still hashes cleanly.

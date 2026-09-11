@@ -69,7 +69,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from .model.dataclass_scalar_validation import validate_scalar_str_fields
 from .model.dotted_version import parse_dotted_numeric_version
+from .model.frozen_str_dict import FrozenStrDict
+from .model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 
 log = logging.getLogger(__name__)
 
@@ -100,26 +103,37 @@ def _reduce_mapping_proxy(
     cannot pickle 'mappingproxy' object`` unconditionally, and
     ``copy.deepcopy`` for a plain object with no ``__deepcopy__`` falls back
     to the identical ``__reduce_ex__``/``copyreg.dispatch_table`` machinery
-    pickling uses, so it hits the same error. That is the *actual* root
-    cause behind ``EnvironmentMatrix.runtime_floors`` (a ``MappingProxyType``
-    since the immutability fix above) breaking ``copy.deepcopy``,
-    ``pickle.dumps``/``loads``, and a direct ``dataclasses.asdict()`` call
-    over this now-embeddable-in-``CompareRequest`` type (``asdict()``
-    recurses field-by-field and falls back to ``copy.deepcopy`` for any
-    field value it does not otherwise recognize as a dataclass/namedtuple/
-    list/tuple/dict -- a bare ``Mapping``-typed proxy is none of those).
-
-    Registered once, at import time, for the type itself (``copyreg.
-    dispatch_table`` -- consulted by both ``pickle`` and ``copy.deepcopy``)
-    rather than adding a custom ``__getstate__``/``__setstate__`` pair to
-    :class:`EnvironmentMatrix` alone: a per-class override would still leave
-    a *direct* ``dataclasses.asdict()`` call broken (it deep-copies each
-    field's raw value, never consulting the *containing* dataclass's own
-    pickle/copy protocol methods at all), and would need to be duplicated
-    onto any future dataclass that also freezes a mapping field this way.
-    Fixing the type once here is strictly additive: nothing in this
+    pickling uses, so it hits the same error. Registered once, at import
+    time, for the type itself (``copyreg.dispatch_table`` -- consulted by
+    both ``pickle`` and ``copy.deepcopy``) so every ``MappingProxyType``
+    anywhere in this process becomes pickle/deepcopy-safe, not just one
+    dataclass's field: a per-class ``__getstate__``/``__setstate__`` override
+    would need duplicating onto every future dataclass that freezes a
+    mapping field this way, and would still leave a *direct*
+    ``dataclasses.asdict()`` call over such a field broken regardless (see
+    below). Fixing the type once here is strictly additive: nothing in this
     process previously depended on a ``MappingProxyType`` *failing* to
     pickle/deep-copy.
+
+    This closes ``pickle``/``copy.deepcopy`` for ``MappingProxyType``, but
+    does *not* by itself make ``dataclasses.asdict()`` over a
+    ``MappingProxyType``-typed field JSON-safe: ``asdict()``'s
+    ``_asdict_inner`` special-cases plain ``dict`` (recursing into a fresh
+    ``dict``), but a ``MappingProxyType`` is not a ``dict`` instance, so it
+    still falls to the generic ``copy.deepcopy(obj)`` branch -- which, with
+    this reducer registered, now succeeds, but reconstructs *another*
+    ``MappingProxyType`` (this reducer's whole point is producing a
+    genuinely-frozen result), not the plain, JSON-serializable ``dict``
+    ``json.dumps()`` needs (Codex review, PR #1221, Finding 2 follow-up).
+    That residual gap is why :class:`EnvironmentMatrix.runtime_floors`
+    itself no longer uses a raw ``MappingProxyType`` at all -- see
+    :class:`~abicheck.model.frozen_str_dict.FrozenStrDict`, which *is* a
+    ``dict`` subclass and so
+    gets ``asdict()``'s native (JSON-safe) dict handling for free, while
+    still being genuinely immutable and hash-stable. This reducer stays
+    registered regardless, since ``MappingProxyType`` is used directly
+    (unfrozen into a dict subclass) by many other modules in this codebase
+    that still benefit from it being pickle/deepcopy-safe.
     """
     return _make_mapping_proxy, (dict(proxy),)
 
@@ -336,6 +350,12 @@ _NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset(
     {"WHEEL_ARCH", "MUSLLINUX", "WHEEL_CONTEXT"}
 )
 
+#: The one `_NON_NUMERIC_RUNTIME_FLOOR_KEYS` member whose string value must
+#: additionally be a *recognized architecture token* -- see the `WHEEL_ARCH`
+#: validation branch in :func:`_parse_runtime_floors` (Codex review, PR
+#: #1221, Finding 1).
+_WHEEL_ARCH_RUNTIME_FLOOR_KEY = "WHEEL_ARCH"
+
 #: Presence-flag keys (MUSLLINUX, WHEEL_CONTEXT — unlike WHEEL_ARCH, which
 #: expects an actual architecture string, not a yes/no flag) where a YAML
 #: boolean or blank value is meaningful and must be honored as "disabled",
@@ -407,6 +427,24 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"{type(value).__name__}: {value!r}"
             )
         floor = str(value)
+        if key_upper == _WHEEL_ARCH_RUNTIME_FLOOR_KEY and floor.lower() not in WHEEL_ARCH_CLAIMS:
+            # Codex review, PR #1221, Finding 1: a WHEEL_ARCH value that
+            # merely passed the str-type check above (e.g. the typo'd
+            # "x86-64" for "x86_64", or any other unrecognized token) still
+            # loaded successfully as a valid EnvironmentMatrix -- but
+            # diff_wheel_deployment.check_wheel_tag_architecture_mismatch
+            # treats an unrecognized claim identically to "no claim
+            # declared" and reports nothing, silently disabling the hard
+            # wheel-architecture-mismatch gate a strict config believes it
+            # enabled. Validate against the exact vocabulary that detector
+            # recognizes (model.wheel_arch_claims.WHEEL_ARCH_CLAIMS, the one
+            # place both this parser and that detector's own per-claim dicts
+            # read from) rather than letting the two independently drift.
+            raise ValueError(
+                f"'runtime_floors.WHEEL_ARCH' {value!r} is not a recognized "
+                f"architecture token; expected one of "
+                f"{sorted(WHEEL_ARCH_CLAIMS)}"
+            )
         if key_upper not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
             # Every dot-separated component must be purely numeric: the floor
             # contract parses with int() per component, so a "2.28-1" or "2.x"
@@ -441,10 +479,13 @@ class EnvironmentMatrix:
     # requirement at or below the floor is COMPATIBLE (every declared target
     # already ships it) and one above the floor is BREAKING (a declared target
     # can no longer load the binary); unspecified prefixes keep the default
-    # RISK classification. A read-only ``MappingProxyType`` (see
-    # ``__post_init__``), not a plain ``dict`` -- callers still read it via
-    # ``.get(...)``/``[...]``/``.items()``, all of which a mapping proxy
-    # supports identically.
+    # RISK classification. A read-only :class:`FrozenStrDict` (see
+    # ``__post_init__``), not a plain mutable ``dict`` -- callers still read
+    # it via ``.get(...)``/``[...]``/``.items()``, all of which it supports
+    # identically to a plain ``dict`` (it's a ``dict`` subclass), while also
+    # being what makes ``dataclasses.asdict()`` over this field JSON-safe
+    # (Codex review, PR #1221, Finding 2 -- see ``FrozenStrDict``'s own
+    # docstring for why a ``MappingProxyType`` could not do this).
     runtime_floors: Mapping[str, str] = field(default_factory=dict)
 
     # Heterogeneous stack constraints
@@ -473,14 +514,17 @@ class EnvironmentMatrix:
         hash, making the object unfindable in that container afterward.
 
         This freezes ``compilers`` into a ``tuple`` and ``runtime_floors``
-        into a ``types.MappingProxyType`` wrapping a private copy of the
-        dict passed in -- a *view*, so no caller holding a reference to the
-        original dict can mutate this instance's copy through it either.
-        Both conversions are idempotent (a ``tuple``/``MappingProxyType``
-        argument round-trips unchanged in content), so repeated
-        construction from an already-frozen instance's own fields is safe.
-        ``sycl``/``cuda`` freeze their own ``list`` fields the same way in
-        their own ``__post_init__``.
+        into a private :class:`FrozenStrDict` copy of the dict passed in --
+        a genuinely immutable ``dict`` subclass (Codex review, PR #1221,
+        Finding 2 follow-up; see its own docstring for why it replaced a
+        ``types.MappingProxyType`` here specifically), constructed from a
+        *copy* of the input so no caller holding a reference to the original
+        dict can mutate this instance's copy through it either. Both
+        conversions are idempotent (a ``tuple``/``FrozenStrDict`` argument
+        round-trips unchanged in content), so repeated construction from an
+        already-frozen instance's own fields is safe. ``sycl``/``cuda``
+        freeze their own ``list`` fields the same way in their own
+        ``__post_init__``.
 
         Codex review, P2 (Finding 3): this class is now genuinely
         ``@dataclass(frozen=True)`` -- freezing only the mutable-looking
@@ -496,7 +540,7 @@ class EnvironmentMatrix:
         """
         object.__setattr__(self, "compilers", tuple(self.compilers))
         object.__setattr__(
-            self, "runtime_floors", MappingProxyType(dict(self.runtime_floors))
+            self, "runtime_floors", FrozenStrDict(self.runtime_floors)
         )
 
     def __hash__(self) -> int:
@@ -511,13 +555,13 @@ class EnvironmentMatrix:
         containing frozen dataclass's own generated ``__hash__``.
 
         ``compilers``/``runtime_floors`` are already frozen by
-        ``__post_init__`` above (a ``tuple`` and a ``MappingProxyType``
+        ``__post_init__`` above (a ``tuple`` and a :class:`FrozenStrDict`
         respectively), so this needs no further projection for those two
         fields beyond ``tuple(sorted(...))`` on ``runtime_floors.items()``
         so key insertion order never changes the hash of two mappings
         holding the same entries. ``__eq__`` is left as the
-        dataclass-generated structural comparison: ``MappingProxyType``
-        compares equal to another mapping (or a proxy) with the same
+        dataclass-generated structural comparison: a plain-``dict``-subclass
+        instance compares equal to another mapping (or dict) with the same
         entries, and ``tuple``/``tuple`` compare structurally, so two
         instances built from differently-ordered-but-equal inputs still
         compare equal via ``__eq__`` and therefore must (and do) hash equal
@@ -563,6 +607,7 @@ class EnvironmentMatrix:
             )
 
         _check_unknown_keys(data, _KNOWN_KEYS, "EnvironmentMatrix", strict=strict)
+        validate_scalar_str_fields(data, cls)
 
         sycl_data = _section_dict(data, "sycl")
         cuda_data = _section_dict(data, "cuda")

@@ -41,6 +41,15 @@ from pathlib import Path
 import pytest
 
 from abicheck.environment_matrix import EnvironmentMatrix
+from abicheck.model.dataclass_scalar_validation import scalar_str_field_types
+from abicheck.model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
+
+#: Every scalar `str | None` field `EnvironmentMatrix.from_dict` should now
+#: type-check (Finding 3 below), read straight off the same reflection
+#: helper the fix itself uses -- so a field added to (or removed from) the
+#: dataclass in the future changes this parametrization automatically
+#: instead of the test silently going stale.
+_SCALAR_STR_FIELDS = sorted(scalar_str_field_types(EnvironmentMatrix))
 
 
 class TestNonNumericRuntimeFloorKeysRejectWrongShapeValues:
@@ -77,6 +86,87 @@ class TestNonNumericRuntimeFloorKeysRejectWrongShapeValues:
             EnvironmentMatrix.from_dict({"runtime_floors": {key: bad_value}})
 
 
+class TestWheelArchUnrecognizedTokenRejected:
+    """Codex review, PR #1221, Finding 1: `WHEEL_ARCH`'s value passing the
+    str-type check above is not sufficient -- it must also be a token
+    `diff_wheel_deployment.check_wheel_tag_architecture_mismatch` actually
+    recognizes, or that detector silently treats the declared claim as "no
+    claim at all" and reports nothing, disabling the hard
+    architecture-mismatch gate a strict config believes it enabled.
+    """
+
+    def test_the_exact_reported_typo_is_rejected(self) -> None:
+        # "x86-64" (a hyphen) for "x86_64" (an underscore) -- the finding's
+        # own reported scenario.
+        with pytest.raises(ValueError, match="not a recognized architecture token"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_ARCH": "x86-64"}})
+
+    def test_the_exact_reported_typo_is_rejected_strict(self) -> None:
+        with pytest.raises(ValueError, match="not a recognized architecture token"):
+            EnvironmentMatrix.from_dict(
+                {"runtime_floors": {"WHEEL_ARCH": "x86-64"}}, strict=True
+            )
+
+    @pytest.mark.parametrize(
+        "bad_token", ["x86-64", "amd64", "arm", "ARM64X", "", "unknown-arch"]
+    )
+    def test_various_unrecognized_tokens_are_rejected(self, bad_token: str) -> None:
+        with pytest.raises(ValueError, match="not a recognized architecture token"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_ARCH": bad_token}})
+
+    @pytest.mark.parametrize("valid_token", sorted(WHEEL_ARCH_CLAIMS))
+    def test_every_recognized_token_still_parses(self, valid_token: str) -> None:
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_ARCH": valid_token}}
+        )
+        assert matrix.runtime_floors["WHEEL_ARCH"] == valid_token
+
+    @pytest.mark.parametrize("valid_token", sorted(WHEEL_ARCH_CLAIMS))
+    def test_every_recognized_token_still_parses_strict(self, valid_token: str) -> None:
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_ARCH": valid_token}}, strict=True
+        )
+        assert matrix.runtime_floors["WHEEL_ARCH"] == valid_token
+
+    def test_recognized_token_is_case_insensitive(self) -> None:
+        # diff_wheel_deployment.py lower()s the claim before comparing, so
+        # the config-time vocabulary check must accept the same casing.
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_ARCH": "X86_64"}}
+        )
+        assert matrix.runtime_floors["WHEEL_ARCH"] == "X86_64"
+
+    def test_error_message_lists_valid_tokens(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_ARCH": "bogus"}})
+        message = str(exc_info.value)
+        for token in WHEEL_ARCH_CLAIMS:
+            assert token in message
+
+    def test_deployment_wheel_arch_typo_is_hard_config_error_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        """The finding's own scenario, through the real `.abicheck.yml`
+        `deployment:` block -- the CLI's strict-mode caller."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "deployment:\n  runtime_floors:\n    WHEEL_ARCH: x86-64\n",
+            encoding="utf-8",
+        )
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        result = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "not a recognized architecture token" in result.output.lower()
+
+
 class TestWheelArchListEndToEndConfigError:
     def test_deployment_wheel_arch_list_is_hard_config_error(
         self, tmp_path: Path
@@ -102,3 +192,100 @@ class TestWheelArchListEndToEndConfigError:
         )
         assert result.exit_code == 64, result.output
         assert "must be a quoted string" in result.output.lower()
+
+
+class TestScalarStrFieldsRejectWrongShapeValues:
+    """Codex review, PR #1221, Finding 3: `EnvironmentMatrix`'s plain scalar
+    ``str | None`` fields (``abi_version``, ``libstdcxx_dual_abi``,
+    ``target_os``, ``target_arch``) were never type-checked at all --
+    ``abi_version: {bad: shape}`` loaded successfully into a frozen,
+    hashable ``EnvironmentMatrix``, and ``hash(matrix)`` then raised
+    ``TypeError: unhashable type: 'dict'`` the first time anything (e.g. a
+    ``CompareRequest`` containing it) inserted the matrix into a dict/set --
+    the same evidence-too-late failure mode round 8's list-element fix
+    already closed for list elements.
+
+    The fix (``model.dataclass_scalar_validation.scalar_str_field_types``) derives which fields to check from
+    the dataclass's own ``str | None`` type annotations via
+    ``typing.get_type_hints``/``dataclasses.fields`` rather than a
+    hand-maintained list, so this parametrization enumerates every such
+    field straight from that same function -- a newly added scalar field is
+    covered automatically, without a new test needing to be written for it.
+    """
+
+    SCALAR_STR_FIELDS = _SCALAR_STR_FIELDS
+
+    @pytest.mark.parametrize("field_name", SCALAR_STR_FIELDS)
+    @pytest.mark.parametrize(
+        "bad_value",
+        [{"bad": "shape"}, ["list"], True, False, 1, 1.5],
+        ids=["mapping", "list", "bool_true", "bool_false", "int", "float"],
+    )
+    def test_wrong_shape_value_rejected(
+        self, field_name: str, bad_value: object
+    ) -> None:
+        with pytest.raises(ValueError, match="must be a string"):
+            EnvironmentMatrix.from_dict({field_name: bad_value})
+
+    @pytest.mark.parametrize("field_name", SCALAR_STR_FIELDS)
+    def test_wrong_shape_value_rejected_strict(self, field_name: str) -> None:
+        with pytest.raises(ValueError, match="must be a string"):
+            EnvironmentMatrix.from_dict({field_name: ["bad"]}, strict=True)
+
+    @pytest.mark.parametrize("field_name", SCALAR_STR_FIELDS)
+    def test_valid_string_value_still_parses(self, field_name: str) -> None:
+        matrix = EnvironmentMatrix.from_dict({field_name: "some-value"})
+        assert getattr(matrix, field_name) == "some-value"
+
+    @pytest.mark.parametrize("field_name", SCALAR_STR_FIELDS)
+    def test_absent_field_still_defaults_to_none(self, field_name: str) -> None:
+        matrix = EnvironmentMatrix.from_dict({})
+        assert getattr(matrix, field_name) is None
+
+    @pytest.mark.parametrize("field_name", SCALAR_STR_FIELDS)
+    def test_explicit_none_is_still_accepted(self, field_name: str) -> None:
+        matrix = EnvironmentMatrix.from_dict({field_name: None})
+        assert getattr(matrix, field_name) is None
+
+    def test_reflection_found_all_four_known_scalar_fields(self) -> None:
+        # Pins the set itself, so a future field's *removal* from
+        # `EnvironmentMatrix` (which would silently shrink parametrization
+        # above to fewer cases) is caught here explicitly.
+        assert set(self.SCALAR_STR_FIELDS) == {
+            "abi_version",
+            "libstdcxx_dual_abi",
+            "target_os",
+            "target_arch",
+        }
+
+
+class TestScalarFieldsAndHashabilityRoundTrip:
+    """Positive hashability round-trip: a well-typed matrix using every
+    scalar field must still hash cleanly after the Finding 3 fix (a
+    regression here would mean the new validation rejected something it
+    should not have)."""
+
+    def test_fully_populated_scalar_fields_still_hash(self) -> None:
+        matrix = EnvironmentMatrix.from_dict(
+            {
+                "abi_version": "18",
+                "libstdcxx_dual_abi": "cxx11",
+                "target_os": "linux",
+                "target_arch": "x86_64",
+            }
+        )
+        assert isinstance(hash(matrix), int)
+        # A `CompareRequest`-shaped use: insertable into a dict/set.
+        cache = {matrix: "resolved"}
+        lookup = EnvironmentMatrix.from_dict(
+            {
+                "abi_version": "18",
+                "libstdcxx_dual_abi": "cxx11",
+                "target_os": "linux",
+                "target_arch": "x86_64",
+            }
+        )
+        assert cache[lookup] == "resolved"
+
+    def test_empty_matrix_still_hashes(self) -> None:
+        assert isinstance(hash(EnvironmentMatrix.from_dict({})), int)
