@@ -1544,6 +1544,38 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "abicheck scan (the deterministic source-intelligence root command --"
+        " classify/pre-scan/pinned-evidence-level orchestrator over dump/"
+        "compare, plus its --against comparison mode, --budget, and"
+        " baseline/receipt machinery -- removed outright: a one-build audit"
+        " is `dump` (there is no `compare --no-baseline`), and comparing a"
+        " build"
+        " against a stored baseline is `compare`)",
+        (
+            "abicheck scan",
+            "cli_scan.py",
+            "cli_scan_baseline.py",
+            "cli_scan_helpers.py",
+            "cli_scan_receipt.py",
+            "service_scan.py",
+            "scan_engine.py",
+            "scan --against",
+            "scan --budget",
+            "--source-intelligence-scan",
+        ),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                # Point-in-time design/status records naming the command in
+                # their own historical-record capacity.
+                "contribute/config-key-review.md",
+                "contribute/plans/index.md",
+                "contribute/architecture-deepening-plan.md",
+            }
+        ),
+    ),
 )
 
 
