@@ -16979,26 +16979,54 @@ not new design.
   alias assignment in the L5 builder — the one piece this row can actually
   remove once every reader stops going through it.
 
-  **Five-reader migration landed.** All five named readers
-  (`internal_leak.py`, `buildsource/cross_source_checks.py`'s two call
-  sites, `buildsource/evidence_report.py`, `evidence_depth.py`,
-  `cli_graph.py`) now read `graph = snap.surface_graph or
-  (snap.build_source.source_graph if snap.build_source else None)` (or the
-  pack-aware equivalent for a call site whose *pack* may be an out-of-band
-  one the caller resolved independently of the snapshot —
-  `evidence_report._side_source_graph`/`evidence_depth._l5_payload_empty`
-  only substitute `surface_graph` when the pack in hand actually **is**
-  `snap.build_source`, never for an unrelated `--old/new-build-info`/
-  `--old/new-sources` pack, per those two modules' own pre-existing "never
-  default *pack* to `snap.build_source`" contract). `cli_graph.py`'s
-  `_load_source_graph` has no `AbiSnapshot` in scope at all (it loads a
-  bare graph JSON file or an out-of-band pack directory), so its migration
-  is the dict-shaped analogue: a full embedded-snapshot JSON document is
-  now recognized and its graph read preferring the top-level
-  `surface_graph` key over the nested `build_source.source_graph` one.
-  `tests/test_surface_graph_reader_migration.py` pins output parity
-  between the pre-Phase-3 shape (`surface_graph` absent) and the
-  post-Phase-3 shape (`surface_graph` populated) for all five.
+  **Five-reader migration landed, with a security correction to the
+  preference order this row's own text originally specified (PR #1216
+  review).** All five named readers (`internal_leak.py`,
+  `buildsource/cross_source_checks.py`'s two call sites,
+  `buildsource/evidence_report.py`, `evidence_depth.py`, `cli_graph.py`) now
+  read `graph = (snap.build_source.source_graph if snap.build_source else
+  None) or snap.surface_graph` — `build_source.source_graph` **first**, not
+  `surface_graph` first as this section originally specified. A security
+  reviewer correctly found that a real `--sources`/`--build-info` embed can
+  leave `build_source.source_graph` a strictly richer, real L3-L5 evidence
+  graph than the always-on, header-only-only `surface_graph`
+  (`_attach_header_graph` builds the latter from headers alone and never
+  updates it once written; `buildsource/embed.py`'s backfill only ever
+  adopts the header-only graph into an *empty* `build_source.source_graph`,
+  never displacing a real one) — so the originally-specified
+  surface_graph-first order silently drops real call-graph/dependency edges
+  whenever the two diverge, letting a genuinely-reachable internal removal
+  be misjudged unreachable and suppressed under a
+  `reachability: proven-unreachable-only` policy (a BREAKING→COMPATIBLE
+  false negative). `surface_graph` is still the correct fallback for a
+  depth-projected snapshot, where `policy/depth_projection.py` clears
+  `build_source.source_graph` at the "source" depth floor while retaining
+  `surface_graph` (an L2 fact) down to the "binary" floor, and for a
+  pre-Phase-3 document carrying `build_source.source_graph` with no
+  `surface_graph` at all — the corrected order still resolves both cases
+  identically to the original one, since it only changes behavior when the
+  two graphs are genuinely different objects. The pack-aware equivalent for
+  a call site whose *pack* may be an out-of-band one the caller resolved
+  independently of the snapshot (`evidence_report._side_source_graph`/
+  `evidence_depth._l5_payload_empty`) applies the same corrected order,
+  still only substituting `surface_graph` when the pack in hand actually
+  **is** `snap.build_source`, never for an unrelated
+  `--old/new-build-info`/`--old/new-sources` pack, per those two modules'
+  own pre-existing "never default *pack* to `snap.build_source`" contract.
+  `cli_graph.py`'s `_load_source_graph` has no `AbiSnapshot` in scope at all
+  (it loads a bare graph JSON file or an out-of-band pack directory), so its
+  migration is the dict-shaped analogue: a full embedded-snapshot JSON
+  document (flat *or* the current single-file sectioned wire format, schema
+  v42+ — a second review-round finding, since the first draft's hand-rolled
+  dict walk missed the sectioned shape every real `dump --sources -o`
+  snapshot actually uses today) is now decoded through
+  `serialization.snapshot_from_dict` and its graph read with the same
+  corrected preference order. `tests/test_surface_graph_reader_migration.py`
+  pins output parity between the pre-Phase-3 shape (`surface_graph` absent)
+  and the post-Phase-3 shape (`surface_graph` populated as the *same*
+  object) for all five, plus a dedicated "prefers the richer
+  `build_source.source_graph`" regression test per reader proving the two
+  graphs are read correctly when they are genuinely different objects.
 
   **The in-memory alias-assignment deletion is NOT done, and is being left
   open rather than forced through unverified.** The one place that builds

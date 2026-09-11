@@ -973,15 +973,14 @@ def compute_call_graph_leak_paths(
     dispatcher gap this ADR's P0 slice explicitly left open (see the ADR's
     "What this ADR does not fix" section).
 
-    Requires an embedded L5 graph (``--sources``/``--build-info``, or the
-    now-always-on L2 header-only graph) with at least one relevant edge;
-    returns ``{}`` otherwise — never an error, mirroring
-    :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
-    degrade contract, so a project with no build-source evidence sees no
-    behavior change at all.
+    Requires an embedded L5 graph (``--sources``/``--build-info``, or the now-always-on
+    L2 header-only graph) with at least one relevant edge; returns ``{}`` otherwise —
+    never an error, mirroring :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
+    degrade contract, so a project with no build-source evidence sees no behavior change at all.
     """
+    # Phase 10 security correction: build_source.source_graph first (richer).
     build_source = getattr(snap, "build_source", None)
-    graph = snap.surface_graph or (build_source.source_graph if build_source else None)
+    graph = (build_source.source_graph if build_source else None) or snap.surface_graph
     if graph is None or not getattr(graph, "nodes", None):
         return {}
     graph = cast("SourceGraphSummary", graph)

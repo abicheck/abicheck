@@ -177,26 +177,32 @@ def _side_source_graph(
 ) -> SourceGraphSummary | None:
     """The L5 evidence graph for one compare side (ADR-063 Phase 10).
 
-    Prefers ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's
-    own embedded ``build_source`` -- the one case the Phase 3 assembly step
-    guarantees shares an identical object with ``surface_graph``. When
+    Prefers *pack*'s own ``source_graph``, falling back to
+    ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's own
+    embedded ``build_source`` and carries no graph of its own -- a real
+    ``--sources``/``--build-info`` embed can leave ``build_source.
+    source_graph`` a strictly richer, real L3-L5 evidence graph than the
+    always-on, header-only-only ``surface_graph`` (security review, PR
+    #1216: the reverse preference silently dropped real graph edges,
+    letting a reachable internal removal be misjudged unreachable). When
     ``resolve_side_pack`` instead resolved an explicit out-of-band
     ``--old/new-build-info``/``--old/new-sources`` pack, that pack has no
     relationship to ``snap.surface_graph`` at all, so its own
     ``source_graph`` is read directly, unchanged.
     """
+    if pack is not None and pack.source_graph is not None:
+        return pack.source_graph
     if snap is not None and pack is not None and pack is snap.build_source:
-        graph = snap.surface_graph or pack.source_graph
+        graph = snap.surface_graph
         # `surface_graph` is typed `SurfaceGraphLike` (`model/graph_facts.py`)
         # for `model/snapshot.py`'s own dependency-free layer, but is always a
-        # real `SourceGraphSummary` at runtime, same as `pack.source_graph` --
-        # narrows back to the concrete class per that protocol's own
-        # documented call-site pattern.
+        # real `SourceGraphSummary` at runtime -- narrows back to the concrete
+        # class per that protocol's own documented call-site pattern.
         from ..model.source_graph import SourceGraphSummary as _SourceGraphSummary
 
         assert graph is None or isinstance(graph, _SourceGraphSummary)
         return graph
-    return pack.source_graph if pack is not None else None
+    return None
 
 
 def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:

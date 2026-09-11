@@ -126,9 +126,11 @@ def _embedded_source_graph(data: dict[str, Any]) -> SourceGraphSummary | None:
         snap = snapshot_from_dict(data)
     except Exception:
         return None
-    graph = snap.surface_graph or (
+    # Phase 10 security correction: build_source.source_graph first (richer
+    # real L3-L5 evidence than the always-on, header-only-only surface_graph).
+    graph = (
         snap.build_source.source_graph if snap.build_source is not None else None
-    )
+    ) or snap.surface_graph
     # Always a real SourceGraphSummary at runtime; narrows back from the
     # SurfaceGraphLike protocol model/snapshot.py's surface_graph field uses.
     return cast("SourceGraphSummary | None", graph)

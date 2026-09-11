@@ -1170,11 +1170,28 @@ concepts:
       five real production readers -- internal_leak.py,
       buildsource/cross_source_checks.py (two call sites),
       buildsource/evidence_report.py, evidence_depth.py, and
-      cli_graph.py -- each preferring surface_graph and falling back to
-      the legacy build_source.source_graph nested field only when
-      surface_graph is absent (a pre-Phase-3 document never populates it).
-      tests/test_surface_graph_reader_migration.py pins output parity
-      between the two shapes per reader. **Not closed by this row:**
+      cli_graph.py. **Preference order security-corrected in PR #1216
+      review** (two rounds): each reader prefers build_source.source_graph,
+      falling back to surface_graph only when the former is absent -- NOT
+      surface_graph-first as this row's plan text originally specified. A
+      real --sources/--build-info embed can leave build_source.source_graph
+      a strictly richer, real L3-L5 evidence graph than the always-on,
+      header-only-only surface_graph; preferring the weaker graph silently
+      dropped real call-graph/dependency edges, letting a
+      genuinely-reachable internal removal be misjudged unreachable and
+      suppressed (a BREAKING->COMPATIBLE false negative under a
+      reachability: proven-unreachable-only policy). surface_graph is still
+      the correct fallback for a depth-projected snapshot (build_source.
+      source_graph clears at the "source" depth floor; surface_graph, an L2
+      fact, clears lower, at "binary") and for a pre-Phase-3 document. A
+      second review round separately found cli_graph.py's first pass missed
+      the current single-file sectioned wire format (schema v42+) every
+      real dump --sources -o snapshot actually uses; fixed by decoding
+      through serialization.snapshot_from_dict rather than hand-walking a
+      third JSON shape. tests/test_surface_graph_reader_migration.py pins
+      output parity between the pre/post-Phase-3 shapes per reader plus a
+      dedicated "prefers the richer build_source.source_graph" regression
+      test per reader. **Not closed by this row:**
       deleting the L5 builder's own in-memory identity-aliasing
       (service_header_graph_attach.py's _attach_header_graph, which
       threads one shared SourceGraphSummary instance into both

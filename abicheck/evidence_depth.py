@@ -95,22 +95,25 @@ def layer_payload_empty(pack: BuildSourcePack, key: str) -> bool:
 def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
     """:func:`layer_payload_empty`'s ``"L5"`` case, ADR-063 Phase 10-aware.
 
-    Prefers ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's
-    own embedded ``build_source`` -- the one case the Phase 3 assembly step
-    guarantees shares an identical object with ``surface_graph`` -- falling
-    back to ``pack.source_graph`` when ``surface_graph`` is absent (a
-    pre-Phase-3 snapshot never populates it). *pack* deliberately never
-    defaults to ``snap.build_source`` elsewhere in this module (see the
-    module docstring): when a caller resolved an out-of-band pack instead,
-    that pack has no relationship to ``snap.surface_graph`` at all, so its
-    own ``source_graph`` is read directly, unchanged.
+    Prefers *pack*'s own ``source_graph``, falling back to
+    ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's own
+    embedded ``build_source`` and carries no graph of its own -- a real
+    ``--sources``/``--build-info`` embed can leave ``build_source.
+    source_graph`` a strictly richer, real L3-L5 evidence graph than the
+    always-on, header-only-only ``surface_graph``, so the reverse preference
+    would misjudge such a pack empty (security review, PR #1216). *pack*
+    deliberately never defaults to ``snap.build_source`` elsewhere in this
+    module (see the module docstring): when a caller resolved an out-of-band
+    pack instead, that pack has no relationship to ``snap.surface_graph`` at
+    all, so its own ``source_graph`` is read directly, unchanged.
     """
     if pack is None:
         return True
-    if pack is snap.build_source:
-        graph = snap.surface_graph or pack.source_graph
-        return graph is None or not graph.nodes
-    return layer_payload_empty(pack, "L5")
+    if pack.source_graph is not None:
+        return not pack.source_graph.nodes
+    if pack is snap.build_source and snap.surface_graph is not None:
+        return not snap.surface_graph.nodes
+    return True
 
 
 def depth_label_for(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
