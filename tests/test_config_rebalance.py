@@ -468,7 +468,9 @@ class TestConfigRoundtrip:
             "GLIBCXX": "3.4.28",
         }
         assert cfg.deployment.sycl.implementation == "dpcpp"
-        assert cfg.deployment.sycl.backends == ["level_zero", "opencl"]
+        # `backends` is frozen into a `tuple` at construction (Codex review,
+        # P2 follow-up, PR #1221's hash-invariant fix).
+        assert cfg.deployment.sycl.backends == ("level_zero", "opencl")
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
     def test_deployment_block_absent_is_none(self) -> None:
@@ -1106,7 +1108,7 @@ class TestEnvironmentMatrixStrictMode:
 
         with caplog.at_level("WARNING"):
             m = EnvironmentMatrix.from_dict({"sycl": {"backend": ["level_zero"]}})
-        assert m.sycl.backends == []
+        assert m.sycl.backends == ()
         assert any("unknown" in r.message.lower() for r in caplog.records)
 
     def test_strict_raises_on_unknown_top_level_key(self) -> None:
@@ -1162,7 +1164,7 @@ class TestEnvironmentMatrixStrictMode:
         )
         assert m.runtime_floors == {"GLIBC": "2.28"}
         assert m.sycl.implementation == "dpcpp"
-        assert m.cuda.gpu_architectures == ["sm_80"]
+        assert m.cuda.gpu_architectures == ("sm_80",)
 
     def test_end_to_end_deployment_typo_is_hard_config_error(
         self, tmp_path: Path

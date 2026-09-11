@@ -392,21 +392,26 @@ class TestEnvironmentMatrix:
             },
         }
         matrix = EnvironmentMatrix.from_dict(data)
-        assert matrix.compilers == ["gcc-13", "clang-17"]
+        # Codex review, P2 follow-up (PR #1221): `compilers`/`sycl.backends`/
+        # `cuda.gpu_architectures` are now frozen into `tuple`s at
+        # construction (the hash-invariant fix), not left as plain,
+        # directly-mutable `list`s -- so these compare against tuple
+        # literals, not the list shape `from_dict`'s own input used.
+        assert matrix.compilers == ("gcc-13", "clang-17")
         assert matrix.sycl.implementation == "dpcpp"
-        assert matrix.sycl.backends == ["level_zero", "opencl"]
-        assert matrix.cuda.gpu_architectures == ["sm_80", "sm_90"]
+        assert matrix.sycl.backends == ("level_zero", "opencl")
+        assert matrix.cuda.gpu_architectures == ("sm_80", "sm_90")
         assert matrix.cuda.driver_range == ("525.0", "580.0")
 
     def test_from_dict_empty(self):
         from abicheck.environment_matrix import EnvironmentMatrix
 
         matrix = EnvironmentMatrix.from_dict({})
-        assert matrix.compilers == []
+        assert matrix.compilers == ()
         assert matrix.target_os is None
         assert matrix.target_arch is None
         assert matrix.sycl.implementation == ""
-        assert matrix.cuda.gpu_architectures == []
+        assert matrix.cuda.gpu_architectures == ()
 
     def test_from_dict_not_dict_raises(self):
         from abicheck.environment_matrix import EnvironmentMatrix
@@ -814,7 +819,7 @@ class TestEnvironmentMatrixValidation:
         """Numeric values in backends list get coerced to strings."""
         from abicheck.environment_matrix import EnvironmentMatrix
         m = EnvironmentMatrix.from_dict({"sycl": {"backends": [123]}})
-        assert m.sycl.backends == ["123"]
+        assert m.sycl.backends == ("123",)
 
 
 # ---------------------------------------------------------------------------

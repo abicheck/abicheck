@@ -62,8 +62,10 @@ other layer may import — the layer's own comment names the one dependency
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from .model.dotted_version import parse_dotted_numeric_version
@@ -76,37 +78,53 @@ class SyclConstraints:
     """SYCL-specific deployment constraints."""
 
     implementation: str = ""              # "dpcpp" | "adaptivecpp"
-    backends: list[str] = field(default_factory=list)  # ["level_zero", "opencl"]
+    backends: tuple[str, ...] = field(default_factory=tuple)  # ("level_zero", "opencl")
     min_pi_version: str = ""              # minimum PI version required
 
+    def __post_init__(self) -> None:
+        # Codex review, P2 follow-up: a plain mutable `list` field remains
+        # directly mutable after construction, which changes this object's
+        # (and any containing `EnvironmentMatrix`'s) hash out from under a
+        # dict/set it was already inserted into -- the classic Python
+        # hash-invariant violation. Freezing into a `tuple` here, once, at
+        # construction, is genuine immutability rather than merely a
+        # hashable *projection* computed fresh each `__hash__` call: the
+        # earlier round's "nothing currently mutates this" reasoning was
+        # necessary but not sufficient, since immutability is a structural
+        # guarantee, not an audit of today's call sites. `tuple(...)` also
+        # accepts an already-`tuple` input unchanged, so this is idempotent
+        # across repeated construction (e.g. a caller round-tripping an
+        # existing instance's own `backends` back into the constructor).
+        self.backends = tuple(self.backends)
+
     def __hash__(self) -> int:
-        # Explicit rather than `@dataclass(frozen=True)`: this stays a plain
-        # mutable dataclass (nothing here mutates `backends` in place after
-        # construction, per a repo-wide grep -- see `EnvironmentMatrix.
-        # __hash__` below for why the field types themselves stay `list`/
-        # `dict` rather than being converted to `tuple` throughout), so only
-        # the hash needs a hashable projection of its content (Codex
-        # review, P2: making the containing `EnvironmentMatrix` hashable so
-        # a `CompareRequest` carrying one can be hashed/used as a set
-        # member or cache key).
-        return hash((self.implementation, tuple(self.backends), self.min_pi_version))
+        # `backends` is already a tuple post-`__post_init__`, so no
+        # projection is needed here beyond what `hash()` does natively.
+        return hash((self.implementation, self.backends, self.min_pi_version))
 
 
 @dataclass
 class CudaConstraints:
     """CUDA-specific deployment constraints (placeholder for future use)."""
 
-    gpu_architectures: list[str] = field(default_factory=list)  # ["sm_80", "sm_90"]
+    gpu_architectures: tuple[str, ...] = field(
+        default_factory=tuple
+    )  # ("sm_80", "sm_90")
     driver_range: tuple[str, str] | None = None   # (min_version, max_version)
     toolkit_version: str = ""
     require_ptx: bool = False              # require PTX for forward-compat
 
+    def __post_init__(self) -> None:
+        # See `SyclConstraints.__post_init__` above for why this freezes
+        # `gpu_architectures` into a `tuple` rather than merely hashing a
+        # `tuple(...)` projection of a still-mutable `list`.
+        self.gpu_architectures = tuple(self.gpu_architectures)
+
     def __hash__(self) -> int:
-        # See `SyclConstraints.__hash__` above for why this is explicit
-        # rather than `frozen=True`.
+        # `gpu_architectures` is already a tuple post-`__post_init__`.
         return hash(
             (
-                tuple(self.gpu_architectures),
+                self.gpu_architectures,
                 self.driver_range,
                 self.toolkit_version,
                 self.require_ptx,
@@ -169,7 +187,7 @@ def _parse_sycl_constraints(
         )
     return SyclConstraints(
         implementation=str(sycl_data.get("implementation", "")),
-        backends=[str(b) for b in backends],
+        backends=tuple(str(b) for b in backends),
         min_pi_version=str(sycl_data.get("min_pi_version", "")),
     )
 
@@ -202,7 +220,7 @@ def _parse_cuda_constraints(
         )
 
     return CudaConstraints(
-        gpu_architectures=[str(a) for a in gpu_archs],
+        gpu_architectures=tuple(str(a) for a in gpu_archs),
         driver_range=driver_range,
         toolkit_version=str(cuda_data.get("toolkit_version", "")),
         require_ptx=require_ptx,
@@ -269,6 +287,28 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"(2.40 parses as 2.4). Write {key}: \"{value}\" "
                 f"with the intended digits."
             )
+        if key_upper in _NON_NUMERIC_RUNTIME_FLOOR_KEYS and not isinstance(value, str):
+            # WHEEL_ARCH/MUSLLINUX/WHEEL_CONTEXT are exempt from the
+            # dotted-numeric check below because they carry a non-version
+            # token (an architecture name or a presence flag) rather than a
+            # version -- but that exemption must not become a license to
+            # accept *any* type. A YAML list/mapping/lone-bool value (e.g.
+            # `WHEEL_ARCH: [x86_64]`) reaching here would otherwise fall
+            # through to the unconditional `str(value)` below and silently
+            # become the literal string `"['x86_64']"`, which the
+            # downstream architecture-mismatch detector treats as an
+            # unrecognized claim and reports nothing for -- a malformed
+            # config silently disabling a hard check instead of raising the
+            # config error `strict=True` promises (Codex review, PR #1221).
+            # Presence-flag bool/int/float/None values for MUSLLINUX/
+            # WHEEL_CONTEXT are already normalized and `continue`d above,
+            # so only a genuinely wrong shape (list/dict, or a bare bool/
+            # numeric on WHEEL_ARCH, which isn't a presence-flag key) can
+            # still reach this branch.
+            raise ValueError(
+                f"'runtime_floors.{key}' must be a quoted string, got "
+                f"{type(value).__name__}: {value!r}"
+            )
         floor = str(value)
         if key_upper not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
             # Every dot-separated component must be purely numeric: the floor
@@ -294,7 +334,7 @@ class EnvironmentMatrix:
     """
 
     # Host toolchain
-    compilers: list[str] = field(default_factory=list)
+    compilers: tuple[str, ...] = field(default_factory=tuple)
     abi_version: str | None = None                    # -fabi-version value
     libstdcxx_dual_abi: str | None = None             # "cxx11" | "old"
 
@@ -304,8 +344,11 @@ class EnvironmentMatrix:
     # requirement at or below the floor is COMPATIBLE (every declared target
     # already ships it) and one above the floor is BREAKING (a declared target
     # can no longer load the binary); unspecified prefixes keep the default
-    # RISK classification.
-    runtime_floors: dict[str, str] = field(default_factory=dict)
+    # RISK classification. A read-only ``MappingProxyType`` (see
+    # ``__post_init__``), not a plain ``dict`` -- callers still read it via
+    # ``.get(...)``/``[...]``/``.items()``, all of which a mapping proxy
+    # supports identically.
+    runtime_floors: Mapping[str, str] = field(default_factory=dict)
 
     # Heterogeneous stack constraints
     sycl: SyclConstraints = field(default_factory=SyclConstraints)
@@ -314,6 +357,42 @@ class EnvironmentMatrix:
     # Target platform — None means unspecified (no assumption).
     target_os: str | None = None
     target_arch: str | None = None
+
+    def __post_init__(self) -> None:
+        """Freeze the mutable-looking fields into genuinely immutable ones.
+
+        Codex review, P2 follow-up: the earlier round made this class
+        hashable by computing a hashable *projection* of ``compilers``/
+        ``runtime_floors`` inside ``__hash__`` (below), reasoning that
+        nothing in this codebase mutates either field in place after
+        construction. That reasoning was necessary but not sufficient --
+        the Python hash contract requires an object's hash to stay stable
+        for as long as it is a dict/set member, which means the fields
+        feeding the hash must be *actually* immutable, not merely
+        "currently unmutated." A live counterexample: once a
+        ``CompareRequest`` carrying this matrix is inserted into a dict/set,
+        ``matrix.runtime_floors["GLIBC"] = "2.34"`` is a perfectly legal
+        mutation of a plain ``dict`` that silently changes the computed
+        hash, making the object unfindable in that container afterward.
+
+        This freezes ``compilers`` into a ``tuple`` and ``runtime_floors``
+        into a ``types.MappingProxyType`` wrapping a private copy of the
+        dict passed in -- a *view*, so no caller holding a reference to the
+        original dict can mutate this instance's copy through it either.
+        Both conversions are idempotent (a ``tuple``/``MappingProxyType``
+        argument round-trips unchanged in content), so repeated
+        construction from an already-frozen instance's own fields is safe.
+        ``sycl``/``cuda`` freeze their own ``list`` fields the same way in
+        their own ``__post_init__``.
+
+        This stays a plain (non-frozen) dataclass rather than
+        ``@dataclass(frozen=True)``: nothing here needs attribute
+        *reassignment* blocked (only the containers' own mutability
+        mattered), and a plain dataclass lets this method run post-init
+        without ``object.__setattr__`` boilerplate.
+        """
+        self.compilers = tuple(self.compilers)
+        self.runtime_floors = MappingProxyType(dict(self.runtime_floors))
 
     def __hash__(self) -> int:
         """A structural hash over a hashable projection of every field.
@@ -326,37 +405,22 @@ class EnvironmentMatrix:
         ``None`` by default, and that unhashability propagates through any
         containing frozen dataclass's own generated ``__hash__``.
 
-        This stays a plain mutable dataclass rather than
-        ``@dataclass(frozen=True)``: ``compilers``/``runtime_floors`` are
-        read via list/dict operations (``.get(...)`` on
-        ``runtime_floors`` in particular -- ``checker.py``,
-        ``workflows/env_matrix_audit.py``, ``extract/wheel_tags.py``) at
-        several call sites across the codebase, and converting those
-        fields to `tuple`s throughout would be a much larger, purely
-        mechanical API churn for no behavioral benefit -- nothing in this
-        codebase mutates an ``EnvironmentMatrix`` (or its ``sycl``/``cuda``
-        sub-objects) in place after construction (a repo-wide grep for
-        ``.compilers =``/``.runtime_floors[``/list-mutating calls on either
-        field found none), so a value that is *used* as immutable
-        configuration does not need to *become* immutable at the type
-        level to be hashed consistently. ``__eq__`` is left as the
-        dataclass-generated structural comparison (already correct for
-        list/dict fields); only ``__hash__`` needs an explicit, hashable
-        projection -- ``tuple(...)`` for the two list fields,
-        ``tuple(sorted(...))`` for ``runtime_floors`` so key insertion
-        order never changes the hash of two dicts holding the same
-        entries, and the two sub-dataclasses' own ``__hash__`` for
-        ``sycl``/``cuda``.
-
-        Two ``EnvironmentMatrix`` instances that compare equal (the
-        dataclass-generated ``__eq__``) always hash equal here, since every
-        field feeding this hash is exactly the field ``__eq__`` compares,
-        projected the same way regardless of instance -- the hash/eq
-        contract every hashable type must satisfy.
+        ``compilers``/``runtime_floors`` are already frozen by
+        ``__post_init__`` above (a ``tuple`` and a ``MappingProxyType``
+        respectively), so this needs no further projection for those two
+        fields beyond ``tuple(sorted(...))`` on ``runtime_floors.items()``
+        so key insertion order never changes the hash of two mappings
+        holding the same entries. ``__eq__`` is left as the
+        dataclass-generated structural comparison: ``MappingProxyType``
+        compares equal to another mapping (or a proxy) with the same
+        entries, and ``tuple``/``tuple`` compare structurally, so two
+        instances built from differently-ordered-but-equal inputs still
+        compare equal via ``__eq__`` and therefore must (and do) hash equal
+        here -- the hash/eq contract every hashable type must satisfy.
         """
         return hash(
             (
-                tuple(self.compilers),
+                self.compilers,
                 self.abi_version,
                 self.libstdcxx_dual_abi,
                 tuple(sorted(self.runtime_floors.items())),
@@ -407,7 +471,7 @@ class EnvironmentMatrix:
         runtime_floors = _parse_runtime_floors(data.get("runtime_floors", {}))
 
         return cls(
-            compilers=compilers,
+            compilers=tuple(compilers),
             abi_version=data.get("abi_version"),
             libstdcxx_dual_abi=data.get("libstdcxx_dual_abi"),
             runtime_floors=runtime_floors,

@@ -39,6 +39,8 @@ system libraries this module doesn't enumerate — see "Out of scope".
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_versioning import _parse_dotted_numeric_version, _version_le
@@ -54,7 +56,7 @@ _MACOS_DEPLOYMENT_TARGET_KEY = "MACOS_DEPLOYMENT_TARGET"
 
 
 def check_macos_deployment_target_floor(
-    macho: MachoMetadata | None, runtime_floors: dict[str, str] | None
+    macho: MachoMetadata | None, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Check a Mach-O binary's own minimum OS version against a declared
     macOS deployment-target promise (e.g. a wheel's ``macosx_10_9_x86_64``
@@ -248,7 +250,7 @@ _ARCH_CLAIM_TO_MACHO_CPU_TYPE: dict[str, frozenset[str]] = {
 def check_wheel_tag_architecture_mismatch(
     elf: ElfMetadata | None,
     macho: MachoMetadata | None,
-    runtime_floors: dict[str, str] | None,
+    runtime_floors: Mapping[str, str] | None,
 ) -> list[Change]:
     """Check a binary's own recorded architecture against the wheel tag's
     claimed architecture (G27).
@@ -523,7 +525,7 @@ _WHEEL_CONTEXT_KEY = "WHEEL_CONTEXT"
 
 
 def check_wheel_rpath_not_portable(
-    elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata | None, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Flag a non-``$ORIGIN``-relative (absolute) RPATH/RUNPATH entry (G27).
 
@@ -574,7 +576,7 @@ def check_wheel_rpath_not_portable(
 
 
 def check_wheel_closure_dependency_violation(
-    elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata | None, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Flag a vendored dependency with no mechanism to ever be found (G27).
 

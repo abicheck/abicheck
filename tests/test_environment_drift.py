@@ -1268,6 +1268,11 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 1}})
         assert m.runtime_floors.get("WHEEL_CONTEXT")
 
+    # Non-string WHEEL_ARCH/MUSLLINUX/WHEEL_CONTEXT rejection (Codex review,
+    # PR #1221 follow-up finding 1) and its end-to-end CLI case are covered
+    # in tests/test_environment_matrix_floor_types.py -- this class is
+    # already at its own architecture/debt.yaml no_growth baseline.
+
     def test_wheel_context_blank_value_end_to_end_does_not_enable_check(
         self,
     ) -> None:

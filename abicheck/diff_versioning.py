@@ -20,6 +20,8 @@ diffing, SONAME bump recommendations, and version-script-missing detection.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .diff_helpers import make_change
@@ -234,7 +236,7 @@ def _floor_required_tag(change: Change) -> str:
 
 
 def apply_runtime_floor_contract(
-    changes: list[Change], runtime_floors: dict[str, str]
+    changes: list[Change], runtime_floors: Mapping[str, str]
 ) -> list[Change]:
     """Classify version-requirement findings against declared runtime floors.
 
@@ -369,7 +371,7 @@ _BASELINE_FLOOR_PREFIXES = ("GLIBC", "GLIBCXX", "CXXABI")
 
 
 def check_platform_baseline_floor(
-    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Check a binary's own required GLIBC/GLIBCXX/CXXABI floor against a
     declared platform-baseline promise (e.g. a manylinux wheel tag) (G10, G27).
@@ -568,7 +570,7 @@ def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
 
 
 def check_musllinux_glibc_dependency(
-    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Flag a musllinux-tagged binary that actually requires glibc (G27).
 

@@ -27,10 +27,24 @@ own contract as invariants, independent of ``CompareRequest``, per this
 repo's "Primitive-level property tests" convention (root ``AGENTS.md``):
 hash/eq agreement, order-independence of the ``runtime_floors`` dict, and
 that two matrices with genuinely different content are distinguishable.
+
+A follow-up review round found the first fix incomplete: making the class
+hashable via a projection computed fresh inside ``__hash__`` does not
+satisfy the actual Python hash contract when the fields it projects
+(``runtime_floors``: ``dict``, ``compilers``: ``list``) remain directly
+mutable after construction -- mutating either one changes the computed hash
+out from under a dict/set the instance was already inserted into. The
+``TestGenuineImmutability`` class below states and checks that stronger
+invariant directly: the containers themselves are frozen (a ``dict``
+mutation raises / a ``tuple`` has no in-place mutation method), not merely
+"nothing today happens to mutate them."
 """
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
+import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.environment_matrix import (
@@ -170,3 +184,105 @@ def test_property_hash_is_a_pure_function_of_content(
     if a_floors != b_floors:
         b = EnvironmentMatrix(runtime_floors=dict(b_floors))
         assert a1 != b
+
+
+# ---------------------------------------------------------------------------
+# Genuine immutability: the hash contract requires the *containers*, not
+# just "nothing currently mutates them", to be frozen (Codex review, P2
+# follow-up, PR #1221).
+# ---------------------------------------------------------------------------
+
+
+class TestGenuineImmutability:
+    def test_runtime_floors_is_a_mapping_proxy_not_a_plain_dict(self) -> None:
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        assert isinstance(matrix.runtime_floors, MappingProxyType)
+
+    def test_runtime_floors_item_assignment_raises(self) -> None:
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        with pytest.raises(TypeError):
+            matrix.runtime_floors["GLIBC"] = "2.34"  # type: ignore[index]
+
+    def test_mutating_the_original_dict_after_construction_does_not_leak_in(
+        self,
+    ) -> None:
+        """`runtime_floors` must be a *copy*-backed view, not a proxy over
+        the caller's own dict -- otherwise a caller mutating the dict it
+        passed in still changes this instance's (and its hash's) content."""
+        source = {"GLIBC": "2.28"}
+        matrix = EnvironmentMatrix(runtime_floors=source)
+        original_hash = hash(matrix)
+        source["GLIBC"] = "2.34"
+        assert matrix.runtime_floors == {"GLIBC": "2.28"}
+        assert hash(matrix) == original_hash
+
+    def test_compilers_is_a_tuple(self) -> None:
+        matrix = EnvironmentMatrix(compilers=["gcc-13", "clang-17"])
+        assert isinstance(matrix.compilers, tuple)
+        assert not hasattr(matrix.compilers, "append")
+
+    def test_sycl_backends_is_a_tuple(self) -> None:
+        sycl = SyclConstraints(backends=["level_zero", "opencl"])
+        assert isinstance(sycl.backends, tuple)
+
+    def test_cuda_gpu_architectures_is_a_tuple(self) -> None:
+        cuda = CudaConstraints(gpu_architectures=["sm_80", "sm_90"])
+        assert isinstance(cuda.gpu_architectures, tuple)
+
+    def test_dict_lookup_survives_a_mutation_that_would_have_broken_it(
+        self,
+    ) -> None:
+        """The regression this whole fix defends against, stated directly:
+        before genuine immutability, `matrix.runtime_floors["GLIBC"] =
+        "2.34"` on a matrix already inserted into a dict/set silently
+        changed its hash, making it unfindable in that container
+        afterward. Now the mutation attempt itself raises, so the
+        container membership is never even put at risk."""
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        cache = {matrix: "resolved"}
+        with pytest.raises(TypeError):
+            matrix.runtime_floors["GLIBC"] = "2.34"  # type: ignore[index]
+        # The matrix is still findable by an equal-but-distinct instance,
+        # exactly as it was before the (rejected) mutation attempt.
+        lookup = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        assert cache[lookup] == "resolved"
+
+    def test_runtime_floors_get_still_works_like_a_dict(self) -> None:
+        """The friendlier half of the fix: callers across the codebase read
+        `runtime_floors` via `.get(...)` (`checker.py`, `workflows.
+        env_matrix_audit`, `extract.wheel_tags`) -- a `MappingProxyType`
+        must keep supporting that read-only interface identically to a
+        plain `dict`."""
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        assert matrix.runtime_floors.get("GLIBC") == "2.28"
+        assert matrix.runtime_floors.get("MISSING") is None
+        assert matrix.runtime_floors.get("MISSING", "default") == "default"
+        assert "GLIBC" in matrix.runtime_floors
+        assert dict(matrix.runtime_floors.items()) == {"GLIBC": "2.28"}
+        assert len(matrix.runtime_floors) == 1
+
+
+class TestSetMembershipSurvivesInsertionAndLookupByEqualInstance:
+    """Regression test for the specific hash/container invariant this fix
+    restores: insert a real instance into a dict/set, then look it up again
+    via a separately-constructed but equal instance."""
+
+    def test_dict_membership(self) -> None:
+        a = EnvironmentMatrix(
+            runtime_floors={"GLIBC": "2.28", "CXXABI": "1.3.13"},
+            compilers=["gcc-13"],
+        )
+        cache: dict[EnvironmentMatrix, str] = {a: "resolved"}
+        b = EnvironmentMatrix(
+            runtime_floors={"CXXABI": "1.3.13", "GLIBC": "2.28"},
+            compilers=["gcc-13"],
+        )
+        assert cache[b] == "resolved"
+
+    def test_set_membership(self) -> None:
+        a = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        b = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        s = {a}
+        assert b in s
+        s.add(b)
+        assert len(s) == 1
