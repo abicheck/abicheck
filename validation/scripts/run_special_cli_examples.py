@@ -386,7 +386,18 @@ def _run_audit_case(
         errors.append(
             f"exit code {execution['returncode']}, expected 0 (audit-only, no --severity-preset)"
         )
-    if payload.get("exit_code") not in (0, None):
+    # Presence, not just value: `abicheck/schemas/audit_report.schema.json`
+    # lists `exit_code` in its `required` set, so a renderer that dropped the
+    # field would be off-contract -- and `.get(...) not in (0, None)` would
+    # have waved that through, since an absent field reads as None (Codex
+    # review). This lane is the end-to-end check of the rendered document;
+    # accepting a missing required field is exactly what it must not do.
+    if "exit_code" not in payload:
+        errors.append(
+            "audit JSON is missing the required `exit_code` field "
+            "(audit_report.schema.json lists it in `required`)"
+        )
+    elif payload.get("exit_code") != 0:
         errors.append(f"JSON exit_code {payload.get('exit_code')!r}, expected 0")
     if got is not None:
         errors.append(f"audit verdict {got!r}, expected null (ADR-068 D2)")
