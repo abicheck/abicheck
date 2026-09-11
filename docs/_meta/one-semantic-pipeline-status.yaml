@@ -403,12 +403,12 @@ concepts:
       for this use).
 
       The single-artifact sectioned document (Phase 8, distinct from this
-      concept's own Phase 8B) is already `dump`/`compare`/`scan`'s default
+      concept's own Phase 8B) is already `dump`/`compare`'s default
       write/read shape -- that part of `authority: mixed`'s legacy side is
       closed. What remains is specific to the *multi-artifact package*
       half this concept names: it is reachable only as a typed-API
-      primitive and an explicit `compare`/`scan --against` input shape,
-      never `dump`/`compare`/`scan`'s own default path -- a user who
+      primitive and an explicit `compare` input shape,
+      never `dump`/`compare`'s own default path -- a user who
       doesn't explicitly build or pass a package still gets the
       pre-existing single-artifact representation. Per
       docs/contribute/plans/storage-format-v2.md's own Phase 1 status,
