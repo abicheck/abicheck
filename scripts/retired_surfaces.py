@@ -848,11 +848,22 @@ def retired_surface_scan_targets(
     the same way every other one-directory-further-out gap in this
     function's own history was (Codex review, fresh evidence).
 
+    `examples/workflows/**/*.md` is here for the same class of gap one
+    more directory over: `examples/CLAUDE.md`'s curated, task-oriented
+    workflow tree (`compare-release`, `audit-release`, `github-actions`,
+    ...) is a small set of hand-written READMEs a new user runs end to
+    end, distinct from both `docs/` and the `catalog/cases/case*/README.md`
+    calibration-fixture sources already covered above -- one cross-linked
+    a retired `mode: scan` spelling while this sweep stayed green because
+    neither `docs.rglob` nor the `cases.glob` pattern above ever walks
+    `examples/` at all (Codex review, fresh evidence).
+
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
     `catalog/ground_truth.json`, `README.md`, `AGENTS.md`,
-    `tools/<tool>/README.md`), which cannot collide with a docs-relative
-    key, so an allowlist entry stays unambiguous.
+    `tools/<tool>/README.md`, `examples/workflows/<name>/README.md`), which
+    cannot collide with a docs-relative key, so an allowlist entry stays
+    unambiguous.
     """
     targets = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
     targets += [
@@ -876,6 +887,12 @@ def retired_surface_scan_targets(
         targets += [
             (p, f"tools/{p.relative_to(tools_dir).as_posix()}")
             for p in sorted(tools_dir.rglob("*.md"))
+        ]
+    workflows_dir = root / "examples" / "workflows"
+    if workflows_dir.is_dir():
+        targets += [
+            (p, f"examples/workflows/{p.relative_to(workflows_dir).as_posix()}")
+            for p in sorted(workflows_dir.rglob("*.md"))
         ]
     return targets
 

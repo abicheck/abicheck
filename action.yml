@@ -871,6 +871,12 @@ outputs:
       tell "nothing found" apart from "something found, not gating" --
       both exit 0, neither fails the step, but only one has something
       worth reading in the JSON report's findings[]),
+      ANALYSIS_INCOMPLETE (with the require-complete-analysis input, when
+      analysis_assurance.status is not "complete" -- the same P0.4
+      orthogonal assurance axis as the two-sided shape above, reachable
+      here since require-complete-analysis applies to both compare shapes;
+      not a two-sided compatibility verdict either, since no baseline was
+      compared -- fails the step unconditionally),
       NOT_COMPARABLE (when the candidate and baseline were not extracted
       under a comparable profile/scope contract -- ADR-050 D2 -- so no
       comparison could run at all; this verdict fails the step
