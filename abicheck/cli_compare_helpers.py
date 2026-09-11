@@ -975,17 +975,34 @@ def _report_compare_result(
     require_complete_analysis: bool = False,
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
+    project_config_path: Path | None = None,
+    project_config_sha256: str | None = None,
 ) -> None:
     """Everything after the comparison: scope, render, exit.
 
     ``run_compare``'s third phase (resolve -> compare -> report), split out so
     each reads as one job. Terminal: ends in
     :func:`_exit_with_severity_or_verdict`, which never returns.
+
+    *project_config_path*/*project_config_sha256* are ``run_compare``'s own
+    already-resolved ``cfg_path``/``cfg_sha`` (the ``.abicheck.yml``
+    ``_resolve_compare_config`` loaded for this same invocation) -- forwarded
+    to :func:`~abicheck.cli_compare_receipt.record_resolved_config` so a
+    ``gate.require_complete_analysis`` receipt entry can name the real
+    document/digest that supplied ``assurance.require_complete``, the same
+    identity every other project-config-sourced provenance entry in this
+    receipt already carries (P2, Codex review, fresh evidence).
     """
     from .cli_buildsource import attach_evidence_metrics
     from .cli_compare_receipt import record_resolved_config
 
-    record_resolved_config(result, resolved_cfg, evaluation_config)
+    record_resolved_config(
+        result,
+        resolved_cfg,
+        evaluation_config,
+        project_config_path=project_config_path,
+        project_config_sha256=project_config_sha256,
+    )
 
     # P0.4 (P1 review, round 9): `DiffResult.requested_depth` -- the G30
     # report-identity field `analysis_assurance.compute_analysis_assurance`
@@ -1997,4 +2014,6 @@ def run_compare(
         require_complete_analysis=require_complete_analysis,
         depth=depth,
         use_cases_manifest=use_cases_manifest,
+        project_config_path=cfg_path,
+        project_config_sha256=cfg_sha,
     )

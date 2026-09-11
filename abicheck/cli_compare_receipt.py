@@ -581,8 +581,22 @@ def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
     config: Any,
+    *,
+    project_config_path: Any = None,
+    project_config_sha256: str | None = None,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
+
+    *project_config_path*/*project_config_sha256* identify the real
+    ``.abicheck.yml`` document this same invocation already resolved (the
+    caller's own ``cfg_path``/``cfg_sha`` -- what built *config*'s other
+    project-config-sourced ``provenance`` entries in the first place).
+    Threaded through to :func:`~abicheck.contract_context.with_resolved_gate`
+    so a ``gate.require_complete_analysis`` entry sourced from
+    ``assurance.require_complete`` can name the same document/digest every
+    other project-config-sourced entry in this receipt already carries,
+    rather than a layer-only stub (P2, Codex review, fresh evidence). Not
+    re-read here -- only forwarded.
 
     A no-op unless ``--contract`` produced a context (and unless
     the caller resolved a *config* at all -- a run with neither
@@ -644,6 +658,10 @@ def record_resolved_config(
         # inconsistency in the one receipt documented as the complete
         # resolved configuration.
         require_complete_analysis=resolved_cfg.require_complete_analysis,
+        project_config_path=(
+            str(project_config_path) if project_config_path is not None else None
+        ),
+        project_config_sha256=project_config_sha256,
     )
 
 

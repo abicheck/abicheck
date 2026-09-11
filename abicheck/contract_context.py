@@ -415,6 +415,8 @@ def with_resolved_gate(
     severity: SeverityConfig,
     severity_provenance: Mapping[str, ValueProvenance],
     require_complete_analysis: bool | None = None,
+    project_config_path: str | None = None,
+    project_config_sha256: str | None = None,
 ) -> PersistedContractContext:
     """Return *context* with the front end's real gate configuration recorded.
 
@@ -480,6 +482,24 @@ def with_resolved_gate(
     only one possible non-default origin. ``False``/``None`` get no entry,
     the same "absent, not defaulted" rule *severity_provenance* follows for
     an unsupplied category.
+
+    *project_config_path*/*project_config_sha256* identify the exact
+    ``.abicheck.yml`` document that supplied ``assurance.require_complete``
+    -- the same path/digest identity every OTHER project-config-sourced
+    ``field_provenance`` entry in this same receipt already carries (e.g.
+    the ``policy.overrides``/``surface.internal_namespaces`` entries
+    ``compatibility_evaluation_frontend.py`` builds with
+    ``path=project_path, sha256=project_sha256``). Without them, a project
+    whose ``.abicheck.yml`` sets ONLY ``assurance.require_complete`` (no
+    other override) left this entry naming just the layer -- unable to
+    identify or replay which exact document/revision enabled the gate
+    (P2, Codex review, fresh evidence). The caller already has these values
+    resolved for the SAME request (they are what built *config*'s own other
+    project-config-sourced entries); this function only threads them
+    through rather than re-reading the file a second time. ``None`` for
+    either (the release fan-out's own caller, which has no project-config
+    document of its own to name here) falls back to the layer-only entry
+    this function has always produced.
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
 
@@ -490,7 +510,22 @@ def with_resolved_gate(
     if require_complete_analysis:
         provenance["gate.require_complete_analysis"] = ValueProvenance(
             layer=SelectorLayer.PROJECT_CONFIG,
+            source_kind="project_config" if project_config_path else None,
+            path=project_config_path,
+            sha256=project_config_sha256,
             field_location="assurance.require_complete",
+            selected_by=(
+                (
+                    SelectedByEntry(
+                        layer=SelectorLayer.PROJECT_CONFIG,
+                        option="assurance.require_complete",
+                        path=project_config_path,
+                        sha256=project_config_sha256,
+                    ),
+                )
+                if project_config_path
+                else ()
+            ),
         )
     resolved_require_complete_analysis = (
         config.gate.require_complete_analysis

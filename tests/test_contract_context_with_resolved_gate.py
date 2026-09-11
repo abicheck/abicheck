@@ -62,6 +62,8 @@ def _apply(
     ctx: PersistedContractContext,
     *,
     require_complete_analysis: bool | None = None,
+    project_config_path: str | None = None,
+    project_config_sha256: str | None = None,
 ) -> PersistedContractContext:
     return with_resolved_gate(
         ctx,
@@ -74,6 +76,8 @@ def _apply(
         ),
         severity_provenance={},
         require_complete_analysis=require_complete_analysis,
+        project_config_path=project_config_path,
+        project_config_sha256=project_config_sha256,
     )
 
 
@@ -192,3 +196,69 @@ class TestWithResolvedGateStampsRequireCompleteAnalysisProvenance:
         result = _apply(ctx, require_complete_analysis=None)
         provenance = result.evaluation_context.resolved_config.provenance
         assert "gate.require_complete_analysis" not in provenance
+
+
+class TestWithResolvedGateThreadsProjectConfigIdentity:
+    """P2 (Codex review, fresh evidence): the ``gate.require_complete_
+    analysis`` provenance entry stamped above named only the generic
+    ``PROJECT_CONFIG`` layer and ``field_location`` -- unlike every OTHER
+    project-config-sourced ``field_provenance`` entry in the same receipt
+    (e.g. ``policy.overrides``/``surface.internal_namespaces``, built in
+    ``compatibility_evaluation_frontend.py`` with a real ``path``/``sha256``
+    and a ``selected_by`` hop), it carried no path, no digest, and no
+    ``selected_by`` hop identifying the actual ``.abicheck.yml`` document
+    that supplied it. For a project whose config sets ONLY
+    ``assurance.require_complete`` (no other override), the persisted
+    receipt could not identify or replay which exact file/revision enabled
+    the gate. Fixed by threading the caller's already-resolved project-
+    config path/digest through ``with_resolved_gate``'s own
+    ``project_config_path``/``project_config_sha256`` parameters, mirroring
+    the shape those other entries already use."""
+
+    def test_provenance_entry_carries_real_path_and_digest(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(
+            ctx,
+            require_complete_analysis=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="deadbeef" * 8,
+        )
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+        assert entry.source_kind == "project_config"
+        assert entry.path == "/repo/.abicheck.yml"
+        assert entry.sha256 == "deadbeef" * 8
+
+    def test_provenance_entry_carries_a_selected_by_hop(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(
+            ctx,
+            require_complete_analysis=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="cafef00d" * 8,
+        )
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert len(entry.selected_by) == 1
+        hop = entry.selected_by[0]
+        assert hop.layer is SelectorLayer.PROJECT_CONFIG
+        assert hop.option == "assurance.require_complete"
+        assert hop.path == "/repo/.abicheck.yml"
+        assert hop.sha256 == "cafef00d" * 8
+
+    def test_no_path_falls_back_to_the_layer_only_stub(self) -> None:
+        """The release fan-out's own caller has no project-config document
+        of its own to name -- omitting both parameters must keep producing
+        exactly the pre-existing layer-only entry, not a broken/partial one."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=True)
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+        assert entry.path is None
+        assert entry.sha256 is None
+        assert entry.source_kind is None
+        assert entry.selected_by == ()

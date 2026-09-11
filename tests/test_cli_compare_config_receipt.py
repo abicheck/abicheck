@@ -840,3 +840,104 @@ class TestRequireCompleteAnalysisFieldProvenance:
             "field_provenance"
         ]
         assert "gate.require_complete_analysis" not in field_provenance
+
+
+class TestRequireCompleteAnalysisProvenanceIdentity:
+    """P2 (Codex review, fresh evidence after
+    ``TestRequireCompleteAnalysisFieldProvenance`` above landed): the
+    provenance entry named the ``project_config`` layer but not the config
+    document itself -- for a project whose ``.abicheck.yml`` sets ONLY
+    ``assurance.require_complete`` (no other override, so no OTHER
+    field_provenance entry happens to name the same file), the persisted
+    receipt could not identify or replay which exact file/digest enabled
+    the gate. Fixed by threading the real, already-resolved project-config
+    path/digest through ``record_resolved_config`` -> ``with_resolved_gate``
+    (``cli_compare_receipt.py``, ``contract_context.py``)."""
+
+    def test_provenance_entry_names_the_real_config_path_and_digest(
+        self, tmp_path: Path
+    ) -> None:
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        entry = field_provenance.get("gate.require_complete_analysis")
+        assert entry is not None, field_provenance
+        # Not a bare stub: the entry identifies the actual document (path
+        # and content digest), the same identity every other project-
+        # config-sourced field_provenance entry in this receipt carries.
+        assert entry["path"] == str(config_path), entry
+        assert entry.get("sha256"), entry
+        selected_by = entry.get("selected_by") or []
+        assert len(selected_by) == 1, entry
+        hop = selected_by[0]
+        assert hop["layer"] == "project_config", hop
+        assert hop["option"] == "assurance.require_complete", hop
+        assert hop["path"] == str(config_path), hop
+        assert hop.get("sha256"), hop
+
+    def test_a_config_setting_only_assurance_still_identifies_itself(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario the finding names: a project config with NO
+        other override -- so no sibling field_provenance entry happens to
+        carry the same path/digest this one must supply for itself."""
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        # No other field in this minimal config contributed a provenance
+        # entry at the project_config layer for this same document --
+        # this entry is the only place that identity can come from.
+        other_project_entries = {
+            key: value
+            for key, value in field_provenance.items()
+            if key != "gate.require_complete_analysis"
+            and value.get("layer") == "project_config"
+        }
+        assert other_project_entries == {}, field_provenance
+        entry = field_provenance["gate.require_complete_analysis"]
+        assert entry["path"] == str(config_path), entry
+        assert entry.get("sha256"), entry
