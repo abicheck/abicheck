@@ -4,8 +4,33 @@
 # rationale for the root Action. See action.yml for the full input contract.
 set -euo pipefail
 
+# Workflow-command injection defense (bug class
+# `trust_boundary.shell_workflow_injection`; #705 -> #758 -> #1222). Every
+# _fail message below interpolates at least one INPUT_* value -- including
+# the newly-public analysis-assurance-complete -- and every one of those is
+# workflow-controlled per action/AGENTS.md's "treat every INPUT_*/GITHUB_*
+# as untrusted" rule. A GitHub annotation is line-delimited, so a value
+# carrying a raw or escaped newline lets the remainder start a *new*
+# workflow command (a smuggled "::add-mask::..." or another "::error::...").
+# Escaping matches GitHub's own documented message-data order (%->%25 first,
+# then CR->%0D, LF->%0A) -- identical to action/run.sh's and
+# actions/check-target/action.yml's own `_gha_escape` helpers, mirrored here
+# (rather than sourced) since this script runs standalone with no import
+# path back to either.
+_gha_escape() {
+  local s="${1//%/%25}"
+  s="${s//$'\r'/%0D}"
+  s="${s//$'\n'/%0A}"
+  printf '%s' "$s"
+}
+
 _fail() {
-  echo "::error::$1"
+  # printf, never echo: with xpg_echo on, echo expands backslash escapes in
+  # its argument, so a value carrying the *literal* characters "\n::error::"
+  # would pass the escaping above (it holds no real newline to escape) and
+  # then be turned into one by the emitter itself. printf '%s\n' treats the
+  # message as data under every shell option.
+  printf '%s\n' "::error::$(_gha_escape "$1")"
   exit 64
 }
 

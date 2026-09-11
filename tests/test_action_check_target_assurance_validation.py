@@ -159,3 +159,53 @@ class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(),
+    reason="actions/check-target/validate-inputs.sh not found",
+)
+class TestAssuranceOverlayEscapesWorkflowCommandInjection:
+    """P2 finding (Codex review, PR #1222): ``_fail`` in
+    ``actions/check-target/validate-inputs.sh`` interpolated its caller's
+    raw message straight into ``echo "::error::$1"`` with no escaping --
+    the same ``trust_boundary.shell_workflow_injection`` class already
+    fixed twice on this branch (``action/run.sh``'s own ``_gha_escape``
+    helper, and ``actions/check-target/action.yml``'s Python-heredoc
+    ``_gha_escape``). Since the enum-validation guard above rejects an
+    unrecognized ``analysis-assurance-complete`` value by echoing it back
+    verbatim in the error message, a direct ``check-target`` caller (this
+    input is a plain composite-action input, fully attacker-controlled per
+    ``action/AGENTS.md``'s "treat every INPUT_*/GITHUB_* as untrusted"
+    rule) could pass a multiline value embedding a smuggled
+    ``::add-mask::``/``::error::`` line, which GitHub's line-delimited
+    workflow-command parser would then treat as a second, attacker-authored
+    command. Fixed by adding a ``_gha_escape`` helper to this script
+    (``%``->``%25``, CR->``%0D``, LF->``%0A``, identical to the other two
+    fixes' scheme) and routing ``_fail`` through it via ``printf`` instead
+    of raw ``echo``."""
+
+    def test_newline_in_assurance_value_does_not_smuggle_a_command(
+        self, tmp_path: Path
+    ) -> None:
+        evil_value = "true\n::add-mask::pwned"
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": evil_value,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+        combined = result.stdout + result.stderr
+        assert "::error::" in combined
+        # The raw newline the malicious input value contained must never
+        # reach the annotation stream unescaped -- every line but the
+        # first must NOT itself start a new `::`-prefixed workflow
+        # command (a real second `::error::`/`::add-mask::` line would
+        # mean the injection landed).
+        lines = combined.splitlines()
+        assert not any(line.startswith("::") for line in lines[1:])
+        assert "%0A::add-mask::pwned" in combined
