@@ -683,8 +683,24 @@ runs:
                     )
                 data = loaded
         assurance = data.get("assurance")
-        if not isinstance(assurance, dict):
+        # Only a missing key or an explicit null/empty value is safe to
+        # treat as "no assurance block yet" and overlay onto. Normal
+        # BuildConfig ingestion (buildsource/build_config.py) rejects any
+        # other non-mapping assurance: value (a bool, a bare string, a
+        # list, a number) as a schema error outright -- silently replacing
+        # one with {} here would make an otherwise-invalid project config
+        # "valid" the moment this workflow gate is enabled, discarding the
+        # user's actual (malformed) value instead of surfacing their
+        # mistake (Codex review).
+        if assurance is None:
             assurance = {}
+        elif not isinstance(assurance, dict):
+            raise SystemExit(
+                f"::error::{base_path or '<build-config>'}: assurance: must be "
+                "a mapping (or omitted/null), got "
+                f"{type(assurance).__name__} ({assurance!r}) -- cannot merge "
+                "an assurance.require_complete overlay into it."
+            )
         # Additive over whatever the base config already declared under
         # assurance: -- only require_complete is forced to true, exactly the
         # one field this overlay exists to set.

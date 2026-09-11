@@ -52,11 +52,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+from _workflow_exec import make_workspace, run_step
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECK_PROJECT = _REPO_ROOT / ".github" / "workflows" / "check-project.yml"
 CHECK_TARGET_ACTION = _REPO_ROOT / "actions" / "check-target" / "action.yml"
+
+
+def _overlay_step() -> dict[str, Any]:
+    data = _load(CHECK_TARGET_ACTION)
+    return next(s for s in data["runs"]["steps"] if s.get("id") == "assurance_overlay")
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -160,3 +167,104 @@ class TestAnalysisAssuranceCompleteConfigOverlay:
             encoding="utf-8"
         )
         assert 'ASSURANCE_OVERLAY_OUTCOME" == "failure"' in run_sh
+
+
+class TestAssuranceOverlayGenerationExecuted:
+    """Executes the "Generate assurance-overlay config" step's real Python
+    body (not just its text) against real ``build-config`` YAML files, per
+    this repo's own "asserting text proves nothing about behavior" rule
+    (``tests/_workflow_exec.py``'s module docstring, #705 -> #758).
+
+    Codex review (PR #1222, fresh evidence after the earlier receipt fix):
+    the merge logic used to do ``assurance = data.get("assurance"); if not
+    isinstance(assurance, dict): assurance = {}`` -- which *silently
+    replaces* a malformed ``assurance:`` value (a bool, a bare string, a
+    list) with ``{}`` instead of erroring, even though normal ``BuildConfig``
+    ingestion rejects every one of those shapes as a schema violation. Only
+    a missing key or an explicit ``null`` should be treated as "safe to
+    overlay onto"; anything else must fail the step loudly.
+    """
+
+    def _run(self, tmp_path: Path, base_config_yaml: str | None) -> Any:
+        workspace = make_workspace(tmp_path)
+        env = {}
+        if base_config_yaml is not None:
+            config_path = workspace / "build-config.yml"
+            config_path.write_text(base_config_yaml, encoding="utf-8")
+            env["BASE_CONFIG"] = str(config_path)
+        else:
+            env["BASE_CONFIG"] = ""
+        return run_step(_overlay_step(), workspace=workspace, env=env)
+
+    def test_no_base_config_produces_a_clean_overlay(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, None)
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (result.workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written == {"assurance": {"require_complete": True}}
+
+    def test_missing_assurance_key_is_overlaid(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, "targets: {}\n")
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (result.workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written["assurance"] == {"require_complete": True}
+        assert written["targets"] == {}
+
+    def test_explicit_null_assurance_is_overlaid(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, "assurance: null\n")
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (result.workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written["assurance"] == {"require_complete": True}
+
+    def test_existing_mapping_assurance_is_merged_additively(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._run(tmp_path, "assurance:\n  some_other_field: true\n")
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (result.workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written["assurance"] == {
+            "some_other_field": True,
+            "require_complete": True,
+        }
+
+    @pytest.mark.parametrize(
+        "malformed_yaml",
+        [
+            pytest.param("assurance: false\n", id="bool"),
+            pytest.param("assurance: complete\n", id="bare-string"),
+            pytest.param("assurance:\n  - one\n  - two\n", id="list"),
+            pytest.param("assurance: 3\n", id="number"),
+        ],
+    )
+    def test_malformed_assurance_block_fails_loud_not_silently_discarded(
+        self, tmp_path: Path, malformed_yaml: str
+    ) -> None:
+        """The bug this finding names: none of these shapes may be silently
+        replaced with ``{}`` -- every one must fail the step instead."""
+        result = self._run(tmp_path, malformed_yaml)
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        assert "assurance" in result.stderr
+        assert not (result.workspace / "check-target-assurance-config.yml").exists()
+
+    def test_non_mapping_whole_document_still_fails_loud(self, tmp_path: Path) -> None:
+        """Negative control for the pre-existing top-level guard, exercised
+        the same executing way as the new assurance-shape guard above."""
+        result = self._run(tmp_path, "- just\n- a\n- list\n")
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
