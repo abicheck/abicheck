@@ -158,3 +158,63 @@ def test_same_content_tracks_the_conditional_from_headers_drop() -> None:
     assert not _same_content(explicit, inferred)
     assert not _same_content(inferred, explicit)
     assert snapshot_content_digest(explicit) != snapshot_content_digest(inferred)
+
+
+def test_no_unlisted_scalar_field_is_digest_irrelevant() -> None:
+    """The drift this constant could otherwise suffer, made mechanical
+    rather than argued (Codex review, PR #1229): the risk is not that a
+    listed field stops being dropped — the checks above catch that — but
+    that the codec starts dropping a NEW field and nobody adds it here, so
+    `_same_content` keeps comparing something the digest ignores and
+    reports `degraded` for a pair that persists identically.
+
+    So rather than trusting the list, this sweeps every `AbiSnapshot`
+    field it can give a scalar value to — including the many that default
+    to `None`, which is where a new provenance qualifier would start life
+    — and asserts that setting it DOES change `snapshot_content_digest`
+    unless the field is already listed. A newly-dropped field fails here
+    on the commit that drops it, without anyone remembering this file
+    exists.
+
+    Verified to bite rather than pass vacuously: adding a `d.pop(...)` for
+    an unlisted field to `snapshot_to_dict` fails this test."""
+    from dataclasses import fields
+
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    #: Tried in order; the first that both assigns and encodes is used, so
+    #: a `str | None` field is exercised as a string and a `bool` as a
+    #: flipped bool.
+    _CANDIDATES: tuple[object, ...] = ("perturbed-value", 1, True)
+
+    swept: list[str] = []
+    digest_irrelevant: list[str] = []
+    for f in fields(AbiSnapshot):
+        snap = AbiSnapshot(version="1.0", library="libfoo.so.1")
+        try:
+            baseline = snapshot_content_digest(snap)
+        except Exception:  # pragma: no cover - a default snapshot must encode
+            raise
+        current = getattr(snap, f.name)
+        candidates = (not current,) if isinstance(current, bool) else _CANDIDATES
+        for candidate in candidates:
+            if candidate == current:
+                continue
+            setattr(snap, f.name, candidate)
+            try:
+                perturbed_digest = snapshot_content_digest(snap)
+            except Exception:
+                setattr(snap, f.name, current)
+                continue
+            swept.append(f.name)
+            if perturbed_digest == baseline:
+                digest_irrelevant.append(f.name)
+            break
+
+    assert len(swept) > 25, f"sweep covered too little to be meaningful: {swept}"
+    unlisted = set(digest_irrelevant) - RUNTIME_ONLY_FIELDS
+    assert unlisted == set(), (
+        "these fields do not reach persisted content but are not in "
+        "RUNTIME_ONLY_FIELDS, so _same_content compares what the digest "
+        f"ignores: {sorted(unlisted)}"
+    )
