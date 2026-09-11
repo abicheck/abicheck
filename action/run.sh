@@ -1955,15 +1955,18 @@ fi
 # install for the composite Action's own callers; this is the identical
 # check for anyone invoking run.sh directly (e.g. tests), same rationale as
 # every other validate-inputs.sh mirror in this file.
-# ---------------------------------------------------------------------------
-if [[ "$MODE" == "scan" ]]; then
-  if [[ ( -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ) && "${INPUT_AUDIT:-false}" != "true" ]]; then
-    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
-  else
-    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
-  fi
-  exit 1
-fi
+#
+# `against`/`estimate`/`audit` are checked BEFORE `mode: scan` itself
+# (CodeRabbit review, fresh evidence) -- matching
+# `action/validate-inputs.sh`'s own order (its retired-input checks run
+# ahead of its `case "$MODE" in scan) ...` arm), so the same combination of
+# inputs reports the identical error from either script. An earlier
+# revision of this block checked `mode: scan` first, which for e.g.
+# `mode: scan` + `against: old.so` reported "mode: scan is no longer
+# supported" here while validate-inputs.sh's preflight -- which runs first
+# in the real composite Action, so a caller normally never reaches this
+# copy at all -- reported "against is no longer supported" for the
+# identical inputs.
 if [[ -n "${INPUT_AGAINST:-}" ]]; then
   echo "::error::against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
   exit 1
@@ -1974,6 +1977,14 @@ if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
 fi
 if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
   echo "::error::audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
+  exit 1
+fi
+if [[ "$MODE" == "scan" ]]; then
+  if [[ ( -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ) && "${INPUT_AUDIT:-false}" != "true" ]]; then
+    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
+  else
+    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
+  fi
   exit 1
 fi
 # new-library-set/risk-rules/crosscheck applied only to the now fully-

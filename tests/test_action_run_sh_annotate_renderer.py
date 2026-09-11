@@ -95,12 +95,37 @@ _REPORT_WITH_ANNOTATIONS = {
 
 
 def _emitted_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
-    """Every exact stdout/stderr line starting with a workflow-command
-    sigil (``::error``/``::warning``/``::notice``) -- what the renderer
-    itself printed, as opposed to a byte range of the raw JSON dump that
-    happens to contain the same text."""
+    """Every exact stdout/stderr line starting with a *titled*
+    workflow-command sigil (``::error title=...``/``::warning title=...``/
+    ``::notice title=...``) -- what the annotate renderer itself prints
+    (every annotation it emits carries a title), as opposed to a byte
+    range of the raw JSON dump that happens to contain the same text, or
+    an untitled ``::error::``/``::warning::``/``::notice::`` line emitted
+    by a wholly different part of run.sh (e.g. its own severity-gate
+    error) that happens to share the sigil. Several tests below rely on
+    this file-scoped meaning: `test_annotate_false_emits_nothing` and
+    siblings assert an empty list specifically to prove the *renderer*
+    stayed silent, even on a run whose real severity gate legitimately
+    emits its own untitled ``::error::`` -- widening this filter to match
+    every sigil unconditionally would make those assertions fail on
+    unrelated, correct output."""
     lines = (result.stdout + result.stderr).splitlines()
     return [ln for ln in lines if ln.startswith(("::error ", "::warning ", "::notice "))]
+
+
+def _has_any_error_command(result: subprocess.CompletedProcess[str]) -> bool:
+    """Whether stdout/stderr carries a real ``::error`` workflow command,
+    titled or untitled -- unlike :func:`_emitted_lines`, not scoped to the
+    annotate renderer's own titled output. Matches both GitHub
+    workflow-command spellings: titled (``::error title=...::message``, a
+    space after the sigil before the ``title=`` parameter) and untitled
+    (``::error::message``, the sigil followed directly by ``::``) --
+    CodeRabbit review, fresh evidence. A caller checking "no error at all
+    occurred" (as opposed to "the renderer stayed silent") wants this, not
+    `_emitted_lines`, whose titled-only filter would silently let an
+    untitled ``::error::`` line through unnoticed."""
+    lines = (result.stdout + result.stderr).splitlines()
+    return any(ln.startswith(("::error ", "::error::")) for ln in lines)
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -560,4 +585,4 @@ class TestAnnotateNotSupportedOnAuditOnlyShape:
         )
         combined = result.stdout + result.stderr
         assert "annotate is not supported for compare's audit-only shape" in combined, combined
-        assert "::error" not in _emitted_lines(result), combined
+        assert not _has_any_error_command(result), combined
