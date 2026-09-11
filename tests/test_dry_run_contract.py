@@ -15,14 +15,15 @@
 
 """Shared ``--dry-run`` contract behavior tests (ADR-043 D4).
 
-``dump``, ``compare``, ``scan``, ``deps tree``, and ``deps compare`` all share
-one ``DryRunResult`` model/renderer (``abicheck/dry_run.py``). This module
-pins the cross-command contract behaviorally: deterministic output, no file
+``dump``, ``compare``, ``deps tree``, and ``deps compare`` all share one
+``DryRunResult`` model/renderer (``abicheck/dry_run.py``). This module pins
+the cross-command contract behaviorally: deterministic output, no file
 written, ``-o/--output`` rejected, and an exit code drawn only from
-``{0, 1, 64}`` — never a verdict code (``2``/``4``). ``scan --dry-run`` has
-its own dedicated coverage in ``test_cli_scan.py``/``test_scan_estimate.py``;
-this file focuses on the three commands (``dump``, ``compare``, ``deps
-tree``/``deps compare``) that previously had none.
+``{0, 1, 64}`` — never a verdict code (``2``/``4``). ``scan --dry-run`` used
+to have its own dedicated coverage in ``test_cli_scan.py``/
+``test_scan_estimate.py`` until ADR-068 Phase 6 retired the command outright;
+this file focuses on the commands (``dump``, ``compare``, ``deps
+tree``/``deps compare``) that survive it.
 """
 
 from __future__ import annotations
@@ -272,7 +273,7 @@ class TestDumpDryRun:
         # --build-info answers a real database once headers are present and
         # None when they are not, so the dry run cannot report a compile
         # context the real run would not build.
-        from abicheck.cli_dump_helpers import compile_db_from_build_info
+        from abicheck.header_conditionals import compile_db_from_build_info
 
         db = tmp_path / "compile_commands.json"
         db.write_text("[]", encoding="utf-8")
@@ -298,7 +299,7 @@ class TestDumpDryRun:
         decision point, turning a loud refusal into a silent unfiltered
         collection (Codex review); this pins the refusal.
         """
-        from abicheck.cli_dump_helpers import compile_db_filter_scope_error
+        from abicheck.header_conditionals import compile_db_filter_scope_error
 
         db = tmp_path / "compile_commands.json"
         assert compile_db_filter_scope_error("src/**", db, "source-target")
@@ -347,7 +348,7 @@ class TestDumpDryRun:
         `load_compile_db()`, which rejects a JSON object outright, so
         `--build-info aquery.json -H api.h` failed before the adapter ran
         (Codex review)."""
-        from abicheck.cli_dump_helpers import compile_db_from_build_info
+        from abicheck.header_conditionals import compile_db_from_build_info
 
         header = tmp_path / "api.h"
         header.write_text("void f(void);\n", encoding="utf-8")
@@ -559,16 +560,22 @@ class TestCompareDryRun:
         assert "effective depth: source" in result.output
         assert "inferred" in result.output
 
-    def test_dry_run_shows_cost_preview_comparable_to_scan_dry_run(
+    def test_dry_run_shows_cost_preview(
         self, tmp_path: Path, source_tree_with_compile_db: Path
     ) -> None:
         # Phase 2f (one-comparison-product.md #35): `compare --dry-run` must
-        # project L0-L5 evidence-collection cost the same way `scan --dry-run`
-        # already does -- reusing `estimate_scan`/`estimate_compare_cost`
-        # rather than a second cost model. Not asserting identical numbers
-        # (the two commands probe different operand shapes, and compare sums
-        # both sides) -- only that both previews are populated, on a
-        # comparable build/source-depth scenario.
+        # project L0-L5 evidence-collection cost, reusing
+        # `estimate_scan`/`estimate_compare_cost` (`dry_run_estimate.py`,
+        # renamed from `service_scan.py`'s own cost-model half, ADR-068 Phase
+        # 6) rather than a second cost model.
+        #
+        # Historically this also compared against `scan --dry-run`'s
+        # identical preview, to prove the two commands agreed on the cost
+        # model. ADR-068 Phase 6 retired `scan` outright, and `dump
+        # --dry-run` renders an entirely different plan-preview format (no
+        # "Cost preview:"/"projected total" banner at all -- see
+        # `render_dump_dry_run`) -- so there is no second command left whose
+        # dry-run surface this cost-preview banner could be compared against.
         old = tmp_path / "old.abi.json"
         new = tmp_path / "new.abi.json"
         _write_snapshot(old, "1.0")
@@ -586,19 +593,6 @@ class TestCompareDryRun:
         assert "Cost preview:" in result.output
         assert "L0_binary" in result.output
         assert "projected total" in result.output
-
-        scan_binary = tmp_path / "libfoo.so"
-        scan_binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
-        scan_result = CliRunner().invoke(
-            main,
-            [
-                "scan", str(scan_binary), "--dry-run",
-                "--sources", str(source_tree_with_compile_db),
-                "--depth", "source",
-            ],
-        )
-        assert scan_result.exit_code in (0, 1), scan_result.output
-        assert "projected total" in scan_result.output
 
     def test_dry_run_rejects_malformed_project_policy_override(
         self, tmp_path: Path

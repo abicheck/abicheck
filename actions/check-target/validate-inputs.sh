@@ -4,8 +4,33 @@
 # rationale for the root Action. See action.yml for the full input contract.
 set -euo pipefail
 
+# Workflow-command injection defense (bug class
+# `trust_boundary.shell_workflow_injection`; #705 -> #758 -> #1222). Every
+# _fail message below interpolates at least one INPUT_* value -- including
+# the newly-public analysis-assurance-complete -- and every one of those is
+# workflow-controlled per action/AGENTS.md's "treat every INPUT_*/GITHUB_*
+# as untrusted" rule. A GitHub annotation is line-delimited, so a value
+# carrying a raw or escaped newline lets the remainder start a *new*
+# workflow command (a smuggled "::add-mask::..." or another "::error::...").
+# Escaping matches GitHub's own documented message-data order (%->%25 first,
+# then CR->%0D, LF->%0A) -- identical to action/run.sh's and
+# actions/check-target/action.yml's own `_gha_escape` helpers, mirrored here
+# (rather than sourced) since this script runs standalone with no import
+# path back to either.
+_gha_escape() {
+  local s="${1//%/%25}"
+  s="${s//$'\r'/%0D}"
+  s="${s//$'\n'/%0A}"
+  printf '%s' "$s"
+}
+
 _fail() {
-  echo "::error::$1"
+  # printf, never echo: with xpg_echo on, echo expands backslash escapes in
+  # its argument, so a value carrying the *literal* characters "\n::error::"
+  # would pass the escaping above (it holds no real newline to escape) and
+  # then be turned into one by the emitter itself. printf '%s\n' treats the
+  # message as data under every shell option.
+  printf '%s\n' "::error::$(_gha_escape "$1")"
   exit 64
 }
 
@@ -22,6 +47,7 @@ EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
 CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
+ANALYSIS_ASSURANCE_COMPLETE="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-false}"
 
 # ── Required-input checks run before the enum/case validations below, so an
 # empty required input (name, profile, baseline-channel, requested-depth)
@@ -140,10 +166,39 @@ if [[ "$KIND" == "bundle" ]]; then
     # baseline-channel: none guard above.
     _fail "allow-new-target: true is not supported when kind is 'bundle' -- a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. Scope the new member individually with a kind: target check instead."
   fi
+  if [[ "$ANALYSIS_ASSURANCE_COMPLETE" == "true" ]]; then
+    # analysis-assurance-complete generates an assurance overlay
+    # (assurance: {require_complete: true}) and routes the internal
+    # analysis step's own `compare` invocation into a directory/package
+    # release fan-out for kind: bundle -- that fan-out has no single
+    # analysis_assurance result to gate on (one contribution per library,
+    # not one for the whole release), and cli_compare_options.py's
+    # _reject_set_input_flags rejects assurance.require_complete: true for
+    # that operand outright. abicheck/buildsource/project_targets.py's
+    # _check_issues already rejects this same combination in the
+    # generated .abicheck.yml/run-plan.json path (analysis.assurance:
+    # complete on a bundle check), but that validation never runs for a
+    # caller invoking check-target directly -- reject it here too, at the
+    # one place every caller actually goes through, before any setup work
+    # (Codex review).
+    _fail "analysis-assurance-complete is not supported for kind: bundle -- a bundle/directory comparison has no single analysis_assurance result to gate on. Scope the assurance check to an individual library-kind target check instead."
+  fi
 fi
 case "$ALLOW_NEW_TARGET" in
   true | false) ;;
   *) _fail "allow-new-target '$ALLOW_NEW_TARGET' is not recognized. Use 'true' or 'false'." ;;
+esac
+case "$ANALYSIS_ASSURANCE_COMPLETE" in
+  true | false) ;;
+  # action.yml's own "Generate assurance-overlay config" step guards on the
+  # exact lowercase string comparison `inputs.analysis-assurance-complete ==
+  # 'true'` -- any other value (a stray 'True', 'yes', or a typo) silently
+  # reads as false there, SKIPPING that step entirely rather than failing,
+  # so a caller who clearly intended to enable the assurance floor instead
+  # gets a normal, unenforced analysis run with no diagnostic at all (Codex
+  # review). Same "not recognized" enum-validation pattern as
+  # allow-new-target immediately above.
+  *) _fail "analysis-assurance-complete '$ANALYSIS_ASSURANCE_COMPLETE' is not recognized. Use 'true' or 'false'." ;;
 esac
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
   _fail "consumer-binary is required when target-kind is 'app-consumer'."
@@ -163,6 +218,15 @@ if [[ "$BASELINE_CHANNEL" == "none" && "$TARGET_KIND" != "library" ]]; then
 fi
 if [[ "$BASELINE_CHANNEL" != "none" && -z "$BASELINE_PATH" ]]; then
   _fail "baseline-path is required when baseline-channel is not 'none'."
+fi
+
+# require-complete-analysis: RETIRED (rulings.py deferred-option followup --
+# hard removal, no deprecation window, mirroring the root Action's own
+# retirement). Leaving it set would silently drop the requested orthogonal
+# exit-1 assurance floor rather than actually enforcing it, so this is a
+# hard error, same severity reasoning as the root Action's own check.
+if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
 fi
 
 exit 0

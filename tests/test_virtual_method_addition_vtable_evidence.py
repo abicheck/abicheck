@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from abicheck.compare.vtable_evidence import vtable_transition_is_evidenced
 from abicheck.diff_cxx_rules import owner_class_of, virtual_method_addition
-from abicheck.model import Function, RecordType, Visibility
+from abicheck.model import Fact, Function, RecordType, Visibility
 from abicheck.type_reachability_spelling import _namespace_suffix_spellings
 
 OWNER = "Widget"
@@ -288,6 +288,118 @@ class TestReliableButUnevidencedFallthroughBranchCompleteness:
         )
         assert change is not None
         assert change.kind.value == "virtual_method_added"
+
+
+class TestPartialVtableFactDeclinesInsteadOfFallingThrough:
+    """T9 (ADR-063 Phase 5B / DWARF per-TU completeness): the invariant
+    ``TestReliableButUnevidencedFallthroughBranchCompleteness`` documents
+    ("a genuinely new mangled symbol always evidences the predicate when
+    facts are reliable, so 'reliable + not evidenced' cannot arise from a
+    real caller") stopped holding once the shared predicate gained its own
+    ``PARTIAL``/``UNSUPPORTED`` top-level decline (Codex review finding on
+    this PR): that decline returns ``False`` *before* the owned-signature
+    branch ever runs, so a genuinely new virtual method on an owner whose
+    ``vtable_fact`` is ``PARTIAL`` now reaches this exact "reliable + not
+    evidenced" shape for real -- unlike the branch-coverage-only
+    construction above, this needs no synthetic ``new_funcs`` trickery.
+    Without ``virtual_method_addition``'s own explicit
+    ``vtable_fact_declined(...)`` guard, this would fall through to the
+    override check and fire a BREAKING ``VIRTUAL_METHOD_ADDED`` -- the same
+    capture-gap fabrication this whole T9 closure exists to prevent, just
+    through this function instead of ``TYPE_VTABLE_CHANGED``.
+    """
+
+    def test_the_precondition_actually_holds(self) -> None:
+        """Pin the premise: this shape really is 'not evidenced' per the
+        shared predicate, and for the NEW reason (the top-level decline,
+        not the owned-signature branch reading 'unchanged')."""
+        t_old = _cls([])
+        t_old.vtable_fact = Fact.partial([], producer="dwarf")
+        t_new = _cls([f"{OWNER}::resize()"])
+        f_new = _virtual_fn()
+        old_funcs: dict[str, Function] = {}
+        new_funcs = {MANGLED: f_new}
+        # Genuinely new symbol, present in new_funcs and absent from
+        # old_funcs -- exactly the shape that always evidenced under the
+        # predicate's pre-T9 shape (see TestEvidencedDifferenceStillDefers
+        # AsBefore). It no longer does, because vtable_fact is PARTIAL.
+        assert not _is_evidenced(t_old, t_new, old_funcs, new_funcs)
+
+    def test_declines_instead_of_fabricating_a_virtual_method_added(self) -> None:
+        t_old = _cls([])
+        t_old.vtable_fact = Fact.partial([], producer="dwarf")
+        t_new = _cls([f"{OWNER}::resize()"])
+        f_new = _virtual_fn()
+        old_funcs: dict[str, Function] = {}
+        new_funcs = {MANGLED: f_new}
+        change = virtual_method_addition(
+            f_new,
+            {OWNER},
+            {OWNER: t_old},
+            {OWNER: t_new},
+            {},
+            old_funcs,
+            new_funcs,
+        )
+        assert change is None
+
+    def test_declines_when_the_new_side_is_the_partial_one(self) -> None:
+        """The mirror case -- the gap can be on either side."""
+        t_old = _cls([])
+        t_new = _cls([f"{OWNER}::resize()"])
+        t_new.vtable_fact = Fact.partial([f"{OWNER}::resize()"], producer="dwarf")
+        f_new = _virtual_fn()
+        old_funcs: dict[str, Function] = {}
+        new_funcs = {MANGLED: f_new}
+        change = virtual_method_addition(
+            f_new,
+            {OWNER},
+            {OWNER: t_old},
+            {OWNER: t_new},
+            {},
+            old_funcs,
+            new_funcs,
+        )
+        assert change is None
+
+    def test_bases_being_fully_evidenced_does_not_rescue_the_fallthrough(
+        self,
+    ) -> None:
+        """The specific reported scenario: bases/virtual_bases ARE fully
+        evidenced (PRESENT), which would let the override check below run
+        to completion and find no matching override -- confirming this
+        decline happens *before* that check, not because it would also
+        have declined on its own."""
+        t_old = RecordType(
+            name=OWNER,
+            kind="class",
+            size_bits=64,
+            vtable=[],
+            vtable_fact=Fact.partial([], producer="dwarf"),
+            bases=[],
+            virtual_bases=[],
+        )
+        t_new = RecordType(
+            name=OWNER,
+            kind="class",
+            size_bits=64,
+            vtable=[f"{OWNER}::resize()"],
+            bases=[],
+            virtual_bases=[],
+        )
+        f_new = _virtual_fn()
+        old_funcs: dict[str, Function] = {}
+        new_funcs = {MANGLED: f_new}
+        change = virtual_method_addition(
+            f_new,
+            {OWNER},
+            {OWNER: t_old},
+            {OWNER: t_new},
+            {},  # old_virtual_sigs: empty -- no override would be found either
+            old_funcs,
+            new_funcs,
+        )
+        assert change is None
 
 
 class TestEqualArraysBlindSpotUnaffected:

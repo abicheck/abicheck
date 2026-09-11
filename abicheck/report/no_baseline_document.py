@@ -130,7 +130,24 @@ __all__ = [
 #: nests the same ``AnalysisAssurance.to_dict()`` compare's report does, so
 #: this always-present block also gains the additive ``schema_staleness_
 #: status`` key.
-AUDIT_REPORT_SCHEMA_VERSION = "1.3"
+#:
+#: ``1.4`` -- two independent additive fields landed together, both MINOR
+#: bumps under the policy stated above:
+#:
+#: * mirrors ``REPORT_SCHEMA_VERSION``'s ``4.2`` (Codex review, P2): an
+#:   additive, top-level ``env_matrix_source_sha256`` key, present only
+#:   when this audit's candidate was actually run under a declared
+#:   ``deployment.runtime_floors``/``EnvironmentMatrix`` contract -- the
+#:   identical digest a two-sided ``compare`` report of the same matrix
+#:   carries under this same name. Absent (not ``null``) when the run
+#:   declared none, matching the compare-side convention.
+#: * adds the top-level ``disposition_audit`` block (ADR-067 C-S2). Closes
+#:   the gap where an audit that suppressed every one of its findings still
+#:   read, in an ``abicheck aggregate`` fan-in, as ``detected_total: 0``/
+#:   ``suppressed: 0``: the rule-attributed ``suppressed`` list was already
+#:   on this document, but nothing folded it into the one block every other
+#:   report shape's own fan-in reads (Codex review, fresh evidence).
+AUDIT_REPORT_SCHEMA_VERSION = "1.4"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.
@@ -206,8 +223,9 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
     ),
     "analysis_assurance": (
         "**Analysis assurance incomplete** -- the evidence behind this audit was "
-        "not complete enough to be relied on, and `--require-complete-analysis` "
-        "makes that a failure rather than a note."
+        "not complete enough to be relied on, and `.abicheck.yml`'s "
+        "`assurance.require_complete: true` makes that a failure rather than a "
+        "note."
     ),
     "evidence_contract": (
         "**Evidence contract not met** -- a pinned `--depth build`/`--depth "
@@ -427,3 +445,32 @@ class NoBaselineDocument:
     #: field states what *did* classify the findings, not what a caller
     #: asked for.
     policy: str = "strict_abi"
+    #: The declared-deployment-floor contract's content digest (Codex
+    #: review, P2), read straight off ``DiffResult.env_matrix_source_sha256``
+    #: -- the same field ``run_no_baseline_compare`` stamps onto its
+    #: ``DiffResult`` via ``dataclasses.replace`` for exactly this reason
+    #: (see that function's own docstring). ``None`` when this audit's
+    #: candidate declared no ``deployment.runtime_floors``/
+    #: ``EnvironmentMatrix`` contract at all -- without this field, a
+    #: candidate that stays within its declared floor (and so produces no
+    #: finding) was indistinguishable, in every rendered report, from one
+    #: run with no deployment contract in effect at all, even though the
+    #: matrix genuinely governed this run.
+    env_matrix_source_sha256: str | None = None
+    #: ADR-067 C-S2's raw-versus-effective disposition ledger
+    #: (``report.disposition_audit.compute_disposition_audit``), already
+    #: serialized -- the same block every two-sided ``compare`` report
+    #: carries at its root. Previously absent from this shape entirely: a
+    #: ``--no-baseline`` audit that suppressed every one of its findings
+    #: emitted a real, rule-attributed ``suppressed`` list of its own, but
+    #: an aggregate fan-in reading a target's generic root
+    #: ``disposition_audit`` block (``workflows.aggregate.disposition_axis.
+    #: disposition_audit_block``) found none on this shape, and folded a
+    #: clean-looking ``detected_total: 0``/``suppressed: 0`` in its place --
+    #: losing the very rule provenance and count `vision.md`'s "Record
+    #: before disposing" rule exists to keep visible (Codex review, fresh
+    #: evidence). ``None`` only for a hand-constructed document (a test
+    #: fixture) that never called :func:`compute_no_baseline_document`; the
+    #: real compute half always attaches one, since ``result.diff`` is a
+    #: genuine self-compared ``DiffResult`` carrying its own ledger.
+    disposition_audit: Mapping[str, Any] | None = None

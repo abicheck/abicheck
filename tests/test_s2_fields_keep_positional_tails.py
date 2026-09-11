@@ -38,7 +38,16 @@ _S2_EXIT_FIELDS = (
     # feeding it into this one.
     "loadability_contribution",
 )
-_S2_BUNDLE_FIELDS = ("scope_record", "extraction_failures", "not_comparable_members")
+_S2_BUNDLE_FIELDS = (
+    "scope_record",
+    "extraction_failures",
+    "not_comparable_members",
+    # ADR-068's `.abicheck.yml` `deployment:` env-matrix demotion: appended
+    # after the S2 fields for the identical reason -- a positional caller
+    # written before this field existed keeps binding the older tail rather
+    # than silently feeding it into this one.
+    "env_matrix_source_sha256",
+)
 _S2_TARGET_FIELDS = (
     "scope_completeness_exit",
     "scope_completeness_incomplete",
@@ -46,6 +55,11 @@ _S2_TARGET_FIELDS = (
     # a positional caller written before this field existed keeps binding
     # the older tail rather than silently feeding it into this one.
     "disposition_audit",
+    # ADR-068 D2's no-baseline audit shape: appended after `disposition_audit`
+    # for the identical reason -- a positional caller written before this
+    # field existed keeps binding the older tail rather than silently
+    # feeding it into this one.
+    "completed_without_compatibility_verdict",
 )
 
 
@@ -55,7 +69,14 @@ def _names(cls: type) -> list[str]:
 
 def test_the_s2_fields_are_the_tail_of_each_type() -> None:
     assert _names(ExitDecision)[-len(_S2_EXIT_FIELDS) :] == list(_S2_EXIT_FIELDS)
-    assert _names(BundleDiffResult)[-3:] == list(_S2_BUNDLE_FIELDS)
+    # `-len(...)`, not a hardcoded `-3`: the literal count is what made this
+    # one assertion fail on a correctly-appended field (`env_matrix_source_
+    # sha256`) while its two siblings, already written this way, simply
+    # needed their tuple extended. The invariant is "these fields are the
+    # tail", never "the tail is exactly three long".
+    assert _names(BundleDiffResult)[-len(_S2_BUNDLE_FIELDS) :] == list(
+        _S2_BUNDLE_FIELDS
+    )
     assert _names(TargetReport)[-len(_S2_TARGET_FIELDS) :] == list(_S2_TARGET_FIELDS)
 
 

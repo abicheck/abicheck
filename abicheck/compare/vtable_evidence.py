@@ -92,6 +92,70 @@ reachable, confirmed fabrication round 2 found (an apparent vtable
 transition read off a PDB-derived side) while leaving every existing
 ``NOT_COLLECTED`` caller — including the leaf-class regression round 3's
 revert protects — on the exact heuristic this module already had.
+
+**T9 second slice (this revision): the DWARF per-translation-unit
+completeness gap the T9 closure above left open.** The PDB slice answers
+"can this producer express the family at all" (a per-*producer*
+capability claim). It cannot answer the question this slice closes: DWARF
+genuinely CAN express bases/virtual_bases/vtable, and usually does
+completely, but ``dwarf_snapshot.py``'s own "first definition wins" ODR
+handling (``_DwarfSnapshotBuilder._check_and_register_type_name``)
+builds each record type from exactly ONE
+compilation unit's own view of it and silently discards every other CU's
+own copy -- including whatever that CU independently saw about the same
+class's virtual methods and bases. When two CUs compiled from the same
+header genuinely disagree (a differing ``-g`` level, a TU that never used
+a given virtual so the compiler omitted its DIE, ``-flimit-debug-info``
+trimming), the retained definition's own evidence is real but may not be
+*complete* -- the exact ambiguity this module's own
+:func:`vtable_transition_is_evidenced` docstring already names as an
+unguarded false-positive source.
+
+``extract.dwarf_vtable_completeness`` is the producer
+half: it compares every discarded ODR-duplicate DIE's own bases/
+virtual_bases/vtable membership against the retained definition's, and
+downgrades the *disagreeing* sibling fact(s) to ``Fact.partial(...)``
+(never a new status -- ``PARTIAL``'s own docstring, "covered only part of
+the requested scope... the uncovered part is unknown, not absent,"
+already states exactly this claim) -- see that module's own "T9 third
+slice" docstring note for why this is per-*field*, not a blanket
+per-record decision. This function's own decline check, below, now
+includes ``PARTIAL`` alongside ``UNSUPPORTED`` for ``vtable_fact``, for
+the same reason the PDB slice declined on ``UNSUPPORTED``: an
+evidence-completeness gap, once flagged, must not let a difference
+derived from it read as a real change. Unlike ``UNSUPPORTED`` (a blanket,
+producer-wide claim), ``PARTIAL`` here is per-record and DWARF-specific
+-- it says nothing about any *other* record in the same snapshot, and
+nothing about what a non-DWARF producer would report for the same class.
+
+``diff_cxx_rules._transitive_bases`` needed no code change for this slice
+-- it already reads ``bases_fact``/``virtual_bases_fact`` via
+``_fact_str_list_confirmed``, which already treats anything other than
+``PRESENT`` (``PARTIAL`` included) as "not confirmed complete." Producing
+``PARTIAL`` for those two fields is what activates a gate that was already
+there, not a new one.
+
+**T9 third slice (this revision): scoping this function's own decline
+check to match the producer's per-field narrowing (Codex review finding
+on this PR).** The paragraph above originally had this function's
+top-level decline check gate on ``bases_fact``/``virtual_bases_fact``
+too, alongside ``vtable_fact`` -- reasoning that a per-TU gap on ANY of
+the three siblings cast doubt on ALL of a record's own DWARF-derived
+evidence, since the producer downgraded all three together. That
+premise no longer holds: the producer now downgrades only the field(s)
+that actually disagreed, so a duplicate confined to (say) ``bases``
+leaves ``vtable_fact`` genuinely ``PRESENT`` -- and the old blanket
+decline check would still reject even direct, non-empty vtable evidence
+for that record, losing a real ``TYPE_VTABLE_CHANGED``/
+``VIRTUAL_METHOD_ADDED`` finding for a reason unconnected to vtable
+evidence at all. This function never reads ``bases``/``bases_fact`` in
+the first place (only ``diff_cxx_rules._transitive_bases`` does, via the
+paragraph above), so it was never protecting anything of its own; the
+top-level check now gates only on ``vtable_fact``, and the ``virtual_
+bases_fact``-dependent fallback comparison at the very end of this
+function gates on ``virtual_bases_fact`` at its own point of use instead
+-- each field's completeness gap now blocks only the branch(es) that
+actually consult it.
 """
 
 from __future__ import annotations
@@ -102,6 +166,44 @@ from ..model import FactStatus, Function, RecordType, resolved_fact_value
 
 OwnerClassOf = Callable[[Function], "str | None"]
 NamespaceSuffixSpellings = Callable[[str], "list[str]"]
+
+#: Statuses on which `vtable_transition_is_evidenced` declines outright --
+#: see that function's own body for the full account of each member's own
+#: reason (UNSUPPORTED: producer-wide incapability, e.g. PDB;
+#: PARTIAL: DWARF's own per-translation-unit completeness gap, T9).
+_DECLINE_STATUSES = (FactStatus.UNSUPPORTED, FactStatus.PARTIAL)
+
+
+def vtable_fact_declined(t_old: RecordType, t_new: RecordType) -> bool:
+    """Whether either side's ``vtable_fact`` status is one of
+    ``_DECLINE_STATUSES`` (``UNSUPPORTED``/``PARTIAL``) -- the exact
+    top-level check :func:`vtable_transition_is_evidenced` gates on, split
+    out so a caller other than that function's own ``TYPE_VTABLE_CHANGED``
+    consumer can ask the identical question.
+
+    ``diff_cxx_rules.virtual_method_addition`` needs this directly (Codex
+    review finding on this PR): its own fallthrough path assumed "when
+    :func:`vtable_transition_is_evidenced` returns ``False``, either the
+    raw arrays genuinely don't evidence anything, or a *genuinely new*
+    mangled symbol would always have been caught by that function's own
+    'class's own virtual functions' branch regardless" -- an invariant
+    this module's own ``PARTIAL``/``UNSUPPORTED`` top-level short-circuit
+    now breaks by construction: it returns ``False`` *before* the
+    owned-virtual-signature branch ever runs, even for a class that
+    genuinely gained a new virtual method. Without its own explicit check
+    here, ``virtual_method_addition`` would fall through to its
+    override-signature check and -- finding no matching override, since
+    bases/virtual_bases can be completely evidenced even while vtable
+    itself is PARTIAL -- emit a BREAKING ``VIRTUAL_METHOD_ADDED`` for
+    exactly the capture-gap artifact this whole T9 closure exists to
+    suppress, just through the sibling detector instead of the primary
+    one.
+    """
+    return (
+        t_old.vtable_fact is not None and t_old.vtable_fact.status in _DECLINE_STATUSES
+    ) or (
+        t_new.vtable_fact is not None and t_new.vtable_fact.status in _DECLINE_STATUSES
+    )
 
 
 def _owned_virtual_signatures(
@@ -228,27 +330,33 @@ def vtable_transition_is_evidenced(
     even called for it (nothing for ``_diff_functions``'s own loop to
     iterate over); the first bullet, when it involves a real, linkable
     virtual method, is *evidenced* by this predicate's own "class's own
-    virtual functions" branch (a genuinely new mangled symbol is always
-    present in the new side's owned-signature set and absent from the old
-    side's), so ``virtual_method_addition`` correctly defers to this
-    predicate rather than needing its own fallthrough -- it is this
-    predicate's own remaining gap to close, not a gap in the symbol-level
-    caller's own coupling to it. Leaning on a sibling detector is not a
-    comfortable place to be, and a previous revision tried to close the
-    second case here directly by reading ``vptr_offset_bits`` -- see the
+    virtual functions" branch **when this function's own top-level decline
+    check above did not already short-circuit before reaching it** -- a
+    genuinely new mangled symbol is always present in the new side's
+    owned-signature set and absent from the old side's, so this predicate
+    returns ``True`` for it whenever it gets that far. It does NOT always
+    get that far: the T9 ``PARTIAL`` addition to the top-level decline
+    check (unlike the original ``UNSUPPORTED``-only gate, which only ever
+    fires for PDB, where ``Function.is_virtual`` is never set at all, so
+    ``virtual_method_addition`` returns at its very first line before
+    reaching any of this) is reachable for DWARF records where a genuinely
+    new virtual method's own symbol legitimately exists -- so
+    ``virtual_method_addition`` can no longer simply defer to this
+    predicate's own ``False`` meaning "not evidenced, safe to fall through
+    to my own override check": ``False`` can now also mean "declined
+    without ever consulting the owned-signature evidence at all." See
+    :func:`vtable_fact_declined` (Codex review finding on this PR) for the
+    caller-side fix -- ``virtual_method_addition`` now checks it directly,
+    rather than relying on this predicate's return value alone to imply
+    it. A previous revision tried to close the pure-virtual accepted false
+    negative here directly by reading ``vptr_offset_bits`` -- see the
     body for why that witness is circular and made this guard inert.
-    Closing it for real needs evidence the model does not carry (a
+    Closing that one for real needs evidence the model does not carry (a
     per-finding provider record, or a polymorphism walk over both base
     chains) -- see AGENTS.md's evidence-provider entry -- not a cleverer
     reading of the fields already here.
     """
-    if (
-        t_old.vtable_fact is not None
-        and t_old.vtable_fact.status is FactStatus.UNSUPPORTED
-    ) or (
-        t_new.vtable_fact is not None
-        and t_new.vtable_fact.status is FactStatus.UNSUPPORTED
-    ):
+    if vtable_fact_declined(t_old, t_new):
         # ADR-063 Track 4 5B final closure / T9: `UNSUPPORTED` is not the
         # generic "not is_present" pre-check round 2 landed and round 3
         # reverted (see the module docstring's "5B final closure" note) --
@@ -269,6 +377,36 @@ def vtable_transition_is_evidenced(
         # convention, or any other producer's genuine non-evidence) is
         # untouched and keeps falling through to the heuristics below,
         # exactly as before this check existed.
+        #
+        # `PARTIAL` (T9 second slice) closes the sibling gap `UNSUPPORTED`
+        # alone cannot: DWARF's own per-translation-unit completeness
+        # signal (`extract.dwarf_vtable_completeness`) -- an ODR-duplicate
+        # DIE in another CU that disagreed with the retained definition's
+        # own vtable membership specifically. Unlike `UNSUPPORTED` (a
+        # producer-wide incapability claim, true for every record that
+        # producer ever emits), `PARTIAL` is per-record, per-*field*, and
+        # DWARF-specific: it says this one class's `vtable` evidence, in
+        # THIS snapshot, may not be the complete set -- not that DWARF as a
+        # format cannot express the family, and (T9 third slice, this
+        # revision) not anything about a *different* field of the same
+        # record that never actually disagreed (`extract.
+        # dwarf_vtable_completeness.finalize_vtable_evidence_completeness`
+        # downgrades each of bases/virtual_bases/vtable independently now,
+        # not as a blanket per-record decision -- see that module's own
+        # "Downgrades are scoped per disagreeing field" docstring note;
+        # Codex review finding on this PR caught the mismatch between that
+        # producer-side narrowing and this function still gating on
+        # `bases_fact`/`virtual_bases_fact` wholesale here).
+        #
+        # `bases_fact`/`virtual_bases_fact` are deliberately NOT part of
+        # this top-level check: this function never reads `bases`/
+        # `bases_fact` at all, and `virtual_bases_fact` is consulted only
+        # by the size/virtual-bases fallback at the very end of this
+        # function, which gates on it there, directly at its own point of
+        # use, instead of over the whole function. `vptr_offset_bits_fact`
+        # is deliberately NOT part of either check -- see the "NOT
+        # consulted here" note further down this docstring for why that
+        # field needs its own separate treatment.
         return False
     old_vtable = resolved_fact_value(t_old.vtable_fact, [])
     new_vtable = resolved_fact_value(t_new.vtable_fact, [])
@@ -334,6 +472,21 @@ def vtable_transition_is_evidenced(
         return True
     if t_old.size_bits != t_new.size_bits:
         return True
+    # T9 third slice: gated here, at this fallback's own point of use,
+    # rather than over the whole function (see the top-level check's own
+    # updated comment) -- a `virtual_bases_fact` completeness gap only
+    # makes THIS comparison unsafe (an incomplete list can differ from a
+    # complete one for reasons that have nothing to do with a real base
+    # change), it says nothing about the vtable-evidence branches already
+    # returned above.
+    if (
+        t_old.virtual_bases_fact is not None
+        and t_old.virtual_bases_fact.status in _DECLINE_STATUSES
+    ) or (
+        t_new.virtual_bases_fact is not None
+        and t_new.virtual_bases_fact.status in _DECLINE_STATUSES
+    ):
+        return False
     old_virtual_bases = resolved_fact_value(t_old.virtual_bases_fact, [])
     new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
     return list(old_virtual_bases) != list(new_virtual_bases)

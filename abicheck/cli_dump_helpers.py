@@ -76,30 +76,19 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .service_dump_pipeline import ResolvedDumpRequest
 
-
-# ── Back-compat re-export shim ───────────────────────────────────────────────
-# All five of these live in `header_conditionals.py` (see that module for the
-# ADR-039 collection logic and why it moved -- PR C, CLI cleanup phase two) and
-# nothing in this module calls any of them itself; they stay reachable under
-# their original names purely so `from .cli_dump_helpers import ...` (cli.py,
-# `frontends/cli/commands/dump.py`) and existing tests keep working unchanged.
-#
-# `header_conditionals.py` is `extract`-classified (ADR-061) and this module
-# is `frontends`-classified, which may not import `extract` at all (only
-# through `workflows`) -- a real, reviewed `dependency-direction` exception,
-# not the no-growth/line-count debt `architecture/debt.yaml`'s `files` list
-# otherwise holds (see that file's `dependency_direction_exceptions`, and
-# ADR-061 gap A's own discussion of why this shim previously used
-# `importlib.import_module` to keep the edge invisible to
-# `check_architecture.py` instead of recording it as accepted debt). Static
-# now, so the edge is visible rather than merely legal-looking.
-from .header_conditionals import (  # noqa: F401
-    attach_build_context as _attach_build_context,
-    compile_db_filter_scope_error as compile_db_filter_scope_error,
-    compile_db_for_filter_scope_check as compile_db_for_filter_scope_check,
-    compile_db_from_build_info as compile_db_from_build_info,
-    user_define_flags as _user_define_flags,
-)
+# `attach_build_context`/`compile_db_filter_scope_error`/
+# `compile_db_for_filter_scope_check`/`compile_db_from_build_info`/
+# `user_define_flags` used to be re-exported here purely so
+# `frontends/cli/commands/dump.py` and existing tests could keep naming them
+# under this module's path (`header_conditionals.py` is `extract`-classified
+# and this module is `frontends`-classified, which may reach `extract` only
+# through `workflows`). ADR-061 gap A's second `dependency_direction_exceptions`
+# entry is now closed: the two real call sites moved onto
+# `service_compare_evidence.py`'s `dump_cli_compile_db_path`/
+# `dump_cli_compile_db_filter_scope_error` wrappers (`workflows`-classified),
+# and nothing outside `header_conditionals.py`'s own tests calls
+# `attach_build_context`/`user_define_flags` any more, so there is no longer a
+# reason for this module to import `header_conditionals` at all.
 
 
 def resolve_dump_debug_format(
@@ -901,8 +890,8 @@ def render_dump_dry_run(
 
 # `compile_db_from_build_info` moved to `header_conditionals.py` (PR C, CLI
 # cleanup phase two) alongside `attach_build_context`/`user_define_flags` --
-# imported above under its original name; every existing caller/test is
-# unchanged. See that module for the derivation logic.
+# no longer re-exported from here (see this module's top-of-file comment).
+# See that module for the derivation logic.
 
 
 def resolve_dump_compile_context(

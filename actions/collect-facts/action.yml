@@ -173,7 +173,7 @@ outputs:
     value: ${{ steps.run-collect-facts.outputs.producer }}
   mode:
     description: >
-      'inline' (replay -- pass `sources` straight to dump/scan/compare, no
+      'inline' (replay -- pass `sources` straight to dump/compare, no
       pack was collected) or 'pack' (wrapper/clang-plugin -- a pack
       directory was collected at `pack-path`).
     value: ${{ steps.run-collect-facts.outputs.mode }}

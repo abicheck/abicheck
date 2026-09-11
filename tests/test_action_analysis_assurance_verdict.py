@@ -13,24 +13,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The composite Action's mapping for P0.4's analysis-assurance exit
-(``--require-complete-analysis``, ``abicheck/analysis_assurance.py``).
+"""The composite Action's now-retired ``require-complete-analysis`` input
+(rulings.py deferred-option followup -- hard removal, no deprecation
+window), plus the P1 fix that followup left behind (Codex review, fresh
+evidence on the retirement PR itself).
 
-Before this, ``action/run.sh`` had no notion of this axis at all: an exit 1
-caused by incomplete ``analysis_assurance`` fell through the existing exit-1
-disambiguation and was mislabeled -- ``SEVERITY_ERROR`` on ``compare`` (a
-*severity-policy* failure it is not) or ``ERROR`` on ``scan`` (an
-*operational* failure it is not). The axis is neither: like ADR-049's
-contract-coverage axis it never rewrites the compatibility verdict, only
-floors the exit code, and is unconditional (no ``fail-on-*`` flag can turn
-it off).
+This file used to exercise the Action's dedicated ``require-complete-
+analysis`` boolean input, which mapped P0.4's orthogonal analysis-assurance
+exit-1 floor onto a labeled ``ANALYSIS_INCOMPLETE`` verdict (see
+``docs/reference/exit-codes.md``, ``abicheck/analysis_assurance.py``). That
+whole mechanism is gone: the CLI's own ``compare --require-complete-
+analysis`` flag it mirrored was demoted to a config-only
+``.abicheck.yml`` ``assurance.require_complete: true`` setting with no CLI
+or Action-input override (ADR-068 D5 guard #2, "no escape hatch"), so the
+Action's own dedicated input has nothing left to forward to and is retired
+the same way (``action.yml``'s own description, ``action/validate-
+inputs.sh``/``action/run.sh``'s tombstone rejections).
 
-The Action gates on this axis via a dedicated ``require-complete-analysis``
-boolean input (mirroring ``fail-on-breaking``), the terminal fix for a class
-of bug found across three Codex review rounds while this axis's detection
-was still inferred from other signals (an unanchored stderr grep, then a
-``$CMD``-array token scan) -- see ``action/run.sh``'s own comment above
-``_assurance_gated()`` for the full history.
+``tests/test_action_validate_inputs.py``'s
+``TestRemovedInputTombstones.test_require_complete_analysis_is_a_hard_error``
+covers the preflight rejection (the loud, fast path every workflow actually
+hits); this file's remaining job is the ``action/run.sh``-level defense in
+depth for anyone invoking it directly, mirroring
+``TestRemovedConfigDuplicates``-shaped retirement tests elsewhere in this
+suite rather than the removed feature's own behavior.
+
+**The P1 bug and its fix.** The retirement PR's first cut left
+``run.sh``'s own ``_assurance_gated()`` still keyed off
+``INPUT_REQUIRE_COMPLETE_ANALYSIS`` to decide whether the belt-and-suspenders
+unconditional exit-1 floor (the block right below "P0.4's analysis-assurance
+axis, unconditional exactly like the contract-coverage check immediately
+above") should fire at all -- but ``validate-inputs.sh`` now hard-rejects any
+non-``false`` value for that input before this step can ever run, so the
+env var can never again read ``true``, and the belt-and-suspenders check
+became permanently dead for exactly the case it exists to catch: a
+config-driven ``assurance.require_complete: true`` (the CLI's only
+remaining source) coinciding with a compatibility verdict the caller chose
+not to gate on (``fail-on-breaking: false``/default-false
+``fail-on-api-break``). The fix makes ``_assurance_gated()`` read the
+report's own self-describing ``analysis_assurance_exit_contribution`` field
+instead (mirroring ``_coverage_gated()``'s pre-existing JSON-only rule) --
+this class of test proves the gate now fires from that field alone, with
+``INPUT_REQUIRE_COMPLETE_ANALYSIS`` never set at all.
 
 Mirrors ``test_action_coverage_verdict.py``'s own harness style (real
 subprocess through ``run.sh``, a shebang-dispatched ``abicheck`` stub on
@@ -58,43 +82,8 @@ pytestmark = pytest.mark.skipif(
     reason="needs a POSIX shell that can exec a shebang script from PATH",
 )
 
-#: The exact wording `assurance_floor_diagnostic` (analysis_assurance.py)
-#: emits. `_assurance_gated()` in run.sh used to grep for this substring on
-#: stderr when no JSON report was readable; ADR-063 Track T8 removed that
-#: fallback, so the line is now only ever inert text in these fixtures --
-#: which is exactly what several tests below assert.
-ASSURANCE_STDERR = (
-    "Analysis assurance incomplete (status='partial') under "
-    "--require-complete-analysis: header context asymmetric between old and "
-    "new. Exit code floored to 1. (P0.4 analysis-assurance axis). Use "
-    "--format json for the full analysis_assurance block."
-)
 
-COVERAGE_STDERR = (
-    "Contract coverage incomplete for the selected --contract domain: "
-    "old/export_table. Exit code floored to 1."
-)
-
-ASSURANCE_BLOCK = {
-    "schema_version": 1,
-    "status": "partial",
-    "notes": ["header context asymmetric between old and new"],
-}
-
-#: `_assurance_gated()` requires this dedicated boolean input to be `true`
-#: before it will even look at the report -- the load-bearing check. Every
-#: test below that expects the axis to actually gate must pass this, and a
-#: readable JSON report whose `analysis_assurance.status` is not "complete".
-REQUIRE_COMPLETE_ANALYSIS_INPUT = {"INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"}
-
-
-def _stub_abicheck(
-    tmp_path: Path,
-    *,
-    exit_code: int,
-    report: dict | None,
-    stderr: str = "",
-) -> Path:
+def _stub_abicheck(tmp_path: Path, *, exit_code: int, report: dict | None) -> Path:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     payload = tmp_path / "payload.json"
@@ -109,8 +98,7 @@ def _stub_abicheck(
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"
-        + (f'printf "%s\\n" {json.dumps(stderr)} >&2\n' if stderr else "")
-        + f"exit {exit_code}\n",
+        f"exit {exit_code}\n",
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -161,611 +149,50 @@ def _lib(tmp_path: Path, name: str) -> str:
     return str(path)
 
 
-class TestScanMapsTheAssuranceExit:
-    def test_an_assurance_gated_scan_is_not_an_operational_error(
-        self, tmp_path: Path
-    ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
-        assert outputs["exit-code"] == "1", outputs
-        assert "ANALYSIS_INCOMPLETE" in outputs["_summary"], outputs["_summary"]
-        assert "header context asymmetric" in outputs["_summary"], outputs["_summary"]
+class TestRunShRejectsTheRetiredInputDirectly:
+    """Defense in depth: ``action/validate-inputs.sh`` is the loud, fast
+    preflight path every real workflow invocation hits first, but
+    ``run.sh`` carries its own copy of the same tombstone rejection for
+    anyone invoking it directly (this file's own harness included)."""
 
-    def test_the_step_fails_unconditionally_even_with_fail_on_breaking_false(
-        self, tmp_path: Path
-    ) -> None:
-        """No ``fail-on-*`` flag disables this axis, matching the
-        contract-coverage axis's own unconditional gate."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                "INPUT_FAIL_ON_BREAKING": "false",
-                "INPUT_FAIL_ON_API_BREAK": "false",
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["_exit"] == 1, outputs
-
-    def test_a_run_without_the_flag_is_unaffected(self, tmp_path: Path) -> None:
-        """`require-complete-analysis` is unset -> exit 1 with neither
-        coverage nor assurance signal stays a plain ERROR, exactly as it
-        always did -- regardless of the stderr diagnostic being absent too
-        in this particular fixture."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ERROR", outputs
-
-
-class TestCompareMapsTheAssuranceExit:
-    def test_an_assurance_gated_compare_is_not_a_severity_failure(
-        self, tmp_path: Path
-    ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={"verdict": "COMPATIBLE", "analysis_assurance": ASSURANCE_BLOCK},
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
-        assert outputs["exit-code"] == "1", outputs
-        assert "ANALYSIS_INCOMPLETE" in outputs["_summary"], outputs["_summary"]
-
-    def test_a_severity_gate_and_assurance_gap_both_survive_together(
-        self, tmp_path: Path
-    ) -> None:
-        """When the severity axis also gates at 1, SEVERITY_ERROR keeps the
-        verdict label (the pre-existing coverage-vs-severity precedence),
-        but the summary still names the assurance gap so it isn't silently
-        dropped."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "analysis_assurance": ASSURANCE_BLOCK,
-                "severity": {
-                    "config": {},
-                    "categories": {},
-                    "exit_code": 1,
-                    "blocking": True,
-                    "blocking_categories": ["addition"],
-                },
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
-        assert "also reports incomplete analysis assurance" in outputs["_stdout"], (
-            outputs["_stdout"]
-        )
-        assert outputs["_exit"] == 1, outputs
-
-    def test_a_coverage_gap_and_assurance_gap_both_survive_together(
-        self, tmp_path: Path
-    ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "analysis_assurance": ASSURANCE_BLOCK,
-                "contract_coverage_exit_contribution": 1,
-                "contract_coverage_failures": [
-                    {
-                        "provider": "export_table",
-                        "side": "old",
-                        "record_id": "old/export_table",
-                        "reason": "search_incomplete",
-                        "status": "unavailable",
-                        "completeness": "none",
-                        "mode": "exports",
-                        "suppressible": False,
-                    }
-                ],
-            },
-            stderr=f"{COVERAGE_STDERR}\n{ASSURANCE_STDERR}",
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
-        assert "also reports incomplete analysis assurance" in outputs["_stdout"], (
-            outputs["_stdout"]
-        )
-        assert outputs["_exit"] == 1, outputs
-
-    def test_the_step_fails_unconditionally_even_with_fail_on_breaking_false(
-        self, tmp_path: Path
-    ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={"verdict": "COMPATIBLE", "analysis_assurance": ASSURANCE_BLOCK},
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                "INPUT_FAIL_ON_BREAKING": "false",
-                "INPUT_FAIL_ON_API_BREAK": "false",
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["_exit"] == 1, outputs
-
-    def test_a_run_without_the_flag_is_unaffected(self, tmp_path: Path) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={"verdict": "COMPATIBLE", "analysis_assurance": ASSURANCE_BLOCK},
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
-
-
-class TestHostileReportContentCannotExecute:
-    """This diff touches the action/workflow trust boundary (``action/
-    run.sh``): the captured stderr and the ``assurance_notes`` Python query
-    both carry content an ``abicheck`` invocation produced from its own
-    inputs, which can themselves come from a
-    PR (a header, a symbol name, a policy note) an attacker controls.
-    Asserting the *text* of the shell/Python changes does not prove a
-    hostile value can't cause a side effect when run.sh's own shell
-    interpolates it into a job-summary ``echo`` -- so these tests actually
-    execute ``run.sh`` against a report/stderr crafted to look like a shell
-    command substitution or an injection into the grep pattern, and assert
-    the attempted payload never ran (no marker file materializes) while the
-    run still reaches the correct, unspoofed verdict.
-    """
-
-    def test_a_command_substitution_in_assurance_notes_does_not_execute(
-        self, tmp_path: Path
-    ) -> None:
-        marker = tmp_path / "pwned"
-        payload = f"$(touch {marker})"
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {
-                    "analysis_assurance": {
-                        "schema_version": 1,
-                        "status": "partial",
-                        "notes": [payload],
-                    }
-                },
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert not marker.exists(), (
-            "the crafted analysis_assurance note executed as a shell command"
-        )
-        # The verdict computation is unaffected by the hostile payload --
-        # it is carried through as inert text in the summary, not evaluated.
-        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
-        assert payload in outputs["_summary"], outputs["_summary"]
-
-    def test_the_real_diagnostic_text_cannot_spoof_the_gate_without_the_input(
-        self, tmp_path: Path
-    ) -> None:
-        """The core anti-spoofing property (Codex review, P1, now closed by
-        the dedicated input): stderr can contain content an attacker
-        influences (a header/symbol name echoed back into some *other*,
-        unrelated diagnostic), so `_assurance_gated()` must not trust
-        stderr at all -- it first requires the dedicated
-        `require-complete-analysis` input to be `true`, which
-        attacker-controlled report/stderr content cannot forge (it isn't
-        even read for this decision). Here the stderr line is the *exact*
-        real diagnostic text (not a near-miss/mention) and the report's own
-        status is genuinely `partial` -- everything a real gated run would
-        show -- except the input was never set. Must still resolve to the
-        pre-existing catch-all, not a spoofed ANALYSIS_INCOMPLETE."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                # Deliberately no REQUIRE_COMPLETE_ANALYSIS_INPUT here.
-            },
-            bindir,
-        )
-        # Falls through to the pre-existing catch-all, exactly as it does
-        # with no diagnostic at all -- not a spoofed ANALYSIS_INCOMPLETE.
-        assert outputs["verdict"] == "ERROR", outputs
-
-    @pytest.mark.parametrize(
-        "stderr_text",
-        [
-            ASSURANCE_STDERR,
-            "some unrelated warning mentioning analysis assurance "
-            "incomplete and require-complete-analysis but not the real "
-            "diagnostic shape",
-            "",
-        ],
-        ids=["real-diagnostic", "near-miss-mention", "no-diagnostic"],
-    )
-    def test_no_stderr_text_gates_this_axis_without_a_json_report(
-        self, tmp_path: Path, stderr_text: str
-    ) -> None:
-        """ADR-063 Track T8: with no readable JSON report, stderr answers
-        nothing at all for this axis -- not even the *exact* substring the
-        retired fallback matched ("Analysis assurance incomplete ... under
-        --require-complete-analysis"), and even with the dedicated input
-        genuinely set.
-
-        Parametrized over the real code-emitted diagnostic, a near-miss that
-        merely mentions the same words, and no diagnostic whatsoever,
-        because the property is that none of them differ: the class this
-        closes is "a text channel deciding a published axis", not one
-        particular forged spelling. The structured
-        `analysis_assurance.status` is the only signal, so all three fall
-        through to the pre-existing catch-all."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report=None,
-            stderr=stderr_text,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ERROR", outputs
-
-    def test_shell_metacharacters_in_the_stderr_diagnostic_do_not_execute(
-        self, tmp_path: Path
-    ) -> None:
-        marker = tmp_path / "pwned2"
-        hostile_stderr = (
-            f"Analysis assurance incomplete (status='partial') under "
-            f"--require-complete-analysis: `; touch {marker} ; ` "
-            f"$({marker}) header context asymmetric. Exit code floored to 1."
-        )
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=hostile_stderr,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert not marker.exists(), (
-            "shell metacharacters in the captured stderr diagnostic executed"
-        )
-        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
-
-
-class TestOptionValueDoesNotSpoofTheFlag:
-    """Two rounds of Codex-found false positives from inferring this flag
-    from *other* signals, both now structurally impossible with the
-    dedicated `require-complete-analysis` input in place -- neither
-    `$CMD` nor `extra-args` is consulted for this decision at all anymore:
-
-    1. Scanning the fully-built `$CMD` array for the literal
-       `--require-complete-analysis` token is not equivalent to "the flag
-       was passed", because `$CMD` also carries values a *different*,
-       structured Action input supplied. `output-file:
-       --require-complete-analysis` is exactly such a case -- it
-       legitimately produces the adjacent tokens `-o
-       --require-complete-analysis` in `$CMD`, with the real CLI's own
-       option parser consuming the second token as `-o`'s filename
-       argument, never parsing it as a flag.
-    2. Scoping the scan to `extra-args`'s own split tokens closed (1) but
-       not an identical collision *within* `extra-args` itself -- e.g.
-       `--header --require-complete-analysis` (a real `--header
-       old=|new=PATH` option consuming the next token as its own value)
-       still false-positives, since no token-scan of any kind can prove a
-       token was parsed as *this* flag rather than as some other option's
-       argument.
-    """
-
-    def test_an_output_file_named_like_the_flag_does_not_gate(
-        self, tmp_path: Path
-    ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                # The collision Codex described: this is a plain path value
-                # for a structured, unrelated input -- not the flag.
-                "INPUT_OUTPUT_FILE": "--require-complete-analysis",
-                # Deliberately no REQUIRE_COMPLETE_ANALYSIS_INPUT: the flag
-                # was never actually requested this run.
-            },
-            bindir,
-        )
-        # Falls through to the pre-existing catch-all, exactly as it does
-        # with no diagnostic and no flag at all -- not a spoofed
-        # ANALYSIS_INCOMPLETE from the -o value alone.
-        assert outputs["verdict"] == "ERROR", outputs
-
-    def test_an_extra_args_option_value_named_like_the_flag_does_not_gate(
-        self, tmp_path: Path
-    ) -> None:
-        """Codex review, third finding: `extra-args: --header
-        --require-complete-analysis` is a real `--header` option consuming
-        the next token as its own value, not the flag -- and, unlike an
-        `extra-args`-token scan, the dedicated input never even looks at
-        `extra-args`'s contents, so this collision cannot reach the gate at
-        all regardless of what `extra-args` contains."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                "INPUT_EXTRA_ARGS": "--header --require-complete-analysis",
-                # Deliberately no REQUIRE_COMPLETE_ANALYSIS_INPUT: the flag
-                # was never actually requested via the dedicated input.
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ERROR", outputs
-
-
-class TestEscalatedAssuranceGateIsNamedCorrectly:
-    """Codex review: when a BREAKING/API_BREAK finding is demoted to
-    compatibility exit 0 by severity policy but incomplete assurance
-    raises the *actual* exit to 1, `_escalate_verdict_to_report()` leaves
-    `GATE_TIER=ANALYSIS_INCOMPLETE`. `_blocking_gate_note()` (the helper
-    that explains an escalated verdict in the job summary) had no
-    assurance case before this fix, so it fell through to the generic
-    "the severity policy gated this run" branch -- false, since severity
-    demoted the finding rather than gating it, and the axis that actually
-    produced the exit is orthogonal to severity entirely."""
-
-    def test_an_escalated_breaking_report_names_assurance_not_severity(
-        self, tmp_path: Path
-    ) -> None:
-        # A BREAKING report whose severity block resolves to exit 0 (the
-        # finding was demoted), but analysis_assurance is incomplete under
-        # the flag -- the real exit-1 cause is assurance alone.
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "BREAKING",
-                "analysis_assurance": ASSURANCE_BLOCK,
-                "severity": {
-                    "config": {},
-                    "categories": {},
-                    "exit_code": 0,
-                    "blocking": False,
-                    "blocking_categories": [],
-                },
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "BREAKING", outputs
-        assert "analysis-assurance axis" in outputs["_summary"], outputs["_summary"]
-        assert (
-            "severity policy gated this run" not in outputs["_summary"]
-        ), outputs["_summary"]
-
-
-class TestReleaseStyleCompareRejectsTheAssuranceInput:
-    """Codex review (P2): the CLI's per-library release fan-out has no
-    single `analysis_assurance` result to gate on and rejects
-    `--require-complete-analysis` outright for a directory/package
-    operand -- so `run.sh` used to just skip forwarding the flag for that
-    shape, silently running a release compare ungated even though the
-    caller explicitly asked for the assurance gate. Must fail loud (the
-    step itself errors) instead, the same "explicit unsupported request,
-    not a silent no-op" treatment the L2 compile-context and evidence-flag
-    guards already give their own release-incompatible inputs."""
-
-    def test_a_directory_old_library_with_the_flag_fails_the_step(
-        self, tmp_path: Path
-    ) -> None:
-        old_dir = tmp_path / "old_release"
-        old_dir.mkdir()
+    def test_compare_mode_fails_the_step(self, tmp_path: Path) -> None:
         bindir = _stub_abicheck(tmp_path, exit_code=0, report={"verdict": "COMPATIBLE"})
         outputs = _run_action(
             tmp_path,
             {
                 "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": str(old_dir),
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
+                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             },
             bindir,
         )
         assert outputs["_exit"] == 1, outputs
-        assert "does not support require-complete-analysis" in outputs["_stdout"], (
-            outputs["_stdout"]
-        )
+        assert "require-complete-analysis" in outputs["_stdout"], outputs["_stdout"]
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
 
-    def test_a_single_pair_compare_with_the_flag_is_unaffected(
-        self, tmp_path: Path
-    ) -> None:
-        """Sanity: the new guard must not misfire for the ordinary
-        single-pair case the rest of this module already exercises."""
-        bindir = _stub_abicheck(
+    def test_no_baseline_compare_mode_fails_the_step(self, tmp_path: Path) -> None:
+        """mode: scan itself is retired outright (ADR-068) -- its own
+        replacement, an audit-only ``compare --no-baseline`` (old-library/
+        abi-baseline both omitted), must reject the retired input the same
+        unconditional way the two-sided shape above does."""
+        bindir = _stub_abicheck(tmp_path, exit_code=0, report={"verdict": "COMPATIBLE"})
+        outputs = _run_action(
             tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "analysis_assurance": ASSURANCE_BLOCK,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             },
-            stderr=ASSURANCE_STDERR,
+            bindir,
+        )
+        assert outputs["_exit"] == 1, outputs
+        assert "require-complete-analysis" in outputs["_stdout"], outputs["_stdout"]
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_a_run_without_the_input_is_unaffected(self, tmp_path: Path) -> None:
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=0, report={"verdict": "COMPATIBLE", "exit_code": 0}
         )
         outputs = _run_action(
             tmp_path,
@@ -775,8 +202,220 @@ class TestReleaseStyleCompareRejectsTheAssuranceInput:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
             bindir,
         )
-        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+
+    def test_an_explicit_false_is_not_an_error(self, tmp_path: Path) -> None:
+        bindir = _stub_abicheck(
+            tmp_path, exit_code=0, report={"verdict": "COMPATIBLE", "exit_code": 0}
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "false",
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+
+
+class TestConfigDrivenAssuranceGateReadsTheReport:
+    """The P1 fix: ``_assurance_gated()`` reads
+    ``analysis_assurance_exit_contribution`` from the JSON report -- the
+    only way a config-only ``assurance.require_complete: true`` (no CLI
+    flag, no Action input) can be observed at all -- rather than the
+    permanently-``false`` ``INPUT_REQUIRE_COMPLETE_ANALYSIS`` env var.
+    ``INPUT_REQUIRE_COMPLETE_ANALYSIS`` is never set in any test below.
+    """
+
+    def _report(self, *, contribution: int, verdict: str) -> dict:
+        return {
+            "report_schema_version": "2.40",
+            "verdict": verdict,
+            "analysis_assurance": {
+                "status": "incomplete" if contribution else "complete"
+            },
+            "analysis_assurance_exit_contribution": contribution,
+        }
+
+    def test_gate_fires_independent_of_fail_on_breaking(self, tmp_path: Path) -> None:
+        """The exact P1 scenario: a config-driven assurance floor coincides
+        with an ABI break the caller chose not to gate on
+        (`fail-on-breaking: false`) -- before the fix, this silently passed
+        because `_assurance_gated()` could never observe `true` any more."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=4,
+            report=self._report(contribution=1, verdict="BREAKING"),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_FAIL_ON_BREAKING": "false",
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_gate_fires_with_fail_on_api_break_false_too(self, tmp_path: Path) -> None:
+        """`fail-on-api-break` already defaults to false -- proves the gate
+        does not depend on that default happening to be true either."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=2,
+            report=self._report(contribution=1, verdict="API_BREAK"),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_a_zero_contribution_is_not_gated(self, tmp_path: Path) -> None:
+        """No false positive: complete assurance alongside a break the
+        caller chose not to gate on stays a clean step."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=4,
+            report=self._report(contribution=0, verdict="BREAKING"),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_FAIL_ON_BREAKING": "false",
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 0, outputs
+
+    def test_the_nested_diff_shape_is_read_too(self, tmp_path: Path) -> None:
+        """`_either()` in `_report_query` reads this field from the document
+        root, else falls back to a `diff`-nested copy -- a shape legacy
+        `scan --against` reports used before ADR-068 retired that mode
+        outright, kept here as a direct test of the query helper's own
+        fallback robustness (`test_action_coverage_verdict.py`'s
+        `_scan_outputs()` tests its `contract_coverage_exit_contribution`
+        sibling the identical way) rather than a claim that a real
+        `mode: compare` invocation produces this exact document today. The
+        assurance check itself is unconditional (mirrors `_coverage_gated()`
+        immediately above it) and reads `_assurance_gated()` directly rather
+        than the published VERDICT label -- a real BREAKING verdict outranks
+        ANALYSIS_INCOMPLETE in `_escalate_verdict_to_report`'s severity
+        ordering and wins the label, so this asserts the exit/message the
+        unconditional check itself produces, not the (by-design, escalated)
+        verdict label."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "diff": self._report(contribution=1, verdict="BREAKING"),
+            },
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+
+class TestConfigDrivenAssuranceGateReadsTheNoBaselineShapeToo:
+    """Finding 3 (P2, PR #1222 Codex review): ``_assurance_gated()`` (fixed
+    above to read ``analysis_assurance_exit_contribution``) didn't account
+    for the DIFFERENT report shape a ``compare --no-baseline`` audit-only
+    run produces (the real replacement for legacy ``mode: scan`` with no
+    baseline, ADR-068) -- that document
+    (``report/no_baseline.py::_document_json``) has no top-level
+    ``analysis_assurance_exit_contribution`` key at all (unlike the
+    two-sided ``compare`` shape) and no ``diff`` wrapper either (unlike the
+    legacy nested shape ``test_the_nested_diff_shape_is_read_too`` above
+    covers) -- the same information lives under
+    ``exit_axes.analysis_assurance`` instead. Before the fix, an audit-only
+    run with ``assurance.require_complete: true`` read a missing key here,
+    silently answered "not gated", and this Action reported a plain ERROR
+    instead of the correct ANALYSIS_INCOMPLETE classification even though
+    the CLI itself correctly exited 1. ``INPUT_OLD_LIBRARY`` is
+    deliberately never set below -- that omission is what selects the
+    ``compare --no-baseline`` audit path."""
+
+    def _no_baseline_report(self, *, contribution: int) -> dict:
+        return {
+            "audit_report_schema_version": "1.0",
+            "no_baseline": True,
+            "verdict": None,
+            "findings": [],
+            "exit_axes": {"analysis_assurance": contribution, "audit_gate": 0},
+            "exit_code": 1 if contribution else 0,
+        }
+
+    def test_the_exit_axes_shape_gates_too(self, tmp_path: Path) -> None:
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=self._no_baseline_report(contribution=1),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_a_zero_exit_axes_contribution_is_not_gated(self, tmp_path: Path) -> None:
+        """No false positive: the exit_axes fallback must not fire on a
+        real, explicit 0 either."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=0,
+            report=self._no_baseline_report(contribution=0),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 0, outputs

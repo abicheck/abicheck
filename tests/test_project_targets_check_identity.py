@@ -342,3 +342,102 @@ class TestAnalysisAssuranceTruthfulnessCli:
         result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
         assert result.exit_code == 0, result.output
         assert "OK" in result.output
+
+
+class TestAnalysisAssuranceCompleteRejectedForBundle:
+    """Codex review, fresh evidence after the earlier inert-setting finding
+    (PR #1222): ``checks[].analysis.assurance: complete`` on a bundle check
+    was accepted by validation and unconditionally forwarded into
+    ``check-target``'s ``analysis-assurance-complete`` input, which merges
+    ``assurance: {require_complete: true}`` into the resolved config and
+    forwards it to the underlying ``compare`` invocation -- for a bundle
+    check that invocation is the directory/package release fan-out, which
+    ``cli_compare_options.py``'s ``_reject_set_input_flags`` unconditionally
+    rejects ``require_complete_analysis=True`` for (a bundle comparison has
+    no single ``analysis_assurance`` result to gate on). That turned every
+    such bundle check into a hard CLI usage/operational error instead of an
+    actionable rejection. Reject it here, at run-plan generation time, the
+    same way ``allow_new_target`` is already rejected for a bundle check
+    (``test_bundle_check_allow_new_target_is_rejected``) -- bundle-level
+    assurance enforcement is a real, separate feature this fix does not
+    attempt."""
+
+    @staticmethod
+    def _bundle_config(assurance: str) -> ProjectTargetsConfig:
+        return ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "a": {"kind": "library", "binary_pattern": "a.so", "bundle": "rel"},
+                    "b": {"kind": "library", "binary_pattern": "b.so", "bundle": "rel"},
+                },
+                "bundles": {
+                    "rel": {
+                        "targets": ["a", "b"],
+                        "checks": [
+                            {
+                                "channel": "release",
+                                "depth": "binary",
+                                "analysis": {"assurance": assurance},
+                            }
+                        ],
+                    }
+                },
+                "baseline": {"channels": {"release": {"source": "git"}}},
+            }
+        )
+
+    def test_bundle_check_analysis_assurance_complete_is_rejected(self) -> None:
+        report = validate_project_targets(self._bundle_config("complete"))
+        assert not report.ok
+        assert any(
+            "analysis.assurance: complete is not supported for a bundle check" in e
+            for e in report.errors
+        )
+
+    def test_bundle_check_without_assurance_passes(self) -> None:
+        """Negative control: a bundle check declaring no assurance
+        requirement at all is unaffected by this new rule."""
+        config = ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "a": {"kind": "library", "binary_pattern": "a.so", "bundle": "rel"},
+                    "b": {"kind": "library", "binary_pattern": "b.so", "bundle": "rel"},
+                },
+                "bundles": {
+                    "rel": {
+                        "targets": ["a", "b"],
+                        "checks": [{"channel": "release", "depth": "binary"}],
+                    }
+                },
+                "baseline": {"channels": {"release": {"source": "git"}}},
+            }
+        )
+        report = validate_project_targets(config)
+        assert report.ok
+
+    def test_library_check_analysis_assurance_complete_still_passes(self) -> None:
+        """Negative control: this rule is bundle-scoped only -- a plain
+        library-kind check declaring analysis.assurance: complete is
+        unaffected (covered generally by
+        ``TestAnalysisAssuranceTruthfulness.test_supported_assurance_value_passes``,
+        restated here as the direct contrast to the bundle rejection
+        above)."""
+        config = ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "libfoo": {
+                        "kind": "library",
+                        "binary_pattern": "lib/libfoo.so",
+                        "checks": [
+                            {
+                                "channel": "none",
+                                "depth": "headers",
+                                "analysis": {"assurance": "complete"},
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+        report = validate_project_targets(config)
+        assert report.ok

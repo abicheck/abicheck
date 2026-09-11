@@ -581,17 +581,23 @@ def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
     config: Any,
+    *,
+    project_config_path: Any = None,
+    project_config_sha256: str | None = None,
+    require_complete_analysis_stated: bool = False,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    A no-op unless ``--contract`` produced a context (and unless
-    the caller resolved a *config* at all -- a run with neither
-    ``--contract`` nor ``--pack`` resolves nothing, since nothing
-    would read the result). Runs before any report is rendered, so every
-    output path sees one configuration resolved by the canonical resolver
-    rather than the core verb's argument-shaped reconstruction, and sees the
-    gate the run was actually scored with rather than :class:`GateConfig`'s
-    built-in defaults.
+    *project_config_path*/*project_config_sha256*/*require_complete_
+    analysis_stated* are forwarded, not re-derived, to :func:`~abicheck.
+    contract_context.with_resolved_gate` -- see its own docstring.
+
+    A no-op unless ``--contract`` produced a context (and unless the caller
+    resolved a *config* at all). Runs before any report is rendered, so
+    every output path sees one configuration resolved by the canonical
+    resolver rather than the core verb's argument-shaped reconstruction,
+    and sees the gate the run was actually scored with rather than
+    :class:`GateConfig`'s built-in defaults.
 
     *config* arrives already resolved rather than being resolved here: since
     ADR-049's ``--pack`` landed, the same object also *configures* the run
@@ -633,6 +639,10 @@ def record_resolved_config(
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in _SEVERITY_CATEGORIES
         },
+        require_complete_analysis=resolved_cfg.require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
+        project_config_path=str(project_config_path) if project_config_path else None,
+        project_config_sha256=project_config_sha256,
     )
 
 
@@ -738,6 +748,7 @@ def _release_summary_effective_config_block(
     scope_public_headers: bool = True,
     on_incomplete_scope: str = "",
     fail_on_removed_library: bool | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -778,6 +789,13 @@ def _release_summary_effective_config_block(
     forced-public-symbols concept of its own (unlike single-pair ``compare``,
     where the two can diverge), so both fields are simply the raw CLI value
     here.
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up): the release-
+    wide deployment-floor digest, computed once by the caller at release
+    scope from the resolved ``EnvironmentMatrix`` -- not read off any
+    per-library ``DiffResult`` (none exists at this scope), so a release
+    with zero matched/completed pairs still reports a real ``policy.
+    env_matrix`` rather than leaving it empty.
     """
     from types import SimpleNamespace
 
@@ -817,6 +835,8 @@ def _release_summary_effective_config_block(
         ),
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
+        # Codex review, P2 follow-up: feeds `policy.env_matrix` below.
+        env_matrix_source_sha256=env_matrix_source_sha256,
         # ADR-068 D4/Phase 5 + §4.1's AUTO rows: modulation, surface metrics and ADR-039 reconciliation are unconditional now (forced on at the Tier-2 chokepoint every library here routes through), so this stand-in must agree rather than default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,

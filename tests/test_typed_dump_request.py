@@ -356,9 +356,10 @@ class TestRunDumpRequest:
     def test_debug_format_rejected_for_non_elf_input(
         self, snap_path: Path, monkeypatch
     ):
+        import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service
 
-        monkeypatch.setattr(service, "detect_binary_format", lambda _p: "pe")
+        monkeypatch.setattr(_input_resolution, "detect_binary_format", lambda _p: "pe")
         with pytest.raises(ValidationError, match="only supported for ELF"):
             service.run_dump_request(
                 DumpRequest(input=InputSpec(path=snap_path), debug_format="dwarf")

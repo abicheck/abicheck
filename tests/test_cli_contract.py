@@ -1407,7 +1407,7 @@ def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> N
     """
     import inspect
 
-    from abicheck.cli_compare_helpers import _reject_set_input_flags
+    from abicheck.cli_compare_options import _reject_set_input_flags
 
     params = inspect.signature(_reject_set_input_flags).parameters
     assert "contract_evaluation" not in params
@@ -1417,10 +1417,14 @@ def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> N
     # nothing left to reject it against here either), and neither does
     # reconcile_build_context (one-comparison-product.md §4.1's AUTO row:
     # the reconciliation is unconditional now, so the release fan-out gets
-    # it rather than rejecting a request for it) -- the signature now starts
-    # at env_matrix_path.
+    # it rather than rejecting a request for it) -- and neither does
+    # env_matrix_path any more (ADR-020b / ADR-068 D5: `deployment:` is a
+    # project-wide config key now, applied to every library in the fan-out
+    # rather than rejected -- see test_environment_drift.py's
+    # `test_deployment_config_applies_across_release_fan_out`).
     assert "exit_code_scheme" not in params
     assert "reconcile_build_context" not in params
+    assert "env_matrix_path" not in params
     # Passes through untouched -- none of these kwargs exist on this
     # function anymore, so there is nothing left here to reject.
-    _reject_set_input_flags(None)
+    _reject_set_input_flags()

@@ -600,19 +600,11 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
         assert "abicheck upload-sarif" not in log, log
 
 
-def test_both_branches_share_the_same_write_guard() -> None:
-    """compare and scan must not drift apart on this.
-
-    Only scan carried the guard, which is exactly how compare shipped
-    without it; asserting every call site references the shared helper keeps
-    a future edit to one from silently leaving the others behind.
-
-    Two call sites since ADR-068 D2 / plan Phase 4 commit 1 and its
-    2026-09-10 amendment: `compare`'s own native branch, and the
-    `compare`/`compare --no-baseline`-translated `mode: scan` branch, which
-    shares one PR_JSON sidecar-injection call site for both its baseline
-    and audit-only sub-cases (there is no longer a separate legacy `scan`
-    CLI branch to carry a third).
+def test_the_single_compare_branch_carries_the_write_guard() -> None:
+    """compare's one branch (two-sided and audit-only shapes alike, since
+    ADR-068's Action-input-lifecycle amendment retired the separate
+    `mode: scan` branch entirely) shares one PR_JSON sidecar-injection call
+    site.
 
     `_extra_args_has_write_flag` (a blanket "any --write at all" check) was
     replaced by `_extra_args_write_would_conflict` in round 9 (Codex
@@ -620,13 +612,13 @@ def test_both_branches_share_the_same_write_guard() -> None:
     only operand, so a non-json `--write` in extra-args no longer needs to
     suppress this script's own `--write json=...` injection there; only a
     directory/package (release) operand, where the CLI supports just one
-    `--write`, still does. Same shared-helper invariant, new name.
+    `--write`, still does.
     """
     text = RUN_SH.read_text(encoding="utf-8")
     guarded = [
         line for line in text.splitlines() if "_extra_args_write_would_conflict" in line
     ]
-    # One definition, one or more docstring cross-references per branch, and
-    # two actual call sites -- assert on the calls specifically.
+    # One definition, plus one actual call site -- assert on the call
+    # specifically.
     calls = [line for line in guarded if "! _extra_args_write_would_conflict" in line]
-    assert len(calls) == 2, guarded
+    assert len(calls) == 1, guarded

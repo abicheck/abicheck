@@ -49,6 +49,7 @@ def format_stat_line(
     redundant_count: int = 0,
     gate_note: str = "",
     audit_note: str = "",
+    deployment_note: str = "",
 ) -> str:
     """Render already-resolved counts/label as the one-line summary.
 
@@ -57,6 +58,13 @@ def format_stat_line(
     Defaulted to the empty string so the one caller with no whole-library
     result to compute one from (``cli_compare_fold._ScopedFold.into_oneline``,
     which renders a *scoped* consumer gate) is unchanged.
+
+    *deployment_note* is the ``; deployment floor <digest>`` clause (Codex
+    review, fresh evidence) -- the same convention
+    ``report.no_baseline.render_no_baseline_oneline`` already established
+    for the no-baseline audit report's own oneline renderer, kept consistent
+    here rather than reinvented. Empty (the default) when no declared
+    ``deployment:`` contract governed this comparison.
     """
     parts = []
     if breaking:
@@ -73,7 +81,7 @@ def format_stat_line(
     )
     return (
         f"{label}: {detail} ({total_changes} total)"
-        f"{redundant_note}{audit_note}{gate_note}"
+        f"{redundant_note}{audit_note}{deployment_note}{gate_note}"
     )
 
 
@@ -89,7 +97,10 @@ def render_stat_document(document: ReportDocument) -> str:
     so a future caller building one document for both the JSON and text
     stat outputs only has to supply these fields once. The ``gate:``
     suffix is pure formatting of that already-resolved ``exit_code``, not a
-    new computation of it.
+    new computation of it. An optional top-level ``env_matrix_source_
+    sha256`` (Codex review, fresh evidence) becomes the ``; deployment
+    floor <digest>`` clause -- omitted when absent, the same additive
+    convention every other field here already follows.
     """
     d = document.to_mapping()
     summary = d["summary"]
@@ -105,6 +116,8 @@ def render_stat_document(document: ReportDocument) -> str:
         )
     audit_note = d.get("disposition_audit_note", "")
     assert isinstance(audit_note, str)
+    digest = d.get("env_matrix_source_sha256")
+    deployment_note = f"; deployment floor {digest}" if digest is not None else ""
     return format_stat_line(
         str(d["verdict_label"]),
         breaking=summary["breaking"],
@@ -115,4 +128,5 @@ def render_stat_document(document: ReportDocument) -> str:
         redundant_count=redundant_count,
         gate_note=gate_note,
         audit_note=audit_note,
+        deployment_note=deployment_note,
     )

@@ -468,9 +468,11 @@ _ARTIFACT_NAMES = frozenset(
 #:       above).
 #: 2.37 — each ``layer_coverage[]`` row (the L3_build row in particular)
 #:       gains five optional keys: ``requested_roots``/``resolved_roots``
-#:       (the P0.2 Bazel root-target(s) declared via ``dump --build-target``/
-#:       ``.abicheck.yml``'s ``build.targets``, and the subset a query
-#:       actually resolved), ``transitive_targets`` (the scoped dependency
+#:       (the P0.2 Bazel root-target(s) declared via ``.abicheck.yml``'s
+#:       ``build.targets`` -- or the typed-API ``InputSpec.build_targets``
+#:       parameter; the ``dump --build-target`` CLI flag that originally
+#:       populated this at 2.37's introduction was later removed -- and the
+#:       subset a query actually resolved), ``transitive_targets`` (the scoped dependency
 #:       closure size), and ``compile_units``/``link_units`` (machine-
 #:       readable counterparts to what ``detail`` already states in prose).
 #:       All five are present-but-empty/``null`` on every row unaffected by
@@ -884,7 +886,16 @@ _ARTIFACT_NAMES = frozenset(
 #:       facts.degraded_reliability_facts`` marks stale. Folds into the existing
 #:       ``status``/``notes`` the same way every context-status field
 #:       already does; unaffected for a run with no stale fact.
-REPORT_SCHEMA_VERSION = "4.1"  #: 4.1 -- see the comment immediately above.
+#: 4.2 -- additive, top-level ``env_matrix_source_sha256`` (Codex review,
+#:       P2): the declared-deployment-floor contract's content digest
+#:       (``DiffResult.env_matrix_source_sha256``), present only when a
+#:       run actually resolved an ``EnvironmentMatrix``
+#:       (``--env-matrix``/``.abicheck.yml``'s ``deployment:``). Omitted
+#:       entirely, not ``null``, for a run with no declared deployment
+#:       contract. The ``--no-baseline`` audit report's
+#:       ``NO_BASELINE_REPORT_SCHEMA_VERSION`` gains the identical field
+#:       under this same name for the same reason.
+REPORT_SCHEMA_VERSION = "4.2"  #: 4.2 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

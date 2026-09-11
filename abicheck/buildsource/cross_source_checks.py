@@ -65,6 +65,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..checker_types import Change
+from ..evidence_depth import resolve_l5_source_graph
 from ..model import (
     AbiSnapshot,
     AccessLevel,
@@ -626,11 +627,7 @@ def _check_private_header_leak(
     # so checking presence alone would record a provider with no fact behind it and
     # mask regressions in real source-graph extraction (ADR-035 D4 coverage honesty
     # — Codex review).
-    sg = (
-        snapshot.build_source.source_graph
-        if snapshot.build_source is not None
-        else None
-    )
+    sg = resolve_l5_source_graph(snapshot, snapshot.build_source)
     if sg is not None and sg.nodes:
         providers.append(PROVIDER_SOURCE_INDEX)
     if not _origin_resolvable(snapshot):
@@ -994,20 +991,15 @@ def _check_public_to_internal_dependency(
     (public-header visibility, or one mapped to an exported binary symbol) points
     at an *internal* declaration/type (private-header or source-file visibility;
     ``generated`` is a public generated header and excluded), the public surface
-    depends on something consumers cannot see —
-    a behavioral risk, elevated when the internal entity is among the revision's
-    changed files (``cfg.changed_paths``).
+    depends on something consumers cannot see — a behavioral risk, elevated
+    when the internal entity is among the revision's changed files (``cfg.changed_paths``).
 
     The dependency edges only exist after an S4/S5 semantic pass. With a
     structural-only graph (or no graph at all) the check skips with a soft
     advisory naming what to enable — it is never counted clean.
     """
     providers = [PROVIDER_SOURCE_INDEX]
-    graph = (
-        snapshot.build_source.source_graph
-        if snapshot.build_source is not None
-        else None
-    )
+    graph = resolve_l5_source_graph(snapshot, snapshot.build_source)
     if graph is None:
         return _CheckOutput(
             [],

@@ -29,7 +29,7 @@ check can run entirely offline/elsewhere, decoupled as two separate steps.
 ```
 
 `gcc-path`/`gcc-prefix`/`gcc-options`/`sysroot` are forwarded straight
-through to the analysis step in every mode (`compare`/`scan`/`dump`) — see
+through to the analysis step in every mode (`compare`/`dump`) — see
 the [`check-target` reference](../../reference/check-target.md) for the full
 input list.
 

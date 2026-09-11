@@ -96,12 +96,12 @@ abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm
 See [Multi-Binary Releases](multi-binary.md) for the bundle/package flags and the
 [GitHub Action](github-action.md) guide for CI examples with packages.
 
-### `compare` for a one-off comparison, with no stored baseline
+### A one-off comparison with side-scoped headers
 
-`compare OLD NEW` doesn't require a *stored* baseline at all — pass a
-previous native library or saved ABI dump directly as `OLD` (a single file,
-not a directory or package -- for those the same `compare` command already
-handles `OLD_PACKAGE NEW_PACKAGE` too). `compare` always runs its always-on
+`abicheck compare OLD NEW` doesn't require a stored baseline at all — `OLD`
+can be a previous native library or a saved ABI dump directly (a single
+file, not a directory or package -- for those, `compare` takes the two
+package roots the same way). `compare` always runs its always-on
 pattern/cross-source audit checks alongside the comparison itself, in one
 pass:
 
@@ -110,10 +110,10 @@ abicheck compare old/libfoo.so new/libfoo.so --header new/include
 ```
 
 `-H`/`--header` and `-I`/`--include` are side-aware: a bare value applies to
-both `OLD` and `NEW`, and an `old=`/`new=` prefix scopes to one side. When
-`OLD` is a **native library** (not a snapshot) and its public headers differ
-from the new version, parse the old side with **its own** headers using the
-`old=` prefix:
+both sides, and an `old=`/`new=` prefix scopes to one side. When `OLD` is a
+**native library** (not a snapshot) and its public headers differ from the
+new version, parse the old side with **its own** headers using the `old=`
+prefix:
 
 ```bash
 abicheck compare old/libfoo.so new/libfoo.so \

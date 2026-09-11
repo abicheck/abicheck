@@ -136,12 +136,47 @@ class StepResult:
 
     @property
     def outputs(self) -> dict[str, str]:
-        """Last-wins parse, matching how the runner reads $GITHUB_OUTPUT."""
+        """Last-wins parse, matching how the runner reads $GITHUB_OUTPUT.
+
+        Handles both record shapes the real runner does: a plain
+        ``key=value`` line, and GitHub's documented multiline form
+        (``key<<DELIMITER``, one or more body lines, a line that is exactly
+        ``DELIMITER``) -- used by a step whose output value may itself
+        contain a newline (e.g. ``actions/check-target/action.yml``'s own
+        ``effective-extra-args`` output, PR #1222). Without this, a
+        multiline record's own delimiter/body lines (none of which contain
+        a literal ``=`` in general) would be silently skipped by the plain
+        parse below, and the key would appear missing rather than present
+        with its real, possibly-multiline value.
+
+        Note ``output_lines`` above already drops blank lines, so a blank
+        body line inside a multiline record is not reconstructable here --
+        a pre-existing limitation of that capture, not of this parse.
+        """
         parsed: dict[str, str] = {}
-        for line in self.output_lines:
+        lines = self.output_lines
+        i = 0
+        n = len(lines)
+        while i < n:
+            line = lines[i]
+            if "<<" in line and "=" not in line.split("<<", 1)[0]:
+                key, _, delimiter = line.partition("<<")
+                i += 1
+                body: list[str] = []
+                while i < n and lines[i] != delimiter:
+                    body.append(lines[i])
+                    i += 1
+                # lines[i] == delimiter here, or i == n on a malformed/
+                # truncated record -- either way, stop collecting and move
+                # past the delimiter line (if any) rather than raising, to
+                # keep this a lenient test-harness parse.
+                parsed[key] = "\n".join(body)
+                i += 1
+                continue
             if "=" in line:
                 key, _, value = line.partition("=")
                 parsed[key] = value
+            i += 1
         return parsed
 
     def tree(self) -> set[str]:

@@ -865,23 +865,38 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--used-by" in out
 
-    def test_require_complete_analysis_is_rejected(self, tmp_path: Path) -> None:
+    def test_assurance_require_complete_config_is_rejected(self, tmp_path: Path) -> None:
+        # rulings.py followup: --require-complete-analysis is gone from the
+        # CLI; this driver rejects assurance.require_complete: true instead.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        cfg_path = tmp_path / ".abicheck.yml"
+        cfg_path.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
+
+        code, out = _invoke(
+            "compare", str(facts_path), str(new_dir),
+            "--config", str(cfg_path), "--format", "json",
+        )
+
+        assert code == 64
+        assert "assurance.require_complete" in out
+
+    def test_require_complete_analysis_flag_no_longer_exists(self, tmp_path: Path) -> None:
+        # Old CLI spelling gone outright -- no alias, no deprecation window.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare",
-            str(facts_path),
-            str(new_dir),
-            "--require-complete-analysis",
-            "--format",
-            "json",
+            "compare", str(facts_path), str(new_dir),
+            "--require-complete-analysis", "--format", "json",
         )
 
         assert code == 64
-        assert "--require-complete-analysis" in out
+        assert "no such option" in out.lower()
 
     def test_debug_root_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: --debug-root locates NEW-side debug info, but

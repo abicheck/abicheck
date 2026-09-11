@@ -27,6 +27,7 @@
         "abicheck/demangle.py",
         "abicheck/detectors.py",
         "abicheck/elf_symbol_filter.py",
+        "abicheck/environment_matrix.py",
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
@@ -331,6 +332,7 @@
         "abicheck/compatibility_evaluation_wiring.py",
         "abicheck/contract_context.py",
         "abicheck/contract_context_io.py",
+        "abicheck/contract_gate_require_complete_provenance.py",
         "abicheck/contract_pipeline.py",
         "abicheck/contract_replay.py",
         "abicheck/contract_scoped_promotion.py",
@@ -339,7 +341,6 @@
         "abicheck/dependency_info.py",
         "abicheck/dumper_hybrid.py",
         "abicheck/effective_config_digest.py",
-        "abicheck/environment_matrix.py",
         "abicheck/impact/consumer_graph.py",
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
@@ -408,6 +409,8 @@
         "report"
       ],
       "legacy_paths": [
+        "abicheck/action_config_overlay.py",
+        "abicheck/action_config_overlay_compile.py",
         "abicheck/cli.py",
         "abicheck/cli_aggregate.py",
         "abicheck/cli_audit.py",

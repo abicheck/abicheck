@@ -39,9 +39,6 @@ from . import cli_resolve
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _exit_on_budget_overflow,
-    _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
-    _fold_suppression_audit_into_text as _fold_suppression_audit_into_text,
-    _fold_use_case_impact_into_text,
     _report_not_comparable,
 )
 from .cli_compare_options import (
@@ -49,7 +46,6 @@ from .cli_compare_options import (
     _param_from_cli,
     _reject_bundle_facts_out_for_single_pair,
     _reject_debug_format_for_non_elf,
-    _reject_set_input_flags,
     _resolve_debug_roots,
     _resolve_demangle,
     _warn_force_public_ignored,
@@ -57,13 +53,7 @@ from .cli_compare_options import (
 )
 from .cli_dump_helpers import resolve_dump_debug_format, resolve_dump_depth
 from .cli_helpers_compare import (
-    # The ADR-043 scoped-gating family lives there (this module is at the
-    # file-size cap); re-exported so ``cli_compare_helpers._verdict_exit_code``
-    # -- which cli_scan_baseline imports -- and the existing test patch targets
-    # keep resolving unchanged.
     _app_compat_summary as _app_compat_summary,
-    _apply_required_symbol_scoping as _apply_required_symbol_scoping,
-    _apply_used_by_scoping as _apply_used_by_scoping,
     _pair_wide_dialect_override,
     _plugin_contract_summary as _plugin_contract_summary,
     _require_used_by_binary_evidence as _require_used_by_binary_evidence,
@@ -85,15 +75,29 @@ from .cli_options import (
     resolve_contract_evaluation,
 )
 from .cli_resolve import (
-    _reject_compile_context_for_set_inputs,
-    _reject_evidence_flags_for_set_inputs,
     _resolve_compare_snapshots,
     classify_compare_operand,
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import AbicheckError, PolicyError, ProfileMismatchError, ScopeMismatchError
+from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
+from .frontends.cli.compare_report import (
+    # A cohesive slice of ``run_compare``'s post-comparison phase (scoped
+    # gating, report rendering, suppression-audit attachment, set-input flag
+    # rejection) -- size-split out to its own module (see that module's own
+    # docstring for why, including why ``_resolve_evaluation_config``/
+    # ``_attach_use_case_impact``/``_report_compare_result`` stay here
+    # instead of moving too). Imported back here, not just called from
+    # there, so every existing ``cli_compare_helpers.<name>`` reference
+    # (docstrings/comments elsewhere in this codebase) keeps resolving
+    # unchanged -- a bare name is looked up in the *calling* module's
+    # globals at call time, not in the module that defined it.
+    _apply_scoped_gating as _apply_scoped_gating,
+    _attach_suppression_audit as _attach_suppression_audit,
+    _reject_flags_unsupported_for_set_inputs,
+    _render_compare_report as _render_compare_report,
+)
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.options import reject_incoherent_secondary_writes
 from .frontends.cli.options.params import _load_suppression_and_policy
@@ -104,7 +108,6 @@ from .frontends.cli.runtime import (
     _finalize_compare_result,
     _load_probe_matrix_changes,
     _log_debug_resolution,
-    _render_output,
     _setup_verbosity,
     _write_or_echo,
 )
@@ -515,36 +518,6 @@ def _reject_manifest_non_elf(
             )
 
 
-def _apply_scoped_gating(
-    result: Any, old: Any, new: Any, policy: str, pf: PolicyFile | None,
-    *,
-    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
-    used_by_old_input: Path, used_by_new_input: Path,
-    exit_code_scheme: str, sev_config: Any,
-    suppression: Any,
-) -> int | None:
-    """Apply whichever ADR-043 scoped gate this run selected, if any.
-
-    ``--used-by`` and ``--required-symbol`` are mutually exclusive (rejected
-    earlier), so at most one applies. Returns the scoped exit code, or ``None``
-    when the run is unscoped and the full-library verdict gates instead.
-    """
-    if used_by_apps:
-        return _apply_used_by_scoping(
-            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
-            policy, pf,
-            exit_code_scheme=exit_code_scheme, sev_config=sev_config,
-            suppression=suppression,
-        )
-    if required_symbols:
-        return _apply_required_symbol_scoping(
-            result, required_symbols, old, new, policy, pf,
-            exit_code_scheme=exit_code_scheme, sev_config=sev_config,
-            suppression=suppression,
-        )
-    return None
-
-
 def _embed_inline_source_sides(
     ctx: click.Context, *,
     old_input: Path, new_input: Path,
@@ -761,65 +734,6 @@ def _resolve_evaluation_config(
     return evaluation_config, pf, resolved_cfg
 
 
-def _render_compare_report(
-    result: Any, old: Any, new: Any, *,
-    fmt: str, follow_deps: bool, show_only: str | None, report_mode: str,
-    show_impact: bool, severity_config: Any,
-    demangle: bool, contract_evaluation: bool,
-    require_complete_analysis: bool = False,
-    audit_suppressions: bool = False,
-) -> str:
-    """Render one compare report and fold every post-render section into it.
-
-    The primary (``--format``) and secondary (``--write``) renders
-    run the identical pipeline and differ only in their arguments, so
-    they share this one function rather than keeping two copies that can drift.
-
-    No ``stat``/``recommend`` parameters (CLI cleanup phase two, PR 1): see
-    ``_render_output``/``service_render.render_output`` for where the
-    one-line format and the unconditional recommendation now live.
-
-    ADR-061 Phase 2 item 5: this used to be a four-fold pipeline -- the
-    fourth step, ``_fold_evidence_depth_into_json``, re-parsed the JSON text
-    this function was about to return to splice in
-    ``old_evidence_depth``/``new_evidence_depth``. Both are now resolved
-    once by the caller and attached onto ``result`` before this function
-    ever runs (see ``checker_types.DiffResult.old_evidence_depth``'s own
-    docstring), so ``_render_output``'s own ``to_json`` call already emits
-    them and no fourth fold-in is needed here any more.
-    """
-    text = _render_output(
-        fmt, result, old, new,
-        follow_deps=follow_deps,
-        show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact,
-        severity_config=severity_config,
-        demangle=demangle,
-        contract_evaluation=contract_evaluation,
-        require_complete_analysis=require_complete_analysis,
-    )
-    text = _fold_scoped_compat_into_text(
-        text, fmt, result,
-        severity_config=severity_config,
-        show_only=show_only, report_mode=report_mode,
-        contract_evaluation=contract_evaluation,
-        demangle=demangle,
-    )
-    # ADR-068 D4/Phase 5: result.suppression_audit is now always attached
-    # when suppression was given; --audit-suppressions only gates whether
-    # this markdown/text/review fold renders it (pass None when not given).
-    # JSON/SARIF/JUnit/HTML read the field off `result` unconditionally.
-    text = _fold_suppression_audit_into_text(
-        text,
-        fmt,
-        result.suppression_audit if audit_suppressions else None,
-        demangle=demangle,
-    )
-    return _fold_use_case_impact_into_text(
-        text, fmt, result, show_only, demangle=demangle
-    )
-
-
 def _attach_use_case_impact(
     result: Any, old: Any, new: Any, manifest: Path | None
 ) -> None:
@@ -872,89 +786,6 @@ def _attach_use_case_impact(
     result.use_case_impact = impact
 
 
-def _attach_suppression_audit(result: Any, suppression: Any) -> None:
-    """Attach the ``--audit-suppressions`` audit trail to *result*.
-
-    Guarded above: audit_suppressions=True implies suppression is not
-    None. Audited against the full pre-suppression change set (kept +
-    suppressed) plus any --used-by/--required-symbol scoped_only_changes
-    (Codex review, fresh evidence: run *after* scoping, not before, so a
-    rule matching only a scoping-synthesized finding like
-    CONSUMER_REQUIRED_SYMBOL_REMOVED isn't misreported as stale). Not a
-    complete fix: scope_diff_to_app/scope_diff_to_required_symbols apply
-    suppression internally to their own candidates before this ever
-    sees them, so a rule matching only a scoping candidate suppression
-    itself already dropped (never reaching scoped_only_changes at all)
-    is still invisible here -- closing that needs those functions to
-    expose their own pre-suppression candidate list, a separate,
-    larger change to appcompat.py this fix does not attempt.
-    """
-    assert suppression is not None
-    # Codex review, fresh evidence: pass the *effective*, policy-override-
-    # applied breaking set (not the static BREAKING_KINDS default) so a
-    # rule's "high risk" classification matches the verdict this run's
-    # own --policy-file would actually produce, e.g. a rule suppressing
-    # a kind the policy promoted to BREAKING is reported as high-risk
-    # even though it isn't in the built-in BREAKING_KINDS.
-    effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
-    result.suppression_audit = suppression.audit(
-        list(result.changes)
-        + list(result.suppressed_changes)
-        + list(getattr(result, "scoped_only_changes", ()) or ()),
-        breaking_kinds=effective_breaking_kinds,
-        # Codex review: a selector-scoped `reclassify:` rule isn't
-        # expressible in effective_breaking_kinds at all (that's a
-        # kind-wide set); pass the policy file through so `audit()` can
-        # classify a reclassified finding by its own rule's resolution.
-        policy_file=getattr(result, "policy_file", None),
-    )
-
-
-def _reject_flags_unsupported_for_set_inputs(
-    ctx: click.Context, *,
-    env_matrix_path: Path | None,
-    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
-    diagnostic_comparison: bool, audit_suppressions: bool,
-    include_labels: dict[Path, str] | None,
-    require_complete_analysis: bool = False,
-    use_cases_manifest: Path | None = None,
-    suppress: Path | None = None,
-    budget: str | None = None, pdb_path: Path | None = None,
-) -> str | None:
-    """Reject the single-pair-only flags on a directory/package compare.
-
-    The per-library fan-out (``compare-release`` backend) consumes the
-    resolved scheme from config but has no public CLI support for these
-    flags on set inputs -- reject them loudly (ADR-037 D12). Validated ahead
-    of the ``--dry-run`` emit so a dry run can't report "ok" for a flag
-    combination the real run would then reject.
-
-    ``--pack`` is not rejected here: the caller resolves it separately right
-    after this call. ``--write`` (``secondary_writes``, repeatable per
-    ADR-068 D4/Phase 5) is not rejected either -- the release engine
-    supports it directly (at most one write; see ``_dispatch_release_
-    compare``'s own rejection of a second one), so it is simply forwarded.
-
-    Returns the ``--depth`` value the caller should forward to the fan-out
-    -- any rung of the public ladder, or ``None``. No rung is rejected; a
-    shortfall is ADR-064's exit-7 axis, per member (see
-    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`).
-    """
-    _reject_set_input_flags(
-        env_matrix_path,
-        used_by_apps=used_by_apps, required_symbols=required_symbols,
-        use_cases_manifest=use_cases_manifest,
-        diagnostic_comparison=diagnostic_comparison,
-        audit_suppressions=audit_suppressions,
-        suppress=suppress,
-        include_labels=include_labels,
-        require_complete_analysis=require_complete_analysis,
-        budget=budget, pdb_path=pdb_path,
-    )
-    _reject_compile_context_for_set_inputs(ctx)
-    return _reject_evidence_flags_for_set_inputs(ctx)
-
-
 def _report_compare_result(
     ctx: click.Context, result: Any, old: Any, new: Any, *,
     old_input: Path, new_input: Path,
@@ -973,19 +804,46 @@ def _report_compare_result(
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
     secondary_writes: tuple[tuple[str, Path], ...],
     require_complete_analysis: bool = False,
+    require_complete_analysis_stated: bool = False,
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
+    project_config_path: Path | None = None,
+    project_config_sha256: str | None = None,
 ) -> None:
     """Everything after the comparison: scope, render, exit.
 
     ``run_compare``'s third phase (resolve -> compare -> report), split out so
     each reads as one job. Terminal: ends in
     :func:`_exit_with_severity_or_verdict`, which never returns.
+
+    *project_config_path*/*project_config_sha256* are ``run_compare``'s own
+    already-resolved ``cfg_path``/``cfg_sha`` (the ``.abicheck.yml``
+    ``_resolve_compare_config`` loaded for this same invocation) -- forwarded
+    to :func:`~abicheck.cli_compare_receipt.record_resolved_config` so a
+    ``gate.require_complete_analysis`` receipt entry can name the real
+    document/digest that supplied ``assurance.require_complete``, the same
+    identity every other project-config-sourced provenance entry in this
+    receipt already carries (P2, Codex review, fresh evidence).
+
+    *require_complete_analysis_stated* is whether the resolved project
+    config LITERALLY carried an ``assurance.require_complete`` key (true or
+    false), distinct from *require_complete_analysis* itself, which already
+    collapses an explicit ``false`` and an omitted key onto the same
+    resolved value -- see ``contract_gate_require_complete_provenance.py``'s
+    own module docstring (Codex review, fresh evidence, PR #1222 fourth
+    round, second finding).
     """
     from .cli_buildsource import attach_evidence_metrics
     from .cli_compare_receipt import record_resolved_config
 
-    record_resolved_config(result, resolved_cfg, evaluation_config)
+    record_resolved_config(
+        result,
+        resolved_cfg,
+        evaluation_config,
+        project_config_path=project_config_path,
+        project_config_sha256=project_config_sha256,
+        require_complete_analysis_stated=require_complete_analysis_stated,
+    )
 
     # P0.4 (P1 review, round 9): `DiffResult.requested_depth` -- the G30
     # report-identity field `analysis_assurance.compute_analysis_assurance`
@@ -995,7 +853,7 @@ def _report_compare_result(
     # (e.g. both sides lack a compile database, so the effective depth stays
     # `headers`) silently read `requested_depth=None`, `depth_satisfied=None`,
     # and could still report `status="complete"` under
-    # `--require-complete-analysis`. `depth` here is `run_compare`'s own
+    # `assurance.require_complete`. `depth` here is `run_compare`'s own
     # raw, Click-validated `--depth` string (one of
     # `checker_types.EVIDENCE_DEPTH_VALUES`, `None` when the flag was
     # omitted) -- copy it onto the result before recomputing
@@ -1207,7 +1065,6 @@ def run_compare(
     # both below). explain_patterns renders the always-on ledger via
     # `--view patterns`, same as show_filtered/audit_suppressions below.
     explain_patterns: bool,
-    env_matrix_path: Path | None,
     verbose: bool,
     use_cases_manifest: Path | None = None,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
@@ -1230,7 +1087,6 @@ def run_compare(
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
     frontend_context: str = "host",
-    require_complete_analysis: bool = False,
     since: str | None = None,  # ADR-068 Phase 2c: changed-path localization
     changed_paths_opt: tuple[str, ...] = (),
     abi3: str | None = None,  # ADR-068 Phase 2d: candidate-side abi3 audit
@@ -1317,6 +1173,13 @@ def run_compare(
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
+    require_complete_analysis = resolved_cfg.require_complete_analysis  # former CLI flag
+    # Was assurance.require_complete literally stated (vs. an omitted key
+    # defaulting to the same resolved value)? See
+    # contract_gate_require_complete_provenance.py's module docstring.
+    require_complete_analysis_stated = (
+        getattr(project_cfg, "assurance_require_complete", None) is not None
+    )
     # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
     # --debug-format are gone as CLI flags (hidden, already config-backed
     # duplicates) -- config-only now, read straight off the resolved config
@@ -1386,7 +1249,6 @@ def run_compare(
     if {old_kind, new_kind} & {"directory", "package"}:
         release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
-            env_matrix_path=env_matrix_path,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
@@ -1582,6 +1444,7 @@ def run_compare(
             depth=release_depth,
             public_header_dirs=project_config_public_header_dirs(project_cfg),
             collapse_versioned_symbols=collapse_versioned_symbols,
+            env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
             # Codex review (PR #1154 follow-up): --view's derived values were
             # silently dropped from this dispatch -- forwarded raw
             # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
@@ -1931,11 +1794,12 @@ def run_compare(
         if evaluation_config is not None and contract_evaluation
         else contract_mode
     )
-    from .service import compare_snapshots, load_env_matrix
-    try:
-        env_matrix = load_env_matrix(env_matrix_path)
-    except AbicheckError as exc:
-        raise click.UsageError(str(exc)) from exc
+    from .service import compare_snapshots
+    # ADR-020b / ADR-068 D5: `deployment:` (former `--env-matrix FILE`) is
+    # config-only now -- `resolved_cfg.deployment` is the single already-
+    # resolved `EnvironmentMatrix`, sourced straight from `.abicheck.yml`,
+    # no CLI override, no separate file to load here.
+    env_matrix = resolved_cfg.deployment
     try:
         deadline.check()  # same boundary check as the resolve stage above
         result = compare_snapshots(
@@ -1995,6 +1859,9 @@ def run_compare(
         follow_deps=follow_deps,
         secondary_writes=secondary_writes,
         require_complete_analysis=require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
         depth=depth,
         use_cases_manifest=use_cases_manifest,
+        project_config_path=cfg_path,
+        project_config_sha256=cfg_sha,
     )

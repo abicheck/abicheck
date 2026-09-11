@@ -283,10 +283,12 @@ class TestCompareHelpAllDisclosure:
 #
 # Same disclosure as `compare` above, generalized via `cli_help.curated_help_options`.
 # One parametrized class covers the presentational assertions; `dump` gets its
-# own advanced-option-still-works check below. A second command tuple existed
-# here for `scan --help-all` until that command was deleted outright
-# (ADR-068 Phase 6, no deprecation window) -- removed along with it, rather
-# than left referencing a `main.commands["scan"]` that no longer exists.
+# own advanced-option-still-works check below.
+#
+# This used to also cover `scan --help-all` (a second row in
+# _HELP_ALL_COMMANDS below, plus its own
+# test_scan_advanced_option_still_functional_after_curated_help_render);
+# ADR-068 Phase 6 retired the `scan` command outright.
 
 _HELP_ALL_COMMANDS: list[
     tuple[str, frozenset[str], tuple[str, ...], tuple[str, ...]]
@@ -316,7 +318,7 @@ _HELP_ALL_COMMANDS: list[
 ]
 
 
-class TestDumpHelpAllDisclosure:
+class TestDumpAndScanHelpAllDisclosure:
     @pytest.mark.parametrize(
         "command,common_names,_advanced,_common", _HELP_ALL_COMMANDS
     )
@@ -430,3 +432,4 @@ class TestDumpHelpAllDisclosure:
         # the point is that Click accepts the (curated-hidden)
         # --dump-manifest flag at all, rather than "no such option".
         assert "no such option" not in result.output.lower()
+

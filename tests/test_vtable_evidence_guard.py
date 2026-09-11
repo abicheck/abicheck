@@ -485,6 +485,322 @@ class TestUnsupportedProducerClosesThePdbFabrication:
         assert omitted.vtable_fact.status != unsupported.vtable_fact.status
 
 
+def _partial_record(
+    *,
+    vtable: list[str],
+    bases: list[str] | None = None,
+    virtual_bases: list[str] | None = None,
+    size_bits: int | None = 64,
+    partial_field: str | None = None,
+) -> RecordType:
+    """A record shaped like the sibling fixtures above, with one of the
+    three T9-gated sibling fields (``vtable``/``bases``/``virtual_bases``)
+    optionally overridden to ``Fact.partial(..., producer="dwarf")`` --
+    exactly the shape ``dwarf_snapshot._finalize_vtable_evidence_
+    completeness`` produces for a cross-translation-unit disagreement.
+    """
+    values = {
+        "vtable": vtable,
+        "bases": bases or [],
+        "virtual_bases": virtual_bases or [],
+    }
+    kwargs: dict[str, object] = {
+        "name": NAME,
+        "kind": "class",
+        "size_bits": size_bits,
+        "vtable": values["vtable"],
+        "bases": values["bases"],
+        "virtual_bases": values["virtual_bases"],
+    }
+    if partial_field is not None:
+        kwargs[f"{partial_field}_fact"] = Fact.partial(
+            values[partial_field], producer="dwarf"
+        )
+    return RecordType(**kwargs)  # type: ignore[arg-type]
+
+
+class TestPartialProducerClosesTheDwarfPerTuGap:
+    """T9 second/third slice: the DWARF-specific sibling of
+    ``TestUnsupportedProducerClosesThePdbFabrication`` above. Where PDB's
+    ``UNSUPPORTED`` is a producer-wide incapability claim, DWARF's own
+    per-translation-unit completeness gap
+    (``extract.dwarf_vtable_completeness.
+    finalize_vtable_evidence_completeness``) is per-record, per-*field*
+    (T9 third slice, Codex review finding on this PR) and expressed as
+    ``FactStatus.PARTIAL`` on whichever of ``vtable_fact``/``bases_fact``/
+    ``virtual_bases_fact`` an ODR-duplicate DIE actually disagreed on --
+    only that field, not a blanket per-record decision. This is a
+    bug-CLASS test (AGENTS.md): it exhaustively covers every (field, side)
+    combination across several independently shaped record pairs -- not
+    just the one reported shape -- so a fix that only closed one of this
+    guard's several internal branches (the both-nonempty reorder branch,
+    the size-delta branch, the virtual_bases fallback branch) would still
+    be caught here, and so would a fix that over-declines (gates a branch
+    that field doesn't actually feed).
+    """
+
+    _SHAPES = [
+        # (old_vtable, new_vtable, old_bases, new_bases, old_vbases,
+        #  new_vbases, old_size, new_size) -- each one alone would
+        #  otherwise evidence a transition through a DIFFERENT branch of
+        #  vtable_transition_is_evidenced when no field is PARTIAL.
+        pytest.param(
+            [f"{NAME}::f()"],
+            [f"{NAME}::g()"],
+            [],
+            [],
+            [],
+            [],
+            64,
+            64,
+            id="both-nonempty-reorder",
+        ),
+        pytest.param(
+            [],
+            [f"{NAME}::f()"],
+            [],
+            [],
+            [],
+            [],
+            64,
+            128,
+            id="empty-to-nonempty-with-size-delta",
+        ),
+        pytest.param(
+            [],
+            [],
+            [],
+            [],
+            [],
+            ["V"],
+            64,
+            64,
+            id="virtual-bases-fallback",
+        ),
+    ]
+
+    def _build(
+        self,
+        *,
+        side: str,
+        field: str | None,
+        old_vtable: list[str],
+        new_vtable: list[str],
+        old_bases: list[str],
+        new_bases: list[str],
+        old_vbases: list[str],
+        new_vbases: list[str],
+        old_size: int,
+        new_size: int,
+    ) -> tuple[RecordType, RecordType]:
+        plain_field = field.removesuffix("_fact") if field is not None else None
+        old = _partial_record(
+            vtable=old_vtable,
+            bases=old_bases,
+            virtual_bases=old_vbases,
+            size_bits=old_size,
+            partial_field=plain_field if side == "old" else None,
+        )
+        new = _partial_record(
+            vtable=new_vtable,
+            bases=new_bases,
+            virtual_bases=new_vbases,
+            size_bits=new_size,
+            partial_field=plain_field if side == "new" else None,
+        )
+        return old, new
+
+    @pytest.mark.parametrize(
+        "old_vtable,new_vtable,old_bases,new_bases,old_vbases,new_vbases,"
+        "old_size,new_size",
+        _SHAPES,
+    )
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_vtable_partial_declines_regardless_of_side_or_shape(
+        self,
+        side: str,
+        old_vtable: list[str],
+        new_vtable: list[str],
+        old_bases: list[str],
+        new_bases: list[str],
+        old_vbases: list[str],
+        new_vbases: list[str],
+        old_size: int,
+        new_size: int,
+    ) -> None:
+        """``vtable_fact`` is the one field whose own ``PARTIAL`` still
+        declines the whole guard, for every shape -- it is the field the
+        top-level check gates on directly."""
+        old, new = self._build(
+            side=side,
+            field="vtable_fact",
+            old_vtable=old_vtable,
+            new_vtable=new_vtable,
+            old_bases=old_bases,
+            new_bases=new_bases,
+            old_vbases=old_vbases,
+            new_vbases=new_vbases,
+            old_size=old_size,
+            new_size=new_size,
+        )
+        # Sanity: without the PARTIAL override, at least one of these
+        # shapes would have to evidence a transition, or this parametrized
+        # case is not actually exercising the guard's "would otherwise say
+        # True" premise its own id names.
+        assert not _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+    @pytest.mark.parametrize(
+        "old_vtable,new_vtable,old_bases,new_bases,old_vbases,new_vbases,"
+        "old_size,new_size",
+        _SHAPES,
+    )
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_bases_partial_never_declines_since_this_guard_never_reads_bases(
+        self,
+        side: str,
+        old_vtable: list[str],
+        new_vtable: list[str],
+        old_bases: list[str],
+        new_bases: list[str],
+        old_vbases: list[str],
+        new_vbases: list[str],
+        old_size: int,
+        new_size: int,
+    ) -> None:
+        """Codex review finding on this PR: ``bases_fact`` (unlike
+        ``vtable_fact``/``virtual_bases_fact``) is never read by this
+        function at all -- only ``diff_cxx_rules._transitive_bases`` reads
+        it, elsewhere. A duplicate that disagreed only on ``bases`` must
+        never suppress a genuinely evidenced vtable transition here, for
+        any of the three shapes."""
+        old, new = self._build(
+            side=side,
+            field="bases_fact",
+            old_vtable=old_vtable,
+            new_vtable=new_vtable,
+            old_bases=old_bases,
+            new_bases=new_bases,
+            old_vbases=old_vbases,
+            new_vbases=new_vbases,
+            old_size=old_size,
+            new_size=new_size,
+        )
+        # Every shape in _SHAPES is evidenced on its own (see the module
+        # docstring's own ids); a bases_fact-only PARTIAL must never
+        # change that.
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_virtual_bases_partial_declines_only_its_own_fallback_branch(
+        self, side: str
+    ) -> None:
+        """``virtual_bases_fact`` is read only by the final size/virtual-
+        bases fallback branch -- its own ``PARTIAL`` must decline that one
+        branch (the ``virtual-bases-fallback`` shape) but must NOT decline
+        a transition already evidenced by an earlier branch (the
+        both-nonempty-reorder and empty-to-nonempty-with-size-delta
+        shapes, which return before this function ever reads
+        ``virtual_bases_fact``) -- the mirror image of the bases_fact test
+        above, and the Codex review finding's own reported scenario."""
+        declined_shape = self._build(
+            side=side,
+            field="virtual_bases_fact",
+            old_vtable=[],
+            new_vtable=[],
+            old_bases=[],
+            new_bases=[],
+            old_vbases=[],
+            new_vbases=["V"],
+            old_size=64,
+            new_size=64,
+        )
+        assert not _vtable_transition_is_evidenced(NAME, *declined_shape, {}, {})
+
+        unaffected_shapes = [
+            self._build(
+                side=side,
+                field="virtual_bases_fact",
+                old_vtable=[f"{NAME}::f()"],
+                new_vtable=[f"{NAME}::g()"],
+                old_bases=[],
+                new_bases=[],
+                old_vbases=[],
+                new_vbases=[],
+                old_size=64,
+                new_size=64,
+            ),
+            self._build(
+                side=side,
+                field="virtual_bases_fact",
+                old_vtable=[],
+                new_vtable=[f"{NAME}::f()"],
+                old_bases=[],
+                new_bases=[],
+                old_vbases=[],
+                new_vbases=[],
+                old_size=64,
+                new_size=128,
+            ),
+        ]
+        for old, new in unaffected_shapes:
+            assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+    def test_owned_virtual_signature_fallback_from_a_partial_side_also_declines(
+        self,
+    ) -> None:
+        """Mirrors ``TestUnsupportedProducerClosesThePdbFabrication``'s own
+        second fabrication path: a genuinely new virtual method (present in
+        ``new_funcs``, absent from ``old_funcs``) would otherwise always
+        evidence the transition through the owned-virtual-signature branch
+        -- ``PARTIAL`` on either side's ``vtable_fact`` must decline even
+        this branch, the one the module docstring calls "always evidenced
+        when reliable"."""
+        populated = _partial_record(vtable=[f"{NAME}::f()"])
+        partial_side = _partial_record(vtable=[], partial_field="vtable")
+        assert not _vtable_transition_is_evidenced(
+            NAME, partial_side, populated, {}, _virtual()
+        )
+
+    def test_not_collected_side_by_side_with_partial_are_not_conflated(self) -> None:
+        """Sanity check on the distinguishing property itself, mirroring
+        the ``UNSUPPORTED``/``NOT_COLLECTED`` pin above: an omitted
+        ``vtable=`` (``NOT_COLLECTED``) and an explicit ``Fact.partial()``
+        are different statuses -- ``NOT_COLLECTED`` must stay exactly as
+        unguarded as ``TestOmittedVtableStillDetectsARealAddition`` pins,
+        or this closure would silently widen into the round-3 regression's
+        shape under a different status name."""
+        omitted = RecordType(name=NAME, kind="class", size_bits=32)
+        partial = _partial_record(vtable=[], size_bits=32, partial_field="vtable")
+        assert omitted.vtable_fact is not None
+        assert partial.vtable_fact is not None
+        assert omitted.vtable_fact.status is FactStatus.NOT_COLLECTED
+        assert partial.vtable_fact.status is FactStatus.PARTIAL
+        assert omitted.vtable_fact.status != partial.vtable_fact.status
+
+    def test_vptr_offset_bits_fact_is_deliberately_not_gated(self) -> None:
+        """``vptr_offset_bits_fact`` is NOT one of the three T9-gated
+        fields -- this guard never consults it at all (see the module
+        docstring's own "NOT consulted here" note), so a ``PARTIAL``
+        *only* on that field must not decline a transition that is
+        otherwise genuinely evidenced (both sides positively populated)."""
+        old = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable=[f"{NAME}::f()"],
+            vptr_offset_bits=0,
+            vptr_offset_bits_fact=Fact.partial(0, producer="dwarf"),
+        )
+        new = RecordType(
+            name=NAME,
+            kind="class",
+            size_bits=64,
+            vtable=[f"{NAME}::g()"],
+            vptr_offset_bits=0,
+        )
+        assert _vtable_transition_is_evidenced(NAME, old, new, {}, {})
+
+
 class TestOwnedVirtualSignaturesBackCompatWrapper:
     """``diff_types_vtable._owned_virtual_signatures`` is a thin back-compat
     wrapper over ``compare.vtable_evidence``'s own private helper of the

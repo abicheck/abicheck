@@ -39,6 +39,7 @@ from .matrix import (
     build_finding_matrix,
     render_finding_matrix_lines,
 )
+from .profile_matrix_render import render_profile_entry_line
 from .reconcile import ReportFindings
 from .resolve import (
     OnMissingRequired,
@@ -351,10 +352,23 @@ class AggregateResult:
             contract_incomplete = []
             analysis_incomplete = []
             scope_incomplete = []
+            audit_only = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
-                if any(r.compatibility_verdict is None and r.required for r in reports):
+                # A `compare --no-baseline` audit's `completed_without_
+                # compatibility_verdict=True` reports are excluded from this
+                # "no verdict" check (Codex review, fresh evidence): its
+                # missing `compatibility_verdict` is by design (ADR-068 D2),
+                # not the report-never-arrived/failed case this line exists
+                # to catch, and the previous version marked every such
+                # required check's profile `incomplete` unconditionally.
+                if any(
+                    r.compatibility_verdict is None
+                    and r.required
+                    and not r.completed_without_compatibility_verdict
+                    for r in reports
+                ):
                     incomplete.append(pid)
                 # Same predicate as `contract_coverage_targets`, and checked
                 # before the `continue` below: a profile can be short of
@@ -381,8 +395,29 @@ class AggregateResult:
                     if r.compatibility_verdict is not None
                 ]
                 if not verdicts:
+                    # Zero real compatibility verdicts. Still not
+                    # `unanalyzed_profiles` if this profile's reports
+                    # include a *completed* no-baseline audit -- it ran
+                    # successfully and simply has no compatibility axis to
+                    # report (Codex review, fresh evidence: the previous
+                    # version put every such profile in both
+                    # `incomplete_profiles` and `unanalyzed_profiles`,
+                    # indistinguishable from a report that never arrived at
+                    # all). `verdict_by_profile` stays `None` either way --
+                    # there is no worst verdict to report in both cases.
                     verdict_by_profile[pid] = None
-                    unanalyzed.append(pid)
+                    if not any(r.analyzed for r in reports):
+                        unanalyzed.append(pid)
+                    else:
+                        # At least one completed no-baseline audit, zero
+                        # real verdicts: see `ProfileMatrixEntry.audit_
+                        # only_profiles`'s own docstring for why this is
+                        # tracked separately rather than left to render as
+                        # "clean". Independently `affected` when its gate
+                        # blocks -- the two facts are orthogonal.
+                        audit_only.append(pid)
+                        if any(r.gate is not None and r.gate.blocking for r in reports):
+                            affected.append(pid)
                     continue
                 worst = max(verdicts, key=lambda v: _VERDICT_RANK[v])
                 verdict_by_profile[pid] = worst.value
@@ -402,6 +437,7 @@ class AggregateResult:
                     analysis_incomplete_profiles=tuple(analysis_incomplete),
                     scope_incomplete_profiles=tuple(scope_incomplete),
                     verdict_by_profile=verdict_by_profile,
+                    audit_only_profiles=tuple(audit_only),
                 )
             )
         return tuple(entries)
@@ -600,73 +636,11 @@ class AggregateResult:
         return out
 
     def _render_profile_entry_line(self, entry: ProfileMatrixEntry) -> str:
-        """One base target's row in the profile matrix.
-
-        Four mutually exclusive shapes -- affected, clean everywhere, partly
-        clean with some profile never producing an analyzed result, and
-        nothing analyzed at all -- then two independent suffixes that qualify
-        whichever shape was chosen.
-        """
-        unanalyzed = entry.unanalyzed_profiles
-        if entry.affected_profiles:
-            line = (
-                f"  {entry.base_target}: affected on "
-                f"{', '.join(entry.affected_profiles)} "
-                f"(checked on {', '.join(entry.profiles)})"
-            )
-            if unanalyzed:
-                # An affected profile and an unanalyzed one can
-                # coexist on the same target -- don't let "checked
-                # on" imply the unanalyzed one produced a result too
-                # (Codex review).
-                line += f"; no analyzed result on {', '.join(unanalyzed)}"
-        elif not unanalyzed:
-            line = (
-                f"  {entry.base_target}: clean on all checked profiles "
-                f"({', '.join(entry.profiles)})"
-            )
-        elif len(unanalyzed) < len(entry.profiles):
-            # Some profiles are clean, others never produced an
-            # analyzed result at all -- never call the latter
-            # "clean" (Codex review).
-            clean = [p for p in entry.profiles if p not in unanalyzed]
-            line = (
-                f"  {entry.base_target}: clean on {', '.join(clean)} "
-                f"(checked on {', '.join(entry.profiles)}); "
-                f"no analyzed result on {', '.join(unanalyzed)}"
-            )
-        else:
-            line = (
-                f"  {entry.base_target}: no analyzed result on any "
-                f"checked profile ({', '.join(entry.profiles)})"
-            )
-        if entry.incomplete_profiles:
-            line += f" [incomplete coverage on {', '.join(entry.incomplete_profiles)}]"
-        if entry.contract_incomplete_profiles:
-            # Qualifies whatever precedes it, exactly as the
-            # incomplete-coverage suffix above does -- including a
-            # "clean" line, which stays accurate: clean is a
-            # statement about compatibility, and this is the
-            # orthogonal evidence axis saying the domain never
-            # closed. Without it a profile that raised the exit to 1
-            # on contract coverage alone read as flatly clean.
-            line += (
-                f" [contract evidence incomplete on "
-                f"{', '.join(entry.contract_incomplete_profiles)}]"
-            )
-        if entry.analysis_incomplete_profiles:
-            # The exact sibling suffix, for the exact sibling reason (Codex
-            # review): a profile that raised the exit to 1 purely on the
-            # analysis-assurance axis must not read as flatly clean either.
-            line += (
-                f" [analysis assurance incomplete on "
-                f"{', '.join(entry.analysis_incomplete_profiles)}]"
-            )
-        if entry.scope_incomplete_profiles:
-            line += (
-                f" [scope incomplete on {', '.join(entry.scope_incomplete_profiles)}]"
-            )
-        return line
+        """One base target's row in the profile matrix -- see
+        :func:`~.profile_matrix_render.render_profile_entry_line` (split out
+        for architecture/debt.yaml's ``no_growth`` ceiling; a pure function
+        of *entry*, so it needs no ``AggregateResult`` state)."""
+        return render_profile_entry_line(entry)
 
     def _render_coverage_and_gate_lines(self) -> list[str]:
         """The closing Coverage: and Gate: blocks."""
@@ -722,7 +696,23 @@ class AggregateResult:
                 f"{t.target_id}{tag}: ⚠ unavailable — "
                 f"{t.reason or 'no report'}{forced_gate}"
             )
-        assert t.compatibility_verdict is not None
+        if t.compatibility_verdict is None:
+            # `t.analyzed` is true (the branch above already returned
+            # otherwise) but there is still no compatibility verdict --
+            # `completed_without_compatibility_verdict` (a `compare
+            # --no-baseline` audit, ADR-068 D2: it completed successfully
+            # and has none by design, unlike every other analyzed-target
+            # shape this function otherwise renders, which always carries a
+            # real `Verdict`). Codex review, fresh evidence: the previous
+            # `assert t.compatibility_verdict is not None` below made
+            # `abicheck aggregate --format text` crash outright on any such
+            # target, including the text invocation `check-project.yml`
+            # itself runs.
+            forced_gate = ""
+            if t.gate is not None and t.gate.blocking:
+                cats = ", ".join(t.gate.blocking_categories)
+                forced_gate = f" [gate: blocking{f' ({cats})' if cats else ''}]"
+            return f"{t.target_id}{tag}: audit completed — no compatibility verdict (no baseline){forced_gate}"
         verdict = t.compatibility_verdict.value
         if t.gate is not None and t.gate.blocking:
             cats = ", ".join(t.gate.blocking_categories)
@@ -770,7 +760,17 @@ class AggregateResult:
             "status": "pass" if self.passed else "fail",
             "compatibility": {
                 "verdict": verdict.value if verdict is not None else None,
-                "analyzed_targets": len(self._compat_targets),
+                # Not `len(self._compat_targets)` -- that set is scoped for
+                # *gate* participation and can include a completed
+                # no-baseline audit whose `compatibility_verdict` is always
+                # `None` (ADR-068 D2), which would otherwise report
+                # `{"verdict": null, "analyzed_targets": 1}` (Codex review,
+                # fresh evidence). Count only targets with a real verdict.
+                "analyzed_targets": sum(
+                    1
+                    for t in self._compat_targets
+                    if t.compatibility_verdict is not None
+                ),
             },
             "coverage": {
                 "status": self.coverage.value,

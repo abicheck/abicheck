@@ -1411,9 +1411,9 @@ class TestCheckAppcompat:
         return [
             patch("abicheck.appcompat._get_lib_soname", return_value=soname),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.service.detect_binary_format", return_value="elf"),
-            patch("abicheck.service.run_dump", return_value=MagicMock()),
-            patch("abicheck.service.compare_snapshots", return_value=diff),
+            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ]
@@ -1424,7 +1424,7 @@ class TestCheckAppcompat:
         with binary_fmt=None."""
         from abicheck.errors import ValidationError
 
-        with patch("abicheck.service.detect_binary_format", return_value=None), \
+        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None), \
              pytest.raises(ValidationError, match="Unrecognised binary format"):
             check_appcompat(tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so")
 
@@ -1459,9 +1459,9 @@ class TestCheckAppcompat:
 
         with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
              patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.service.detect_binary_format", return_value="elf"), \
-             patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump, \
-             patch("abicheck.service.compare_snapshots", return_value=diff), \
+             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"), \
+             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump, \
+             patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff), \
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._detect_app_format", return_value=None):
             check_appcompat(
@@ -1485,9 +1485,9 @@ class TestCheckAppcompat:
 
         with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
              patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.service.detect_binary_format", return_value="elf"), \
-             patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump, \
-             patch("abicheck.service.compare_snapshots", return_value=diff), \
+             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"), \
+             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump, \
+             patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff), \
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._detect_app_format", return_value=None):
             check_appcompat(app, old_lib, new_lib)
@@ -1515,9 +1515,9 @@ class TestCheckAppcompat:
 
         with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
              patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.service.detect_binary_format", return_value="elf"), \
-             patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump, \
-             patch("abicheck.service.compare_snapshots", return_value=diff), \
+             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"), \
+             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump, \
+             patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff), \
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._detect_app_format", return_value=None):
             check_appcompat(
@@ -1678,9 +1678,9 @@ class TestCheckAppcompat:
         with (
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.service.detect_binary_format", return_value="elf"),
-            patch("abicheck.service.run_dump", return_value=MagicMock()),
-            patch("abicheck.service.compare_snapshots", return_value=diff),
+            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=elf_meta),
@@ -1701,9 +1701,9 @@ class TestCheckAppcompat:
         with (
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.service.detect_binary_format", return_value="elf"),
-            patch("abicheck.service.run_dump", return_value=MagicMock()) as mock_run_dump,
-            patch("abicheck.service.compare_snapshots", return_value=diff),
+            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump,
+            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ):
@@ -1730,9 +1730,9 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
-            patch("abicheck.service.detect_binary_format", return_value="elf"),
-            patch("abicheck.service.run_dump", return_value=MagicMock()),
-            patch("abicheck.service.compare_snapshots", return_value=diff),
+            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
         ):
@@ -1756,9 +1756,9 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
-            patch("abicheck.service.detect_binary_format", return_value="elf"),
-            patch("abicheck.service.run_dump", return_value=MagicMock()),
-            patch("abicheck.service.compare_snapshots", return_value=diff),
+            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
         ):

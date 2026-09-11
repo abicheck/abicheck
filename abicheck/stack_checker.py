@@ -513,20 +513,27 @@ def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResu
         ScopeMismatchError: same, for the scope contract.
     """
     # T5 direct-bypass migration (ADR-037 D10.1): route both the dump and
-    # compare halves through the Tier-2 `service` module instead of calling
-    # `dumper.dump()`/`checker.compare()` directly.
-    from . import service
+    # compare halves through the real workflows-package owners instead of
+    # calling `dumper.dump()`/`checker.compare()` directly. Not the flat
+    # `abicheck.service` facade: `service.py` also re-exports
+    # frontends-classified `service_render.render_output`, and this module
+    # is workflows-classified, so importing `service.py` itself here would
+    # widen that workflows -> frontends edge instead of letting it close
+    # (ADR-061 gap A).
+    from .service_dump_native import run_dump
+    from .workflows.compare_policy import compare_snapshots
+    from .workflows.input_resolution import detect_binary_format
 
     try:
-        old_fmt = service.detect_binary_format(old_path)
-        new_fmt = service.detect_binary_format(new_path)
+        old_fmt = detect_binary_format(old_path)
+        new_fmt = detect_binary_format(new_path)
         if old_fmt is None or new_fmt is None:
             bad_path = old_path if old_fmt is None else new_path
             raise UnsupportedArtifactError(
                 f"Unrecognised binary format for {bad_path}: expected ELF, "
                 "Mach-O, or PE shared library."
             )
-        old_snap = service.run_dump(
+        old_snap = run_dump(
             old_path,
             old_fmt,
             [],
@@ -534,7 +541,7 @@ def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResu
             "baseline",
             "c++",
         )
-        new_snap = service.run_dump(
+        new_snap = run_dump(
             new_path,
             new_fmt,
             [],
@@ -547,7 +554,7 @@ def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResu
         return None
 
     try:
-        return service.compare_snapshots(old_snap, new_snap)
+        return compare_snapshots(old_snap, new_snap)
     except (ProfileMismatchError, ScopeMismatchError):
         raise
     except Exception as exc:  # noqa: BLE001

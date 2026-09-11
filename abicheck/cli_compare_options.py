@@ -58,7 +58,6 @@ def _param_from_cli(name: str) -> bool:
 
 
 def _reject_set_input_flags(
-    env_matrix_path: Path | None,
     used_by_apps: tuple[Any, ...] = (),
     required_symbols: tuple[str, ...] = (),
     use_cases_manifest: Path | None = None,
@@ -85,6 +84,14 @@ def _reject_set_input_flags(
     ``--exit-code-scheme`` is not one of these either any more -- CLI
     cleanup phase two PR G2 deleted the flag entirely, so there is nothing
     left to reject it against on a release comparison either.
+    ``deployment:`` (the former ``--env-matrix FILE``) is not one of these
+    either any more, since its demotion to a ``.abicheck.yml`` config key
+    (ADR-020b §4.1 / ADR-068 D5): a declared deployment matrix is a
+    project-wide property, not a per-library one (unlike ``debug.pdb_path``
+    just below, which genuinely cannot generalize across a fan-out's
+    members), so it applies uniformly to every library the same way
+    ``gate.fail_on_removed_library``/``release.*`` already do -- see
+    ``resolve_compare_config``'s own ``deployment`` field.
     """
     # ``--reconcile-build-context`` is not one of these any more either
     # (one-comparison-product.md §4.1's AUTO row): the flag is gone and the
@@ -92,12 +99,6 @@ def _reject_set_input_flags(
     # ``compare_snapshots`` chokepoint every per-library fan-out already
     # routes through, so the release path now *gets* the behavior this
     # branch used to reject a request for.
-    if env_matrix_path is not None:
-        raise click.UsageError(
-            "--env-matrix is not supported for directory/package (release) "
-            "comparisons yet; it applies to single-file / snapshot inputs. "
-            "Compare the libraries individually to use it."
-        )
     if pdb_path is not None:
         # Codex review, PR #1180, fresh evidence ("Reject PDB config for
         # release fan-outs"): compare_pdb_config's own PE-liveness check
@@ -193,7 +194,7 @@ def _reject_set_input_flags(
         )
     if require_complete_analysis:
         raise click.UsageError(
-            "--require-complete-analysis is not supported for directory/"
+            "assurance.require_complete is not supported for directory/"
             "package (release) comparisons yet (P0.4): the per-library "
             "fan-out has no single analysis_assurance result to gate on. "
             "Compare the specific library individually to use it, or see "

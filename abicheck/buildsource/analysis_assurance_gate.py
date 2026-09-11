@@ -20,15 +20,32 @@ audit, "First vertical slice" -- see
 ``checks[].analysis.assurance`` was accepted as any non-empty identifier
 string, forwarded verbatim through ``RunPlanCheck`` into the generated run
 plan, and honored by nothing: the only analysis-completeness axis this
-codebase actually wires into an exit code is the existing
-``compare``/``scan --against --require-complete-analysis`` boolean gate
-(``abicheck.analysis_assurance.AnalysisAssurance``/
-``fold_analysis_assurance_exit``) -- there is no graduated or otherwise
-distinct assurance-level mechanism a declared check could select between.
-So a project author writing e.g. ``analysis: {assurance: partial}`` got a
-structurally-valid config that silently did nothing, ever -- exactly the
-"declared but unhonored setting" failure the project-checks contract exists
-to prevent.
+codebase actually wires into an exit code is
+``compare``'s ``.abicheck.yml`` ``assurance.require_complete: true`` boolean
+gate (``abicheck.analysis_assurance.AnalysisAssurance``/
+``fold_analysis_assurance_exit`` -- config-only since the CLI's own former
+``--require-complete-analysis`` flag was demoted, rulings.py deferred-option
+followup) -- there is no graduated or otherwise distinct assurance-level
+mechanism a declared check could select between. So a project author
+writing e.g. ``analysis: {assurance: partial}`` got a structurally-valid
+config that silently did nothing, ever -- exactly the "declared but
+unhonored setting" failure the project-checks contract exists to prevent.
+
+This module's own validation (below) still accepts only ``'complete'`` at
+run-plan generation time. The Action layer used to translate a declared
+``'complete'`` value into the CLI's own now-retired boolean flag; since that
+flag is gone, ``actions/check-target/action.yml``'s
+``analysis-assurance-complete`` input is the config-overlay replacement (the
+way ``dso-only``/``fail-on-removed-library`` already have one): it merges an
+``assurance: {require_complete: true}`` fragment into whatever build-config
+the internal analysis step reads, the same effect a project author's own
+``.abicheck.yml`` line would have. ``.github/workflows/check-project.yml``
+forwards ``checks[].analysis.assurance == 'complete'`` into that input for
+every matrix cell, so a declared value is enforced end-to-end again. A
+caller of ``check-target`` directly (bypassing ``check-project.yml``) must
+set ``analysis-assurance-complete`` itself -- this module has no way to
+reach an Action input from here, so that remains the one caller-side step
+this validation cannot perform on its own behalf.
 
 Split into its own leaf module (rather than living inline in
 ``project_targets.py``) purely to respect that file's ``architecture/
@@ -57,7 +74,7 @@ def analysis_assurance_issues(value: str, *, where: str) -> list[str]:
         f"{where}: analysis.assurance {value!r} is not a supported assurance "
         "level -- no gate in this codebase enforces any value other than "
         f"{sorted(SUPPORTED_ANALYSIS_ASSURANCE_VALUES)!r} (which maps onto "
-        "`compare`/`scan --against`'s existing --require-complete-analysis "
+        "`compare`'s `.abicheck.yml` `assurance.require_complete: true` "
         "gate). Declaring an unsupported value would be silently accepted "
         "and never honored by any check execution, report, or gate -- "
         "remove it or use a supported value."

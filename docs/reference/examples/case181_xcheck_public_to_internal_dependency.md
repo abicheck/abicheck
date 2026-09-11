@@ -129,9 +129,16 @@ this automatically; `compare`'s own migrated cross-source-evolution path
 (`workflows.cross_source_evolution.compute_cross_source_evolution`, the
 `checker.compare()` call site this check now runs through) does not
 currently pass `--since`/`--changed-path` through to
-`CrosscheckConfig.changed_paths` at all, so this case is always reported at
-the lower "reaches something internal" confidence today, regardless of
-`--since`. See `docs/contribute/known-gaps.md`.
+`CrosscheckConfig.changed_paths` at all — verified live in
+`workflows/cross_source_evolution.py`'s own `_run_one_side`, whose
+`CrosscheckConfig(...)` construction never sets `changed_paths` — so this
+case is always reported at the lower "reaches something internal"
+confidence today, regardless of `--since`. This also means the
+higher-confidence variant is not reachable from a two-sided
+`abicheck compare OLD NEW --since <rev>` either, not only from the
+`--no-baseline` audit shown above (`--since`/`--changed-path` are rejected
+outright under `--no-baseline`, exit 64, since a single-build audit has no
+revision range to narrow). See `docs/contribute/known-gaps.md`.
 
 ## Why this matters for a real release
 

@@ -61,9 +61,6 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
-# ADR-068's 2026-09-10 amendment deleted the legacy raw-flag `scan` branch
-# -- one `mode: scan` branch is left, calling `add_compile_context_flags`.
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 # No longer used for `mode: scan` itself; kept for `_run_add_flag_shlex_split`.
@@ -356,7 +353,6 @@ def _mode_value_for_marker(mode_marker: str) -> str:
     return {
         _DUMP_MODE_MARKER: "dump",
         _COMPARE_MODE_MARKER: "compare",
-        _SCAN_MODE_MARKER: "scan",
     }[mode_marker]
 
 
@@ -716,18 +712,6 @@ class TestCompileContextForwardingParity:
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["options"] == ["-DMSG=hello world", "-DOK=1"]
 
-    def test_scan_forwards_all_six_flags(self) -> None:
-        """`mode: scan` now forwards these via a synthesized `--config`
-        overlay too (ADR-068's 2026-09-10 amendment removed the legacy
-        raw-flag branch) -- mirrors the dump/compare tests above exactly."""
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV, _DUMP_COMPILE_CONTEXT_START)
-        compile_blk = _read_compile_config_overlay(cmd)
-        assert compile_blk["frontend"] == "clang"
-        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
-        assert compile_blk["options"] == ["-DFOO=1"]
-        assert compile_blk["sysroot"] == "/opt/sysroot"
-        assert compile_blk["nostdinc"] is True
-
     def test_gcc_options_quoted_value_stays_one_token(self) -> None:
         """Regression (Codex review, PR #757): routing gcc-options through
         add_flag()'s plain bash word-splitting broke a shell-quoted value
@@ -1009,13 +993,6 @@ class TestCompileContextForwardingParity:
             {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        assert "--config" not in cmd
-        assert "--compiler" not in cmd
-        assert "--sysroot" not in cmd
-        assert "--nostdinc" not in cmd
-
-    def test_scan_omits_unset_flags(self) -> None:
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, {}, _DUMP_COMPILE_CONTEXT_START)
         assert "--config" not in cmd
         assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
@@ -1403,10 +1380,21 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         """``sources`` is normally a checkout-relative path too (e.g.
         ``sources: src``) -- the same relative-path-vs-``$_PY_SAFE_DIR``
         bug class ``TestCompileContextMergesWithRelativeBuildConfig``
-        covers for ``build-config``."""
+        covers for ``build-config``.
+
+        P1 finding follow-up (Codex review, fresh evidence, PR #1222 ninth
+        round): ``build.compile_db`` now lives in the SOURCES-ROOT's own
+        ``.abicheck.yml`` -- ``build:`` is sources-root-exclusive, so a
+        checkout-root-only setting no longer survives once ``--sources``
+        is given at all, matching
+        ``TestCompileContextDiscoversSourcesRootOwnConfig``'s own
+        ``test_no_sources_root_config_clears_to_defaults`` below. This test
+        previously planted ``build.compile_db`` on the checkout-root
+        document instead, which only passed because of the very bug that
+        round fixed."""
         src_dir = tmp_path / "src"
         src_dir.mkdir()
-        (tmp_path / ".abicheck.yml").write_text(
+        (src_dir / ".abicheck.yml").write_text(
             "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
         )
         (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
@@ -1535,17 +1523,31 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
             "system": "cmake",
         }
 
-    def test_no_sources_root_config_falls_back_to_checkout_root(
-        self, tmp_path: Path
-    ) -> None:
-        """When --sources carries no config of its own, behavior is
-        unchanged from before this fix -- the checkout-root config (if any)
-        is used as-is."""
+    def test_no_sources_root_config_clears_to_defaults(self, tmp_path: Path) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 ninth round):
+        when ``--sources`` carries NO config of its own at all
+        (``discover_build_config`` returns ``None``), ``build:`` must clear
+        to pure defaults -- NOT fall back to the checkout-root config, even
+        though one exists. This test's name and assertion previously
+        encoded the opposite (buggy) behavior this same round's finding
+        reported: ``embed_build_source()``'s own ``cfg_path = build_config
+        or discover_build_config(raw_sources)`` never consults the
+        checkout-root document for ``build:``/``sources:`` once
+        ``--sources`` is given, whether or not that tree has its own
+        config -- so forwarding the checkout's ``build: {system: make}``
+        here would apply a setting the real, non-overlay pipeline would
+        never have picked up, purely because this Action's overlay
+        synthesis ran. See ``tests/test_reusable_workflows_assurance_
+        overlay_compile_context.py::
+        TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists``
+        for the identical fix at the ``actions/check-target/action.yml``
+        call site."""
         (tmp_path / ".abicheck.yml").write_text(
             "build:\n  system: make\n", encoding="utf-8"
         )
         src_dir = tmp_path / "src"
         src_dir.mkdir()
+        # Deliberately no `.abicheck.yml` at all under src_dir.
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
@@ -1555,7 +1557,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        assert doc["build"] == {"system": "make"}
+        assert "build" not in doc
 
     def test_sources_root_sources_block_is_also_carried(self, tmp_path: Path) -> None:
         """Codex review, PR #1159 (P1, second round, fresh evidence): ``sources``

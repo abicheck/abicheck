@@ -14,7 +14,7 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` still has one too, but it is **being retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-being-retired) before depending on any of its codes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes.
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
@@ -189,7 +189,7 @@ run, folded with the same `max` discipline:
 | Axis | Contributes | When |
 |---|---|---|
 | Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
-| Analysis assurance (P0.4) | `1` | `--require-complete-analysis` and `analysis_assurance.status` is not `complete` |
+| Analysis assurance (P0.4) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete` |
 | Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
 
@@ -257,29 +257,27 @@ present in `--format json` output (`analysis_assurance` — a top-level key on
 `compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
-is purely informational until a caller opts in. Passing
-`--require-complete-analysis` makes `compare`/`scan --against` additionally contribute exit `1`
+is purely informational until a caller opts in. Setting `.abicheck.yml`'s
+`assurance.require_complete: true` (config-only -- no CLI flag; the former
+`compare --require-complete-analysis` flag was demoted here entirely) makes
+`compare` additionally contribute exit `1`
 whenever `analysis_assurance.status` is not `complete`, folded with the same
 `max` discipline the contract-coverage axis above uses: it raises a clean `0`
 to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
 demote a real ABI break to "warnings only", and it never rewrites the
 compatibility verdict, any finding, or the severity gate's own contribution.
 
-`--require-complete-analysis` is single-pair only. A directory/package
+`assurance.require_complete: true` is single-pair only. A directory/package
 (release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out); `scan
---against` rejects it without `--against`, alongside every other
-baseline-only flag — there is no comparison for it to gate on otherwise.
+tracked follow-up for extending this axis to the release fan-out).
 
-**Without `--require-complete-analysis` every pre-existing invocation's exit
-code is unchanged**, exactly as `--contract`'s own coverage axis
+**Without `assurance.require_complete: true` every pre-existing invocation's
+exit code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 
-The composite GitHub Action folds this the same way it folds the
-contract-coverage axis: an assurance-gated exit `1` (via the dedicated
-`require-complete-analysis` input, on either command) maps to a dedicated
-`ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
-unconditional (no `fail-on-*` input disables it).
+The composite GitHub Action's own dedicated `require-complete-analysis`
+input is retired alongside the CLI flag it forwarded to (rulings.py
+deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
 ## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
@@ -508,34 +506,37 @@ scheme-independent CI behaviour.
 
 ---
 
-## `abicheck scan` (being retired)
+## `abicheck scan` (retired)
 
-!!! danger "`scan` is retired by ADR-068 — hard removal, no deprecation window"
+!!! danger "`scan` was retired by ADR-068 Phase 6 — hard removal, no deprecation window"
     [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D1 reduces the root surface to six verbs and retires `scan` as a second
+    D1 reduced the root surface to six verbs and retired `scan` as a second
     analysis product. D8 is explicit that the removal is **hard**: no hidden
-    alias, no shim, no silent ignoring. Once the retirement PR lands,
-    `abicheck scan` exits `64` with `No such command`, and the error names
-    `compare --no-baseline`. **The whole table below stops existing at that
-    point** — exit `5`, `6` and `7` do not become `compare` codes by
-    inheritance; each moves onto `compare`'s own `ExitDecision` axes on its
-    own schedule, and the `compare` sections above are where a migrated axis
-    is documented.
+    alias, no shim, no silent ignoring. `abicheck scan` now exits `64` with
+    `No such command`, and the error names `compare --no-baseline`. **The
+    whole table below no longer describes any live command** — exit `5`, `6`
+    and `7` did not become `compare` codes by inheritance; each moved onto
+    `compare`'s own `ExitDecision` axes on its own schedule (where one exists
+    yet), and the `compare` sections above are where a migrated axis is
+    documented. The table is kept below purely as a historical record of
+    `scan`'s own exit-code contract while it existed.
 
-    Nothing is deleted before its capability has a proven home (D9), so this
-    table is accurate for the current build. But do not write new CI against
-    it: pin the equivalent `compare` invocation instead, and where none
-    exists yet, see
+    Do not write new CI against it: pin the equivalent `compare` invocation
+    instead, and where none exists yet, see
     [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
-    for what is still open. GitHub Action users are insulated — `mode: scan`
-    is translated inside the Action and retires on the Action's own input
-    lifecycle (D8, [ADR-047](../contribute/adr/047-github-actions-integration-model.md)).
+    for what is still open. The GitHub Action's own `mode: scan` input has
+    since been retired outright too — see
+    [ADR-068's Action-input-lifecycle amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
+    and the [migration guide](../use/github-action.md#migrating-from-mode-scan).
 
-The one-shot source-intelligence scan has its own contract (it may compare
-`ARTIFACT` against `--against` and adds a budget guard). `--against` is the
-only thing that selects the mode: omit it and `scan` runs a one-build
-audit/hygiene/source-consistency scan only; pass it and `scan` also compares
-`ARTIFACT` against it — there is no separate `--audit` flag:
+**Everything below this point, to the end of this section, is historical —
+`scan` no longer exists and none of it is a live invocation to copy.** While
+it existed, the one-shot source-intelligence scan had its own contract (it
+could compare `ARTIFACT` against `--against` and added a budget guard).
+`--against` was the only thing that selected the mode: omit it and `scan`
+ran a one-build audit/hygiene/source-consistency scan only; pass it and
+`scan` also compared `ARTIFACT` against it — there was no separate
+`--audit` flag:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -563,9 +564,9 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > not abandoned: plan §3 #16 retires the *mode*, and it returns as
 > `compare --no-baseline DIR` over ADR-065 S3's package component
 > inventories, which are the prerequisite for preserving its per-member
-> selection and coverage accounting. Until then, run one `scan` per library.
-> Exit `1` on a `scan` is unchanged and means a genuine CLI/operational
-> error.
+> selection and coverage accounting. Until then, run `compare --no-baseline`
+> once per library. Exit `1` on a `scan` was unchanged there and meant a
+> genuine CLI/operational error.
 
 ### `scan --against` and severity (mirrors `compare`)
 
@@ -674,7 +675,7 @@ Phase 7), and the exit code is the worst contribution across them:
   produce exit `1`, for unrelated reasons, and `aggregate` records which one
   fired rather than merging them into one undifferentiated `1`.
 - **analysis_assurance** — reads back each analyzed target's own
-  `analysis_assurance_exit_contribution` (`--require-complete-analysis`; see
+  `analysis_assurance_exit_contribution` (`assurance.require_complete`; see
   "Analysis-assurance contribution" above) and folds it with `max` the same way (aggregate
   schema `1.5`); `aggregate` never recomputes it. A target whose own evidence
   was incomplete under that flag aggregates to `1` on this axis alone,
@@ -696,7 +697,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `--require-complete-analysis`; a release target's comparison scope gated (`.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `.abicheck.yml`'s `assurance.require_complete: true`; a release target's comparison scope gated (`.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -759,7 +760,7 @@ for the current value) and carries the six axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage` /
 `analysis_assurance` / `scope_completeness` — the last three are
 `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and present even
-when no target used `--contract`/`--require-complete-analysis` or every
+when no target used `--contract`/`assurance.require_complete: true` or every
 release target checked its whole scope (an empty `incomplete_targets` list,
 not an omitted block).
 

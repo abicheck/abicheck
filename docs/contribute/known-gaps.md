@@ -134,7 +134,17 @@ looked like the obvious fix and wasn't.
   `scan` — investigated, not fixed (Codex review, fresh evidence, P0.2
   follow-up). Fixed (ADR-063 Phase 4, "option 2" below): the combination now
   raises a clean usage error instead of silently collecting an unscoped
-  graph.** `abicheck.workflows.plan.bazel_target_scoping_failure()` is the
+  graph.** **Status note, added once this was closed:** `scan` (including
+  every `scan`-specific mechanism this entry narrates —
+  `scan_bazel_scoping_failure`, `ScanRequest`, `cli_scan.py`) was later
+  removed outright (ADR-068 Phase 6), and `dump`'s own `--build-target` CLI
+  flag was removed after it (once `scan`'s removal resolved the routing
+  hazard that had deferred it). `.abicheck.yml`'s `build.targets` is now the
+  *only* front-end-reachable source of root-target scoping for `dump`/
+  `compare`; the historical narrative below (written while both the flag and
+  `scan` still existed) is kept for the reasoning it records about the
+  underlying `bazel_target_scoping_failure`/`_discovered_config_build_targets`
+  mechanism, which is unchanged. `abicheck.workflows.plan.bazel_target_scoping_failure()` is the
   one check both `dump`/`compare` (via `AnalysisPlanner`, wired into
   `service_dump_pipeline.resolve_dump_request`/`service_compare_pipeline.
   resolve_compare_request`) and `scan --against`'s own candidate resolution
@@ -7296,7 +7306,7 @@ therefore either wired or declared, never silent.
 The table's reasons fall in three families, so the error message tells the
 user which applies: the option *describes a comparison* this run never
 performs (`--used-by`, `--used-by-manifest`, `--required-symbol`,
-`--use-cases`, `--post-manifest`, `--env-matrix`, `--diagnostic-comparison`,
+`--use-cases`, `--post-manifest`, `--diagnostic-comparison`,
 `--old-variant`/`--new-variant`, `--bundle-facts-*`, `--since`/
 `--changed-path`); it is for the *directory/package fan-out*
 `--no-baseline` does not accept (`--select`, `--select-required`,
@@ -7373,11 +7383,22 @@ ADR amendment for the full reasoning each):
   `--policy`/`.abicheck.yml`'s `policy.overrides` already lets a user
   control any one check's severity; only the `KEY=LEVEL` *syntax* itself
   does not survive.
-- `--build-target` — no `compare`/`dump` flag or config equivalent exists
-  yet (`.abicheck.yml`'s planned `build.targets` CONFIG key, §4.2, is not
-  implemented for either command); implementing it is `dump`'s own
-  CLI/config-cleanup phase (a different workstream's owned files), not this
-  one's.
+- `--build-target` — **stale, corrected below.** This entry originally said
+  no config equivalent existed for either command; that was already false
+  by the time it was written (`.abicheck.yml`'s `build.targets` key existed
+  and `dump --build-target` already consumed it, CLI-override-wins). `scan`
+  *did* have its own `--build-target` flag
+  (`changelog.d/20260816_113000_noreply_abicheck_scan_build_target.md`
+  records it being added), and it was retired first, in ADR-068's
+  2026-09-09 amendment (the `scan` retirement) — `dump`'s own
+  `--build-target` was deliberately left in place at that point precisely
+  because `scan` still existed and shared its plumbing, so pulling `dump`'s
+  copy first would have broken `scan`'s still-live flag. `dump`'s own
+  `--build-target` CLI flag was later removed outright too (ADR-068 Phase 6
+  follow-up, once `scan`'s full removal cleared the routing hazard that had
+  deferred `dump`'s own removal) — `.abicheck.yml`'s `build.targets` is now
+  the *only* front-end-reachable source for either command, with no CLI
+  override left to take precedence over it.
 - `--artifact-set`/`new-library-set` — ADR-065 S3's package component
   inventories (plan Prerequisite P5) are explicitly "Not started"; routing
   this onto `compare --no-baseline DIR` today would silently narrow its
@@ -8354,3 +8375,53 @@ single mechanical rename, since `scan`'s CLI surface (`--depth`,
 `--crosscheck`, JSON/text output shape) does not map 1:1 onto `compare`'s.
 Left as a dedicated follow-up PR, out of scope for a docs-only pass; not
 fixed here.
+
+## The `compare --no-baseline` audit report carries no per-finding provider attribution, so `provider_assertions` is unvalidated
+
+Every G20 audit case in `catalog/ground_truth.json` declares
+`provider_assertions` — which providers must corroborate each finding
+(e.g. case151: `private_header_leak` from **both** `public_header_ast` and
+`source_index`; case148: `header_build_context_mismatch` from
+`build_config` + `public_header_ast`). Legacy `scan` published these as
+`crosscheck.providers`, and `validation/scripts/run_special_cli_examples.py`
+checked them. ADR-068 Phase 6 retired the whole-audit orchestrator
+(`scan_engine.py`) that built that block, and no replacement projection
+landed in `report/no_baseline.py`, so the assertion is now unchecked by
+anything.
+
+**Measured, not assumed:** the rich and thin fixtures of case151 —
+the case that exists purely to show corroboration growing with evidence —
+produce *byte-identical* public reports today. Both answer
+`evidence_tiers: ["elf", "header"]` and a single `private_header_leak`
+finding. There is no public signal to validate the assertion against, so
+the runner records `unvalidated_assertions: ["provider_assertions"]` and
+`collect_full_example_matrix.py` surfaces it on the row (the same
+mechanism as `kinds_strict`). That makes the gap visible in the matrix
+artifact; it does **not** detect a regression that drops a provider while
+still emitting the expected finding kind, and those rows still count as
+`COVERED` (Codex review, PR #1225, raised twice — the second time
+correctly pointing out that metadata alone changes no coverage
+accounting).
+
+**Why it was not closed in PR #1225.** The data already exists and the
+fix is small and precisely located: `CrosscheckResult.providers` is
+computed and serialized today, and
+`workflows/cross_source_evolution._run_one_side` already reads it
+(`evaluated = check in result.providers`) and discards the list — so
+closing this means stamping `result.providers[check]` onto the emitted
+`Change` and projecting it. What makes it a separate change is not
+size: it bumps a **published** report schema
+(`AUDIT_REPORT_SCHEMA_VERSION`, plus the two-sided compare report, since
+`compute_cross_source_evolution` runs on both paths) and adds a public
+`Change` field. This file's own root contract is explicit that a schema
+or public-interface change "still needs its ADR and migration" and is not
+something a repair PR folds in as a side effect.
+
+The alternative offered in review — mark rows with a non-empty
+`unvalidated_assertions` as `UNRESOLVED` — was declined for a stated
+reason, not skipped: `validation/CLAUDE.md`'s matrix contract requires one
+`COVERED` row per ground-truth entry and no `UNRESOLVED` rows, and *all
+ten* audit cases declare `provider_assertions`, so it turns a currently
+green required lane red for a capability removed upstream in PR #1211.
+That is a maintainer call about blocking on the follow-up, not a
+repair-PR decision.

@@ -47,6 +47,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.schemas import (
+    AGGREGATE_REPORT_SCHEMA_PATH,
     COMPARE_REPORT_SCHEMA_PATH,
     REPORT_SCHEMA_VERSION,
     load_compare_report_schema,
@@ -127,6 +128,21 @@ class TestSchemaFile:
         schema = load_compare_report_schema()
         assert "report_schema_version" in schema["required"]
 
+    def test_schema_declares_env_matrix_source_sha256(self):
+        # Schema 4.2 (Codex review, P2): the packaged schema previously
+        # described the pre-4.2 shape and had no declaration for this field
+        # at all -- additionalProperties' permissiveness let real output
+        # keep validating, but a schema-driven consumer (one that *types* or
+        # *discovers* fields from the schema, not merely validates against
+        # it) could not see the field exists.
+        schema = load_compare_report_schema()
+        prop = schema["properties"]["env_matrix_source_sha256"]
+        assert prop["type"] == "string"
+        assert prop["pattern"] == "^sha256:[0-9a-f]{64}$"
+        # Schema-optional, matching DiffResult.env_matrix_source_sha256's own
+        # "omitted entirely, not null, when unset" contract.
+        assert "env_matrix_source_sha256" not in schema.get("required", [])
+
     def test_docs_mirror_matches_packaged_schema(self):
         # Regression guard (code review, PR #611): the docs/reference/schemas/v1
         # copy previously drifted from the packaged schema (PR #595) without any
@@ -145,6 +161,53 @@ class TestSchemaFile:
         assert docs_copy.read_text() == COMPARE_REPORT_SCHEMA_PATH.read_text()
 
 
+class TestAnalysisAssuranceSchemaNamesTheConfigKeyNotTheRetiredFlag:
+    """``analysis_assurance_exit_contribution``'s schema descriptions must
+    name a switch a reader can actually flip.
+
+    ``compare --require-complete-analysis`` was removed (rulings.py
+    deferred-option followup): the only way to arm this axis is
+    ``.abicheck.yml``'s ``assurance.require_complete: true``. Both the
+    packaged compare-report schema (top-level and per-decision-object
+    duplicate properties) and the aggregate-report schema (the whole-run,
+    per-target, and document-level descriptions) still described the
+    trigger as the retired CLI flag, which now exits 64 as a usage error
+    instead of reproducing the gate (Codex review, PR #1222, P2). Assert
+    directly on the raw schema text -- mirroring
+    ``test_no_baseline_report_formats.
+    test_analysis_assurance_notice_names_the_config_key_not_the_retired_flag``'s
+    equivalent fix for the no-baseline notice text -- rather than only
+    checking the property still validates, since a stale-but-still-valid
+    description would pass that check unchanged.
+    """
+
+    def test_compare_report_schema_names_the_config_key(self) -> None:
+        text = COMPARE_REPORT_SCHEMA_PATH.read_text(encoding="utf-8")
+        assert "--require-complete-analysis" not in text
+        assert "assurance.require_complete" in text
+
+    def test_aggregate_report_schema_names_the_config_key(self) -> None:
+        text = AGGREGATE_REPORT_SCHEMA_PATH.read_text(encoding="utf-8")
+        assert "--require-complete-analysis" not in text
+        assert "assurance.require_complete" in text
+
+    def test_docs_mirrors_also_name_the_config_key(self) -> None:
+        # scripts/publish_schemas.py keeps these byte-identical to the
+        # packaged copies above; assert independently in case that sync
+        # step is ever skipped for one file but not the other.
+        docs_dir = (
+            COMPARE_REPORT_SCHEMA_PATH.parent.parent.parent
+            / "docs"
+            / "reference"
+            / "schemas"
+            / "v1"
+        )
+        for name in ("compare_report.schema.json", "aggregate_report.schema.json"):
+            text = (docs_dir / name).read_text(encoding="utf-8")
+            assert "--require-complete-analysis" not in text
+            assert "assurance.require_complete" in text
+
+
 @_requires_jsonschema
 class TestReportValidatesAgainstSchema:
     def _validate(self, payload: dict) -> None:
@@ -155,6 +218,40 @@ class TestReportValidatesAgainstSchema:
         f = _fn("api", "_Z3apiv")
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
         payload = json.loads(reporter.to_json(compare(snap, snap)))
+        self._validate(payload)
+
+    def test_env_matrix_source_sha256_validates_when_present(self):
+        """Schema 4.2 (Codex review, P2): a run resolving a declared
+        EnvironmentMatrix emits a top-level env_matrix_source_sha256, and
+        the real value -- not a hand-typed stand-in -- must validate
+        against the packaged schema's declaration for it."""
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        elf = ElfMetadata(
+            machine="EM_X86_64",
+            hash_styles=frozenset({"gnu"}),
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            elf=elf,
+            elf_only_mode=True,
+            platform="elf",
+        )
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        result = compare(snap, snap, env_matrix=matrix)
+        payload = json.loads(reporter.to_json(result))
+        assert "env_matrix_source_sha256" in payload
+        self._validate(payload)
+
+    def test_env_matrix_source_sha256_omitted_without_a_declared_matrix(self):
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        assert "env_matrix_source_sha256" not in payload
         self._validate(payload)
 
     def test_no_change_report_carries_analysis_assurance(self):

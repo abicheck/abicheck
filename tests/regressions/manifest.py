@@ -372,18 +372,20 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "accept the value and then ignore it "
                     "(tests/test_explicit_source_extractor_propagation.py, "
                     "exhaustive over the frontend x env domain, grounded in "
-                    "_make_source_extractor). Its own end-to-end half "
-                    "(tests/test_dump_scan_l3_comparability.py, a real "
-                    "castxml `dump` baseline vs. a real `scan --against` "
-                    "candidate) and the production call site it exercised "
-                    "(`scan_engine._build_new_snapshot`) were both deleted "
-                    "with the `scan` command itself (ADR-068 Phase 6) -- "
-                    "the primitive-level coverage above still stands, but "
-                    "this chain now has no end-to-end coverage and no "
-                    "live production caller at all (a real, acknowledged "
-                    "capability gap, not silently dropped -- see "
-                    "test_explicit_source_extractor_propagation.py's own "
-                    "module docstring). The same "
+                    "_make_source_extractor). ADR-068 Phase 6 deleted `scan` "
+                    "and its own end-to-end half of that coverage "
+                    "(tests/test_dump_scan_l3_comparability.py) along with "
+                    "the production call site the primitive fed "
+                    "(scan_engine._build_new_snapshot) -- no `compare`-side "
+                    "caller passes an explicit `--ast-frontend` through to "
+                    "L4 source-ABI replay selection today, so this whole "
+                    "chain is currently unreachable from any production "
+                    "code path (a real, acknowledged capability gap, not "
+                    "silently dropped -- see that module's own module "
+                    "docstring). The primitive's request-domain contract "
+                    "stays covered regardless; only the end-to-end and "
+                    "call-site halves are gone, with no replacement caller "
+                    "to re-derive them against. The same "
                     "concern's *other* consumers (the L2 header parse, the "
                     "preprocessor/pattern pre-scans) are untouched. "
                     "consumer_compile was chosen as the first "
@@ -470,6 +472,71 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "reader exists to avoid. That case answers None by "
                     "design and is pinned by a test, but it is a real "
                     "narrowing of the invariant above, not a closed case."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="storage.out_of_band_snapshot_reader_envelope_drift",
+        invariant=(
+            "A consumer outside `abicheck/` that hand-parses a snapshot "
+            "document written by `abicheck dump` must answer identically "
+            "for the sectioned envelope and the equivalent flat document. "
+            "Indexing a formerly-top-level key (`build_source`, "
+            "`dump_provenance`, `declarations`, ...) without unwrapping the "
+            "ADR-063 Phase 8 envelope first reads `None` for every real "
+            "dump output, and nothing distinguishes that from the field "
+            "genuinely being absent -- so the failure is silent wherever "
+            "absence is a legitimate answer. The in-tree readers go "
+            "through `snapshot_from_dict`, which accepts either shape; "
+            "only the out-of-band ones can drift, and they drift at the "
+            "moment the envelope changes, not at the moment they are "
+            "written."
+        ),
+        fixed_by=(1225,),
+        seed_tests=("tests/test_snapshot_envelope_out_of_band_readers.py",),
+        # `()` deliberately: the seed test calls the reader helpers directly
+        # (importlib-loaded modules, no CliRunner, no Action step), so it
+        # reaches neither surface. This field documents what a seed test
+        # actually exercises -- a claimed surface it does not reach conceals
+        # the very cross-surface gap a contributor should find here
+        # (CodeRabbit review; the rule is this schema's own, from PR #885).
+        public_surfaces=(),
+        axes={
+            "encoding": ("flat", "sectioned"),
+            "embedded_layers": ("none", "L3", "L4", "L5", "combinations"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The behavioural half covers the three readers known "
+                    "today and only the `build_source` key in depth; the "
+                    "other keys the envelope moved (`dump_provenance`, "
+                    "`declarations`, `types`, `enums`) are covered by the "
+                    "structural AST scan alone, which proves an unwrap is "
+                    "*mentioned* in the reading function, not that it is "
+                    "applied to the right value on every path. A reader "
+                    "that unwraps one document and then indexes a second, "
+                    "un-unwrapped one in the same function passes the scan. "
+                    "The scan is also function-local: a reader that indexes "
+                    "a moved key on a dict some *other* helper loaded is not "
+                    "flagged, correctly when that helper unwraps (as "
+                    "`tests/_snapshot_document_reader.py` does) and silently "
+                    "when it does not."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+            KnownGap(
+                description=(
+                    "The scan covers `actions/`, `contrib/`, `scripts/`, "
+                    "`validation/` and `tests/` -- first-party trees only. "
+                    "A downstream consumer (a user's CI script, a "
+                    "third-party integration) reading `build_source` off a "
+                    "dump-written baseline has the identical bug and "
+                    "nothing here can see it; the durable fix for that "
+                    "population is a documented, supported reader entry "
+                    "point rather than a scan."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),

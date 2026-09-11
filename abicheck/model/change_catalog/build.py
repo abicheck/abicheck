@@ -241,7 +241,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         impact="The binary's own Mach-O minimum-OS load command "
         "(LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION) exceeds the macOS "
         "deployment target promised by the wheel's platform tag (e.g. "
-        "macosx_10_9_x86_64) or an explicit --env-matrix declaration — "
+        "macosx_10_9_x86_64) or an explicit .abicheck.yml deployment: declaration — "
         "the macOS counterpart of G10's manylinux glibc-floor check. "
         "Existing installs on the tag's promised deployment target can "
         "refuse to load the binary (dyld enforces the minimum-OS load "

@@ -33,8 +33,9 @@ up front, before any of that, and produces no report or outputs at all.
    happened and cannot retroactively instrument it), or `phase: auto` for
    `replay` (no pre-build hook needed).
 3. **Runs the analysis** — the root Action's `compare` mode against the
-   resolved baseline, or (`baseline-channel: none`) `scan` mode with no
-   `--against` (a one-build audit).
+   resolved baseline, or (`baseline-channel: none`) `compare`'s own
+   audit-only shape (`old-library`/`abi-baseline` both omitted, a one-build
+   audit).
 4. **Writes the report envelope**, once input validation (the very first
    step) has passed — even when steps 1 or 3 above then fail, since the
    internal resolve/analysis steps run with `continue-on-error: true`
@@ -112,7 +113,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `baseline-target` | no | (= `name`) | Which target's baseline actually resolves — set to the referenced library for `app-consumer`/`plugin-contract`. Ignored for `kind: bundle`. |
 | `bundle-members` | when `kind: bundle` | `[]` | JSON array of the bundle's member target ids. |
 | `profile` | yes | — | The build `profile.id` this check runs under. |
-| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `scan` cannot do). |
+| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `compare`'s audit-only shape cannot do). |
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
@@ -128,7 +129,8 @@ caller-provided directory of the candidate build's own member binaries.
 | `new-library` | yes | — | Candidate binary (`kind: target`) or directory of candidate member binaries (`kind: bundle`). |
 | `consumer-binary` | when `target-kind: app-consumer` | — | Forwarded as `--used-by`. |
 | `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as the root Action's `required-symbols` input (translated to the CLI's `--required-symbol @FILE`). |
-| `require-complete-analysis` | no | `false` | Forwarded to the internal analysis step's own `require-complete-analysis` input, gated on `kind != 'bundle'` (a bundle check's operand is a directory, and the root Action rejects the flag outright for a directory/package compare) — `false` for `kind: bundle` regardless of this input's value. `check-project.yml` sets this per cell from `checks[].analysis.assurance == 'complete'` (product-gaps audit §3); any other declared `analysis.assurance` value fails `project plan` before a run plan is generated, so this input's whole domain is `'true'`/`'false'`. |
+| `require-complete-analysis` | no | `false` | RETIRED (rulings.py deferred-option followup — hard removal, no deprecation window, mirroring the root Action's own `require-complete-analysis` retirement, which this input forwarded to). The root Action's input it mapped onto is gone: P0.4's orthogonal `ANALYSIS_INCOMPLETE` axis is config-only now, `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or Action-input override. Still declared so a workflow that sets it gets an explicit `::error::` instead of a silently-ignored input. See `analysis-assurance-complete` below for how `checks[].analysis.assurance: complete` (product-gaps audit §3) is now enforced instead. |
+| `analysis-assurance-complete` | no | `false` | Set to `'true'` when this cell declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis`'s own docstring names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action instead merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller (it already validates and carries `checks[].analysis.assurance` on the run-plan); rejected outright for `kind: bundle` (a bundle/directory comparison has no single `analysis_assurance` result to gate on) — validated up front in `validate-inputs.sh`, before any setup work. |
 | `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `policy-file`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
 
 ## Outputs
@@ -155,14 +157,15 @@ two identities that collapse to the same slug under the filename's lossy
 character substitution still produce distinct files — needed because
 `check-project.yml` downloads every matrix cell's report into one shared
 flat directory), starting from whatever the
-underlying `compare`/`scan` run already produced and layering on the
+underlying `compare` run already produced and layering on the
 fields below. For a normal single-library `compare` (the common case),
 that starting shape is `abicheck/reporter.py`'s existing compare-report
 shape (the one carrying `report_schema_version` — see
 [Output formats](../use/output-formats.md#json-schema-and-stability-guarantees) for that contract and
 `abicheck.schemas.current("compare")` for the version this build emits).
 A `baseline-channel: none` audit
-instead starts from a `scan` report (its own `scan_schema_version` shape),
+instead starts from `compare`'s own audit-only (`--no-baseline`) report
+(its own `audit_report_schema_version` shape),
 and a `kind: bundle` check starts from the CLI's per-library release
 fan-out summary (`libraries`/`old_dir`, no schema-version marker of its
 own) — neither of those two carries `report_schema_version`.

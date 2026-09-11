@@ -5,9 +5,18 @@
 root command is deleted outright (`abicheck scan` exits 64, naming
 `compare`/`compare --no-baseline` as the replacement), its scan-only
 modules and tests are deleted, and `tests/parity/` is now a compare-only
-regression corpus. Three flag demotions Phase 6 unblocked
-(`compare --env-matrix`, `compare --require-complete-analysis`,
-`dump --build-target`) remain open, unimplemented followups — see
+regression corpus. Of the three flag demotions Phase 6 unblocked,
+all three of the deferred flag demotions Phase 6 unblocked have since
+landed: `dump --build-target` (`.abicheck.yml`'s `build.targets` is the
+only front-end-reachable source now — `frontends/cli/options/rulings.py`'s
+deferred ruling recorded its only real blocker as `--build-target` still
+being a live `scan` option, per `plans/one-comparison-product.md`'s "One
+deferral's blocker re-attributed" note; with `scan` deleted, that blocker
+is gone and the flag is removed outright, old spelling exits 64, no
+alias), `compare --env-matrix` (`deployment:` in `.abicheck.yml`, PR
+#1221), and `compare --require-complete-analysis`
+(`assurance.require_complete` in `.abicheck.yml`, rulings.py
+deferred-option followup, this PR) — none remain open. See
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
 exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends
@@ -445,7 +454,7 @@ trade a possible *false negative* for a shorter CLI — not convenience.
 | `--budget` (§3 #19) | **(c) — implemented** | The other condition the task explicitly named as a real (c) candidate: an unbounded run is a real CI risk (opaque runner kill instead of a clear, actionable exit code). `compare` gained a `--budget` option (`frontends/cli/commands/compare.py`) parsed the same way `scan`'s always was (`15m`/`900s`/`1h`, bare number = seconds) and enforced via `deadline.deadline_scope` — the same ambient, contextvar-based mechanism `scan_engine.py` already used, which every deadline-aware subprocess call already downstream of it (castxml/clang extraction, the preprocessor scan, source replay) already consults without further plumbing. Entered around both the resolve and the classify phase, with the *remaining* budget (not the full duration again) passed to the second entry, so a slow resolution cannot silently grant classification a second full budget. Overflow sets `DiffResult.budget_overflow` (exit 5, ADR-064's existing axis) via the native CLI's own catch of `deadline.DeadlineExceeded`; the typed API (`CompareRequest.budget_s`, `service_compare_pipeline.run_compare_request`) raises the same exception rather than fabricating a partial result, since a typed caller can already catch it. Verified live: `compare --budget 0s -H foo.h old.so new.so` exits `5`. **Known, accepted narrowing versus `scan`'s own budget guard:** `scan_engine.py`'s per-stage checks additionally bounded fine-grained sub-steps within a single collection pass; this implementation bounds the two coarser phases (resolve, classify) `compare`'s own architecture actually separates. Still a real, enforced ceiling — recorded in `docs/contribute/known-gaps.md` as an accepted granularity difference, not a capability gap. |
 | `--risk-rules` (§3 #14) and risk-driven `auto` depth selection (§3 #13) | **(b) — dropped** | Omitting `--depth` on `compare` already deterministically defaults to `headers` — never narrower than what a *non*-risk-driven `scan` run would have used, so dropping the risk-scoring auto-escalation is not a new false negative relative to `compare`'s own existing, already-shipped default; it is the removal of a convenience that used to *sometimes* escalate depth further than the default, never a removal of a floor. A CI job that wants source-level assurance on every run must now pin `--depth source` explicitly rather than rely on risk scoring inferring it — a documented breaking change to `mode: scan`'s implicit depth selection when `depth` is left unset, not a silent capability loss (the Action now requires an explicit `depth` input, or accepts the same fixed `headers` default `compare` always used). |
 | `--crosscheck KEY=error` promotion syntax (§3 #23) | **(b) — dropped, superseded** | All eleven cross-source checks already reach `compare` as ordinary `ChangeKind`s (§3 #3, landed), so the underlying capability — controlling a specific check's severity — already exists via `--policy`/`.abicheck.yml`'s `policy.overrides` (a `ChangeKind`-keyed mechanism every one of these checks already has a registry entry for). The `KEY=LEVEL` *syntax* itself does not survive; `policy.overrides.<CHANGE_KIND>: error` is the replacement spelling. A documented breaking change to `mode: scan`'s `crosscheck` input's promotion syntax — the dedicated `crosscheck` report block itself was already scan-only surface with no compare equivalent, and disappears with the mode. |
-| `--build-target` (no `compare` flag equivalent) | **(b) — dropped** | `scan --build-target` is `dump --build-target`'s own CLI equivalent (`BuildEvidence.target_scope`), an advanced knob narrowing which build target's evidence collection uses when a compile database names several — not a correctness floor: omitting it does not silently narrow what `compare` reports below its own ordinary (all-targets) default, it only foregoes a precision narrowing a minority of multi-target libraries need. `.abicheck.yml`'s `build.targets` (§4.2's own CONFIG classification) is the eventual config-level replacement, but that key is not implemented for either `dump` or `compare` yet (verified: no `build.targets`/`build_target` reference anywhere outside `scan`'s own modules) — implementing it is `dump`'s own CLI/config-cleanup phase (Phase 7 in the plan, a different agent's owned files: `cli_dump*.py`), not this commit's. Documented breaking change: `build-target` under `mode: scan` now errors clearly rather than routing to a nonexistent flag or a silent no-op. |
+| `--build-target` (no `compare` flag equivalent) | **(b) — dropped** | `scan --build-target` is `dump --build-target`'s own CLI equivalent (`BuildEvidence.target_scope`), an advanced knob narrowing which build target's evidence collection uses when a compile database names several — not a correctness floor: omitting it does not silently narrow what `compare` reports below its own ordinary (all-targets) default, it only foregoes a precision narrowing a minority of multi-target libraries need. `.abicheck.yml`'s `build.targets` (§4.2's own CONFIG classification) was, at the time of this ruling, the eventual config-level replacement, but that key was not implemented for either `dump` or `compare` yet (verified then: no `build.targets`/`build_target` reference anywhere outside `scan`'s own modules) — implementing it was blocked on `dump --build-target` itself remaining a live flag until this same Phase 6 `scan` removal landed (`frontends/cli/options/rulings.py`'s deferred ruling for `--build-target` named exactly that blocker, not an undecided architectural question). Documented breaking change: `build-target` under `mode: scan` now errors clearly rather than routing to a nonexistent flag or a silent no-op. **Resolved by the 2026-09-11 amendment below:** with `scan` (and `scan --build-target` with it) now deleted, that blocker is gone — `dump --build-target` has since been removed outright too (old spelling exits 64, no alias), and `.abicheck.yml`'s `build.targets` is now the only front-end-reachable source, on both `dump` and `compare`. |
 | `--artifact-set`/`new-library-set` (§3 #16/#17) | **(b) — dropped, pending prerequisite** | ADR-065 S3's package component inventories (plan Prerequisite P5) — the model `compare --no-baseline DIR`'s own N-library audit selection would need to genuinely preserve `--artifact-set`'s per-member manifest/coverage accounting — is explicitly "Not started" in the plan, owned by a different workstream. Routing `new-library-set` onto `compare --no-baseline` today would silently narrow its member-selection/coverage guarantees rather than reproduce them, which is exactly the false-negative risk the (c) bar exists to catch — so this is not implemented in this commit. `mode: scan` with `new-library-set` set now errors clearly (naming ADR-065 S3 as the blocking prerequisite) instead of silently falling back to a legacy CLI branch that itself was one asymmetric input combination away from disappearing anyway. Tracked as a real, open gap in `docs/contribute/known-gaps.md`, not silently dropped. |
 | Per-side header/include root: additive (`scan`) vs. overriding (`compare`) | **(a) — already covered, fixed in the Action** | This was never a `compare` capability gap — it is purely how `action/run.sh` assembles `-H`/`-I` flags before invoking either CLI. The Action itself now unions a shared `header`/`include` root into each side-specific list before building `CMD`, reproducing `scan`'s documented additive semantics without needing any `compare` change — `compare`'s own per-side override behavior when given a bare (non-side-prefixed) root plus a side-specific one elsewhere is unaffected and pre-existing. |
 | `.json`/`.json.gz`/`.json.zst`/content-sniffed snapshot baseline, `dependency_scope` tag matching | **(a) — already covered** | `service.run_dump`'s `include_dependencies` parameter already lets `compare`'s own live-binary dumping filter consistently with a `dump --include-system-declarations` baseline (module map, "Snapshot" section) — the exact tag-matching `scan`'s own `_scan_candidate_include_dependencies` provided. No `compare`-side gap; the Action's own JSON-snapshot-sniffing routing check is simply no longer needed once every `mode: scan` request routes to `compare` unconditionally. |
@@ -459,13 +468,15 @@ trade a possible *false negative* for a shorter CLI — not convenience.
 below):** `_SCAN_NEEDS_LEGACY_CLI` and its call sites are deleted outright.
 Every `mode: scan` request — baseline and audit-only alike — is assembled as
 a `compare`/`compare --no-baseline` invocation. `new-library-set` and
-`build-target` inputs are rejected with a clear `::error::` naming the
-blocking prerequisite (ADR-065 S3, and `dump`'s own config-cleanup phase,
-respectively) rather than silently degrading or routing to a branch that no
-longer exists; `risk-rules`/`crosscheck` inputs are rejected the same way,
-naming their `.abicheck.yml` replacement. This is what D8 calls hard removal
-with no deprecation window, applied to the Action's own input surface for
-the first time — previously only the CLI's flag surface was held to it.
+`build-target` inputs are rejected with a clear `::error::`; `new-library-set`
+names its still-blocking prerequisite (ADR-065 S3), while `build-target` —
+per the 2026-09-11 amendment below, once `dump --build-target` itself was
+retired — is simply retired on every mode, naming `.abicheck.yml`'s
+`build.targets` as the replacement rather than a prerequisite still to land;
+`risk-rules`/`crosscheck` inputs are rejected the same way, naming their
+`.abicheck.yml` replacement. This is what D8 calls hard removal with no
+deprecation window, applied to the Action's own input surface for the first
+time — previously only the CLI's flag surface was held to it.
 
 **Current state (CodeRabbit review, this same commit):** the ruling table
 above is complete, but `_SCAN_NEEDS_LEGACY_CLI` and its ~17 `MODE == "scan"`
@@ -673,6 +684,128 @@ test_audit_gate_axis_honors_a_policy_promoted_verdict` (live, an
 flip its exit code from `0` to `3` with no change to which finding is
 reported).
 
+## Amendment (2026-09-11): `compare --env-matrix` demoted to `.abicheck.yml`'s `deployment:` config key
+
+Phase 6 (`scan` retirement) named three flag demotions it unblocked but did
+not itself implement: `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` — the plan's own
+"Blocked by `scan`" ruling (`one-comparison-product.md` §7k) recorded
+`--env-matrix` as blocked specifically on `scan`'s own `action/run.sh`
+routing predicate translating a `mode: scan` request onto `compare`, not as
+an open architectural question about whether the demotion itself was
+correct (it was already ruled CONFIG in §4.1). With `scan` (and its
+`action/run.sh` translation layer) deleted, that blocker is gone, and this
+amendment closes it: `compare --env-matrix FILE` is retired (old spelling
+exits 64, no alias, per D8's hard-removal-no-deprecation-window rule), and
+`.abicheck.yml`'s new top-level `deployment:` block — embedding
+`EnvironmentMatrix`'s existing YAML shape (`compilers`, `sycl:`/`cuda:`
+sub-blocks, `runtime_floors:`) verbatim, via `EnvironmentMatrix.from_dict`
+— is now the only front-end-reachable source of declared deployment
+constraints, on both a bare `compare` and the directory/package release
+fan-out (`cli_compare_release.py`/`cli_compare_release_pairwise.py` resolve
+`BuildConfig.deployment` per library, the same as every other project-config
+field the fan-out already reads — so the constraint now applies across a
+release the way `--env-matrix` itself, a single-invocation flag, never did).
+The typed Python API's `compare(..., env_matrix=...)` parameter is
+unaffected: it is ordinary per-comparison evidence data, the same shape
+every other CONFIG-demoted field keeps as a typed-API parameter alongside
+its `.abicheck.yml` route. **Correction (Codex review, fresh evidence on
+this PR):** the claim above did not, as first written, extend to
+`CompareRequest`'s own constructor shape — this PR's first pass replaced the
+documented, released `env_matrix_path: Path` field outright with
+`env_matrix: EnvironmentMatrix`, so a Tier-2 caller built exactly per the
+previously-published `CompareRequest(..., env_matrix_path=Path(...))` shape
+(credited in `CHANGELOG.md`'s 0.4.0 entry) hit an immediate `TypeError` at
+construction, not a graceful fallback. Fixed in the same review round:
+`CompareRequest.env_matrix_path` is kept as a genuine, still-accepted
+constructor parameter, but resolution into an `EnvironmentMatrix` is lazy
+rather than immediate — `__post_init__` only checks the structural
+"not both `env_matrix` and `env_matrix_path`" invariant (no file I/O), and
+the actual load (via `workflows.input_resolution.load_env_matrix`, the same
+loader the retired CLI flag itself used) happens later, at the
+plan/execution boundary, through `CompareRequest.effective_env_matrix()` —
+called from `resolve_compare_request()` and cached on
+`ResolvedComparePair.resolved_env_matrix` for `classify_compare_pair()` to
+read. So constructing a `CompareRequest(..., env_matrix_path=...)` succeeds
+even if the file doesn't exist yet (and does not cache stale contents from
+before a later edit); the two spellings become equivalent only once the
+request is resolved, not at construction — see
+`abicheck/workflows/contracts.py`'s own field docstring and
+`tests/test_environment_drift.py::TestCompareRequestEnvMatrixPathCompat`.
+Only the CLI flag surface and its
+`--support-promise`-shaped strict-schema enforcement moved.
+`compare --require-complete-analysis` and `dump --build-target` — this same
+list's other two deferrals — are also now both implemented; see the
+following two amendments and
+`docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for
+their exact scope. This amendment closes the `--env-matrix` deferral the
+plan already ruled on; it does not reopen that ruling or the CONFIG
+classification itself.
+
+## Amendment (2026-09-11): `dump --build-target` removed, closing the last flag-demotion deferral Phase 6 unblocked
+
+Phase 6 (`scan` retirement) named three flag demotions it unblocked but did
+not itself implement: `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` — the ruling table
+above's own `--build-target` row (2026-09-09) recorded `dump --build-target`
+as still blocked specifically on `scan --build-target` remaining a live
+option, not as an open architectural question. With `scan` (and
+`scan --build-target` with it) deleted, that blocker is gone, and this
+amendment closes it: `dump --build-target` is removed outright (old spelling
+exits 64, no alias), and `.abicheck.yml`'s `build.targets` — the CONFIG
+classification the ruling table already named as the eventual replacement —
+is now the only front-end-reachable source of build-target scoping, on both
+`dump` and `compare`. `InputSpec.build_targets` stays as a genuine typed-API
+field for a programmatic caller: unlike `--build-query`/`--build-compile-db`
+(removed from `InputSpec` for being entangled with build-system execution
+trust), `build_targets` is ordinary per-side evidence-scoping data, the same
+shape as `compile_db_filter`/`public_header_dirs`. The existing
+CLI-overrides-config fallback (`buildsource/embed.py`, `buildsource/
+l2_seed.py`, `workflows/plan.py`'s `_discovered_config_build_targets`)
+already read `.abicheck.yml`'s `build.targets` whenever `build_targets` was
+empty, so removing the CLI's only non-empty source makes config the sole
+front-end-reachable route with no further plumbing changes needed.
+`action.yml`/`action/run.sh`/`action/validate-inputs.sh`'s `build-target`
+input is retired on every mode now (previously scan-only), failing loudly
+before the toolchain install and naming `.abicheck.yml`'s `build.targets` as
+the replacement — the "Consequence for `action/run.sh`" paragraph above is
+updated accordingly. `compare --env-matrix` and `compare
+--require-complete-analysis` — this same list's other two deferrals — are
+also both now implemented (see the preceding amendment and the following
+one); see `docs/contribute/plans/one-comparison-product.md`'s Phase 6
+section for their exact scope. This amendment closes the `--build-target`
+deferral the ruling table already ruled on; it does not reopen that ruling
+or the (b) classification itself.
+
+## Amendment (2026-09-11): `compare --require-complete-analysis` demoted to `.abicheck.yml`'s `assurance.require_complete` config key
+
+The third and final flag demotion Phase 6 unblocked but did not itself
+implement (the same list the two preceding amendments each closed one entry
+of): the ruling table's `--require-complete-analysis` row recorded it as
+blocked on the identical `scan`-routing hazard as `--env-matrix` (`action/
+run.sh` translating a `mode: scan` request onto `compare` unless a predicate
+said it must stay on the legacy CLI), plus a dedicated Action input
+(`require-complete-analysis`) that needed to retire in the same PR for
+front-end parity — not as an open architectural question about whether the
+demotion itself was correct (P0.4's orthogonal assurance floor was already
+ruled CONFIG). With `scan` deleted, the routing hazard is gone, and this
+amendment closes it: `compare --require-complete-analysis` is retired (old
+spelling exits 64, no alias, per D8's hard-removal-no-deprecation-window
+rule), and `.abicheck.yml`'s new `assurance:` block's `require_complete`
+key — resolved into `BuildConfig.assurance_require_complete` and read
+straight off it by `resolve_compare_config` with no surviving CLI override,
+the same shape `gate.fail_on_removed_library` already uses — is now the
+only front-end-reachable source. The composite Action's own
+`require-complete-analysis` input is retired the same way, on every mode
+(previously forwarded only through `compare`'s branch per the "Action input
+lifecycle" amendment above): `action/validate-inputs.sh` now rejects it
+outright before the toolchain install, and `action/run.sh` no longer
+forwards it as a CLI flag, naming `.abicheck.yml`'s `assurance.require_complete`
+as the replacement. This closes the last of the three flag demotions named
+at the top of this section — `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` are now all
+implemented, with no open, unimplemented deferral remaining from that list.
+
 ## Alternatives considered
 
 **Keep `scan`, make `compare` call into it.** Rejected: it preserves two
@@ -696,6 +829,215 @@ and the cross-source checks are among the findings users act on most.
 **Merge `deps` into `compare`.** Rejected for now (D6): the operands differ
 in kind, and forcing them together to reduce a command count is the sort of
 argument-count-dependent semantics this work is meant to eliminate.
+
+## Amendment (2026-09-11): the Action input lifecycle — `mode: scan` retired outright
+
+The CLI's own `scan` command was already deleted (Phase 6, above) — `abicheck
+scan` has exited 64 for a while, naming `compare`/`compare --no-baseline` as
+the replacement. Until now, `mode: scan` survived as a composite-Action
+*input value* only: `action/run.sh` translated it internally to `compare`/
+`compare --no-baseline`, matching the CLI's own retirement one layer up but
+never actually removing the Action-level spelling. This amendment closes
+that gap, per D8's own hard-removal rule (no deprecation window): setting
+`mode: scan` on the Action now fails the step outright, at the earliest
+possible point (`action/validate-inputs.sh`, before Python setup or any
+toolchain install), naming the exact replacement for the caller's own shape.
+The Action's three scan-only inputs (`against`, `estimate`, `audit`) are
+retired the same way — each becomes a hard `::error::`, not a silently
+inert no-op, since GitHub Actions drops an undeclared input with only a
+warning and this input family used to change what actually ran.
+
+### The two `mode: scan` shapes, and what replaces each
+
+`mode: scan` never collapsed to one spelling — a baseline scan and an
+audit-only scan were two different requests, and they get two different
+replacements:
+
+**(a) `mode: scan` with `against`/`abi-baseline` set (a baseline scan).**
+Replacement: `mode: compare` with the identical baseline value passed as
+`old-library` (or `abi-baseline`, unchanged) and the same `new-library`.
+This was already exactly what the Action's own internal translation did
+for this shape (`INPUT_AGAINST` → `INPUT_OLD_LIBRARY`) — the only change is
+that the caller now states `compare` directly instead of `scan` being
+translated for them.
+
+**(b) `mode: scan` with no baseline (or `audit: true`, which forced this
+shape regardless of an `against`/`abi-baseline` also being configured).**
+Replacement: `mode: compare` with **both** `old-library` and `abi-baseline`
+omitted — omission is the trigger, not a dedicated flag. This routes to a
+first-class `compare --no-baseline` invocation against `new-library` alone,
+reporting no old/new compatibility verdict at all (D2). `compare` did not
+previously expose this shape as a *native* Action request at all — before
+this amendment, `old-library` was a required Action operand for `mode:
+compare` in every practical sense (the CLI's own `--no-baseline` flag had
+no Action-level way to reach it for a native `compare` request), and the
+shape was reachable only through `mode: scan`'s own internal translation.
+This amendment makes it native: `action/validate-inputs.sh` and
+`action/run.sh` now both treat "old-library and abi-baseline both absent"
+as a first-class, documented compare shape, not an implicit fallback. See
+"What changed to make (b) native" below for the mechanics.
+
+### The audit-gate trap, restated as a migration requirement
+
+Legacy `mode: scan` with no baseline gated a CI job on a `BREAKING`/
+`API_BREAK`-classified candidate-side finding **by default, unconditionally,
+no flag needed**. `compare --no-baseline`'s own audit-gate axis
+(ADR-068's 2026-09-10 amendment, above) reproduces the identical gating
+partition at exit code `3` — but it is **opt-in**, activated only by
+`--severity-preset` (any value except `info-only`). A caller migrating an
+audit-only `mode: scan` job to `mode: compare` (shape (b) above) who does
+not also set `severity-preset` gets a job that always exits 0/passes,
+silently converting what used to gate CI into a step that never fails
+regardless of what the audit finds. This is exactly the risk `vision.md`'s
+"record before disposing" principle warns about, on the exit code rather
+than a finding.
+
+**This is a required migration step, not an optional hardening.** Every
+audit-only `mode: scan` job that relied on the default gating (i.e., did not
+already pass `severity-preset: info-only` to opt out) must add
+`severity-preset: default` (or `strict`) when migrating to `mode: compare`'s
+audit-only shape, or the job silently stops gating. A job that already
+passed `severity-preset: info-only` — an explicit "don't gate" request —
+needs no change; the same value keeps the same meaning.
+
+Verified live against the G20 corpus fixtures this ADR's 2026-09-10
+amendment already established as the reproduction set
+(`catalog/cases/case148_xcheck_header_build_mismatch`,
+`case149_xcheck_odr_variant`, `case143_audit_accidental_export`):
+
+```console
+$ abicheck compare --no-baseline catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json \
+    --format json --severity-preset default
+exit=3
+$ abicheck compare --no-baseline catalog/cases/case149_xcheck_odr_variant/snapshot.abi.json \
+    --format json --severity-preset default
+exit=3
+$ abicheck compare --no-baseline catalog/cases/case143_audit_accidental_export/snapshot.abi.json \
+    --format json --severity-preset default
+exit=0
+```
+
+case148/case149 carry `API_BREAK`-classified findings and gate (exit 3,
+matching legacy `scan`'s own exit 2 on the identical fixtures); case143
+carries only a `RISK`-classified finding and does not gate (exit 0),
+matching legacy `scan`'s own exit 0 there too — the replacement wiring
+reproduces the exact gate/no-gate partition legacy `scan` had, provided the
+caller adds `--severity-preset`.
+
+### What changed to make (b) native
+
+Before this amendment, `action/run.sh`'s `compare` branch unconditionally
+required `old-library` (`${INPUT_OLD_LIBRARY:?old-library is required for
+compare mode}`) — the audit-only shape was reachable only via `mode: scan`'s
+own separate command-assembly branch. That branch is now deleted outright,
+and the compare branch itself gained the audit-only case: `old-library` and
+`abi-baseline` both empty routes to `compare --no-baseline new-library`
+instead of failing the bash parameter expansion. Everything scan's own
+audit-only translation used to do for this shape now lives in the one
+`compare` branch, keyed on this same presence check (`_NO_BASELINE` in
+`action/run.sh`):
+
+- `-H`/`-I`: no OLD side exists in this shape (old-header/old-include would
+  be a CLI usage error — "the OLD side is declared absent"), so they are
+  never forwarded; `public-header-dir` folds into a bare `-H` root the same
+  way `dump` derives provenance-and-extraction scope from `-H` (legacy
+  `scan`'s own `--public-header-dir` CLI flag is gone, so there is no
+  separate flag to fold from any more).
+- `since`/`changed-path`/`budget`: rejected upfront (before any dependency
+  install) as usage errors for this shape, matching `compare --no-baseline`'s
+  own CLI-level rejection (D2) — unchanged from the previous `mode: scan`
+  behavior for this shape.
+- `require-complete-analysis`: at the time this amendment landed, **now
+  forwarded**, unlike legacy `scan`'s own audit mode (which never accepted
+  the flag at all, so this Action documented it as a no-op for that shape) —
+  `compare --no-baseline` genuinely accepted the flag and gave it real teeth
+  (live-verified: an incomplete analysis-assurance candidate-side finding
+  failed the step under it). **Superseded by the later 2026-09-11
+  `assurance.require_complete` amendment below**: the CLI flag and Action
+  input this paragraph describes have since been retired outright in favor
+  of `.abicheck.yml`'s `assurance:` config block, so this shape now forwards
+  no `--require-complete-analysis` flag at all — history kept here for the
+  historical record of what this specific amendment changed at the time.
+- `budget`: the two-sided (baseline) shape gains the dedicated `budget`
+  Action input's forwarding too — previously `compare`'s own branch had no
+  `--budget` forwarding at all (the input was documented scan-only); now any
+  `mode: compare` baseline request can set it.
+- The `-H`/`-I` shared-root-plus-override union behavior legacy `scan`'s own
+  CLI documented as additive (`_add_unioned_sided_flag` in the pre-amendment
+  `action/run.sh`) is **not** carried forward for a two-sided compare: a
+  two-sided `compare`'s own native per-side resolution (which OVERRIDES a
+  bare shared root with a side-specific one, not unions them) now applies
+  uniformly, since there is no longer a `scan`-flavored CLI to reproduce.
+  This is a deliberate, accepted behavior change of this migration — it
+  restores `compare`'s own always-documented semantics rather than
+  preserving `scan`'s divergent one for a route that no longer exists.
+- One `run.sh`-internal bug was caught and fixed while implementing this:
+  `_compile_context_sources_pairwise()` (decides whether a `--sources`
+  tree's own `compile:`/`source:`/`debug:` blocks promote pair-wide or
+  single-sided) keyed only on `$MODE == "compare"` plus whether `old-library`
+  looked like a stored snapshot — it had no way to tell "old-library
+  genuinely omitted" apart from "old-library happens to test as a live
+  binary" (an empty string is not a stored-snapshot magic-byte match
+  either), so it would have misclassified the new audit-only shape as
+  pairwise. Fixed to also require `old-library` be non-empty before
+  classifying pairwise.
+
+### Consequences for this repo's own callers
+
+- `.github/workflows/test-action.yml`'s three `mode: scan` acceptance lanes
+  (`test-scan-baseline-breaking`, `test-scan-audit`, `test-scan-estimate`)
+  are migrated to the shape (a)/(b) replacements above, asserting the
+  identical exit code and verdict as before — these lanes are this
+  migration's own acceptance evidence, not just coverage that happened to
+  need updating.
+- `tests/test_action_run_sh_scan_no_baseline_capability_gap.py` and
+  `tests/test_action_run_sh_scan_routing_edge_cases.py` (both named for a
+  scan-vs-legacy-CLI routing predicate that no longer exists — there is
+  only one CLI, `compare`, and no routing decision left to make) are
+  retired: the former is renamed to
+  `tests/test_action_run_sh_compare_no_baseline_capability_gap.py` and its
+  real invariant (since/changed-path/budget rejected upfront for the
+  audit-only shape; require-complete-analysis forwarded, not withheld) kept
+  and restated for `mode: compare`; the latter's entire subject (does input
+  X affect which of two CLIs a scan request routes to) has no meaning once
+  there is only one CLI, and its coverage of `compare`'s own real behavior
+  (header/include unions, depth values, JSON-snapshot detection, extra-args
+  passthrough) was already independently covered by this directory's other
+  `compare`-focused test modules, so the file is deleted rather than kept
+  as a hollow renamed shell. `tests/test_action_validate_inputs_no_baseline_
+  capability_gap.py` is renamed to `tests/test_action_validate_inputs_
+  compare_no_baseline_capability_gap.py` on the same basis as its `run_sh`
+  sibling. A number of other, pre-existing test modules that happened to
+  exercise `mode: scan` as one parametrized case alongside `compare`
+  (`test_action_analysis_assurance_verdict.py`,
+  `test_action_compile_context_old_library_liveness.py`,
+  `test_action_compile_context_parity.py`, `test_action_coverage_verdict.py`,
+  `test_action_run_contract.py`) are updated in place: a `scan`-parametrized
+  case is either dropped (a `compare`-only invariant now) or ported directly
+  to the `compare` shape it was implicitly already testing, with no loss of
+  the underlying invariant.
+- `docs/use/github-action.md` gains a migration section covering both
+  shapes, including the `severity-preset` requirement above.
+  `docs/integration/scenarios/source-replay.md` and `single-build-audit.md`
+  (built around `mode: scan` examples) are rewritten for the `mode: compare`
+  replacement wiring. `docs/use/github-action-source-scans.md` — described
+  elsewhere as the canonical `mode: scan` Action reference — is retired per
+  `docs/AGENTS.md`'s ownership rules, folded into `github-action.md`'s own
+  migration section and `use/dump-compare-flags.md` rather than kept as a
+  page about a retired mode.
+- `scripts/retired_surfaces.py` gains a `mode: scan` (Action input value)
+  entry, so no future documentation page can reintroduce the retired
+  spelling without the `check_docs_contract.py` sweep catching it.
+
+### Status
+
+Implemented: `action.yml`, `action/validate-inputs.sh`, `action/run.sh`,
+this repository's own callers, and the docs above. Verified live against
+the G20 corpus (audit-gate reproduction, above) and via
+`tests/test_action_run_sh_*.py`/`tests/test_action_validate_inputs*.py`
+(the full directory, not just the files this amendment specifically
+touched — every test in both directories passes against the new
+behavior).
 
 ## Relationship to existing ADRs
 

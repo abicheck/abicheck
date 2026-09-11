@@ -381,13 +381,13 @@ class TestEvidenceReading:
         hardcoded list cannot tell "this flag is gone" from "this flag is
         unrecorded" -- the second is the real failure and it would have gone
         unnoticed. There is still no generic `--severity` option for a stem
-        to match, which is why the grader spells its flags out.
-        """
+        to match, which is why the grader spells its flags out (`scan`, the
+        other former source, was retired by ADR-068 Phase 6)."""
         from abicheck.cli import main
 
         severity_options = {
             opt
-            for name in ("compare", "scan")
+            for name in ("compare",)
             for p in main.commands[name].params
             if getattr(p, "param_type_name", None) == "option"
             for opt in p.opts

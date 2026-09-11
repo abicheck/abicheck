@@ -52,6 +52,7 @@ fi
 COLLECT_VERIFY_OUTCOME="${COLLECT_VERIFY_OUTCOME:-}"
 COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
 CONSUMER_CONTEXT_OUTCOME="${CONSUMER_CONTEXT_OUTCOME:-}"
+ASSURANCE_OVERLAY_OUTCOME="${ASSURANCE_OVERLAY_OUTCOME:-}"
 
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
@@ -130,6 +131,13 @@ elif [[ "$COLLECT_REPLAY_OUTCOME" == "failure" ]]; then
 elif [[ "$CONSUMER_CONTEXT_OUTCOME" == "failure" ]]; then
   MODE="operational-error"
   RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "the consumer_compile header extraction pass failed before comparison.")
+elif [[ "$ASSURANCE_OVERLAY_OUTCOME" == "failure" ]]; then
+  # analysis-assurance-complete asked for an assurance.require_complete
+  # overlay, but building it failed (e.g. build-config didn't parse to a
+  # YAML mapping) -- never silently fall back to running the comparison
+  # without the requested assurance floor.
+  MODE="operational-error"
+  RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "generating the assurance.require_complete config overlay failed -- see the 'Generate assurance-overlay config' step's own log.")
 elif [[ "$ANALYSIS_RAN" != "true" || -z "$ANALYSIS_REPORT_PATH" || ! -f "$ANALYSIS_REPORT_PATH" ]]; then
   # Baseline resolution succeeded (or was skipped for baseline-channel:
   # none), but the analysis step never produced a report -- a genuine

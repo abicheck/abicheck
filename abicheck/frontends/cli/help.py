@@ -33,10 +33,9 @@ axis (M2): plain ``--help`` on each shows only a curated common subset
 (:data:`COMPARE_COMMON_OPTION_NAMES` / :data:`DUMP_COMMON_OPTION_NAMES`),
 folding the long tail behind ``--help-all``. See :func:`curated_help_options`
 (the shared factory) and its two per-command instances,
-``compare_help_options``/``dump_help_options``. A third instance,
-``scan_help_options``, existed for the ``scan`` command until it was deleted
-outright (ADR-068 Phase 6, no deprecation window) -- removed along with it,
-rather than left as a dead decorator with no command to apply it to.
+``compare_help_options``/``dump_help_options``. ``scan`` used to be a third
+instance (``scan_help_options``/``SCAN_COMMON_OPTION_NAMES``) until ADR-068
+Phase 6 retired the command outright.
 """
 
 from __future__ import annotations
@@ -203,10 +202,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--provenance"],
         },
     ],
-    # A `"* scan"` panel existed here until the `scan` command was deleted
-    # outright (ADR-068 Phase 6, no deprecation window) -- removed along with
-    # it rather than left as a panel with no matching command.
-    #
+    # The "* scan" panel used to live here; ADR-068 Phase 6 retired the
+    # `scan` command outright.
     # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
     # plain Click help — its group is not under the rich-click `main`, so panel
     # config would be inert there. Its flags already carry help; the dialect's
@@ -361,10 +358,10 @@ def _make_help_callback(
     """Build the curated ``--help`` callback for one command.
 
     Factored out of the original ``compare``-only implementation so ``dump``
-    and ``scan`` (G21.8 follow-on) get the identical curated/full split
-    without a copy-pasted callback per command — the closure just captures
-    which command's name to print in the pointer message and which dest-name
-    set counts as "common" for it.
+    (G21.8 follow-on) gets the identical curated/full split without a
+    copy-pasted callback per command — the closure just captures which
+    command's name to print in the pointer message and which dest-name set
+    counts as "common" for it.
     """
 
     def _help_callback(
@@ -482,8 +479,8 @@ compare_help_options: Callable[[F], F] = curated_help_options(
 )
 
 
-# ── `dump --help-all` / `scan --help-all` (same disclosure, applied to the
-# other two big commands, G21.8 follow-on) ────────────────────────────────
+# ── `dump --help-all` (same disclosure, applied to a second big command,
+# G21.8 follow-on) ─────────────────────────────────────────────────────────
 #
 # Dest names, mirroring COMPARE_COMMON_OPTION_NAMES above.
 DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
@@ -518,11 +515,10 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# SCAN_COMMON_OPTION_NAMES/scan_help_options used to live here (the `scan
+# --help`/`scan --help-all` curated/full split); ADR-068 Phase 6 retired the
+# `scan` command outright.
+
 dump_help_options: Callable[[F], F] = curated_help_options(
     "dump", DUMP_COMMON_OPTION_NAMES
 )
-# A third instance, `scan_help_options` (built from a `SCAN_COMMON_OPTION_NAMES`
-# frozenset that mirrored the two above), existed here for the `scan` command
-# until it was deleted outright (ADR-068 Phase 6, no deprecation window) --
-# removed along with it, rather than left as a dead decorator with no command
-# left to apply it to.

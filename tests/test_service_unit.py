@@ -2403,7 +2403,7 @@ class TestCompareRequestAdr055Evidence:
         also be diffed (prepare_embedded_build_source) and forwarded to
         compare_snapshots as extra_changes, or a source-only ABI change would
         silently produce an ordinary artifact-only compatible verdict."""
-        from abicheck import service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
         from abicheck.checker_policy import ChangeKind
         from abicheck.checker_types import Change
 
@@ -2426,13 +2426,17 @@ class TestCompareRequestAdr055Evidence:
         )
 
         captured = {}
-        original_compare_snapshots = service_mod.compare_snapshots
+        # classify_compare_pair (service_compare_pipeline.py) imports
+        # compare_snapshots from its real owner (workflows.compare_policy,
+        # ADR-061 gap A) rather than the flat abicheck.service facade, so the
+        # patch target follows it.
+        original_compare_snapshots = compare_policy_mod.compare_snapshots
 
         def _spy_compare_snapshots(old, new, *a, **kw):
             captured["extra_changes"] = kw.get("extra_changes")
             return original_compare_snapshots(old, new, *a, **kw)
 
-        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _spy_compare_snapshots)
 
         request = CompareRequest(
             old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
@@ -3384,12 +3388,13 @@ class TestContractEvaluationThreading:
         # docstring), then project_policy_overrides (findings-analysis-fixes
         # batch, second review round, defect 4: the release fan-out's own
         # `.abicheck.yml` `policy.overrides` gap), same rule.
-        assert params[-12:] == [
+        assert params[-13:] == [
             "diagnostic_comparison", "contract_evaluation",
             "include_dependencies", "contract_mode", "pack_policy_overrides",
             "pack_internal_namespaces", "compile_context", "depth",
             "severity_preset", "public_header_dirs",
             "collapse_versioned_symbols", "project_policy_overrides",
+            "env_matrix",
         ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):

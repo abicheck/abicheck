@@ -60,8 +60,10 @@ inputs:
       Baseline channel name (release-contract, accepted-main, explicit, or a
       project-defined custom channel), or the literal 'none' for a
       single-build audit with no baseline (ADR-047 §8 S5) -- when 'none',
-      resolve-baseline is skipped entirely and this check runs the existing
-      scan audit path directly (no --against) instead of compare.
+      resolve-baseline is skipped entirely and this check runs mode: compare
+      with old-library/abi-baseline both omitted (ADR-068 D2's audit-only
+      shape -- the root Action's retired mode: scan, no --against, used to
+      be this path) instead of a two-sided compare.
     required: true
   baseline-path:
     description: >
@@ -286,28 +288,47 @@ inputs:
       gate-mode: advisory, and aggregate.py's own GateInfo.from_report_data
       falls back to legacy_from_verdict(verdict) instead, which would still
       see the real BREAKING/API_BREAK verdict and derive a blocking gate
-      regardless of gate-mode. Ignored for a scan-mode audit (baseline-
-      channel: none), which always carries its own top-level exit_code.
+      regardless of gate-mode. For a baseline-channel: none audit, this now
+      also selects whether the audit-only compare's own AUDIT_GATE axis
+      gates on a BREAKING/API_BREAK-classified finding (ADR-068's
+      2026-09-10 amendment) -- the default 'default' preserves the exit
+      behavior the retired mode: scan audit path always had.
     required: false
     default: 'default'
   require-complete-analysis:
     description: >
-      Forwarded to the internal analysis step's own require-complete-
-      analysis input (product-gaps audit §3): a truthful projection of this
-      cell's declared checks[].analysis.assurance, which check-project.yml
-      sets to 'true' only when that value is 'complete' (the one value
-      project_targets.py's analysis_assurance_gate.py accepts -- any other
-      declared value is rejected before a run plan is even generated, so
-      this input is never asked to honor an unsupported one). Unconditionally
-      dropped to 'false' for kind: bundle, mirroring every other per-cell
-      compile/frontend override this Action already gates on kind !=
-      'bundle': a bundle check's old-library is a directory (the resolved
-      binaries-dir), and the root Action's own require-complete-analysis
-      input rejects a directory/package compare outright (no single
-      analysis_assurance result to gate a release fan-out on) -- forwarding
-      it unconditionally would turn a working bundle check into a hard
-      operational error the moment a project declared assurance: complete
-      anywhere in its checks:.
+      RETIRED (rulings.py deferred-option followup -- hard removal, no
+      deprecation window, mirroring the root Action's own
+      require-complete-analysis retirement, which this input forwarded
+      to). The root Action's input it mapped onto is gone: P0.4's
+      orthogonal ANALYSIS_INCOMPLETE axis is config-only now,
+      `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or
+      Action-input override. Still declared so a workflow that sets it
+      gets an explicit `::error::` instead of a silently-ignored input.
+      See `analysis-assurance-complete` below for how
+      `checks[].analysis.assurance: complete` (product-gaps audit §3) is
+      now enforced instead.
+    required: false
+    default: 'false'
+  analysis-assurance-complete:
+    description: >
+      Set to 'true' when this cell declared `checks[].analysis.assurance:
+      complete` (RunPlanCheck.analysis_assurance, validated at run-plan
+      generation time by project_targets.py's analysis_assurance_gate.py,
+      which still accepts only 'complete'). This is the config-overlay
+      replacement `require-complete-analysis` above's own docstring used
+      to name as a tracked gap: since neither a CLI flag nor an Action
+      input can carry `assurance.require_complete` any more (see that
+      input's docstring), this Action instead merges an
+      `assurance: {require_complete: true}` fragment into whichever
+      build-config the internal analysis step would otherwise read
+      (`build-config`, possibly none) -- the same config-only mechanism a
+      project author's own `.abicheck.yml` line would produce, so a
+      declared 'complete' cell is enforced the identical way. check-project.yml
+      is the intended caller (it already validates and carries
+      `checks[].analysis.assurance` on the run-plan); a direct check-target
+      caller may also set this explicitly. Ignored (no overlay generated)
+      when not exactly 'true'.
     required: false
     default: 'false'
   extra-args:
@@ -401,6 +422,8 @@ runs:
         INPUT_CONSUMER_BINARY: ${{ inputs.consumer-binary }}
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
+        INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
     # ── Capture this Action's own identity before any nested `uses:` step ──
@@ -592,7 +615,8 @@ runs:
         dependency-source: ${{ inputs.dependency-source }}
 
     # ── Analysis: compare against the resolved baseline, or (baseline: ─────
-    # none) a scan audit with no --against -- continue-on-error so the ─────
+    # none) mode: compare's audit-only shape (old-library/abi-baseline both
+    # omitted, ADR-068 D2) -- continue-on-error so the ─────
     # report-envelope step below always runs, per ADR-047 §7's required ─────
     # "internal analysis step must run with continue-on-error: true" rule. ──
     # Also skipped when a required collect-facts step failed: without this,
@@ -616,6 +640,1065 @@ runs:
     # Deleting any stale file first, unconditionally (not gated on this
     # step's own `if:` below), closes that window regardless of whether
     # analysis runs this time.
+    # ── Assurance overlay: config-overlay replacement for the retired ───────
+    # require-complete-analysis input/flag (see that input's own docstring
+    # above), analogous to the CLI's own release-topology inputs
+    # (dso-only/fail-on-removed-library). `analysis-assurance-complete`
+    # carries `checks[].analysis.assurance == 'complete'` (RunPlanCheck.
+    # analysis_assurance) forwarded from check-project.yml's own run-plan
+    # cell; since P0.4's ANALYSIS_INCOMPLETE axis is config-only now (no CLI
+    # flag or Action input can set it), the only way left to honor a
+    # declared 'complete' cell is to merge an
+    # `assurance: {require_complete: true}` fragment into whichever
+    # build-config the internal analysis step below would otherwise read --
+    # the same effect a project author's own `.abicheck.yml` line would
+    # have, produced here instead of requiring the author to hand-author it.
+    # Runs after "Install abicheck" so `yaml` (a hard abicheck dependency,
+    # `buildsource/build_config.py`) is guaranteed importable regardless of
+    # what the runner's own system Python carries. Placed BEFORE "Clean
+    # stale analysis output" so that step still runs immediately before
+    # "Run analysis" (tests/test_action_check_target.py pins that adjacency
+    # so no other step can write check-target-analysis.json in between) --
+    # this step writes to a private `mktemp`-created file under
+    # `$RUNNER_TEMP` (forwarded to "Run analysis" as this step's own
+    # `config-path` output, see below) rather than a fixed in-checkout name,
+    # so it does not need that same adjacency guarantee.
+    - name: Generate assurance-overlay config
+      id: assurance_overlay
+      if: inputs.analysis-assurance-complete == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        BASE_CONFIG: ${{ inputs.build-config }}
+        # Codex review (P1), fresh evidence, PR #1222: needed so this step
+        # can detect a caller's own `extra-args: --config <path>` (used
+        # instead of the `build-config` input) and fold it into the
+        # overlay below as the merge base, rather than leaving it to reach
+        # the nested Action's own `extra-args` forwarding unchanged --
+        # which, once this step also starts forwarding a real overlay as
+        # `build-config` (see that input's own forwarding below), would
+        # collide with action/run.sh's `_cmd_has_config_flag &&
+        # _extra_args_has_config_flag` guard as TWO irreconcilable
+        # `--config` values and fail a check that worked before
+        # `analysis-assurance-complete` was enabled. See the "extra-args
+        # --config extraction" block below for the full mechanism.
+        EXTRA_ARGS: ${{ inputs.extra-args }}
+        # The effective --sources root this run's own "Run analysis" step
+        # below will actually pass (mirrors that step's own `sources:`
+        # input formula exactly, see its comment there): a successful
+        # `consumer_context` step means "Run analysis" forwards no
+        # --sources at all (the synthesized consumer snapshot replaces it),
+        # otherwise it's inputs.sources, defaulting to '.' only for a
+        # replay evidence-producer. Needed so the discovered-config branch
+        # below can validate build.compile_db against the SAME root the
+        # nested compare/scan will resolve it against, instead of
+        # unconditionally stripping it for want of any --sources context
+        # (Codex review, fresh evidence: this step DOES have inputs.sources
+        # available, unlike what a previous round assumed).
+        SOURCES_ROOT: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
+        # Whether THIS step's own nested "Run analysis" invocation resolves
+        # a --sources tree's compile:/source:(singular)/debug: blocks
+        # PAIR-WIDE ("pairwise") or SINGLE-SIDED (empty) -- the same
+        # distinction action/run.sh's own _compile_context_sources_pairwise
+        # makes for its sibling overlay, computed here directly from THIS
+        # step's own already-known inputs rather than guessed at (Codex
+        # review, fresh evidence, PR #1222 fourth round: a previous round
+        # excluded these three blocks unconditionally, believing this step
+        # had "no reliable way to determine" single-sidedness -- it does).
+        # "Run analysis" below always runs mode: ${{ inputs.baseline-channel
+        # == 'none' && 'scan' || 'compare' }} with old-library: ${{
+        # inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir ||
+        # steps.resolve.outputs.snapshot-path }} (see that step's own
+        # inputs) -- mirroring run.sh's own two independent rules:
+        #   * mode: scan (baseline-channel: none, the "audit" path) is
+        #     ALWAYS single-sided, regardless of kind -- native scan
+        #     resolves ONE shared compile_context for the whole invocation
+        #     and applies it to both the baseline and the candidate
+        #     (run.sh's own _compile_context_sources_pairwise docstring).
+        #   * mode: compare (baseline-channel set, the "baseline" path) is
+        #     single-sided only when old-library is a STORED snapshot, not
+        #     a live binary (_old_library_is_stored_snapshot). kind: target
+        #     always resolves old-library to resolve-baseline's own
+        #     snapshot-path -- documented as "Path to the resolved target's
+        #     .abicheck.json snapshot" (actions/resolve-baseline/action.yml)
+        #     -- a stored JSON document, never a live ELF/PE/Mach-O binary,
+        #     so it is unconditionally single-sided. kind: bundle instead
+        #     resolves old-library to binaries-dir, a directory of REAL,
+        #     live ELF member binaries ("bundle analysis reads real ELF
+        #     binaries, never JSON snapshots" -- that same action's own
+        #     bundle-members docstring) -- genuinely pair-wide live
+        #     extraction on both sides, exactly the ambiguous case
+        #     run.sh's own rule excludes.
+        # So the only ambiguous combination left is kind: bundle with
+        # mode: compare; every other combination is unambiguously
+        # single-sided.
+        SOURCES_PAIRWISE: ${{ inputs.kind == 'bundle' && inputs.baseline-channel != 'none' && 'pairwise' || '' }}
+        # Within the single-sided (non-pairwise) bucket above, `compile:`
+        # does NOT always resolve the same way (Codex review, fresh
+        # evidence, PR #1222 fourth round, second finding on this fix --
+        # see `abicheck.action_config_overlay.apply_sources_root_config_
+        # blocks`'s own `merge_compile` parameter docstring and `run.sh`'s
+        # own `_compile_context_sources_merge_compile` for the full
+        # account): `mode: scan` (baseline-channel: none) genuinely selects
+        # `compile:` from exactly ONE document -- the `--sources` tree's
+        # own, the identical single-document shape `build:`/`sources:`/
+        # `source:`/`debug:` already use -- so this is "" (REPLACE) there.
+        # `mode: compare` (baseline-channel set -- the only `compare` shape
+        # that ever reaches this single-sided bucket at all, per the
+        # SOURCES_PAIRWISE comment above) is different: the checkout-root
+        # document's own `compile:` is ALREADY independently resolved
+        # FIRST, unconditionally, and the live NEW side's own `--sources`
+        # tree only folds ON TOP of that via a second `merge_compile_config`
+        # call inside `frontends/cli/commands/compare.py`'s
+        # `_embed_inline_source_side` -- a genuine two-stage MERGE, so this
+        # is "true" there. P1 fix (Codex review, fresh evidence, PR #1222
+        # eleventh round): that second stage runs UNCONDITIONALLY whenever
+        # `--new-sources` names a raw tree, regardless of whether
+        # `--config` is explicit -- unlike `build:`/`sources:`, whose own
+        # single-sided resolution genuinely IS short-circuited by an
+        # explicit `--config`. So this step's own generated overlay must
+        # supply only the CHECKOUT-side half of that two-stage merge
+        # (`compile:` left untouched, at whatever the checkout document/
+        # `BASE_CONFIG` already set) and let the CLI's own second stage run
+        # unaided -- see this flag's own consumer (`_sources_root_blocks`
+        # below) for how that is enforced. `SOURCES_MERGE_COMPILE` itself
+        # still needs to be "true" here: it still gates `source:`(singular)/
+        # `debug:` exclusion below, which is unaffected by this fix.
+        SOURCES_MERGE_COMPILE: ${{ inputs.baseline-channel != 'none' && 'true' || '' }}
+      run: |
+        set -euo pipefail
+        PY="$(command -v python3 || command -v python)"
+        # Security (Codex review): this step's Python previously launched
+        # directly from the workspace checkout. Python's own `site`
+        # processing auto-imports any `sitecustomize.py`/`usercustomize.py`
+        # reachable from CWD/PYTHONPATH during interpreter STARTUP -- before
+        # this heredoc's own body ever runs -- including one a PR author
+        # committed into this untrusted checkout. Since this whole step is
+        # itself driven by a project's own `.abicheck.yml`
+        # `checks[].analysis.assurance: complete` setting, a PR that plants a
+        # top-level `sitecustomize.py` and declares that config value would
+        # get arbitrary code execution here. Mirrors action/run.sh's own
+        # `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` mitigation exactly: a fresh,
+        # private, empty temp directory (never the untrusted checkout) as
+        # CWD, with `PYTHONPATH` cleared for this one invocation, so the
+        # checkout is never on `sys.path` at any point during interpreter
+        # startup. Fails loud if a private directory can't be created,
+        # rather than silently falling back to a shared one.
+        _real_pwd="$PWD"
+        # Windows path qualification (Codex review, P1): on a Windows/
+        # Git-Bash runner an explicit `build-config` commonly arrives as a
+        # Windows-style absolute path (`C:/...`, `C:\...`, or a UNC
+        # `\\server\share\...`), none of which start with `/`. A POSIX-only
+        # leading-slash test below would misclassify every one of those as
+        # RELATIVE and prefix it with `$_real_pwd`, producing a malformed,
+        # doubled path. `_is_path_already_qualified` mirrors
+        # `action/run.sh`'s own function of the same name EXACTLY (see its
+        # docstring there for the `?:*` drive-relative caveat and why the
+        # Windows-only patterns are gated on `$_RUNNING_ON_WINDOWS`) --
+        # this step doesn't source `run.sh` (each composite-action step
+        # here already duplicates run.sh's small shell snippets, tagged
+        # with a "Mirrors action/run.sh's own ..." comment, rather than
+        # sharing a sourced library file), so the exact logic is
+        # duplicated here too rather than re-implemented from intent.
+        case "$OSTYPE" in
+          msys* | cygwin* | win32*) _RUNNING_ON_WINDOWS=true ;;
+          *) _RUNNING_ON_WINDOWS=false ;;
+        esac
+        _is_path_already_qualified() {
+          case "$1" in
+            /*) return 0 ;;
+          esac
+          if [[ "$_RUNNING_ON_WINDOWS" == "true" ]]; then
+            case "$1" in
+              ?:* | \\*) return 0 ;;
+            esac
+          fi
+          return 1
+        }
+        if ! _py_safe_dir="$(mktemp -d)"; then
+          echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helper without risking the checked-out repository shadowing the installed package."
+          exit 1
+        fi
+        trap 'rm -rf "$_py_safe_dir"' EXIT
+        # Security (Codex review, second finding): the overlay's OUTPUT file
+        # must NOT be a predictable path inside the untrusted checkout
+        # (`$_real_pwd/check-target-assurance-config.yml`, as this used to
+        # read) -- a malicious PR can commit a SYMLINK at exactly that path
+        # pointing anywhere the runner user can write (e.g. a dotfile, or a
+        # sibling job's workspace), and the plain `open(path, "w")` below
+        # would follow it and overwrite whatever it points to with
+        # attacker-influenced YAML. This is independent of the
+        # sitecustomize.py fix above -- that one is about what code runs
+        # during interpreter startup, this one is purely about where the
+        # write lands. Mirrors action/run.sh's own established convention
+        # for a config overlay it doesn't trust the destination of (see
+        # `_COMPILE_CONTEXT_CONFIG_OVERLAY`/`_RELEASE_TOPOLOGY_CONFIG_OVERLAY`
+        # and `_mktemp_canonical`): a `mktemp`-created file under
+        # `$RUNNER_TEMP` has a runtime-random name nothing in the checkout
+        # could have pre-planted a symlink at, and `mktemp` itself creates
+        # the file atomically (O_EXCL-equivalent), so there is no window in
+        # which a symlink could already occupy that exact path -- unlike
+        # `$_py_safe_dir` above (whose whole lifetime is scoped to, and
+        # removed at the end of, this one step's `trap`), this file must
+        # outlive the step for "Run analysis" below to read it, so it gets
+        # its own `mktemp` under `$RUNNER_TEMP` rather than reusing
+        # `$_py_safe_dir`. `$RUNNER_TEMP` is documented by GitHub Actions to
+        # already be an absolute path, but resolve it defensively the same
+        # way `_mktemp_canonical` does, in case a self-hosted runner ever
+        # configures `TMPDIR`/`RUNNER_TEMP` as a relative value.
+        _assurance_out_path="$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-check-target-assurance-config.XXXXXX")"
+        # Windows path qualification (Codex review, P1, second call site):
+        # on a Windows/Git-Bash runner `mktemp` can return a path inherited
+        # from `$RUNNER_TEMP` that is already Windows-drive-qualified (e.g.
+        # `D:/a/_temp/tmp.XXXXXX`), which the POSIX-only `/*` case below
+        # would misclassify as RELATIVE and prefix with `$PWD`, producing a
+        # malformed doubled path. Reuse `_is_path_already_qualified` (see
+        # its own definition/docstring above) rather than duplicating the
+        # qualification check a second time in this same step.
+        if ! _is_path_already_qualified "$_assurance_out_path"; then
+          _assurance_out_path="$PWD/$_assurance_out_path"
+        fi
+        # ── extra-args --config extraction (Codex review, P1, fresh ────────
+        # evidence, PR #1222): a caller who names a config via `extra-args:
+        # --config <path>` instead of the `build-config` input (both are
+        # otherwise-supported, independent ways to name a project config)
+        # used to reach the nested Action's own `extra-args` untouched,
+        # since this step forwarded an EMPTY `build-config` whenever
+        # `analysis-assurance-complete` was false. Now that this step
+        # forwards a real overlay as `build-config` instead (see that
+        # input's own forwarding below), the nested Action's compare CLI
+        # would see BOTH an overlay `--config` (from `build-config`) and
+        # the caller's own raw `--config` (from `extra-args`) --
+        # action/run.sh's `_cmd_has_config_flag && _extra_args_has_
+        # config_flag` guard rejects exactly that combination as two
+        # irreconcilable configs, breaking a check that worked before this
+        # input was enabled. Extract that config here instead, so it can be
+        # merged into the SAME overlay the explicit-`build-config` branch
+        # below already builds, and strip it from the `extra-args` this
+        # step forwards onward (see `effective-extra-args` output below) so
+        # the nested Action never sees a redundant second `--config`.
+        #
+        # Only when no explicit `build-config` was given: an explicit
+        # `build-config` input is a more specific, deliberate operator
+        # signal and keeps its existing precedent (a `build-config` +
+        # `extra-args --config` combination together is already, and
+        # remains, action/run.sh's own documented rejection -- see that
+        # guard's own docstring -- so this step leaves both untouched in
+        # that case rather than silently picking one).
+        #
+        # Mirrors action/run.sh's own `_extra_args_is_value_option`/
+        # `_extra_args_options` tokenizer closely enough to agree with it on
+        # what counts as a real `--config` FLAG (as opposed to some OTHER
+        # value-taking option's own literal value, e.g. `--policy --config`
+        # where `--config` is `--policy`'s value, not a flag) -- deliberately
+        # duplicated rather than sourced, the same "this step doesn't source
+        # run.sh" convention `_is_path_already_qualified` above already
+        # documents. Keeps this list in sync with run.sh's by hand; an
+        # unlisted value-taking option is misread as a bare flag, which can
+        # only under-recognize a `--config` occurrence -- never mis-attribute
+        # some other option's value as one (the same safe-by-construction
+        # direction run.sh's own docstring establishes).
+        _ct_extra_args_is_value_option() {
+          case "$1" in
+            --abi3 | --ast-frontend | --budget | \
+            --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
+            --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
+            --debug-format | --debug-info | --debug-root | --debuginfod-url | \
+            --depth | --devel-pkg | --dump-manifest | --format | \
+            --frontend-context | --header | --include | --instantiation-manifest | \
+            --lang | --ld-library-path | --manifest | --max-findings | \
+            --output | --output-dir | --pack | \
+            --pdb-path | --policy | --post-manifest | --probe-matrix | \
+            --public-header-dir | --required-symbol | \
+            --search-path | --severity-preset | --since | --sources | \
+            --suppress | --sysroot | --use-cases | --used-by | --variant | --version | --view | \
+            --write | -H | -I | -o)
+              return 0
+              ;;
+          esac
+          return 1
+        }
+        # Codex review (P2), fresh evidence, PR #1222: expand a Click-style
+        # clustered short-option token (`-vH` for `-v -H`) into its
+        # constituent single-character options, one per line, BEFORE the
+        # main loop below applies its pending-value/`--config`-recognition
+        # logic. Without this, `-vH --config` (with a header file literally
+        # named `--config`) was misread as one opaque `-vH` flag followed
+        # by a bare, valueless `--config` -- which the trailing-`--config`
+        # guard further down then rejects outright, turning argv the real
+        # CLI genuinely accepts (`compare --help-all` documents `-v` as a
+        # boolean flag and `-H [old=|new=]PATH` as a value-taking short
+        # option; verified directly against the installed CLI) into a
+        # spurious "extra-args ends with a trailing --config" failure.
+        #
+        # Deliberately identical to action/run.sh's own
+        # `_extra_args_expand_short_clusters` (same accepted shapes, same
+        # `H`/`I`/`o`/`j` value-taking terminal set, same "leave an attached
+        # inline value like `-vHfoo` unexpanded" carve-out) rather than a
+        # re-derived approximation -- this step doesn't source run.sh (see
+        # `_ct_extra_args_is_value_option` above), so the two copies are
+        # kept in sync by hand the same documented way. A cluster shape
+        # this function doesn't recognize is left as one opaque token,
+        # which can only under-recognize a `--config` occurrence -- never
+        # mis-attribute some other option's value as one -- the same
+        # safe-by-construction direction `_ct_extra_args_is_value_option`
+        # already establishes.
+        _ct_extra_args_expand_short_clusters() {
+          local _tok="$1" _rest _last _flags _n _k
+          case "$_tok" in
+            -[a-zA-Z][a-zA-Z]*) ;;
+            *) return 1 ;;
+          esac
+          _rest="${_tok#-}"
+          _last="${_rest: -1}"
+          case "$_last" in
+            H | I | o | j) ;;
+            *) return 1 ;;
+          esac
+          _flags="${_rest%?}"
+          _n=${#_flags}
+          for ((_k = 0; _k < _n; _k++)); do
+            [[ "${_flags:_k:1}" == "v" ]] || return 1
+          done
+          for ((_k = 0; _k < _n; _k++)); do
+            printf -- '-v\n'
+          done
+          printf -- '-%s\n' "$_last"
+          return 0
+        }
+        _ct_extra_args_config=""
+        _extra_args_without_config=()
+        if [[ -n "${EXTRA_ARGS:-}" ]]; then
+          _ct_pending=""
+          # Codex review (P2), fresh evidence, PR #1222: once a bare `--`
+          # end-of-options marker is seen (outside of being consumed as some
+          # OTHER option's own value below -- see the `_ct_pending` branch
+          # immediately below, which pops the very next token unconditionally
+          # as that option's value, exactly mirroring Click's own parser, so
+          # a `--` consumed there is genuinely just data and never flips this
+          # flag), every token from that point on -- including tokens that
+          # otherwise look exactly like `--config`/`--config=...` -- is a
+          # POSITIONAL OPERAND, not an option, to any Click-based CLI
+          # (including this repo's own `compare` command). Before this fix,
+          # this tokenizer kept recognizing `--config` after `--` anyway,
+          # extracting it as if it were a real flag and reconstructing the
+          # remaining args as just `--` -- silently curing a malformed
+          # `extra-args: '-- --config custom.yml'` invocation that the real
+          # CLI itself rejects (`--` ends option parsing, so the following
+          # `--config custom.yml` is two unexpected operands, exit 64).
+          # Track that state and stop all option recognition once seen, so
+          # this step passes the identical malformed sequence through
+          # unchanged and the nested CLI produces the same real exit-64
+          # error the caller's own malformed input earns, rather than this
+          # step fixing it for them.
+          _ct_seen_end_of_options=""
+          # shellcheck disable=SC2086  # word-splitting is the point; mirrors
+          # run.sh's own identical `set -- ${INPUT_EXTRA_ARGS:-}` in
+          # `_extra_args_options`.
+          set -- ${EXTRA_ARGS}
+          for _ct_arg in "$@"; do
+            if [[ -n "$_ct_pending" ]]; then
+              if [[ "$_ct_pending" == "--config" ]]; then
+                # On a REPEATED --config within extra-args alone, keep the
+                # LAST one -- the same "Click keeps only the last one"
+                # semantics extra-args would have had if forwarded raw and
+                # left to Click's own parsing.
+                _ct_extra_args_config="$_ct_arg"
+              else
+                _extra_args_without_config+=("$_ct_pending" "$_ct_arg")
+              fi
+              _ct_pending=""
+              continue
+            fi
+            if [[ -n "$_ct_seen_end_of_options" ]]; then
+              # Past `--`: every remaining token, `--config`-shaped or not,
+              # is a positional operand -- pass it through unchanged.
+              _extra_args_without_config+=("$_ct_arg")
+              continue
+            fi
+            if [[ "$_ct_arg" == "--" ]]; then
+              _ct_seen_end_of_options=1
+              _extra_args_without_config+=("$_ct_arg")
+              continue
+            fi
+            if [[ "$_ct_arg" == "--config=" ]]; then
+              # Codex review (P2), fresh evidence, PR #1222: an explicit
+              # `--config=` (the `=`-form with an EMPTY value) is just as
+              # malformed as the bare trailing `--config` handled below --
+              # the real CLI rejects it too ("Error: Invalid value for
+              # '--config': File '' does not exist.", exit 64) -- so it
+              # must fail loud here rather than silently vanishing into the
+              # generic `--config=*` branch right below, whose own `-n`
+              # merge guard would otherwise treat the empty string as "no
+              # config value to merge" and just drop the token, turning
+              # malformed input into a successful run with no --config at
+              # all.
+              echo "::error::extra-args contains '--config=' with an empty value, which the real CLI itself rejects as an invalid --config path (\"Invalid value for '--config': File '' does not exist.\"). Refusing to silently drop it and proceed as if no --config had been given."
+              exit 1
+            fi
+            if [[ "$_ct_arg" == --config=* ]]; then
+              _ct_extra_args_config="${_ct_arg#--config=}"
+              continue
+            fi
+            if _ct_extra_args_is_value_option "$_ct_arg"; then
+              _ct_pending="$_ct_arg"
+              continue
+            fi
+            # Codex review (P2), fresh evidence, PR #1222: only reached once
+            # `$_ct_arg` is confirmed NOT itself a known value-taking option
+            # (a bare `-H`/`-I`/`-o` already matched above) and, critically,
+            # only ever inline in this same stateful loop -- never as a
+            # separate pre-pass over the whole token list. A pre-pass can't
+            # tell a genuine cluster from a *value* token that merely looks
+            # like one (e.g. `-H -vH` -- there `-vH` is `-H`'s own consumed
+            # value, a literal string, not a cluster to expand); reaching
+            # this point already proves `$_ct_pending` was empty, i.e.
+            # `$_ct_arg` is not a preceding option's value. Mirrors
+            # action/run.sh's own `_extra_args_options` for the identical
+            # reason (see that function's docstring).
+            if _ct_cluster="$(_ct_extra_args_expand_short_clusters "$_ct_arg")"; then
+              while IFS= read -r _ct_cluster_flag; do
+                [[ -z "$_ct_cluster_flag" ]] && continue
+                if _ct_extra_args_is_value_option "$_ct_cluster_flag"; then
+                  _ct_pending="$_ct_cluster_flag"
+                else
+                  _extra_args_without_config+=("$_ct_cluster_flag")
+                fi
+              done <<<"$_ct_cluster"
+              continue
+            fi
+            _extra_args_without_config+=("$_ct_arg")
+          done
+          # A trailing --config with nothing after it is malformed usage the
+          # real CLI itself rejects ("Error: Option '--config' requires an
+          # argument.", exit 64) -- fail loud here too (Codex review, P2,
+          # fresh evidence, PR #1222) rather than silently dropping the
+          # token and proceeding as if extra-args never named --config at
+          # all: reconstruction would otherwise remove the malformed
+          # occurrence and let the nested run accept the generated overlay,
+          # exactly the "malformed input quietly becomes a successful
+          # invocation" gap this whole extraction block exists to close, not
+          # reproduce it for its own trailing case.
+          if [[ "$_ct_pending" == "--config" ]]; then
+            echo "::error::extra-args ends with a trailing --config that has no following value, which the real CLI itself rejects (\"Option '--config' requires an argument.\"). Refusing to silently drop it and proceed as if no --config had been given."
+            exit 1
+          fi
+          if [[ -n "$_ct_pending" ]]; then
+            _extra_args_without_config+=("$_ct_pending")
+          fi
+        fi
+        _effective_extra_args="${EXTRA_ARGS:-}"
+        if [[ -z "${BASE_CONFIG:-}" && -n "$_ct_extra_args_config" ]]; then
+          # Reassigns BASE_CONFIG itself (rather than introducing a
+          # separate "effective" variable) so the unconditional
+          # `_base_config_abs` absolutization right below -- shared
+          # verbatim with the plain explicit-build-config case -- treats an
+          # extra-args-derived config exactly like one named via
+          # `build-config` directly, with no separate code path to drift.
+          BASE_CONFIG="$_ct_extra_args_config"
+          if [[ ${#_extra_args_without_config[@]} -gt 0 ]]; then
+            _effective_extra_args="${_extra_args_without_config[*]}"
+          else
+            _effective_extra_args=""
+          fi
+        fi
+        _base_config_abs=""
+        if [[ -n "${BASE_CONFIG:-}" ]]; then
+          if _is_path_already_qualified "$BASE_CONFIG"; then
+            _base_config_abs="$BASE_CONFIG"
+          else
+            _base_config_abs="$_real_pwd/$BASE_CONFIG"
+          fi
+        fi
+        # Same relative-path-vs-$_py_safe_dir bug class as $BASE_CONFIG
+        # above: $SOURCES_ROOT (this step's own effective --sources value,
+        # see the env: block's comment) is very often a checkout-relative
+        # path (e.g. `sources: src`) too -- absolutize it against
+        # $_real_pwd, mirroring action/run.sh's own
+        # add_compile_context_flags identically, before it crosses into the
+        # $_py_safe_dir-scoped Python subprocess below.
+        _sources_root_abs=""
+        if [[ -n "${SOURCES_ROOT:-}" ]]; then
+          if _is_path_already_qualified "$SOURCES_ROOT"; then
+            _sources_root_abs="$SOURCES_ROOT"
+          else
+            _sources_root_abs="$_real_pwd/$SOURCES_ROOT"
+          fi
+        fi
+        (cd "$_py_safe_dir" \
+         && ABICHECK_BASE_CONFIG="$_base_config_abs" \
+            ABICHECK_DISCOVER_START="$_real_pwd" \
+            ABICHECK_OUT_PATH="$_assurance_out_path" \
+            ABICHECK_SOURCES_ROOT="$_sources_root_abs" \
+            ABICHECK_SOURCES_PAIRWISE="${SOURCES_PAIRWISE:-}" \
+            ABICHECK_SOURCES_MERGE_COMPILE="${SOURCES_MERGE_COMPILE:-}" \
+            PYTHONPATH= "$PY" - <<'PYSCRIPT'
+        import os
+        import sys
+        from pathlib import Path
+
+        import yaml
+
+        from abicheck.action_config_overlay import (
+            apply_sources_root_config_blocks,
+            discovered_compile_db_resolves,
+            rebase_relative_config_paths,
+            strip_untrusted_execution_keys,
+            validate_base_config,
+        )
+        from abicheck.cli_helpers_compare import discover_project_config
+        from abicheck.config_paths import discover_build_config
+
+        def _gha_escape(text: object) -> str:
+            # Codex review, P1, fresh evidence, PR #1222: every value
+            # interpolated into an `::error::`/`::warning::` workflow
+            # command below is untrusted -- a path derived from this step's
+            # own `ABICHECK_BASE_CONFIG`/`ABICHECK_SOURCES_ROOT` env (which
+            # a direct `check-target` caller/PR author fully controls, per
+            # action/AGENTS.md's "treat every INPUT_*/GITHUB_* as
+            # untrusted" rule -- a filesystem path may legally contain a
+            # raw newline byte), or the text of a PyYAML ParserError/
+            # ScannerError, which echoes attacker-controlled config-file
+            # bytes verbatim. GitHub's runner parses workflow commands
+            # line-by-line from stdout, so an embedded "\n" lets the
+            # remainder of an untrusted value start a *new* command line
+            # (e.g. a smuggled "::add-mask::..." or another
+            # "::error::..."), and an embedded "%" would similarly corrupt
+            # a real property-escaped value if this text were ever nested
+            # inside one. Escaping matches GitHub's own documented
+            # message-data escaping (%->%25, CR->%0D, LF->%0A) so the
+            # annotation always renders as the single, literal line
+            # intended -- never a second, attacker-authored command.
+            # Identical to (and shared-in-spirit with) action/run.sh's own
+            # `_gha_escape`, mirrored here rather than imported since this
+            # script runs as a standalone heredoc with no import path back
+            # to that shell function.
+            return (
+                str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            )
+
+        def _validate_or_exit(doc: dict, source_desc: str) -> None:
+            # Codex review (P2): a base document loaded below via a bare
+            # `yaml.safe_load` is syntactically valid YAML, but was never run
+            # through the real strict-schema check (`BuildConfig.from_dict`)
+            # the native CLI's own `load_build_config`/
+            # `discover_project_config` loading path always applies before any
+            # command sees the parsed config. Left unchecked, a schema-invalid
+            # value in a field this step goes on to STRIP (`build.query: 7`,
+            # `compile.compiler: []`) or CAP (`resource_limits.
+            # max_bundle_facts_decode_nodes: "no"`) is silently deleted/
+            # replaced by strip_untrusted_execution_keys() below before the
+            # nested "Run analysis" step's own CLI ever gets a chance to
+            # reject it -- and a malformed `assurance:` value would otherwise
+            # be silently overwritten by this step's own `assurance
+            # ["require_complete"] = True` merge further down. Both turn a
+            # config a direct `compare --config <file>` invocation would
+            # refuse outright into a silently-accepted run purely because
+            # `analysis-assurance-complete` happened to be enabled. Validating
+            # here, before any stripping/merge happens, surfaces the identical
+            # error the user would see running abicheck directly against this
+            # file. Shared with action/run.sh's own equivalent merge helper
+            # via abicheck.action_config_overlay.validate_base_config so the
+            # two call sites can't independently drift on what counts as a
+            # valid base document.
+            try:
+                validate_base_config(doc)
+            except ValueError as exc:
+                raise SystemExit(
+                    f"::error::the config at {_gha_escape(source_desc)} is "
+                    f"invalid: {_gha_escape(exc)}. Refusing to silently "
+                    "proceed with (or merge on top of) a "
+                    "malformed project config -- fix the file or remove it."
+                ) from exc
+
+        base_path_env = os.environ.get("ABICHECK_BASE_CONFIG", "")
+        data: dict = {}
+        source_desc = "<build-config>"
+        # found_path anchors rebase_relative_config_paths() below -- the real,
+        # on-disk location `data` was loaded from, used only to resolve a
+        # config-relative `compile.include_dirs` entry against the correct
+        # project root. None means no config was found at all (nothing to
+        # rebase against, and nothing to merge onto but the bare overlay).
+        found_path: Path | None = None
+        if base_path_env:
+            # An explicit build-config was given: use it as the base. This is
+            # an operator's own deliberate action (the user named this exact
+            # file), already the trusted case cli_options.py's own
+            # `explicit_config = build_config is not None` check grants --
+            # see strip_untrusted_execution_keys's own docstring -- so
+            # build.query/compile.compiler/resource_limits are NOT stripped
+            # here, unchanged from before. A relative compile.include_dirs
+            # entry is still rebased below (Codex review, fresh evidence):
+            # that is a pure correctness concern independent of trust -- an
+            # explicit config with a relative include dir breaks exactly the
+            # same way a discovered one does the moment its document moves to
+            # this step's own $RUNNER_TEMP-located overlay file.
+            base_path = Path(base_path_env)
+            source_desc = str(base_path)
+            found_path = base_path
+            # Codex review (P1), fresh evidence, PR #1222: a malformed
+            # explicit build-config (e.g. bad indentation) fails inside
+            # `yaml.safe_load` itself, before `_validate_or_exit`/
+            # `_gha_escape` ever run -- PyYAML's own ParserError embeds the
+            # source's filename verbatim in its error mark, so an unguarded
+            # raise here can put attacker-controlled text (a crafted
+            # filename containing a newline + a workflow command) on its
+            # own output line, unescaped. Catch the parse failure and
+            # escape it exactly like every other error this step emits,
+            # mirroring the sources-root branch's own identical guard
+            # below.
+            try:
+                with open(base_path, encoding="utf-8") as fh:
+                    loaded = yaml.safe_load(fh)
+            except Exception as exc:
+                raise SystemExit(
+                    "::error::failed to parse the explicit build-config "
+                    f"{_gha_escape(source_desc)}: {_gha_escape(exc)}. "
+                    "Refusing to let a raw parser traceback (which may "
+                    "embed attacker-controlled file content) reach the "
+                    "runner."
+                ) from exc
+            # An empty (or non-mapping) explicit build-config is not "no
+            # config given" -- the file still exists and was named
+            # explicitly -- but `load_build_config()` itself treats every
+            # non-mapping document (None, a scalar, a list) as an empty
+            # `BuildConfig()` and proceeds (Codex review, P2, fresh
+            # evidence, PR #1222): merge as an empty base here too instead
+            # of rejecting the run, matching both the ordinary CLI and the
+            # sources-root branch's own identical handling below.
+            if isinstance(loaded, dict):
+                _validate_or_exit(loaded, source_desc)
+                data = loaded
+        else:
+            # No explicit build-config: discover the project's real
+            # .abicheck.yml the same way the nested root Action's own CLI
+            # would (Codex review). Without this, passing the bare overlay
+            # as an explicit --config/build-config would DISABLE the root
+            # Action's/CLI's normal auto-discovery, silently dropping every
+            # other project setting (scope/severity/policy/compile/...) the
+            # moment analysis.assurance: complete is enabled.
+            discovered = discover_project_config(Path(os.environ["ABICHECK_DISCOVER_START"]))
+            if discovered is not None:
+                source_desc = str(discovered)
+                found_path = discovered
+                # Same two guards as the explicit build-config branch above
+                # (Codex review, PR #1222): an unguarded parse failure would
+                # leak a raw, unescaped traceback, and a non-mapping
+                # document must merge as an empty base rather than fail the
+                # run, matching `load_build_config()`.
+                try:
+                    loaded = yaml.safe_load(discovered.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    raise SystemExit(
+                        "::error::failed to parse the discovered project "
+                        f"config {_gha_escape(source_desc)}: "
+                        f"{_gha_escape(exc)}. Refusing to let a raw parser "
+                        "traceback (which may embed attacker-controlled "
+                        "file content) reach the runner."
+                    ) from exc
+                if isinstance(loaded, dict):
+                    _validate_or_exit(loaded, source_desc)
+                    data = loaded
+            # Sources-root promotion (Codex review, P1, fresh evidence, PR
+            # #1222 third round): `discover_project_config` above walks UP
+            # from ABICHECK_DISCOVER_START (this Action's own checkout root)
+            # -- it can never find a config that lives AT `inputs.sources`
+            # itself when that tree sits below the checkout root, since an
+            # upward walk never descends into a subdirectory. But the nested
+            # "Run analysis" step below forwards this step's own overlay as
+            # an EXPLICIT --build-config, which -- per cli_options.py's
+            # `explicit_config = build_config is not None` -- permanently
+            # short-circuits the nested compare/scan's own single-sided
+            # `build_config or discover_build_config(sources)` resolution
+            # (`abicheck/buildsource/embed.py`'s `embed_build_source()`,
+            # `cli_options.py`'s compile-context resolution): without this
+            # step performing the identical sources-root lookup itself and
+            # folding it in, a sources-root `.abicheck.yml`'s own build:/
+            # sources: settings (compile-DB selection, build-system targets,
+            # graph-detail settings) would be silently shadowed the moment
+            # `analysis-assurance-complete` synthesizes this overlay --
+            # purely an artifact of how the overlay is generated, not
+            # anything the caller asked for. `discover_build_config` (never
+            # `discover_project_config`) is the correct lookup here --
+            # non-recursive, anchored at the sources root itself, exactly
+            # matching `embed_build_source()`'s own selection -- and, when it
+            # finds a config DISTINCT from the checkout-root one just above,
+            # that document's own build:/sources: blocks REPLACE (not merge
+            # into) the checkout-root document's own such blocks, via the
+            # identical shared primitive (abicheck.action_config_overlay.
+            # apply_sources_root_config_blocks) action/run.sh's own
+            # equivalent compile-context overlay merge uses, so the two
+            # callers cannot independently drift on this selection.
+            #
+            # Whether compile:/source:(singular)/debug: are ALSO safe to
+            # promote from this sources-root document (in addition to
+            # build:/sources:, always promoted below) depends on whether
+            # THIS step's own nested "Run analysis" invocation resolves
+            # those three blocks single-sidedly or pair-wide for this
+            # particular kind/mode combination -- computed by this step's
+            # own `env:` block (see SOURCES_PAIRWISE's docstring there for
+            # the exact kind/mode reasoning) rather than guessed at here, a
+            # fix for a previous round's belief that "this step has no
+            # reliable way to determine" that distinction. Mirrors
+            # run.sh's own ABICHECK_SOURCES_PAIRWISE-gated block selection
+            # exactly (Codex review, fresh evidence, PR #1222 fourth round).
+            #
+            # `compile:` itself is NOT promoted here for a `mode: compare`
+            # caller any more (Codex review, P1, fresh evidence, PR #1222
+            # eleventh round -- reverses the fourth round's own conclusion
+            # right below): `frontends/cli/commands/compare.py`'s
+            # `_embed_inline_source_side` ALWAYS independently folds the
+            # live NEW side's own `--sources` tree's `compile:` block onto
+            # the CLI's already-resolved compile context, per field, the
+            # moment `--new-sources` names a raw tree -- unconditionally,
+            # regardless of whether `--config`/`build-config` was explicit
+            # (unlike `build:`/`sources:`, whose own single-sided selection
+            # inside `embed_build_source()` genuinely IS short-circuited by
+            # an explicit `--config`, which is what makes promoting THOSE
+            # two blocks here necessary in the first place -- see the
+            # "Sources-root promotion" comment above). So the real
+            # `compare` pipeline already performs the sources-root
+            # `compile:` fold exactly once, entirely on its own, for this
+            # exact operand shape; this step forwarding its own synthesized
+            # overlay as `build-config` only supplies the checkout-side
+            # HALF of that two-stage merge (`build_config=cfg_path`'s own
+            # stage) -- it must leave `compile:` at that checkout-only
+            # value, untouched, so the CLI's own second stage has something
+            # to fold ONTO rather than something the sources-root document
+            # was already folded into once already. Promoting/merging
+            # `compile:` here too -- what a previous round did, believing
+            # this step needed to reproduce BOTH stages of that merge
+            # itself because an explicit `--config` would otherwise
+            # suppress the second one -- folds the sources-root document's
+            # `compile:` block in TWICE: once here, once again inside
+            # `_embed_inline_source_side`'s own always-running merge, since
+            # that merge is never gated on config explicitness at all. A
+            # repeat-sensitive flag (`compile.options: [-include, foo.h]`)
+            # then applies twice in the final compiler invocation purely
+            # because `analysis.assurance: complete` was enabled -- the
+            # exact P1 finding this comment now documents the fix for.
+            # `dump`/`scan`'s single-document-REPLACE shape is genuinely
+            # different and keeps promoting `compile:` (see
+            # `_sources_root_blocks` below): there, an explicit `--config`
+            # DOES suppress the CLI's own `compile:` resolution from the
+            # `--sources` tree entirely (`resolve_dump_debug_config`'s own
+            # `build_config or discover_build_config(sources)`, the same
+            # either/or `build:`/`sources:` use), so promoting it here is
+            # the ONLY way that setting ever reaches the run at all.
+            _sources_pairwise = (
+                os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
+            )
+            # Still needed to decide whether `source:`(singular)/`debug:`
+            # may be promoted (see `_sources_root_blocks` below) -- that
+            # distinction is unrelated to the `compile:` fix above and
+            # unchanged by it: `compare`'s own pipeline never re-resolves
+            # `source:`/`debug:` from a per-side `--sources` tree's own
+            # document at all (unlike `compile:`'s genuine, CLI-only
+            # two-stage merge), so those two stay excluded here whenever
+            # this flag is set, exactly as before.
+            _sources_merge_compile = (
+                os.environ.get("ABICHECK_SOURCES_MERGE_COMPILE", "") == "true"
+            )
+            # `source:`(singular)/`debug:` are NOT safe to promote from the
+            # sources-root document whenever this same `_sources_merge_
+            # compile` flag is set (Codex review, P1, fresh evidence, PR
+            # #1222 eighth round): that flag is true exactly for `mode:
+            # compare`'s own single-sided shape (a stored-snapshot old
+            # operand; see SOURCES_MERGE_COMPILE's own env docstring), and
+            # `compare`'s real pipeline never resolves `source:`/`debug:`
+            # from a per-side `--sources` tree's own document at all --
+            # unlike `compile:`, which the checkout-then-sources two-stage
+            # MERGE above genuinely folds. `frontends/cli/commands/
+            # compare.py`'s `_embed_inline_source_side` receives BOTH as
+            # already-frozen arguments (`_resolved_collect_mode`/
+            # `_resolved_debug`), computed once from the checkout-side
+            # `resolved_cfg` before any per-side tree is even considered,
+            # and forwards them verbatim to the nested dump invocation via
+            # its private `_resolved_collect_mode`/
+            # `_resolved_debug` hooks -- `frontends/cli/dump_debug_config.
+            # resolve_dump_debug_fields` only ever falls back to resolving
+            # a tree's own document when `resolved_debug` is `None`, which
+            # never happens on `compare`'s own call path. So promoting
+            # these two blocks here for `mode: compare` would let a
+            # sources-root document control this run's collection depth
+            # (`source:`) or debug-info extraction (`debug:`) in a way the
+            # real, non-overlay `compare` invocation never permits --
+            # exactly the kind of overlay-only side effect `analysis.
+            # assurance: complete` must never introduce. `dump`/`scan`
+            # (`_sources_merge_compile` unset) are unaffected: their own
+            # single-document selection genuinely takes `source:`/`debug:`
+            # from the `--sources` tree's own document exclusively
+            # (`resolve_dump_debug_config`'s `build_config or
+            # discover_build_config(sources)`), the identical shape
+            # `build:`/`sources:` already use -- see this function's own
+            # module docstring and `apply_sources_root_config_blocks`'s own
+            # docstring for the full account.
+            #
+            # `compile:` is EXCLUDED here whenever `_sources_merge_compile`
+            # is set too now (Codex review, P1, fresh evidence, PR #1222
+            # eleventh round) -- see the `_sources_merge_compile` comment
+            # above for why: for `mode: compare`'s shape, promoting it here
+            # would fold the sources-root document's `compile:` block in
+            # TWICE (once here, once again inside `_embed_inline_source_
+            # side`'s own always-running merge), so this bucket now
+            # collapses to the SAME three-block set the pairwise bucket
+            # already uses -- `compile:` is left at whatever the checkout
+            # document/BASE_CONFIG supplied, exactly the checkout-only HALF
+            # of the real pipeline's own two-stage merge, with the CLI
+            # supplying the other half entirely on its own.
+            _sources_root_blocks = (
+                ("build", "sources")
+                if _sources_pairwise or _sources_merge_compile
+                else ("build", "sources", "compile", "source", "debug")
+            )
+            _sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
+            if _sources_root_env:
+                _sources_found = discover_build_config(Path(_sources_root_env))
+                if _sources_found is not None and _sources_found != found_path:
+                    try:
+                        _sources_loaded = yaml.safe_load(
+                            _sources_found.read_text(encoding="utf-8")
+                        )
+                    except Exception as exc:
+                        raise SystemExit(
+                            "::error::failed to parse the discovered "
+                            f"sources-root config {_gha_escape(_sources_found)}: "
+                            f"{_gha_escape(exc)}. Refusing to silently proceed "
+                            "as if it were unconfigured."
+                        ) from exc
+                    # An empty (or non-mapping) sources-root .abicheck.yml is
+                    # not "no config found" -- the file still EXISTS, so
+                    # discover_build_config() still selects it exclusively;
+                    # apply_sources_root_config_blocks() itself treats that
+                    # as an empty document and clears both blocks, matching
+                    # load_build_config()'s own empty-BuildConfig outcome
+                    # (see that function's own docstring).
+                    if isinstance(_sources_loaded, dict):
+                        _validate_or_exit(_sources_loaded, str(_sources_found))
+                    # Rebase EACH document's own compile.include_dirs
+                    # against ITS OWN project root BEFORE merging (Codex
+                    # review, fresh evidence): a `dump`/`scan`-shaped
+                    # caller's `compile:` promotion below is still a real
+                    # per-field MERGE when both documents define it (see
+                    # apply_sources_root_config_blocks' own docstring), so a
+                    # merged include_dirs can hold entries from BOTH
+                    # documents -- the single later
+                    # rebase_relative_config_paths() call below anchors
+                    # against only ONE root, which would silently
+                    # mis-resolve the other document's own relative entries.
+                    # Pre-resolving each document's own entries to absolute
+                    # paths here, before the merge, makes that later
+                    # single-anchor call a safe no-op for both (an
+                    # already-absolute path is left untouched). Harmless
+                    # no-op for a `mode: compare` caller too (`compile:` is
+                    # never in `_sources_root_blocks` there any more, so
+                    # this rebase only ever touches build:/sources: paths
+                    # for it, neither of which is a config-relative key).
+                    if found_path is not None:
+                        data = rebase_relative_config_paths(
+                            data, found_path=found_path
+                        )
+                    if isinstance(_sources_loaded, dict):
+                        _sources_loaded = rebase_relative_config_paths(
+                            _sources_loaded, found_path=_sources_found
+                        )
+                    data = apply_sources_root_config_blocks(
+                        data,
+                        _sources_loaded,
+                        blocks=_sources_root_blocks,
+                        merge_compile=_sources_merge_compile,
+                    )
+                    # found_path anchors compile.include_dirs's own rebase
+                    # below -- reassign it to the sources-root document ONLY
+                    # when compile: was actually sourced from it (mirrors
+                    # run.sh's own identical
+                    # `if not (sources_pairwise or sources_merge_compile):
+                    # found_path = sources_found`): NEITHER a pairwise NOR a
+                    # `mode: compare` single-sided caller's own `compile:`
+                    # block is ever promoted from the sources root any more
+                    # (per `_sources_root_blocks` above -- P1 fix, PR #1222
+                    # eleventh round, reversing the fourth round's own
+                    # `if not _sources_pairwise:` condition, which used to
+                    # reassign `found_path` for the `mode: compare` bucket
+                    # too, back when that bucket still merged `compile:`
+                    # from the sources root), so both must keep resolving
+                    # `compile.include_dirs` against whichever document
+                    # actually supplied `base["compile"]` -- always the
+                    # checkout-root config (if any) for either bucket now.
+                    if not (_sources_pairwise or _sources_merge_compile):
+                        found_path = _sources_found
+                elif _sources_found is None:
+                    # Codex review, P1, fresh evidence, PR #1222 ninth
+                    # round: no `.abicheck.yml` exists ANYWHERE in the
+                    # `--sources` tree at all -- distinct from the
+                    # "a sources-root document exists but is empty/
+                    # non-mapping" case just above, which already clears
+                    # these same blocks via apply_sources_root_config_blocks'
+                    # own empty-document handling. The real pipeline treats
+                    # "no document" identically to "an empty document" for
+                    # this purpose: embed_build_source()'s own `cfg_path =
+                    # build_config or discover_build_config(raw_sources)`
+                    # resolves to `None` either way, so `cfg` stays `None`
+                    # and every one of build:/sources:(plural)/compile:/
+                    # source:(singular)/debug: -- whichever this step's own
+                    # `_sources_root_blocks` says are sources-root-exclusive
+                    # for this particular command/mode -- falls back to a
+                    # bare `BuildConfig()`'s pure defaults, NEVER the
+                    # checkout-root document's own values for those same
+                    # keys. Leaving `data` untouched here (as a previous
+                    # round did) let the checkout document's own build:/
+                    # sources: survive into the generated overlay, which
+                    # `embed.py` then applies as an explicit --config --
+                    # settings the real, non-overlay `--sources <dir>`
+                    # invocation would never have picked up. Reuse the
+                    # identical `apply_sources_root_config_blocks` clearing
+                    # with `sources_doc=None` (its own docstring: a
+                    # non-dict `sources_doc` clears every block in `blocks`
+                    # except a `merge_compile=True` empty-fold, which is a
+                    # correct no-op onto the checkout's own compile: -- see
+                    # that function's docstring for why `compile:` is the
+                    # one exception even here). Mirrors action/run.sh's own
+                    # identical `elif sources_found is None:` branch so the
+                    # two shared call sites cannot independently drift on
+                    # this again.
+                    data = apply_sources_root_config_blocks(
+                        data,
+                        None,
+                        blocks=_sources_root_blocks,
+                        merge_compile=_sources_merge_compile,
+                    )
+            # Security (Codex review, third round): this discovered document
+            # is PR-controlled, untrusted content -- exactly what
+            # cli_options.py's compile.compiler gate and ADR-032 D5's
+            # build.query gate exist to withhold "explicit --config, operator
+            # authorized this to run" status from. But every downstream
+            # `--config`/`build-config` (this step's own `config-path` output,
+            # forwarded to "Run analysis" below) IS an explicit one from the
+            # nested root Action's own perspective -- forwarding this
+            # document unchanged would launder an untrusted build.query/
+            # compile.compiler into that trusted, executable-authorized
+            # status the moment a PR merely declares
+            # `analysis.assurance: complete` (or, on this Action's own
+            # `analysis-assurance-complete` input, any project using this
+            # check without an explicit build-config), a privilege-
+            # escalation / command-injection path. Strip/cap exactly the
+            # fields action/run.sh's own equivalent merge withholds from an
+            # auto-discovered config, via the identical shared
+            # implementation (abicheck.action_config_overlay -- see its
+            # module docstring) so the two can't independently drift.
+            data = strip_untrusted_execution_keys(data)
+            build_blk = data.get("build")
+            if isinstance(build_blk, dict) and "compile_db" in build_blk:
+                # Codex review, fresh evidence: a previous round always
+                # stripped here, believing this step had no --sources root
+                # to validate the glob against -- but this step's own
+                # `sources` Action input (mirrored into ABICHECK_SOURCES_ROOT
+                # by the env: block above, identically to how "Run analysis"
+                # below will itself resolve --sources) IS that root. Keep a
+                # demonstrably-resolving discovered build.compile_db instead
+                # of unconditionally discarding valid L3-L5 compiler-flag
+                # evidence, via the identical shared resolution
+                # action/run.sh's own compile-context overlay uses
+                # (discovered_compile_db_resolves -- see its own docstring)
+                # so the two callers can't independently drift on what
+                # counts as "resolves".
+                _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
+                if not discovered_compile_db_resolves(
+                    build_blk["compile_db"], _sources_root
+                ):
+                    build_blk = dict(build_blk)
+                    del build_blk["compile_db"]
+                    data["build"] = build_blk
+                    print(
+                        "::warning::the discovered .abicheck.yml's "
+                        "build.compile_db was dropped from this synthesized "
+                        "--config overlay -- forwarding it would silently "
+                        "promote it to an explicit, must-not-be-missing "
+                        "compile-DB path; set build-config explicitly (naming a "
+                        "config you reviewed) to opt in.",
+                        file=sys.stderr,
+                    )
+        if found_path is not None:
+            # Correctness (Codex review, fresh evidence): `data` is about to
+            # be written to a FRESH path (this step's own $RUNNER_TEMP-
+            # located overlay file, never `found_path`'s own directory), so a
+            # config-relative compile.include_dirs entry must be rewritten to
+            # an absolute path anchored at `found_path`'s own project root
+            # first -- left unrebased, it would silently resolve against the
+            # overlay file's own scratch location instead of the real
+            # project the moment this step runs.
+            data = rebase_relative_config_paths(data, found_path=found_path)
+        assurance = data.get("assurance")
+        # Only a missing key or an explicit null/empty value is safe to
+        # treat as "no assurance block yet" and overlay onto. Normal
+        # BuildConfig ingestion (buildsource/build_config.py) rejects any
+        # other non-mapping assurance: value (a bool, a bare string, a
+        # list, a number) as a schema error outright -- silently replacing
+        # one with {} here would make an otherwise-invalid project config
+        # "valid" the moment this workflow gate is enabled, discarding the
+        # user's actual (malformed) value instead of surfacing their
+        # mistake (Codex review).
+        if assurance is None:
+            assurance = {}
+        elif not isinstance(assurance, dict):
+            raise SystemExit(
+                f"::error::{_gha_escape(source_desc)}: assurance: must be "
+                "a mapping (or omitted/null), got "
+                f"{type(assurance).__name__} ({assurance!r}) -- cannot merge "
+                "an assurance.require_complete overlay into it."
+            )
+        else:
+            # Codex review (P2): `yaml.safe_load()` resolves a YAML anchor/
+            # alias pair (e.g. `assurance: &shared {}` / `gate: *shared`)
+            # to the SAME dict object for both keys. Mutating `assurance`
+            # in place below would therefore also mutate whatever OTHER
+            # top-level key shares this object -- `yaml.safe_dump()`
+            # preserves the alias relationship, so the written overlay
+            # would carry `require_complete` under that unrelated key too
+            # (e.g. `gate.require_complete`, which the nested CLI then
+            # rejects as an unknown field on an otherwise perfectly valid
+            # config). A shallow copy is enough here: only a scalar key is
+            # being added, and this block never mutates one of
+            # `assurance`'s own nested values in place, so nothing deeper
+            # in the object graph is at risk of this same aliasing hazard.
+            assurance = dict(assurance)
+        # Additive over whatever the base config already declared under
+        # assurance: -- only require_complete is forced to true, exactly the
+        # one field this overlay exists to set.
+        assurance["require_complete"] = True
+        data["assurance"] = assurance
+        with open(os.environ["ABICHECK_OUT_PATH"], "w", encoding="utf-8") as fh:
+            yaml.safe_dump(data, fh, sort_keys=False)
+        PYSCRIPT
+        )
+        # Forward the ABSOLUTE path of the freshly-`mktemp`-created file
+        # (never the old in-checkout relative name) to "Run analysis" below,
+        # which reads it back out as this step's own output rather than a
+        # path re-derived (and therefore re-guessable) from a fixed string.
+        echo "config-path=$_assurance_out_path" >> "$GITHUB_OUTPUT"
+        # The `extra-args` value "Run analysis" below should actually
+        # forward: identical to the raw input UNLESS this step just merged
+        # an `extra-args --config <path>` into the overlay above (see the
+        # "extra-args --config extraction" block above), in which case that
+        # `--config`/`--config=<path>` pair has already been folded into
+        # `config-path` and must not ALSO reach the nested Action raw --
+        # doing so would recreate the exact two-`--config` collision this
+        # step exists to close. `extra-args` can legitimately contain
+        # newlines (a YAML literal-block `|` value, per
+        # `_extra_args_options`'s own docstring in action/run.sh), so this
+        # uses GitHub's documented multiline-output delimiter form rather
+        # than a plain `key=value` line, which would silently corrupt (or
+        # be silently truncated by) an embedded newline. `mktemp -u` is
+        # already relied on elsewhere in this same step purely for its
+        # random-suffix generation (no file created), giving a delimiter
+        # nothing in `$_effective_extra_args` itself is expected to contain.
+        _extra_args_output_delim="ct_extra_args_$(basename "$(mktemp -u)")"
+        {
+          echo "effective-extra-args<<$_extra_args_output_delim"
+          printf '%s\n' "$_effective_extra_args"
+          echo "$_extra_args_output_delim"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Clean stale analysis output
       shell: bash
       run: rm -f check-target-analysis.json
@@ -626,11 +1709,19 @@ runs:
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
         steps.collect_verify.outcome != 'failure' &&
         steps.collect_replay.outcome != 'failure' &&
-        steps.consumer_context.outcome != 'failure'
+        steps.consumer_context.outcome != 'failure' &&
+        steps.assurance_overlay.outcome != 'failure'
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
-        mode: ${{ inputs.baseline-channel == 'none' && 'scan' || 'compare' }}
+        # mode is always compare (ADR-068's Action-input-lifecycle amendment
+        # -- mode: scan is retired outright). A baseline-channel: none run
+        # never executes the resolve-baseline step above, so
+        # steps.resolve.outputs.* below all resolve empty -- old-library
+        # therefore comes out empty in exactly that case, which is what
+        # selects mode: compare's audit-only shape (old-library/abi-baseline
+        # both omitted, ADR-068 D2). No separate mode selector is needed.
+        mode: compare
         old-library: ${{ inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir || steps.resolve.outputs.snapshot-path }}
         new-library: ${{ steps.consumer_context.outcome == 'success' && 'check-target-consumer.abi.json' || inputs.new-library }}
         header: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.header }}
@@ -649,18 +1740,22 @@ runs:
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
         # surfaces that resolved value as an output -- it only prints a
         # notice telling the caller to "pass sources: $SOURCES directly to
-        # dump/scan/compare". Forwarding the raw (still-empty) inputs.sources
+        # dump/compare". Forwarding the raw (still-empty) inputs.sources
         # here instead left action/run.sh's add_single_flag skipping --sources
         # entirely (it omits the flag for an empty value), so a replay check
         # with sources: left unset would pass the collect-facts step but then
-        # run compare/scan with NO source evidence at all -- silently missing
+        # run compare with NO source evidence at all -- silently missing
         # source-only findings at requested-depth: build/source (Codex
         # review). Mirror collect-facts' own default here so the analysis
         # step sees the same directory replay validated.
         sources: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
         build-info: ${{ steps.consumer_context.outcome == 'success' && '' || ((inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info) }}
         compile-db: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-db }}
-        build-config: ${{ inputs.build-config }}
+        # "Generate assurance-overlay config" above (this step is skipped
+        # entirely when analysis-assurance-complete != 'true', in which case
+        # its own outcome reads 'skipped' and this falls back to the plain
+        # build-config input unchanged).
+        build-config: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.config-path || inputs.build-config }}
         depth: ${{ inputs.requested-depth }}
         used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
         required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract-file || '' }}
@@ -668,11 +1763,21 @@ runs:
         policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
-        # Gated on kind != 'bundle' -- see this input's own docstring above
-        # for why forwarding it unconditionally would turn a working bundle
-        # check into a hard operational error.
-        require-complete-analysis: ${{ inputs.kind != 'bundle' && inputs.require-complete-analysis == 'true' }}
-        extra-args: ${{ inputs.extra-args }}
+        # require-complete-analysis: RETIRED -- this Action's own input (see
+        # its docstring above) is validated to 'false' before this step can
+        # ever run, and the root Action's own input it used to forward to is
+        # gone too, so there is nothing left to forward here.
+        #
+        # "Generate assurance-overlay config" above (this step is skipped
+        # entirely when analysis-assurance-complete != 'true', in which case
+        # its own outcome reads 'skipped' and this falls back to the plain
+        # extra-args input unchanged) may have consumed a caller's own
+        # `extra-args: --config <path>` into the `build-config` overlay
+        # above (see that step's "extra-args --config extraction" comment) --
+        # forward its own `effective-extra-args` output in that case rather
+        # than the raw input, so a since-merged `--config` doesn't ALSO
+        # reach this invocation raw and collide with the overlay's own.
+        extra-args: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.effective-extra-args || inputs.extra-args }}
         format: 'json'
         output-file: 'check-target-analysis.json'
         add-job-summary: 'false'
@@ -712,5 +1817,6 @@ runs:
         COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
         COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
         CONSUMER_CONTEXT_OUTCOME: ${{ steps.consumer_context.outcome }}
+        ASSURANCE_OVERLAY_OUTCOME: ${{ steps.assurance_overlay.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

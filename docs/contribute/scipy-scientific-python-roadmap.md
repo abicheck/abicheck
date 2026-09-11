@@ -112,7 +112,7 @@ XL-effort item described above.
   through the noise.
 - **Platform-floor verification — G10 (done).**
   The manylinux glibc floor check (`platform_baseline_floor_raised`,
-  declared via `--env-matrix`'s `runtime_floors`) is implemented; musllinux,
+  declared via `.abicheck.yml`'s `deployment.runtime_floors`) is implemented; musllinux,
   macOS deployment targets, Windows API/UCRT requirements, `GLIBCXX`/`CXXABI`,
   and CPU instruction-set floors are covered by later work (see §3 below).
 - **Header frontend robustness — G16 (done) /

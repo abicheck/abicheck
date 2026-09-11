@@ -285,9 +285,9 @@ class TestPeOrdinalRetargeted:
              patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
              patch("abicheck.appcompat._missing_app_versions", return_value=[]), \
              patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse_pe, \
-             patch("abicheck.service.detect_binary_format", return_value="pe"), \
-             patch("abicheck.service.run_dump") as mock_run_dump, \
-             patch("abicheck.service.compare_snapshots") as mock_compare:
+             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="pe"), \
+             patch("abicheck.service_dump_native.run_dump") as mock_run_dump, \
+             patch("abicheck.workflows.compare_policy.compare_snapshots") as mock_compare:
             mock_parse_app.return_value = AppRequirements(undefined_symbols={"ordinal:17"})
             mock_parse_pe.side_effect = [
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),

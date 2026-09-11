@@ -1489,7 +1489,7 @@
         0,
         1
       ],
-      "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under --require-complete-analysis \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when the flag was given and analysis_assurance.status is not \"complete\", 0 otherwise (including when the flag was never given). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
+      "description": "P0.4 (schema 2.40): what analysis_assurance contributes to the exit code under `.abicheck.yml`'s `assurance.require_complete: true` \u2014 the exact sibling of contract_coverage_exit_contribution for the other orthogonal exit-floor axis. 1 when that config key was set and analysis_assurance.status is not \"complete\", 0 otherwise (including when the key was never set). Applied since introduction: the process exit status is floored to this value (folded with max, so it never lowers a 2/4/5/6 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses (analysis_assurance.analysis_assurance_exit_contribution). Present alongside analysis_assurance, under the same condition.",
       "$comment": "aggregate.py's _analysis_assurance_exit reads this field directly rather than recomputing it."
     },
     "annotations": {
@@ -1581,7 +1581,7 @@
         "analysis_assurance_contribution": {
           "type": "integer",
           "enum": [0, 1],
-          "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when --require-complete-analysis was not given."
+          "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when `.abicheck.yml`'s `assurance.require_complete: true` was not set."
         },
         "crosscheck_promotion_contribution": {
           "type": "integer",
@@ -1639,6 +1639,11 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "CLI cleanup phase two, PR B (schema 2.45): a SHA-256 fingerprint of the resolved gate/policy/surface/contract configuration this comparison actually ran under, so two reports (or a report replayed later) can be compared for \"did the resolved configuration change\" without a byte-for-byte diff. Identical computation for compare, the directory/package release fan-out, and scan --against (see effective_config_fields below and effective_config_digest.py's own module docstring for the two resolution tiers it picks between). Schema-optional, like exit: absent from compat/cli.py's compat check --report-format json output, whose own transform options (-strict, -source/-binary, ...) this digest's native legacy/severity gate axes don't represent."
+    },
+    "env_matrix_source_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Schema 4.2 (Codex review, P2): a SHA-256 content digest of the resolved declared-deployment-floor contract (DiffResult.env_matrix_source_sha256) -- the canonical content_digest of the resolved EnvironmentMatrix (.abicheck.yml's deployment: config key, ADR-068 D5, former --env-matrix FILE). Present only when a run actually resolved an EnvironmentMatrix; omitted entirely (never null) for a run with no declared deployment contract. The --no-baseline audit report's NO_BASELINE_REPORT_SCHEMA_VERSION gains the identical field under this same name for the same reason."
     },
     "effective_config_fields": {
       "type": "object",

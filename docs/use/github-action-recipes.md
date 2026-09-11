@@ -541,20 +541,20 @@ Behavior knobs:
 - `pr-comment-detail: full` lists every change with source locations and expands
   all sections; `summary` reduces the comment to the verdict and counts.
 
-The same four inputs work for `mode: scan` against a single artifact: the
-comment renders `scan`'s own verdict, breaking/needs-review findings, a
-green "Public API additions" section, and a short risk/coverage summary
-line, without a second `compare` run:
+The same four inputs work for `mode: compare`'s audit-only shape
+(`old-library`/`abi-baseline` both omitted — ADR-068 D2, the replacement for
+legacy `mode: scan` with no baseline): the comment renders the audit's own
+`AUDIT_GATE`/`AUDIT_CLEAN`/`AUDIT_RISK` verdict and candidate-side findings,
+with no second `compare` run and no OLD side to render at all:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
         with:
-          mode: scan
           new-library: build/libfoo.so
-          against: baseline.json
           new-header: include/foo.h
+          severity-preset: default   # keeps AUDIT_GATE gating -- see github-action.md's migration note
           pr-comment: true
-          pr-comment-on: always   # also comment a clean audit/compare
+          pr-comment-on: always   # also comment a clean audit
 ```
 
 On large diffs the `standard` view stays readable by rolling related changes up

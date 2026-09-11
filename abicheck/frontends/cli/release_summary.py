@@ -63,6 +63,7 @@ def _write_release_summary_file(
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     write_output: Callable[[Path, str], None] | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -89,6 +90,12 @@ def _write_release_summary_file(
     real configuration every library was compared under, same as the
     primary report (see ``_release_summary_effective_config_block``'s own
     docstring).
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up): the same
+    release-wide deployment-floor digest the primary release JSON's own
+    envelope field carries, computed once by the caller at release scope --
+    this sidecar previously carried neither that top-level field nor a
+    real value for ``effective_config_fields["policy.env_matrix"]``.
     """
     from ...cli_compare_receipt import _release_summary_effective_config_block
     from ...cli_compare_release_helpers import (
@@ -118,6 +125,7 @@ def _write_release_summary_file(
         scope_public_headers=scope_public_headers,
         on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
+        env_matrix_source_sha256=env_matrix_source_sha256,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
@@ -168,6 +176,8 @@ def _write_release_summary_file(
             scope=terms.completeness,
         ),
     }
+    if env_matrix_source_sha256 is not None:
+        summary_data["env_matrix_source_sha256"] = env_matrix_source_sha256
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section
     # ADR-067 C-S2: the same folded release-level `disposition_audit` the

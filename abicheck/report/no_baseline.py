@@ -273,6 +273,7 @@ def compute_no_baseline_document(
 ) -> NoBaselineDocument:
     """Resolve *result* into the one document every format below projects."""
     from ..policy.contract_coverage_exit import coverage_exit_floor
+    from .disposition_audit import compute_disposition_audit
     from .pattern_preprocessor_scan import compute_pattern_preprocessor_scan_json
 
     diff = result.diff
@@ -302,6 +303,8 @@ def compute_no_baseline_document(
             result, require_complete_analysis, audit_gate_enabled
         ),
         policy=diff.policy,
+        env_matrix_source_sha256=getattr(diff, "env_matrix_source_sha256", None),
+        disposition_audit=compute_disposition_audit(diff).to_dict(),
     )
 
 
@@ -487,6 +490,23 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         "exit_axes": dict(doc.exit_axes),
         "exit_code": doc.exit_code,
         "policy": doc.policy,
+        # Codex review, P2: the declared-deployment-floor contract's content
+        # digest -- omitted, not `null`, when this audit's candidate declared
+        # no `deployment.runtime_floors`/`EnvironmentMatrix` contract at all,
+        # the same additive convention `reporter._add_env_matrix_digest`
+        # follows for the two-sided compare report under this identical key.
+        **(
+            {"env_matrix_source_sha256": doc.env_matrix_source_sha256}
+            if doc.env_matrix_source_sha256 is not None
+            else {}
+        ),
+        # ADR-067 C-S2's raw-versus-effective ledger, at the same root key
+        # every two-sided `compare` report carries it under -- so a reader
+        # (including `abicheck aggregate`'s own generic
+        # `disposition_audit_block` fold-in) does not need a shape-specific
+        # path to find it. Never omitted: `None` only for a hand-built
+        # document a test constructs directly.
+        "disposition_audit": doc.disposition_audit,
     }
 
 
@@ -540,6 +560,13 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
         f"- Acquisition state (OLD): `{doc.old_acquisition_state}`",
         f"- Evidence tiers: {', '.join(doc.evidence_tiers) or '(none recorded)'}",
     ]
+    # Codex review, P2: the same declared-deployment-floor digest the JSON
+    # projection carries under `env_matrix_source_sha256` -- omitted
+    # entirely (not a "(none)" placeholder line) when no `deployment:`
+    # contract governed this run, matching the JSON convention's own
+    # additive omission and keeping a plain run's Markdown unchanged.
+    if doc.env_matrix_source_sha256 is not None:
+        lines.append(f"- Deployment floor digest: `{doc.env_matrix_source_sha256}`")
     lines += ["", "## Candidate-side findings", ""]
     if not doc.findings:
         lines.append(
@@ -649,9 +676,19 @@ def render_no_baseline_oneline(doc: NoBaselineDocument) -> str:
         if doc.exit_axes.get(key)
     ]
     axes = f"; {', '.join(contributing)}" if contributing else ""
+    # Codex review, P2: same digest the JSON/Markdown projections carry,
+    # omitted (not a placeholder) when no `deployment:` contract governed
+    # this run -- a within-floor audit must not read the same as a run with
+    # no deployment contract at all in the one view most likely to be the
+    # only thing a reader sees.
+    deployment = (
+        f"; deployment floor {doc.env_matrix_source_sha256}"
+        if doc.env_matrix_source_sha256 is not None
+        else ""
+    )
     return (
         f"{doc.library or '(unnamed)'} audit (no baseline): {count} candidate-side "
-        f"{noun}{suppressed}, no compatibility verdict{axes} "
+        f"{noun}{suppressed}, no compatibility verdict{axes}{deployment} "
         f"[exit {doc.exit_code}]\n"
     )
 

@@ -53,7 +53,6 @@ from ....cli_options import (
     changed_path_options,
     contract_options,
     debug_resolution_options,
-    env_matrix_option,
     evidence_options,
     include_dependencies_option,
     normalize_sided_options,
@@ -719,7 +718,8 @@ def _embed_inline_source_side(
 # ADR-068 D4 / Phase 5: --surface-metrics is gone -- ADR-027's metric-drift
 # findings are computed on every comparison and merged into result.changes,
 # so nothing was left for the flag to select, not even a rendering choice.
-@env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
+# ADR-068 D5: --env-matrix is gone -- declared deployment constraints are
+# now `.abicheck.yml`'s `deployment:` config key (runtime_floors contract).
 # §4.1's AUTO row: ADR-039 build-context reconciliation is unconditional now
 # and `--reconcile-build-context` is gone. It is strictly evidence-gated and
 # can only ever move a phantom finding out of the verdict, never manufacture
@@ -759,15 +759,6 @@ def _embed_inline_source_side(
                    "the finding is harmless, so this never moves a verdict or an "
                    "exit code. Validate a manifest on its own with "
                    "`abicheck project validate-use-cases`.")
-@click.option("--require-complete-analysis", "require_complete_analysis",
-              is_flag=True, default=False,
-              help="P0.4: fail the build when analysis_assurance.status is not "
-                   "'complete', independent of the compatibility verdict. "
-                   "Contributes exit 1, folded with max the same way "
-                   "--contract's coverage axis is (ADR-049 Phase 7): "
-                   "it raises a clean 0 to 1 and never lowers a 2/4. Single-pair "
-                   "compares only, not the directory/package release fan-out. "
-                   "See docs/reference/exit-codes.md.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -801,14 +792,18 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     for and the tables above are exhaustive. Set contract.unresolved=warn
     (via a `kind: contract` --pack) to accept incomplete coverage.
     \b
-    A second, independent orthogonal axis (P0.4): with
-    --require-complete-analysis, an analysis_assurance.status other than
+    A second, independent orthogonal axis (P0.4): with a project's
+    `.abicheck.yml` setting `assurance.require_complete: true` (config-only
+    -- no CLI flag; the former --require-complete-analysis flag was
+    demoted here entirely), an analysis_assurance.status other than
     "complete" (how complete/trustworthy the evidence itself was — depth,
     TU/export accounting, fact-set comparability, header-context drift,
     source-graph completeness — independent of what the verdict says)
     contributes exit 1 the same way, folded with the same max discipline.
-    Without the flag, analysis_assurance is still always computed and
-    reported in --format json, it just never affects the exit code.
+    Without the setting, analysis_assurance is still always computed and
+    reported in --format json, it just never affects the exit code. Single-
+    pair compares only, not the directory/package release fan-out (see
+    docs/reference/config-file.md's `assurance:` section).
     \b
     A third, independent orthogonal axis (ADR-068 2026-09-10 amendment):
     under --no-baseline, this becomes an audit rather than a comparison, and

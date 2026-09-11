@@ -169,6 +169,51 @@ def test_every_format_discloses_a_suppressed_finding(
             assert kind in text
 
 
+@pytest.mark.parametrize(("case", "filename"), _FIXTURES)
+def test_json_disposition_audit_accounts_for_every_suppressed_finding(
+    case: str, filename: str
+) -> None:
+    """The JSON document's own ``disposition_audit`` block (Codex review,
+    fresh evidence) must count a fully-suppressed run's findings as
+    ``suppressed``, not as zero -- the same conservation invariant
+    :func:`test_suppressing_everything_reports_everything_as_suppressed`
+    states for ``suppressed_findings`` itself, checked here against the
+    *folded ledger* an ``abicheck aggregate`` fan-in actually reads
+    (``workflows.aggregate.disposition_axis.disposition_audit_block``
+    reads this exact root key, generically, for every report shape)."""
+    result = _result(case, filename, suppression=_suppress_everything())
+    assert result.suppressed_findings, "fixture precondition"
+    text, _ = render_no_baseline(result, "json")
+    payload = json.loads(text)
+    audit = payload["disposition_audit"]
+    assert audit["detected_total"] == len(result.suppressed_findings)
+    counts = dict(audit["counts"])
+    assert counts["suppressed"] == len(result.suppressed_findings)
+
+
+def test_disposition_audit_is_absent_only_for_a_hand_built_document() -> None:
+    """The compute half always attaches a real block; only a document a
+    test constructs directly (never via ``compute_no_baseline_document``)
+    may leave the field at its ``None`` default."""
+    from abicheck.report.no_baseline_document import NoBaselineDocument
+
+    doc = NoBaselineDocument(
+        library="libfoo.so",
+        new_version="1.0",
+        old_acquisition_state="declared_absent",
+        evidence_tiers=(),
+        findings=(),
+        suppressed=(),
+        evolution=None,
+        pattern_preprocessor_scan=None,
+        run_outcome={},
+        comparison_scope={},
+        coverage_exit_contribution=0,
+        exit_code=0,
+    )
+    assert doc.disposition_audit is None
+
+
 # ---------------------------------------------------------------------------
 # Coherence: no renderer may disagree with the document it projects.
 # ---------------------------------------------------------------------------
@@ -638,6 +683,25 @@ def test_the_two_axis_tables_cover_the_same_axes() -> None:
     assert set(NO_BASELINE_EXIT_AXIS_LABELS) == set(NO_BASELINE_EXIT_AXIS_NOTICES)
 
 
+def test_analysis_assurance_notice_names_the_config_key_not_the_retired_flag() -> None:
+    """The remediation text must name a switch a reader can actually flip.
+
+    `compare --require-complete-analysis` was removed (rulings.py
+    deferred-option followup): the only way to arm this axis is
+    `.abicheck.yml`'s `assurance.require_complete: true`. The notice
+    previously still told a reader to pass `--require-complete-analysis`,
+    which now exits 64 as a usage error instead of reproducing the gate
+    (Codex review, P2). Assert the fix directly on the notice text rather
+    than only through the headline-substring check the other axis tests use,
+    since that check would pass unchanged whether the remediation clause
+    named the live config key or the dead flag.
+    """
+    notice = NO_BASELINE_EXIT_AXIS_NOTICES["analysis_assurance"]
+    assert "--require-complete-analysis" not in notice
+    assert "assurance.require_complete" in notice
+    assert ".abicheck.yml" in notice
+
+
 @pytest.mark.parametrize(
     ("axis", "require_complete"),
     [(axis, req) for axis, (_, req) in _GATED_AXIS_FIXTURES.items()],
@@ -717,6 +781,140 @@ def test_the_audit_json_validates_against_its_own_published_schema() -> None:
         "an audit must not validate as a compare report — the two documents "
         "mean different things by a null verdict"
     )
+
+
+def test_audit_env_matrix_source_sha256_validates_against_published_schema() -> None:
+    """Schema 1.4 (Codex review, P2): the audit document gains the identical
+    top-level env_matrix_source_sha256 field the two-sided compare report
+    already gained in schema 4.2, for the same declared-deployment-floor
+    contract. A real run resolving an EnvironmentMatrix must emit it and
+    validate against the packaged audit schema's declaration for it."""
+    jsonschema = pytest.importorskip("jsonschema")
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.environment_matrix import EnvironmentMatrix
+    from abicheck.model import AbiSnapshot
+    from abicheck.schemas import load_audit_report_schema
+
+    elf = ElfMetadata(
+        machine="EM_X86_64",
+        hash_styles=frozenset({"gnu"}),
+        needed=["libc.so.6"],
+        versions_required={"libc.so.6": ["GLIBC_2.34"]},
+    )
+    snapshot = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        elf=elf,
+        elf_only_mode=True,
+        platform="elf",
+    )
+    matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+    result = run_no_baseline_compare(snapshot, env_matrix=matrix)
+    payload, _ = render_no_baseline(result, "json")
+    doc = json.loads(payload)
+    assert "env_matrix_source_sha256" in doc
+    errors = list(
+        jsonschema.Draft202012Validator(load_audit_report_schema()).iter_errors(doc)
+    )
+    assert not errors, [e.message for e in errors]
+
+
+def test_audit_schema_declares_env_matrix_source_sha256() -> None:
+    from abicheck.schemas import load_audit_report_schema
+
+    schema = load_audit_report_schema()
+    prop = schema["properties"]["env_matrix_source_sha256"]
+    assert prop["type"] == "string"
+    assert prop["pattern"] == "^sha256:[0-9a-f]{64}$"
+    assert "env_matrix_source_sha256" not in schema.get("required", [])
+
+
+def _result_with_env_matrix():
+    """A ``--no-baseline`` result with a declared ``deployment:`` contract.
+
+    Factored out so every format's disclosure test builds the identical
+    fixture ``test_audit_env_matrix_source_sha256_validates_against_
+    published_schema`` already validates against the audit JSON schema,
+    rather than each format re-deriving its own.
+    """
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.environment_matrix import EnvironmentMatrix
+    from abicheck.model import AbiSnapshot
+
+    elf = ElfMetadata(
+        machine="EM_X86_64",
+        hash_styles=frozenset({"gnu"}),
+        needed=["libc.so.6"],
+        versions_required={"libc.so.6": ["GLIBC_2.34"]},
+    )
+    snapshot = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        elf=elf,
+        elf_only_mode=True,
+        platform="elf",
+    )
+    matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+    return run_no_baseline_compare(snapshot, env_matrix=matrix)
+
+
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS))
+def test_every_format_projects_the_env_matrix_digest_when_present(fmt: str) -> None:
+    """Codex review, P2: a within-floor audit is only distinguishable from a
+    run with no ``deployment:`` contract if *every* format carries the
+    digest ``env_matrix_source_sha256`` -- not only JSON. Each format's own
+    equivalent "digest"/provenance projection point must surface it.
+    """
+    result = _result_with_env_matrix()
+    doc = compute_no_baseline_document(result)
+    assert doc.env_matrix_source_sha256 is not None, "fixture precondition"
+    text, _ = render_no_baseline(result, fmt)
+
+    if fmt == "json":
+        payload = json.loads(text)
+        assert payload["env_matrix_source_sha256"] == doc.env_matrix_source_sha256
+    elif fmt == "sarif":
+        payload = json.loads(text)
+        props = payload["runs"][0]["properties"]
+        assert props["envMatrixSourceSha256"] == doc.env_matrix_source_sha256
+    elif fmt == "junit":
+        root = ET.fromstring(text)
+        props = {
+            p.get("name"): p.get("value") for p in root.findall("./properties/property")
+        }
+        assert props["env_matrix_source_sha256"] == doc.env_matrix_source_sha256
+    else:  # markdown, oneline
+        assert doc.env_matrix_source_sha256 in text, (
+            f"{fmt} does not surface the declared-deployment-floor digest"
+        )
+
+
+@pytest.mark.parametrize(("case", "filename"), _FIXTURES)
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS))
+def test_every_format_omits_the_env_matrix_digest_when_absent(
+    case: str, filename: str, fmt: str
+) -> None:
+    """The converse of the test above: no format may fabricate a digest, or
+    a placeholder for one, when this audit's candidate declared no
+    ``deployment:`` contract at all.
+    """
+    result = _result(case, filename)
+    doc = compute_no_baseline_document(result)
+    assert doc.env_matrix_source_sha256 is None, "fixture precondition"
+    text, _ = render_no_baseline(result, fmt)
+
+    if fmt == "json":
+        payload = json.loads(text)
+        assert "env_matrix_source_sha256" not in payload
+    elif fmt == "sarif":
+        payload = json.loads(text)
+        assert "envMatrixSourceSha256" not in payload["runs"][0]["properties"]
+    elif fmt == "junit":
+        root = ET.fromstring(text)
+        names = {p.get("name") for p in root.findall("./properties/property")}
+        assert "env_matrix_source_sha256" not in names
+    else:  # markdown, oneline
+        assert "deployment floor" not in text.lower()
 
 
 def test_junit_names_the_axis_that_gated_not_every_axis_that_could_have() -> None:

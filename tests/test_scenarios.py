@@ -591,20 +591,61 @@ def test_sc_malformed_input(tmp_path: Path) -> None:
     assert "Failed to load" in res.output
 
 
-# `test_sc_scan_binary_depth_matrix_args` (SC-SCAN-BINARY-DEPTH-MATRIX-ARGS)
-# was retired here, not rewritten, when ADR-068 Phase 6 deleted `scan`
-# outright. It asserted on a `coverage` array (`layer`/`status` rows for
-# `L0_binary`/`L1_debug`/`L2_header`/`pattern_scan`/`L3_build`) and a
-# top-level `pattern_scan.files_scanned` field -- both entirely
-# `ScanOutcome`-shaped fields `compare --format json` has never emitted
-# (verified live: a `compare --depth binary` JSON report on an equivalent
-# fixture carries neither key at all). The scenario's own comment already
-# named this precisely: "neither of which `compare` reproduces yet" -- that
-# gap was never closed before `scan` itself was deleted, so there is no
-# `compare`-based rewrite that preserves this test's actual assertions.
-# See `docs/contribute/known-gaps.md` for the tracked gap this leaves open
-# (whether `compare --depth binary` ignores matrix-wide `--sources`/
-# `--build-info` the same way `scan --depth binary` did is now untested).
+def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+    old = _lib(
+        "1",
+        [_fn("kept"), _fn("removed")],
+        elf=ElfMetadata(symbols=[ElfSymbol(name="kept"), ElfSymbol(name="removed")]),
+    )
+    new = _lib("2", [_fn("kept")], elf=ElfMetadata(symbols=[ElfSymbol(name="kept")]))
+    old_path = _save(old, tmp_path / "old.json")
+    new_path = _save(new, tmp_path / "new.json")
+    include = tmp_path / "include"
+    include.mkdir()
+    (include / "api.h").write_text("int kept(void);\n", encoding="utf-8")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "api.cpp").write_text(
+        'extern "C" int kept(void) { return 0; }\n',
+        encoding="utf-8",
+    )
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+
+    res = _cli(
+        "compare",
+        old_path,
+        new_path,
+        "-H",
+        str(include),
+        "--sources",
+        str(src),
+        "--build-info",
+        str(cdb),
+        "--depth",
+        "binary",
+        "--format",
+        "json",
+    )
+    assert res.exit_code == 4, res.output
+    doc = json.loads(res.stdout)
+    assert doc["verdict"] == "BREAKING"
+    # The binary rung stays artifact-only (L0/L1) even with matrix-wide
+    # headers/sources/build-info present: `old_evidence_depth`/
+    # `new_evidence_depth` pin at the requested "binary" depth, and no
+    # "dwarf" tier is collected (L1 debug info never joins).
+    assert doc["old_evidence_depth"] == "binary"
+    assert doc["new_evidence_depth"] == "binary"
+    assert "dwarf" not in doc["evidence_tiers"]
+    # No L3 preprocessor pre-scan ran (no build evidence attached to the
+    # stored snapshot operands themselves -- `-H`/`--sources`/`--build-info`
+    # are ignored for a snapshot input, per the CLI's own warning above), and
+    # the L2 pattern pre-scan saw no files either.
+    pps = doc["pattern_preprocessor_scan"]
+    assert pps["pattern"]["new"]["files_scanned"] == 0
+    assert pps["preprocessor"]["new"]["ran"] is False
 
 
 def test_sc_c_struct_layout(tmp_path: Path) -> None:

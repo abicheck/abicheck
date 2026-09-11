@@ -30,9 +30,6 @@ import click
 
 from ....cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
-    compile_db_filter_scope_error,
-    compile_db_for_filter_scope_check,
-    compile_db_from_build_info,
     reject_snapshot_compression_conflict,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
@@ -67,6 +64,10 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ....service_compare_evidence import (
+    dump_cli_compile_db_filter_scope_error,
+    dump_cli_compile_db_path,
+)
 from ..dump_debug_config import (
     DumpDebugConfig,
     resolve_dump_build_compile_db_filter,
@@ -218,7 +219,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              provenance: tuple[str, ...],
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None,
-             build_targets: tuple[str, ...] = (),
              depth: str | None = None,
              # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
              # defaulted-None parameter stays only so the internal composition
@@ -368,7 +368,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # The L2 compile database is whatever --build-info names, read back after
     # --depth binary has had its say about the headers (a headerless dump has
     # no header AST for a database to parameterize).
-    compile_db_path = compile_db_from_build_info(build_info, headers)
+    compile_db_path = dump_cli_compile_db_path(build_info, headers)
     # The scope check itself resolves the compile database more broadly than
     # `compile_db_path` above -- a `--sources` tree with no `--build-info` can
     # still auto-discover one, and the L3->L2 fold/L3 embed both resolve it
@@ -378,10 +378,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # (`effective_compile_db`) -- see `compile_db_for_filter_scope_check`'s
     # own docstring for why widening it here would widen that too.
     if (
-        _filter_scope_error := compile_db_filter_scope_error(
-            compile_db_filter,
-            compile_db_for_filter_scope_check(build_info, sources, headers),
-            collect_mode,
+        _filter_scope_error := dump_cli_compile_db_filter_scope_error(
+            compile_db_filter, build_info, sources, headers, collect_mode,
         )
     ) is not None:
         raise click.UsageError(_filter_scope_error)
@@ -530,7 +528,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         pdb_path=pdb_path, debug_roots=debug_roots,
         debuginfod=debuginfod, debuginfod_url=debuginfod_url,
         dump_manifest=parsed_dump_manifest,
-        sources=sources, build_info=build_info, build_targets=build_targets,
+        sources=sources, build_info=build_info,
         include_dependencies=include_dependencies,
         follow_deps=follow_deps, search_paths=search_paths,
         ld_library_path=ld_library_path,
@@ -647,7 +645,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 write_snapshot_output=_write_snapshot_output_fn,
                 git_tag=git_tag, build_id=build_id, no_git=no_git,
                 output=output, build_info=build_info, sources=sources,
-                build_targets=build_targets,
                 include_dependencies=include_dependencies,
                 headers=tuple(headers),
                 gcc_path=gcc_path, gcc_prefix=gcc_prefix,
@@ -689,7 +686,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, git_tag, build_id, no_git, collect_mode, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = compile_db_path
@@ -803,7 +800,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         git_tag=git_tag, build_id=build_id, no_git=no_git,
         output=output, build_info=build_info, sources=sources,
         collect_mode=_resolved.collect_mode,
-        build_targets=build_targets,
         header_backend=_resolved.header_backend,
         requested_depth=_resolved.requested_depth,
         include_dependencies=include_dependencies,

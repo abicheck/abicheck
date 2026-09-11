@@ -18,7 +18,8 @@
 Covers: extension recognition (Cython/pybind11/C-ext, abi3 vs version-specific,
 free-threaded), the stable-ABI classifier, the compare-time detector (stable-ABI
 violations, abi3-dropped, GIL/free-threaded switch), snapshot serialization
-round-trip, and the ``abicheck scan --abi3`` single-artifact audit.
+round-trip, and the ``abicheck compare --abi3`` candidate-side audit (formerly
+``abicheck scan --abi3``, retired by ADR-068 Phase 6).
 """
 
 from __future__ import annotations
@@ -612,17 +613,29 @@ def _write_snapshot(tmp_path: object, snap: AbiSnapshot) -> str:
     return path
 
 
-def _scan_abi3(path: str, *args: str) -> object:
-    """Invoke ``scan <path> --depth binary`` with extra args."""
+def _compare_abi3(path: str, *args: str) -> object:
+    """Invoke ``compare <path> <path> --abi3 ...`` (self-compare, so the only
+    findings are the candidate-side abi3 audit's own).
+
+    Historically this exercised ``scan <path> --depth binary --abi3 ...``;
+    ADR-068 Phase 6 retired that command. ``--abi3`` is a candidate-side
+    audit of ``compare``'s NEW operand (`cli_compare_helpers.py`), so the
+    same artifact is passed as both OLD and NEW to isolate the audit finding
+    from any ordinary two-sided diff (see `test_compare_changed_path_and_
+    abi3.py::TestCompareAbi3`, which established this pattern first).
+    """
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    return CliRunner().invoke(main, ["scan", path, "--depth", "binary", *args])
+    return CliRunner().invoke(main, ["compare", path, path, *args])
 
 
-#: Promote the audit finding to a hard gate (scan's advisory→error path).
-_GATE = ("--crosscheck", "python_stable_abi_violation=error")
+#: Promote the (advisory, risk-severity) abi3 audit finding to a hard gate --
+#: `compare` has no scan-only `--crosscheck` promotion mechanism, but a
+#: strict severity preset gates a risk-severity finding to exit 2 the same
+#: way `--crosscheck ...=error` used to.
+_GATE = ("--severity-preset", "strict")
 
 
 def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
@@ -631,25 +644,12 @@ def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9")
+    result = _compare_abi3(path, "--abi3", "3.9")
     assert result.exit_code == 0, result.output
     assert "python_stable_abi_violation" in result.output
 
-    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    gated = _compare_abi3(path, "--abi3", "3.9", *_GATE)
     assert gated.exit_code == 2, gated.output
-
-
-def test_scan_crosscheck_rejects_compare_time_python_kinds(tmp_path: object) -> None:
-    # Only the single-artifact audit finding is promotable via --crosscheck. The
-    # compare-time kinds gate through compare's own verdict, so promoting them
-    # here is rejected as an unknown cross-check (documented boundary).
-    snap = _ext_snapshot("2.0", ["PyList_New"])
-    path = _write_snapshot(tmp_path, snap)
-    result = _scan_abi3(
-        path, "--abi3", "3.9", "--crosscheck", "python_abi3_dropped=error"
-    )
-    assert result.exit_code != 0
-    assert "unknown cross-check" in result.output
 
 
 def test_scan_abi3_clean_passes(tmp_path: object) -> None:
@@ -657,13 +657,14 @@ def test_scan_abi3_clean_passes(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
+    result = _compare_abi3(path, "--abi3", "3.12", *_GATE)
     assert result.exit_code == 0, result.output
     assert "python_stable_abi_violation" not in result.output
 
 
 def test_scan_abi3_rejects_non_extension(tmp_path: object) -> None:
-    # --abi3 on a plain C library is a usage error (nothing to audit).
+    # --abi3 on a plain C library is an evidence-contract error (nothing to
+    # audit) -- compare's own exit 7 (ADR-068's evidence-contract axis).
     elf = ElfMetadata()
     elf.symbols = [
         ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
@@ -671,8 +672,8 @@ def test_scan_abi3_rejects_non_extension(tmp_path: object) -> None:
     snap = AbiSnapshot(library="libfoo.so", version="1.0", elf=elf)
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9")
-    assert result.exit_code != 0
+    result = _compare_abi3(path, "--abi3", "3.9")
+    assert result.exit_code == 7, result.output
     assert "not a recognisable CPython extension" in result.output
 
 
@@ -681,7 +682,7 @@ def test_scan_abi3_flags_private_import(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    result = _compare_abi3(path, "--abi3", "3.9", *_GATE)
     assert result.exit_code == 2, result.output
     assert "python_stable_abi_violation" in result.output
 
@@ -692,21 +693,23 @@ def test_scan_abi3_json_output_carries_finding(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9", "--format", "json")
+    result = _compare_abi3(path, "--abi3", "3.9", "--format", "json")
     assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
-    # The abi3 audit coverage row records it ran AND names the offending symbol,
-    # so a CI artifact tells the user which import to fix (not just a count).
-    rows = {row.get("layer"): row for row in data.get("coverage", [])}
-    assert "abi3_audit" in rows
-    assert "_PyObject_LookupSpecial" in rows["abi3_audit"]["detail"]
+    data = _json.loads(result.stdout)
+    # The finding names the offending symbol in its own description, so a CI
+    # artifact tells the user which import to fix (not just a count).
+    findings = [
+        c for c in data["changes"] if c["kind"] == "python_stable_abi_violation"
+    ]
+    assert findings, data["changes"]
+    assert any("_PyObject_LookupSpecial" in f["description"] for f in findings)
 
 
 def test_scan_abi3_text_report_names_offending_symbol(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9")
+    result = _compare_abi3(path, "--abi3", "3.9")
     assert result.exit_code == 0, result.output
     # The specific non-stable import is visible in the human report, not hidden
     # behind a bare `python_stable_abi_violation: 1` count.
@@ -717,13 +720,13 @@ def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "not-a-version")
-    assert result.exit_code != 0
+    result = _compare_abi3(path, "--abi3", "not-a-version")
+    assert result.exit_code == 64, result.output
     assert "invalid --abi3" in result.output
 
 
 def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:
-    # `scan --abi3 3.9` on a version-specific `foo.cpython-311.so` must not
+    # `compare --abi3 3.9` on a version-specific `foo.cpython-311.so` must not
     # certify it clean: the SOABI tag itself pins it to 3.11, so it cannot
     # satisfy the abi3 floor no matter how stable its imports are.
     src = "foo.cpython-311-x86_64-linux-gnu.so"
@@ -731,11 +734,11 @@ def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:
     assert snap.python_ext.is_version_specific is True
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9")
+    result = _compare_abi3(path, "--abi3", "3.9")
     assert "python_stable_abi_violation" in result.output
     assert "cpython-311" in result.output
     # And it gates when promoted.
-    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    gated = _compare_abi3(path, "--abi3", "3.9", *_GATE)
     assert gated.exit_code == 2, gated.output
 
 
@@ -754,7 +757,7 @@ def test_scan_abi3_flags_unknown_public_symbol(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "PyUnicode_AsUTF8"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9")
+    result = _compare_abi3(path, "--abi3", "3.9")
     assert result.exit_code == 0, result.output
     assert "python_stable_abi_violation" in result.output
 
@@ -828,15 +831,15 @@ def test_audit_supplied_floor_used_when_no_lower_declared() -> None:
 
 
 def test_scan_abi3_honors_lower_declared_floor_end_to_end(tmp_path: object) -> None:
-    # Codex P2 (a233b36): `scan --abi3 3.12 --crosscheck …=error` on a cp39-abi3
-    # artifact importing a 3.11-only symbol must FAIL (exit 2), not certify clean
-    # — the tag still advertises 3.9 where the symbol is missing.
+    # Codex P2 (a233b36): `compare --abi3 3.12 --severity-preset strict` on a
+    # cp39-abi3 artifact importing a 3.11-only symbol must FAIL (exit 2), not
+    # certify clean — the tag still advertises 3.9 where the symbol is missing.
     src = "foo.cp39-abi3-win_amd64.pyd"
     snap = _ext_snapshot(
         "2.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
     )
     path = _write_snapshot(tmp_path, snap)
-    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
+    result = _compare_abi3(path, "--abi3", "3.12", *_GATE)
     assert result.exit_code == 2, result.output
     assert "python_stable_abi_violation" in result.output
 

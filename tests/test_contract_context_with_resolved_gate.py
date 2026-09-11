@@ -35,7 +35,7 @@ from abicheck.compatibility_evaluation_config import (
 )
 from abicheck.contract_context import build_persisted_context, with_resolved_gate
 from abicheck.contract_evidence import ContractEvidenceBlock, PersistedContractContext
-from abicheck.contract_relevance_types import ContractMode
+from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.severity import SeverityConfig, SeverityLevel
 
 
@@ -58,7 +58,14 @@ def _base_context(
     )
 
 
-def _apply(ctx: PersistedContractContext) -> PersistedContractContext:
+def _apply(
+    ctx: PersistedContractContext,
+    *,
+    require_complete_analysis: bool | None = None,
+    require_complete_analysis_stated: bool = False,
+    project_config_path: str | None = None,
+    project_config_sha256: str | None = None,
+) -> PersistedContractContext:
     return with_resolved_gate(
         ctx,
         exit_code_scheme="legacy",
@@ -69,6 +76,10 @@ def _apply(ctx: PersistedContractContext) -> PersistedContractContext:
             addition=SeverityLevel.INFO,
         ),
         severity_provenance={},
+        require_complete_analysis=require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
+        project_config_path=project_config_path,
+        project_config_sha256=project_config_sha256,
     )
 
 
@@ -107,3 +118,227 @@ class TestWithResolvedGatePreservesScopedFields:
         gate = result.evaluation_context.resolved_config.gate
         assert gate.exit_code_scheme == "legacy"
         assert gate.severity.abi_breaking == SeverityLevel.ERROR
+
+
+class TestWithResolvedGateThreadsRequireCompleteAnalysis:
+    """P2 (Codex review, fresh evidence on the require-complete-analysis
+    retirement PR): before this fix, ``with_resolved_gate`` always fell back
+    to the *pre-existing* ``config.gate.require_complete_analysis`` (the
+    compatibility resolver's own built-in default, ``False``) regardless of
+    what the front end actually resolved the field to -- so a ``--contract``
+    compare with ``assurance.require_complete: true`` persisted a receipt
+    where ``effective_config_fields["gate.require_complete_analysis"]``
+    (sourced from the real resolved config) read ``True`` while
+    ``evaluation_context.resolved_config.gate.require_complete_analysis``
+    read ``False``, an internal inconsistency in the one receipt documented
+    as the complete resolved configuration. The fix adds an explicit
+    ``require_complete_analysis`` parameter the caller can pass its own
+    resolved value through -- these tests exercise that parameter directly,
+    independent of the pre-existing scoped-field-preservation tests above
+    (which never pass it, and so must keep observing the fallback)."""
+
+    def test_explicit_true_overrides_the_context_s_existing_false(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=True)
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is True
+        )
+
+    def test_explicit_false_overrides_the_context_s_existing_true(self) -> None:
+        ctx = _base_context(require_complete_analysis=True, scope=None)
+        result = _apply(ctx, require_complete_analysis=False)
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is False
+        )
+
+    def test_omitted_falls_back_to_the_context_s_existing_value(self) -> None:
+        # The pre-existing fallback behavior (None is the default), which
+        # every test above this class already exercises via `_apply`'s own
+        # default -- restated here explicitly as this class's own baseline.
+        ctx = _base_context(require_complete_analysis=True, scope=None)
+        result = _apply(ctx, require_complete_analysis=None)
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is True
+        )
+
+
+class TestWithResolvedGateStampsRequireCompleteAnalysisProvenance:
+    """P2 (Codex review, fresh evidence after the fix above landed): the
+    resolved *value* was threaded through, but ``field_provenance["gate.
+    require_complete_analysis"]`` stayed absent -- the receipt could show
+    *that* the gate was enabled but not *why*. Fixed by having
+    ``with_resolved_gate`` itself stamp a ``PROJECT_CONFIG``-layer entry
+    whenever an explicit ``True`` is passed -- that field has no CLI
+    override and no pack route, so ``True`` can only ever have come from
+    ``.abicheck.yml``'s ``assurance.require_complete``."""
+
+    def test_provenance_entry_is_stamped_when_true(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=True)
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+
+    def test_false_leaves_the_field_absent(self) -> None:
+        """The "absent, not defaulted" rule: an unset/false field gets no
+        fabricated provenance entry, mirroring an unsupplied severity
+        category."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=False)
+        provenance = result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in provenance
+
+    def test_omitted_leaves_the_field_absent(self) -> None:
+        """Same rule for the omitted (``None``, fallback-to-context) case."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=None)
+        provenance = result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in provenance
+
+
+class TestWithResolvedGateDistinguishesExplicitFalseFromOmitted:
+    """P2 finding (Codex review, fresh evidence, PR #1222 fourth round): a
+    config explicitly stating ``assurance.require_complete: false`` used to
+    take the SAME "no provenance" branch as an entirely-omitted key -- both
+    produce the identical resolved value (``False``), so a ``--contract``
+    receipt built from that value alone could not distinguish "the project
+    deliberately opted out of complete-assurance enforcement" from "the
+    project never considered this setting at all". Fixed by threading the
+    "was this key literally present" boolean (*require_complete_analysis_
+    stated*) separately from the resolved value -- see
+    ``contract_gate_require_complete_provenance.py``'s own docstring."""
+
+    def test_explicit_false_gets_a_real_provenance_entry(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(
+            ctx,
+            require_complete_analysis=False,
+            require_complete_analysis_stated=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="deadbeef" * 8,
+        )
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+        assert entry.source_kind == "project_config"
+        assert entry.path == "/repo/.abicheck.yml"
+        assert entry.sha256 == "deadbeef" * 8
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is False
+        )
+
+    def test_explicit_false_without_stated_still_leaves_the_field_absent(
+        self,
+    ) -> None:
+        """*require_complete_analysis_stated* defaults to ``False`` --
+        a caller that never resolves the "was this literally in the
+        document" bit at all keeps getting the pre-existing behavior
+        (``TestWithResolvedGateStampsRequireCompleteAnalysisProvenance.
+        test_false_leaves_the_field_absent`` above), so this fix is purely
+        additive for every existing caller."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=False)
+        provenance = result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in provenance
+
+    def test_omitted_key_stays_distinguishable_from_explicit_false(
+        self,
+    ) -> None:
+        """The two cases the finding requires stay distinguishable in the
+        SAME receipt shape: an omitted ``assurance:`` key (or an
+        ``assurance:`` block present without ``require_complete``) still
+        produces no provenance entry at all, while an explicit ``false``
+        produces a real one -- so the persisted ``--contract`` receipt can
+        tell them apart."""
+        omitted_ctx = _base_context(require_complete_analysis=False, scope=None)
+        omitted_result = _apply(
+            omitted_ctx,
+            require_complete_analysis=False,
+            require_complete_analysis_stated=False,
+        )
+        stated_ctx = _base_context(require_complete_analysis=False, scope=None)
+        stated_result = _apply(
+            stated_ctx,
+            require_complete_analysis=False,
+            require_complete_analysis_stated=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="cafef00d" * 8,
+        )
+        omitted_provenance = (
+            omitted_result.evaluation_context.resolved_config.provenance
+        )
+        stated_provenance = stated_result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in omitted_provenance
+        assert "gate.require_complete_analysis" in stated_provenance
+
+
+class TestWithResolvedGateThreadsProjectConfigIdentity:
+    """P2 (Codex review, fresh evidence): the ``gate.require_complete_
+    analysis`` provenance entry stamped above named only the generic
+    ``PROJECT_CONFIG`` layer and ``field_location`` -- unlike every OTHER
+    project-config-sourced ``field_provenance`` entry in the same receipt
+    (e.g. ``policy.overrides``/``surface.internal_namespaces``, built in
+    ``compatibility_evaluation_frontend.py`` with a real ``path``/``sha256``
+    and a ``selected_by`` hop), it carried no path, no digest, and no
+    ``selected_by`` hop identifying the actual ``.abicheck.yml`` document
+    that supplied it. For a project whose config sets ONLY
+    ``assurance.require_complete`` (no other override), the persisted
+    receipt could not identify or replay which exact file/revision enabled
+    the gate. Fixed by threading the caller's already-resolved project-
+    config path/digest through ``with_resolved_gate``'s own
+    ``project_config_path``/``project_config_sha256`` parameters, mirroring
+    the shape those other entries already use."""
+
+    def test_provenance_entry_carries_real_path_and_digest(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(
+            ctx,
+            require_complete_analysis=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="deadbeef" * 8,
+        )
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+        assert entry.source_kind == "project_config"
+        assert entry.path == "/repo/.abicheck.yml"
+        assert entry.sha256 == "deadbeef" * 8
+
+    def test_provenance_entry_carries_a_selected_by_hop(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(
+            ctx,
+            require_complete_analysis=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="cafef00d" * 8,
+        )
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert len(entry.selected_by) == 1
+        hop = entry.selected_by[0]
+        assert hop.layer is SelectorLayer.PROJECT_CONFIG
+        assert hop.option == "assurance.require_complete"
+        assert hop.path == "/repo/.abicheck.yml"
+        assert hop.sha256 == "cafef00d" * 8
+
+    def test_no_path_falls_back_to_the_layer_only_stub(self) -> None:
+        """The release fan-out's own caller has no project-config document
+        of its own to name -- omitting both parameters must keep producing
+        exactly the pre-existing layer-only entry, not a broken/partial one."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=True)
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+        assert entry.path is None
+        assert entry.sha256 is None
+        assert entry.source_kind is None
+        assert entry.selected_by == ()
