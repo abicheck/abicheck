@@ -18,10 +18,14 @@
 abi-baseline both omitted) routes to ``compare --no-baseline`` (the
 replacement for legacy ``mode: scan`` with no baseline, per ADR-068's
 Action-input-lifecycle amendment -- ``mode: scan`` itself is retired
-outright), and this Action injects ``--severity-preset default`` on that
-invocation whenever the caller stated no preset of their own, so the
-audit-gate exit axis (``policy/audit_gate_exit.py``, exit code ``3``)
-reproduces legacy ``mode: scan``'s own default-gating behavior.
+outright). Per that same amendment's 2026-09-11 update, this Action never
+injects a preset on the caller's behalf: the audit-gate exit axis
+(``policy/audit_gate_exit.py``, exit code ``3``) only activates when the
+caller explicitly passes ``severity-preset`` (any value but ``info-only``),
+same as a native ``compare --no-baseline`` invocation would. A caller
+migrating an audit-only ``mode: scan`` job that relied on the legacy,
+unconditional default gating must add ``severity-preset`` itself -- this is
+a *required* migration step, not something ``run.sh`` does for them.
 
 Driven through the *real* ``run.sh`` and the *real* ``abicheck`` binary
 against the committed G20 corpus fixtures
@@ -152,13 +156,37 @@ class TestAuditOnlyScanNoGatingFindings:
 
 
 class TestAuditOnlyScanGatingFindingNoExplicitPreset:
-    """(b) audit-only scan with a gating (API_BREAK-classified) finding and
-    no explicit severity-preset -> exit computed via the AUDIT_GATE axis
-    (3, or higher if another axis also fires via max-fold) -> Action
-    verdict output = AUDIT_GATE. Also (2) the injected `--severity-preset
-    default` reaches the underlying CLI at all (case148's own
-    header_build_context_mismatch finding gates only under a non-info-only
-    preset -- see tests/parity/test_no_baseline_audit_corpus_parity.py and
+    """(b) audit-only scan with a gating-*capable* (API_BREAK-classified)
+    finding but NO explicit severity-preset -> the audit-gate axis never
+    activates (it is opt-in, per ADR-068's 2026-09-11 amendment), so the
+    step stays exit 0 even though the same finding gates once a preset is
+    supplied (see TestAuditOnlyScanGatingFindingWithExplicitPreset below).
+    This is the migration trap the amendment names: a job that relies on
+    the default without also adding `severity-preset` silently stops
+    gating."""
+
+    @pytest.mark.parametrize("case_name", [_GATING_CASE, _GATING_CASE_2])
+    def test_gating_capable_finding_stays_exit_zero_without_a_preset(
+        self, tmp_path: Path, case_name: str
+    ) -> None:
+        outputs = _run_action(
+            tmp_path,
+            {"INPUT_NEW_LIBRARY": str(_snapshot_path(case_name))},
+        )
+        assert outputs["_returncode"] == 0, outputs
+        assert outputs.get("verdict") != "AUDIT_GATE", outputs
+        assert outputs.get("exit-code") == "0", outputs
+
+
+class TestAuditOnlyScanGatingFindingWithExplicitPreset:
+    """The same (b) shape, now WITH the caller explicitly opting in via
+    `severity-preset: default` -- this is the required migration step
+    (ADR-068's 2026-09-11 amendment) that restores legacy `mode: scan`'s
+    own default-gating behavior: exit computed via the AUDIT_GATE axis (3,
+    or higher if another axis also fires via max-fold) -> Action verdict
+    output = AUDIT_GATE (case148's own header_build_context_mismatch
+    finding gates only under a non-info-only preset -- see
+    tests/parity/test_no_baseline_audit_corpus_parity.py and
     policy/audit_gate_exit.py)."""
 
     @pytest.mark.parametrize("case_name", [_GATING_CASE, _GATING_CASE_2])
@@ -167,7 +195,10 @@ class TestAuditOnlyScanGatingFindingNoExplicitPreset:
     ) -> None:
         outputs = _run_action(
             tmp_path,
-            {"INPUT_NEW_LIBRARY": str(_snapshot_path(case_name))},
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(case_name)),
+                "INPUT_SEVERITY_PRESET": "default",
+            },
         )
         assert outputs["_returncode"] != 0, outputs
         assert outputs.get("verdict") == "AUDIT_GATE", outputs
@@ -180,9 +211,12 @@ class TestAuditOnlyScanRiskFindingDoesNotGate:
     case143's own accidental-export finding is RISK-classified
     (COMPATIBLE_WITH_RISK effective verdict), which the audit-gate axis
     explicitly must never gate on (policy/audit_gate_exit.py's own module
-    docstring names this exact case as the regression it guards against)."""
+    docstring names this exact case as the regression it guards against).
+    Exercised both without a preset (the axis is inactive at all) and with
+    one explicitly supplied (the axis is active but the RISK classification
+    itself is what keeps it from gating)."""
 
-    def test_risk_finding_does_not_gate_even_with_default_preset_injected(
+    def test_risk_finding_does_not_gate_without_a_preset(
         self, tmp_path: Path
     ) -> None:
         outputs = _run_action(
@@ -192,13 +226,27 @@ class TestAuditOnlyScanRiskFindingDoesNotGate:
         assert outputs["_returncode"] == 0, outputs
         assert outputs.get("verdict") != "AUDIT_GATE", outputs
 
+    def test_risk_finding_does_not_gate_even_with_an_explicit_preset(
+        self, tmp_path: Path
+    ) -> None:
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
+                "INPUT_SEVERITY_PRESET": "default",
+            },
+        )
+        assert outputs["_returncode"] == 0, outputs
+        assert outputs.get("verdict") != "AUDIT_GATE", outputs
+
 
 class TestAuditOnlyScanExplicitInfoOnlyPresetSuppressesGating:
     """(d) audit-only scan where the caller explicitly set
-    `severity-preset: info-only` -> injection must NOT override it, so
-    gating is suppressed (matches explicit user intent) even though it's a
-    `mode: scan` job -- legacy `scan` gated unconditionally, but the
-    translated path must honor an explicit opt-out."""
+    `severity-preset: info-only` -> the audit-gate axis stays inactive, so
+    gating is suppressed (matches explicit user intent) -- legacy
+    `mode: scan` gated unconditionally, but the replacement `mode: compare`
+    shape must honor an explicit opt-out the same way a bare no-preset
+    request already does."""
 
     def test_info_only_preset_keeps_a_gating_finding_at_exit_zero(
         self, tmp_path: Path
@@ -217,12 +265,11 @@ class TestAuditOnlyScanExplicitInfoOnlyPresetSuppressesGating:
 
 class TestAuditOnlyScanExplicitNonDefaultPresetIsHonored:
     """(e) audit-only scan where the caller explicitly set
-    `severity-preset: strict` -> injection must NOT override it, your
-    injected default must not stomp the caller's explicit choice (in this
-    case the observable behavior is identical to the injected default,
-    since `strict` -- like `default` -- opts the run into gating; the
-    point of this test is that the *caller's own value* reached the CLI,
-    not a silently-substituted one, which the next test proves directly)."""
+    `severity-preset: strict` -> the caller's own value reaches the CLI
+    unchanged and opts the run into gating (`strict`, like `default`, is
+    any-value-but-`info-only`), exactly as a two-sided compare's own
+    `--severity-preset` forwarding already works -- there is no special
+    audit-only injection path left to stomp it."""
 
     def test_explicit_strict_preset_still_gates_a_gating_finding(
         self, tmp_path: Path
@@ -239,14 +286,11 @@ class TestAuditOnlyScanExplicitNonDefaultPresetIsHonored:
         assert outputs.get("exit-code") == "3", outputs
 
     def test_explicit_preset_reaches_the_cli_unduplicated(self, tmp_path: Path) -> None:
-        # A stronger version of the test above: the caller's own explicit
-        # preset must appear on the assembled command line exactly once --
-        # never alongside a second, injected `default` occurrence (Click
-        # keeps only the last repeated flag, so a silent duplicate would
-        # either be harmless here or actively wrong depending on order;
-        # either way it is not what "don't override an explicit choice"
-        # means). Routed through the same dry-run preview `run.sh` itself
-        # supports, so this doesn't need a second live CLI invocation.
+        # The caller's own explicit preset must appear on the assembled
+        # command line exactly once -- a plain pass-through bug could still
+        # duplicate or drop it. Routed through the same dry-run preview
+        # `run.sh` itself supports, so this doesn't need a second live CLI
+        # invocation.
         outputs = _run_action(
             tmp_path,
             {
@@ -316,10 +360,15 @@ class TestAuditOnlyScanExitZeroVerdictNeverClaimsCompatible:
         self, tmp_path: Path
     ) -> None:
         # Sanity check that the new exit-0 verdicts don't leak into the
-        # existing exit-3 AUDIT_GATE path (case148, default preset).
+        # existing exit-3 AUDIT_GATE path (case148, with the required
+        # explicit severity-preset opt-in -- the axis is no longer active
+        # by default, see TestAuditOnlyScanGatingFindingNoExplicitPreset).
         outputs = _run_action(
             tmp_path,
-            {"INPUT_NEW_LIBRARY": str(_snapshot_path(_GATING_CASE))},
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_GATING_CASE)),
+                "INPUT_SEVERITY_PRESET": "default",
+            },
         )
         assert outputs.get("verdict") == "AUDIT_GATE", outputs
         assert outputs.get("exit-code") == "3", outputs

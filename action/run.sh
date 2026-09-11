@@ -1739,24 +1739,6 @@ _extra_args_has_dry_run_flag() {
   return 1
 }
 
-# Same shape again: does the user's own `extra-args` already carry
-# `--severity-preset`? ADR-068's 2026-09-10 amendment's audit-gate opt-in
-# means the audit-only `compare --no-baseline` shape (old-library/
-# abi-baseline both omitted) injects `--severity-preset default` whenever
-# the caller stated no preset of their own, to preserve the audit-gate's
-# documented default-gating behavior -- but a caller who already asked for
-# a preset via `extra-args` (rather than the dedicated `severity-preset`
-# input) must keep exactly the preset they asked for, `info-only`'s
-# explicit "don't gate" included, never silently overridden by the
-# injected default.
-_extra_args_has_severity_preset_flag() {
-  local _name _value
-  while IFS=$'\t' read -r _name _value; do
-    [[ "$_name" == "--severity-preset" ]] && return 0
-  done <<<"$(_extra_args_options)"
-  return 1
-}
-
 # Per ADR-068's re-scoping (`mode: scan` and its own CLI are both retired
 # outright), this Action keeps no compatible CLI-flag surface for
 # `extra-args` beyond `compare`'s own real option set: a flag `compare`
@@ -2839,23 +2821,17 @@ elif [[ "$MODE" == "compare" ]]; then
   # Severity configuration. Audit-only: --severity-preset is ALSO the
   # ADR-068 2026-09-10 amendment's audit-gate opt-in (`compare --no-baseline`
   # only gates on a candidate-side finding when a preset other than
-  # `info-only` is in effect) -- injecting `default` whenever the caller
-  # stated no preset of their own (neither the dedicated Action input nor an
-  # explicit `extra-args --severity-preset ...`) is what keeps legacy
-  # `mode: scan`'s own documented default-gating behavior intact across this
-  # migration; a caller who already asked for a preset (any value,
-  # `info-only` included) keeps exactly the preset they asked for. This
-  # injection applies ONLY to the audit-only shape -- a baseline compare
-  # fully controls its own --severity-preset, exactly as before.
-  if [[ "$_NO_BASELINE" == "true" ]]; then
-    if [[ -n "${INPUT_SEVERITY_PRESET:-}" ]] || _extra_args_has_severity_preset_flag; then
-      add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
-    else
-      CMD+=(--severity-preset default)
-    fi
-  else
-    add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
-  fi
+  # `info-only` is in effect). Unlike an earlier draft of this migration,
+  # this step never injects a preset on the caller's behalf: the ADR-068
+  # 2026-09-11 amendment states the audit-gate opt-in is the *caller's*
+  # migration step, not something `run.sh` does implicitly (a job that
+  # relied on legacy `mode: scan`'s own default gating must itself pass
+  # `severity-preset: default` when migrating -- see the amendment's
+  # "audit-gate trap" section). So this is the exact same pass-through as
+  # the baseline shape below: forward whatever preset the caller asked for
+  # (the dedicated input, `extra-args --severity-preset ...`, or neither),
+  # and change nothing else.
+  add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
   # rejected upstream for the audit-only shape (compare --no-baseline's
@@ -4294,8 +4270,10 @@ else
         # way exit `1` is shared between severity/coverage/assurance/scope
         # above), so no report-based disambiguation is needed here. This
         # arm is reached through the audit-only shape (old-library/
-        # abi-baseline both omitted), which injects `--severity-preset
-        # ...` per this file's own compare-command-assembly comment.
+        # abi-baseline both omitted) whenever the caller also opted in via
+        # `--severity-preset` (any value but `info-only`) -- the caller's
+        # own migration step per ADR-068's 2026-09-11 amendment, not
+        # something this file injects.
         # This is NOT a two-sided compatibility verdict: an audit reports no
         # `changes`/compatibility verdict at all (ADR-068 D2) -- the axis
         # only says a real, BREAKING/API_BREAK-classified candidate-side
