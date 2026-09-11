@@ -563,17 +563,30 @@ class RttiNote:
 
 
 def render_rtti_note(note: RttiNote | None) -> list[str]:
+    """Render the symbol-shape breakdown of the breaking set: counts, then stop.
+
+    It used to call these findings "not public-API breaks" and the remainder
+    the "genuine public-surface" count -- a claim name shape cannot support,
+    which told users to disregard real breaks (a vtable layout change on a
+    public, user-derivable class is one). Contract membership is ADR-049's
+    question. Bug class ``classification.name_shape_as_contract_membership``.
+    """
     if note is None:
         return []
     return [
-        f"> ℹ️ **{note.rtti + note.internal} of {note.total} breaking findings are "
-        f"internal/RTTI churn** ({note.rtti} RTTI, {note.internal} "
-        "internal-namespace) — typically a missing `-fvisibility=hidden`, not "
-        f"public-API breaks. Genuine public-surface breaking findings: "
-        f"**{note.public}**.",
+        f"> \u2139\ufe0f **Breaking findings by symbol shape:** {note.rtti} RTTI/vtable "
+        f"artifact(s), {note.internal} in an internal-namespace-by-convention, "
+        f"{note.public} other, of {note.total} total.",
+        ">",
+        "> This is how the symbols are *spelled*, not what is in the public "
+        "contract \u2014 a vtable or typeinfo change for a public, user-derivable "
+        "class is a genuine public ABI break, and the internal-namespace count "
+        "assumes a convention this library may not follow. Churn here *can* mean "
+        "a missing `-fvisibility=hidden`, but this breakdown alone does not "
+        "establish that; run with `--contract` to classify findings against a "
+        "resolved contract instead.",
         "",
     ]
-
 
 # ---------------------------------------------------------------------------
 # Analysis confidence section

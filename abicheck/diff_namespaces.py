@@ -62,10 +62,16 @@ if TYPE_CHECKING:
 # Namespace segments that mark a declaration as "not yet promised stable".
 # Matched as a whole segment between ``::``; substring matches inside
 # identifiers like ``ExperimentalView`` are intentionally not flagged.
+#
+# ``v0`` is deliberately NOT here: a version segment states which version of the
+# API a declaration belongs to, not what is promised about it, and inline-
+# versioned public APIs (``namespace v0``) are a widespread way to spell a
+# library's *current public* API. A project that does mean it that way states it
+# via a ``--policy`` document's ``experimental_namespaces:`` key (threaded
+# through ``PipelineContext``). See docs/use/policies.md.
 DEFAULT_EXPERIMENTAL_NAMESPACES: tuple[str, ...] = (
     "experimental",
     "preview",
-    "v0",
 )
 
 

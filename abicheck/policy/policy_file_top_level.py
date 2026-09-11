@@ -62,6 +62,7 @@ KNOWN_POLICY_FILE_KEYS = frozenset(
         "reclassify",
         "frozen_namespaces",
         "internal_namespaces",
+        "experimental_namespaces",
         "evidence_policy",
         "versioning",
         "acknowledgment",

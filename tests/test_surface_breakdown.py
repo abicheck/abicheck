@@ -87,9 +87,16 @@ class TestReporterSurfacing:
 
     def test_markdown_banner_present_with_churn(self):
         md = to_markdown(self._churny_result())
-        assert "internal/RTTI churn" in md
-        assert "3 of 4 breaking findings" in md
-        assert "Genuine public-surface breaking findings: **1**" in md
+        assert "Breaking findings by symbol shape:" in md
+        assert "2 RTTI/vtable artifact(s)" in md
+        assert "1 in an internal-namespace-by-convention" in md
+        assert "1 other, of 4 total" in md
+        # The note must not tell the user these are not public-API breaks:
+        # a vtable change on a public, user-derivable class is one. See
+        # render_rtti_note's docstring.
+        assert "not public-API breaks" not in md
+        assert "Genuine public-surface" not in md
+        assert "--contract" in md
 
     def test_json_breakdown_present_with_churn(self):
         d = json.loads(to_json(self._churny_result()))

@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import pytest
 
+from abicheck.model.symbol_ownership import (
+    has_internal_namespace_component,
+    symbol_origin,
+)
 from abicheck.name_classification import (
     ITANIUM_RTTI_PREFIXES,
     LOCAL_RTTI_PREFIXES,
     RTTI_DATA_PREFIXES,
-    has_internal_namespace_component,
     is_abi_surface_type_name,
     is_compiler_internal_type,
     is_cxx_runtime_library,
@@ -29,7 +32,6 @@ from abicheck.name_classification import (
     is_non_abi_surface_type,
     is_rtti_symbol,
     is_stdlib_local_name_symbol,
-    symbol_origin,
 )
 
 
@@ -198,10 +200,38 @@ def test_is_stdlib_local_name_symbol_false(name: str) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["_ZN4daal8internal3FooEv", "_ZN3lib6detail4implE", "_ZN3lib8__detailE", "_ZN3lib5_implE"],
+    [
+        "_ZN4daal8internal3FooEv",
+        "_ZN3lib6detail4implE",
+        # Previously spelled "_ZN3lib8__detailE"/"_ZN3lib5_implE" -- degenerate
+        # strings with no entity after the namespace, so the internal segment
+        # was the *leaf*. The predicate now answers "is the owning scope
+        # internal", under which a leaf named `__detail` is a public entity
+        # that happens to share the name. Given a real entity inside those
+        # namespaces, they match as before.
+        "_ZN3lib8__detail3fooEv",
+        "_ZN3lib5_impl3fooEv",
+    ],
 )
 def test_internal_namespace_component(name: str) -> None:
     assert has_internal_namespace_component(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # A parameter type in an internal namespace never makes the function
+        # itself internal: svs::consume(const svs::detail::Token&).
+        "_ZN3svs7consumeERKNS_6detail5TokenE",
+        # An entity *named* like an internal namespace is not *in* one.
+        "_ZN3lib8__detailEv",
+        "_ZN3lib5_implEv",
+    ],
+)
+def test_internal_namespace_component_only_considers_owning_scope(name: str) -> None:
+    """See tests/test_symbol_origin_ownership_properties.py for the generated
+    form of this invariant."""
+    assert not has_internal_namespace_component(name)
 
 
 def test_internal_substring_not_matched_without_length_prefix() -> None:

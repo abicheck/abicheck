@@ -1295,7 +1295,7 @@ class DetectNamespacePatterns:
             detect_namespace_patterns,
         )
 
-        namespaces = self._experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
+        namespaces = self._experimental_namespaces or ctx.experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
         new_findings = detect_namespace_patterns(
             ctx.old,
             ctx.new,
@@ -1685,6 +1685,7 @@ class PostProcessingPipeline:
         # for scope_to_public_surface would instead bind `True` here and
         # leave scoping disabled, with no error).
         internal_namespaces: tuple[str, ...] | None = None,
+        experimental_namespaces: tuple[str, ...] | None = None,
         # ADR-067 C-S1: appended last for the same positional-safety reason
         # the note above records.
         disposition_ledger: DispositionLedger | None = None,
@@ -1696,6 +1697,7 @@ class PostProcessingPipeline:
             suppression=suppression,
             frozen_namespaces=list(frozen_namespaces or []),
             internal_namespaces=internal_namespaces,
+            experimental_namespaces=experimental_namespaces,
             scope_to_public_surface=scope_to_public_surface,
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,

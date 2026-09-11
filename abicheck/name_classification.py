@@ -61,8 +61,6 @@ __all__ = [
     "is_local_rtti_symbol",
     "is_local_name_symbol",
     "is_stdlib_local_name_symbol",
-    "has_internal_namespace_component",
-    "symbol_origin",
     "COMPILER_INTERNAL_TYPES",
     "is_compiler_internal_type",
     "is_non_abi_surface_type",
@@ -73,9 +71,9 @@ __all__ = [
     "STDLIB_TYPE_NAMESPACE_PREFIXES",
 ]
 
-# This module has no intra-package imports on purpose: it sits at the bottom of
-# the dependency graph so any module can import it without risking a cycle. Keep
-# it dependency-free.
+# This module has no *import-time* intra-package imports on purpose: it sits at
+# the bottom of the dependency graph so any module can import it without risking
+# a cycle. Keep it dependency-free.
 
 # Generic RTTI artifact prefixes (Itanium ABI): vtables, VTT, typeinfo
 # objects/names, and virtual/covariant thunks. Churn in these mirrors churn in
@@ -366,31 +364,12 @@ def is_stdlib_local_name_symbol(name: str) -> bool:
     return bool(_STDLIB_LOCAL_NAME_RE.match(name))
 
 
-def has_internal_namespace_component(name: str) -> bool:
-    """Return True if *name* contains a conventional internal-namespace component.
-
-    Used by :func:`symbol_origin`; also exposed as a building block for the
-    planned report view-model (C2) and the ``model.py`` split (C10).
-    """
-    return any(comp in name for comp in INTERNAL_NAMESPACE_COMPONENTS)
-
-
-def symbol_origin(symbol: str) -> str:
-    """Best-effort origin of a (usually mangled) symbol.
-
-    Returns ``"rtti"``, ``"internal"`` or ``"public"``. RTTI is checked first:
-    an RTTI symbol for an internal type (e.g. ``_ZTIN4daal8internal3FooE``)
-    classifies as ``"rtti"``, mirroring the historical behaviour.
-
-    Used to explain why a large C++ ``breaking`` count is dominated by churn in
-    RTTI artifacts or internal-namespace symbols rather than genuine public-API
-    breaks (a common pattern in libraries built without ``-fvisibility=hidden``).
-    """
-    if is_rtti_symbol(symbol):
-        return "rtti"
-    if has_internal_namespace_component(symbol):
-        return "internal"
-    return "public"
+# ``symbol_origin`` and ``has_internal_namespace_component`` used to live here.
+# They moved to ``model/symbol_ownership.py``: answering "which scope *owns*
+# this symbol" is not a name-shape question and needs the real Itanium
+# nested-name parser, which this deliberately dependency-free module must not
+# import. Re-exporting them back here would make that a cycle, so importers
+# name the owning module directly.
 
 
 # ---------------------------------------------------------------------------
