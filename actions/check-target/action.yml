@@ -664,12 +664,44 @@ runs:
       run: |
         set -euo pipefail
         PY="$(command -v python3 || command -v python)"
-        "$PY" - <<'PYSCRIPT'
+        # Security (Codex review): this step's Python previously launched
+        # directly from the workspace checkout. Python's own `site`
+        # processing auto-imports any `sitecustomize.py`/`usercustomize.py`
+        # reachable from CWD/PYTHONPATH during interpreter STARTUP -- before
+        # this heredoc's own body ever runs -- including one a PR author
+        # committed into this untrusted checkout. Since this whole step is
+        # itself driven by a project's own `.abicheck.yml`
+        # `checks[].analysis.assurance: complete` setting, a PR that plants a
+        # top-level `sitecustomize.py` and declares that config value would
+        # get arbitrary code execution here. Mirrors action/run.sh's own
+        # `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` mitigation exactly: a fresh,
+        # private, empty temp directory (never the untrusted checkout) as
+        # CWD, with `PYTHONPATH` cleared for this one invocation, so the
+        # checkout is never on `sys.path` at any point during interpreter
+        # startup. Fails loud if a private directory can't be created,
+        # rather than silently falling back to a shared one.
+        _real_pwd="$PWD"
+        if ! _py_safe_dir="$(mktemp -d)"; then
+          echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helper without risking the checked-out repository shadowing the installed package."
+          exit 1
+        fi
+        trap 'rm -rf "$_py_safe_dir"' EXIT
+        _base_config_abs=""
+        if [[ -n "${BASE_CONFIG:-}" ]]; then
+          case "$BASE_CONFIG" in
+            /*) _base_config_abs="$BASE_CONFIG" ;;
+            *) _base_config_abs="$_real_pwd/$BASE_CONFIG" ;;
+          esac
+        fi
+        (cd "$_py_safe_dir" \
+         && ABICHECK_BASE_CONFIG="$_base_config_abs" \
+            ABICHECK_OUT_PATH="$_real_pwd/check-target-assurance-config.yml" \
+            PYTHONPATH= "$PY" - <<'PYSCRIPT'
         import os
 
         import yaml
 
-        base_path = os.environ.get("BASE_CONFIG", "")
+        base_path = os.environ.get("ABICHECK_BASE_CONFIG", "")
         data: dict = {}
         if base_path:
             with open(base_path, encoding="utf-8") as fh:
@@ -706,9 +738,10 @@ runs:
         # one field this overlay exists to set.
         assurance["require_complete"] = True
         data["assurance"] = assurance
-        with open("check-target-assurance-config.yml", "w", encoding="utf-8") as fh:
+        with open(os.environ["ABICHECK_OUT_PATH"], "w", encoding="utf-8") as fh:
             yaml.safe_dump(data, fh, sort_keys=False)
         PYSCRIPT
+        )
 
     - name: Clean stale analysis output
       shell: bash

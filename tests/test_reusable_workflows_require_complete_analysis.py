@@ -268,3 +268,48 @@ class TestAssuranceOverlayGenerationExecuted:
         result = self._run(tmp_path, "- just\n- a\n- list\n")
         assert result.returncode != 0
         assert "::error::" in result.stderr
+
+
+class TestAssuranceOverlayGenerationIsIsolated:
+    """Finding 1 (P1, SECURITY, PR #1222 Codex review): the "Generate
+    assurance-overlay config" step used to launch Python directly against
+    the workspace checkout, with no CWD/PYTHONPATH isolation. Python's own
+    ``site`` processing auto-imports a discoverable ``sitecustomize.py``
+    during interpreter STARTUP -- before this step's own heredoc body ever
+    runs a single line -- so a PR that plants a top-level
+    ``sitecustomize.py`` and declares ``checks[].analysis.assurance:
+    complete`` in its own project config got arbitrary code execution in
+    this Action's context. Fixed by mirroring ``action/run.sh``'s own
+    ``$_PY_SAFE_DIR``/cleared-``PYTHONPATH`` mitigation exactly (see
+    ``tests/test_action_run_sh_py_safe_path.py`` for the same
+    sitecustomize-does-not-execute pattern proven against that script's own
+    inline-Python invocations)."""
+
+    def _run(self, tmp_path: Path) -> Any:
+        workspace = make_workspace(tmp_path)
+        (workspace / "sitecustomize.py").write_text(
+            "import pathlib\n"
+            "pathlib.Path(__file__).with_name('PWNED').write_text('pwned')\n",
+            encoding="utf-8",
+        )
+        return run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+
+    def test_a_checkout_planted_sitecustomize_does_not_execute(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._run(tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert not (result.workspace / "PWNED").exists()
+
+    def test_the_step_still_produces_its_real_output_despite_isolation(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: isolation must not be a silent no-op that
+        also breaks the step's own real job."""
+        result = self._run(tmp_path)
+        written = yaml.safe_load(
+            (result.workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written == {"assurance": {"require_complete": True}}
