@@ -7989,11 +7989,23 @@ violations, blocked" pattern this ADR's other gaps already use for
   compatibility half. No single classification — `extract` included, this
   entry's own earlier revision wrongly proposed — can be correct while
   both halves stay in one file, since `compare`'s and `policy`'s
-  `may_import` never include `extract`. The real fix is an internal split
-  (rollup functions to `extract`, the compatibility-check functions to a
-  layer both `compare` and `policy` can reach), not a caller-side wrapper
-  and not a single blocked-migrate target; recorded here as its own shape
-  rather than forced into either bucket above.
+  `may_import` never include `extract`. Splitting the file is necessary
+  but not sufficient on its own: the compatibility half's natural owner is
+  `compare` (it's an old/new pairwise comparison rule, the same shape as
+  `source_diff.py`'s own responsibility — `model` would mis-own it, since
+  `model` holds entities/values, not comparison algorithms), but
+  `inputs_validate.py` itself is `extract`-classified and calls
+  `check_fact_set_compatibility` directly; `extract`'s `may_import` is
+  `model`/`storage` only, so moving the compatibility half to `compare`
+  would immediately turn `inputs_validate.py`'s own call into a new,
+  forbidden `extract -> compare` edge. The real fix therefore has two
+  parts, not one: the internal split (rollup functions to `extract`, the
+  compatibility-check functions to `compare`) *and* moving or interposing
+  `inputs_validate.py`'s own call site (e.g. routing it through a
+  `workflows`-owned caller, the same pattern this ADR's caller-forced
+  entries already use) — a combination neither the caller-forced nor the
+  self-dependency shape above covers on its own, and not a single
+  blocked-migrate target either; recorded here as its own third shape.
 - `abicheck/compat/descriptor.py` (target: `extract` — ABICC XML
   descriptor parsing, the same shape as the already-`extract`-classified
   `compat/abicc_dump_import.py`) — blocked because `abicheck/compat/cli.py`
@@ -8025,23 +8037,36 @@ violations, blocked" pattern this ADR's other gaps already use for
   facade (its own docstring: "Back-compat facade: source-graph values/
   construction/comparison split"), not a real implementation module. Every
   name it used to define now lives in already-classified siblings
-  (`model.graph_facts`/`model.source_graph` for values, `extract`-classified
-  `source_graph_build.py`/`source_graph_build_source_abi.py`/
-  `source_graph_query.py` for construction, `compare`-classified
-  `source_graph_compare.py` for comparison); this module only re-exports
-  those names (`X as X`) so a pre-existing `from .source_graph import ...`
-  call site keeps resolving. No internal first-party module actually
-  imports it any more (every real internal caller already imports the
-  split-out siblings directly) — it exists purely for external/legacy
-  callers. Classifying it `workflows` (as an earlier version of this
-  change did) would misstate its responsibility: it coordinates nothing,
-  and giving a pure re-export facade a real layer identity is exactly the
-  kind of false ownership this ADR's facade rules (root-level
-  `public_root_surfaces`/`facades`) exist to prevent elsewhere — this
-  module is simply nested, so that schema doesn't reach it. Root-level
-  `architecture/modules.yaml` facade tracking is schema-limited the same
-  way `dispositions.yaml` is (root paths only), which is why this is
-  recorded here rather than there.
+  (`model.graph_facts`/`model.source_graph`/the now-`model`-classified
+  `source_graph_query.py` for values, `extract`-classified
+  `source_graph_build.py`/`source_graph_build_source_abi.py` for
+  construction, `compare`-classified `source_graph_compare.py` for
+  comparison); this module only re-exports those names (`X as X`) so a
+  pre-existing `from .source_graph import ...` call site keeps resolving.
+  No internal first-party module actually imports it any more (every real
+  internal caller already imports the split-out siblings directly) — it
+  exists purely for external/legacy callers. Classifying it `workflows`
+  (as an earlier version of this change did) would misstate its
+  responsibility: it coordinates nothing, and giving a pure re-export
+  facade a real layer identity is exactly the kind of false ownership
+  this ADR's `facades` mechanism exists to prevent elsewhere. Unlike
+  `dispositions.yaml`, `architecture/modules.yaml`'s `facades` list is
+  **not** root-path-limited — `check_architecture.py` resolves each entry
+  as `facade.replace(".", "/") + ".py"`, which reaches a nested module
+  like `abicheck.buildsource.source_graph` just as well (verified: adding
+  it there and running `check_architecture.py` does invoke
+  `_check_facade` against it). The real reason it isn't registered there
+  is that it doesn't satisfy that check's stricter delegation-only rules:
+  it has no `__all__`, and it carries a real `__getattr__` function body
+  (a deliberate, documented lazy import breaking a real
+  `source_graph -> source_graph_findings -> source_graph` cycle the
+  AI-readiness gate would otherwise reject) — trial-registering it
+  produces exactly those two `facade-exports`/`facade-logic` findings.
+  Making it pass would mean removing that cycle-breaking `__getattr__` or
+  restructuring the module, a real code change out of scope for this
+  docs-only pass. Recorded here as a retained, deliberately-unclassified
+  exception instead, with the concrete blocking findings named rather
+  than asserted.
 - `abicheck/impact/model.py` — the identical shape gap B already
   established for `checker_policy.py`/`contract_gating.py`/`reclassify.py`:
   `abicheck/checker_types.py` (`model`, whose `may_import` is empty)
