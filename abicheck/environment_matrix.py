@@ -61,6 +61,7 @@ other layer may import — the layer's own comment names the one dependency
 """
 from __future__ import annotations
 
+import copyreg
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -73,9 +74,73 @@ from .model.dotted_version import parse_dotted_numeric_version
 log = logging.getLogger(__name__)
 
 
-@dataclass
+def _make_mapping_proxy(data: dict[str, str]) -> MappingProxyType[str, str]:
+    """Reconstruct a ``MappingProxyType`` from pickled/deep-copied state.
+
+    The actual reconstruction callable a ``copyreg`` reducer names must
+    itself be importable by (module, qualified name) -- ``MappingProxyType``
+    fails that on CPython: its ``__module__`` reports ``"builtins"`` but
+    ``builtins.mappingproxy`` is not an attribute pickle can look up
+    (``PicklingError: attribute lookup mappingproxy on builtins failed``),
+    a genuine CPython quirk, not something specific to this module. A
+    plain wrapper function defined here (a real, importable module-level
+    name) sidesteps it.
+    """
+    return MappingProxyType(data)
+
+
+def _reduce_mapping_proxy(
+    proxy: MappingProxyType[str, str],
+) -> tuple[Any, tuple[dict[str, str]]]:
+    """``copyreg`` reducer for ``types.MappingProxyType`` (Codex review, P2,
+    Finding 2).
+
+    Python's stdlib registers no pickle support for ``MappingProxyType`` at
+    all -- ``pickle.dumps(types.MappingProxyType({}))`` raises ``TypeError:
+    cannot pickle 'mappingproxy' object`` unconditionally, and
+    ``copy.deepcopy`` for a plain object with no ``__deepcopy__`` falls back
+    to the identical ``__reduce_ex__``/``copyreg.dispatch_table`` machinery
+    pickling uses, so it hits the same error. That is the *actual* root
+    cause behind ``EnvironmentMatrix.runtime_floors`` (a ``MappingProxyType``
+    since the immutability fix above) breaking ``copy.deepcopy``,
+    ``pickle.dumps``/``loads``, and a direct ``dataclasses.asdict()`` call
+    over this now-embeddable-in-``CompareRequest`` type (``asdict()``
+    recurses field-by-field and falls back to ``copy.deepcopy`` for any
+    field value it does not otherwise recognize as a dataclass/namedtuple/
+    list/tuple/dict -- a bare ``Mapping``-typed proxy is none of those).
+
+    Registered once, at import time, for the type itself (``copyreg.
+    dispatch_table`` -- consulted by both ``pickle`` and ``copy.deepcopy``)
+    rather than adding a custom ``__getstate__``/``__setstate__`` pair to
+    :class:`EnvironmentMatrix` alone: a per-class override would still leave
+    a *direct* ``dataclasses.asdict()`` call broken (it deep-copies each
+    field's raw value, never consulting the *containing* dataclass's own
+    pickle/copy protocol methods at all), and would need to be duplicated
+    onto any future dataclass that also freezes a mapping field this way.
+    Fixing the type once here is strictly additive: nothing in this
+    process previously depended on a ``MappingProxyType`` *failing* to
+    pickle/deep-copy.
+    """
+    return _make_mapping_proxy, (dict(proxy),)
+
+
+copyreg.pickle(MappingProxyType, _reduce_mapping_proxy)
+
+
+@dataclass(frozen=True)
 class SyclConstraints:
-    """SYCL-specific deployment constraints."""
+    """SYCL-specific deployment constraints.
+
+    Codex review, P2 (Finding 3): genuinely ``frozen=True`` now, not just a
+    frozen *collection* field on an otherwise-mutable dataclass -- plain
+    attribute reassignment (``constraints.implementation = "x"``) used to
+    silently change this object's hash out from under a dict/set it was
+    already inserted into, the same hash-invariant violation the
+    ``backends`` tuple-freeze below was fixing for collection fields alone.
+    ``__post_init__`` uses ``object.__setattr__`` to set the frozen
+    ``backends`` field once, which is the standard pattern for a frozen
+    dataclass that still needs to normalize a field at construction time.
+    """
 
     implementation: str = ""              # "dpcpp" | "adaptivecpp"
     backends: tuple[str, ...] = field(default_factory=tuple)  # ("level_zero", "opencl")
@@ -95,7 +160,7 @@ class SyclConstraints:
         # accepts an already-`tuple` input unchanged, so this is idempotent
         # across repeated construction (e.g. a caller round-tripping an
         # existing instance's own `backends` back into the constructor).
-        self.backends = tuple(self.backends)
+        object.__setattr__(self, "backends", tuple(self.backends))
 
     def __hash__(self) -> int:
         # `backends` is already a tuple post-`__post_init__`, so no
@@ -103,9 +168,13 @@ class SyclConstraints:
         return hash((self.implementation, self.backends, self.min_pi_version))
 
 
-@dataclass
+@dataclass(frozen=True)
 class CudaConstraints:
-    """CUDA-specific deployment constraints (placeholder for future use)."""
+    """CUDA-specific deployment constraints (placeholder for future use).
+
+    ``frozen=True`` for the same reason as :class:`SyclConstraints` above
+    (Codex review, P2, Finding 3).
+    """
 
     gpu_architectures: tuple[str, ...] = field(
         default_factory=tuple
@@ -118,7 +187,7 @@ class CudaConstraints:
         # See `SyclConstraints.__post_init__` above for why this freezes
         # `gpu_architectures` into a `tuple` rather than merely hashing a
         # `tuple(...)` projection of a still-mutable `list`.
-        self.gpu_architectures = tuple(self.gpu_architectures)
+        object.__setattr__(self, "gpu_architectures", tuple(self.gpu_architectures))
 
     def __hash__(self) -> int:
         # `gpu_architectures` is already a tuple post-`__post_init__`.
@@ -325,7 +394,7 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
     return runtime_floors
 
 
-@dataclass
+@dataclass(frozen=True)
 class EnvironmentMatrix:
     """Declared deployment constraints — shared across SYCL, CUDA, etc.
 
@@ -385,14 +454,22 @@ class EnvironmentMatrix:
         ``sycl``/``cuda`` freeze their own ``list`` fields the same way in
         their own ``__post_init__``.
 
-        This stays a plain (non-frozen) dataclass rather than
-        ``@dataclass(frozen=True)``: nothing here needs attribute
-        *reassignment* blocked (only the containers' own mutability
-        mattered), and a plain dataclass lets this method run post-init
-        without ``object.__setattr__`` boilerplate.
+        Codex review, P2 (Finding 3): this class is now genuinely
+        ``@dataclass(frozen=True)`` -- freezing only the mutable-looking
+        *collection* fields (this method's original job) left ordinary
+        attribute reassignment (``matrix.target_os = "windows"``) able to
+        change this object's hash out from under a dict/set it was already
+        inserted into, the exact same hash-invariant violation the
+        collection freeze above was fixing for ``compilers``/
+        ``runtime_floors`` alone. ``object.__setattr__`` is the standard
+        pattern for a frozen dataclass's own ``__post_init__`` to set a
+        field once (ordinary ``self.x = ...`` would raise
+        ``FrozenInstanceError`` here).
         """
-        self.compilers = tuple(self.compilers)
-        self.runtime_floors = MappingProxyType(dict(self.runtime_floors))
+        object.__setattr__(self, "compilers", tuple(self.compilers))
+        object.__setattr__(
+            self, "runtime_floors", MappingProxyType(dict(self.runtime_floors))
+        )
 
     def __hash__(self) -> int:
         """A structural hash over a hashable projection of every field.
@@ -481,6 +558,31 @@ class EnvironmentMatrix:
             target_arch=data.get("target_arch"),
         )
 
+    @classmethod
+    def from_dict_or_none(
+        cls, data: object, *, strict: bool = False
+    ) -> EnvironmentMatrix | None:
+        """Parse an *optional* embedded block, e.g. ``.abicheck.yml``'s
+        ``deployment:`` key (:mod:`abicheck.buildsource.build_config`).
+
+        Returns ``None`` when *data* is absent or not a mapping -- the
+        config-key "unset" state -- instead of raising; a present-but-wrong
+        *type* (a list, a string, ...) is still a genuine schema error, which
+        is exactly what ``build_config_schema.deployment_findings()`` checks
+        for and reports as a usage error before this is ever called.
+        :meth:`from_dict` itself still raises on a *malformed dict*.
+
+        This is the "is there one at all" glue every embedding caller would
+        otherwise duplicate around a bare :meth:`from_dict` call -- moved
+        here (rather than staying a few lines of ``isinstance`` glue inside
+        ``BuildConfig.from_dict``) per this file's own architecture-debt
+        entry (``architecture/debt.yaml``): a property of the *matrix's own
+        parse*, not something a caller should re-derive.
+        """
+        if not isinstance(data, dict):
+            return None
+        return cls.from_dict(data, strict=strict)
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to the ``EnvironmentMatrix`` YAML/dict shape.
 
@@ -531,6 +633,18 @@ class EnvironmentMatrix:
         if self.target_arch is not None:
             out["target_arch"] = self.target_arch
         return out
+
+    @staticmethod
+    def dump_or_empty(matrix: EnvironmentMatrix | None) -> dict[str, Any]:
+        """:meth:`to_dict` for an *optional* matrix -- ``{}`` when unset.
+
+        The serialization-side counterpart of :meth:`from_dict_or_none`
+        above: ``BuildConfig``'s own ``deployment:`` block round-trips a
+        ``self.deployment: EnvironmentMatrix | None`` field, and this is the
+        one-line glue that used to be its own private ``_deployment_block``
+        method there.
+        """
+        return {} if matrix is None else matrix.to_dict()
 
     @classmethod
     def from_yaml(cls, path: Path) -> EnvironmentMatrix:
