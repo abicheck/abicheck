@@ -471,18 +471,6 @@ class BuildConfig:
         return _subkey_type_findings(key, sub, sub_value)
 
     @classmethod
-    def _deployment_findings(cls, value: object) -> list[str]:
-        """Type findings for ``deployment:`` -- delegates to
-        ``build_config_schema.deployment_findings``, the same shape
-        ``_subkey_findings`` above delegates to ``subkey_findings`` (see that
-        module's own docstring for why this validation lives there now, not
-        here: ``environment_matrix.py`` was reclassified ``model`` in
-        ``architecture/modules.yaml``, which is exactly the one extra layer
-        ``build_config_schema.py``'s ``extract`` classification may import).
-        """
-        return _deployment_type_findings(value)
-
-    @classmethod
     def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:
         """Type findings for one recognized top-level *block* key."""
         if value is None:
@@ -516,7 +504,14 @@ class BuildConfig:
                 findings.append(f"unknown .abicheck.yml key {key!r}")
                 continue
             if key == "deployment":
-                findings += cls._deployment_findings(value)
+                # ``environment_matrix.py`` was reclassified ``model`` in
+                # ``architecture/modules.yaml`` (ADR-061), which is exactly
+                # the one extra layer ``build_config_schema.py``'s
+                # ``extract`` classification may import -- so its own
+                # ``deployment_findings()`` is called directly here, the same
+                # module ``_subkey_findings`` above delegates to for every
+                # other block's own subkey type table.
+                findings += _deployment_type_findings(value)
                 continue
             known_block = cls._KNOWN_BLOCK_KEYS.get(key)
             if known_block is None:
@@ -665,11 +660,7 @@ class BuildConfig:
                 else 0
             ),
             policy_overrides=_parse_policy_overrides(policy),
-            deployment=(
-                EnvironmentMatrix.from_dict(deployment_raw, strict=True)
-                if isinstance(deployment_raw, dict)
-                else None
-            ),
+            deployment=EnvironmentMatrix.from_dict_or_none(deployment_raw, strict=True),
         )
 
     def _build_block(self) -> dict[str, Any]:
@@ -823,13 +814,6 @@ class BuildConfig:
             release["support_promise"] = self.release_support_promise
         return release
 
-    def _deployment_block(self) -> dict[str, Any]:
-        """``deployment:`` block -- the embedded ``EnvironmentMatrix`` shape
-        (empty when unset)."""
-        if self.deployment is None:
-            return {}
-        return self.deployment.to_dict()
-
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -855,7 +839,7 @@ class BuildConfig:
             ("release", self._release_block()),
             ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
             ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
-            ("deployment", self._deployment_block()),  # keys on is-not-None: empty != absent
+            ("deployment", EnvironmentMatrix.dump_or_empty(self.deployment)),  # keys on is-not-None: empty != absent
         ):
             if (self.deployment is not None) if key == "deployment" else block:
                 out[key] = block
