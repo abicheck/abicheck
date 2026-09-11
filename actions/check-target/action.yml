@@ -653,8 +653,10 @@ runs:
     # stale analysis output" so that step still runs immediately before
     # "Run analysis" (tests/test_action_check_target.py pins that adjacency
     # so no other step can write check-target-analysis.json in between) --
-    # this step writes a different file (check-target-assurance-config.yml)
-    # and does not need that same adjacency guarantee.
+    # this step writes to a private `mktemp`-created file under
+    # `$RUNNER_TEMP` (forwarded to "Run analysis" as this step's own
+    # `config-path` output, see below) rather than a fixed in-checkout name,
+    # so it does not need that same adjacency guarantee.
     - name: Generate assurance-overlay config
       id: assurance_overlay
       if: inputs.analysis-assurance-complete == 'true'
@@ -687,6 +689,37 @@ runs:
           exit 1
         fi
         trap 'rm -rf "$_py_safe_dir"' EXIT
+        # Security (Codex review, second finding): the overlay's OUTPUT file
+        # must NOT be a predictable path inside the untrusted checkout
+        # (`$_real_pwd/check-target-assurance-config.yml`, as this used to
+        # read) -- a malicious PR can commit a SYMLINK at exactly that path
+        # pointing anywhere the runner user can write (e.g. a dotfile, or a
+        # sibling job's workspace), and the plain `open(path, "w")` below
+        # would follow it and overwrite whatever it points to with
+        # attacker-influenced YAML. This is independent of the
+        # sitecustomize.py fix above -- that one is about what code runs
+        # during interpreter startup, this one is purely about where the
+        # write lands. Mirrors action/run.sh's own established convention
+        # for a config overlay it doesn't trust the destination of (see
+        # `_COMPILE_CONTEXT_CONFIG_OVERLAY`/`_RELEASE_TOPOLOGY_CONFIG_OVERLAY`
+        # and `_mktemp_canonical`): a `mktemp`-created file under
+        # `$RUNNER_TEMP` has a runtime-random name nothing in the checkout
+        # could have pre-planted a symlink at, and `mktemp` itself creates
+        # the file atomically (O_EXCL-equivalent), so there is no window in
+        # which a symlink could already occupy that exact path -- unlike
+        # `$_py_safe_dir` above (whose whole lifetime is scoped to, and
+        # removed at the end of, this one step's `trap`), this file must
+        # outlive the step for "Run analysis" below to read it, so it gets
+        # its own `mktemp` under `$RUNNER_TEMP` rather than reusing
+        # `$_py_safe_dir`. `$RUNNER_TEMP` is documented by GitHub Actions to
+        # already be an absolute path, but resolve it defensively the same
+        # way `_mktemp_canonical` does, in case a self-hosted runner ever
+        # configures `TMPDIR`/`RUNNER_TEMP` as a relative value.
+        _assurance_out_path="$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-check-target-assurance-config.XXXXXX")"
+        case "$_assurance_out_path" in
+          /*) : ;;
+          *) _assurance_out_path="$PWD/$_assurance_out_path" ;;
+        esac
         _base_config_abs=""
         if [[ -n "${BASE_CONFIG:-}" ]]; then
           case "$BASE_CONFIG" in
@@ -697,7 +730,7 @@ runs:
         (cd "$_py_safe_dir" \
          && ABICHECK_BASE_CONFIG="$_base_config_abs" \
             ABICHECK_DISCOVER_START="$_real_pwd" \
-            ABICHECK_OUT_PATH="$_real_pwd/check-target-assurance-config.yml" \
+            ABICHECK_OUT_PATH="$_assurance_out_path" \
             PYTHONPATH= "$PY" - <<'PYSCRIPT'
         import os
         from pathlib import Path
@@ -772,6 +805,11 @@ runs:
             yaml.safe_dump(data, fh, sort_keys=False)
         PYSCRIPT
         )
+        # Forward the ABSOLUTE path of the freshly-`mktemp`-created file
+        # (never the old in-checkout relative name) to "Run analysis" below,
+        # which reads it back out as this step's own output rather than a
+        # path re-derived (and therefore re-guessable) from a fixed string.
+        echo "config-path=$_assurance_out_path" >> "$GITHUB_OUTPUT"
 
     - name: Clean stale analysis output
       shell: bash
@@ -822,7 +860,7 @@ runs:
         # entirely when analysis-assurance-complete != 'true', in which case
         # its own outcome reads 'skipped' and this falls back to the plain
         # build-config input unchanged).
-        build-config: ${{ steps.assurance_overlay.outcome == 'success' && 'check-target-assurance-config.yml' || inputs.build-config }}
+        build-config: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.config-path || inputs.build-config }}
         depth: ${{ inputs.requested-depth }}
         used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
         required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract-file || '' }}
