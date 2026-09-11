@@ -72,9 +72,9 @@ from .workflows.extraction import (
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
+    from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .service_dump_pipeline import ResolvedDumpRequest
-    from .dry_run_estimate import CompileContext
 
 
 # ── Back-compat re-export shim ───────────────────────────────────────────────

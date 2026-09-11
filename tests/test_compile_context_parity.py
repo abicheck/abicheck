@@ -46,8 +46,8 @@ from click.testing import CliRunner
 
 from abicheck.cli import compare_cmd, dump_cmd, main
 from abicheck.cli_options import compile_context_options, sided_frontend_explicit
-from abicheck.model import AbiSnapshot
 from abicheck.dry_run_estimate import CompileContext
+from abicheck.model import AbiSnapshot
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
 #: The ``gcc_*`` dests are deliberately absent: --gcc-options was removed as a

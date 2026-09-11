@@ -156,11 +156,11 @@ def test_seeded_includes_and_compile_context_forwards_input_spec_build_targets(
     what both did.
     """
     from abicheck.api_types import InputSpec
+    from abicheck.dry_run_estimate import CompileContext
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_input_resolution import (
         _seeded_includes_and_compile_context,
     )
-    from abicheck.dry_run_estimate import CompileContext
 
     captured: dict = {}
 

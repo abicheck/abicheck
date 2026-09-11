@@ -40,13 +40,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .compile_context import CompileContext
+from .dry_run_estimate import expand_header_inputs
 from .errors import SnapshotError, ValidationError
 from .header_utils import (
     cache_relevant_operand_paths,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
-from .dry_run_estimate import expand_header_inputs
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot

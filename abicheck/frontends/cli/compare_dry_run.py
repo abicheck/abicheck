@@ -54,8 +54,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...dry_run import DryRunResult
-    from ...model.consumer_spec import ConsumerAppInput
     from ...dry_run_estimate import CostEstimate
+    from ...model.consumer_spec import ConsumerAppInput
 
 
 def add_compare_cost_preview_section(

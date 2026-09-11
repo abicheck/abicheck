@@ -41,8 +41,8 @@ from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_hea
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .model import AbiSnapshot
     from .dry_run_estimate import CompileContext
+    from .model import AbiSnapshot
     from .workflows.extraction import DumpManifest
 
 

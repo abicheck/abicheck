@@ -786,15 +786,14 @@ def _dump_elf(
 # ``from abicheck.service_dump_native import _dump_pe`` (and, via
 # ``service.py``'s own re-export, ``from abicheck.service import
 # _dump_pe``) keep working unchanged.
-from .service_dump_native_pe import (  # noqa: E402
-    _dump_macho as _dump_macho,
-    _dump_pe as _dump_pe,
-    _extract_pdb_debug as _extract_pdb_debug,
-)
-
 # expand_header_inputs is the scan-engine's own header expansion helper,
 # re-exported through ``dry_run_estimate`` -- imported lazily below to avoid a
 # module-load-time cycle (``dry_run_estimate`` -> ... -> this module's own
 # siblings), matching how ``service.py`` itself deferred this before the
 # split.
 from .dry_run_estimate import expand_header_inputs  # noqa: E402
+from .service_dump_native_pe import (  # noqa: E402
+    _dump_macho as _dump_macho,
+    _dump_pe as _dump_pe,
+    _extract_pdb_debug as _extract_pdb_debug,
+)

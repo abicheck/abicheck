@@ -44,9 +44,9 @@ from .workflows.extraction import (
 if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
+    from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .model.consumer_spec import ConsumerAppInput
-    from .dry_run_estimate import CompileContext
     from .workflows.extraction import BuildConfig
     from .workflows.gate import SeverityConfig
     from .workflows.policy_file import PolicyFile

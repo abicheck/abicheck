@@ -139,6 +139,27 @@ if TYPE_CHECKING:
 # so ``from abicheck.service import resolve_compare_request`` works.
 # ``run_compare_request``/``run_compare`` (their composition and its
 # keyword-argument shim) live there too now, for the same file-size reason. ──
+# ── Dry-run cost model (ADR-035 D10's `[CostEstimate]`) extracted to the leaf
+# module dry_run_estimate, same size-cap/re-export/non-circular-import rationale
+# as service_render above. ADR-068's Phase 4 typed-API slice retired that
+# module's own `ScanRequest`/`ScanResult` (and their `--artifact-set`
+# siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
+# `CompareResult` is the one typed contract now. ────────────────────────────
+from .dry_run_estimate import (  # noqa: E402,F401
+    _HEADER_EXTS,
+    CompileContext,
+    CostEstimate,
+    _count_compile_db_tus,
+    _count_pack_tus,
+    _count_source_tus,
+    _discover_compile_db,
+    _is_header_path,
+    _is_source_tu_path,
+    _scan_imports,
+    estimate_scan,
+    expand_header_inputs,
+    pair_wide_cxx20_std_override,
+)
 from .service_compare_pipeline import (  # noqa: E402,F401
     ResolvedComparePair,
     classify_compare_pair,
@@ -200,28 +221,6 @@ from .service_render import (  # noqa: E402,F401
     _render_deps_section_md,
     _render_json_output,
     render_output,
-)
-
-# ── Dry-run cost model (ADR-035 D10's `[CostEstimate]`) extracted to the leaf
-# module dry_run_estimate, same size-cap/re-export/non-circular-import rationale
-# as service_render above. ADR-068's Phase 4 typed-API slice retired that
-# module's own `ScanRequest`/`ScanResult` (and their `--artifact-set`
-# siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
-# `CompareResult` is the one typed contract now. ────────────────────────────
-from .dry_run_estimate import (  # noqa: E402,F401
-    _HEADER_EXTS,
-    CompileContext,
-    CostEstimate,
-    _count_compile_db_tus,
-    _count_pack_tus,
-    _count_source_tus,
-    _discover_compile_db,
-    _is_header_path,
-    _is_source_tu_path,
-    _scan_imports,
-    estimate_scan,
-    expand_header_inputs,
-    pair_wide_cxx20_std_override,
 )
 
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/

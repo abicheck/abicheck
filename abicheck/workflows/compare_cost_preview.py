@@ -47,8 +47,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from ..dry_run_estimate import CostEstimate
+    from ..model.evidence_depth_levels import EvidenceDepth, SourceMethod
 
 
 def _resolve_compare_estimate_level(
