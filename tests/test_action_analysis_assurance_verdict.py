@@ -341,3 +341,72 @@ class TestConfigDrivenAssuranceGateReadsTheReport:
         )
         assert outputs["_exit"] != 0, outputs
         assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+
+class TestConfigDrivenAssuranceGateReadsTheNoBaselineShapeToo:
+    """Finding 3 (P2, PR #1222 Codex review): ``_assurance_gated()`` (fixed
+    above to read ``analysis_assurance_exit_contribution``) didn't account
+    for the DIFFERENT report shape a ``mode: scan``/``--no-baseline``
+    audit-only run produces -- that document
+    (``report/no_baseline.py::_document_json``) has no top-level
+    ``analysis_assurance_exit_contribution`` key at all (unlike the
+    two-sided ``compare`` shape) and no ``diff`` wrapper either (unlike
+    ``scan --against``'s shape, which ``test_scan_mode_reads_the_nested_
+    contribution_too`` above already covers) -- the same information lives
+    under ``exit_axes.analysis_assurance`` instead. Before the fix, an
+    audit-only run with ``assurance.require_complete: true`` read a missing
+    key here, silently answered "not gated", and this Action reported a
+    plain ERROR instead of the correct ANALYSIS_INCOMPLETE classification
+    even though the CLI itself correctly exited 1. ``INPUT_AGAINST`` is
+    deliberately never set below -- that omission is what selects the
+    ``--no-baseline`` audit path (``run.sh``'s own ``MODE == "scan" &&
+    -z INPUT_AGAINST`` dispatch)."""
+
+    def _no_baseline_report(self, *, contribution: int) -> dict:
+        return {
+            "audit_report_schema_version": "1.0",
+            "no_baseline": True,
+            "verdict": None,
+            "findings": [],
+            "exit_axes": {"analysis_assurance": contribution, "audit_gate": 0},
+            "exit_code": 1 if contribution else 0,
+        }
+
+    def test_the_exit_axes_shape_gates_too(self, tmp_path: Path) -> None:
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=self._no_baseline_report(contribution=1),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_a_zero_exit_axes_contribution_is_not_gated(self, tmp_path: Path) -> None:
+        """No false positive: the exit_axes fallback must not fire on a
+        real, explicit 0 either."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=0,
+            report=self._no_baseline_report(contribution=0),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 0, outputs

@@ -3759,7 +3759,29 @@ elif query == "assurance_contribution":
     # the run's own evidence was incomplete -- so no separate "was gating
     # requested" signal is needed here, unlike the retired
     # `assurance_status`-only query below.
-    print(_either("analysis_assurance_exit_contribution", 0))
+    #
+    # `_either` alone only covers the two-sided compare shape (root) and
+    # the `scan --against` shape (nested under `diff`) -- but a `mode: scan`
+    # / `--no-baseline` audit-only report is a THIRD shape
+    # (`report/no_baseline.py:_document_json`) that carries this same
+    # information under `exit_axes.analysis_assurance` instead, since that
+    # document has no `verdict`/gate namespace of its own to hang a
+    # top-level `analysis_assurance_exit_contribution` key from (Codex
+    # review): without this fallback, an audit-only run with
+    # `assurance.require_complete: true` reads a missing key here, silently
+    # answers "not gated", and this Action reports a plain ERROR/nothing
+    # instead of ANALYSIS_INCOMPLETE even though the CLI itself correctly
+    # exited 1. `_either`'s own sentinel-safe None check (not the
+    # zero-collapsing default) is what lets a real `0` from either primary
+    # shape short-circuit before ever consulting `exit_axes`.
+    _value = report.get("analysis_assurance_exit_contribution")
+    if _value is None:
+        _value = nested.get("analysis_assurance_exit_contribution")
+    if _value is None:
+        _exit_axes = report.get("exit_axes")
+        if isinstance(_exit_axes, dict):
+            _value = _exit_axes.get("analysis_assurance")
+    print(_value if _value is not None else 0)
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
     # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
