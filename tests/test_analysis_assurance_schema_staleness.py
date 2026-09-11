@@ -283,3 +283,35 @@ class TestSchemaStalenessStatus:
         aa = result.analysis_assurance
         assert aa.schema_staleness_status == "degraded"
         assert any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_other_side_only_inferred_header_awareness_never_taints(self) -> None:
+        """Codex review, PR #1209 round 5: the other side matching the
+        exact producer is not enough on its own -- ``_diff_param_va_list``
+        also requires ``_both_header_aware`` (confirmed, non-inferred
+        header awareness on BOTH sides). An ``other`` side that is
+        ``ast_producer == "clang"`` but only ever had its ``from_headers``
+        *inferred* (``from_headers_inferred=True`` -- a legacy pre-explicit-
+        key snapshot) still fails that gate, so the detector never runs for
+        this pair either, the same as a producer mismatch."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_va_list_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        new.from_headers_inferred = True
+        assert degraded_reliability_facts(old) == ["clang_va_list_facts_reliable"]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes

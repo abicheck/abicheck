@@ -90,14 +90,18 @@ __all__ = ["schema_staleness_status"]
 
 #: The two flags whose one real consumer (``diff_symbols._diff_param_va_
 #: list``/``_diff_var_access``) gates on BOTH sides sharing one exact
-#: ``ast_producer`` -- not merely this side's own. ``degraded_reliability_
-#: facts(snap)`` already requires *this* side to be the named producer
-#: before listing either flag (a real, single-snapshot narrowing), but it
-#: cannot see the *other* side at all, so a mixed-producer pair (a
-#: degraded, confirmed-header "clang" old side paired with a "castxml" new
-#: side, say) would otherwise still read the flag as consulted even though
-#: the detector's own both-sides gate means it was never reached at all
-#: for this pair (Codex review, PR #1209). Fixed here, in the pair-aware
+#: ``ast_producer`` AND both being header-*confirmed* (``_both_header_
+#: aware`` -- non-inferred ``from_headers`` on each side), not merely this
+#: side's own. ``degraded_reliability_facts(snap)`` already requires *this*
+#: side to be the named producer AND header-confirmed before listing
+#: either flag (a real, single-snapshot narrowing), but it cannot see the
+#: *other* side at all, so a pair where *this* side qualifies but *other*
+#: doesn't -- wrong producer (a degraded, confirmed-header "clang" old side
+#: paired with a "castxml" new side), or the right producer but only
+#: *inferred* header awareness (``from_headers_inferred=True``) -- would
+#: otherwise still read the flag as consulted even though the detector's
+#: own both-sides gate means it was never reached at all for this pair
+#: (Codex review, PR #1209, rounds 2 and 5). Fixed here, in the pair-aware
 #: assurance layer, rather than in ``model.snapshot_reliability`` -- that
 #: module's own scoped contract (``model/AGENTS.md``) is single-snapshot
 #: fact shapes, never a detector's pairing algorithm.
@@ -107,16 +111,30 @@ _PAIR_PRODUCER_GATED_FLAGS: dict[str, str] = {
 }
 
 
+def _other_side_confirms_pair_gate(other: AbiSnapshot, producer: str) -> bool:
+    """Whether *other* alone would satisfy ``_diff_param_va_list``'s/
+    ``_diff_var_access``'s own ``_both_header_aware`` + exact-producer gate
+    -- confirmed (non-inferred) header awareness AND the exact matching
+    *producer*, mirroring ``diff_symbols.py``'s own two checks.
+    """
+    return (
+        other.from_headers
+        and not other.from_headers_inferred
+        and other.ast_producer == producer
+    )
+
+
 def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[str]:
     """*snap*'s own :func:`degraded_reliability_facts`, narrowed to drop a
     :data:`_PAIR_PRODUCER_GATED_FLAGS` entry whose one real consumer never
-    ran for this pair because *other* isn't the same exact producer.
+    ran for this pair because *other* doesn't also clear the detector's own
+    both-sides gate (see :func:`_other_side_confirms_pair_gate`).
     """
     return [
         name
         for name in degraded_reliability_facts(snap)
-        if _PAIR_PRODUCER_GATED_FLAGS.get(name) is None
-        or other.ast_producer == _PAIR_PRODUCER_GATED_FLAGS[name]
+        if (producer := _PAIR_PRODUCER_GATED_FLAGS.get(name)) is None
+        or _other_side_confirms_pair_gate(other, producer)
     ]
 
 
