@@ -31,7 +31,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .contracts import _LoadedReport
+from .contracts import _LoadedReport, _malformed_gate_report
 from .disposition_axis import disposition_audit_block
 from .gate import (
     COVERAGE_INCOMPLETE_EXIT,
@@ -40,6 +40,7 @@ from .gate import (
     _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
+    _is_schema_valid_run_outcome,
 )
 from .reconcile import parse_report_findings
 from .scope_axis import scope_completeness_exit, scope_completeness_incomplete
@@ -117,18 +118,36 @@ def load_no_baseline_report(
     # correct that: an operational failure and a real gating finding
     # are different facts, and a required-but-optional-gate report
     # would have shown neither.
+    # `report/no_baseline.py::_run_outcome` always emits a full, schema-valid
+    # `RunOutcome.to_dict()` block -- so a missing or schema-invalid one here
+    # is itself a sign of a malformed/hand-authored document, not merely "an
+    # audit that predates this field" (unlike the two-sided-report reader
+    # this mirrors, `_run_outcome_gate_and_operational`, which does have a
+    # genuinely-absent legacy case to fall back to). Checking only
+    # `run_outcome.operational` in isolation -- as this used to -- let a
+    # `run_outcome` missing every OTHER required key (or missing outright)
+    # still read `operationally_failed=False` and fall through to marking
+    # the report `completed_without_compatibility_verdict=True`: a malformed
+    # envelope was silently treated as a genuine completed audit (Codex
+    # review, fresh evidence). Fails closed the same way `load.py`'s own
+    # `_malformed_gate_report` branches do, rather than reusing
+    # `_run_outcome_gate_and_operational`'s exception-raising shape, since
+    # this shape's `run_outcome.gate` is always `PolicyGateDecision.NONE` by
+    # construction (`_run_outcome`'s own docstring) and carries no useful
+    # gate/operational pair to fold in either case.
     run_outcome_raw = data.get("run_outcome")
-    operational_status = (
-        run_outcome_raw.get("operational")
-        if isinstance(run_outcome_raw, Mapping)
-        else None
-    )
-    operationally_failed = isinstance(
-        operational_status, str
-    ) and operational_status not in (
-        "none",
-        "",
-    )
+    if not isinstance(run_outcome_raw, Mapping) or not _is_schema_valid_run_outcome(
+        run_outcome_raw
+    ):
+        return _malformed_gate_report(
+            target_id,
+            data.get("library"),
+            head_sha,
+            path,
+            "no-baseline audit's run_outcome is missing or schema-invalid",
+        )
+    operational_status = run_outcome_raw.get("operational")
+    operationally_failed = operational_status not in ("none", "")
     # `analysis_assurance_exit_contribution`, the dedicated root key
     # `_analysis_assurance_exit()` reads, is a two-sided-report-only
     # field this shape never emits (its own assurance contribution

@@ -44,6 +44,7 @@ from .contracts import (
     DEFAULT_REPORT_PREFIX,
     GateInfo,
     _LoadedReport,
+    _malformed_gate_report,
 )
 from .disposition_axis import disposition_audit_block
 from .gate import (
@@ -88,22 +89,6 @@ def target_id_from_path(path: Path, *, prefix: str = DEFAULT_REPORT_PREFIX) -> s
     if prefix and stem.startswith(prefix):
         stem = stem[len(prefix) :]
     return stem
-
-
-def _malformed_gate_report(
-    target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
-) -> _LoadedReport:
-    """The shared "gate decision is malformed" unavailable shape every
-    fail-closed branch here returns, apart from *reason*."""
-    return _LoadedReport(
-        target_id=target_id,
-        verdict=None,
-        gate=None,
-        library=library,
-        head_sha=head_sha,
-        reason=reason,
-        path=path,
-    )
 
 
 def _not_comparable_contradiction_reason(

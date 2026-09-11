@@ -127,7 +127,19 @@ def neutralize_no_baseline_axes(report: dict[str, Any]) -> None:
                 updated_axes[axis] = 0
         report["exit_axes"] = updated_axes
         if "exit_code" in report:
-            report["exit_code"] = max(updated_axes.values(), default=0)
+            # `bool` is an `int` subclass, and a malformed/hand-authored
+            # report is exactly the input this defensive filter guards
+            # against -- a stray non-int (or bool) axis value would
+            # otherwise either crash `max()` outright (mixed int/str) or
+            # silently persist a non-int `exit_code` (CodeRabbit review).
+            report["exit_code"] = max(
+                (
+                    value
+                    for value in updated_axes.values()
+                    if isinstance(value, int) and not isinstance(value, bool)
+                ),
+                default=0,
+            )
 
 
 def classify_no_baseline_verdict(

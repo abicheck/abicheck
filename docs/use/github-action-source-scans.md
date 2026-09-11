@@ -203,7 +203,7 @@ replacement for legacy `mode: scan` with no baseline (see
 > for what changed and why).
 
 ```yaml
-      - uses: abicheck/abicheck@v0.5.0
+      - uses: abicheck/abicheck@<commit-sha>  # newer than v0.5.0 -- see the note above
         with:
           mode: compare
           new-library: build/libfoo.so

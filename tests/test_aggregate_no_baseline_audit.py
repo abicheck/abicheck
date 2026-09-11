@@ -35,6 +35,7 @@ import json
 from pathlib import Path
 
 from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+from abicheck.policy.outcome import RUN_OUTCOME_SCHEMA_VERSION
 
 LINUX = "linux-x86_64"
 MACOS = "macos-arm64"
@@ -84,8 +85,13 @@ def _write_no_baseline_report(
 
     *operational*, when given, is written as `run_outcome.operational`
     (e.g. `"evidence_contract_error"`) -- a real operational failure this
-    audit's own producer recorded, as opposed to the default clean/absent
-    case."""
+    audit's own producer recorded, as opposed to the default clean/``"none"``
+    case. `run_outcome` itself is always a full, schema-valid
+    `RunOutcome.to_dict()` block (`report/no_baseline.py::_run_outcome`
+    always emits one) -- the aggregate's own loader now fails closed
+    (`_is_schema_valid_run_outcome`) on anything less, so a fixture carrying
+    a truncated block would silently start exercising the malformed-report
+    branch instead of the completed-audit one it means to test."""
     exit_axes = {
         "audit_gate": audit_gate_axis,
         "contract_coverage": 0,
@@ -105,9 +111,16 @@ def _write_no_baseline_report(
         "exit_code": max(exit_axes.values()),
         "contract_coverage_exit_contribution": 0,
         "policy": "strict_abi",
+        "run_outcome": {
+            "schema_version": RUN_OUTCOME_SCHEMA_VERSION,
+            "compatibility": None,
+            "assurance": None,
+            "gate": "none",
+            "operational": operational if operational is not None else "none",
+            "lifecycle": "existing",
+            "scope": "complete",
+        },
     }
-    if operational is not None:
-        payload["run_outcome"] = {"operational": operational}
     if report_target_id is not None:
         payload["target_id"] = report_target_id
     path = d / f"{prefix}{target_id}.json"
@@ -323,8 +336,8 @@ class TestNoBaselineAuditOperationalFailure:
     def test_a_clean_operational_status_still_counts_as_a_completed_audit(
         self, tmp_path: Path
     ):
-        # "none" (and the field's own absence, covered by every other test
-        # in this file) must not be mistaken for a real failure.
+        # "none" (the default every other test in this file writes too)
+        # must not be mistaken for a real failure.
         _write_no_baseline_report(tmp_path, LINUX, operational="none")
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert r.targets[0].analyzed is True
@@ -495,3 +508,115 @@ class TestNoBaselineAuditTargetDictExposesCompletionSeparateFromVerdict:
         d = r.targets[0].to_dict()
         assert d["state"] == "unavailable"
         assert "completed_without_compatibility_verdict" not in d
+
+
+def _write_raw_no_baseline_report(d: Path, target_id: str, payload: dict) -> Path:
+    """Like `_write_no_baseline_report`, but writes *payload* verbatim --
+    for exercising a malformed/hand-authored document this loader must fail
+    closed on, rather than a shape its own producer would ever emit."""
+    path = d / f"abi-report-{target_id}.json"
+    path.write_text(json.dumps(payload))
+    return path
+
+
+#: Sentinel distinguishing "no `run_outcome` key at all" from any real
+#: value (including `None`) in `TestNoBaselineAuditRejectsAMalformedRunOutcome`.
+_ABSENT = object()
+
+
+class TestNoBaselineAuditRejectsAMalformedRunOutcome:
+    """CodeRabbit review, fresh evidence: `report/no_baseline.py::_run_outcome`
+    always emits a full, schema-valid `RunOutcome.to_dict()` block, so a
+    `no_baseline: true` document whose `run_outcome` is missing, not an
+    object, or missing one of its required keys is not a legacy shape this
+    loader should tolerate -- it's a malformed document, and treating it as
+    a genuinely completed audit (`completed_without_compatibility_verdict
+    =True`) would let a corrupted or hand-authored report silently pass as
+    analyzed. `load_no_baseline_report` now validates the whole envelope
+    via the same `_is_schema_valid_run_outcome` gate.py's two-sided-report
+    reader already relies on, and fails the target unavailable (with a
+    reason) instead, the same shape `load.py`'s own `_malformed_gate_report`
+    branches use for every other malformed-gate case."""
+
+    _BASE_PAYLOAD = {
+        "audit_report_schema_version": "1.3",
+        "no_baseline": True,
+        "library": "libfoo.so",
+        "verdict": None,
+        "changes": [],
+        "findings": [],
+        "exit_axes": {
+            "audit_gate": 0,
+            "contract_coverage": 0,
+            "analysis_assurance": 0,
+            "evidence_contract": 0,
+            "incomplete_scope": 0,
+            "no_comparison_completed": 0,
+        },
+        "exit_code": 0,
+        "contract_coverage_exit_contribution": 0,
+        "policy": "strict_abi",
+    }
+
+    def _payload(self, run_outcome: object) -> dict:
+        payload = dict(self._BASE_PAYLOAD)
+        if run_outcome is not _ABSENT:
+            payload["run_outcome"] = run_outcome
+        return payload
+
+    def test_a_missing_run_outcome_is_unavailable_not_analyzed(
+        self, tmp_path: Path
+    ):
+        _write_raw_no_baseline_report(
+            tmp_path, LINUX, self._payload(_ABSENT)
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is False
+        assert r.targets[0].completed_without_compatibility_verdict is False
+        assert r.targets[0].reason is not None
+        assert "run_outcome" in r.targets[0].reason
+
+    def test_a_run_outcome_missing_required_keys_is_unavailable(
+        self, tmp_path: Path
+    ):
+        # Only `operational` -- the one field the old, insufficient check
+        # actually read -- is present; every other required key is absent.
+        _write_raw_no_baseline_report(
+            tmp_path, LINUX, self._payload({"operational": "none"})
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is False
+        assert r.targets[0].completed_without_compatibility_verdict is False
+
+    def test_a_run_outcome_that_is_not_an_object_is_unavailable(
+        self, tmp_path: Path
+    ):
+        _write_raw_no_baseline_report(
+            tmp_path, LINUX, self._payload("not-a-mapping")
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is False
+        assert r.targets[0].completed_without_compatibility_verdict is False
+
+    def test_a_complete_schema_valid_run_outcome_is_still_analyzed(
+        self, tmp_path: Path
+    ):
+        # Control case: the real producer's own shape must keep working.
+        _write_raw_no_baseline_report(
+            tmp_path,
+            LINUX,
+            self._payload(
+                {
+                    "schema_version": RUN_OUTCOME_SCHEMA_VERSION,
+                    "compatibility": None,
+                    "assurance": None,
+                    "gate": "none",
+                    "operational": "none",
+                    "lifecycle": "existing",
+                    "scope": "complete",
+                }
+            ),
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed is True
+        assert r.targets[0].completed_without_compatibility_verdict is True

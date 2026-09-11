@@ -417,6 +417,35 @@ class _LoadedReport:
     completed_without_compatibility_verdict: bool = False
 
 
+def _malformed_gate_report(
+    target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
+) -> _LoadedReport:
+    """The shared "gate decision is malformed" unavailable shape every
+    fail-closed branch in ``load.py``/``no_baseline_load.py`` returns, apart
+    from *reason*.
+
+    Lives here, next to :class:`_LoadedReport` itself, rather than in
+    ``load.py`` (its original home) — ``no_baseline_load.py`` needs the
+    identical fail-closed shape for its own ``run_outcome`` schema check
+    (Codex review, fresh evidence: it previously read only
+    ``run_outcome.operational`` and ignored every other required key, so a
+    missing or schema-invalid ``run_outcome`` block on an otherwise
+    ``no_baseline: true`` document was still marked
+    ``completed_without_compatibility_verdict=True``), and ``load.py``
+    already imports from ``no_baseline_load.py`` — a shared helper can only
+    live in a module neither one imports the other through.
+    """
+    return _LoadedReport(
+        target_id=target_id,
+        verdict=None,
+        gate=None,
+        library=library,
+        head_sha=head_sha,
+        reason=reason,
+        path=path,
+    )
+
+
 @dataclass(frozen=True)
 class TargetReport:
     """One target's contribution to the aggregate.
