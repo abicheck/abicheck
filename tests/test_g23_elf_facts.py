@@ -409,19 +409,22 @@ class TestLegacySnapshotDeserialization:
         # A legacy snapshot (no elf_class key) with 32-bit pointer_size must
         # rehydrate as 32-bit, not the hard-coded 64 default, so it does not
         # false-positive elf_class_changed against a real 32-bit binary.
-        from abicheck.serialization import SCHEMA_VERSION, _elf_from_dict
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.snapshot_platform_blocks import elf_from_dict as _elf_from_dict
 
         elf = _elf_from_dict({"pointer_size": 4}, SCHEMA_VERSION)
         assert elf.elf_class == 32
 
     def test_missing_elf_class_defaults_to_64_for_64bit(self):
-        from abicheck.serialization import SCHEMA_VERSION, _elf_from_dict
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.snapshot_platform_blocks import elf_from_dict as _elf_from_dict
 
         elf = _elf_from_dict({"pointer_size": 8}, SCHEMA_VERSION)
         assert elf.elf_class == 64
 
     def test_new_fields_roundtrip(self):
-        from abicheck.serialization import SCHEMA_VERSION, _elf_from_dict
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.snapshot_platform_blocks import elf_from_dict as _elf_from_dict
 
         elf = _elf_from_dict(
             {

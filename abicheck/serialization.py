@@ -48,7 +48,14 @@ classified ``storage``. This facade exists for two reasons a genuinely
 
 Every public name below keeps its historical, documented signature, so
 every existing ``from abicheck.serialization import ...`` caller (and the
-Python API docs) resolve unchanged.
+Python API docs) resolve unchanged. ``__all__`` states that documented
+surface explicitly (Codex review) -- `architecture/modules.yaml`'s
+`public_root_surfaces` treatment means `scripts/check_architecture.py`'s
+`facade-*` checks don't apply here the way they do to a `facades`-listed
+module, so `decode_snapshot`/`finalize_snapshot` (this module's own
+orchestration helpers, not part of the documented surface) and the stdlib
+imports below stay accessible as module attributes but are not advertised
+via `__all__`/`from abicheck.serialization import *`.
 """
 
 from __future__ import annotations
@@ -56,6 +63,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "bundle_facts_from_dict",
+    "bundle_facts_to_dict",
+    "from_sectioned_document",
+    "is_sectioned_document",
+    "load_bundle_facts",
+    "load_snapshot",
+    "load_snapshot_document",
+    "save_bundle_facts",
+    "save_snapshot",
+    "snapshot_content_digest",
+    "snapshot_from_dict",
+    "snapshot_to_dict",
+    "snapshot_to_json",
+    "to_sectioned_document",
+    "write_snapshot",
+]
 
 if TYPE_CHECKING:
     from .model.bundle_facts import BundleFacts
