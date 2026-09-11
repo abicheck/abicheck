@@ -634,7 +634,12 @@ def test_find_by_value_types_ignores_a_braced_structural_template_argument():
 
 
 def _record(
-    name: str, *, is_opaque: bool = False, entity_id=None, fields=()
+    name: str,
+    *,
+    is_opaque: bool = False,
+    entity_id=None,
+    fields=(),
+    qualified_name: str | None = None,
 ) -> RecordType:
     return RecordType(
         name=name,
@@ -642,6 +647,7 @@ def _record(
         is_opaque=is_opaque,
         entity_id=entity_id,
         fields=list(fields),
+        qualified_name=qualified_name,
     )
 
 
@@ -1211,6 +1217,26 @@ class TestResolveStructChangeEntityId:
         assert resolved.entity_id is None
         assert resolved is change
 
+    def test_a_qualified_name_match_counts_as_exact_too(self) -> None:
+        """A real false positive (Codex review round 9, PR #1218): the
+        header-AST backend stores the bare leaf in ``RecordType.name`` and
+        the real scoped spelling in ``qualified_name`` -- a visible
+        ``api::Handle`` (identity-less) with an unrelated, opaque
+        ``internal::Handle`` (bare-named "Handle", with a stable id)
+        elsewhere. A DWARF change genuinely about "api::Handle" must
+        recognize the ``qualified_name`` match as exact (blocking the
+        bare-name fallback), not only a ``RecordType.name`` match."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        visible_api_handle = _record(
+            "Handle", is_opaque=False, entity_id=None, qualified_name="api::Handle"
+        )
+        old = _snap([opaque_handle, visible_api_handle])
+        new = _snap([opaque_handle, visible_api_handle])
+        change = _struct_size_change("api::Handle")
+        resolved = _resolve_struct_change_entity_id(change, old, new)
+        assert resolved.entity_id is None
+        assert resolved is change
+
     def test_a_change_with_its_own_entity_id_is_returned_unchanged(self) -> None:
         """A change that already carries an identity (a header-AST-sourced
         producer, or an already-bridged copy) is passed through verbatim --
@@ -1301,6 +1327,30 @@ class TestMemberPointerFollowsTemplatedOwners:
     def test_a_templated_owner_is_still_recognized_as_indirect(
         self, field_type: str
     ) -> None:
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record("Wrapper", fields=[TypeField(name="ptr", type=field_type)])
+        old = _snap([opaque_handle, wrapper])
+        new = _snap([opaque_handle, wrapper])
+        change = _struct_size_change("Handle", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+    @pytest.mark.parametrize(
+        "field_type",
+        [
+            "Handle (Owner::*)[3]",
+            "Handle (Owner<int>::*)[3]",
+            "Handle (ns::Owner<int>::*)[3]",
+        ],
+    )
+    def test_a_templated_owner_in_the_grouped_form_is_still_recognized(
+        self, field_type: str
+    ) -> None:
+        """The *parenthesized* pointer-to-member-array/-function shape
+        (``"Handle (Owner<int>::*)[3]"``) had its own, separate
+        non-template-aware owner-scope regex -- Codex review round 9,
+        PR #1218: fixing the unparenthesized shape in round 7 did not fix
+        this one too."""
         opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
         wrapper = _record("Wrapper", fields=[TypeField(name="ptr", type=field_type)])
         old = _snap([opaque_handle, wrapper])

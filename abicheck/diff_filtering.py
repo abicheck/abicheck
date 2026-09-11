@@ -1825,7 +1825,17 @@ def _resolve_struct_change_entity_id(
     exactly the collision the stable tier's own bare-name-grouping bugs
     were about, reintroduced here through the bridge instead. The
     bare-name candidate is only ever consulted when *no* exact-named
-    declaration exists at all."""
+    declaration exists at all.
+
+    **"Exact" means either ``RecordType.name`` or ``RecordType.
+    qualified_name``** (Codex review, PR #1218, round 9): a header-AST
+    backend commonly stores only the bare leaf in ``name`` and the real
+    scoped spelling in ``qualified_name`` -- checking ``name`` alone would
+    never recognize a DWARF change's own qualified *record_name*
+    (``"api::Handle"``) as naming the *same* declaration a header-AST
+    backend renders leaf-only, wrongly treating it as no exact match at
+    all and falling through to an unrelated bare-name namesake exactly
+    the round-8 fix was meant to prevent."""
     if c.entity_id is not None:
         return c
     record_name = _struct_change_record_name(c)
@@ -1834,7 +1844,7 @@ def _resolve_struct_change_entity_id(
     exact_ids: set[EntityId] = set()
     for snap in (old, new):
         for t in snap.types:
-            if t.name == record_name:
+            if t.name == record_name or t.qualified_name == record_name:
                 exact_found = True
                 if t.entity_id is not None:
                     exact_ids.add(t.entity_id)
