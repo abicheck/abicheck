@@ -1445,6 +1445,30 @@ def _format_release_json(
         # indistinguishable from a genuinely clean run anywhere this JSON is
         # read from. Same "present only when active" gate as the field above.
         summary["contract_coverage_failure_count"] = contract_coverage_failure_count
+    # Codex review, P2: the declared-deployment-floor contract's content
+    # digest, promoted once to the release envelope -- `env_matrix` is
+    # threaded identically to every library's comparison in one release
+    # fan-out (`cli_compare_release_pairwise.py`'s own `env_matrix`
+    # parameter), so every per-library entry that carries this key in one
+    # release run carries the identical digest; reading it off the first
+    # entry that has it (rather than re-deriving it from a live
+    # `EnvironmentMatrix` this function never receives) keeps this the one
+    # place the digest is computed, matching the scalar `compare` report's
+    # own `env_matrix_source_sha256` field name/placement so a consumer
+    # need not special-case a release-shaped report. Omitted, not `null`,
+    # when this release's candidate declared no `deployment:` contract at
+    # all -- same additive convention as every other "present only when
+    # active" key in this function.
+    _env_matrix_digest = next(
+        (
+            lib["env_matrix_source_sha256"]
+            for lib in library_results
+            if "env_matrix_source_sha256" in lib
+        ),
+        None,
+    )
+    if _env_matrix_digest is not None:
+        summary["env_matrix_source_sha256"] = _env_matrix_digest
     # Release-level public-surface scoping rollup (ADR-024, issue #235).
     # Present only when --scope-public-headers was active (per-library
     # entries then carry a "scope_resolved" key).

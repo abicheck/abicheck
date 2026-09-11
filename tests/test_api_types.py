@@ -394,6 +394,58 @@ class TestCompareRequestReplace:
         assert changed.policy == req.policy
 
 
+class TestCompareRequestHashableWithEnvMatrix:
+    """Codex review, P2: ``CompareRequest`` is a frozen dataclass with a
+    dataclass-generated ``__hash__``, so every field it carries must itself
+    be hashable for that generated method to work at all -- and
+    ``env_matrix``, an :class:`~abicheck.environment_matrix.EnvironmentMatrix`,
+    used to be unhashable (a plain, non-frozen dataclass with ``eq=True``
+    gets ``__hash__`` set to ``None`` by default), which made *every*
+    ``CompareRequest`` supplying real deployment configuration unhashable
+    too -- breaking a typed-API caller using requests as set members or
+    cache keys. Fixed by giving ``EnvironmentMatrix`` (and its ``sycl``/
+    ``cuda`` sub-dataclasses) an explicit ``__hash__`` over a hashable
+    projection of their fields; see ``EnvironmentMatrix.__hash__``'s own
+    docstring for why the fields themselves stay ``list``/``dict``.
+    """
+
+    def _request(self, floor: str = "2.28") -> CompareRequest:
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        return CompareRequest(
+            old=InputSpec.of("a"),
+            new=InputSpec.of("b"),
+            env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": floor}),
+        )
+
+    def test_hash_does_not_raise(self):
+        # This is the reported defect verbatim: it used to raise
+        # `TypeError: unhashable type: 'EnvironmentMatrix'`.
+        assert isinstance(hash(self._request()), int)
+
+    def test_two_requests_with_equal_env_matrix_hash_and_compare_equal(self):
+        a = self._request()
+        b = self._request()
+        assert a == b
+        assert hash(a) == hash(b)
+        # And a real set/dict use, the exact scenario the finding names.
+        assert {a, b} == {a}
+        assert {a: "cached"}[b] == "cached"
+
+    def test_two_requests_with_different_env_matrix_are_distinguishable(self):
+        a = self._request("2.28")
+        b = self._request("2.34")
+        assert a != b
+        # Hash collision is legal in general, but these two floors must not
+        # be treated as the same cache key/set member.
+        assert {a, b} == {a, b}
+
+    def test_request_with_no_env_matrix_stays_hashable(self):
+        # The plain default (env_matrix=None) must be unaffected.
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
+        assert isinstance(hash(req), int)
+
+
 class TestCompareRequestRuntimeResolvableAnnotations:
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review, PR B slice 1 follow-up: with `from __future__ import

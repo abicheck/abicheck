@@ -79,6 +79,18 @@ class SyclConstraints:
     backends: list[str] = field(default_factory=list)  # ["level_zero", "opencl"]
     min_pi_version: str = ""              # minimum PI version required
 
+    def __hash__(self) -> int:
+        # Explicit rather than `@dataclass(frozen=True)`: this stays a plain
+        # mutable dataclass (nothing here mutates `backends` in place after
+        # construction, per a repo-wide grep -- see `EnvironmentMatrix.
+        # __hash__` below for why the field types themselves stay `list`/
+        # `dict` rather than being converted to `tuple` throughout), so only
+        # the hash needs a hashable projection of its content (Codex
+        # review, P2: making the containing `EnvironmentMatrix` hashable so
+        # a `CompareRequest` carrying one can be hashed/used as a set
+        # member or cache key).
+        return hash((self.implementation, tuple(self.backends), self.min_pi_version))
+
 
 @dataclass
 class CudaConstraints:
@@ -88,6 +100,18 @@ class CudaConstraints:
     driver_range: tuple[str, str] | None = None   # (min_version, max_version)
     toolkit_version: str = ""
     require_ptx: bool = False              # require PTX for forward-compat
+
+    def __hash__(self) -> int:
+        # See `SyclConstraints.__hash__` above for why this is explicit
+        # rather than `frozen=True`.
+        return hash(
+            (
+                tuple(self.gpu_architectures),
+                self.driver_range,
+                self.toolkit_version,
+                self.require_ptx,
+            )
+        )
 
 
 #: Top-level keys :meth:`EnvironmentMatrix.from_dict` understands; anything
@@ -290,6 +314,58 @@ class EnvironmentMatrix:
     # Target platform — None means unspecified (no assumption).
     target_os: str | None = None
     target_arch: str | None = None
+
+    def __hash__(self) -> int:
+        """A structural hash over a hashable projection of every field.
+
+        Codex review, P2: ``CompareRequest`` is a frozen dataclass with a
+        dataclass-generated ``__hash__``, and its ``env_matrix`` field holds
+        an ``EnvironmentMatrix`` -- so a ``CompareRequest`` supplying real
+        deployment configuration could not be hashed at all, since a plain
+        (non-frozen) dataclass with ``eq=True`` gets ``__hash__`` set to
+        ``None`` by default, and that unhashability propagates through any
+        containing frozen dataclass's own generated ``__hash__``.
+
+        This stays a plain mutable dataclass rather than
+        ``@dataclass(frozen=True)``: ``compilers``/``runtime_floors`` are
+        read via list/dict operations (``.get(...)`` on
+        ``runtime_floors`` in particular -- ``checker.py``,
+        ``workflows/env_matrix_audit.py``, ``extract/wheel_tags.py``) at
+        several call sites across the codebase, and converting those
+        fields to `tuple`s throughout would be a much larger, purely
+        mechanical API churn for no behavioral benefit -- nothing in this
+        codebase mutates an ``EnvironmentMatrix`` (or its ``sycl``/``cuda``
+        sub-objects) in place after construction (a repo-wide grep for
+        ``.compilers =``/``.runtime_floors[``/list-mutating calls on either
+        field found none), so a value that is *used* as immutable
+        configuration does not need to *become* immutable at the type
+        level to be hashed consistently. ``__eq__`` is left as the
+        dataclass-generated structural comparison (already correct for
+        list/dict fields); only ``__hash__`` needs an explicit, hashable
+        projection -- ``tuple(...)`` for the two list fields,
+        ``tuple(sorted(...))`` for ``runtime_floors`` so key insertion
+        order never changes the hash of two dicts holding the same
+        entries, and the two sub-dataclasses' own ``__hash__`` for
+        ``sycl``/``cuda``.
+
+        Two ``EnvironmentMatrix`` instances that compare equal (the
+        dataclass-generated ``__eq__``) always hash equal here, since every
+        field feeding this hash is exactly the field ``__eq__`` compares,
+        projected the same way regardless of instance -- the hash/eq
+        contract every hashable type must satisfy.
+        """
+        return hash(
+            (
+                tuple(self.compilers),
+                self.abi_version,
+                self.libstdcxx_dual_abi,
+                tuple(sorted(self.runtime_floors.items())),
+                self.sycl,
+                self.cuda,
+                self.target_os,
+                self.target_arch,
+            )
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, strict: bool = False) -> EnvironmentMatrix:

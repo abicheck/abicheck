@@ -411,6 +411,15 @@ def _compare_one_library(
                 if result.coverage_warnings
                 else {}
             ),  # e.g. same-binary; never reached this entry before (Codex review)
+            # Codex review, P2: stamped here (before `_diff_result` is
+            # discarded below) so this library's declared-deployment-floor
+            # digest survives `_strip_diff_results_and_adjust_verdict`; also
+            # promoted once to the release envelope (`_format_release_json`).
+            **(
+                {"env_matrix_source_sha256": result.env_matrix_source_sha256}
+                if result.env_matrix_source_sha256 is not None
+                else {}
+            ),
         }
         if pattern_modulations_text is not None:
             entry["_pattern_modulations_text"] = pattern_modulations_text
