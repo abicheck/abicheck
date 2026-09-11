@@ -514,13 +514,21 @@ def _from_no_baseline(
     translated here to ``_bucket_changes``'s lowercase ``severity``
     vocabulary via :data:`_NO_BASELINE_VERDICT_TO_SEVERITY`.
 
-    Modeled as ``mode="scan"`` + ``scan_audit_only=True`` rather than a new
-    mode value: this is exactly the shape legacy ``scan``'s own audit-only
-    path (``pr_comment_scan.from_scan``'s ``audit_only`` branch) already
-    renders -- "ran, found candidate-side findings, but no baseline to
-    compare against" -- so it reuses that rendering (headline wording,
-    ``scan_note``) for what is the same underlying situation now reached
-    through a different CLI, rather than duplicating it.
+    Modeled as ``mode="scan"`` (bucket-derived counts, no scan-specific
+    verdict/risk note) with the dedicated ``no_baseline_audit``/
+    ``no_baseline_audit_gate_blocking`` flags below driving ``_header``'s
+    own headline -- NOT ``scan_audit_only`` (Codex review, PR #1210, round
+    3): that flag's own headline special-case only fires when every bucket
+    is empty, so a real candidate-side finding here would otherwise fall
+    through to the ordinary two-sided "ABI BREAKING"/"Source API changed;
+    binary ABI unchanged" wording, which falsely implies a before/after
+    comparison this run never performed. ``no_baseline_audit_gate_blocking``
+    is read directly from the report's own ``exit_axes.audit_gate`` --
+    whether this specific run's `policy/audit_gate_exit.py` axis actually
+    fired -- rather than re-derived from severity/bucket membership here,
+    since a Review-bucket api_break-severity finding does not by itself
+    mean this run's exit gated on it (the axis is opt-in via
+    ``--severity-preset``).
 
     Without this branch, ``build_model`` fell through to ``_from_compare``,
     which reads ``report["changes"]`` -- always ``[]`` on a no-baseline
@@ -552,6 +560,11 @@ def _from_no_baseline(
     if contract_coverage_blocking:
         incomplete_blocking = True
     suppressed_count = report.get("suppressed_count")
+    exit_axes = report.get("exit_axes")
+    audit_gate_exit = (
+        exit_axes.get("audit_gate") if isinstance(exit_axes, dict) else None
+    )
+    audit_gate_blocking = isinstance(audit_gate_exit, int) and audit_gate_exit > 0
     return CommentModel(
         mode="scan",
         subject=str(report.get("library", "artifact")),
@@ -566,7 +579,8 @@ def _from_no_baseline(
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
-        scan_audit_only=True,
+        no_baseline_audit=True,
+        no_baseline_audit_gate_blocking=audit_gate_blocking,
         suppressed_count=suppressed_count if isinstance(suppressed_count, int) else 0,
     )
 

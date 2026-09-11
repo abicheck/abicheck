@@ -93,6 +93,25 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 
 
 def _header(model: CommentModel) -> tuple[str, str]:
+    if model.no_baseline_audit:
+        # `compare --no-baseline` never compared two versions, so none of
+        # the two-sided wording below ("ABI BREAKING", "Source API changed;
+        # binary ABI unchanged") is accurate here even when the bucket
+        # counts below would otherwise select it -- every one of those
+        # phrasings implies a before/after result this run never produced
+        # (Codex review, PR #1210, round 3). Blocking-ness for this
+        # dedicated headline comes from the report's own `exit_axes.
+        # audit_gate` (`no_baseline_audit_gate_blocking`), not from bucket
+        # membership -- an api_break-severity finding lands in Review the
+        # same way it would for a real comparison, but whether THIS run's
+        # exit code actually gated on it is a fact only the report itself
+        # states (severity-preset opt-in, case143/case148's own asymmetric
+        # gating).
+        if not model.breaking and not model.review and not model.has_incomplete:
+            return "✅", "Audit — no baseline to compare"
+        if model.no_baseline_audit_gate_blocking:
+            return "🛑", "Audit gate: candidate-side finding blocks this step"
+        return "⚠️", "Audit — candidate-side finding(s), not gated"
     if (
         model.mode == "scan"
         and model.scan_audit_only

@@ -209,6 +209,31 @@ class CommentModel:
     # "✅ No ABI changes" headline as if a baseline comparison had run and
     # found nothing.
     scan_audit_only: bool = False
+    # True for a `compare --no-baseline` audit report
+    # (`pr_comment._from_no_baseline`) -- unlike `scan_audit_only` above
+    # (legacy `scan`'s own now-Action-unreachable audit shape), a
+    # no-baseline audit can carry real candidate-side findings bucketed by
+    # `_bucket_changes` the ordinary way, so the empty-bucket check
+    # `scan_audit_only` relies on isn't enough to gate this special-case
+    # headline on its own (Codex review, PR #1210, round 3): reusing the
+    # two-sided "ABI BREAKING"/"Source API changed; binary ABI unchanged"
+    # wording for a run that never compared two versions falsely implies a
+    # before/after result. `_header` checks this flag first and renders a
+    # dedicated audit headline instead, for every finding count including
+    # zero, driven by `no_baseline_audit_gate_blocking` below rather than
+    # bucket membership.
+    no_baseline_audit: bool = False
+    # Whether `policy/audit_gate_exit.py`'s own orthogonal axis actually
+    # gated this run (read directly from the report's own
+    # `exit_axes.audit_gate`, never re-derived from severity-preset/bucket
+    # membership here -- "read, don't re-derive" per this repository's own
+    # known-gaps convention). A finding can land in the Review bucket
+    # (an api_break-severity finding, `_SEVERITY_BUCKET`) without this axis
+    # ever firing (no severity-preset given at all, or an explicit
+    # `info-only`) -- the PR comment must not imply the step failed when it
+    # didn't, and must not imply it merely reviewed a case when a real
+    # `AUDIT_GATE` exit actually failed the step.
+    no_baseline_audit_gate_blocking: bool = False
     # scan mode only: the exact (breaking, needs-review) totals from
     # `diff`'s own scalar `breaking`/`api_break`/`risk` counts (already
     # gate/severity-promotion-adjusted -- see `pr_comment_scan._scan_true_
