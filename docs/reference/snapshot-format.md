@@ -242,7 +242,7 @@ snapshots produce when compared.
 | gzip | `.abicheck.json.gz` / `.abi.json.gz` | universal interoperability |
 | zstd | `.abicheck.json.zst` / `.abi.json.zst` | **preferred** for baseline/release/cache storage |
 
-`compare`, `scan --against`, and the Python API
+`compare` and the Python API
 (`abicheck.serialization.load_snapshot`) all *read* every encoding
 transparently — detected from magic bytes, not just the filename suffix.
 `abicheck dump` *produces* one: it infers the encoding from `-o/--output`'s

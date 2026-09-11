@@ -408,7 +408,7 @@ import.
 Add an explicit provider such as:
 
 ```bash
-abicheck scan wheel.whl --runtime-surface sandbox
+abicheck dump wheel.whl --runtime-surface sandbox
 ```
 
 Run imports in an isolated subprocess or container with:

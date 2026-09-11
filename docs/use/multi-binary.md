@@ -528,7 +528,7 @@ to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
 ## Comparing against a stored bundle baseline (G38 Phase 2)
 
 Every bundle comparison above reopens live `.so` files on both sides. That
-means a stored-baseline workflow — the normal `scan --against`/CI pattern
+means a stored-baseline workflow — the normal `compare`/CI pattern
 every other surface this tool supports — could not get a bundle-level
 verdict at all: there was no persisted form of "what the bundle layer knows
 about a release" to compare a live directory against later.

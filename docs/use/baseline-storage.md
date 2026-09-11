@@ -26,7 +26,7 @@ your team. For what a baseline is and why you may need two of them, see
 Every recipe below writes/reads a baseline as an `.abicheck.json` file, but
 that file may just as well be gzip- or zstd-compressed on disk
 (`.abicheck.json.gz`/`.abicheck.json.zst`) — every abicheck entry point
-(`dump`, `compare`, `scan --against`, the `abicheck/abicheck` Action, and
+(`dump`, `compare`, the `abicheck/abicheck` Action, and
 `actions/baseline`) detects the encoding transparently from magic bytes, not
 the filename, so a compressed baseline is a drop-in replacement for a plain
 one everywhere on this page. It's a pure storage/transport envelope around

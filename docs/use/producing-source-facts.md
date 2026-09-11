@@ -372,7 +372,7 @@ This links each source declaration to the binary's exported symbol (matching
 ctor/dtor ABI clone variants — `C1`/`C2`/`C3`, `D0`/`D1`/`D2` — so one source
 constructor claims all of its exported symbols). The result is a single
 self-contained `.baseline.json` carrying L0–L5, ready for
-[`compare`](cli-usage.md) or [`scan --against`](evidence-depth.md).
+[`compare`](cli-usage.md).
 
 ### Reading the L4 coverage numbers
 

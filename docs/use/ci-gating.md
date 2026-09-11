@@ -98,8 +98,8 @@ unscoped path:
 
 **Contract coverage runs alongside, not inside, this chain.** Under
 `--contract`, if the selected domain's required evidence is
-incomplete (missing, partial, stale, or contradictory), `compare`/
-`scan --against` contribute an additional, independent exit `1` — folded
+incomplete (missing, partial, stale, or contradictory), `compare`
+contributes an additional, independent exit `1` — folded
 with `max` against whatever the six stages above produced, so it can raise a
 clean `0` to `1` but never lowers a `2`/`4`. This is a genuinely different
 question from suppression or policy: those decide what an *observed* finding

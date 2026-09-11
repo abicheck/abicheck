@@ -51,15 +51,16 @@ any `-I`/`--include` you pass takes precedence over the auto-added roots:
 
 ```bash
 export ABICHECK_AST_FRONTEND=clang        # on a clang-only host (no castxml)
-abicheck scan --binary lib/libtbb.so.12.18 \
+abicheck dump lib/libtbb.so.12.18 \
   -H include/oneapi/tbb.h \
-  --public-header-dir include \
-  --lang c++ --audit --depth headers
+  -I include \
+  --lang c++ --depth headers \
+  -o libtbb-12.18.abi.json
 ```
 
-`--public-header-dir` establishes the public/internal boundary so the
-single-release hygiene cross-checks run (it is what lets abicheck classify
-which declarations are public).
+The header set is what establishes the public/internal boundary — it is what
+lets abicheck classify which declarations are public. Compare two such
+snapshots (or a snapshot against a live `.so`) with `abicheck compare`.
 
 !!! tip "Prefer the umbrella over the include *directory*"
     Passing `-H <include-dir>` makes abicheck parse **every** header in the
@@ -73,7 +74,7 @@ which declarations are public).
 ## 4. Going deeper needs a build
 
 `--depth headers` (L2) works from the binary + headers alone. The deeper levels
-(`build`/`source`/`full` → L3/L4/L5) read a **`compile_commands.json`**:
+(`build`/`source` → L3/L4/L5) read a **`compile_commands.json`**:
 
 - abicheck auto-discovers one under the source tree (`.`, `build/`, `builddir/`,
   `out/`, `_build/`, `cmake-build-debug/`, **or any immediate subdirectory**);
@@ -81,20 +82,19 @@ which declarations are public).
   `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`; Meson: emitted by `meson setup`;
   Make/Autotools: `bear -- make`), or pass `--build-info <dir|compile_commands.json>`.
 
-Without one, L3/L4/L5 report `not_collected` and only the compiler-free pattern
-pre-scan runs. On a large tree, scope that pre-scan with `--since <ref>` /
-`--changed-path <file>` (or set `ABICHECK_PATTERN_SCAN_JOBS` to fan it out).
+Without one, L3/L4/L5 report `not_collected` and the analysis stays at the
+header tier.
 
 ## 5. Packaging shapes that need a workaround
 
 | Shape | Symptom | What to do |
 |-------|---------|------------|
-| **Static-only** (e.g. oneCCL on conda-forge ships `libccl.a`, no `.so`) | `scan` rejects the `.a`: "static/import library archive … not analysed" | extract members (`ar x lib.a`) and scan the resulting objects, or scan a shared library built from them |
+| **Static-only** (e.g. oneCCL on conda-forge ships `libccl.a`, no `.so`) | abicheck rejects the `.a`: "static/import library archive … not analysed" | extract members (`ar x lib.a`) and analyse the resulting objects, or a shared library built from them |
 | **Headers in a third package** | `-H` dir has no headers | fetch the `*-include` package (see [§1](#1-the-pieces-live-in-different-packages)) |
 | **Stripped release `.so`, no DWARF** | header-aware L2 still works; DWARF cross-checks skip | pass `-H` headers (recommended anyway) |
 
 ## See also
 
 - [Worked Example: Scanning a Library](real-world-example.md) — the full flow and reports
-- [Source-Scan Depth](../use/evidence-depth.md) — what L0–L5 collect and cost
+- [Evidence depth](../use/evidence-depth.md) — what L0–L5 collect and cost
 - [CLI Usage](../use/cli-usage.md) — every flag
