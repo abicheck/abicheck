@@ -171,6 +171,95 @@ class TestAssuranceOverlayMergesExtraArgsConfig:
         assert result.outputs["effective-extra-args"] == "--policy --config"
 
 
+class TestAssuranceOverlayRejectsValuelessConfigOccurrence:
+    """Codex review (P2), fresh evidence, PR #1222: a ``--config`` occurrence
+    in ``extra-args`` with no value at all (a trailing bare ``--config``, or
+    the ``=``-form with an empty value) is malformed usage the REAL CLI
+    itself rejects with a Click "requires an argument"/"Invalid value"
+    usage error (exit 64) -- confirmed directly against the installed CLI:
+
+    ``compare --config good.yml --config`` ->
+    ``Error: Option '--config' requires an argument.`` (exit 64)
+
+    ``compare --config=`` ->
+    ``Error: Invalid value for '--config': File '' does not exist.``
+    (exit 64)
+
+    Before this fix, ``_ct_extra_args_config`` retained an EARLIER, valid
+    ``--config`` occurrence (or nothing) while silently discarding the
+    trailing malformed one during reconstruction -- turning malformed input
+    into a successful overlay-generation run instead of preserving the real
+    CLI's own hard-error semantics. Both shapes must now fail this step
+    loud, with a clear ``::error::`` annotation, rather than silently
+    dropping the offending token and letting the nested run accept a
+    generated overlay as if extra-args had never named a malformed
+    ``--config`` at all."""
+
+    def test_trailing_bare_config_after_an_earlier_valid_one_fails_loud(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact reported repro: TWO ``--config`` occurrences, where the
+        first is valid and the final one is a bare, valueless trailing
+        token. Retaining the first and silently discarding the second would
+        make this step succeed where the real CLI errors out."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "good.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--config good.yml --config"},
+        )
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "::error::" in combined
+        assert "--config" in combined
+        assert "config-path" not in result.outputs
+        assert "effective-extra-args" not in result.outputs
+
+    def test_lone_trailing_bare_config_fails_loud(self, tmp_path: Path) -> None:
+        """The same malformed shape with no earlier valid occurrence to
+        (wrongly) fall back to."""
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--severity-preset strict --config"},
+        )
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "::error::" in combined
+        assert "config-path" not in result.outputs
+
+    def test_equals_form_with_empty_value_fails_loud(self, tmp_path: Path) -> None:
+        """``--config=`` (the ``=``-form with an EMPTY value) is just as
+        malformed, and was previously swallowed silently by the generic
+        ``--config=*`` branch's own "no value to merge" guard rather than
+        being preserved for the real CLI to reject."""
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--config="},
+        )
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "::error::" in combined
+        assert "config-path" not in result.outputs
+
+    def test_equals_form_with_a_real_value_still_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """Sanity check alongside the two failure cases above: a REAL
+        ``--config=<path>`` value must keep working exactly as before this
+        fix -- only the EMPTY-value shape is malformed."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "custom.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--config=custom.yml"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["targets"] == {}
+
+
 class TestAssuranceOverlayLeavesExtraArgsAloneWhenUnaffected:
     def test_extra_args_without_config_is_forwarded_unchanged(
         self, tmp_path: Path

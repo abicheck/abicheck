@@ -940,6 +940,21 @@ runs:
               _ct_pending=""
               continue
             fi
+            if [[ "$_ct_arg" == "--config=" ]]; then
+              # Codex review (P2), fresh evidence, PR #1222: an explicit
+              # `--config=` (the `=`-form with an EMPTY value) is just as
+              # malformed as the bare trailing `--config` handled below --
+              # the real CLI rejects it too ("Error: Invalid value for
+              # '--config': File '' does not exist.", exit 64) -- so it
+              # must fail loud here rather than silently vanishing into the
+              # generic `--config=*` branch right below, whose own `-n`
+              # merge guard would otherwise treat the empty string as "no
+              # config value to merge" and just drop the token, turning
+              # malformed input into a successful run with no --config at
+              # all.
+              echo "::error::extra-args contains '--config=' with an empty value, which the real CLI itself rejects as an invalid --config path (\"Invalid value for '--config': File '' does not exist.\"). Refusing to silently drop it and proceed as if no --config had been given."
+              exit 1
+            fi
             if [[ "$_ct_arg" == --config=* ]]; then
               _ct_extra_args_config="${_ct_arg#--config=}"
               continue
@@ -950,12 +965,21 @@ runs:
             fi
             _extra_args_without_config+=("$_ct_arg")
           done
-          # A trailing --config with nothing after it (malformed usage the
-          # real CLI would itself reject) is dropped rather than re-added as
-          # a bare token -- there is no value to merge, and re-adding it
-          # would just reproduce the same collision this block exists to
-          # close.
-          if [[ -n "$_ct_pending" && "$_ct_pending" != "--config" ]]; then
+          # A trailing --config with nothing after it is malformed usage the
+          # real CLI itself rejects ("Error: Option '--config' requires an
+          # argument.", exit 64) -- fail loud here too (Codex review, P2,
+          # fresh evidence, PR #1222) rather than silently dropping the
+          # token and proceeding as if extra-args never named --config at
+          # all: reconstruction would otherwise remove the malformed
+          # occurrence and let the nested run accept the generated overlay,
+          # exactly the "malformed input quietly becomes a successful
+          # invocation" gap this whole extraction block exists to close, not
+          # reproduce it for its own trailing case.
+          if [[ "$_ct_pending" == "--config" ]]; then
+            echo "::error::extra-args ends with a trailing --config that has no following value, which the real CLI itself rejects (\"Option '--config' requires an argument.\"). Refusing to silently drop it and proceed as if no --config had been given."
+            exit 1
+          fi
+          if [[ -n "$_ct_pending" ]]; then
             _extra_args_without_config+=("$_ct_pending")
           fi
         fi
