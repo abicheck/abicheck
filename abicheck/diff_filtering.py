@@ -1811,19 +1811,48 @@ def _resolve_struct_change_entity_id(
     guess on the *whole* symbol yields the field's own name (e.g.
     ``"field"``), never the record's. ``_struct_change_record_name``
     recovers the exact record spelling by stripping the known
-    ``field_name`` suffix instead of guessing."""
+    ``field_name`` suffix instead of guessing.
+
+    **An exact-name match, even an identity-less one, blocks the bare-name
+    fallback** (Codex review, PR #1218, round 8): if ``old.types``/
+    ``new.types`` contains a declaration whose own name is *exactly*
+    *record_name*, that declaration -- not some other, differently-named
+    one -- is what this change is actually about. Falling through to the
+    bare-name candidate when that exact declaration simply has no
+    resolved ``entity_id`` would instead risk borrowing an unrelated
+    namesake's id (an opaque bare ``Handle`` sharing a leaf spelling with
+    a visible ``other::Handle`` the change is really about, say) --
+    exactly the collision the stable tier's own bare-name-grouping bugs
+    were about, reintroduced here through the bridge instead. The
+    bare-name candidate is only ever consulted when *no* exact-named
+    declaration exists at all."""
     if c.entity_id is not None:
         return c
     record_name = _struct_change_record_name(c)
-    bare = depth_aware_bare_name(record_name)
-    candidate_names = {record_name} if bare == record_name else {record_name, bare}
-    candidates: set[EntityId] = set()
+
+    exact_found = False
+    exact_ids: set[EntityId] = set()
     for snap in (old, new):
         for t in snap.types:
-            if t.name in candidate_names and t.entity_id is not None:
-                candidates.add(t.entity_id)
-    if len(candidates) == 1:
-        return dataclasses.replace(c, entity_id=next(iter(candidates)))
+            if t.name == record_name:
+                exact_found = True
+                if t.entity_id is not None:
+                    exact_ids.add(t.entity_id)
+    if exact_found:
+        if len(exact_ids) == 1:
+            return dataclasses.replace(c, entity_id=next(iter(exact_ids)))
+        return c
+
+    bare = depth_aware_bare_name(record_name)
+    if bare == record_name:
+        return c
+    bare_ids: set[EntityId] = set()
+    for snap in (old, new):
+        for t in snap.types:
+            if t.name == bare and t.entity_id is not None:
+                bare_ids.add(t.entity_id)
+    if len(bare_ids) == 1:
+        return dataclasses.replace(c, entity_id=next(iter(bare_ids)))
     return c
 
 

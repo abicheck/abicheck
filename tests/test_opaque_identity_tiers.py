@@ -1191,6 +1191,26 @@ class TestResolveStructChangeEntityId:
         assert resolved.entity_id is None
         assert resolved is change
 
+    def test_an_exact_name_match_with_no_identity_blocks_the_bare_fallback(
+        self,
+    ) -> None:
+        """A real false positive (Codex review round 8, PR #1218): the
+        change is genuinely about ``other::Handle`` (an exact-name
+        declaration exists, but carries no resolved ``entity_id``), while
+        an unrelated, opaque bare ``Handle`` happens to carry a stable id.
+        Falling through to the bare-name candidate here would borrow the
+        wrong entity's identity entirely -- the exact-name declaration's
+        own missing identity must decline the bridge outright, not excuse
+        a guess from an unrelated namesake."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        visible_other_handle = _record("other::Handle", is_opaque=False, entity_id=None)
+        old = _snap([opaque_handle, visible_other_handle])
+        new = _snap([opaque_handle, visible_other_handle])
+        change = _struct_size_change("other::Handle")
+        resolved = _resolve_struct_change_entity_id(change, old, new)
+        assert resolved.entity_id is None
+        assert resolved is change
+
     def test_a_change_with_its_own_entity_id_is_returned_unchanged(self) -> None:
         """A change that already carries an identity (a header-AST-sourced
         producer, or an already-bridged copy) is passed through verbatim --
