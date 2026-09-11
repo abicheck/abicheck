@@ -172,16 +172,171 @@ class TestDemangle:
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
-    def test_warning_emitted_once(self):
-        """The 'demangling unavailable' warning fires only once."""
-        mock_cxxfilt = MagicMock()
-        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
-        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+    def test_warning_emitted_once_when_both_backends_confirmed_absent(self):
+        """The 'demangling unavailable' warning fires, exactly once, only
+        when the cxxfilt package genuinely fails to import AND the c++filt
+        binary genuinely doesn't exist -- both backends confirmed absent,
+        not merely one symbol failing to demangle."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 _mod.demangle("_ZN3foo3barEv")
                 _mod.demangle.cache_clear()
                 _mod.demangle("_ZN3foo3bazEv")
         assert _mod._warned_no_demangler is True
+
+    def test_non_importerror_cxxfilt_import_failure_falls_through_to_cppfilt(self):
+        """Codex review, fresh evidence: an installed `cxxfilt` module can
+        fail to *import* for a reason other than "package not installed"
+        (e.g. an OSError/RuntimeError from a broken native dependency at
+        module-init time). Narrowing the import's except clause to
+        `ImportError` let such an exception escape uncaught, aborting
+        demangle() entirely instead of falling through to the working
+        c++filt fallback -- must behave the same as an ImportError."""
+        real_import = __import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "cxxfilt":
+                raise OSError("broken native dependency")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_fake_import):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt", "_ZN3foo3barEv"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
+                )
+                result = _mod.demangle("_ZN3foo3barEv")
+        assert result == "foo::bar()"
+        assert _mod._warned_no_demangler is False
+
+    def test_cxxfilt_dependency_modulenotfounderror_is_not_cxxfilt_missing(
+        self, caplog
+    ):
+        """Codex review, fresh evidence (third round): a bare `ImportError`
+        is not proof that `cxxfilt` itself is the missing module -- cxxfilt
+        can be installed and importable, but its own `import` of some
+        dependency can fail, raising a `ModuleNotFoundError` (an
+        `ImportError` subclass) naming the DEPENDENCY, not `cxxfilt`, in
+        `.name`. That must be recorded as "cxxfilt broken", never as
+        "cxxfilt confirmed missing" -- and the eventual warning (with
+        c++filt also missing) must say so, not falsely claim "no cxxfilt
+        package"."""
+        real_import = __import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "cxxfilt":
+                raise ModuleNotFoundError(
+                    "No module named 'some_cxxfilt_dependency'",
+                    name="some_cxxfilt_dependency",
+                )
+            return real_import(name, *args, **kwargs)
+
+        with caplog.at_level("WARNING", logger=_mod._log.name):
+            with patch("builtins.__import__", side_effect=_fake_import):
+                with patch("subprocess.run", side_effect=FileNotFoundError):
+                    result = _mod.demangle("_ZN3foo3barEv")
+        assert result is None
+        assert _mod._cxxfilt_import_confirmed_missing is False
+        assert _mod._cxxfilt_import_confirmed_broken is True
+        [warning_text] = [r.getMessage() for r in caplog.records]
+        assert "cxxfilt failed to initialize" in warning_text
+        assert "no cxxfilt package" not in warning_text
+
+    def test_genuine_cxxfilt_modulenotfounderror_is_confirmed_missing(self):
+        """The positive counterpart: a `ModuleNotFoundError` whose `.name`
+        actually IS "cxxfilt" is genuine proof the package itself isn't
+        installed, and must still set `_cxxfilt_import_confirmed_missing`
+        (not merely `_cxxfilt_import_confirmed_broken`)."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            _mod.demangle("_ZN3foo3barEv")
+        assert _mod._cxxfilt_import_confirmed_missing is True
+        assert _mod._cxxfilt_import_confirmed_broken is False
+
+    def test_warning_wording_distinguishes_broken_cxxfilt_from_missing_cxxfilt(
+        self, caplog
+    ):
+        """Codex review, fresh evidence (second round): when an installed
+        `cxxfilt` fails to import with something other than `ImportError`
+        (a broken native dependency, say) and c++filt is also genuinely
+        missing, the warning must still fire (no demangler actually works)
+        but must NOT claim "no cxxfilt package" -- that package IS
+        installed, just broken. Only a genuine ImportError earns that
+        specific wording."""
+        real_import = __import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "cxxfilt":
+                raise OSError("broken native dependency")
+            return real_import(name, *args, **kwargs)
+
+        with caplog.at_level("WARNING", logger=_mod._log.name):
+            with patch("builtins.__import__", side_effect=_fake_import):
+                with patch("subprocess.run", side_effect=FileNotFoundError):
+                    result = _mod.demangle("_ZN3foo3barEv")
+        assert result is None
+        assert _mod._warned_no_demangler is True
+        [warning_text] = [r.getMessage() for r in caplog.records]
+        assert "cxxfilt failed to initialize" in warning_text
+        assert "no cxxfilt package" not in warning_text
+
+    def test_no_warning_when_cppfilt_present_but_symbol_fails(self):
+        """Root-cause regression for the false-positive warning: cxxfilt is
+        importable (present, working for other symbols) and the c++filt
+        binary is genuinely installed and runs to completion -- it just
+        can't demangle THIS particular symbol (foreign ABI / malformed
+        mangled name / echoes the input back unchanged, exit 0). That must
+        never be reported as "demangler unavailable": the tool is present
+        and working, this one input just isn't real Itanium mangling."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("not itanium")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                # c++filt ran fine (returncode 0) but simply echoed the
+                # input back unchanged -- the canonical "couldn't demangle
+                # this one" outcome, not a missing-tool outcome.
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt", "_ZNOTVALID"],
+                    returncode=0,
+                    stdout="_ZNOTVALID\n",
+                    stderr="",
+                )
+                result = _mod.demangle("_ZNOTVALID")
+        assert result is None
+        assert _mod._warned_no_demangler is False
+
+    @pytest.mark.parametrize(
+        "cxxfilt_effect,cppfilt_returncode,cppfilt_stdout",
+        [
+            (RuntimeError("no"), 1, ""),
+            (RuntimeError("no"), 0, "_ZFAILS\n"),
+            (lambda s: s, 1, ""),
+            (lambda s: s, 0, "_ZFAILS\n"),
+        ],
+    )
+    def test_no_warning_across_present_tool_failure_combinations(
+        self, cxxfilt_effect, cppfilt_returncode, cppfilt_stdout
+    ):
+        """Parametrized over several present-tool/failing-symbol
+        combinations (cxxfilt raising vs. echoing unchanged, c++filt
+        non-zero exit vs. exit-0-echo) -- pins the actual invariant broken
+        by the reported bug (a working c++filt alongside a false
+        "unavailable" warning for some other symbol in the same run), not
+        just the one reported symbol/code path."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = cxxfilt_effect
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt", "_ZFAILS"],
+                    returncode=cppfilt_returncode,
+                    stdout=cppfilt_stdout,
+                    stderr="",
+                )
+                result = _mod.demangle("_ZFAILS")
+        assert result is None
+        assert _mod._warned_no_demangler is False
 
     def test_macho_double_underscore_prefix_via_cxxfilt(self):
         """Codex review, fresh evidence: clang's own `mangledName` carries the
