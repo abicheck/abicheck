@@ -171,6 +171,95 @@ class TestAssuranceOverlayMergesExtraArgsConfig:
         assert result.outputs["effective-extra-args"] == "--policy --config"
 
 
+class TestAssuranceOverlayExpandsShortOptionClusters:
+    """Codex review (P2), fresh evidence, PR #1222: a Click-style clustered
+    short-option token (`-vH` for `-v -H`) must be expanded BEFORE this
+    tokenizer's pending-value/``--config``-recognition logic runs, so a
+    header path literally spelled ``--config`` following such a cluster is
+    correctly read as ``-H``'s own VALUE -- never mistaken for a real
+    ``--config`` flag occurrence.
+
+    Confirmed directly against the installed CLI before writing this fix:
+    ``compare --help-all`` documents ``-v`` as a boolean flag and
+    ``-H [old=|new=]PATH`` as a value-taking short option, and
+    ``compare old.so new.so -vH --config`` (with a file literally named
+    ``--config``) is genuinely ACCEPTED -- ``-H``'s value is the string
+    ``--config``, a legitimate header-path argument, not a second flag.
+    Before this fix, this tokenizer (which never expanded clusters) read
+    the whole ``-vH`` token as one opaque, unrecognized flag and then read
+    the following bare ``--config`` as a real, trailing, valueless
+    ``--config`` occurrence -- which
+    ``TestAssuranceOverlayRejectsValuelessConfigOccurrence`` below's own
+    guard then rejects outright, turning argv the real CLI accepts into a
+    spurious step failure."""
+
+    def test_cluster_before_config_shaped_value_is_not_misread(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact reported repro: ``-vH --config``, where ``--config``
+        is meant as ``-H``'s own literal path VALUE (a header file
+        literally named ``--config``), not a real ``--config`` flag.
+        Overlay generation must succeed, with no merge-base config
+        extracted, and the untouched raw ``extra-args`` forwarded onward
+        unchanged (this step's own pass-through behavior for extra-args
+        that name no real ``--config`` flag)."""
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "-vH --config"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written == {"assurance": {"require_complete": True}}
+        assert result.outputs["effective-extra-args"] == "-vH --config"
+
+    def test_real_config_flag_survives_alongside_an_unrelated_cluster(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuine ``--config real.yml`` occurring alongside an
+        unrelated short option (``-v``, itself too short to be a
+        multi-character cluster) must still be recognized and extracted
+        exactly as before -- the cluster-expansion fix must not regress
+        ordinary, non-clustered ``--config`` extraction."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "real.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "-v --config real.yml"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["targets"] == {}
+        assert result.outputs["effective-extra-args"] == "-v"
+
+    def test_cluster_with_a_genuinely_separate_config_flag_after_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A cluster (``-vH somefile.h``) followed by a genuinely
+        separate, real ``--config`` flag: ``-H``'s own value is
+        ``somefile.h``, and the LATER ``--config real.yml`` is a real flag
+        that must still be extracted -- proving cluster expansion and
+        ``--config`` recognition compose correctly rather than only one of
+        the two firing. The reconstructed ``effective-extra-args`` must
+        show the cluster expanded into its constituent ``-v``/``-H``
+        tokens (reconstruction only happens once a real config IS
+        extracted -- see the `BASE_CONFIG`/`_ct_extra_args_config`
+        branch)."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "real.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "EXTRA_ARGS": "-vH somefile.h --config real.yml",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["targets"] == {}
+        assert result.outputs["effective-extra-args"] == "-v -H somefile.h"
+
+
 class TestAssuranceOverlayRejectsValuelessConfigOccurrence:
     """Codex review (P2), fresh evidence, PR #1222: a ``--config`` occurrence
     in ``extra-args`` with no value at all (a trailing bare ``--config``, or

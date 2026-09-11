@@ -918,6 +918,54 @@ runs:
           esac
           return 1
         }
+        # Codex review (P2), fresh evidence, PR #1222: expand a Click-style
+        # clustered short-option token (`-vH` for `-v -H`) into its
+        # constituent single-character options, one per line, BEFORE the
+        # main loop below applies its pending-value/`--config`-recognition
+        # logic. Without this, `-vH --config` (with a header file literally
+        # named `--config`) was misread as one opaque `-vH` flag followed
+        # by a bare, valueless `--config` -- which the trailing-`--config`
+        # guard further down then rejects outright, turning argv the real
+        # CLI genuinely accepts (`compare --help-all` documents `-v` as a
+        # boolean flag and `-H [old=|new=]PATH` as a value-taking short
+        # option; verified directly against the installed CLI) into a
+        # spurious "extra-args ends with a trailing --config" failure.
+        #
+        # Deliberately identical to action/run.sh's own
+        # `_extra_args_expand_short_clusters` (same accepted shapes, same
+        # `H`/`I`/`o`/`j` value-taking terminal set, same "leave an attached
+        # inline value like `-vHfoo` unexpanded" carve-out) rather than a
+        # re-derived approximation -- this step doesn't source run.sh (see
+        # `_ct_extra_args_is_value_option` above), so the two copies are
+        # kept in sync by hand the same documented way. A cluster shape
+        # this function doesn't recognize is left as one opaque token,
+        # which can only under-recognize a `--config` occurrence -- never
+        # mis-attribute some other option's value as one -- the same
+        # safe-by-construction direction `_ct_extra_args_is_value_option`
+        # already establishes.
+        _ct_extra_args_expand_short_clusters() {
+          local _tok="$1" _rest _last _flags _n _k
+          case "$_tok" in
+            -[a-zA-Z][a-zA-Z]*) ;;
+            *) return 1 ;;
+          esac
+          _rest="${_tok#-}"
+          _last="${_rest: -1}"
+          case "$_last" in
+            H | I | o | j) ;;
+            *) return 1 ;;
+          esac
+          _flags="${_rest%?}"
+          _n=${#_flags}
+          for ((_k = 0; _k < _n; _k++)); do
+            [[ "${_flags:_k:1}" == "v" ]] || return 1
+          done
+          for ((_k = 0; _k < _n; _k++)); do
+            printf -- '-v\n'
+          done
+          printf -- '-%s\n' "$_last"
+          return 0
+        }
         _ct_extra_args_config=""
         _extra_args_without_config=()
         if [[ -n "${EXTRA_ARGS:-}" ]]; then
@@ -994,6 +1042,29 @@ runs:
             fi
             if _ct_extra_args_is_value_option "$_ct_arg"; then
               _ct_pending="$_ct_arg"
+              continue
+            fi
+            # Codex review (P2), fresh evidence, PR #1222: only reached once
+            # `$_ct_arg` is confirmed NOT itself a known value-taking option
+            # (a bare `-H`/`-I`/`-o` already matched above) and, critically,
+            # only ever inline in this same stateful loop -- never as a
+            # separate pre-pass over the whole token list. A pre-pass can't
+            # tell a genuine cluster from a *value* token that merely looks
+            # like one (e.g. `-H -vH` -- there `-vH` is `-H`'s own consumed
+            # value, a literal string, not a cluster to expand); reaching
+            # this point already proves `$_ct_pending` was empty, i.e.
+            # `$_ct_arg` is not a preceding option's value. Mirrors
+            # action/run.sh's own `_extra_args_options` for the identical
+            # reason (see that function's docstring).
+            if _ct_cluster="$(_ct_extra_args_expand_short_clusters "$_ct_arg")"; then
+              while IFS= read -r _ct_cluster_flag; do
+                [[ -z "$_ct_cluster_flag" ]] && continue
+                if _ct_extra_args_is_value_option "$_ct_cluster_flag"; then
+                  _ct_pending="$_ct_cluster_flag"
+                else
+                  _extra_args_without_config+=("$_ct_cluster_flag")
+                fi
+              done <<<"$_ct_cluster"
               continue
             fi
             _extra_args_without_config+=("$_ct_arg")
