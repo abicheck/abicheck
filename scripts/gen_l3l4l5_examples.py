@@ -665,9 +665,14 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     # (graph_reconcile.OUTCOME_RECONCILED / "declaration_identity_reconciled").
     # _classify_outcome() reports `declaration_moved` when the qualified-name
     # alias tier pairs two nodes AND the declaring file changed; it reports
-    # `declaration_identity_reconciled` -- the residual "neither individually
-    # fired" branch -- when the qualified name is paired but the declaring
-    # file stayed the SAME. case196 changes the header path
+    # `declaration_identity_reconciled` -- the "neither individually fired"
+    # branch -- when the qualified name is paired (unchanged, raw-identical
+    # on both sides) but the declaring file stayed the SAME too: the raw
+    # qualified name never differed here, so there is no positive evidence
+    # of pure coordinate churn (contrast OUTCOME_COORDINATES_ONLY, which
+    # requires the raw qualified name to have actually differed and
+    # normalized away -- see graph_reconcile._classify_outcome). case196
+    # changes the header path
     # (detail_v1.h -> detail_v2.h) alongside the signature; this case is the
     # identical fixture with the header path held constant on both sides, so
     # only the mangled-name-moving signature change (int -> long) perturbs

@@ -160,6 +160,7 @@ class ChangeKind(str, Enum):
     VAR_ACCESS_WIDENED = 'var_access_widened'
     SUPPORT_PROMISE_COMPONENT_RETIRED = 'support_promise_component_retired'
     SUPPORT_PROMISE_COMPONENT_INTRODUCED = 'support_promise_component_introduced'
+    DECLARATION_COORDINATES_SHIFTED = 'declaration_coordinates_shifted'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'
     FUNC_DELETED_ELF_FALLBACK = 'func_deleted_elf_fallback'
