@@ -387,6 +387,13 @@ def _declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
     return result
 
 
+def _signature_tail(identity: CanonicalIdentity) -> str:
+    # normalized_signature's kind/arity/param-types tail, qn field stripped
+    # off (that field alone carries coordinate churn) -- comparable across
+    # a coordinate shift. Format: "sig:" + qn + "\x1f" + kind + "\x1f" + ...
+    return identity.normalized_signature.split("\x1f", 1)[-1]
+
+
 def _classify_outcome(
     old_identity: CanonicalIdentity,
     new_identity: CanonicalIdentity,
@@ -417,10 +424,12 @@ def _classify_outcome(
         return OUTCOME_MOVED
     if renamed and moved:
         return OUTCOME_RECONCILED
-    # Neither fired: only real churn (raw name differed, normalized equal)
-    # proves nothing else changed -- an already-identical raw name (e.g. an
-    # alias/canonical match where only the mangled id differs) does not.
-    return OUTCOME_COORDINATES_ONLY if old_qn != new_qn else OUTCOME_RECONCILED
+    # Neither fired: coordinate-only needs BOTH the raw name to have
+    # differed (normalized equal) AND the signature tail to still agree --
+    # else a simultaneous real signature change would be missed too.
+    same_sig = _signature_tail(old_identity) == _signature_tail(new_identity)
+    coordinate_only = old_qn != new_qn and same_sig
+    return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
 
 
 #: One node kind's structural-context index: context -> the new-side node ids

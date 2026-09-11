@@ -1149,35 +1149,34 @@ def test_reconcile_added_removed_stays_fast_on_a_large_graph() -> None:
     assert elapsed < 10.0, f"reconciliation took {elapsed:.2f}s for {n} nodes"
 
 
-def _identity(qualified_name: str, declaring_file: str) -> CanonicalIdentity:
+def _identity(qn: str, decl_file: str, sig: str = "") -> CanonicalIdentity:
     return CanonicalIdentity(
-        primary_id=f"id:{qualified_name}",
+        primary_id=f"id:{qn}",
         tier=IDENTITY_TIER_CANONICAL,
-        qualified_name=qualified_name,
-        source_relative=declaring_file,
+        qualified_name=qn,
+        source_relative=decl_file,
+        normalized_signature=sig,
     )
 
 
 def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
-    """Bug-class regression: PR #1204 taught renamed/moved to ignore
-    coordinate churn, but the fallthrough lumped it with the opposite
-    "both changed" outcome (RECONCILED). Second bug (Codex review):
-    COORDINATES_ONLY fires only on POSITIVE churn evidence (raw name
-    differed, normalized away) -- an already-identical name/file (case197:
-    a mangled-name change neither axis observes) stays RECONCILED
-    (ADR-048's intent). Oracle table, independent of the branches under
-    test."""
-    # name: (old_qn, new_qn, name_changed_for_real, has_coord_evidence)
+    """Bug-class regression: PR #1204's fallthrough lumped coordinate churn
+    with the opposite "both changed" outcome; review found COORDINATES_ONLY
+    needs POSITIVE churn evidence AND an agreeing signature tail, not just
+    both predicates False. Oracle table, independent of the code tested."""
+    lam1, lam2 = "(lambda at f.h:1:2)", "(lambda at f.h:9:9)"
     names = {
-        "identical": ("ns::Widget", "ns::Widget", False, False),
-        "real_rename": ("ns::Widget", "ns::WidgetV2", True, False),
-        "coord_shift": ("(lambda at f.h:1:2)", "(lambda at f.h:9:9)", False, True),
+        "identical": ("ns::Widget", "ns::Widget", False, False, ("s", "s")),
+        "real_rename": ("ns::Widget", "ns::WidgetV2", True, False, ("s", "s")),
+        "coord_shift": (lam1, lam2, False, True, ("s", "s")),
+        "coord_shift_sig_change": (lam1, lam2, False, True, ("s0", "s1")),
     }
     files = {"same": ("a.h", "a.h", False), "real_move": ("a.h", "b.h", True)}
     name_words, loc_words = ("renamed", "name"), ("moved", "location", "declaring")
-    for nk, (old_qn, new_qn, name_ch, has_coord) in names.items():
+    for nk, (old_qn, new_qn, name_ch, has_coord, (old_sig, new_sig)) in names.items():
         for fk, (old_f, new_f, file_ch) in files.items():
-            old_id, new_id = _identity(old_qn, old_f), _identity(new_qn, new_f)
+            old_id = _identity(old_qn, old_f, f"sig:{old_qn}\x1f{old_sig}")
+            new_id = _identity(new_qn, new_f, f"sig:{new_qn}\x1f{new_sig}")
             outcome = _classify_outcome(old_id, new_id)
             if name_ch and not file_ch:
                 expected = OUTCOME_RENAMED
@@ -1185,13 +1184,14 @@ def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
                 expected = OUTCOME_MOVED
             elif name_ch and file_ch:
                 expected = OUTCOME_RECONCILED
+            elif has_coord and old_sig == new_sig:
+                expected = OUTCOME_COORDINATES_ONLY
             else:
-                expected = OUTCOME_COORDINATES_ONLY if has_coord else OUTCOME_RECONCILED
+                expected = OUTCOME_RECONCILED
             assert outcome == expected, f"{nk}/{fk}: {expected!r} != {outcome!r}"
             prose = _OUTCOME_PROSE[outcome]
-            # RECONCILED is exempt when neither axis changed -- ADR-048
-            # also covers "no clean split" there (case197), an accepted
-            # prose overstatement, not a bug.
+            # RECONCILED w/ neither axis changed is ADR-048's accepted
+            # "no clean split" (case197) prose overstatement, not a bug.
             if outcome == OUTCOME_RECONCILED and not (name_ch and file_ch):
                 continue
             if not name_ch:
