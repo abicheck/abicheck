@@ -212,6 +212,35 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
         assert "used-by" in outputs["_stdout"], outputs
         assert "required-symbol" in outputs["_stdout"], outputs
 
+    @pytest.mark.parametrize(
+        "env_name,value",
+        [
+            ("INPUT_OLD_HEADER", "old_include/foo.h"),
+            ("INPUT_OLD_INCLUDE", "old_include/"),
+            ("INPUT_OLD_VERSION", "1.0.0"),
+        ],
+    )
+    def test_old_sided_inputs_are_rejected(
+        self, tmp_path: Path, env_name: str, value: str
+    ) -> None:
+        # Codex review, PR #1223, round 8: old-header/old-include/
+        # old-version were silently dropped (never forwarded) on the
+        # audit-only shape -- there is no OLD side for this evidence to
+        # describe, and the CLI's own _reject_old_sided_inputs
+        # (abicheck/frontends/cli/commands/no_baseline_rulings.py) rejects
+        # an explicitly OLD-scoped value outright rather than accepting
+        # it silently. Caught here, upfront, same as the other audit-only
+        # capability gaps above.
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
+                env_name: value,
+            },
+        )
+        assert outputs["_returncode"] == 1, outputs
+        assert "does not support" in outputs["_stdout"], outputs
+
 
 class TestAuditOnlyCompareUnaffectedWhenTheseInputsAreUnset:
     """The common case -- an audit-only compare that never touches since/

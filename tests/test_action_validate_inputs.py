@@ -1202,6 +1202,42 @@ class TestScopedComparisonInputsRejectedOnAuditOnly:
         assert "::warning::" not in result.stdout
 
 
+class TestOldSidedInputsRejectedOnAuditOnly:
+    """The audit-only shape (old-library/abi-baseline both omitted) rejects
+    old-header/old-include/old-version outright -- there is no OLD side for
+    this evidence to describe, and the CLI's own _reject_old_sided_inputs
+    (abicheck/frontends/cli/commands/no_baseline_rulings.py) rejects an
+    explicitly OLD-scoped --header/--include/--version rather than silently
+    dropping it. Codex review, PR #1223, round 8: action/run.sh's audit-only
+    branch previously just never forwarded these three, which reads as
+    "honored" when it was silently dropped."""
+
+    @pytest.mark.parametrize(
+        "env_name,value",
+        [
+            ("INPUT_OLD_HEADER", "old_include/"),
+            ("INPUT_OLD_INCLUDE", "old_include/"),
+            ("INPUT_OLD_VERSION", "1.0.0"),
+        ],
+    )
+    def test_each_input_alone_is_rejected_without_a_baseline(
+        self, env_name: str, value: str
+    ) -> None:
+        result = _run_validate({"INPUT_MODE": "compare", env_name: value})
+        assert result.returncode == 1
+        assert "does not support" in result.stdout
+
+    def test_old_header_passes_once_old_library_is_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_OLD_HEADER": "old_include/foo.h",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Drift guard: validate-inputs.sh intentionally duplicates run.sh's
 # `_is_release_style_operand()` (documented at the top of validate-inputs.sh

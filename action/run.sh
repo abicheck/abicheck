@@ -2549,6 +2549,14 @@ elif [[ "$MODE" == "compare" ]]; then
       echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support used-by/used-by-manifest/required-symbol/required-symbols -- these scope a two-sided comparison to what a real consumer uses, and compare --no-baseline has no old/new pair to scope (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports consumer scoping, or drop these inputs for this audit-only run."
       exit 1
     fi
+    if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
+      exit 1
+    fi
+    if [[ -n "${INPUT_OLD_VERSION:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+      exit 1
+    fi
   fi
   CMD+=(compare)
   if [[ "$_NO_BASELINE" == "true" ]]; then
@@ -2564,11 +2572,13 @@ elif [[ "$MODE" == "compare" ]]; then
 
   # -H/-I: no OLD side at all in the audit-only shape -- old-header/
   # old-include would be a CLI usage error ("the OLD side is declared
-  # absent, so there is no baseline for this evidence to describe"), so they
-  # are simply not forwarded. public-header-dir has no dedicated `compare`
+  # absent, so there is no baseline for this evidence to describe") and are
+  # rejected upfront above, before reaching this point, rather than
+  # silently dropped here. public-header-dir has no dedicated `compare`
   # flag (unlike legacy `scan`) -- it folds into -H, the same directory
   # provenance-and-extraction-scope role a bare -H root already plays.
-  # `--version old=` is dropped for the same no-OLD-side reason.
+  # old-version is rejected upfront above too, same as old-header/
+  # old-include -- only new-version is forwarded on this shape.
   if [[ "$_NO_BASELINE" == "true" ]]; then
     add_flag "-H" "${INPUT_HEADER:-}"
     add_flag "-H" "${INPUT_NEW_HEADER:-}"

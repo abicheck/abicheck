@@ -184,6 +184,12 @@ case "$MODE" in
             || -n "${INPUT_REQUIRED_SYMBOL:-}" || -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support used-by/used-by-manifest/required-symbol/required-symbols -- these scope a two-sided comparison to what a real consumer uses, and compare --no-baseline has no old/new pair to scope (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports consumer scoping, or drop these inputs for this audit-only run."
       fi
+      if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
+      fi
+      if [[ -n "${INPUT_OLD_VERSION:-}" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+      fi
     fi
     # compare's full --format choice set is json|markdown|sarif|html|junit|
     # review (`abicheck compare --help-all`); a directory/package operand

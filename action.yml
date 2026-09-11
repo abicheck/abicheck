@@ -963,9 +963,15 @@ outputs:
       incomplete analysis assurance with
       the require-complete-analysis input -- unlike the two-sided shape,
       there is no bare severity-gate exit-1 source here (severity-based
-      audit gating uses the dedicated exit 3 below instead), so these two
-      are exit 1's only causes on this shape; told apart the same way, one
-      level down under diff),
+      audit gating uses the dedicated exit 3 below instead). A third
+      cause, dry-run only: with dry-run true, a live-candidate (not a
+      stored snapshot) request pinning depth: build/source via extra-args
+      with no sources/build-info given previews a blocker the real run
+      would hit at exit 7 -- the dry-run preview itself reports VERDICT
+      ERROR at exit 1 rather than 7, since no analysis actually ran to
+      collect that evidence contract in the first place. These three are
+      exit 1's only causes on this shape; the first two are told apart the
+      same way, one level down under diff),
       3 (AUDIT_GATE -- the audit-gate axis;
       see the verdict output's own description above),
       7 (evidence-contract error, ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR
@@ -1025,6 +1031,7 @@ runs:
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
+        INPUT_OLD_VERSION: ${{ inputs.old-version }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
