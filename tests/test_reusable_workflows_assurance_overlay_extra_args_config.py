@@ -260,6 +260,81 @@ class TestAssuranceOverlayExpandsShortOptionClusters:
         assert result.outputs["effective-extra-args"] == "-v -H somefile.h"
 
 
+class TestAssuranceOverlayRecognizesUsedByManifestAsValueOption:
+    """Codex review (P2), fresh evidence, PR #1222 (merged as commit
+    1acebd605; this fix follows up on ``main`` post-merge):
+    ``--used-by-manifest`` is a genuine value-taking ``compare`` CLI option
+    (``abicheck/frontends/cli/options/release.py``'s ``used_by_manifests``,
+    confirmed directly against the installed CLI's ``compare --help-all``)
+    that was missing from this step's own ``_ct_extra_args_is_value_option``
+    case list. A caller passing ``extra-args: '--used-by-manifest --config'``
+    with a consumer manifest literally named ``--config`` -- an argv the real
+    CLI genuinely accepts, since ``--used-by-manifest FILE`` consumes the
+    following token as its own value -- was misread by this tokenizer as one
+    opaque, unrecognized ``--used-by-manifest`` flag followed by a bare,
+    trailing, valueless ``--config`` occurrence, which
+    ``TestAssuranceOverlayRejectsValuelessConfigOccurrence``'s own guard then
+    rejected outright: ``analysis-assurance-complete: true`` broke a check
+    that would otherwise succeed.
+
+    Root-caused (per root ``AGENTS.md``'s "fix the cause, not the instance")
+    to a stale/incomplete value-taking-option enumeration, not one missing
+    name: ``action/run.sh``'s own hand-synced ``_extra_args_is_value_option``
+    sibling was independently missing the identical four options
+    (``--used-by-manifest``, ``--select``, ``--select-required``,
+    ``--max-findings-per-library``) -- see
+    ``tests/test_extra_args_is_value_option_completeness.py`` for the
+    systematic, generative invariant test (introspects the real ``compare``
+    Click command itself and diffs it against both hand-maintained lists)
+    that now catches a *future* missing option mechanically, rather than
+    needing another Codex round per omission."""
+
+    def test_used_by_manifest_before_config_shaped_value_is_not_misread(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact reported repro: ``--used-by-manifest --config``, where
+        ``--config`` is meant as ``--used-by-manifest``'s own literal FILE
+        value (a consumer manifest literally named ``--config``), not a real
+        ``--config`` flag. Overlay generation must succeed, with no
+        merge-base config extracted, and the untouched raw ``extra-args``
+        forwarded onward unchanged (this step's own pass-through behavior
+        for extra-args that name no real ``--config`` flag)."""
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--used-by-manifest --config"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written == {"assurance": {"require_complete": True}}
+        assert result.outputs["effective-extra-args"] == "--used-by-manifest --config"
+
+    def test_real_config_flag_survives_alongside_used_by_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuine ``--config real.yml`` occurring alongside a real
+        ``--used-by-manifest consumers.json`` value must still be recognized
+        and extracted correctly -- ``--used-by-manifest``'s own value must
+        not be misread as a flag/unknown token, and the later real
+        ``--config`` must still be found and extracted."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "real.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "EXTRA_ARGS": "--used-by-manifest consumers.json --config real.yml",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["targets"] == {}
+        assert (
+            result.outputs["effective-extra-args"]
+            == "--used-by-manifest consumers.json"
+        )
+
+
 class TestAssuranceOverlayRejectsValuelessConfigOccurrence:
     """Codex review (P2), fresh evidence, PR #1222: a ``--config`` occurrence
     in ``extra-args`` with no value at all (a trailing bare ``--config``, or
