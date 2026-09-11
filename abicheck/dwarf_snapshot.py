@@ -50,6 +50,7 @@ from .dwarf_utils import (
     unwrap_cv_typedef as _unwrap_cv_typedef,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
+from .extract import dwarf_vtable_completeness as _dvc
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
     default_member_access_for_tag as _default_member_access_for_tag,
@@ -297,6 +298,7 @@ class _DwarfSnapshotBuilder:
         # ``_record_by_qualified_name`` is deferred to _finalize_vptr_offsets
         # time, once every CU is known, rather than attempted eagerly here.
         self._die_key_to_qualified_name: dict[tuple[int, int], str] = {}
+        self._vtable_evidence_conflicts: set[str] = set()  # ADR-063 T9, see _dvc
         # id(derived RecordType) -> ordered list of (base bare name, this
         # edge's own bit offset or None, (CU offset, base DIE offset) or
         # None), ONE ENTRY PER DW_TAG_inheritance CHILD -- not a dict keyed
@@ -393,6 +395,7 @@ class _DwarfSnapshotBuilder:
         # entirely inherited — needs every record type in self.types, not
         # just this CU's (see _finalize_vptr_offsets's own docstring).
         self._finalize_vptr_offsets()
+        _dvc.finalize_vtable_evidence_completeness(self)  # T9, needs every CU walked
 
         # Third pass: filter types to only those reachable from
         # exported symbols (transitive closure)
@@ -834,6 +837,7 @@ class _DwarfSnapshotBuilder:
             # would find nothing in _record_die_index at all (Codex review,
             # reproduced with two TUs sharing one header).
             self._register_die_qualified_name(die, CU, qualified)
+            _dvc.note_duplicate_record_evidence(self, qualified, die, CU, children)
             return
 
         tag = die.tag

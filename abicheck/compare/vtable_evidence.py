@@ -92,6 +92,47 @@ reachable, confirmed fabrication round 2 found (an apparent vtable
 transition read off a PDB-derived side) while leaving every existing
 ``NOT_COLLECTED`` caller — including the leaf-class regression round 3's
 revert protects — on the exact heuristic this module already had.
+
+**T9 second slice (this revision): the DWARF per-translation-unit
+completeness gap the T9 closure above left open.** The PDB slice answers
+"can this producer express the family at all" (a per-*producer*
+capability claim). It cannot answer the question this slice closes: DWARF
+genuinely CAN express bases/virtual_bases/vtable, and usually does
+completely, but ``dwarf_snapshot.py``'s own "first definition wins" ODR
+handling (``_DwarfSnapshotBuilder._check_and_register_type_name``)
+builds each record type from exactly ONE
+compilation unit's own view of it and silently discards every other CU's
+own copy -- including whatever that CU independently saw about the same
+class's virtual methods and bases. When two CUs compiled from the same
+header genuinely disagree (a differing ``-g`` level, a TU that never used
+a given virtual so the compiler omitted its DIE, ``-flimit-debug-info``
+trimming), the retained definition's own evidence is real but may not be
+*complete* -- the exact ambiguity this module's own
+:func:`vtable_transition_is_evidenced` docstring already names as an
+unguarded false-positive source.
+
+``extract.dwarf_vtable_completeness`` is the producer
+half: it compares every discarded ODR-duplicate DIE's own bases/
+virtual_bases/vtable membership against the retained definition's, and
+downgrades all three sibling facts to ``Fact.partial(...)`` (never a new
+status -- ``PARTIAL``'s own docstring, "covered only part of the
+requested scope... the uncovered part is unknown, not absent," already
+states exactly this claim) whenever they disagree. This function's own
+decline check, below, now includes ``PARTIAL`` alongside ``UNSUPPORTED``
+for the same three fields, for the same reason the PDB slice declined on
+``UNSUPPORTED``: an evidence-completeness gap, once flagged, must not let
+a difference derived from it read as a real change. Unlike ``UNSUPPORTED``
+(a blanket, producer-wide claim), ``PARTIAL`` here is per-record and
+DWARF-specific -- it says nothing about any *other* record in the same
+snapshot, and nothing about what a non-DWARF producer would report for
+the same class.
+
+``diff_cxx_rules._transitive_bases`` needed no code change for this slice
+-- it already reads ``bases_fact``/``virtual_bases_fact`` via
+``_fact_str_list_confirmed``, which already treats anything other than
+``PRESENT`` (``PARTIAL`` included) as "not confirmed complete." Producing
+``PARTIAL`` for those two fields is what activates a gate that was already
+there, not a new one.
 """
 
 from __future__ import annotations
@@ -102,6 +143,12 @@ from ..model import FactStatus, Function, RecordType, resolved_fact_value
 
 OwnerClassOf = Callable[[Function], "str | None"]
 NamespaceSuffixSpellings = Callable[[str], "list[str]"]
+
+#: Statuses on which `vtable_transition_is_evidenced` declines outright --
+#: see that function's own body for the full account of each member's own
+#: reason (UNSUPPORTED: producer-wide incapability, e.g. PDB;
+#: PARTIAL: DWARF's own per-translation-unit completeness gap, T9).
+_DECLINE_STATUSES = (FactStatus.UNSUPPORTED, FactStatus.PARTIAL)
 
 
 def _owned_virtual_signatures(
@@ -243,11 +290,30 @@ def vtable_transition_is_evidenced(
     reading of the fields already here.
     """
     if (
-        t_old.vtable_fact is not None
-        and t_old.vtable_fact.status is FactStatus.UNSUPPORTED
-    ) or (
-        t_new.vtable_fact is not None
-        and t_new.vtable_fact.status is FactStatus.UNSUPPORTED
+        (
+            t_old.vtable_fact is not None
+            and t_old.vtable_fact.status in _DECLINE_STATUSES
+        )
+        or (
+            t_new.vtable_fact is not None
+            and t_new.vtable_fact.status in _DECLINE_STATUSES
+        )
+        or (
+            t_old.bases_fact is not None
+            and t_old.bases_fact.status in _DECLINE_STATUSES
+        )
+        or (
+            t_new.bases_fact is not None
+            and t_new.bases_fact.status in _DECLINE_STATUSES
+        )
+        or (
+            t_old.virtual_bases_fact is not None
+            and t_old.virtual_bases_fact.status in _DECLINE_STATUSES
+        )
+        or (
+            t_new.virtual_bases_fact is not None
+            and t_new.virtual_bases_fact.status in _DECLINE_STATUSES
+        )
     ):
         # ADR-063 Track 4 5B final closure / T9: `UNSUPPORTED` is not the
         # generic "not is_present" pre-check round 2 landed and round 3
@@ -269,6 +335,36 @@ def vtable_transition_is_evidenced(
         # convention, or any other producer's genuine non-evidence) is
         # untouched and keeps falling through to the heuristics below,
         # exactly as before this check existed.
+        #
+        # `PARTIAL` (T9 second slice, this revision) closes the sibling gap
+        # `UNSUPPORTED` alone cannot: DWARF's own per-translation-unit
+        # completeness signal (`extract.dwarf_vtable_completeness`) -- an
+        # ODR-duplicate DIE in another CU that
+        # disagreed with the retained definition's own bases/virtual_bases/
+        # vtable membership. Unlike `UNSUPPORTED` (a producer-wide
+        # incapability claim, true for every record that producer ever
+        # emits), `PARTIAL` is per-record and DWARF-specific: it says this
+        # one class's evidence, in THIS snapshot, may not be the complete
+        # set, not that DWARF as a format cannot express the family. No
+        # existing producer emitted `PARTIAL` for any of these three fields
+        # before this slice, so this addition is a pure widening of the
+        # decline set with no reachable behavior change for any
+        # already-covered `PRESENT`/`NOT_COLLECTED`/`FAILED` input --
+        # `NOT_COLLECTED` in particular (the hand-built-fixture convention
+        # round 3's revert protects) is untouched, exactly as the paragraph
+        # above already established for `UNSUPPORTED`.
+        #
+        # `bases_fact`/`virtual_bases_fact` join `vtable_fact` here rather
+        # than only gating this function's own top-level "class's own
+        # virtual functions differ" branch, because a per-TU gap detected on
+        # ANY of the three siblings casts doubt on ALL of this record's own
+        # DWARF-derived layout evidence for the same reason (the same
+        # discarded ODR-duplicate DIE is where all three would have come
+        # from) -- `dwarf_snapshot.py`'s own finalize pass always downgrades
+        # all three together for exactly this reason, never just one.
+        # `vptr_offset_bits_fact` is deliberately NOT part of this check --
+        # see the "NOT consulted here" note further down this docstring for
+        # why that field needs its own separate treatment.
         return False
     old_vtable = resolved_fact_value(t_old.vtable_fact, [])
     new_vtable = resolved_fact_value(t_new.vtable_fact, [])

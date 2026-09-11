@@ -905,13 +905,13 @@
     },
     {
       "path": "abicheck/dwarf_snapshot.py",
-      "baseline_lines": 1994,
+      "baseline_lines": 1998,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1994 -> 1998 (ADR-063 Phase 5B / T9 third slice, duplication-and-convergence-assessment.md Phase 6 item 4): the DWARF per-translation-unit vtable-evidence-completeness signal. The actual logic (comparing a discarded ODR-duplicate DIE's own bases/virtual_bases/vtable membership against the retained definition's, and downgrading the retained record's facts to Fact.partial(...) on disagreement) lives entirely in the new extract/dwarf_vtable_completeness.py leaf module, which takes the builder itself (typed Any) rather than several individual pieces of state specifically so the two call sites here could stay one line each. What remains here is the minimum irreducible wiring this builder's own __init__/CU-walk/ODR-duplicate-branch structure requires and cannot itself move: the one new import, the one new per-instance conflict-tracking set (mutated throughout the CU walk, so it must live on the builder), and one call each at the two places new evidence becomes available (the ODR-duplicate branch) and consumable (the post-CU-walk finalize pass, alongside the existing _finalize_vptr_offsets). No smaller diff -- see compare/vtable_evidence.py's own \"T9 second slice\" docstring note for the consumer half and tests/test_dwarf_vtable_completeness.py for the producer-side test suite.",
       "review_by": "2026-11-30"
     },
     {
