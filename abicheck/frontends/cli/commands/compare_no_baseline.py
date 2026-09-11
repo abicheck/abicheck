@@ -31,9 +31,12 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
+
+if TYPE_CHECKING:
+    from ....environment_matrix import EnvironmentMatrix
 
 from ....report.no_baseline import (
     NO_BASELINE_SUPPORTED_FORMATS,
@@ -195,6 +198,13 @@ class _ResolvedInvocation:
     contract: _ContractChoices
     scope: _ScopeChoices
     suppression: _SuppressionChecks
+    #: ADR-020b / ADR-068 D5: the `.abicheck.yml` `deployment:`-resolved
+    #: `EnvironmentMatrix`, threaded through so the candidate-only
+    #: declared-runtime-floor/wheel-packaging checks run on this audit too
+    #: (`workflows.env_matrix_audit`) -- the same already-resolved value the
+    #: two-sided `compare` path reads as `resolved_cfg.deployment` (Codex
+    #: review: previously this driver had no channel for it at all).
+    env_matrix: EnvironmentMatrix | None
 
 
 def maybe_dispatch_no_baseline_compare(
@@ -399,6 +409,9 @@ def _resolve_no_baseline_invocation(
             strict_suppressions=bool(resolved_cfg.strict_suppressions),
             require_justification=bool(resolved_cfg.require_justification),
         ),
+        # ADR-020b: config-only, no CLI kwarg -- same already-resolved
+        # `EnvironmentMatrix` the two-sided `compare` path reads.
+        env_matrix=resolved_cfg.deployment,
     )
 
 
@@ -559,6 +572,7 @@ def _run_no_baseline_compare_cmd(
             sources=inv.evidence.sources,
             build_info=inv.evidence.build_info,
         ),
+        env_matrix=inv.env_matrix,
     )
 
     _emit_no_baseline_report(result, inv)

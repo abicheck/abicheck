@@ -39,6 +39,8 @@ system libraries this module doesn't enumerate — see "Out of scope".
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_versioning import _parse_dotted_numeric_version, _version_le
@@ -46,6 +48,7 @@ from .model.binary_naming import strip_vendor_hash
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata
 from .model.macho_facts import MachoMetadata
+from .model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 
 #: Declared-floor key for :func:`check_macos_deployment_target_floor`, in the
 #: same ``runtime_floors``/``EnvironmentMatrix`` mapping G10/G27's other
@@ -54,7 +57,7 @@ _MACOS_DEPLOYMENT_TARGET_KEY = "MACOS_DEPLOYMENT_TARGET"
 
 
 def check_macos_deployment_target_floor(
-    macho: MachoMetadata | None, runtime_floors: dict[str, str] | None
+    macho: MachoMetadata | None, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Check a Mach-O binary's own minimum OS version against a declared
     macOS deployment-target promise (e.g. a wheel's ``macosx_10_9_x86_64``
@@ -244,11 +247,32 @@ _ARCH_CLAIM_TO_MACHO_CPU_TYPE: dict[str, frozenset[str]] = {
     "arm64": frozenset({"ARM64"}),
 }
 
+#: Drift guard (Codex review, PR #1221, Finding 1): `model.wheel_arch_claims.
+#: WHEEL_ARCH_CLAIMS` is `environment_matrix.py`'s -- a different
+#: architecture layer that may not import this (``compare``-layer) module --
+#: independent source of truth for which ``WHEEL_ARCH`` tokens are valid to
+#: *declare*. If a new claim were added to only one of the two dicts above
+#: (or only to `WHEEL_ARCH_CLAIMS` itself), a strict config could accept a
+#: token this detector still treats as unrecognized (or vice versa) without
+#: either side raising anything. Checked at import time so the two can never
+#: silently diverge again.
+if (
+    _ARCH_CLAIM_TO_ELF_MACHINE.keys() | _ARCH_CLAIM_TO_MACHO_CPU_TYPE.keys()
+    != WHEEL_ARCH_CLAIMS
+):
+    # A plain `if`/`raise` rather than `assert`, so this drift guard still
+    # fires under `python -O` (which strips bare `assert` statements).
+    raise AssertionError(
+        "diff_wheel_deployment's per-claim dicts and "
+        "model.wheel_arch_claims.WHEEL_ARCH_CLAIMS have drifted apart -- "
+        "update WHEEL_ARCH_CLAIMS to match"
+    )
+
 
 def check_wheel_tag_architecture_mismatch(
     elf: ElfMetadata | None,
     macho: MachoMetadata | None,
-    runtime_floors: dict[str, str] | None,
+    runtime_floors: Mapping[str, str] | None,
 ) -> list[Change]:
     """Check a binary's own recorded architecture against the wheel tag's
     claimed architecture (G27).
@@ -269,9 +293,17 @@ def check_wheel_tag_architecture_mismatch(
     same normalization as the other G10/G27 checks) — a
     :func:`abicheck.package.parse_wheel_architecture_claim` value (e.g.
     ``"x86_64"``, ``"aarch64"``, ``"arm64"``). Returns ``[]`` when no claim
-    is declared, the claim isn't a recognized architecture token, neither
-    *elf* nor *macho* carries a recorded machine/cpu_type, or the recorded
-    value satisfies the claim.
+    is declared, neither *elf* nor *macho* carries a recorded machine/
+    cpu_type, or the recorded value satisfies the claim. A claim that isn't
+    a recognized architecture token *at all* (outside
+    :data:`abicheck.model.wheel_arch_claims.WHEEL_ARCH_CLAIMS`) also
+    produces no finding here — but one that IS a recognized token for the
+    *other* binary format (e.g. a Mach-O-only ``arm64`` claim compared
+    against an ELF binary, or vice versa) is always flagged as a mismatch:
+    it's a real claim this detector understands, just not one either
+    recognized ELF or Mach-O spelling could ever satisfy for the format
+    actually under comparison (Codex review, PR #1221, Finding 1 — see
+    :func:`_elf_arch_mismatch`/:func:`_macho_arch_mismatch`).
 
     For a fat/universal Mach-O, :attr:`MachoMetadata.cpu_type` is only the
     *one* slice ``parse_macho_metadata`` selected for the host running
@@ -393,6 +425,19 @@ def _elf_arch_mismatch(elf: ElfMetadata, claimed: str) -> list[Change] | None:
     name = getattr(elf, "soname", "") or "<binary>"
     expected = _ARCH_CLAIM_TO_ELF_MACHINE.get(claimed)
     if expected is None:
+        if claimed in WHEEL_ARCH_CLAIMS:
+            # Codex review, PR #1221, Finding 1: `claimed` is a real,
+            # config-accepted architecture token (it's in the cross-format
+            # union `WHEEL_ARCH_CLAIMS`), but not one this ELF-specific dict
+            # recognizes -- e.g. a Mach-O-only `arm64` claim compared
+            # against an ELF binary. Silently returning `[]` here would let
+            # a token that's plausible for the *wrong* binary format disable
+            # this whole gate for whatever ELF binary is actually under
+            # comparison, no matter how obviously it mismatches. Treat it as
+            # a hard, unconditional mismatch instead: no ELF-recognized
+            # spelling can ever satisfy a claim this format's own dict has
+            # no entry for.
+            return _arch_mismatch(name, claimed, elf_machine)
         return []
     if elf_machine not in expected:
         return _arch_mismatch(name, claimed, elf_machine)
@@ -458,6 +503,15 @@ def _macho_arch_mismatch(macho: MachoMetadata, claimed: str) -> list[Change]:
         return []
     expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
     if expected is None:
+        if claimed in WHEEL_ARCH_CLAIMS:
+            # Codex review, PR #1221, Finding 1: the ELF-side symmetric
+            # case -- `claimed` is a real, config-accepted token (e.g. an
+            # ELF-only `aarch64` claim) that this Mach-O-specific dict has
+            # no entry for. See `_elf_arch_mismatch`'s matching branch for
+            # the full rationale; the fix is the same in both directions.
+            return _arch_mismatch(
+                macho.install_name or "<binary>", claimed, ", ".join(slices)
+            )
         return []
     if any(s.upper() in expected for s in slices):
         return []
@@ -523,7 +577,7 @@ _WHEEL_CONTEXT_KEY = "WHEEL_CONTEXT"
 
 
 def check_wheel_rpath_not_portable(
-    elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata | None, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Flag a non-``$ORIGIN``-relative (absolute) RPATH/RUNPATH entry (G27).
 
@@ -574,7 +628,7 @@ def check_wheel_rpath_not_portable(
 
 
 def check_wheel_closure_dependency_violation(
-    elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata | None, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Flag a vendored dependency with no mechanism to ever be found (G27).
 

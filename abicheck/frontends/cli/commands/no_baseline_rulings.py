@@ -245,10 +245,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "--post-manifest",
         "a post-manifest overlays contract scope across two sides",
     ),
-    "env_matrix_path": (
-        "--env-matrix",
-        "an environment matrix compares runtime floors across two builds",
-    ),
     "diagnostic_comparison": (
         "--diagnostic-comparison",
         "ADR-050's escape hatch downgrades an incomparable-pair failure; a "

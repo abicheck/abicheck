@@ -869,6 +869,38 @@ def test_a_discovered_configs_scope_reaches_the_audit_runner(
     )
 
 
+def test_a_discovered_configs_deployment_reaches_the_audit_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review finding 4: a discovered `.abicheck.yml`'s `deployment:`
+    (`resolved_cfg.deployment`, the config-only `EnvironmentMatrix` the
+    two-sided `compare` path threads through too) must reach
+    `run_no_baseline_compare` -- previously that function had no
+    `env_matrix` parameter at all, so a declared `deployment.runtime_floors`
+    was silently invisible to this audit mode."""
+    import abicheck.frontends.cli.commands.compare_no_baseline as cmd
+    from abicheck.environment_matrix import EnvironmentMatrix
+
+    work, snapshot = _in_dir(
+        tmp_path, 'deployment:\n  runtime_floors:\n    GLIBC: "2.28"\n'
+    )
+    monkeypatch.chdir(work)
+
+    seen: dict[str, object] = {}
+    original = cmd.run_no_baseline_compare
+
+    def spy(candidate, **kwargs):
+        seen["env_matrix"] = kwargs.get("env_matrix")
+        return original(candidate, **kwargs)
+
+    monkeypatch.setattr(cmd, "run_no_baseline_compare", spy)
+    result = invoke_cli("compare", "--no-baseline", str(snapshot), "--format", "json")
+    assert result.exit_code == 0, result.output
+    matrix = seen["env_matrix"]
+    assert isinstance(matrix, EnvironmentMatrix)
+    assert matrix.runtime_floors == {"GLIBC": "2.28"}
+
+
 def test_the_audit_sarif_names_why_it_exited(tmp_path: Path) -> None:
     """SARIF must carry the coverage ledger, not just `exitCode: 1`.
 

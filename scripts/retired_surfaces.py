@@ -792,6 +792,17 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        "compare --env-matrix (ADR-068 D5: declared deployment constraints"
+        " demoted to .abicheck.yml's deployment: config key, embedding"
+        " EnvironmentMatrix's own YAML shape inline via"
+        " EnvironmentMatrix.from_dict rather than a side file -- no"
+        " surviving CLI override)",
+        ("--env-matrix",),
+        # config-file.md/environment-drift.md: each names the old flag only
+        # in the sentence explaining its own fold into `deployment:`.
+        frozenset({"reference/config-file.md", "learn/environment-drift.md"}),
+    ),
+    (
         "mode: scan (the composite GitHub Action input value -- ADR-068's"
         " Action-input-lifecycle amendment, D8 hard removal: the CLI's own"
         " `scan` command was already gone, Phase 6 above; setting mode: scan"

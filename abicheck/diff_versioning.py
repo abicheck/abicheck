@@ -20,10 +20,13 @@ diffing, SONAME bump recommendations, and version-script-missing detection.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .diff_helpers import make_change
 from .model.binary_naming import strip_vendor_hash
+from .model.dotted_version import parse_dotted_numeric_version
 from .model.elf_facts import ElfMetadata
 
 # Tokens that mark an ELF symbol-version node as implementation-internal rather
@@ -36,36 +39,17 @@ from .model.elf_facts import ElfMetadata
 _INTERNAL_VERSION_NODE_TOKENS = ("PRIVATE", "INTERNAL")
 
 _UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
-_MAX_VERSION_COMPONENT_DIGITS = 9
 """Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
 like ``GLIBC_PRIVATE``.  Sorts *above* any real version so that a new
 non-numeric requirement is always treated as potentially BREAKING — never
 silently COMPAT."""
 
-
-def _parse_dotted_numeric_version(text: str) -> tuple[int, ...] | None:
-    """Parse a dotted numeric version safely, or return ``None``.
-
-    Version tags and declared runtime floors can come from untrusted ELF
-    metadata or snapshots.  Keep integer conversion bounded so pathological
-    digit strings are treated like malformed versions rather than aborting the
-    comparison via Python's integer-conversion guard (or burning CPU/memory on
-    runtimes without one).
-    """
-    parts = text.split(".")
-    if not parts:
-        return None
-    parsed: list[int] = []
-    for part in parts:
-        if (
-            not part
-            or not part.isascii()
-            or not part.isdigit()
-            or len(part) > _MAX_VERSION_COMPONENT_DIGITS
-        ):
-            return None
-        parsed.append(int(part))
-    return tuple(parsed) if parsed else None
+#: Re-exported under this module's own private name so every existing
+#: internal call site below, plus external importers
+#: (``diff_wheel_deployment.py``, ``tests/test_environment_drift.py``), are
+#: unaffected by the move to ``model/dotted_version.py`` (see that module's
+#: own docstring for why the split happened).
+_parse_dotted_numeric_version = parse_dotted_numeric_version
 
 
 def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
@@ -252,7 +236,7 @@ def _floor_required_tag(change: Change) -> str:
 
 
 def apply_runtime_floor_contract(
-    changes: list[Change], runtime_floors: dict[str, str]
+    changes: list[Change], runtime_floors: Mapping[str, str]
 ) -> list[Change]:
     """Classify version-requirement findings against declared runtime floors.
 
@@ -315,6 +299,67 @@ def apply_runtime_floor_contract(
     return changes
 
 
+#: Change kinds produced by the *standalone* declared-runtime-floor checks
+#: (:func:`check_platform_baseline_floor`,
+#: ``diff_wheel_deployment.check_macos_deployment_target_floor``) whose
+#: catalog default verdict is RISK even though each of these two checks --
+#: unlike :func:`apply_runtime_floor_contract`'s delta reclassification,
+#: which can land on either COMPATIBLE or BREAKING depending on direction --
+#: only ever emits a finding when the candidate's own requirement already
+#: *exceeds* the declared floor (each returns ``[]``/``None`` in every
+#: within-floor case; see each function's own docstring). A finding of one
+#: of these kinds existing at all is therefore unconditionally a floor
+#: violation: a declared deployment target cannot load this artifact.
+#:
+#: ``diff_wheel_deployment.check_wheel_rpath_not_portable`` (which also
+#: only ever fires past its own gate) is deliberately *not* included here:
+#: its own docstring says a non-``$ORIGIN``-relative RPATH entry is "almost
+#: always" a build-machine artifact, not proof the dependency it names is
+#: actually unresolvable -- a *separate* closure/reachability check would be
+#: needed to prove that. Promoting this heuristic finding unconditionally to
+#: BREAKING would manufacture a hard break from what is genuinely only
+#: portability-RISK evidence (Codex review). The other three standalone
+#: checks (``check_musllinux_glibc_dependency``,
+#: ``check_wheel_tag_architecture_mismatch``,
+#: ``check_wheel_closure_dependency_violation``) already default to
+#: BREAKING in the catalog and need no promotion either.
+_BASELINE_VIOLATION_ONLY_KINDS = frozenset(
+    {
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+    }
+)
+
+
+def promote_baseline_violation_findings(changes: list[Change]) -> list[Change]:
+    """Promote every :data:`_BASELINE_VIOLATION_ONLY_KINDS` finding to BREAKING.
+
+    Shared by both call sites that can produce these findings: the two-sided
+    ``checker._env_matrix_contract_changes`` and the no-baseline audit's
+    ``workflows.env_matrix_audit`` (ADR-068 D3) -- a candidate-only floor
+    violation means the same thing regardless of whether an OLD snapshot was
+    available to diff against, so both paths must reach the same verdict for
+    the identical violation. Findings already carrying a modulation (from an
+    earlier hook) are left untouched, matching
+    :func:`apply_runtime_floor_contract`'s own convention. Mutates and
+    returns *changes*.
+    """
+    for change in changes:
+        if change.kind not in _BASELINE_VIOLATION_ONLY_KINDS:
+            continue
+        if change.effective_verdict is not None:
+            continue
+        change.effective_verdict = Verdict.BREAKING
+        change.modulation_reason = (
+            "declared deployment baseline exceeded: this check only fires "
+            "when the candidate's own requirement already exceeds the "
+            "declared floor, so declared deployment targets cannot load "
+            "this artifact"
+        )
+        change.modulation_rule = "baseline_violation_always_breaking"
+    return changes
+
+
 #: Versioned-symbol namespaces a platform-baseline floor can be declared for.
 #: GLIBC is G10's original scope; GLIBCXX (libstdc++) and CXXABI (the C++
 #: Itanium ABI runtime, also shipped by libstdc++) are G27's extension — a
@@ -326,7 +371,7 @@ _BASELINE_FLOOR_PREFIXES = ("GLIBC", "GLIBCXX", "CXXABI")
 
 
 def check_platform_baseline_floor(
-    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Check a binary's own required GLIBC/GLIBCXX/CXXABI floor against a
     declared platform-baseline promise (e.g. a manylinux wheel tag) (G10, G27).
@@ -525,7 +570,7 @@ def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
 
 
 def check_musllinux_glibc_dependency(
-    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+    elf: ElfMetadata, runtime_floors: Mapping[str, str] | None
 ) -> list[Change]:
     """Flag a musllinux-tagged binary that actually requires glibc (G27).
 
@@ -723,12 +768,25 @@ def detect_version_script_missing(
 #: needs glibc" (musllinux_glibc_dependency_detected), or "a vendored
 #: dependency has no RPATH to ever be found" (wheel_closure_dependency_violation)
 #: — recommending a bump for these is actively misleading remediation advice
-#: (Codex review #583).
+#: (Codex review #583). The same reasoning applies to
+#: :data:`_BASELINE_VIOLATION_ONLY_KINDS` once
+#: :func:`promote_baseline_violation_findings` gives one of them
+#: ``effective_verdict=BREAKING``: "the binary requires a newer GLIBC/macOS
+#: SDK than the declared deployment floor promises" is fixed by rebuilding
+#: against the older sysroot, never by a SONAME bump.
+#: ``WHEEL_RPATH_NOT_PORTABLE`` is deliberately *not* included here: it is
+#: no longer promoted to BREAKING at all (see
+#: :data:`_BASELINE_VIOLATION_ONLY_KINDS`'s own docstring), and at its
+#: catalog-default RISK severity it can never satisfy
+#: :func:`check_soname_bump_policy`'s own breaking-kind check anyway, so
+#: including it here would be inert.
 _SONAME_BUMP_CANNOT_FIX_KINDS = frozenset(
     {
         ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
         ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
         ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
     }
 )
 

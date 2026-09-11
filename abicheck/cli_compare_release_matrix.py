@@ -217,6 +217,7 @@ def _finalize_release_output(
     scope_terms: ComparisonScopeTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -259,6 +260,7 @@ def _finalize_release_output(
         scope_terms=scope_terms,
         demangle=demangle,
         show_only=show_only,
+        env_matrix_source_sha256=env_matrix_source_sha256,
     )
     _write_or_echo(output, text)
 
@@ -291,6 +293,7 @@ def _finalize_release_output(
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
             write_output=_safe_write_output,
+            env_matrix_source_sha256=env_matrix_source_sha256,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same

@@ -738,6 +738,7 @@ class ReviewDigest:
     disposition_audit: DispositionAudit | None = None
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
     quality_issues_count: int = 0  #: non-addition compatible findings, own row
+    env_matrix_source_sha256: str | None = None
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -781,6 +782,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
         f"SONAME `{digest.soname_value}`",
         "",
     ]
+    if digest.env_matrix_source_sha256 is not None:
+        lines += [f"**Deployment floor digest:** `{digest.env_matrix_source_sha256}`", ""]
 
     # ADR-067 D3: the digest is the summary a reviewer approves a merge from,
     # so the counts table above must not be the whole story -- what was
