@@ -302,10 +302,10 @@ class TestAugmentReport:
         assert out["check_id"] == "pvxs-bundle@p#c@headers"
         assert out["policy_gate_decision"] == "fail"
 
-    def _no_baseline_report(self, *, findings=(), exit_code=0):
+    def _no_baseline_report(self, *, findings=(), exit_code=0, operational=None):
         """A minimal real `compare --no-baseline` audit document
         (`report/no_baseline.py::_document_json`'s own shape)."""
-        return {
+        report = {
             "audit_report_schema_version": "1.3",
             "no_baseline": True,
             "library": "libpvxs",
@@ -316,6 +316,9 @@ class TestAugmentReport:
             "findings": list(findings),
             "exit_code": exit_code,
         }
+        if operational is not None:
+            report["run_outcome"] = {"operational": operational}
+        return report
 
     def test_no_baseline_audit_is_not_an_operational_error(self):
         """Codex review, fresh evidence: a `compare --no-baseline` audit
@@ -342,6 +345,51 @@ class TestAugmentReport:
             )
             == 0
         )
+
+    def test_no_baseline_audit_that_failed_its_evidence_contract_is_operational(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a no-baseline audit is not immune
+        to operational failure -- a pinned evidence contract it could not
+        satisfy (`run_outcome.operational: evidence_contract_error`, exit
+        7) means no valid analysis ran at all. The unconditional "no
+        baseline -> no operational error" exemption previously swallowed
+        this too, so `gate-mode: advisory`/`deferred` turned a genuinely
+        failed audit into a quiet exit 0."""
+        out = augment_report(
+            self._no_baseline_report(
+                exit_code=7, operational="evidence_contract_error"
+            ),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="source",
+            gate_mode="advisory",
+        )
+        assert out.get("operational_errors")
+        assert out["operational_errors"][0]["kind"] == "evidence_contract_error"
+        assert (
+            final_exit_code(
+                "advisory",
+                real_exit_code=0,
+                operational_error=bool(out["operational_errors"]),
+            )
+            == 1
+        )
+
+    def test_no_baseline_audit_with_operational_none_is_unaffected(self) -> None:
+        """A real (but not literally absent) `run_outcome.operational:
+        none` must still read as clean -- only a non-`none` value is a
+        real operational failure."""
+        out = augment_report(
+            self._no_baseline_report(operational="none"),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out.get("operational_errors") == []
 
     def test_no_baseline_audit_with_a_real_finding_is_still_not_operational(self):
         """A gating candidate-side finding is a real, reportable result --

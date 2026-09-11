@@ -590,6 +590,27 @@ def _classify_verdict(
     # again): an audit has none, and leaving the key unset is the truthful
     # answer, not a degraded one.
     if report.get("no_baseline") is True:
+        # A no-baseline audit is not immune to operational failure -- a
+        # pinned evidence contract it could not satisfy (`run_outcome.
+        # operational: evidence_contract_error`, exit 7) means no valid
+        # analysis ran at all, same as any other operational sentinel this
+        # function recognizes. Checked before the unconditional "no error"
+        # exemption below: without this, `gate-mode: advisory`/`deferred`
+        # turned a failed audit into a quiet exit 0, since no valid
+        # analysis completed to report a candidate-side finding from
+        # (Codex review, fresh evidence).
+        operational_status = run_outcome.get("operational")
+        if isinstance(operational_status, str) and operational_status not in (
+            OperationalStatus.NONE.value,
+            "",
+        ):
+            msg = report.get("error") or (
+                f"audit did not complete: {operational_status}"
+            )
+            out["operational_errors"] = [
+                {"kind": operational_status, "message": str(msg)}
+            ]
+            return
         out.setdefault("operational_errors", [])
         return
     if raw_verdict in LEGACY_VERDICT_VALUES:

@@ -195,6 +195,13 @@ needed. Useful as a standing lint on the default branch. Omit both
 replacement for legacy `mode: scan` with no baseline (see
 [Scenario S5](../integration/scenarios/single-build-audit.md)):
 
+> `compare`'s own audit-only shape (this whole recipe) was added after the
+> `v0.5.0` release, alongside `mode: scan`'s retirement (ADR-068) — pin a
+> commit SHA newer than `v0.5.0` to run this example as written; on
+> `v0.5.0` itself, the equivalent is legacy `mode: scan` with no baseline
+> (see [Migrating from mode: scan](github-action.md#migrating-from-mode-scan)
+> for what changed and why).
+
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
         with:
