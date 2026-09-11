@@ -239,13 +239,28 @@ class TestAssuranceOverlayGenerationExecuted:
     def test_existing_mapping_assurance_is_merged_additively(
         self, tmp_path: Path
     ) -> None:
-        result = self._run(tmp_path, "assurance:\n  some_other_field: true\n")
+        """Regression note (PR #1222 Codex review, second finding):
+        `some_other_field` used to stand in for "any pre-existing key" here,
+        but `assurance:` has exactly one recognized subkey
+        (`require_complete`) -- once the base document is validated against
+        the real `BuildConfig` schema (this finding's own fix), that
+        fixture is itself schema-invalid and the step now correctly refuses
+        it before ever reaching the merge this test means to exercise. Use
+        `assurance.require_complete: false` instead (schema-valid, and a
+        stronger assertion of "additive": the overlay must not just add the
+        key, it must override an existing FALSE value to True) alongside an
+        unrelated top-level block, to keep proving both halves of
+        "additive" -- an unrelated top-level key survives untouched, and an
+        existing assurance value is overridden rather than merely added
+        alongside."""
+        result = self._run(
+            tmp_path,
+            "severity:\n  preset: strict\nassurance:\n  require_complete: false\n",
+        )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["assurance"] == {
-            "some_other_field": True,
-            "require_complete": True,
-        }
+        assert written["assurance"] == {"require_complete": True}
+        assert written["severity"] == {"preset": "strict"}
 
     @pytest.mark.parametrize(
         "malformed_yaml",
@@ -360,9 +375,7 @@ class TestAssuranceOverlayOutputPathIsPrivate:
         assert victim.read_text(encoding="utf-8") == "do not overwrite me"
         assert outside_is_intact(tmp_path)
 
-    def test_the_planted_symlink_itself_is_left_untouched(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_planted_symlink_itself_is_left_untouched(self, tmp_path: Path) -> None:
         result, _victim = self._plant_symlink_and_run(tmp_path)
         assert result.returncode == 0, result.stderr
         planted = result.workspace / "check-target-assurance-config.yml"
@@ -684,3 +697,110 @@ class TestAssuranceOverlayRebasesRelativeIncludeDirs:
         assert written["compile"]["include_dirs"] == [
             str((explicit_dir / "include").resolve())
         ]
+
+
+class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
+    """P2 finding (PR #1222 Codex review, this commit): the base config
+    document (discovered OR explicit) was never validated against the real
+    ``BuildConfig`` schema before this step's own stripping/overlay logic
+    ran. A schema-invalid value in a field this step goes on to STRIP
+    (``build.query: 7``, ``compile.compiler: []``) was previously silently
+    deleted as part of ordinary stripping -- before the nested "Run
+    analysis" step's own CLI ever got a chance to parse and reject it --
+    turning a config a direct ``compare --config <file>`` invocation would
+    refuse outright into a silently-accepted run purely because
+    ``analysis-assurance-complete`` happened to be enabled.
+
+    Fixed by validating the loaded document via the shared
+    ``abicheck.action_config_overlay.validate_base_config`` (the same
+    ``BuildConfig.from_dict`` check ``action/run.sh``'s own equivalent merge
+    already applies, see
+    ``tests/test_action_run_sh_config_validation.py``'s
+    ``TestMergeConfigOverlayValidatesBaseConfigBeforeStripping`` for that
+    call site's own regression coverage, and
+    ``tests/test_action_config_overlay.py``'s ``TestValidateBaseConfig``
+    for the shared function's own direct, harness-independent tests)
+    BEFORE any stripping or overlay merge runs.
+    """
+
+    def test_discovered_invalid_build_query_type_fails_loud(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario the finding names: build.query: 7 is a field
+        this step strips unconditionally -- validating AFTER stripping (the
+        bug) would never see the invalid value at all."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  query: 7\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        assert "build.query" in result.stderr
+        assert "config-path" not in result.outputs
+
+    def test_discovered_invalid_compile_compiler_type_fails_loud(
+        self, tmp_path: Path
+    ) -> None:
+        """compile.compiler: [] -- also stripped unconditionally, also must
+        be validated first."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  compiler: []\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        assert "compile.compiler" in result.stderr
+        assert "config-path" not in result.outputs
+
+    def test_discovered_invalid_build_compile_db_type_fails_loud(
+        self, tmp_path: Path
+    ) -> None:
+        """build.compile_db: false -- this call site strips it
+        unconditionally too (no --sources root to validate a resolving
+        glob against)."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  compile_db: false\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        assert "compile_db" in result.stderr
+        assert "config-path" not in result.outputs
+
+    def test_explicit_build_config_invalid_document_also_fails_loud(
+        self, tmp_path: Path
+    ) -> None:
+        """Schema validity is independent of the trust question -- an
+        explicit build-config is trusted to run build.query/
+        compile.compiler, but a direct `compare --config <file>` against it
+        would still reject a structurally invalid document just as loudly
+        as a discovered one."""
+        workspace = make_workspace(tmp_path)
+        explicit_config = workspace / "explicit.yml"
+        explicit_config.write_text("build:\n  query: 7\n", encoding="utf-8")
+        result = run_step(
+            _overlay_step(),
+            workspace=workspace,
+            env={"BASE_CONFIG": str(explicit_config)},
+        )
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        assert "config-path" not in result.outputs
+
+    def test_valid_discovered_document_is_unaffected(self, tmp_path: Path) -> None:
+        """Negative control: a schema-valid discovered document must still
+        produce a normal, successful overlay -- this fix must not reject
+        anything it didn't reject before."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  system: cmake\ncompile:\n  std: c++17\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"system": "cmake"}
+        assert written["compile"] == {"std": "c++17"}
+        assert written["assurance"] == {"require_complete": True}

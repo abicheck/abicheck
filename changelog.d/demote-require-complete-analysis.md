@@ -28,4 +28,4 @@
 
 - `.abicheck.yml`'s new `assurance:` block, with one key today:
   `require_complete` (default `false`) — see the `Removed` entry above and
-  [Config file reference § `assurance:`](../docs/reference/config-file.md#assurance).
+  [Config file reference § `assurance:`](docs/reference/config-file.md#assurance).

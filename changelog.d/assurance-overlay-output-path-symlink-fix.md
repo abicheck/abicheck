@@ -37,6 +37,29 @@
   temp file's own directory instead of the real project root. Every such
   entry is now rewritten to an absolute path anchored at the original
   config's own project root before the overlay is written.
+- **The step's base config document (discovered or explicit) is now
+  validated against the real `BuildConfig` schema before any
+  stripping/overlay merge runs.** A schema-invalid value in a field the
+  step goes on to strip anyway (`build.query: 7`, `compile.compiler: []`,
+  `build.compile_db: false`) was previously silently deleted as part of
+  ordinary stripping, before the nested analysis step's own CLI ever got a
+  chance to parse and reject it — turning a config a direct `compare
+  --config <file>` invocation would refuse outright into a
+  silently-accepted run purely because `analysis-assurance-complete` was
+  enabled. Fixed via a new shared `abicheck.action_config_overlay.
+  validate_base_config`, called by both this step and `action/run.sh`'s
+  own equivalent merge before either one's stripping/overlay logic runs,
+  so the two call sites can't independently drift on what counts as a
+  valid base document.
+- **A wrong-typed `resource_limits.max_bundle_facts_decode_nodes` is now
+  left untouched instead of being silently replaced with `null`.**
+  `strip_untrusted_execution_keys` used to coerce a non-integer value to
+  `None` before resolving the capped budget, which read that `None` right
+  back and then overwrote the original (wrong-typed) value with a literal
+  `null` — printing a "capped to the conservative default" warning that
+  described nothing that actually happened. A non-integer value is now
+  left exactly as written, so the real `BuildConfig` schema error surfaces
+  downstream instead.
 
 ### Documentation
 

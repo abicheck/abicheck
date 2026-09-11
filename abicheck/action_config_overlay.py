@@ -60,6 +60,28 @@ that document is already the trusted case these same gates exist to allow,
 matching ``cli_options.py``'s own ``explicit_config = build_config is not
 None`` line.
 
+:func:`validate_base_config` is a third, orthogonal concern from the same
+family: a base document -- discovered OR explicit -- loaded via a bare
+``yaml.safe_load`` is syntactically valid YAML, but has never been run
+through the real strict-schema check (``BuildConfig.from_dict``) the native
+CLI's own ``load_build_config``/``discover_project_config`` loading path
+always applies before any command sees the parsed config. Left unvalidated,
+a structurally invalid document (``build.query: 7``, ``compile.compiler:
+[]``, ``build.compile_db: false``) can have its own invalid field silently
+STRIPPED by :func:`strip_untrusted_execution_keys` or REPLACED by either
+caller's own top-level-key overlay merge before the nested engine ever gets
+a chance to reject it -- turning a config a direct ``compare --config
+<file>`` invocation would refuse outright into a silently-accepted run.
+Must run BEFORE both of the other two functions in this module, for exactly
+that reason -- validating a document only after its invalid fields have
+already been stripped or overwritten proves nothing about what the operator
+actually wrote. Unlike :func:`strip_untrusted_execution_keys`, it applies to
+BOTH kinds of base document alike (discovered and explicit) -- an explicit
+build-config is trusted to run ``build.query``/``compile.compiler``, but
+that is a distinct question from whether it is schema-valid at all, and the
+same ``compare --config <file>`` a user could run directly would reject an
+explicit config just as loudly as a discovered one.
+
 :func:`rebase_relative_config_paths` is an unrelated, purely-correctness
 concern that applies to BOTH kinds of base document alike: relocating the
 merged overlay to a fresh path (typically under ``$RUNNER_TEMP``, chosen so
@@ -79,11 +101,35 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from .buildsource.build_config import BuildConfig
 from .bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
 from .config_paths import project_root_for_config
 from .frontends.cli.commands.compare_bundle_facts_rejections import (
     resolve_max_json_object_nodes_cfg,
 )
+
+
+def validate_base_config(doc: dict[str, object]) -> None:
+    """Validate *doc* against the real ``BuildConfig`` schema -- the same
+    strict-structure check (``BuildConfig._validate_structure``: unknown
+    top-level keys, wrong-typed values) that ``load_build_config``/
+    ``discover_project_config`` always apply before the native CLI ever
+    sees a parsed config document.
+
+    Raises ``ValueError`` (the identical exception :meth:`BuildConfig.
+    from_dict` itself raises for a structurally invalid document) when
+    *doc* is invalid; the caller decides how to present that failure (both
+    current call sites format it as a GitHub Actions ``::error::``
+    annotation and exit non-zero, matching what a direct ``compare
+    --config <file>`` invocation against the same document would report).
+    Does nothing when *doc* is schema-valid.
+
+    See the module docstring for why this must run before
+    :func:`strip_untrusted_execution_keys`/:func:`rebase_relative_config_paths`
+    and why it applies to an explicit base document too, not just a
+    discovered one.
+    """
+    BuildConfig.from_dict(doc)
 
 
 def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]:
@@ -142,11 +188,24 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     resource_limits = base.get("resource_limits")
     if isinstance(resource_limits, dict):
         configured_nodes = resource_limits.get("max_bundle_facts_decode_nodes")
+        # CodeRabbit review, fresh evidence: a wrong-typed configured_nodes
+        # (a string, list, or bool -- bool is an int subclass, so it's
+        # excluded explicitly) used to be coerced to None here before
+        # calling resolve_max_json_object_nodes_cfg(), which returns None
+        # right back for a None input -- capped_nodes (None) then compares
+        # unequal to configured_nodes (the original wrong-typed value), so
+        # the "capped" branch fired and OVERWROTE the value with a literal
+        # null, printing a "capped to the conservative default" warning
+        # that doesn't describe what actually happened. A wrong-typed value
+        # is not this function's concern at all (see the module docstring:
+        # :func:`validate_base_config` -- called first by every real
+        # caller -- is what rejects it, with the same error a direct
+        # ``compare --config <file>`` would raise); this function must
+        # leave it untouched rather than inventing a replacement.
+        if not isinstance(configured_nodes, int) or isinstance(configured_nodes, bool):
+            return base
         capped_nodes = resolve_max_json_object_nodes_cfg(
-            configured_nodes
-            if isinstance(configured_nodes, int)
-            and not isinstance(configured_nodes, bool)
-            else None,
+            configured_nodes,
             config_explicit=False,
             default=DEFAULT_MAX_JSON_OBJECT_NODES,
         )

@@ -741,8 +741,42 @@ runs:
         from abicheck.action_config_overlay import (
             rebase_relative_config_paths,
             strip_untrusted_execution_keys,
+            validate_base_config,
         )
         from abicheck.cli_helpers_compare import discover_project_config
+
+        def _validate_or_exit(doc: dict, source_desc: str) -> None:
+            # Codex review (P2): a base document loaded below via a bare
+            # `yaml.safe_load` is syntactically valid YAML, but was never run
+            # through the real strict-schema check (`BuildConfig.from_dict`)
+            # the native CLI's own `load_build_config`/
+            # `discover_project_config` loading path always applies before any
+            # command sees the parsed config. Left unchecked, a schema-invalid
+            # value in a field this step goes on to STRIP (`build.query: 7`,
+            # `compile.compiler: []`) or CAP (`resource_limits.
+            # max_bundle_facts_decode_nodes: "no"`) is silently deleted/
+            # replaced by strip_untrusted_execution_keys() below before the
+            # nested "Run analysis" step's own CLI ever gets a chance to
+            # reject it -- and a malformed `assurance:` value would otherwise
+            # be silently overwritten by this step's own `assurance
+            # ["require_complete"] = True` merge further down. Both turn a
+            # config a direct `compare --config <file>` invocation would
+            # refuse outright into a silently-accepted run purely because
+            # `analysis-assurance-complete` happened to be enabled. Validating
+            # here, before any stripping/merge happens, surfaces the identical
+            # error the user would see running abicheck directly against this
+            # file. Shared with action/run.sh's own equivalent merge helper
+            # via abicheck.action_config_overlay.validate_base_config so the
+            # two call sites can't independently drift on what counts as a
+            # valid base document.
+            try:
+                validate_base_config(doc)
+            except ValueError as exc:
+                raise SystemExit(
+                    f"::error::the config at {source_desc} is invalid: {exc}. "
+                    "Refusing to silently proceed with (or merge on top of) a "
+                    "malformed project config -- fix the file or remove it."
+                ) from exc
 
         base_path_env = os.environ.get("ABICHECK_BASE_CONFIG", "")
         data: dict = {}
@@ -778,6 +812,7 @@ runs:
                         "-- cannot merge an assurance.require_complete overlay "
                         "into it."
                     )
+                _validate_or_exit(loaded, source_desc)
                 data = loaded
         else:
             # No explicit build-config: discover the project's real
@@ -799,6 +834,7 @@ runs:
                             "mapping -- cannot merge an assurance.require_complete "
                             "overlay into it."
                         )
+                    _validate_or_exit(loaded, source_desc)
                     data = loaded
             # Security (Codex review, third round): this discovered document
             # is PR-controlled, untrusted content -- exactly what

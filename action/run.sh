@@ -599,8 +599,8 @@ import yaml
 from abicheck.action_config_overlay import (
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
+    validate_base_config,
 )
-from abicheck.buildsource.build_config import BuildConfig
 from abicheck.config_paths import (
     discover_build_config,
     find_config_in_dir,
@@ -640,9 +640,14 @@ def _validate_or_exit(doc: dict[str, object], source_path: Path) -> None:
     # error as if it had been valid all along, instead of the loud usage
     # error the equivalent native CLI invocation would raise. Validating
     # here, before any merge happens, surfaces the same error the user
-    # would see running abicheck directly against this file.
+    # would see running abicheck directly against this file. Shared with
+    # actions/check-target/action.yml's own equivalent "Generate
+    # assurance-overlay config" step via
+    # abicheck.action_config_overlay.validate_base_config (Codex review,
+    # second finding) so the two call sites can't independently drift on
+    # what counts as a valid base document.
     try:
-        BuildConfig.from_dict(doc)
+        validate_base_config(doc)
     except ValueError as exc:
         print(
             f"::error::the config at {_gha_escape(source_path)} is invalid: "

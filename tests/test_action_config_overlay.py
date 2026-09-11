@@ -32,9 +32,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.action_config_overlay import (
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
+    validate_base_config,
 )
 
 
@@ -88,6 +91,42 @@ class TestStripUntrustedExecutionKeys:
         base = {"build": [], "compile": "not-a-mapping"}
         out = strip_untrusted_execution_keys(base)
         assert out == base
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            pytest.param("no", id="string"),
+            pytest.param([], id="list"),
+            pytest.param(True, id="bool-true"),
+            pytest.param(False, id="bool-false"),
+            pytest.param(None, id="none"),
+        ],
+    )
+    def test_wrong_typed_resource_limit_is_left_untouched_not_replaced(
+        self, bad_value: object
+    ) -> None:
+        """CodeRabbit review, fresh evidence: a wrong-typed
+        max_bundle_facts_decode_nodes used to be coerced to None before
+        calling resolve_max_json_object_nodes_cfg(), which read that None
+        straight back -- the resulting `capped_nodes` (None) then compared
+        UNEQUAL to the original wrong-typed value, so the "capped" branch
+        fired and silently OVERWROTE it with a literal null, printing a
+        "capped to the conservative default" warning that describes
+        nothing that actually happened. This function must instead leave a
+        wrong-typed value alone -- schema validation (validate_base_config,
+        called first by every real caller) is what rejects it, with the
+        real BuildConfig error, not this stripping helper."""
+        base = {"resource_limits": {"max_bundle_facts_decode_nodes": bad_value}}
+        out = strip_untrusted_execution_keys(base)
+        assert out["resource_limits"]["max_bundle_facts_decode_nodes"] == bad_value
+
+    def test_valid_int_resource_limit_still_caps_correctly(self) -> None:
+        """Companion negative control: the wrong-typed-value fix above must
+        not disturb the ordinary valid-int capping path."""
+        base = {"resource_limits": {"max_bundle_facts_decode_nodes": 999999999}}
+        out = strip_untrusted_execution_keys(base)
+        assert out["resource_limits"]["max_bundle_facts_decode_nodes"] < 999999999
+        assert isinstance(out["resource_limits"]["max_bundle_facts_decode_nodes"], int)
 
 
 class TestRebaseRelativeConfigPaths:
@@ -158,3 +197,63 @@ class TestRebaseRelativeConfigPaths:
         base = {"compile": {"include_dirs": ["include"]}}
         out = rebase_relative_config_paths(base, found_path=cfg)
         assert out["compile"]["include_dirs"] == [str((tmp_path / "include").resolve())]
+
+
+class TestValidateBaseConfig:
+    """Both call sites (``action/run.sh``'s
+    ``_merge_config_overlay_with_discovered_project_config`` and
+    ``actions/check-target/action.yml``'s "Generate assurance-overlay
+    config" step) must reject a schema-invalid base document with the same
+    error a direct ``compare --config <file>`` invocation would raise --
+    BEFORE either one's own stripping/overlay logic runs (PR #1222 Codex
+    review, P2 finding: an invalid field that gets stripped anyway was
+    previously never validated at all, silently masking the error)."""
+
+    def test_valid_document_is_a_no_op(self) -> None:
+        validate_base_config(
+            {"compile": {"compiler": "gcc"}, "severity": {"preset": "strict"}}
+        )
+
+    def test_empty_document_is_valid(self) -> None:
+        validate_base_config({})
+
+    @pytest.mark.parametrize(
+        "doc",
+        [
+            pytest.param({"build": {"query": 7}}, id="build.query-wrong-type"),
+            pytest.param(
+                {"compile": {"compiler": []}}, id="compile.compiler-wrong-type"
+            ),
+            pytest.param(
+                {"build": {"compile_db": False}}, id="build.compile_db-wrong-type"
+            ),
+            pytest.param({"release": []}, id="release-block-not-a-mapping"),
+            pytest.param(
+                {"totally_unknown_top_level_key": 1}, id="unknown-top-level-key"
+            ),
+        ],
+    )
+    def test_schema_invalid_document_raises_value_error(self, doc: dict) -> None:
+        """Every field one of the two call sites goes on to strip/cap/
+        overwrite must already be rejected here, BEFORE that stripping ever
+        runs -- otherwise the invalid value is silently deleted/replaced
+        instead of surfaced (the exact bug this function exists to close)."""
+        with pytest.raises(ValueError):
+            validate_base_config(doc)
+
+    def test_rejects_before_stripping_would_have_hidden_the_error(self) -> None:
+        """Root-cause regression guard: build.query is a field
+        strip_untrusted_execution_keys() unconditionally deletes, so
+        validating AFTER stripping (the bug this function fixes) would never
+        see the invalid value at all. Assert the two functions disagree on
+        this document -- stripping alone reports it as clean, only
+        validate_base_config (run first, per every real call site) catches
+        it."""
+        doc = {"build": {"query": 7}}
+        stripped = strip_untrusted_execution_keys(doc)
+        # Stripping alone silently "fixes" the invalid value by deleting it --
+        # this is the masking behaviour the finding describes, reproduced
+        # directly rather than only asserted in prose.
+        assert "query" not in stripped.get("build", {})
+        with pytest.raises(ValueError):
+            validate_base_config(doc)
