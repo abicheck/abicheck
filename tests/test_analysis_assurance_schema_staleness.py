@@ -205,3 +205,64 @@ class TestSchemaStalenessStatus:
         result = checker.compare(old, new)
         aa = result.analysis_assurance
         assert aa.schema_staleness_status == "clean"
+
+    def test_mixed_producer_pair_never_taints_on_the_pair_gated_flags(self) -> None:
+        """Codex review, PR #1209: ``clang_va_list_facts_reliable``/
+        ``castxml_var_access_facts_reliable``'s one real consumer
+        (``diff_symbols._diff_param_va_list``/``_diff_var_access``) exits at
+        its own both-sides-exact-producer gate -- so a degraded, confirmed-
+        header "clang" old side paired with a "castxml" new side means that
+        detector never even runs for this pair, and regenerating the stale
+        side could not enable it. The single-snapshot ``degraded_
+        reliability_facts(old)`` alone cannot see this (it only knows
+        old's own producer), so ``schema_staleness_status`` must narrow it
+        pair-aware rather than report a false ``"degraded"``."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_va_list_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        # Single-snapshot: old alone still reports it (it doesn't know new's
+        # producer) -- the pair-aware narrowing lives in schema_staleness_
+        # status, not in degraded_reliability_facts itself.
+        assert degraded_reliability_facts(old) == ["clang_va_list_facts_reliable"]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_same_producer_pair_still_taints_the_pair_gated_flags(self) -> None:
+        """The mirror of the case above: when BOTH sides really are
+        "clang", the detector's gate is satisfied and a degraded flag on
+        either side must still taint the status -- the pair-aware
+        narrowing must not over-exempt."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_va_list_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes

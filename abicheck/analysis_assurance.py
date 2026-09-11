@@ -155,7 +155,9 @@ __all__ = [
 #: ``buildsource.model.BUILD_SOURCE_PACK_VERSION`` versions independently of
 #: the ABI-snapshot schema: this is a self-contained sub-object a consumer
 #: can version-check without caring about the report's own MAJOR.MINOR.
-ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.0"
+#: 1.0 -> 1.1: added ``schema_staleness_status`` (additive; a 1.0-only
+#: reader ignores the new key).
+ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.1"
 
 #: The required top-level status vocabulary.
 AssuranceStatus = Literal[

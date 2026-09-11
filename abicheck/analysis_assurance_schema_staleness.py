@@ -46,6 +46,37 @@ if TYPE_CHECKING:
 
 __all__ = ["schema_staleness_status"]
 
+#: The two flags whose one real consumer (``diff_symbols._diff_param_va_
+#: list``/``_diff_var_access``) gates on BOTH sides sharing one exact
+#: ``ast_producer`` -- not merely this side's own. ``degraded_reliability_
+#: facts(snap)`` already requires *this* side to be the named producer
+#: before listing either flag (a real, single-snapshot narrowing), but it
+#: cannot see the *other* side at all, so a mixed-producer pair (a
+#: degraded, confirmed-header "clang" old side paired with a "castxml" new
+#: side, say) would otherwise still read the flag as consulted even though
+#: the detector's own both-sides gate means it was never reached at all
+#: for this pair (Codex review, PR #1209). Fixed here, in the pair-aware
+#: assurance layer, rather than in ``model.snapshot_reliability`` -- that
+#: module's own scoped contract (``model/AGENTS.md``) is single-snapshot
+#: fact shapes, never a detector's pairing algorithm.
+_PAIR_PRODUCER_GATED_FLAGS: dict[str, str] = {
+    "clang_va_list_facts_reliable": "clang",
+    "castxml_var_access_facts_reliable": "castxml",
+}
+
+
+def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[str]:
+    """*snap*'s own :func:`degraded_reliability_facts`, narrowed to drop a
+    :data:`_PAIR_PRODUCER_GATED_FLAGS` entry whose one real consumer never
+    ran for this pair because *other* isn't the same exact producer.
+    """
+    return [
+        name
+        for name in degraded_reliability_facts(snap)
+        if _PAIR_PRODUCER_GATED_FLAGS.get(name) is None
+        or other.ast_producer == _PAIR_PRODUCER_GATED_FLAGS[name]
+    ]
+
 
 def schema_staleness_status(
     old: AbiSnapshot, new: AbiSnapshot
@@ -59,10 +90,12 @@ def schema_staleness_status(
     ``"asymmetric"`` state of its own: unlike header/DWARF/L3 evidence (each
     gated on BOTH sides carrying the same channel), a *single* side's stale
     fact already means the affected detector(s) declined to trust it for
-    THIS comparison, whether or not the other side is current.
+    THIS comparison, whether or not the other side is current -- except the
+    two :data:`_PAIR_PRODUCER_GATED_FLAGS` flags, which :func:`_pair_aware_
+    degraded_facts` narrows first.
     """
-    old_degraded = degraded_reliability_facts(old)
-    new_degraded = degraded_reliability_facts(new)
+    old_degraded = _pair_aware_degraded_facts(old, new)
+    new_degraded = _pair_aware_degraded_facts(new, old)
     if not old_degraded and not new_degraded:
         return "clean", []
     notes: list[str] = []
