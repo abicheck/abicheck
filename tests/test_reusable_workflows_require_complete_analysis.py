@@ -53,55 +53,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
-from _workflow_exec import make_workspace, outside_is_intact, run_step
+from _assurance_overlay_exec import (
+    CHECK_PROJECT,
+    CHECK_TARGET_ACTION,
+    _load,
+    _run_overlay,
+    _written_overlay,
+)
+from _workflow_exec import make_workspace, outside_is_intact
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-CHECK_PROJECT = _REPO_ROOT / ".github" / "workflows" / "check-project.yml"
-CHECK_TARGET_ACTION = _REPO_ROOT / "actions" / "check-target" / "action.yml"
-
-
-def _overlay_step() -> dict[str, Any]:
-    data = _load(CHECK_TARGET_ACTION)
-    return next(s for s in data["runs"]["steps"] if s.get("id") == "assurance_overlay")
-
-
-def _run_overlay(workspace: Path, env: dict[str, str]) -> Any:
-    """``run_step`` against the overlay step, defaulting ``SOURCES_ROOT`` to
-    empty for every test that isn't specifically exercising PR #1222
-    Finding 2's ``build.compile_db``-resolution behavior.
-
-    ``_workflow_exec.run_step`` leaves any step ``env:`` key the caller
-    doesn't override at its literal, un-evaluated ``${{ ... }}`` GitHub
-    Actions expression text (see its own docstring) -- without this
-    default, every pre-existing test in this module (none of which name
-    ``SOURCES_ROOT`` at all) would suddenly see that literal expression
-    string as the shell's actual ``$SOURCES_ROOT`` value the moment the
-    step gained that env key, rather than the empty string these tests
-    intend.
-    """
-    merged = {"SOURCES_ROOT": "", **env}
-    return run_step(_overlay_step(), workspace=workspace, env=merged)
-
-
-def _written_overlay(result: Any) -> Any:
-    """Load the YAML the overlay step actually wrote.
-
-    Security (Codex review, PR #1222): the step no longer writes to a fixed,
-    in-checkout-relative name -- it writes to a private, `mktemp`-created
-    file under `$RUNNER_TEMP` and reports that ABSOLUTE path as its own
-    `config-path` $GITHUB_OUTPUT record, exactly what the real "Run
-    analysis" step reads to build its `--config`. Reading the file back via
-    that same output (never a path this test re-derives on its own) is what
-    proves the two agree.
-    """
-    config_path = Path(result.outputs["config-path"])
-    return yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-
-def _load(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
 
 
 class TestRequireCompleteAnalysisRetired:
@@ -206,6 +167,29 @@ class TestAnalysisAssuranceCompleteConfigOverlay:
             encoding="utf-8"
         )
         assert 'ASSURANCE_OVERLAY_OUTCOME" == "failure"' in run_sh
+
+    def test_sources_pairwise_env_matches_the_ambiguous_bundle_plus_baseline_case(
+        self,
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 fourth
+        round): the overlay step's own ``SOURCES_PAIRWISE`` env value must
+        be 'pairwise' in EXACTLY the one combination run.sh's own
+        ``_compile_context_sources_pairwise`` treats as genuinely
+        ambiguous for this step's nested "Run analysis" invocation --
+        kind: bundle with a real baseline-channel (mode: compare against a
+        live binaries-dir old-library) -- and empty (single-sided) for
+        every other kind/baseline-channel combination (kind: target
+        against either a stored snapshot or no baseline at all, and
+        kind: bundle with baseline-channel: none, which routes to mode:
+        scan -- always single-sided regardless of kind)."""
+        data = _load(CHECK_TARGET_ACTION)
+        overlay_step = next(
+            s for s in data["runs"]["steps"] if s.get("id") == "assurance_overlay"
+        )
+        expr = overlay_step["env"]["SOURCES_PAIRWISE"]
+        assert "inputs.kind == 'bundle'" in expr
+        assert "inputs.baseline-channel != 'none'" in expr
+        assert "'pairwise'" in expr
 
 
 class TestAssuranceOverlayGenerationExecuted:

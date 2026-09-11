@@ -677,6 +677,43 @@ runs:
         # (Codex review, fresh evidence: this step DOES have inputs.sources
         # available, unlike what a previous round assumed).
         SOURCES_ROOT: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
+        # Whether THIS step's own nested "Run analysis" invocation resolves
+        # a --sources tree's compile:/source:(singular)/debug: blocks
+        # PAIR-WIDE ("pairwise") or SINGLE-SIDED (empty) -- the same
+        # distinction action/run.sh's own _compile_context_sources_pairwise
+        # makes for its sibling overlay, computed here directly from THIS
+        # step's own already-known inputs rather than guessed at (Codex
+        # review, fresh evidence, PR #1222 fourth round: a previous round
+        # excluded these three blocks unconditionally, believing this step
+        # had "no reliable way to determine" single-sidedness -- it does).
+        # "Run analysis" below always runs mode: ${{ inputs.baseline-channel
+        # == 'none' && 'scan' || 'compare' }} with old-library: ${{
+        # inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir ||
+        # steps.resolve.outputs.snapshot-path }} (see that step's own
+        # inputs) -- mirroring run.sh's own two independent rules:
+        #   * mode: scan (baseline-channel: none, the "audit" path) is
+        #     ALWAYS single-sided, regardless of kind -- native scan
+        #     resolves ONE shared compile_context for the whole invocation
+        #     and applies it to both the baseline and the candidate
+        #     (run.sh's own _compile_context_sources_pairwise docstring).
+        #   * mode: compare (baseline-channel set, the "baseline" path) is
+        #     single-sided only when old-library is a STORED snapshot, not
+        #     a live binary (_old_library_is_stored_snapshot). kind: target
+        #     always resolves old-library to resolve-baseline's own
+        #     snapshot-path -- documented as "Path to the resolved target's
+        #     .abicheck.json snapshot" (actions/resolve-baseline/action.yml)
+        #     -- a stored JSON document, never a live ELF/PE/Mach-O binary,
+        #     so it is unconditionally single-sided. kind: bundle instead
+        #     resolves old-library to binaries-dir, a directory of REAL,
+        #     live ELF member binaries ("bundle analysis reads real ELF
+        #     binaries, never JSON snapshots" -- that same action's own
+        #     bundle-members docstring) -- genuinely pair-wide live
+        #     extraction on both sides, exactly the ambiguous case
+        #     run.sh's own rule excludes.
+        # So the only ambiguous combination left is kind: bundle with
+        # mode: compare; every other combination is unambiguously
+        # single-sided.
+        SOURCES_PAIRWISE: ${{ inputs.kind == 'bundle' && inputs.baseline-channel != 'none' && 'pairwise' || '' }}
       run: |
         set -euo pipefail
         PY="$(command -v python3 || command -v python)"
@@ -798,6 +835,7 @@ runs:
             ABICHECK_DISCOVER_START="$_real_pwd" \
             ABICHECK_OUT_PATH="$_assurance_out_path" \
             ABICHECK_SOURCES_ROOT="$_sources_root_abs" \
+            ABICHECK_SOURCES_PAIRWISE="${SOURCES_PAIRWISE:-}" \
             PYTHONPATH= "$PY" - <<'PYSCRIPT'
         import os
         import sys
@@ -937,19 +975,26 @@ runs:
             # equivalent compile-context overlay merge uses, so the two
             # callers cannot independently drift on this selection.
             #
-            # Scoped to build:/sources: only, deliberately narrower than
-            # run.sh's own five-block promotion (which also carries
-            # compile:/source:(singular)/debug: for a genuinely single-sided
-            # caller): this step has no reliable way to determine here
-            # whether the nested "Run analysis" invocation's own compare/scan
-            # resolves those three blocks single-sidedly or pair-wide for
-            # this particular old-library/mode combination (run.sh's own
-            # `_compile_context_sources_pairwise` additionally depends on
-            # whether the live OLD operand is a stored snapshot, which this
-            # step cannot inspect) -- build:/sources: are unconditionally
-            # single-sided in every mode (`embed_build_source()`'s own
-            # selection never varies with pairing), so only those two are
-            # safe to promote without guessing.
+            # Whether compile:/source:(singular)/debug: are ALSO safe to
+            # promote from this sources-root document (in addition to
+            # build:/sources:, always promoted below) depends on whether
+            # THIS step's own nested "Run analysis" invocation resolves
+            # those three blocks single-sidedly or pair-wide for this
+            # particular kind/mode combination -- computed by this step's
+            # own `env:` block (see SOURCES_PAIRWISE's docstring there for
+            # the exact kind/mode reasoning) rather than guessed at here, a
+            # fix for a previous round's belief that "this step has no
+            # reliable way to determine" that distinction. Mirrors
+            # run.sh's own ABICHECK_SOURCES_PAIRWISE-gated block selection
+            # exactly (Codex review, fresh evidence, PR #1222 fourth round).
+            _sources_pairwise = (
+                os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
+            )
+            _sources_root_blocks = (
+                ("build", "sources")
+                if _sources_pairwise
+                else ("build", "sources", "compile", "source", "debug")
+            )
             _sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
             if _sources_root_env:
                 _sources_found = discover_build_config(Path(_sources_root_env))
@@ -975,8 +1020,19 @@ runs:
                     if isinstance(_sources_loaded, dict):
                         _validate_or_exit(_sources_loaded, str(_sources_found))
                     data = apply_sources_root_config_blocks(
-                        data, _sources_loaded, blocks=("build", "sources")
+                        data, _sources_loaded, blocks=_sources_root_blocks
                     )
+                    # found_path anchors compile.include_dirs's own rebase
+                    # below -- reassign it to the sources-root document ONLY
+                    # when compile: was actually sourced from it (mirrors
+                    # run.sh's own identical `if not sources_pairwise:
+                    # found_path = sources_found`): a pairwise caller's own
+                    # compile: block (never promoted from the sources root,
+                    # per _sources_root_blocks above) must keep resolving
+                    # against whichever document actually supplied
+                    # base["compile"] (the checkout-root config, if any).
+                    if not _sources_pairwise:
+                        found_path = _sources_found
             # Security (Codex review, third round): this discovered document
             # is PR-controlled, untrusted content -- exactly what
             # cli_options.py's compile.compiler gate and ADR-032 D5's
