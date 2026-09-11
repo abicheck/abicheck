@@ -55,6 +55,7 @@ from ..policy.support_promise import (
 from .build_config_schema import (
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
+    deployment_findings as _deployment_type_findings,
     opt_int as _opt_int,
     parse_policy_overrides as _parse_policy_overrides,
     subkey_findings as _subkey_type_findings,
@@ -471,27 +472,15 @@ class BuildConfig:
 
     @classmethod
     def _deployment_findings(cls, value: object) -> list[str]:
-        """Type findings for ``deployment:``: not a fixed subkey set (unlike
-        every other block) since it embeds ``EnvironmentMatrix``'s own
-        richer, nested YAML shape -- delegates to
-        ``EnvironmentMatrix.from_dict`` itself rather than re-declaring that
-        shape here, the same reasoning ``from_dict`` below reuses for
-        parsing. Kept on this class (not ``build_config_schema.py``, which
-        is ``extract``-classified and may not import ``environment_matrix``,
-        a ``workflows`` module) rather than the sibling schema module every
-        other subkey-type check lives in.
+        """Type findings for ``deployment:`` -- delegates to
+        ``build_config_schema.deployment_findings``, the same shape
+        ``_subkey_findings`` above delegates to ``subkey_findings`` (see that
+        module's own docstring for why this validation lives there now, not
+        here: ``environment_matrix.py`` was reclassified ``model`` in
+        ``architecture/modules.yaml``, which is exactly the one extra layer
+        ``build_config_schema.py``'s ``extract`` classification may import).
         """
-        if value is None:
-            return []
-        if not isinstance(value, dict):
-            return [
-                f"deployment must be a mapping, got {type(value).__name__}: {value!r}"
-            ]
-        try:
-            EnvironmentMatrix.from_dict(value, strict=True)
-        except (TypeError, ValueError) as exc:
-            return [f"deployment: {exc}"]
-        return []
+        return _deployment_type_findings(value)
 
     @classmethod
     def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:

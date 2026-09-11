@@ -24,6 +24,7 @@ from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .diff_helpers import make_change
 from .model.binary_naming import strip_vendor_hash
+from .model.dotted_version import parse_dotted_numeric_version
 from .model.elf_facts import ElfMetadata
 
 # Tokens that mark an ELF symbol-version node as implementation-internal rather
@@ -36,36 +37,17 @@ from .model.elf_facts import ElfMetadata
 _INTERNAL_VERSION_NODE_TOKENS = ("PRIVATE", "INTERNAL")
 
 _UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
-_MAX_VERSION_COMPONENT_DIGITS = 9
 """Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
 like ``GLIBC_PRIVATE``.  Sorts *above* any real version so that a new
 non-numeric requirement is always treated as potentially BREAKING — never
 silently COMPAT."""
 
-
-def _parse_dotted_numeric_version(text: str) -> tuple[int, ...] | None:
-    """Parse a dotted numeric version safely, or return ``None``.
-
-    Version tags and declared runtime floors can come from untrusted ELF
-    metadata or snapshots.  Keep integer conversion bounded so pathological
-    digit strings are treated like malformed versions rather than aborting the
-    comparison via Python's integer-conversion guard (or burning CPU/memory on
-    runtimes without one).
-    """
-    parts = text.split(".")
-    if not parts:
-        return None
-    parsed: list[int] = []
-    for part in parts:
-        if (
-            not part
-            or not part.isascii()
-            or not part.isdigit()
-            or len(part) > _MAX_VERSION_COMPONENT_DIGITS
-        ):
-            return None
-        parsed.append(int(part))
-    return tuple(parsed) if parsed else None
+#: Re-exported under this module's own private name so every existing
+#: internal call site below, plus external importers
+#: (``diff_wheel_deployment.py``, ``tests/test_environment_drift.py``), are
+#: unaffected by the move to ``model/dotted_version.py`` (see that module's
+#: own docstring for why the split happened).
+_parse_dotted_numeric_version = parse_dotted_numeric_version
 
 
 def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:

@@ -51,6 +51,13 @@ YAML format::
       toolkit_version: "12.4"
 
 See ADR-020b for design rationale.
+
+Classified ``model`` in ``architecture/modules.yaml`` (ADR-061), not
+``workflows``: this module is a pure data shape plus a parser, with no
+orchestration logic of its own, so it belongs in the innermost ring every
+other layer may import — the layer's own comment names the one dependency
+(``diff_versioning.py``'s dotted-version parser) that had to move to
+``model/dotted_version.py`` first to make that legal.
 """
 from __future__ import annotations
 
@@ -59,7 +66,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .diff_versioning import _parse_dotted_numeric_version
+from .model.dotted_version import parse_dotted_numeric_version
 
 log = logging.getLogger(__name__)
 
@@ -244,7 +251,7 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
             # contract parses with int() per component, so a "2.28-1" or "2.x"
             # would silently truncate to (2,) and flip verdicts. Reject
             # malformed text here instead (Codex review #510).
-            if _parse_dotted_numeric_version(floor) is None:
+            if parse_dotted_numeric_version(floor) is None:
                 raise ValueError(
                     f"'runtime_floors.{key}' must be a dotted numeric version "
                     f"(digits and dots only, e.g. '2.28'), with each component "
