@@ -46,7 +46,7 @@ from .header_utils import (
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
-from .service_scan import expand_header_inputs
+from .workflows.header_inputs import expand_header_inputs
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot

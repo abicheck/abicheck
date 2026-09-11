@@ -43,7 +43,7 @@ from .frontends.cli.options.params import (
 )
 
 if TYPE_CHECKING:
-    from .service_scan import CompileContext
+    from .compile_context import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -869,8 +869,8 @@ def merge_compile_config(
     intended ``compile:`` settings and still exit 0 — but best-effort (warn +
     CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
     """
+    from .compile_context import CompileContext
     from .config_paths import project_root_for_config
-    from .service_scan import CompileContext
     from .workflows.extraction import discover_build_config, load_build_config
 
     explicit_config = build_config is not None
@@ -1141,7 +1141,7 @@ def resolve_compile_context(
     ``AstContextAmbiguousError`` in ``sycl_context``), not from a blanket
     reject here.
     """
-    from .service_scan import CompileContext
+    from .compile_context import CompileContext
 
     cli_ctx = CompileContext(
         gcc_path=compiler_path,
@@ -1305,38 +1305,6 @@ def set_input_options(func: F) -> F:
         "(0 = auto-detect CPU count, clamped to fit available memory -- see "
         "ABICHECK_RELEASE_JOB_MEM_GIB -- the default). An explicit positive "
         "value is never memory-clamped.",
-    )(func)
-    return func
-
-
-def artifact_set_options(func: F) -> F:
-    """``scan --artifact-set`` knobs (ADR-056).
-
-    A small, dedicated pair rather than reuse of `release_options` wholesale
-    — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`/
-    `--manifest`, only the set operand and the system-provider allow-list.
-    `--bundle-system-providers`' option text matches `release_options`'
-    below verbatim (same flag, same meaning, just declared for a different
-    command) rather than being redefined with different wording.
-    """
-    func = click.option(
-        "--artifact-set",
-        "artifact_set",
-        multiple=True,
-        metavar="DIR|PATH",
-        help="Audit a *set* of libraries with no old side, as one artifact "
-        "(ADR-056): a directory (every discoverable shared library in it), "
-        "or a repeatable explicit path, one --artifact-set per member. "
-        "Mutually exclusive with the positional ARTIFACT and with --against "
-        "(audit-only — no old-side comparison for a set).",
-    )(func)
-    func = click.option(
-        "--bundle-system-providers",
-        "bundle_system_providers",
-        default="",
-        help="Comma-separated extra sonames to treat as system-provided "
-        "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
-        "Only meaningful with --artifact-set.",
     )(func)
     return func
 

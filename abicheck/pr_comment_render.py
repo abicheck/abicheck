@@ -23,9 +23,8 @@ boundary. :func:`render_comment` takes an already-built
 so the two halves split along a real seam rather than an arbitrary line
 range -- confirmed directly: nothing here calls back into
 ``pr_comment.py``'s own functions, only into ``pr_comment_base.py`` (the
-``CommentModel``/``Finding`` types and shared formatting helpers already
-factored out for ``pr_comment_scan.py``) and ``pr_comment_scan.py`` itself
-(``scan_note``). ``pr_comment.py`` re-exports :func:`render_comment` and this
+``CommentModel``/``Finding`` types and shared formatting helpers).
+``pr_comment.py`` re-exports :func:`render_comment` and this
 module's other externally-referenced names for its existing callers
 (``cli_pr_comment.py``, several ``tests/test_pr_comment*.py`` modules).
 """
@@ -36,7 +35,6 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 
 from .pr_comment_base import CommentModel, Finding, _esc
-from .pr_comment_scan import scan_note
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
@@ -102,19 +100,6 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 
 
 def _header(model: CommentModel) -> tuple[str, str]:
-    if (
-        model.mode == "scan"
-        and model.scan_audit_only
-        and not model.breaking
-        and not model.review
-        and not model.has_incomplete
-    ):
-        # An audit-only `scan` (no `--against` baseline at all) ran no
-        # comparison, so every compatibility bucket is necessarily empty —
-        # the generic "✅ No ABI changes" wording below would misreport that
-        # as "we compared and found nothing" rather than "there was nothing
-        # to compare".
-        return "✅", "Scan audit — no baseline to compare"
     if model.scoped_verdict is not None:
         # `contract_coverage_blocking` is checked FIRST, ahead of the scoped
         # header itself (Codex review, two rounds): the contract-coverage
@@ -606,8 +591,6 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
         else "⛔ Blocked by policy (compatible)"
     )
     out: list[str] = []
-    if model.mode == "scan":
-        out += scan_note(model)
     out += _findings_table(
         breaking_title, model.breaking, detail, open_default=bool(model.breaking)
     )

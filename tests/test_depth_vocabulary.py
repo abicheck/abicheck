@@ -32,14 +32,12 @@ from abicheck.frontends.cli.options.params import DEPTH_PARAM
 
 def _registered() -> dict:
     """Register every depth-bearing command on ``main`` and return its map."""
-    import abicheck.cli_scan  # noqa: F401  — registers scan
-
     return main.commands
 
 
 # ── One dial: every depth-bearing command shows the same user-facing ladder ──
 
-_DEPTH_COMMANDS = ("compare", "dump", "scan")
+_DEPTH_COMMANDS = ("compare", "dump")
 
 
 @pytest.mark.parametrize("cmd_name", _DEPTH_COMMANDS)

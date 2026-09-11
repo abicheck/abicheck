@@ -182,7 +182,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "scripts/check_ai_readiness.py",
         "tests/test_type_graph.py",
         "tests/test_l3l4l5_new_kinds.py",
-        "tests/test_cli_scan.py",
         "tests/test_appcompat.py",
         "tests/test_dumper_clang.py",
         "tests/test_source_abi.py",
@@ -1349,13 +1348,10 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_pr_comment",
                 "cli_probe",
                 "cli_resolve",
-                "cli_scan",
-                "cli_scan_baseline",
                 "cli_stack",
                 "cli_suggest",
                 "cli_surface",
                 "l0_export_delta",
-                "scan_engine",
                 "service",
                 "service_compare_pipeline",
                 "service_dump_pipeline",
@@ -1377,7 +1373,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # deadlock; the package still imports cleanly.
                 "service_header_graph_attach",
                 "service_input_resolution",
-                "service_scan",
                 # `service_dump_native` joins the same SCC on exactly the terms
                 # `service_header_graph_attach` above was signed off under -- a
                 # *split* of an existing member (ADR-061 "make service.py a
@@ -2557,7 +2552,6 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # Scan baseline resolution (P0 item 4's baseline half): calls
         # `service.resolve_input()` directly rather than through
         # `service_input_resolution.resolve_side_snapshot`.
-        "abicheck/cli_scan_baseline.py:1087:19:service.resolve_input",
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.

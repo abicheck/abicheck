@@ -100,13 +100,11 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/serialization.py",
     "abicheck/pe_metadata.py",
     "abicheck/macho_metadata.py",
-    "abicheck/cli_scan.py",
     "abicheck/dumper.py",
     "abicheck/dwarf_presence.py",
     "abicheck/service.py",
     "scripts/benchmark_scaling.py",
     "tests/test_performance.py",
-    "tests/test_perf_binary_scan.py",
     "tests/test_perf_dump_scaling.py",
     "tests/test_benchmark_scaling.py",
     # Every buildsource module (header/include/call/type graph, L3 build
@@ -133,16 +131,13 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "action/install-castxml.sh",
     "scripts/check_header_graph_perf.py",
     "tests/test_header_graph_perf_gate.py",
-    # scan()/dump()/compare() orchestration, resolution, and caching -- the
-    # owners of scan latency a narrower path filter previously missed
-    # entirely (no scan-shaped scenario ran under this workflow at all for a
-    # change to any of these).
+    # dump()/compare() orchestration, resolution, and caching -- the owners
+    # of extraction latency a narrower path filter previously missed
+    # entirely.
     "abicheck/service_input_resolution.py",
-    "abicheck/service_scan.py",
     "abicheck/service_dump_pipeline.py",
     "abicheck/service_compare_pipeline.py",
     "abicheck/service_dump_cache.py",
-    "abicheck/scan_engine.py",
     "abicheck/snapshot_cache.py",
     "abicheck/cli_buildsource.py",
     "abicheck/cli_buildsource_helpers.py",

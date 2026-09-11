@@ -221,7 +221,7 @@ jobs:
 
       - name: Run slow perf tests
         run: |
-          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m slow
+          pytest tests/test_performance.py -v --tb=short -m slow
 
       - name: Write job summary
         if: always()

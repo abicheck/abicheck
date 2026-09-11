@@ -16,7 +16,7 @@
 """Guard: every ``abicheck <cmd> … --flag`` shown in the user-guide examples is a
 real option of that command.
 
-The worked-example and scan-levels pages hand-write CLI invocations; nothing else
+The worked-example and evidence-depth pages hand-write CLI invocations; nothing else
 exercises them, so a future flag rename/removal would silently stale the docs.
 This parses the ``abicheck`` commands out of those pages' fenced ``bash`` blocks
 and asserts each long/short flag still resolves against the click command — the
@@ -31,10 +31,13 @@ from pathlib import Path
 import pytest
 
 from abicheck.cli import compare_cmd, dump_cmd
-from abicheck.cli_scan import scan_cmd
 
 _DOCS = Path(__file__).resolve().parent.parent / "docs"
-_DOC_FILES = ("start/real-world-example.md", "use/scan-levels.md", "use/cli-usage.md")
+_DOC_FILES = (
+    "start/real-world-example.md",
+    "use/evidence-depth.md",
+    "use/cli-usage.md",
+)
 
 #: subcommand name → click command object whose options are authoritative.
 #: `collect` was removed (ADR-043 D1): dump/compare now auto-collect/ingest
@@ -42,7 +45,6 @@ _DOC_FILES = ("start/real-world-example.md", "use/scan-levels.md", "use/cli-usag
 _COMMANDS = {
     "compare": compare_cmd,
     "dump": dump_cmd,
-    "scan": scan_cmd,
 }
 
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.DOTALL)
@@ -107,7 +109,7 @@ def test_docs_contain_abicheck_examples() -> None:
     """Sanity: the parser actually found the documented commands (no silent zero)."""
     invs = _abicheck_invocations()
     assert len(invs) >= 5, f"expected several abicheck examples, found {len(invs)}"
-    assert {c for _, c, _, _ in invs} >= {"compare", "scan", "dump"}
+    assert {c for _, c, _, _ in invs} >= {"compare", "dump"}
 
 
 @pytest.mark.parametrize("name,cmd,line,flags", _abicheck_invocations())

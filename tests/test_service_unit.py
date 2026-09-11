@@ -1123,8 +1123,8 @@ class TestDumpElf:
         primary parse's cache key let the two passes disagree on staleness
         -- reusing a stale cached AST here while the header-graph pass
         correctly reparsed."""
+        from abicheck.compile_context import CompileContext
         from abicheck.service import _dump_elf
-        from abicheck.service_scan import CompileContext
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1197,8 +1197,8 @@ class TestDumpElf:
         # the inferred -H root must defer — emitted as its own -isystem token
         # *after* the build's (build's is emitted first, so it wins), not jumping
         # ahead as -I. -isystem also keeps it above the standard system dirs.
+        from abicheck.compile_context import CompileContext
         from abicheck.service import _dump_elf
-        from abicheck.service_scan import CompileContext
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1373,8 +1373,8 @@ class TestHeaderScopedInferredRoots:
         assert captured["extra_hash_dirs"] == ()
 
     def test_macho_build_context_defers_and_hashes(self, tmp_path):
+        from abicheck.compile_context import CompileContext
         from abicheck.service import _try_header_scoped_dump
-        from abicheck.service_scan import CompileContext
 
         root, umb = self._umbrella(tmp_path)
         captured = {}
@@ -1519,9 +1519,9 @@ class TestHeaderScopedInferredRoots:
         # must not also swallow this and silently succeed with --header/
         # --include ignored, exactly the same reasoning as the
         # DeadlineExceeded test above.
+        from abicheck.compile_context import CompileContext
         from abicheck.errors import AstContextMissingError
         from abicheck.service import _try_header_scoped_dump
-        from abicheck.service_scan import CompileContext
 
         _root, umb = self._umbrella(tmp_path)
 
@@ -2676,7 +2676,7 @@ class TestCompareRequestAdr055Evidence:
         signal goes undetected, letting the pair disagree on dialect."""
         from types import SimpleNamespace
 
-        from abicheck import service_scan
+        from abicheck import cxx20_pair_dialect as service_scan
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
@@ -2693,7 +2693,7 @@ class TestCompareRequestAdr055Evidence:
         # ADR-055 D1: the pair-wide scan runs in the shared
         # `service_compare_pipeline`, which imports this helper from the module
         # that defines it rather than through `service`'s re-export -- so the
-        # spy belongs on `service_scan`, where it lives.
+        # spy belongs on `cxx20_pair_dialect`, where it lives.
         monkeypatch.setattr(
             service_scan, "pair_wide_cxx20_std_override", _fake_override
         )
@@ -2785,13 +2785,13 @@ class TestCompareRequestAdr055Evidence:
         dialect (e.g. only a sysroot) must not silently discard the pair-wide
         C++20 heuristic's override for that side -- it should be merged in
         unless the side already pins its own explicit standard."""
-        from abicheck import service_scan
+        from abicheck import cxx20_pair_dialect as service_scan
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
 
-        # ADR-055 D1: spied on `service_scan` (where it is defined) rather than
+        # ADR-055 D1: spied on `cxx20_pair_dialect` (where it is defined) rather than
         # `service` (which only re-exports it) -- the shared compare pipeline
         # imports it from the defining module.
         monkeypatch.setattr(
@@ -4010,7 +4010,7 @@ class TestRunDumpHeaderGraph:
         from an unrequested host parse would combine device declarations
         with host-only call/type/include edges, feeding crosschecks a graph
         incoherent with what it's describing."""
-        from abicheck.service_scan import CompileContext
+        from abicheck.compile_context import CompileContext
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4462,8 +4462,8 @@ class TestAttachHeaderGraphDeviceContext:
     confidently wrong."""
 
     def test_device_context_skips_include_extractor(self, tmp_path):
+        from abicheck.compile_context import CompileContext
         from abicheck.service import _attach_header_graph
-        from abicheck.service_scan import CompileContext
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4485,8 +4485,8 @@ class TestAttachHeaderGraphDeviceContext:
         mock_extractor.assert_not_called()
 
     def test_host_context_still_uses_include_extractor(self, tmp_path):
+        from abicheck.compile_context import CompileContext
         from abicheck.service import _attach_header_graph
-        from abicheck.service_scan import CompileContext
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4684,8 +4684,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
     re-parsed correctly."""
 
     def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path: Path):
+        from abicheck.compile_context import CompileContext
         from abicheck.service import _attach_header_graph
-        from abicheck.service_scan import CompileContext
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4782,166 +4782,16 @@ class TestCliNativeBinaryHeaderWiring:
                 _dump_native_binary(p, "macho", [], [], "1.0", "c++")
 
 
-def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
-    # Fast-lane guard for the scan orchestrator's ownership of the inferred
-    # build-dir cleanup (the real end-to-end check is the integration suite):
-    # service_scan.run_scan must run the deferred cleanup thunks in its finally —
-    # both on success and when run_scan_core raises — so the temp cmake build dir
-    # never outlives the scan. Mirrors the same contract in cli_scan.run_scan.
-    from types import SimpleNamespace
-
-    from abicheck import service_scan as _ss
-
-    ran = {"n": 0}
-
-    def fake_core(**kw):
-        # The orchestrator hands us the cleanup list; register a sentinel thunk the
-        # way collect_inline_pack would for an inferred cmake build dir.
-        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
-        outcome = SimpleNamespace(
-            verdict="COMPATIBLE",
-            exit_code=0,
-            coverage=[],
-            crosscheck={},
-            to_dict=lambda: {},
-        )
-        return SimpleNamespace(outcome=outcome, findings=[])
-
-    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
-
-    req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
-    res = _ss.run_scan(req)
-    assert res.verdict == "COMPATIBLE"
-    assert ran["n"] == 1  # the finally ran the deferred cleanup on success
-
-    # And it still runs when the core raises a budget overflow mid-scan.
-    from abicheck.scan_engine import _BudgetOverflow
-
-    ran["n"] = 0
-
-    def raising_core(**kw):
-        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
-        raise _BudgetOverflow("over budget")
-
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
-    res = _ss.run_scan(req)
-    assert res.exit_code == 5  # budget overflow surfaced
-    assert ran["n"] == 1  # finally still ran the cleanup on the raise path
 
 
-def test_run_scan_rejects_comparison_only_fields_without_baseline():
-    # Codex review on PR #657: ScanRequest's policy/suppression/scope/
-    # force-public/pattern-verdict/env-matrix fields only mean anything for
-    # a baseline comparison (run_scan_core only calls _run_baseline_compare
-    # when baseline is set and mode isn't "audit"). Without a baseline they
-    # must be rejected loudly (mirrors the CLI's identical scan_cmd guard),
-    # not silently accepted and discarded.
-    from abicheck.errors import ValidationError
-    from abicheck.service_scan import ScanRequest, run_scan
-
-    req = ScanRequest(binaries=[Path("libfoo.so")], depth="binary", policy="sdk_vendor")
-    with pytest.raises(ValidationError, match="only take effect with a baseline"):
-        run_scan(req)
 
 
-def test_run_scan_rejects_comparison_only_fields_with_audit_mode_despite_baseline():
-    # Even with a baseline set, an explicit mode="audit" means run_scan_core
-    # never calls _run_baseline_compare either -- the guard must catch that
-    # combination too, not just baseline=None.
-    from abicheck.errors import ValidationError
-    from abicheck.service_scan import ScanRequest, run_scan
-
-    req = ScanRequest(
-        binaries=[Path("libfoo.so")],
-        depth="binary",
-        baseline=Path("old.abi.json"),
-        mode="audit",
-        pattern_verdicts=True,
-    )
-    with pytest.raises(ValidationError, match="only take effect with a baseline"):
-        run_scan(req)
 
 
-def test_run_scan_allows_comparison_fields_with_a_real_baseline(monkeypatch):
-    # The new guard must not fire for the case it's meant to allow: a real
-    # baseline comparison actually using the config surface.
-    from types import SimpleNamespace
-
-    from abicheck import service_scan as _ss
-
-    def fake_core(**kw):
-        outcome = SimpleNamespace(
-            verdict="COMPATIBLE",
-            exit_code=0,
-            coverage=[],
-            crosscheck={},
-            to_dict=lambda: {},
-        )
-        return SimpleNamespace(outcome=outcome, findings=[])
-
-    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
-
-    req = _ss.ScanRequest(
-        binaries=[Path("libfoo.so")],
-        depth="binary",
-        baseline=Path("old.abi.json"),
-        policy="sdk_vendor",
-    )
-    res = _ss.run_scan(req)
-    assert res.verdict == "COMPATIBLE"
 
 
-def test_run_scan_rejects_collapse_versioned_symbols_without_baseline():
-    # Codex review on PR #657: ScanRequest gained collapse_versioned_symbols
-    # (an ICU-style version-suffix transition needs it to demote a rename to
-    # COMPATIBLE_WITH_RISK the same way `compare`'s config-resolved
-    # equivalent does) -- it must be rejected without a baseline like every
-    # other comparison-only field.
-    from abicheck.errors import ValidationError
-    from abicheck.service_scan import ScanRequest, run_scan
-
-    req = ScanRequest(
-        binaries=[Path("libfoo.so")], depth="binary", collapse_versioned_symbols=True
-    )
-    with pytest.raises(ValidationError, match="only take effect with a baseline"):
-        run_scan(req)
 
 
-def test_run_scan_forwards_collapse_versioned_symbols_to_core(monkeypatch):
-    # And, with a real baseline, the value must actually reach
-    # run_scan_core (the Python API's own config-surface parity gap Codex
-    # found -- the CLI threads this but ScanRequest never exposed it).
-    from types import SimpleNamespace
-
-    from abicheck import service_scan as _ss
-
-    captured = {}
-
-    def fake_core(**kw):
-        captured["collapse_versioned_symbols"] = kw.get("collapse_versioned_symbols")
-        outcome = SimpleNamespace(
-            verdict="COMPATIBLE",
-            exit_code=0,
-            coverage=[],
-            crosscheck={},
-            to_dict=lambda: {},
-        )
-        return SimpleNamespace(outcome=outcome, findings=[])
-
-    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
-
-    req = _ss.ScanRequest(
-        binaries=[Path("libfoo.so")],
-        depth="binary",
-        baseline=Path("old.abi.json"),
-        collapse_versioned_symbols=True,
-    )
-    _ss.run_scan(req)
-
-    assert captured["collapse_versioned_symbols"] is True
 
 
 # ── _try_attach_numpy_capi_surface() ────────────────────────────────────────

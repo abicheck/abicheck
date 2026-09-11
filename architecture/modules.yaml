@@ -271,6 +271,9 @@
         "policy"
       ],
       "legacy_paths": [
+        "abicheck/aggregate.py",
+        "abicheck/aggregate_findings.py",
+        "abicheck/aggregate_manifest.py",
         "abicheck/appcompat.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
@@ -305,7 +308,6 @@
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
         "abicheck/resolver.py",
-        "abicheck/scan_abi3_resolve.py",
         "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
@@ -316,11 +318,7 @@
         "abicheck/service_header_graph_attach.py",
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
-        "abicheck/service_scan.py",
-        "abicheck/stack_checker.py",
-        "abicheck/aggregate.py",
-        "abicheck/aggregate_findings.py",
-        "abicheck/aggregate_manifest.py"
+        "abicheck/stack_checker.py"
       ]
     },
     "report": {
@@ -342,8 +340,6 @@
         "abicheck/pr_comment.py",
         "abicheck/pr_comment_base.py",
         "abicheck/pr_comment_render.py",
-        "abicheck/pr_comment_scan.py",
-        "abicheck/pr_comment_scan_abort.py",
         "abicheck/report_classifications.py",
         "abicheck/report_correlation.py",
         "abicheck/report_model.py",
@@ -392,10 +388,6 @@
         "abicheck/cli_pr_comment.py",
         "abicheck/cli_project.py",
         "abicheck/cli_resolve.py",
-        "abicheck/cli_scan.py",
-        "abicheck/cli_scan_baseline.py",
-        "abicheck/cli_scan_helpers.py",
-        "abicheck/cli_scan_receipt.py",
         "abicheck/cli_stack.py",
         "abicheck/compat/cli.py",
         "abicheck/dry_run.py",
@@ -449,10 +441,6 @@
       "cli_pr_comment.py",
       "cli_project.py",
       "cli_resolve.py",
-      "cli_scan.py",
-      "cli_scan_baseline.py",
-      "cli_scan_helpers.py",
-      "cli_scan_receipt.py",
       "cli_stack.py"
     ],
     "service_": [
@@ -466,8 +454,7 @@
       "service_header_scoped.py",
       "service_input_resolution.py",
       "service_metadata_attach.py",
-      "service_render.py",
-      "service_scan.py"
+      "service_render.py"
     ],
     "reporter_": [
       "reporter_contract_blocks.py",
@@ -588,7 +575,6 @@
     "abicheck/cli_compare_helpers.py",
     "abicheck/cli_compare_release_helpers.py",
     "abicheck/cli_dump_helpers.py",
-    "abicheck/cli_scan_helpers.py",
     "abicheck/compat/_helpers.py",
     "abicheck/diff_helpers.py",
     "abicheck/dwarf_utils.py",
@@ -664,10 +650,6 @@
     "cli_pr_comment.py",
     "cli_project.py",
     "cli_resolve.py",
-    "cli_scan.py",
-    "cli_scan_baseline.py",
-    "cli_scan_helpers.py",
-    "cli_scan_receipt.py",
     "cli_stack.py",
     "comparability.py",
     "comparability_fields.py",
@@ -823,7 +805,6 @@
     "pr_comment.py",
     "pr_comment_base.py",
     "pr_comment_render.py",
-    "pr_comment_scan.py",
     "probe_harness.py",
     "process_resources.py",
     "product_baseline.py",
@@ -843,7 +824,6 @@
     "resolver.py",
     "root_cause_evidence.py",
     "sarif.py",
-    "scan_engine.py",
     "semver.py",
     "serialization.py",
     "service.py",
@@ -858,7 +838,6 @@
     "service_input_resolution.py",
     "service_metadata_attach.py",
     "service_render.py",
-    "service_scan.py",
     "severity.py",
     "snapshot_cache.py",
     "snapshot_io.py",

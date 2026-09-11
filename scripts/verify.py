@@ -552,7 +552,7 @@ STEPS: tuple[Step, ...] = (
         # trips), so a serial run was pure wasted wall time on a multi-core
         # runner/machine and left this local step unable to reproduce CI's
         # actual timing behavior (Codex review, PR #1036).
-        # tests/test_performance.py, tests/test_perf_binary_scan.py, AND
+        # tests/test_performance.py AND
         # tests/test_header_scan_deadline_integration.py are excluded here
         # and covered by the separate "slow-perf" step below, run serially --
         # see that step's own comment for why (Codex review, same PR, three
@@ -564,7 +564,6 @@ STEPS: tuple[Step, ...] = (
             "-m",
             "slow",
             "--ignore=tests/test_performance.py",
-            "--ignore=tests/test_perf_binary_scan.py",
             "--ignore=tests/test_header_scan_deadline_integration.py",
             "--tb=short",
             "-n",
@@ -578,7 +577,7 @@ STEPS: tuple[Step, ...] = (
     Step(
         "slow-perf",
         # Deliberately NOT parallelized, unlike "slow" above: every test in
-        # tests/test_performance.py, tests/test_perf_binary_scan.py, and
+        # tests/test_performance.py and
         # tests/test_header_scan_deadline_integration.py (whole-file
         # `pytestmark = pytest.mark.slow` in the first two; the third has one
         # `@pytest.mark.slow` test,
@@ -595,7 +594,6 @@ STEPS: tuple[Step, ...] = (
         _py(
             "pytest",
             "tests/test_performance.py",
-            "tests/test_perf_binary_scan.py",
             "tests/test_header_scan_deadline_integration.py",
             "-m",
             "slow",

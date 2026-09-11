@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .config_paths import find_config_in_dir
-from .service_scan import pair_wide_cxx20_std_override
+from .cxx20_pair_dialect import pair_wide_cxx20_std_override
 from .workflows.extraction import (
     has_explicit_std,
     strip_vendor_hash as strip_vendor_hash,
@@ -44,8 +44,8 @@ from .workflows.extraction import (
 if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
+    from .compile_context import CompileContext
     from .model import AbiSnapshot
-    from .service_scan import CompileContext
     from .workflows.extraction import BuildConfig
     from .workflows.gate import SeverityConfig
     from .workflows.policy_file import PolicyFile

@@ -729,7 +729,7 @@ def test_cli_contract_allowlist_entries_are_real_violations() -> None:
 
 
 def _registered_commands() -> dict:
-    """Return the registered top-level commands (dump/compare/scan/deps/compat)."""
+    """Return the registered top-level commands (dump/compare/deps/compat)."""
     from abicheck.cli import main
 
     return main.commands
@@ -1040,11 +1040,11 @@ def test_ast_frontend_threads_to_l4_extractor(
     assert captured.get("extractor") == "clang"
 
 
-@pytest.mark.parametrize("name", ["dump", "scan"])
+@pytest.mark.parametrize("name", ["dump"])
 def test_project_config_flag_is_config_not_build_config(name: str) -> None:
     """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
     and reflect that it loads the whole project .abicheck.yml. No back-compat
-    window is kept, so the old spelling must be gone on dump/scan."""
+    window is kept, so the old spelling must be gone on dump."""
     commands = _registered_commands()
     flags = _command_flags(commands[name])
     assert "--config" in flags, name
@@ -1100,7 +1100,7 @@ def test_header_graph_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
     assert hidden_flags == {"--header-graph", "--header-graph-includes"}
 
 
-@pytest.mark.parametrize("cmd_name", ["compare", "dump", "scan"])
+@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
 def test_removed_gcc_spellings_are_gone_entirely(cmd_name: str) -> None:
     """--gcc-path/--gcc-prefix/--gcc-option are removed, not hidden.
 
@@ -1312,62 +1312,10 @@ def test_run_compare_request_normalizes_lang(
     assert seen_langs == ["c", "c"]
 
 
-# ── D1: service_scan must not depend on the CLI frontend ────────────────────
-#
-# service_scan.run_scan historically imported its shared scan-engine core
-# (run_scan_core / _BudgetOverflow / _EvidenceContractError) from cli_scan.py —
-# a Click command module — the reverse of the intended frontend → service →
-# engine dependency direction (ADR-037 D1). That engine core now lives in
-# scan_engine.py (no @click.option decorators, not registered as a command);
-# cli_scan.py (the CLI) and service_scan.py (the typed service API) both
-# import from it instead of service_scan reaching into the CLI module.
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Return every module name imported anywhere in *path* (module-level,
-    function-local, or under ``TYPE_CHECKING`` — all are real coupling, just
-    with different init-time consequences)."""
-    import ast
-
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module:
-                out.add(module)
-            for alias in node.names:
-                out.add(f"{module}.{alias.name}" if module else alias.name)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                out.add(alias.name)
-    return out
 
 
-def test_service_scan_does_not_import_cli_scan() -> None:
-    """service_scan.py must never import from cli_scan.py (the Click ``scan``
-    command module) — the shared engine core lives in scan_engine.py, which
-    both cli_scan.py and service_scan.py depend on independently."""
-    import abicheck.service_scan as service_scan_mod
-
-    path = Path(service_scan_mod.__file__)
-    imported = _imported_modules(path)
-    assert not {"cli_scan", "abicheck.cli_scan"} & imported, (
-        "service_scan.py imports from cli_scan.py — this reintroduces the "
-        "service→CLI dependency inversion ADR-037 D1 / the scan_engine split "
-        "fixed. Import the needed symbols from abicheck.scan_engine instead."
-    )
-
-
-def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
-    """cli_scan.py's re-exported run_scan_core (etc.) are the *same objects*
-    as scan_engine's, not divergent copies — the CLI and the typed service API
-    both call one engine (ADR-037 D1)."""
-    from abicheck import cli_scan, scan_engine
-
-    assert cli_scan.run_scan_core is scan_engine.run_scan_core
-    assert cli_scan._BudgetOverflow is scan_engine._BudgetOverflow
-    assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
 
 
 def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:

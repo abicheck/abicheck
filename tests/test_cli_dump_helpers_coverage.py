@@ -1042,7 +1042,7 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
         captured["written_snap"] = snap
         _write(snap, *a, **k)
 
-    from abicheck.service_scan import CompileContext
+    from abicheck.compile_context import CompileContext
 
     sentinel_cc = CompileContext()
 
@@ -1134,7 +1134,7 @@ def test_perform_elf_dump_explicit_lang_reaches_header_graph(
 
     _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
-    from abicheck.service_scan import CompileContext
+    from abicheck.compile_context import CompileContext
 
     perform_elf_dump(
         so,
@@ -1215,7 +1215,7 @@ def test_perform_elf_dump_dwarf_only_does_not_attach_header_graph(
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
-    from abicheck.service_scan import CompileContext
+    from abicheck.compile_context import CompileContext
 
     sentinel_cc = CompileContext()
 
@@ -1316,7 +1316,7 @@ def test_perform_elf_dump_header_graph_gets_compile_db_flags(
     a valid main snapshot while the second, independent clang pass building
     the header graph parsed without them and silently degraded to a
     declaration-only graph (Codex review)."""
-    from abicheck.service_scan import CompileContext
+    from abicheck.compile_context import CompileContext
 
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"

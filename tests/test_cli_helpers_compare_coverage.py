@@ -23,9 +23,9 @@ from abicheck.cli_helpers_compare import (
     dry_run_compile_db_matched,
     fold_l0_hard_removals,
 )
+from abicheck.compile_context import CompileContext
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot
-from abicheck.service_scan import CompileContext
 
 
 def _write_compile_db(directory, entries):

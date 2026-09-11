@@ -792,4 +792,4 @@ from .service_dump_native_pe import (  # noqa: E402
 # module-load-time cycle (``service_scan`` -> ... -> this module's own
 # siblings), matching how ``service.py`` itself deferred this before the
 # split.
-from .service_scan import expand_header_inputs  # noqa: E402
+from .workflows.header_inputs import expand_header_inputs  # noqa: E402

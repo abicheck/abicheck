@@ -34,7 +34,7 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.cli_options import resolve_compile_context
-from abicheck.service_scan import CompileContext
+from abicheck.compile_context import CompileContext
 
 
 @pytest.fixture

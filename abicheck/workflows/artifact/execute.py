@@ -686,7 +686,7 @@ def embed_side_build_source(
     from ...buildsource.embed import embed_build_source
     from ...dumper_clang import resolve_source_frontend_clang_bin
     from ...dumper_scoping import dump_manifest_public_roots
-    from ...service_scan import expand_public_header_inputs
+    from ..header_inputs import expand_public_header_inputs
 
     ctx = evidence.compile
     frontend_ctx = (

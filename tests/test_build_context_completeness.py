@@ -737,7 +737,7 @@ class TestForcedIncludeCacheKey:
         `service._attach_header_graph` already apply.
         """
         from abicheck import service_header_scoped
-        from abicheck.service_scan import CompileContext
+        from abicheck.compile_context import CompileContext
 
         gen = tmp_path / "gen"
         gen.mkdir()

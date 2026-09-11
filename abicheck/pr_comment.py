@@ -92,13 +92,8 @@ from .pr_comment_base import (
 )
 
 # `_EVIDENCE_KIND_VALUES`/`_evidence_symbol_label` (the "analysis incomplete"
-# bucket's kind classification -- see the module docstring above) now live
-# in `pr_comment_base.py`, shared with `pr_comment_scan.py`'s own finding
-# classification (Codex review, follow-up: a `scan --against` diff can carry
-# the identical evidence-quality kinds through `diff.findings`, and routing
-# them through the generic compatibility-severity buckets there produced a
-# misleading "Compatibility risk" headline for what is really a
-# missing-evidence signal).
+# bucket's kind classification -- see the module docstring above) live in
+# `pr_comment_base.py`.
 # `MARKER`/`DETAIL_LEVELS`/`GITHUB_COMMENT_LIMIT`/`render_comment`/`_header`
 # and their siblings now live in `pr_comment_render.py` (the "Rendering --
 # CommentModel -> markdown" half this module's own former section divider
@@ -113,7 +108,6 @@ from .pr_comment_render import (
     _header as _header,
     render_comment as render_comment,
 )
-from .pr_comment_scan import from_scan
 
 POST_MODES = ("always", "changes", "never")
 
@@ -863,8 +857,6 @@ def build_model(
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):
         return _from_appcompat(report, gate_api_break, gate_breaking)
-    if "scan_schema_version" in report:
-        return from_scan(report, gate_api_break, gate_breaking)
     return _from_compare(report, gate_api_break, gate_breaking)
 
 

@@ -52,7 +52,7 @@ from .header_utils import (
 from .model import AbiSnapshot, Visibility
 
 if TYPE_CHECKING:
-    from .service_scan import CompileContext
+    from .compile_context import CompileContext
 
 
 def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
@@ -101,8 +101,9 @@ def _try_header_scoped_dump(
     ``False`` (the default) is a no-op: identical to the pre-existing
     "force only bare ``'c'``" behavior.
     """
+    from .compile_context import CompileContext
     from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
-    from .service_scan import CompileContext, expand_header_inputs
+    from .workflows.header_inputs import expand_header_inputs
 
     # Expand header directories into individual files (same as the ELF path),
     # so `--header <dir>` scopes correctly instead of feeding a directory to

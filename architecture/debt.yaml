@@ -492,26 +492,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/cli_scan.py",
-      "baseline_lines": 2000,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1993 -> 2000 (the file-size hard cap exactly), ADR-063 Phase 4's second slice: both of this file's own Bazel-scoping pre-flight call sites (scan_cmd's single-binary check, _run_artifact_set's own) needed a sources=/build_config= pair forwarded so a config-sourced (no explicit --build-target) root-target scope closes the dry-run/execution parity gap the phase's first slice left open here -- see docs/contribute/adr/063-one-semantic-pipeline.md's Phase 4 status. A later Codex review round additionally found scan_cmd's own call used the bare bazel_target_scoping_failure instead of the scan-aware scan_bazel_scoping_failure, missing its headers/collect-mode exemption; switching it to the correct, already-shared guard cost three more positional arguments at that one call site. No smaller diff was found that still forwards both values through both call sites without a second, independently-maintained copy of the config-sourced fallback logic. Final Codex round: _run_artifact_set's own bespoke workflows.plan.artifact_set_bazel_scoping_failure approximated an unresolved --depth as always-active/always-exempt across earlier rounds, either false-positive-rejecting a real no-op or false-negative-accepting a request run_scan_core would later reject anyway -- the same dry-run/execution parity defect class this file's own baseline bump above exists to close. Replaced with a probe ScanRequest through service_scan._resolve_member_scan_level (the identical primitive estimate_artifact_set's own --dry-run cost totals already resolve through) feeding the real eff_depth/collect_mode into the existing scan_bazel_scoping_failure, and the now-dead bespoke function was deleted from workflows/plan.py. Net line count at this file unchanged (the added resolution call offset by trimming two on-topic ADR-063 comments elsewhere in this same file down to their essential content) -- landed exactly at the existing baseline, no bump needed this round.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1349,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/comparability.py",
       "baseline_lines": 1524,
       "target": "compare",
@@ -982,16 +962,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/pr_comment_scan.py",
-      "baseline_lines": 1186,
-      "target": "report",
-      "rule": "no_growth",
-      "category": "legacy_report_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/product_baseline.py",
       "baseline_lines": 1901,
       "target": "storage",
@@ -1042,16 +1012,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/scan_engine.py",
-      "baseline_lines": 1496,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised then lowered across several ADR-063 Phase 4 Codex rounds: the Bazel target-scoping pre-flight check needed to run at the top of run_scan_core(), before the S3 pattern scan/POI work, not only inside _build_new_snapshot() -- a typed run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight ahead of run_scan_core() the way the CLI does, so without this fix an unsupported request paid for real (if cheap) work before being rejected. The old check inside _build_new_snapshot() was then removed rather than left as a second, unguarded copy -- testing found that unguarded duplicate reintroduced the depth=binary false positive for the typed API (collect_mode's exemption lived only in the new guard). A further round found the guard's own exemption too broad: collect_mode(\"off\") alone wrongly covered --depth headers too (only --depth binary also clears headers to empty, the actual reason build_info is never consulted) -- widened to `headers or collection_for_ci_mode(...)[1]`. Finally, once service_scan.run_scan_set() needed the identical guard+exemption (see that file's own entry) the whole check was extracted into a shared workflows.plan.scan_bazel_scoping_failure(), replacing this file's own inlined copy with a single import + call -- net lower than every prior checkpoint despite the added functionality. Baseline raised again, 1491 -> 1494, ADR-063 Phase 4's second slice: run_scan_core()'s own call to scan_bazel_scoping_failure() now forwards sources=/build_config=, closing the config-sourced (no explicit --build-target) root-target-scope gap the phase's first slice left open -- see docs/contribute/adr/063-one-semantic-pipeline.md's Phase 4 status. Baseline raised again, 1494 -> 1496, ADR-063 Phase 7: ScanOutcome.to_dict() gained the new `run_outcome` structured field (one function-local import + one dict-literal write, kept to the minimum footprint via the shared policy.outcome.run_outcome_dict_for_scan_outcome() helper).",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/schemas/__init__.py",
       "baseline_lines": 1118,
       "target": "see ADR-061 ownership map",
@@ -1069,16 +1029,6 @@
       "category": "legacy_storage_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Classifying this `storage` (measured directly) surfaced 72 findings, not a handful. One slice of that is now closed: BundleFacts (de)serialization -- the whole `storage -> workflows` edge (BundleFacts is `workflows`-classified) -- moved to the new sibling `bundle_facts_serialization.py` (itself `workflows`, since bundle_facts.py is already at its own 800-line cap), dropping the measured count to 62. Two distinct kinds of finding remain, and only one is mechanical: (1) ~10 `storage -> extract` sites where `_xxx_from_dict` helpers still import dataclasses (`ElfMetadata`, `PeMetadata`, ...) from the flat, unclassified parser modules (`elf_metadata.py`, `pe_metadata.py`, ...) instead of their canonical `model/*_facts.py` home each parser already re-exports from -- a same-object import-path fix, not yet done because it alone would not unblock classification (see (2)); (2) one genuine behavioral edge, not a wrong import path: `snapshot_from_dict`'s legacy-snapshot backward-compat backfill calls `python_ext.detect_python_extension()` -- real extraction logic (inferring a fact from exported-symbol/import evidence), not a fact lookup -- so `storage`'s `may_import: [model]` cannot admit it without either moving that backfill to a workflows-level post-load step (auditing every `snapshot_from_dict` caller to confirm none needs it skipped) or leaving `serialization.py` itself unclassified, the same treatment `policy_file.py` gets for an analogous reason. The remaining `frontends -> storage`/`compare -> storage` edges (cli_buildsource.py, cli_buildsource_merge.py, cli_compare_release_helpers.py, compat/cli.py, probe_harness.py) are unchanged and still real -- probe_harness.py's need for `snapshot_to_dict`/`snapshot_from_dict` to serialize its own probe-matrix JSON is a `compare`-classified module needing a `storage` operation, which `compare`'s narrower `may_import: [model]` (no `workflows` either) cannot route around via the usual facade pattern, and has not been investigated further. Not yet a routine reclassification. ADR-061 Phase 4 (service.py thinning slice, second pass) added `abicheck.serialization` to `architecture/modules.yaml`'s `public_root_surfaces` instead of attempting the full classification above: the new `abicheck/workflows/input_resolution.py` module (real `resolve_input`/`load_env_matrix`/`collect_metadata` implementations moved out of `service.py`, physically inside the `workflows` package) needs `load_snapshot`, and being `migrated_source` it is checked for unclassified imports unconditionally, unlike `service.py`'s own flat, `legacy_paths`-classified copy of the same import. `public_root_surfaces` is the documented exemption for exactly this shape -- a genuinely public, stable surface (`serialization.py`'s own docstring already calls `load_snapshot`/`save_snapshot`/`write_snapshot` 'the public compatibility surface') reached from a migrated package, without deciding the harder question this entry is still open on. It changes nothing about the five real `frontends -> storage`/`compare -> storage` edges above, and does not move this entry's `target` off 'blocked' -- `probe_harness.py`'s `compare -> storage` edge in particular has no available facade route (`compare`'s `may_import` is `[model]` only, not `workflows`) and would need its own investigation independent of this exemption. Raised by 10 for ADR-063 Phase 2's closing slice (schema v31): the encode/decode hookup and reconstruction keywords for the typedef_entity_ids/constant_entity_ids sidecars. The codec itself lives in storage/entity_id_codec.py, so only the call-site plumbing lands here.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/service_scan.py",
-      "baseline_lines": 1947,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines, to the file-size hard cap exactly (ADR-063 Phase 4, Codex review): run_scan_set() -- the typed API's own --artifact-set entry point -- had no Bazel target-scoping pre-flight of its own, so an unsupported request only failed after discover_artifact_set()/check_artifact_set_soname_collisions()/artifact_set_member_exports() had already run for every member. The actual guard logic lives in the new shared workflows.plan.scan_bazel_scoping_failure() (used by scan_engine.run_scan_core too, replacing each call site's own inlined copy and shrinking scan_engine.py in the process) -- this file's own footprint is the minimum call-site glue: one import (its own explanatory comment trimmed onto the import line itself), one resolve call, one guarded raise. No smaller diff was found that still calls the shared guard before the real discovery work below, while landing exactly at (not over) the file-size hard cap. Baseline lowered 2000 -> 1933, closing ADR-063 Phase 4's residual: run_scan_set()'s own scan_bazel_scoping_failure() call still hadn't forwarded sources=/build_config= (the config-sourced, no-explicit---build-target root-target-scope case this same phase's second slice already closed for run_scan_core() and both of cli_scan.py's own pre-flight sites), because the widened call plus its own comment didn't fit this file's line budget at the prior baseline and neither a LARGE_FILE_ALLOWLIST entry nor trimming unrelated content was accepted (see the known-gaps.md entry this baseline bump replaces). Closed instead by moving responsibility, not by raising the baseline: _descendant_pgids()/_kill_process_tree() -- the process-group kill machinery behind run_scan_subprocess()/run_scan_set_subprocess(), with zero dependency on anything scan-specific -- moved to the new abicheck/workflows/scan_subprocess.py (a genuine one-directional edge, mirroring cxx20_pair_dialect.py's own precedent; the worker/harness functions that call back into run_scan()/run_scan_set() stayed here, avoiding the mutual-dependency shape a full move would have created), re-exported for backward compatibility. That bought back ~90 lines of room, used to add the sources=/build_config= forwarding (plus its own explanatory comment) and land at the new, lowered baseline (1933) with real room left below the file-size hard cap (2000), rather than exactly at the cap the way the prior baseline did. Raised again 1933 -> 1934 (2026-09-03, Round 8 review): estimate_artifact_set's pinned-depth blocker message was corrected to name both the --artifact-set aggregate exit code (1) and the single-artifact exit code (7) it had been conflating, one line longer than the code it replaced. Raised again 1934 -> 1947 (2026-09-03, CodeRabbit review, fresh evidence, PR #1032): run_scan's resolve_scan_gate_options(req) call had no exception translation -- an invalid exit_code_scheme/severity_preset raised bare ValueError/PolicyError instead of the ValidationError every other malformed ScanRequest field raises, so a Tier-2 caller guarding with except ValidationError would miss it. Now wrapped in a try/except that translates, mirroring the existing _resolve_scan_contract_config -> resolve_scan_config translation just above it.",
       "review_by": "2026-11-30"
     },
     {
@@ -1464,16 +1414,6 @@
     {
       "path": "tests/test_cli_dump_helpers_coverage.py",
       "baseline_lines": 2000,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_cli_scan.py",
-      "baseline_lines": 3276,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
@@ -1972,16 +1912,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_pr_comment_scan.py",
-      "baseline_lines": 1679,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_product_baseline.py",
       "baseline_lines": 1999,
       "target": "tests/unit-or-contract ownership matching production migration",
@@ -2084,26 +2014,6 @@
     {
       "path": "tests/test_sarif.py",
       "baseline_lines": 1408,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_scan_artifact_set.py",
-      "baseline_lines": 1368,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_scan_compare_parity.py",
-      "baseline_lines": 1697,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",

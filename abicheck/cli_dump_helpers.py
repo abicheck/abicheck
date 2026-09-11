@@ -84,9 +84,9 @@ from .workflows.extraction import (
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
+    from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_dump_pipeline import ResolvedDumpRequest
-    from .service_scan import CompileContext
 
 
 # ── Back-compat re-export shim (lazy, per AGENTS.md's moved-helper

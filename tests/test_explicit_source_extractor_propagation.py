@@ -58,7 +58,6 @@ pinned xfails.
 from __future__ import annotations
 
 import itertools
-from pathlib import Path
 
 import pytest
 
@@ -251,65 +250,6 @@ class TestExplicitlyRequestedSourceExtractorContract:
         assert tool_name == "clang"
 
 
-class TestScanEngineCallSitePropagation:
-    """The call site actually consumes the primitive.
-
-    ``tests/test_dump_scan_l3_comparability.py`` proves this end to end with a
-    real compiler, but that module is ``integration``-marked and so excluded
-    from the default fast lane. A hardcoded ``source_extractor="auto"``
-    reappearing in ``scan_engine`` is exactly the regression that started
-    here, and it must not be able to reach a PR whose author ran only the
-    fast command.
-    """
-
-    @staticmethod
-    def _captured_source_extractor(
-        monkeypatch: pytest.MonkeyPatch, frontend: str
-    ) -> object:
-        """The ``source_extractor`` a real ``_build_new_snapshot`` passes on.
-
-        Spies on the shared resolver and aborts as soon as the argument is
-        captured, so this stays a fast-lane test with no compiler, no binary
-        and no snapshot work behind it.
-        """
-        import abicheck.scan_engine as scan_engine
-        import abicheck.workflows.artifact.execute as execute
-
-        captured: dict[str, object] = {}
-
-        def _spy(*_args: object, **kwargs: object) -> object:
-            """Capture the kwarg under test, then abort the resolution."""
-            captured["source_extractor"] = kwargs.get("source_extractor")
-            raise _StopResolution
-
-        monkeypatch.setattr(execute, "_resolve_side_snapshot_impl", _spy)
-        with pytest.raises(_StopResolution):
-            scan_engine._build_new_snapshot(
-                binary=Path("libfoo.so"),
-                headers=[],
-                includes=[],
-                sources=None,
-                collect_mode="source-target",
-                lang="c++",
-                allow_build_query=False,
-                compile_context=CompileContext(frontend=frontend),
-            )
-        return captured["source_extractor"]
-
-    def test_an_explicit_frontend_reaches_the_l4_extractor(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Both concrete backends reach L4 replay when explicitly requested."""
-        assert self._captured_source_extractor(monkeypatch, "castxml") == "castxml"
-        assert self._captured_source_extractor(monkeypatch, "clang") == "clang"
-
-    @pytest.mark.parametrize("frontend", ("auto", "hybrid", "android", "nonsense"))
-    def test_an_unstated_frontend_keeps_scans_own_default(
-        self, frontend: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Unchanged behaviour, pinned so a future "just use effective_frontend"
-        simplification cannot silently flip ``scan``'s default to castxml."""
-        assert self._captured_source_extractor(monkeypatch, frontend) == "auto"
 
 
 class TestNeverRaises:

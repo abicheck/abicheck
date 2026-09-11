@@ -139,6 +139,12 @@ if TYPE_CHECKING:
 # so ``from abicheck.service import resolve_compare_request`` works.
 # ``run_compare_request``/``run_compare`` (their composition and its
 # keyword-argument shim) live there too now, for the same file-size reason. ──
+# ── Shared header-input expansion (leaf module), plus the two typed-request
+# helpers `service.py` has always re-exported from the engine layer. ────────
+from .compile_context import CompileContext as CompileContext  # noqa: E402
+from .cxx20_pair_dialect import (  # noqa: E402,F401
+    pair_wide_cxx20_std_override,
+)
 from .service_compare_pipeline import (  # noqa: E402,F401
     ResolvedComparePair,
     classify_compare_pair,
@@ -181,39 +187,6 @@ from .service_metadata_attach import (  # noqa: E402,F401
     _try_attach_sycl_metadata,
 )
 
-# ── Scan service (ADR-035 D10 typed engine: ScanRequest → ScanResult /
-# [CostEstimate]) extracted to leaf module service_scan, same size-cap/re-
-# export/non-circular-import rationale as service_render above. ────────────
-from .service_scan import (  # noqa: E402,F401
-    _HEADER_EXTS,
-    Budget,
-    CompileContext,
-    CostEstimate,
-    LayerResult,
-    ScanArtifactResult,
-    ScanRequest,
-    ScanResult,
-    ScanSetResult,
-    _count_compile_db_tus,
-    _count_pack_tus,
-    _count_source_tus,
-    _discover_compile_db,
-    _is_header_path,
-    _is_source_tu_path,
-    _kill_process_tree,
-    _layers_from_coverage,
-    _scan_imports,
-    _scan_subprocess_worker,
-    estimate_scan,
-    expand_header_inputs,
-    pair_wide_cxx20_std_override,
-    run_audit,
-    run_scan,
-    run_scan_set,
-    run_scan_set_subprocess,
-    run_scan_subprocess,
-)
-
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/
 # `load_suppression_and_policy`/`_validate_contract_mode`/
 # `dedup_policy_override_warnings` moved into the leaf module
@@ -233,6 +206,10 @@ from .workflows.compare_policy import (  # noqa: E402,F401
     dedup_policy_override_warnings,
     load_suppression_and_policy,
 )
+from .workflows.header_inputs import (  # noqa: E402,F401
+    _HEADER_EXTS,
+    expand_header_inputs,
+)
 
 # ── Output rendering: service_render.py is `frontends`-classified (ADR-061),
 # re-exported via workflows/render.py's typed wrappers -- see its docstring.
@@ -242,42 +219,28 @@ from .workflows.render import (  # noqa: E402,F401
     render_output,
 )
 
-# Explicit re-export (mypy strict / no_implicit_reexport): the scan engine moved
-# to the leaf module ``service_scan`` but its public names must still resolve as
-# ``from abicheck.service import ...``.
+# Explicit re-export (mypy strict / no_implicit_reexport): names that live in
+# leaf modules must still resolve as ``from abicheck.service import ...``.
 __all__ = [
-    "Budget",
     "CompareRequest",
     "CompareResult",
     "CompileContext",
-    "CostEstimate",
     "DumpRequest",
     "InputSpec",
-    "LayerResult",
     "OutputSpec",
-    "ScanArtifactResult",
-    "ScanRequest",
-    "ScanResult",
     "ResolvedComparePair",
-    "ScanSetResult",
     "classify_compare_pair",
     "collect_metadata",
     "compare_snapshots",
     "detect_binary_format",
-    "estimate_scan",
     "expand_header_inputs",
     "load_suppression_and_policy",
     "render_output",
     "resolve_compare_request",
     "resolve_input",
-    "run_audit",
     "run_compare",
     "run_compare_request",
     "run_dump",
     "run_dump_request",
-    "run_scan",
-    "run_scan_set",
-    "run_scan_set_subprocess",
-    "run_scan_subprocess",
     "sniff_text_format",
 ]
