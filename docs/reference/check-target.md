@@ -33,8 +33,9 @@ up front, before any of that, and produces no report or outputs at all.
    happened and cannot retroactively instrument it), or `phase: auto` for
    `replay` (no pre-build hook needed).
 3. **Runs the analysis** — the root Action's `compare` mode against the
-   resolved baseline, or (`baseline-channel: none`) `scan` mode with no
-   `--against` (a one-build audit).
+   resolved baseline, or (`baseline-channel: none`) `compare`'s own
+   audit-only shape (`old-library`/`abi-baseline` both omitted, a one-build
+   audit).
 4. **Writes the report envelope**, once input validation (the very first
    step) has passed — even when steps 1 or 3 above then fail, since the
    internal resolve/analysis steps run with `continue-on-error: true`
@@ -112,7 +113,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `baseline-target` | no | (= `name`) | Which target's baseline actually resolves — set to the referenced library for `app-consumer`/`plugin-contract`. Ignored for `kind: bundle`. |
 | `bundle-members` | when `kind: bundle` | `[]` | JSON array of the bundle's member target ids. |
 | `profile` | yes | — | The build `profile.id` this check runs under. |
-| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `scan` cannot do). |
+| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `compare`'s audit-only shape cannot do). |
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
@@ -156,14 +157,15 @@ two identities that collapse to the same slug under the filename's lossy
 character substitution still produce distinct files — needed because
 `check-project.yml` downloads every matrix cell's report into one shared
 flat directory), starting from whatever the
-underlying `compare`/`scan` run already produced and layering on the
+underlying `compare` run already produced and layering on the
 fields below. For a normal single-library `compare` (the common case),
 that starting shape is `abicheck/reporter.py`'s existing compare-report
 shape (the one carrying `report_schema_version` — see
 [Output formats](../use/output-formats.md#json-schema-and-stability-guarantees) for that contract and
 `abicheck.schemas.current("compare")` for the version this build emits).
 A `baseline-channel: none` audit
-instead starts from a `scan` report (its own `scan_schema_version` shape),
+instead starts from `compare`'s own audit-only (`--no-baseline`) report
+(its own `audit_report_schema_version` shape),
 and a `kind: bundle` check starts from the CLI's per-library release
 fan-out summary (`libraries`/`old_dir`, no schema-version marker of its
 own) — neither of those two carries `report_schema_version`.

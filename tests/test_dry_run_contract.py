@@ -272,7 +272,7 @@ class TestDumpDryRun:
         # --build-info answers a real database once headers are present and
         # None when they are not, so the dry run cannot report a compile
         # context the real run would not build.
-        from abicheck.cli_dump_helpers import compile_db_from_build_info
+        from abicheck.header_conditionals import compile_db_from_build_info
 
         db = tmp_path / "compile_commands.json"
         db.write_text("[]", encoding="utf-8")
@@ -298,7 +298,7 @@ class TestDumpDryRun:
         decision point, turning a loud refusal into a silent unfiltered
         collection (Codex review); this pins the refusal.
         """
-        from abicheck.cli_dump_helpers import compile_db_filter_scope_error
+        from abicheck.header_conditionals import compile_db_filter_scope_error
 
         db = tmp_path / "compile_commands.json"
         assert compile_db_filter_scope_error("src/**", db, "source-target")
@@ -347,7 +347,7 @@ class TestDumpDryRun:
         `load_compile_db()`, which rejects a JSON object outright, so
         `--build-info aquery.json -H api.h` failed before the adapter ran
         (Codex review)."""
-        from abicheck.cli_dump_helpers import compile_db_from_build_info
+        from abicheck.header_conditionals import compile_db_from_build_info
 
         header = tmp_path / "api.h"
         header.write_text("void f(void);\n", encoding="utf-8")

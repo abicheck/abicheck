@@ -637,8 +637,11 @@ class TestRemovedConfigDuplicates:
             for opt in (*p.opts, *p.secondary_opts)
         }
 
-    @pytest.mark.parametrize("command", ["compare", "scan"])
+    @pytest.mark.parametrize("command", ["compare"])
     def test_demoted_families_are_gone(self, command: str) -> None:
+        # `scan` was itself retired outright (ADR-068) and is no longer a
+        # registered command at all -- `main.commands["scan"]` would raise
+        # `KeyError` rather than name a command with the flags re-added.
         spellings = self._option_spellings(main.commands[command])
         for flag in self.REMOVED_CONFIG_DUPLICATES:
             assert flag not in spellings, (

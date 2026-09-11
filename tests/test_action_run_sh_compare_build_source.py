@@ -217,27 +217,23 @@ class TestCompareModeForwardsChangeFocusInputs:
         assert "--changed-path" not in cmd
 
 
-class TestScanModeForwardsCrossCompilerFlags:
-    """Same gap as compare mode above, in scan mode's branch (Codex
-    review, PR #625) -- for the audit-only (no baseline) shape.
+class TestAuditOnlyCompareForwardsCrossCompilerFlags:
+    """Same gap as compare mode above, in the audit-only (old-library and
+    abi-baseline both omitted) shape.
 
-    Unlike the pre-migration `scan` CLI, which took these as raw
-    `--compiler`/`--compiler-prefix`/`--compiler-option`/`--sysroot`
-    flags, `mode: scan` now routes unconditionally through
-    `compare`/`compare --no-baseline` (ADR-068's second 2026-09-09
-    amendment and its 2026-09-10 amendment closed the audit-only shape's
-    own last remaining gap), which has no such flags at all -- they are
-    merged into a synthesized `compile:` overlay and forwarded as one
-    `--config` (`add_compile_context_flags`), same as the baseline-scan
-    and native-compare shapes below. Uses `_run_scan_against_raw` (defined
-    below) with `against` cleared, since it already captures that overlay
-    file's content while `run.sh` is still running.
+    `compare`/`compare --no-baseline` has no raw `--compiler`/
+    `--compiler-prefix`/`--compiler-option`/`--sysroot` flags at all --
+    they are merged into a synthesized `compile:` overlay and forwarded as
+    one `--config` (`add_compile_context_flags`), same as the two-sided
+    and native-compare shapes below. Uses `_run_baseline_compare_raw`
+    (defined below) with old-library cleared, since it already captures
+    that overlay file's content while `run.sh` is still running.
     """
 
     def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
-        result, captured, captured_config = _run_scan_against_raw(
+        result, captured, captured_config = _run_baseline_compare_raw(
             {
-                "INPUT_AGAINST": "",
+                "INPUT_OLD_LIBRARY": "",
                 "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
                 "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
                 "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
@@ -281,9 +277,9 @@ class TestScanModeForwardsCrossCompilerFlags:
         parser, not the parser's own behavior, which is exercised
         elsewhere against `abicheck/buildsource/build_config.py` directly).
         """
-        result, _captured, captured_config = _run_scan_against_raw(
+        result, _captured, captured_config = _run_baseline_compare_raw(
             {
-                "INPUT_AGAINST": "",
+                "INPUT_OLD_LIBRARY": "",
                 "INPUT_GCC_OPTIONS": '-DMSG="hello world"',
             },
             tmp_path,
@@ -533,13 +529,13 @@ class TestCompareModeDirectoryDepthAsymmetry:
         assert "--depth" not in cmd
 
 
-def _run_scan_against_raw(
+def _run_baseline_compare_raw(
     env_extra: dict[str, str], tmp_path: Path
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
-    """Like ``_run_compare_raw``, but drives ``run.sh``'s baseline
-    ``mode: scan`` branch (an ``against`` operand supplied) instead of a
-    native ``mode: compare`` request -- the scan->compare CLI-translation
-    route re-enabled by the 2026-09-09 ADR-068 amendment. Returns the raw
+    """Like ``_run_compare_raw``, but drives ``run.sh``'s two-sided
+    ``mode: compare`` branch with a real old-library operand by default --
+    pass ``{"INPUT_OLD_LIBRARY": ""}`` in ``env_extra`` to instead exercise
+    the audit-only shape (old-library omitted). Returns the raw
     result, the captured-argv path, and the captured-config path (mirrors
     ``_compile_overlay_from_cmd``'s own "snapshot the overlay file's
     content while run.sh is still running" rationale)."""
@@ -578,13 +574,9 @@ def _run_scan_against_raw(
     env = {
         **base_env,
         "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
-        "INPUT_MODE": "scan",
+        "INPUT_MODE": "compare",
         "INPUT_NEW_LIBRARY": str(new_json),
-        "INPUT_AGAINST": str(against_json),
-        # A default baseline scan (no --pattern-verdicts) now stays on the
-        # legacy CLI (Codex review, PR #1172, round 17) -- this test is
-        # about --config collision, not that routing axis, so opt in
-        # explicitly to keep exercising the compare-translation branch.
+        "INPUT_OLD_LIBRARY": str(against_json),
         "INPUT_DEPTH": "headers",
         "INPUT_EXTRA_ARGS": "--pattern-verdicts",
         "INPUT_ADD_JOB_SUMMARY": "false",
@@ -593,6 +585,10 @@ def _run_scan_against_raw(
         "GITHUB_STEP_SUMMARY": str(github_step_summary),
         **env_extra,
     }
+    # An explicitly empty old-library in env_extra (audit-only shape)
+    # overrides the real default above -- a real "" value, not absence.
+    if env.get("INPUT_OLD_LIBRARY") == "":
+        del env["INPUT_OLD_LIBRARY"]
     result = subprocess.run(
         [_bash_executable(), str(RUN_SH)],
         capture_output=True,
@@ -604,12 +600,11 @@ def _run_scan_against_raw(
     return result, captured, captured_config
 
 
-class TestScanBaselineCompareTranslationPreservesMergedConfig:
-    """Codex review, PR #1172, round 21, fresh evidence: a baseline
-    ``mode: scan`` request eligible for the scan->compare translation
-    route that ALSO supplies both ``build-config`` and a dedicated
-    compile-context input (``gcc-path`` here) used to emit two conflicting
-    ``--config`` tokens on the translated ``compare`` command line --
+class TestBaselineCompareTranslationPreservesMergedConfig:
+    """Codex review, PR #1172, round 21, fresh evidence: a two-sided
+    ``mode: compare`` request that ALSO supplies both ``build-config`` and
+    a dedicated compile-context input (``gcc-path`` here) used to emit two
+    conflicting ``--config`` tokens on the assembled command line --
     ``add_compile_context_flags`` above already merges ``build-config``
     into its own synthesized ``compile:`` overlay and appends ``--config``
     itself, but the branch's own unconditional
@@ -626,7 +621,7 @@ class TestScanBaselineCompareTranslationPreservesMergedConfig:
     ) -> None:
         build_config = tmp_path / "cfg.yml"
         build_config.write_text("release:\n  dso_only: true\n", encoding="utf-8")
-        result, captured, captured_config = _run_scan_against_raw(
+        result, captured, captured_config = _run_baseline_compare_raw(
             {
                 "INPUT_BUILD_CONFIG": str(build_config),
                 "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
@@ -664,7 +659,7 @@ class TestScanBaselineCompareTranslationPreservesMergedConfig:
         input -- still exactly one --config (the synthesized overlay),
         confirming the guard doesn't newly suppress the no-collision case.
         """
-        result, captured, captured_config = _run_scan_against_raw(
+        result, captured, captured_config = _run_baseline_compare_raw(
             {"INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -685,7 +680,7 @@ class TestScanBaselineCompareTranslationPreservesMergedConfig:
         pre-existing, correct behavior for the no-collision case)."""
         build_config = tmp_path / "cfg.yml"
         build_config.write_text("release:\n  dso_only: true\n", encoding="utf-8")
-        result, captured, _captured_config = _run_scan_against_raw(
+        result, captured, _captured_config = _run_baseline_compare_raw(
             {"INPUT_BUILD_CONFIG": str(build_config)}, tmp_path
         )
         assert result.returncode == 0, result.stdout + result.stderr

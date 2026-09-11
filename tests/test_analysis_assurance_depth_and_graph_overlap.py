@@ -80,9 +80,7 @@ def _assurance_config_args(tmp_path: Path) -> list[str]:
     ``--require-complete-analysis`` flag."""
     cfg_path = tmp_path / ".abicheck-assurance.yml"
     if not cfg_path.exists():
-        cfg_path.write_text(
-            "assurance:\n  require_complete: true\n", encoding="utf-8"
-        )
+        cfg_path.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
     return ["--config", str(cfg_path)]
 
 

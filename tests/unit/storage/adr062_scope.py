@@ -78,6 +78,15 @@ import pathlib
 #: `qualified_name_segments` facade's anonymous/lambda-closure ordinal-
 #: identity renumbering -- snapshot string normalization, not a Phase 0
 #: identity/availability/versioning/package primitive.
+#: `snapshot_codec`/`snapshot_schema_versions`/`snapshot_encode`/
+#: `snapshot_decode_declarations`/`snapshot_reliability_flags` are a ninth:
+#: ADR-061 gap E closure package 6's real owner behind the flat
+#: `serialization.py` facade -- `AbiSnapshot` <-> dict/JSON encode/decode,
+#: the schema-version history/thresholds, and the reliability-flag
+#: computations, split across several files purely to keep each one under
+#: the ADR-061 new-file production line ceiling. Same class as
+#: `snapshot_load_normalization` above: real snapshot codec/migration
+#: logic, not a Phase 0 identity/availability/versioning/package primitive.
 NON_ADR062_MODULES = frozenset(
     {
         "bounded_read",
@@ -104,6 +113,11 @@ NON_ADR062_MODULES = frozenset(
         "sparse_section_codec",
         "snapshot_load_normalization",
         "closure_identity",
+        "snapshot_codec",
+        "snapshot_schema_versions",
+        "snapshot_encode",
+        "snapshot_decode_declarations",
+        "snapshot_reliability_flags",
     }
 )
 

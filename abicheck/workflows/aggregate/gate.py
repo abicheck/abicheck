@@ -567,6 +567,21 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     return 0
 
 
+def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
+    """The report's own P0.4 analysis-assurance contribution (``0``/``1``):
+    read, not recomputed (``GateInfo.from_scan_report`` reads only the
+    nested compatibility gate -- Codex review); fails open like its sibling
+    :func:`_contract_coverage_exit`, over the same block traversal. Moved
+    here from ``load.py`` (architecture/debt.yaml's ``no_growth`` ceiling
+    for that file) to sit next to the sibling axis reader it already
+    mirrors -- a pure code move, not a behavior change."""
+    for block in contract_coverage_blocks(data):
+        raw = block.get("analysis_assurance_exit_contribution")
+        if _is_valid_contribution(raw):
+            return raw
+    return 0
+
+
 def scan_severity_gate_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
     """Key paths within a *scan* report that may carry a ``severity`` gate block.
 

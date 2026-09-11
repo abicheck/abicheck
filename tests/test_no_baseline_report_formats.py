@@ -169,6 +169,51 @@ def test_every_format_discloses_a_suppressed_finding(
             assert kind in text
 
 
+@pytest.mark.parametrize(("case", "filename"), _FIXTURES)
+def test_json_disposition_audit_accounts_for_every_suppressed_finding(
+    case: str, filename: str
+) -> None:
+    """The JSON document's own ``disposition_audit`` block (Codex review,
+    fresh evidence) must count a fully-suppressed run's findings as
+    ``suppressed``, not as zero -- the same conservation invariant
+    :func:`test_suppressing_everything_reports_everything_as_suppressed`
+    states for ``suppressed_findings`` itself, checked here against the
+    *folded ledger* an ``abicheck aggregate`` fan-in actually reads
+    (``workflows.aggregate.disposition_axis.disposition_audit_block``
+    reads this exact root key, generically, for every report shape)."""
+    result = _result(case, filename, suppression=_suppress_everything())
+    assert result.suppressed_findings, "fixture precondition"
+    text, _ = render_no_baseline(result, "json")
+    payload = json.loads(text)
+    audit = payload["disposition_audit"]
+    assert audit["detected_total"] == len(result.suppressed_findings)
+    counts = dict(audit["counts"])
+    assert counts["suppressed"] == len(result.suppressed_findings)
+
+
+def test_disposition_audit_is_absent_only_for_a_hand_built_document() -> None:
+    """The compute half always attaches a real block; only a document a
+    test constructs directly (never via ``compute_no_baseline_document``)
+    may leave the field at its ``None`` default."""
+    from abicheck.report.no_baseline_document import NoBaselineDocument
+
+    doc = NoBaselineDocument(
+        library="libfoo.so",
+        new_version="1.0",
+        old_acquisition_state="declared_absent",
+        evidence_tiers=(),
+        findings=(),
+        suppressed=(),
+        evolution=None,
+        pattern_preprocessor_scan=None,
+        run_outcome={},
+        comparison_scope={},
+        coverage_exit_contribution=0,
+        exit_code=0,
+    )
+    assert doc.disposition_audit is None
+
+
 # ---------------------------------------------------------------------------
 # Coherence: no renderer may disagree with the document it projects.
 # ---------------------------------------------------------------------------

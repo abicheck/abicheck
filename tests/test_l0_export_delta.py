@@ -33,7 +33,7 @@ def test_resolve_failure_returns_empty_tuple(monkeypatch, tmp_path):
     def _raise(*_a, **_kw):
         raise AbicheckError("no such file")
 
-    monkeypatch.setattr("abicheck.service.resolve_input", _raise)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", _raise)
     result = collect_l0_export_delta(tmp_path / "old.so", tmp_path / "new.so", "c++")
     assert result == ()
 
@@ -41,12 +41,14 @@ def test_resolve_failure_returns_empty_tuple(monkeypatch, tmp_path):
 def test_compare_failure_returns_empty_tuple(monkeypatch, tmp_path):
     """A resolve success followed by a compare_snapshots failure is just as
     much a "probe didn't pan out" case and must not escape."""
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
 
     def _raise(*_a, **_kw):
         raise AbicheckError("incompatible snapshots")
 
-    monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+    monkeypatch.setattr("abicheck.workflows.compare_policy.compare_snapshots", _raise)
     result = collect_l0_export_delta(tmp_path / "old.so", tmp_path / "new.so", "c++")
     assert result == ()
 
@@ -54,7 +56,9 @@ def test_compare_failure_returns_empty_tuple(monkeypatch, tmp_path):
 def test_folds_elf_only_removal(monkeypatch, tmp_path):
     """The symbols-only re-probe finds a hard ELF-only removal (case97's exact
     shape) and returns exactly that fact."""
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     removal = Change(
         kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
         symbol="_ZN3lib8extendedEv",
@@ -70,7 +74,9 @@ def test_folds_elf_only_removal(monkeypatch, tmp_path):
         changes=[removal, unrelated],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     result = collect_l0_export_delta(tmp_path / "old.so", tmp_path / "new.so", "c++")
     assert result == (removal,)
 
@@ -79,7 +85,9 @@ def test_ignores_non_elf_only_findings(monkeypatch, tmp_path):
     """A breaking finding that isn't func_removed_elf_only is never returned --
     this probe restores exactly one specific fact, never a general advisory
     dump."""
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     diff = DiffResult(
         old_version="1.0",
         new_version="2.0",
@@ -87,13 +95,17 @@ def test_ignores_non_elf_only_findings(monkeypatch, tmp_path):
         changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="other", description="")],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     result = collect_l0_export_delta(tmp_path / "old.so", tmp_path / "new.so", "c++")
     assert result == ()
 
 
 def test_no_breaking_findings_returns_empty_tuple(monkeypatch, tmp_path):
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     diff = DiffResult(
         old_version="1.0",
         new_version="1.0",
@@ -101,6 +113,8 @@ def test_no_breaking_findings_returns_empty_tuple(monkeypatch, tmp_path):
         changes=[],
         verdict=Verdict.COMPATIBLE,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     result = collect_l0_export_delta(tmp_path / "old.so", tmp_path / "new.so", "c++")
     assert result == ()

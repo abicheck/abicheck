@@ -297,39 +297,6 @@ add_sided_flag() {
   fi
 }
 
-# Re-unions a bare shared header/include root with a per-side override
-# before forwarding to the translated `compare AGAINST ARTIFACT` command
-# (ADR-068's second 2026-09-09 amendment; docs/contribute/known-gaps.md's
-# "The Action's `mode: scan` still routes several request shapes to the
-# legacy `scan` CLI"): `compare`'s own per-side resolution
-# (`cli_helpers_compare._resolve_per_side_options`) OVERRIDES a bare shared
-# root with a side-specific one rather than unioning them, unlike `scan`'s
-# own `-H`/`-I` handling that `action.yml` documents as additive -- so
-# forwarding both unmodified to `compare` would silently drop the shared
-# root for whichever side has an override. This re-adds the bare root as an
-# explicit same-sided entry for each side that has one, closing that gap at
-# the Action level rather than in `compare` itself (out of scope here; see
-# the routing-predicate comment this replaces for the full account).
-# `add_sided_flag` appends independently per call, so two calls for the same
-# flag/side simply accumulate in `$CMD` -- no need to pre-merge into one
-# value. When neither side has an override at all, this is byte-identical
-# to the previous unconditional bare `add_flag` call (no side prefix
-# introduced). `extra_new` is `--public-header-dir` folding into the `new`
-# side as an additional override source (header only; `compare` has no
-# dedicated flag for it, see the call site's own comment).
-_add_unioned_sided_flag() {
-  local flag="$1" bare="$2" old_override="$3" new_override="$4" extra_new="${5:-}"
-  if [[ -z "$old_override" && -z "$new_override" && -z "$extra_new" ]]; then
-    add_flag "$flag" "$bare"
-    return
-  fi
-  [[ -n "$bare" ]] && add_sided_flag "$flag" "old" "$bare"
-  [[ -n "$old_override" ]] && add_sided_flag "$flag" "old" "$old_override"
-  [[ -n "$bare" ]] && add_sided_flag "$flag" "new" "$bare"
-  [[ -n "$new_override" ]] && add_sided_flag "$flag" "new" "$new_override"
-  [[ -n "$extra_new" ]] && add_sided_flag "$flag" "new" "$extra_new"
-}
-
 # Scalar counterpart of add_sided_flag: the value is a single opaque string
 # (e.g. a version label) that must reach the CLI exactly as given, including
 # any embedded whitespace -- never split into multiple flags. A version
@@ -373,18 +340,15 @@ add_single_flag() {
 # Action's own cross-compilation inputs (ast-frontend/gcc-path/gcc-prefix/
 # gcc-options/sysroot/nostdinc/lang) still exist, so forwarding them now
 # means synthesizing a `compile:` block into a project config the run reads
-# via --config, instead of passing per-run flags. `scan` is no longer an
-# exception (ADR-068's second 2026-09-09/2026-09-10 amendments retired its
-# own CLI entirely, this Action's own mode: scan translates unconditionally
-# to `compare`/`compare --no-baseline`) -- its call site now calls this same
-# `add_compile_context_flags` helper too, same as dump/single-pair compare,
-# rather than the removed add_single_flag/add_flag_shlex_split-direct
-# forwarding an earlier Action version used here. One real, accepted
-# narrowing this brings: `compile.options` (below) rejects any entry
-# containing whitespace, where scan's own removed --compiler-option CLI
-# flag forwarded such a flag verbatim (see `gcc-options`'s own action.yml
-# description for the full account) -- scan has no CLI path left to take
-# advantage of that any more.
+# via --config, instead of passing per-run flags. `dump`, single-pair
+# `compare`, and `compare --no-baseline`'s single audited artifact all call
+# this same `add_compile_context_flags` helper (ADR-068's Action-
+# input-lifecycle amendment removed `mode: scan`, which used to be this
+# helper's other caller, entirely). One real, accepted narrowing this
+# brings: `compile.options` (below) rejects any entry containing whitespace,
+# where the CLI's own now-removed --compiler-option flag once forwarded such
+# a flag verbatim (see `gcc-options`'s own action.yml description for the
+# full account).
 #
 # When the caller ALSO names their own build-config, this Action merges the
 # two: the synthesized compile: overlay is folded into a COPY of the named
@@ -455,8 +419,8 @@ _merge_config_overlay_with_discovered_project_config() {
   #     own `build_config or discover_build_config(raw_sources)` selection
   #     (Codex review, fresh evidence): when --sources names a directory
   #     with its own config, the native CLI would use THAT file exclusively
-  #     for build:/sources: (dump/scan) or build:/sources:/compile:/source:/
-  #     debug: (dump/scan only -- see $6) whenever no explicit --config is
+  #     for build:/sources: (dump) or build:/sources:/compile:/source:/
+  #     debug: (dump only -- see $6) whenever no explicit --config is
   #     given -- but this Action always ends up passing an explicit --config
   #     once any compile-context input is set, which permanently short-
   #     circuits that discovery (`build_config is not None`), silently
@@ -473,10 +437,11 @@ _merge_config_overlay_with_discovered_project_config() {
   #     both sides", cli_helpers_compare.py's resolved_cfg.source_method/
   #     debug_format are each resolved once for the whole comparison).
   #     Omitted (or any other value) means the caller's MODE resolves them
-  #     SINGLE-SIDED (dump, scan --against -- neither has an "other side"
-  #     these could leak into: dump has one operand, and scan's own -H/-I
-  #     have always applied only to the scanned ARTIFACT, never to
-  #     --against). Only "pairwise" excludes compile:/source:/debug: from
+  #     SINGLE-SIDED (dump, compare --no-baseline's single audited artifact --
+  #     neither has an "other side" these could leak into: dump has one
+  #     operand, and the audit-only shape's own -H/-I apply only to the
+  #     audited artifact, never to a baseline side it doesn't have). Only
+  #     "pairwise" excludes compile:/source:/debug: from
   #     the sources-root block-replacement below -- everywhere else, a
   #     --sources tree's own config is the ONLY document those three blocks
   #     can meaningfully come from for that one operand, exactly matching
@@ -791,18 +756,18 @@ else:
     # cli_compare_helpers.py) -- promoting it from a NEW-only sources-root
     # config there would silently apply NEW-only settings to OLD's own
     # parsing too. But a THIRD review round (fresh evidence, PR #1171) found
-    # that blanket exclusion regressed `dump`/`scan --against`, which have
-    # no "other side" for it to leak into (dump has one operand; scan's own
-    # -H/-I have always applied only to the scanned ARTIFACT) -- for those,
-    # `merge_compile_config()`'s own docstring states the --sources tree's
-    # config IS the intended, ONLY source of compile: for that one operand,
-    # exactly like embed_build_source()'s build_config or
-    # discover_build_config(sources) selection already is for build:/
-    # sources:. So only "pairwise" callers (single-pair `compare`) exclude
-    # it; every other caller (dump, scan, and compare's own single-sided
-    # shape) keeps promoting it, matching the ORIGINAL five-block version of
-    # this fix before the second review round overcorrected it for every
-    # mode at once.
+    # that blanket exclusion regressed `dump`, which has no "other side"
+    # for these to leak into (one operand, period) -- for that, and for the
+    # audit-only `compare --no-baseline` shape (also no other side, its own
+    # -H/-I applying only to the one audited artifact), `merge_compile_
+    # config()`'s own docstring states the --sources tree's config IS the
+    # intended, ONLY source of compile: for that one operand, exactly like
+    # embed_build_source()'s build_config or discover_build_config(sources)
+    # selection already is for build:/sources:. So only "pairwise" callers
+    # (a genuinely two-sided `compare`) exclude the three; every other
+    # caller (dump, the audit-only shape) keeps promoting them, matching
+    # the ORIGINAL five-block version of this fix before the second review
+    # round overcorrected it for every mode at once.
     sources_pairwise = os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
     # Codex review, fresh evidence, PR #1222 fourth round, second finding:
     # within the single-sided bucket, `compile:` does NOT always resolve
@@ -1124,45 +1089,24 @@ _old_library_is_stored_snapshot() {
 # function's docstring. Only single-pair `compare OLD NEW` with a genuinely
 # *live* OLD operand is pairwise: both operands are then independently-
 # parsed live headers under the SAME resolved compile context. `dump` has
-# one operand, period, live or not; a `compare` (or a translated `scan
-# --against`, see below) whose OLD-like operand is a stored snapshot or
-# resolved ABI baseline (_old_library_is_stored_snapshot) does no
-# header/debug extraction on that side either (Codex review, fresh
-# evidence, PR #1171, fifth round: the earlier `$MODE == "compare"` check
-# alone was too coarse and silently discarded a live NEW-with-`--sources`
-# operand's own compile:/source:/debug: settings whenever OLD was a
-# stored/baseline snapshot) -- neither shape has an "other side" a
-# --sources tree's own compile:/debug: could leak into, so both stay
+# one operand, period, live or not; the audit-only shape (`compare
+# --no-baseline`, old-library empty) has no OLD side at all; and a
+# two-sided `compare` whose OLD operand is a stored snapshot or resolved
+# ABI baseline (_old_library_is_stored_snapshot) does no header/debug
+# extraction on that side either (Codex review, fresh evidence, PR #1171,
+# fifth round: the earlier `$MODE == "compare"` check alone was too coarse
+# and silently discarded a live NEW-with-`--sources` operand's own
+# compile:/source:/debug: settings whenever OLD was a stored/baseline
+# snapshot) -- none of these three shapes has an "other side" a --sources
+# tree's own compile:/debug: could leak into, so all three stay
 # single-sided.
-#
-# `scan --against` -- both its *legacy* CLI branch and the branch
-# internally routed through `compare` (ADR-068 D2) -- stays single-sided
-# UNCONDITIONALLY, regardless of whether `--against` is itself live: unlike
-# `compare`'s genuinely independent, two-sided OLD/NEW model, native scan
-# resolves ONE shared `compile_context` for the whole invocation
-# (`resolve_compile_context()`, `cli_scan.py`) and applies it to BOTH the
-# baseline and the candidate -- `cli_scan_baseline.py`'s own
-# `_run_baseline_compare` threads that same `compile_context` into the
-# baseline's own `InputSpec`/`SideEvidence` too (a bare `-H`/`--include`
-# applies to both sides per ADR-040; even a genuinely live `--against`
-# reuses the candidate's own headers/compile context, with a warning, when
-# no `old=`-scoped ones are given). So the `--sources`-root's own
-# `compile:`/`source:`/`debug:` block being the intended, single source for
-# that ONE shared context is scan's own real, native, already-established
-# behavior -- NOT a "no other side to leak into" special case the way
-# dump's true single operand is (Codex review, fresh evidence, PR #1171,
-# tenth round: a ninth-round fix mistakenly modeled scan's translated branch
-# on `compare`'s asymmetric OLD/NEW liveness distinction, which does NOT
-# apply to scan at all -- excluding the sources-root promotion for a live
-# `--against` would have made the translated route silently diverge from
-# what `_discover_scan_project_config()` already does on the untranslated,
-# legacy route for the exact same `scan --against` request).
 #
 # The release-style directory/package `compare` fan-out never calls
 # add_compile_context_flags at all (it rejects every compile-context input
 # outright), so it never reaches this helper either.
 _compile_context_sources_pairwise() {
-  if [[ "$MODE" == "compare" ]] && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
+  if [[ "$MODE" == "compare" && -n "${INPUT_OLD_LIBRARY:-}" ]] \
+     && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
     echo "pairwise"
   fi
 }
@@ -1180,29 +1124,48 @@ _compile_context_sources_pairwise() {
 # `--sources` tree's own document supplies `compile:` EXCLUSIVELY when no
 # explicit `--build-config` is given, the identical single-document shape
 # `build:`/`sources:`/`source:`/`debug:` already use, so this echoes ""
-# (REPLACE) for them. `compare`'s own single-sided shape (`$MODE ==
-# "compare"`, which -- per _compile_context_sources_pairwise's own
-# docstring -- only reaches this bucket at all with a stored-snapshot old
-# operand) is different: `cli_compare_helpers.py`'s own
-# `resolve_compile_context(..., build_config=cfg_path, ...)` ALWAYS
-# independently resolves the checkout-root document's `compile:` block
-# FIRST, unconditionally, and the live side's own `--sources` tree only
-# folds ON TOP of that via a SECOND `merge_compile_config` call
-# (`compare.py`'s `_maybe_dump_side`) -- a genuine two-stage MERGE, so this
-# echoes "true" for `compare`. See `apply_sources_root_config_blocks`'s own
-# `merge_compile` parameter docstring for the full account.
+# (REPLACE) for them. `compare`'s TWO-SIDED shape (`$MODE == "compare"` with
+# old-library or abi-baseline actually set -- which, per
+# _compile_context_sources_pairwise's own docstring, reaches this
+# single-sided bucket at all only via a stored-snapshot old operand) is
+# different: `cli_compare_helpers.py`'s own `resolve_compile_context(...,
+# build_config=cfg_path, ...)` ALWAYS independently resolves the
+# checkout-root document's `compile:` block FIRST, unconditionally, and the
+# live side's own `--sources` tree only folds ON TOP of that via a SECOND
+# `merge_compile_config` call (`compare.py`'s `_maybe_dump_side`) -- a
+# genuine two-stage MERGE, so this echoes "true" for it.
+#
+# The audit-only shape (old-library/abi-baseline BOTH omitted, `compare
+# --no-baseline`) also reaches the single-sided bucket, but is NOT the
+# stored-snapshot-old case above and does NOT go through
+# `resolve_compile_context` at all: `compare_no_baseline.py`'s own
+# `_resolve_no_baseline_invocation` resolves the checkout-root config only
+# for scope/severity/assurance, and the candidate's own compile: comes from
+# `workflows.no_baseline_compare.resolve_no_baseline_candidate` ->
+# `resolve_side_snapshot` -- the exact same per-side primitive `dump`
+# resolves through, with no second, checkout-root-first merge stage at all
+# (verified by reading that call chain -- no `compile=` override is ever
+# threaded through, so a checkout-root `compile:` block plays no part here).
+# So this must NOT echo "true" for the audit-only shape (a real regression
+# found via `test_action_compile_context_old_library_liveness.py`'s own
+# `TestAuditOnlyCompareStaysSingleSidedUnconditionally`, which this
+# unconditional `$MODE == "compare"` check failed): it echoes "true" only
+# when compare actually has an old side to two-stage-merge against. See
+# `apply_sources_root_config_blocks`'s own `merge_compile` parameter
+# docstring for the full account.
 _compile_context_sources_merge_compile() {
-  if [[ "$MODE" == "compare" ]]; then
+  if [[ "$MODE" == "compare" \
+        && ( -n "${INPUT_OLD_LIBRARY:-}" || -n "${INPUT_ABI_BASELINE:-}" ) ]]; then
     echo "true"
   fi
 }
 
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
-  # (dump, single-pair compare, and scan -- which has no CLI of its own left
-  # to take a literal --lang flag at all any more, ADR-068's second
-  # 2026-09-09/2026-09-10 amendments -- see _compile_context_sources_
-  # pairwise's own docstring above -- all take --lang here now).
+  # (dump and single-pair compare, including the audit-only shape -- the
+  # CLI itself has no literal --lang flag at all any more, Phase 7 -- see
+  # _compile_context_sources_pairwise's own docstring above -- all take
+  # --lang here now).
   local include_lang="${1:-true}"
   # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is the
   # *default*, not a user override, so it must not by itself count as "lang
@@ -1320,19 +1283,18 @@ if gcc_options:
     # CodeRabbit review, PR #1146, finding #7: BuildConfig.from_dict()
     # (abicheck/buildsource/build_config.py) rejects any compile.options
     # list item containing whitespace -- each entry must already be one
-    # complete argv atom, the same contract `scan`'s own equivalent
-    # gcc-options-forwarding path (add_flag_shlex_split, above) already
-    # honors for a multi-line (YAML block scalar) value: one line is one
-    # complete, space-safe token, never shlex-split further. Unconditional
+    # complete argv atom, the same contract add_flag_shlex_split (above)
+    # already honors for a multi-line (YAML block scalar) value: one line is
+    # one complete, space-safe token, never shlex-split further. Unconditional
     # `shlex.split()` here previously ignored that line-per-token
     # convention and instead re-tokenized the whole multi-line value on
     # every whitespace character regardless of line breaks -- for an
-    # ordinary multi-line value that diverged from scan's own token
+    # ordinary multi-line value that diverged from those token
     # boundaries, and for a deliberately-spaced line (e.g. one meant as a
     # single, later-rejected whitespace-bearing atom) it silently
     # *accepted* the split instead of surfacing BuildConfig's own
-    # whitespace-rejection error, which is the outcome scan's own
-    # unsplit-multiline handling produces for the identical input shape.
+    # whitespace-rejection error, which is the outcome the unsplit-multiline
+    # handling above produces for the identical input shape.
     # A single-line value keeps `shlex.split()`: that spelling is the
     # direct config-key replacement for the old scalar `--gcc-options`
     # flag, which was always shell-quoting-aware.
@@ -1577,33 +1539,12 @@ _is_release_style_operand() {
   return 1
 }
 
-# `scan --compile-db` is gone: --build-info already accepts a build dir, a
-# compile_commands.json, or a pre-captured pack, so a compile-db input is
-# one more way to name the same operand. Rejected rather than resolved by
-# the fallback when both are set, and *only* for `mode: scan` -- scan is
-# the one mode whose behavior this changed (it used to forward both
-# operands and the scan pipeline gave compile-db precedence, so collapsing
-# them onto one flag would silently analyze a different build context than
-# the same workflow used to). Compare and dump have always used the
-# build-info-wins fallback with no such guard -- that precedence is
-# pre-existing, documented behavior, not a regression, and is deliberately
-# left alone. Shared by both of `mode: scan`'s two internal CLI routings
-# (the legacy `scan` CLI branch, and the `compare`-translated branch --
-# ADR-068 D2, plan Phase 4 commit 1) so the check and its message exist in
-# exactly one place rather than two copies that could drift.
-_reject_scan_build_info_compile_db_conflict() {
-  if [[ -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
-    echo "::error::build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
-    exit 1
-  fi
-}
-
-# Whether *name* is a compare/scan CLI option that consumes a following
+# Whether *name* is a compare CLI option that consumes a following
 # token as its own value (Click `nargs=1`, not a boolean flag) -- the full
-# combined option table of both commands, current as of this commit
-# (`python -c "...click introspection over abicheck.cli.main.commands
-# ['compare'/'scan']..."`, see this function's own git history for the
-# exact one-liner). Every value-taking option, across both short and long
+# option table, current as of this commit (`python -c "...click
+# introspection over abicheck.cli.main.commands['compare']..."`, see this
+# function's own git history for the exact one-liner). Every value-taking
+# option, across both short and long
 # spellings, is listed; anything not listed here is treated as a flag/
 # unknown token.
 #
@@ -1620,16 +1561,16 @@ _reject_scan_build_info_compile_db_conflict() {
 # unnoticed.
 _extra_args_is_value_option() {
   case "$1" in
-    --abi3 | --against | --artifact-set | --ast-frontend | --budget | \
+    --abi3 | --ast-frontend | --budget | \
     --build-info | --build-target | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
     --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
-    --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
+    --debug-format | --debug-info | --debug-root | --debuginfod-url | \
     --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
     --frontend-context | --header | --include | --instantiation-manifest | \
     --lang | --ld-library-path | --manifest | --max-findings | \
     --output | --output-dir | --pack | \
     --pdb-path | --policy | --post-manifest | --probe-matrix | \
-    --public-header-dir | --required-symbol | --risk-rules | \
+    --public-header-dir | --required-symbol | \
     --search-path | --severity-preset | --since | --sources | \
     --suppress | --sysroot | --use-cases | --used-by | --variant | --version | --view | \
     --write | -H | -I | -o)
@@ -1644,7 +1585,7 @@ _extra_args_is_value_option() {
 # is exactly such a cluster; returns 1 (no output) otherwise, so the caller
 # falls through to treating the token as an ordinary opaque one.
 #
-# The only short options across compare+scan are one boolean flag (`-v`)
+# The only short options on compare are one boolean flag (`-v`)
 # and four value-taking ones (`-H`/`-I`/`-j`/`-o`, mirroring
 # `_extra_args_is_value_option` above) -- so the only cluster shape that
 # needs expanding is zero or more `v`s followed by exactly one of those
@@ -1855,7 +1796,7 @@ _extra_args_has_config_flag() {
 # Same shape as `_extra_args_has_write_flag` above, for the sibling defect
 # (Codex review, P2, fresh evidence): `INPUT_DRY_RUN` is a dedicated Action
 # input, but an *effective* dry run reached only through `extra-args
-# --dry-run` leaves `INPUT_DRY_RUN` false, so the compare/scan command
+# --dry-run` leaves `INPUT_DRY_RUN` false, so the compare command
 # assembly still takes its non-dry-run branch and forwards `-o
 # "$OUTPUT_FILE"`/injects `--write json=$PR_JSON` -- both of which the CLI
 # itself rejects alongside a real `--dry-run` (`dry_run.
@@ -1872,36 +1813,11 @@ _extra_args_has_dry_run_flag() {
   return 1
 }
 
-# Same shape again: does the user's own `extra-args` already carry
-# `--severity-preset`? ADR-068's 2026-09-10 amendment's audit-gate opt-in
-# means the translated audit-only `mode: scan` branch below injects
-# `--severity-preset default` whenever the caller stated no preset of their
-# own, to preserve `mode: scan`'s documented default-gating behavior across
-# the migration to `compare --no-baseline` -- but a caller who already
-# asked for a preset via `extra-args` (rather than the dedicated
-# `severity-preset` input) must keep exactly the preset they asked for,
-# `info-only`'s explicit "don't gate" included, never silently overridden
-# by the injected default.
-_extra_args_has_severity_preset_flag() {
-  local _name _value
-  while IFS=$'\t' read -r _name _value; do
-    [[ "$_name" == "--severity-preset" ]] && return 0
-  done <<<"$(_extra_args_options)"
-  return 1
-}
-
-# `_extra_args_has_scan_only_flag`/`_extra_args_has_pattern_verdicts_flag`
-# (Codex review, P2, PR #1160/#1172, many rounds) used to live here, gating
-# the scan->compare internal-routing decision against a scan-only flag or a
-# missing `--pattern-verdicts` reaching `extra-args` -- both removed (ADR-068's
-# second 2026-09-09 amendment; the routing comment above this file's mode-
-# branch if/elif chain has the full account of what closed, including the
-# 2026-09-10 amendment that closed the one remaining audit-only gap). Per
-# ADR-068's re-scoping, the Action no longer keeps a compatible CLI-flag
-# surface with `scan` for `extra-args` passthrough on the translated-
-# `compare` route: a flag `compare` genuinely lacks now raises `compare`'s
-# own real, correct Click usage error, the same outcome a native `mode:
-# compare` request has always gotten for an unsupported `extra-args` flag.
+# Per ADR-068's re-scoping (`mode: scan` and its own CLI are both retired
+# outright), this Action keeps no compatible CLI-flag surface for
+# `extra-args` beyond `compare`'s own real option set: a flag `compare`
+# genuinely lacks raises `compare`'s own real, correct Click usage error,
+# the same outcome any unsupported `extra-args` flag has always gotten.
 
 # Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
 # extra-args, printing it (and nothing else) when found. Empty output means
@@ -2106,22 +2022,63 @@ elif [[ -n "$_PY_BIN" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
-# Codex review). Removing these outright (rather than keeping them as
-# functional aliases, like the existing `allow-build-query` no-op above)
-# would silently break existing workflows that still set them: GitHub
-# Actions drops an input the action.yml no longer declares with only a
-# warning, so `estimate: true` would otherwise silently run a real scan
-# instead of the preview it used to produce, and `audit: true` would
-# silently stop forcing a baseline-less hygiene lint once a
-# baseline/abi-baseline is configured -- a much worse failure mode than a
-# hard error, since nothing signals that the step is no longer doing what
-# the workflow author intended.
-# ---------------------------------------------------------------------------
-if [[ "$MODE" == "scan" && "${INPUT_ESTIMATE:-false}" == "true" ]]; then
-  INPUT_DRY_RUN="true"
+# `against`/`estimate`/`audit`/`mode: scan` retirement (ADR-068's
+# Action-input-lifecycle amendment; D8, hard removal, no deprecation
+# window). Each existed only to serve the now-removed `mode: scan` --
+# `action/validate-inputs.sh` rejects all four before Python setup/toolchain
+# install for the composite Action's own callers; this is the identical
+# check for anyone invoking run.sh directly (e.g. tests), same rationale as
+# every other validate-inputs.sh mirror in this file.
+#
+# `against`/`estimate`/`audit` are checked BEFORE `mode: scan` itself
+# (CodeRabbit review, fresh evidence) -- matching
+# `action/validate-inputs.sh`'s own order (its retired-input checks run
+# ahead of its `case "$MODE" in scan) ...` arm), so the same combination of
+# inputs reports the identical error from either script. An earlier
+# revision of this block checked `mode: scan` first, which for e.g.
+# `mode: scan` + `against: old.so` reported "mode: scan is no longer
+# supported" here while validate-inputs.sh's preflight -- which runs first
+# in the real composite Action, so a caller normally never reaches this
+# copy at all -- reported "against is no longer supported" for the
+# identical inputs.
+if [[ -n "${INPUT_AGAINST:-}" ]]; then
+  echo "::error::against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
+  exit 1
 fi
-FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
+if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  echo "::error::estimate is no longer supported (it applied only to the now-removed mode: scan, as a dry-run alias). Set dry-run: 'true' instead, which applies to every mode."
+  exit 1
+fi
+if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
+  echo "::error::audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
+  exit 1
+fi
+if [[ "$MODE" == "scan" ]]; then
+  if [[ ( -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ) && "${INPUT_AUDIT:-false}" != "true" ]]; then
+    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
+  else
+    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
+  fi
+  exit 1
+fi
+# new-library-set/risk-rules/crosscheck applied only to the now fully-
+# removed mode: scan (ADR-068 D8, hard removal) -- with that mode gone,
+# none of the three can ever do anything on any mode any more. Rejected
+# here, before any mode dispatch, the identical checks
+# action/validate-inputs.sh already runs (this is the copy for anyone
+# invoking run.sh directly, e.g. tests).
+if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
+  echo "::error::new-library-set is no longer supported (ADR-068 (b): scan --artifact-set, and mode: scan itself, are both retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented. Remove new-library-set; compare each library individually, or wait for ADR-065 S3."
+  exit 1
+fi
+if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
+  echo "::error::risk-rules is no longer supported (ADR-068 (b): scan --risk-rules, and mode: scan itself, are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
+  exit 1
+fi
+if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
+  echo "::error::crosscheck is no longer supported (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax, and mode: scan itself, are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
+  exit 1
+fi
 
 # Replaces every literal (non-glob) occurrence of $2 in $1 with $3, via
 # prefix/suffix parameter-expansion pattern REMOVAL (`%%`/`#`) plus plain
@@ -2441,9 +2398,7 @@ case "${INPUT_BASELINE_GENERATION:-}" in
   [0-9]*) ;;
 esac
 
-if [[ -n "$ABI_BASELINE" \
-   && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
-   && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
+if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
   BASELINE_DIR=$(mktemp -d)
   # Canonicalized to an absolute path immediately (Codex review, fresh
   # evidence): `mktemp -d` returns a path relative to `$TMPDIR` when that
@@ -2549,209 +2504,18 @@ if [[ -n "$ABI_BASELINE" \
   fi
   if [[ -n "$BASELINE_FILE" ]]; then
     echo "Using ABI baseline: $BASELINE_FILE"
-    # compare consumes the baseline as old-library; scan consumes it as --against.
-    if [[ "$MODE" == "scan" ]]; then
-      INPUT_AGAINST="$BASELINE_FILE"
-    else
-      INPUT_OLD_LIBRARY="$BASELINE_FILE"
-    fi
+    INPUT_OLD_LIBRARY="$BASELINE_FILE"
   elif [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     # The fetch was tolerated above (dry-run never hard-fails on an
-    # unresolved baseline), but if no other old-library/against was
-    # independently given there is nothing left to preview -- report and
-    # stop here rather than falling through to `${INPUT_OLD_LIBRARY:?...}`
-    # below, whose bash parameter-expansion abort would turn this specific,
-    # deliberately-tolerated case into a hard failure after all.
-    if [[ "$MODE" == "scan" && -z "${INPUT_AGAINST:-}" ]] ||
-       [[ "$MODE" == "compare" && -z "${INPUT_OLD_LIBRARY:-}" ]]; then
-      echo "::notice::--dry-run: no ABI baseline could be resolved and no other old-library/against was given, so there is nothing to preview."
+    # unresolved baseline), but if no other old-library was independently
+    # given there is nothing left to preview -- report and stop here rather
+    # than silently falling through to the audit-only (--no-baseline) shape,
+    # which a caller who genuinely wanted a baseline compare did not ask for.
+    if [[ -z "${INPUT_OLD_LIBRARY:-}" ]]; then
+      echo "::notice::--dry-run: no ABI baseline could be resolved and no other old-library was given, so there is nothing to preview."
       exit 0
     fi
   fi
-fi
-
-# ---------------------------------------------------------------------------
-# `mode: scan` internal routing (ADR-068 D2; plan
-# docs/contribute/plans/one-comparison-product.md Phase 4 commit 1; ADR-068's
-# second 2026-09-09 amendment and its 2026-09-10 amendment together collapsed
-# this to no routing predicate at all -- see below).
-#
-# `mode: scan` stays a fully documented, working Action input -- only its
-# *internal* implementation changes here. A scan invocation with a real
-# baseline (`--against`/`abi-baseline`, not forced audit-only) is built and
-# dispatched as a plain two-sided `compare AGAINST ARTIFACT`; one with no
-# baseline (audit-only) is built and dispatched as `compare --no-baseline
-# ARTIFACT` -- both below, in the same shared branch, collapsing this
-# Action's own scan/compare command assembly into one path with no
-# legacy-CLI fallback left at all. Every divergence a routing predicate here
-# used to guard against has closed (ADR-068's second 2026-09-09 amendment
-# ruling table plus its 2026-09-10 amendment, which closed the one
-# remaining exit-code gap on the audit-only shape --
-# `docs/contribute/known-gaps.md`'s former "The Action's `mode: scan` still
-# routes several request shapes to the legacy `scan` CLI" entry, now closed):
-#
-# - **The evidence-contract floor.** Closed: `compare --depth build`/
-#   `--depth source` with no evidence to satisfy it now hits the identical
-#   hard evidence-contract floor `scan` always did (exit 7,
-#   `EVIDENCE_CONTRACT_ERROR`, ADR-037 D5 -- live-verified against this
-#   repo: `compare --depth build old.so new.so` with no build evidence
-#   exits 7). No divergence left to route around.
-# - **Risk-driven auto depth.** Closed: `--risk-rules` and the auto-depth
-#   escalation it fed are retired outright (ADR-068 (b), rejected in
-#   preflight below); an omitted `--depth` on both `scan` and `compare` now
-#   deterministically defaults to `headers`, so there is no richer
-#   `scan`-only behavior left to lose by omitting `--depth`.
-# - **Per-side header/include roots: additive vs. overriding.** Still real
-#   (`compare`'s own `cli_helpers_compare._resolve_per_side_options`
-#   genuinely OVERRIDES a bare shared root with a side-specific one instead
-#   of unioning them the way `scan`'s own `action.yml`-documented `-H`/`-I`
-#   handling does) but no longer a reason to stay on `scan`: the
-#   translated-`compare` branch below now re-unions the bare root onto
-#   whichever side has an override before forwarding
-#   (`_add_unioned_sided_flag`, defined near `add_sided_flag` above),
-#   closing the gap at the Action level instead of avoiding the combination.
-# - **Stored JSON-snapshot baseline / `dependency_scope` tag matching.**
-#   Closed: `service.run_dump`'s `include_dependencies` parameter already
-#   lets `compare`'s own live-binary dumping filter consistently with a
-#   `dependency_scope`-tagged baseline snapshot, so there is no remaining
-#   gap the extension/content sniff this predicate used to run needs to
-#   guard.
-# - **Report JSON schema / `output-file` / `--write` / bare `format: json`.**
-#   No longer a routing concern: the scan-vs-compare JSON schema-shape
-#   difference (`scan_schema_version`/nested `diff.findings`/`coverage`/
-#   `crosscheck` vs. `report_schema_version`/root `changes`) is an accepted,
-#   documented breaking change of this migration, not something to route
-#   around -- and `compare` already has its own `-o`/`--output` and
-#   `--write`.
-# - **`--budget`.** Closed: `compare --budget` landed and enforces the same
-#   overflow floor `scan` always did (live-verified against this repo:
-#   `compare --budget 0s ...` exits 5).
-# - **`--crosscheck`'s `KEY=error` promotion syntax.** Ruled (b), dropped,
-#   superseded: every cross-source check already reaches `compare` as an
-#   ordinary `ChangeKind`, so `.abicheck.yml`'s `policy.overrides.<KIND>:
-#   error` is the replacement. `crosscheck` is now a rejected retired input
-#   (preflight block below), not a routing condition.
-# - **`--pattern-verdicts` default / scan-only flags reaching `compare`
-#   through `extra-args`.** No longer guarded here: per ADR-068's
-#   re-scoping, the Action does not keep a compatible CLI-flag surface with
-#   `scan` for `extra-args` passthrough -- a flag `compare` genuinely lacks
-#   now raises `compare`'s own real, correct Click usage error, the same
-#   outcome a native `mode: compare` request passing an unsupported
-#   `extra-args` flag has always gotten.
-#
-# What remained after the second 2026-09-09 amendment: **audit-only (no
-# baseline) stayed on the legacy `scan` CLI unconditionally**, because
-# `compare --no-baseline` (ADR-068 D2, ADR-047 §8 S5) deliberately reports
-# NO compatibility verdict and always exited 0, even when a real
-# `API_BREAK`-classified cross-source hygiene finding was present --
-# `scan`'s own audit-only path derives a verdict from that same finding and
-# gates its own process exit at 2, no flag needed
-# (`docs/contribute/known-gaps.md`'s "`compare --no-baseline` does not yet
-# reproduce `scan`'s audit-mode findings" section recorded this as the
-# reason audit-only stayed on the legacy CLI).
-#
-# **Closed by ADR-068's 2026-09-10 amendment, and wired into this Action by
-# this section.** `policy/audit_gate_exit.py` adds an orthogonal audit-gate
-# exit axis: `compare --no-baseline` now reproduces legacy `scan`'s
-# gating partition (a `BREAKING`/`API_BREAK`-classified finding gates,
-# `RISK`/`COMPATIBLE` does not) at its own dedicated exit code, `3`, folded
-# with `max` like every other orthogonal axis. Unlike legacy `scan`, the
-# axis is **opt-in**, activated by `--severity-preset` (any value except
-# `info-only`) rather than unconditional -- every pre-existing `compare
-# --no-baseline` invocation's exit code stays bit-for-bit unchanged absent
-# that flag. Audit-only `mode: scan` therefore now routes to `compare
-# --no-baseline` unconditionally, exactly like a baseline scan already
-# routed to plain `compare AGAINST ARTIFACT` -- there is no remaining
-# `MODE == "scan"` condition left in this Action's own command-assembly
-# that exists to serve a legacy-CLI fallback. Two things follow from the
-# axis being opt-in rather than on by default: this Action injects
-# `--severity-preset default` on the translated invocation whenever the
-# caller stated no preset of their own (neither the dedicated
-# `severity-preset` input nor an explicit `extra-args --severity-preset
-# ...`), which is what keeps `mode: scan`'s own documented default-gating
-# behavior intact across this migration -- a caller who already stated a
-# preset (`info-only` included) keeps exactly the preset they asked for,
-# and this injection never applies to a native `mode: compare` request,
-# which fully controls its own `--severity-preset`; and the Action maps the
-# resulting exit `3` to a new `AUDIT_GATE` verdict (alongside
-# `COVERAGE_INCOMPLETE`/`SEVERITY_ERROR` below) rather than folding it into
-# the generic `ERROR` arm, since exit `3` can now only ever come from this
-# axis (`compare` itself never emits it any other way). See the mode-`scan`
-# branch below (now unconditionally `compare`/`compare --no-baseline`) for
-# the actual flag translation, and the final exit-code/PR-comment/output
-# sections further down for where `AUDIT_GATE` is read and gated.
-_SCAN_HAS_BASELINE=false
-if [[ "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
-  _SCAN_HAS_BASELINE=true
-fi
-
-# ADR-068's second 2026-09-09 amendment ruling table, applied to this Action's
-# own input surface (D8: hard removal, no deprecation window). Each named a
-# `scan` CLI flag that no longer exists, so the only honest outcomes are a
-# clear error naming the blocker/replacement, or a silent downgrade to a
-# different operation than the workflow asked for.
-#
-# Deliberately **before** the command-assembly branches below (these four
-# checks used to live inside a since-removed legacy-CLI-fallback branch, so
-# a `mode: scan` run that qualified for the translated `compare` route
-# skipped all four and silently ignored the retired input instead of
-# rejecting it -- CodeRabbit review, PR #1186). The retirement is a
-# property of the *input*, not of which CLI the run happens to route onto.
-# `action/validate-inputs.sh` rejects the same four earlier still, before
-# any toolchain install; these copies are what a direct `run.sh` caller
-# (tests, and anyone invoking it outside the composite Action) gets, which
-# is exactly why they must not sit behind a route decision.
-if [[ "$MODE" == "scan" ]]; then
-if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
-  echo "::error::mode: scan no longer supports new-library-set (ADR-068 (b): scan --artifact-set is retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented -- routing it onto compare --no-baseline today would silently narrow those guarantees. Until that lands, run one scan per library."
-  exit 1
-fi
-if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
-  echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
-  exit 1
-fi
-if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-  echo "::error::mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
-  exit 1
-fi
-if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
-  echo "::error::mode: scan no longer supports crosscheck (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity; only the KEY=LEVEL syntax itself doesn't survive."
-  exit 1
-fi
-fi
-
-# Same shape, but scoped to the audit-only shape only (Codex review, PR
-# #1210): `since`/`changed-path`/`budget` are NOT retired -- a baseline scan
-# (`_SCAN_HAS_BASELINE == true`) still forwards all three to `compare`'s own
-# two-sided pipeline exactly as before, which accepts them identically to
-# legacy `scan --against` (live-verified). The gap is narrower and specific
-# to `compare --no-baseline`: it hard-rejects all three as a CLI usage error
-# (ADR-068 D2 -- "is not available with --no-baseline" for since/
-# changed-path, "not wired to this path yet" for budget), where legacy
-# `scan`'s own audit mode (no --against) genuinely supported all three
-# (live-verified: `scan ARTIFACT --since ...`/`--budget ...` with no
-# --against both exit 0). Forwarding them anyway and letting `compare`
-# reject them would still be a real regression for an existing audit-only
-# workflow that set one of these inputs -- it worked before this migration
-# and would now hard-fail with a Click usage error deep in the run instead
-# of a clear, upfront explanation. So these three are rejected here, the
-# same way the four hard-retired inputs above are, rather than forwarded
-# and left to `compare`'s own error -- the difference from those four is
-# that this is a *capability gap of the --no-baseline route specifically*,
-# not a retired input: setting `against:` alongside them still works today.
-if [[ "$MODE" == "scan" && "$_SCAN_HAS_BASELINE" != "true" ]]; then
-if [[ -n "${INPUT_SINCE:-}" ]]; then
-  echo "::error::mode: scan without a baseline (against) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports since identically to legacy scan --against, or drop since for this audit-only run."
-  exit 1
-fi
-if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
-  echo "::error::mode: scan without a baseline (against) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports changed-path identically to legacy scan --against, or drop changed-path for this audit-only run."
-  exit 1
-fi
-if [[ -n "${INPUT_BUDGET:-}" ]]; then
-  echo "::error::mode: scan without a baseline (against) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports budget identically to legacy scan --against, or drop budget for this audit-only run."
-  exit 1
-fi
 fi
 
 if [[ "$MODE" == "dump" ]]; then
@@ -2832,18 +2596,95 @@ elif [[ "$MODE" == "compare" ]]; then
   # automatically in the latter case (ADR-037 D7), so this one branch covers
   # both; the package-specific options below are simply ignored (with a
   # stderr warning from the CLI) when the operands are a single pair.
+  #
+  # Audit-only shape (ADR-068's Action-input-lifecycle amendment; the
+  # replacement for legacy `mode: scan` with no baseline, or `audit: true`):
+  # old-library and abi-baseline both omitted routes to `compare --no-baseline
+  # new-library` -- a one-sided audit against the candidate's own public
+  # surface, reporting no old/new compatibility verdict at all. Validated
+  # upstream (`action/validate-inputs.sh`) and re-checked here (the
+  # identical check, for anyone invoking run.sh directly, e.g. tests, same
+  # as every other validate-inputs.sh mirror in this file): new-library is
+  # required in this shape, and since/changed-path/budget are rejected as
+  # usage errors (compare --no-baseline doesn't implement revision-range
+  # evidence scoping or the wall-clock guard, ADR-068 D2).
+  _NO_BASELINE=false
+  if [[ -z "${INPUT_OLD_LIBRARY:-}" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
+    _NO_BASELINE=true
+  fi
+  if [[ "$_NO_BASELINE" == "true" ]]; then
+    if [[ -n "${INPUT_SINCE:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports since, or drop since for this audit-only run."
+      exit 1
+    fi
+    if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports changed-path, or drop changed-path for this audit-only run."
+      exit 1
+    fi
+    if [[ -n "${INPUT_BUDGET:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
+      exit 1
+    fi
+    if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support follow-deps -- compare --no-baseline's DT_NEEDED dependency walk is not wired to this path yet (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports follow-deps, or drop follow-deps for this audit-only run."
+      exit 1
+    fi
+    if [[ -n "${INPUT_USED_BY:-}" || -n "${INPUT_USED_BY_MANIFEST:-}" \
+          || -n "${INPUT_REQUIRED_SYMBOL:-}" || -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support used-by/used-by-manifest/required-symbol/required-symbols -- these scope a two-sided comparison to what a real consumer uses, and compare --no-baseline has no old/new pair to scope (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports consumer scoping, or drop these inputs for this audit-only run."
+      exit 1
+    fi
+    if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
+      exit 1
+    fi
+    # old-version's Action-level default is the literal placeholder 'old'
+    # (action.yml), always present even when the caller never set it --
+    # inert here, not a usage error, same as validate-inputs.sh's mirror
+    # check (Codex review, PR #1223, round 11).
+    if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
+      exit 1
+    fi
+  fi
   CMD+=(compare)
-  CMD+=("${INPUT_OLD_LIBRARY:?old-library is required for compare mode}")
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
+  if [[ "$_NO_BASELINE" == "true" ]]; then
+    if _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+      echo "::error::mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY:-}') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
+      exit 1
+    fi
+    CMD+=(--no-baseline "${INPUT_NEW_LIBRARY:?new-library is required for an audit-only compare (old-library/abi-baseline both omitted)}")
+  else
+    CMD+=("${INPUT_OLD_LIBRARY}")
+    CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
+  fi
 
-  add_flag "-H" "${INPUT_HEADER:-}"
-  add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
-  add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
-  add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
-  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
-  add_sided_scalar_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
-  add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
+  # -H/-I: no OLD side at all in the audit-only shape -- old-header/
+  # old-include would be a CLI usage error ("the OLD side is declared
+  # absent, so there is no baseline for this evidence to describe") and are
+  # rejected upfront above, before reaching this point, rather than
+  # silently dropped here. public-header-dir has no dedicated `compare`
+  # flag (unlike legacy `scan`) -- it folds into -H, the same directory
+  # provenance-and-extraction-scope role a bare -H root already plays.
+  # old-version is rejected upfront above too, same as old-header/
+  # old-include -- only new-version is forwarded on this shape.
+  if [[ "$_NO_BASELINE" == "true" ]]; then
+    add_flag "-H" "${INPUT_HEADER:-}"
+    add_flag "-H" "${INPUT_NEW_HEADER:-}"
+    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
+    add_flag "-I" "${INPUT_INCLUDE:-}"
+    add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
+    add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
+  else
+    add_flag "-H" "${INPUT_HEADER:-}"
+    add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
+    add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
+    add_flag "-I" "${INPUT_INCLUDE:-}"
+    add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
+    add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
+    add_sided_scalar_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
+    add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
+  fi
   # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc/lang)
   # have no CLI channel at all for a directory/package operand (Phase 7
   # removed --ast-frontend etc. from `compare` entirely, and the per-library
@@ -2889,7 +2730,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # side source tree to point --sources/--build-info at in compare mode, so
   # these inputs scope to `new=` unconditionally rather than exposing a
   # second old-sources/old-build-info input pair. Previously silently
-  # dropped in compare mode (only dump/scan forwarded them) — a real gap
+  # dropped in compare mode (only dump forwarded them) — a real gap
   # flagged by review: a --depth build/source compare request had no way to
   # actually reach the CLI's evidence flags at all.
   #
@@ -2967,20 +2808,24 @@ elif [[ "$MODE" == "compare" ]]; then
     add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
     add_single_flag "--depth" "${INPUT_DEPTH:-}"
     # --since/--changed-path (ADR-068 Phase 2c) were previously silently
-    # dropped in compare mode -- only the scan branches below forwarded
-    # them, despite this page's own docs (github-action-source-scans.md)
-    # already claiming `mode: compare` "takes the identical
-    # depth/since/changed-path/sources/build-info inputs mode: scan does"
-    # (Codex review, fresh evidence: `--since`'s scope-narrowing value was
-    # silently ignored and a pinned `--depth source` replayed the whole
-    # target instead of the PR's changed files, exactly the unrelated-
-    # findings/expensive-CI-run risk the docs were written to avoid).
-    # Single-pair-only, matching --sources/--build-info/--depth build/source
-    # above: the release fan-out doesn't collect build/source evidence for
-    # a directory/package operand at all, so there is nothing for --since/
-    # --changed-path to scope there either.
-    add_single_flag "--since" "${INPUT_SINCE:-}"
-    add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
+    # dropped in compare mode -- only the scan branch forwarded them,
+    # despite this page's own docs already claiming `mode: compare` "takes
+    # the identical depth/since/changed-path/sources/build-info inputs
+    # mode: scan does" (Codex review, fresh evidence: `--since`'s
+    # scope-narrowing value was silently ignored and a pinned `--depth
+    # source` replayed the whole target instead of the PR's changed files,
+    # exactly the unrelated-findings/expensive-CI-run risk the docs were
+    # written to avoid). Single-pair-only, matching --sources/--build-info/
+    # --depth build/source above: the release fan-out doesn't collect
+    # build/source evidence for a directory/package operand at all, so
+    # there is nothing for --since/--changed-path to scope there either.
+    # Rejected upstream for the audit-only shape (validate-inputs.sh and
+    # its direct-invocation mirror above), so this is only ever reached
+    # with a baseline present.
+    if [[ "$_NO_BASELINE" != "true" ]]; then
+      add_single_flag "--since" "${INPUT_SINCE:-}"
+      add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
+    fi
   fi
 
   # Format — for SARIF, always write to a file so upload-sarif can find it.
@@ -3081,8 +2926,27 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
 
-  # Severity configuration
+  # Severity configuration. Audit-only: --severity-preset is ALSO the
+  # ADR-068 2026-09-10 amendment's audit-gate opt-in (`compare --no-baseline`
+  # only gates on a candidate-side finding when a preset other than
+  # `info-only` is in effect). Unlike an earlier draft of this migration,
+  # this step never injects a preset on the caller's behalf: the ADR-068
+  # 2026-09-11 amendment states the audit-gate opt-in is the *caller's*
+  # migration step, not something `run.sh` does implicitly (a job that
+  # relied on legacy `mode: scan`'s own default gating must itself pass
+  # `severity-preset: default` when migrating -- see the amendment's
+  # "audit-gate trap" section). So this is the exact same pass-through as
+  # the baseline shape below: forward whatever preset the caller asked for
+  # (the dedicated input, `extra-args --severity-preset ...`, or neither),
+  # and change nothing else.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
+  # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
+  # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
+  # rejected upstream for the audit-only shape (compare --no-baseline's
+  # wall-clock guard isn't wired to that path, ADR-068 D2).
+  if [[ "$_NO_BASELINE" != "true" ]]; then
+    add_single_flag "--budget" "${INPUT_BUDGET:-}"
+  fi
 
   # require-complete-analysis: RETIRED (rulings.py deferred-option followup
   # -- hard removal, no deprecation window). The CLI's own
@@ -3147,8 +3011,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
 
   # Format — deps-tree supports markdown, json, and html (`deps tree
   # --help`; html renders via cli_stack.py's stack_to_html). Hard error on
-  # anything else (sarif), not a silent fallback — see the scan branch's
-  # format check above.
+  # anything else (sarif), not a silent fallback.
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
     echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
@@ -3177,8 +3040,7 @@ elif [[ "$MODE" == "deps-compare" ]]; then
 
   # Format — deps-compare supports markdown, json, and html (`deps compare
   # --help`; html renders via cli_stack.py's stack_to_html). Hard error on
-  # anything else (sarif), not a silent fallback — see the scan branch's
-  # format check above.
+  # anything else (sarif), not a silent fallback.
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
     echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
@@ -3195,234 +3057,8 @@ elif [[ "$MODE" == "deps-compare" ]]; then
     fi
   fi
 
-elif [[ "$MODE" == "scan" ]]; then
-  # ── Scan mode, routed through `compare`/`compare --no-baseline` (ADR-068
-  #    D2; plan Phase 4 commit 1; ADR-068's 2026-09-10 amendment closed the
-  #    one remaining exit-code gap for the audit-only shape -- see the
-  #    routing comment above this whole if/elif chain for the full account
-  #    of what changed and why) ───────────────────────────────────────────
-  # `--against`/`abi-baseline` (real, not forced audit-only, i.e.
-  # `$_SCAN_HAS_BASELINE == true`) maps onto a plain two-sided
-  # `compare AGAINST ARTIFACT`; its absence maps onto
-  # `compare --no-baseline ARTIFACT` -- a single-pair comparison or a
-  # single-artifact audit, never the directory/package release fan-out
-  # (scan never accepted a directory/package operand either, see the
-  # rejection below).
-  CMD+=(compare)
-  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}"
-  # scan has no per-library fan-out (unlike compare) — a directory/package
-  # is normally caught early by action/validate-inputs.sh, before any
-  # dependency install; re-checked here for anyone invoking run.sh directly
-  # (e.g. tests) without that step, same message as before this migration.
-  if _is_release_style_operand "$SCAN_ARTIFACT"; then
-    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use mode: compare against a directory/package for a multi-library binary comparison instead."
-    exit 1
-  fi
-
-  if [[ "$_SCAN_HAS_BASELINE" == "true" ]]; then
-    CMD+=("${INPUT_AGAINST}" "$SCAN_ARTIFACT")
-  else
-    CMD+=(--no-baseline "$SCAN_ARTIFACT")
-  fi
-
-  # -H/-I stay side-aware exactly as scan's own CLI already made them
-  # (ADR-040 L1) when a real baseline is present: a bare value applies to
-  # both ARTIFACT and the baseline side; old-header/old-include and
-  # new-header/new-include scope to one side only. Routed through
-  # `_add_unioned_sided_flag` (defined above, near `add_sided_flag`) rather
-  # than plain `add_flag`/`add_sided_flag` calls, because `compare`'s own
-  # per-side resolution OVERRIDES a bare shared root with a side-specific
-  # one instead of unioning them the way `scan` documents -- see that
-  # helper's own docstring for the full account.
-  #
-  # `--public-header-dir` has no dedicated `compare` flag at all (unlike
-  # `scan`) -- `compare` derives provenance AND extraction scope from `-H`'s
-  # own directory semantics alone (dump's own comment above has the full
-  # rationale; plan P4 confirms this is already `compare`'s existing, solved
-  # behavior). So it folds into `-H`'s own union as an additional `new`-side
-  # override source when a baseline is present: a bare -H root is side-both
-  # (ADR-040 L1), which would also feed the candidate's public-header-dir
-  # tree into the baseline/old side's own header parse if left unsided.
-  #
-  # An audit-only run (`compare --no-baseline`) has no OLD side at all --
-  # `-H old=`/`-I old=` are a hard CLI usage error under `--no-baseline`
-  # ("the OLD side is declared absent, so there is no baseline for this
-  # evidence to describe"), so old-header/old-include are simply not
-  # forwarded at all here (live-verified against this repo; they are also
-  # documented, action.yml, as applying only to `compare`/`scan --against`'s
-  # baseline side -- there was never a documented audit-only use for them).
-  # header/new-header/public-header-dir/include/new-include still apply to
-  # the one candidate operand, forwarded unsided the same way `dump` mode's
-  # own single-operand -H/-I handling above does.
-  if [[ "$_SCAN_HAS_BASELINE" == "true" ]]; then
-    _add_unioned_sided_flag "-H" "${INPUT_HEADER:-}" "${INPUT_OLD_HEADER:-}" "${INPUT_NEW_HEADER:-}" "${INPUT_PUBLIC_HEADER_DIR:-}"
-    _add_unioned_sided_flag "-I" "${INPUT_INCLUDE:-}" "${INPUT_OLD_INCLUDE:-}" "${INPUT_NEW_INCLUDE:-}"
-  else
-    add_flag "-H" "${INPUT_HEADER:-}"
-    add_flag "-H" "${INPUT_NEW_HEADER:-}"
-    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
-    add_flag "-I" "${INPUT_INCLUDE:-}"
-    add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
-  fi
-
-  # --severity-preset: forwarded as the caller stated it for a baseline scan
-  # (unchanged behavior). For an audit-only scan it is ALSO the ADR-068
-  # 2026-09-10 amendment's audit-gate opt-in: `compare --no-baseline` only
-  # gates on a candidate-side finding when a preset other than `info-only`
-  # is in effect (`policy/audit_gate_exit.py`), unlike legacy `scan`'s own
-  # audit mode, which derived a verdict (and gated at exit 2) from the
-  # identical finding unconditionally, no flag needed. Injecting `default`
-  # whenever the caller stated no preset of their own -- neither the
-  # dedicated Action input nor an explicit `extra-args --severity-preset
-  # ...` -- is what keeps `mode: scan`'s own documented default-gating
-  # behavior intact across this migration; a caller who already asked for a
-  # preset (any value, `info-only` included) keeps exactly the preset they
-  # asked for, never overridden. This injection applies ONLY on this
-  # audit-only-translated-to-compare path -- a native `mode: compare`
-  # request (the sibling branch below) fully controls its own
-  # --severity-preset and is never touched by it.
-  if [[ "$_SCAN_HAS_BASELINE" == "true" ]]; then
-    add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
-  elif [[ -n "${INPUT_SEVERITY_PRESET:-}" ]] || _extra_args_has_severity_preset_flag; then
-    add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
-  else
-    CMD+=(--severity-preset default)
-  fi
-
-  # Phase 7 (main): --lang/--ast-frontend/--compiler/--compiler-prefix/
-  # --compiler-option/--sysroot/--nostdinc are gone from `compare`'s CLI
-  # entirely -- `.abicheck.yml`'s `compile:` block is their only source now
-  # (see `add_compile_context_flags`'s own docstring above). This branch
-  # always resolves a single-pair `compare [AGAINST] ARTIFACT` operand set
-  # (scan never accepted a directory/package operand, rejected above), so it
-  # can call the same single-pair helper the real `compare`/`dump` branches
-  # use, unconditionally -- no release-style-operand gate needed here the
-  # way the real `compare` branch has one. Live-verified: `--config` works
-  # identically under `compare --no-baseline`.
-  add_compile_context_flags true
-
-  # scan's own --build-info/--compile-db mutual-exclusivity guard.
-  _reject_scan_build_info_compile_db_conflict
-  # Sided to `new=`, matching `compare`'s own single-pair branch above:
-  # scan's build/source evidence has only ever applied to the scanned
-  # ARTIFACT, never to a baseline side, and ARTIFACT is always this run's
-  # `new`/candidate operand -- live-verified that `--sources new=`/
-  # `--build-info new=` are accepted identically under `--no-baseline`
-  # (only an `old=`-prefixed value is rejected there, and this branch never
-  # forwards one).
-  add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
-  add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  # Skipped when add_compile_context_flags above already merged build-config
-  # into a synthesized compile: overlay and added --config itself (the
-  # explicit-build-config-plus-compile-context case) -- adding it again here
-  # would emit a second, conflicting --config, and Click keeps only the last
-  # one, silently discarding the synthesized compiler/sysroot/macros overlay.
-  if ! _cmd_has_config_flag; then
-    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  fi
-  # No `--build-target` here: `compare` has no such option at all (ADR-068
-  # (b) also retired it from `scan` -- rejected as a usage error above, in
-  # the shared retired-input preflight block).
-  add_single_flag "--depth" "${INPUT_DEPTH:-}"
-  # `--since`/`--changed-path` localize a comparison to what a revision
-  # range touched. Forwarded unconditionally here because the one shape that
-  # cannot use them (audit-only, no baseline) is now rejected upfront, above
-  # this whole if/elif chain, with a clear, specific error naming the gap
-  # (Codex review, PR #1210) -- so by the time this line runs, either a
-  # baseline is present (`compare` accepts both identically to legacy
-  # `scan --against`), or neither input was set (forwarding an empty value
-  # is a no-op). `compare --no-baseline` itself still hard-rejects both
-  # (ADR-068 D2), but this branch never reaches that CLI call with one set.
-  add_single_flag "--since" "${INPUT_SINCE:-}"
-  add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
-  # `--budget`: same shape as since/changed-path above -- an audit-only run
-  # with `budget:` set is rejected upfront (`compare --no-baseline`'s
-  # wall-clock guard isn't wired to that path, per the same preflight
-  # block), so this is reached only with a baseline present (or no value to
-  # forward). `compare` accepts `--budget` identically to legacy
-  # `scan --against` (live-verified) -- unlike since/changed-path, this one
-  # was dropped entirely by this migration (Codex review, PR #1210: no
-  # `INPUT_BUDGET` reference existed anywhere in this file), silently
-  # removing the wall-clock guard from every baseline scan job that set it.
-  if [[ "$_SCAN_HAS_BASELINE" == "true" ]]; then
-    add_single_flag "--budget" "${INPUT_BUDGET:-}"
-  fi
-
-  # `scan --against` took @policy_options the same as `compare`, and
-  # `compare --no-baseline` accepts --policy/--suppress identically --
-  # forwarded unconditionally on both the baseline and audit-only shapes.
-  add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
-  add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
-  # require-complete-analysis: RETIRED (rulings.py deferred-option followup
-  # -- hard removal, no deprecation window). validate-inputs.sh already
-  # rejects a non-empty/false input unconditionally, regardless of mode,
-  # before this step ever runs -- this is defense in depth for anyone
-  # invoking run.sh directly, matching `mode: compare`'s own retirement
-  # guard above.
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-    echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
-    exit 1
-  fi
-
-  # Format — scan's own public contract is unchanged (still text/json only,
-  # still validated/erroring the same way below). Internally, `compare` has
-  # no bare "text" format, so "text" maps to `compare`'s own "markdown".
-  FORMAT="${INPUT_FORMAT:-text}"
-  if [[ "$FORMAT" != "text" && "$FORMAT" != "json" ]]; then
-    echo "::error::mode: scan does not support format: $FORMAT. Only 'text' and 'json' are supported."
-    exit 1
-  fi
-  _CLI_FORMAT="$FORMAT"
-  [[ "$_CLI_FORMAT" == "text" ]] && _CLI_FORMAT="markdown"
-  CMD+=(--format "$_CLI_FORMAT")
-
-  # Computed here, not only after extra-args are appended to CMD below --
-  # same reason as compare mode's own early computation above (the PR_JSON
-  # sidecar-injection decision a few lines down needs to see an
-  # `extra-args --format` override too).
-  _EFFECTIVE_FORMAT="$(_effective_format)"
-
-  # dry-run — `compare`'s own dry-run handling is the real thing here on
-  # both shapes now (live-verified: `compare --no-baseline --dry-run` works
-  # identically), so it is forwarded exactly like `compare` mode's own
-  # branch does above.
-  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
-    CMD+=(--dry-run)
-  elif _extra_args_has_dry_run_flag; then
-    :
-  else
-    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if [[ -n "$OUTPUT_FILE" ]]; then
-      CMD+=(-o "$OUTPUT_FILE")
-    fi
-
-    # Render a second, always-unfiltered JSON report from this same run for
-    # the sticky PR comment (--write), the same way `compare` mode's own
-    # branch above does -- see that branch's own comment for the full
-    # rationale (including why this is unconditional on `pr-comment`).
-    # Live-verified: `compare --no-baseline --write json=... --format
-    # markdown` works identically to the baseline shape.
-    #
-    # Always "single" here, never "release": scan's own `new-library`
-    # (ARTIFACT) is always a single binary/snapshot -- neither the baseline
-    # nor audit-only shape accepts a directory/package operand at all (see
-    # the earlier `scan does not accept a directory or package for
-    # new-library` rejection above), so `--write`'s repeatability is never
-    # constrained the way a release/directory compare's is (Codex review,
-    # PR #1210, round 9: a `--write markdown=...`/`--write sarif=...` in
-    # extra-args used to unconditionally suppress this injection, leaving
-    # `_resolve_clean_exit_verdict` with no JSON report to recognize the
-    # no-baseline shape from at all -- a risk-bearing audit exited 0 as the
-    # generic COMPATIBLE verdict instead of AUDIT_CLEAN/AUDIT_RISK).
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
-       && ! _extra_args_write_would_conflict "single"; then
-      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-      CMD+=(--write "json=$PR_JSON")
-    fi
-  fi
-
 else
-  echo "::error::Unknown mode '$MODE'. Use 'compare', 'dump', 'scan', 'deps-tree', or 'deps-compare'."
+  echo "::error::Unknown mode '$MODE'. Use 'compare', 'dump', 'deps-tree', or 'deps-compare'."
   exit 1
 fi
 
@@ -3445,35 +3081,21 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
     echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
     exit 1
   fi
-  # A `mode: scan` routed-to-`compare` special case used to filter
-  # `--pattern-verdicts` out of `extra-args` here (Codex review, PR #1172,
-  # round 18): that flag was the one thing an earlier extra-args predicate
-  # let reach the compare-translation branch at all despite `compare`
-  # having no such option, so forwarding it verbatim would fail with a real
-  # usage error on the one shape the old routing predicate was supposed to
-  # let through safely. Routing to `compare`/`compare --no-baseline` is now
-  # unconditional for every `mode: scan` request (baseline or audit-only
-  # alike) regardless of `extra-args` content (ADR-068's second 2026-09-09
-  # amendment and its 2026-09-10 amendment), so that special case is dead: a
-  # flag `compare` genuinely lacks -- `--pattern-verdicts` included -- now
-  # raises `compare`'s own real, correct Click usage error, the accepted
-  # outcome per ADR-068's re-scoping ("the Action does not keep a compatible
-  # interface with scan's own CLI surface"). Every mode, `scan` included,
-  # appends `extra-args` the same plain way now.
+  # A flag `compare` genuinely lacks -- `--pattern-verdicts` included --
+  # raises `compare`'s own real, correct Click usage error (ADR-068's
+  # re-scoping: this Action keeps no compatible CLI-flag surface with the
+  # now-removed `mode: scan`). Every mode appends `extra-args` the same
+  # plain way.
   # shellcheck disable=SC2206
   CMD+=($INPUT_EXTRA_ARGS)
 fi
 # --- END: extra-args append block ---
 # (CodeRabbit review, PR #1172, round 20: a dedicated, code-shaped sentinel
-# for tests/test_action_run_sh_scan_routing_edge_cases.py's
-# `_region_through_extra_args_append()` -- a human-readable comment on the
-# *next* block was a fragile boundary marker, since rewording that prose for
-# an unrelated reason would silently break the test's `text.index` lookup.
-# This line's own text is the boundary and needs no other justification to
-# stay unchanged.)
+# so a test extracting this region by text boundary has a stable marker
+# that a rewording of the surrounding prose can't silently break.)
 
-# Recomputed here (idempotently -- compare/scan mode already computed it
-# above, right after their own `$FORMAT` was set, so their own PR_JSON
+# Recomputed here (idempotently -- the compare branch already computed it
+# above, right after its own `$FORMAT` was set, so its own PR_JSON
 # sidecar-injection decisions could see it too) for every JSON-detection
 # site below that needs the real format this invocation runs with rather
 # than the nominal `$FORMAT` -- see `_effective_format`'s own docstring.
@@ -4078,6 +3700,18 @@ _emit_annotations() {
     fi
     return 0
   fi
+  # compare's audit-only shape (old-library/abi-baseline both omitted) has
+  # no `annotations` array in its own report schema at all (it has no
+  # additions/removals to annotate, only candidate-side `findings`) -- the
+  # `annotations` report query below would already silently print nothing
+  # for it, which reads as "requested but nothing found" rather than "not
+  # supported on this shape". Say so explicitly instead (Codex review, PR
+  # #1223, round 11) -- the same "never silently emit nothing" treatment
+  # every other annotate gap above already gets.
+  if [[ "$MODE" == "compare" && "${_NO_BASELINE:-false}" == "true" ]]; then
+    echo "::notice title=abicheck annotate::annotate is not supported for compare's audit-only shape (old-library/abi-baseline both omitted) -- its report has no additions/removals to annotate, only candidate-side findings (see the JSON report's findings[]). No annotations are rendered."
+    return 0
+  fi
   local _src _additions
   _src=$(_json_report_src)
   if [[ -z "$_src" ]]; then
@@ -4416,6 +4050,25 @@ GATE_TIER=""
 _resolve_clean_exit_verdict() {
   local _v _no_baseline_audit
   VERDICT="COMPATIBLE"
+  # An audit-only (no-baseline) dry run writes no JSON report at all --
+  # `compare --dry-run` performs no analysis and only previews the command
+  # it would have run (Codex review, fresh evidence): the `no_baseline_audit`
+  # query below reads that (absent) report and prints nothing, so without
+  # this check the fallthrough below would silently default to
+  # VERDICT=COMPATIBLE -- "No binary ABI break detected" for a preview that
+  # never compared anything, let alone the candidate's own public surface.
+  # Checked first and returns early, before the no-baseline-audit report
+  # query (which would find no report to read) and before
+  # `_report_compat_verdict` (same reason). Two-sided dry-run is a
+  # pre-existing, out-of-scope gap this fix does not touch -- see the
+  # verdict output's own description, which documents only the audit-only
+  # shape's dry-run behavior.
+  if [[ "${_NO_BASELINE:-false}" == "true" ]] \
+    && { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; }; then
+    VERDICT="DRY_RUN"
+    echo "::notice::--dry-run: this is a preview of the command that would run -- no analysis was performed and there is no candidate-side finding to report. Drop --dry-run to run the audit for real."
+    return
+  fi
   # A no-baseline audit's own `verdict` field is always null (no comparison
   # ran at all), so `_report_compat_verdict` below prints nothing for it and
   # this function would otherwise silently default to VERDICT=COMPATIBLE --
@@ -4496,21 +4149,7 @@ _blocking_gate_note() {
     | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
   if [[ -n "$_cats" ]]; then
     echo ">"
-    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" || "$MODE" == "scan" ]]; then
-      # `scan` is the second case that bypasses the flags at *every* tier: its
-      # final branch detects the real severity category and sets FINAL_EXIT=1
-      # unconditionally, so claiming the flags still decide would be the exact
-      # opposite of what happened (Codex review). Keyed on the raw `$MODE`
-      # input (round 19, fresh evidence -- reverting a prior round's own
-      # reasoning here): the *caller's* fail-on-* contract is what this note
-      # describes, and that contract is `mode: scan`'s own regardless of
-      # which CLI a `--pattern-verdicts`-enabled baseline request happened to
-      # route through internally (ADR-068 D2, Phase 4 commit 1) -- the real
-      # gate dispatch below applies scan's unconditional-severity rule to
-      # exactly that case too, so this note must describe the same thing it
-      # actually did, not which raw CLI ran (every `mode: scan` request now
-      # runs `compare`/`compare --no-baseline` internally; `$MODE` alone is
-      # what still distinguishes the caller's own contract).
+    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
       echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
     else
       # Only the SEVERITY_ERROR tier bypasses the fail-on flags. At the
@@ -4668,14 +4307,12 @@ else
   # 8=REMOVED_LIBRARY (directory/package operands with
   # fail-on-removed-library set), 16=NOT_COMPARABLE (a scope/profile
   # mismatch -- `comparability.py`, `cli_compare_helpers.py`'s single-pair
-  # path and `cli_compare_release_helpers.py`'s release fan-out both use
-  # this code; a translated `mode: scan` request routes through this exact
-  # branch too, both the baseline and audit-only shapes, since ADR-068's
-  # legacy `scan`-CLI fallback branch is gone -- Codex review P2, PR #1160,
-  # four rounds: the 16 arm was missing entirely at one point, so a
-  # translated `mode: scan` request hitting it fell into the generic `*)
-  # VERDICT="ERROR"` case below, which made `_maybe_post_pr_comment`'s own
-  # ERROR guard skip posting the report). Click also uses exit code 2 for
+  # path (baseline and audit-only shapes alike) and `cli_compare_release_
+  # helpers.py`'s release fan-out all use this code -- Codex review P2, PR
+  # #1160, four rounds: the 16 arm was missing entirely at one point, so a
+  # request hitting it fell into the generic `*) VERDICT="ERROR"` case
+  # below, which made `_maybe_post_pr_comment`'s own ERROR guard skip
+  # posting the report). Click also uses exit code 2 for
   # usage/argument errors — detect via stderr.
   if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
     VERDICT="ERROR"
@@ -4740,30 +4377,21 @@ else
               echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
             fi
           fi
-        elif [[ "$MODE" == "scan" ]]; then
-          # `mode: scan`'s own catch-all differs from native `compare`'s
-          # (below): a two-sided `compare`'s legacy severity scheme has no
-          # OTHER source for exit 1 at all, so "not a CLI error, no
-          # coverage/assurance/scope signal" safely defaults to
-          # SEVERITY_ERROR there. `mode: scan` covers both the baseline
-          # shape (identical to compare's own reasoning -- a real baseline
-          # comparison, where a real severity gate is still possible here)
-          # and the audit-only shape (`compare --no-baseline`), which has
-          # no severity-driven exit-1 source whatsoever (its own four
-          # orthogonal axes are audit_gate=3, contract_coverage=1,
-          # analysis_assurance=1, evidence_contract=7 -- never a bare
-          # severity-gate 1, `docs/reference/exit-codes.md`'s `compare
-          # --no-baseline` section). So this reads the report's own
-          # pre-fold `severity.exit_code`/`run_outcome.gate` directly
-          # (mirroring legacy `scan`'s own identical check, computed
-          # before it ever consulted coverage/assurance) rather than
-          # assuming severity the way compare's own catch-all below does:
-          # a real signal still means SEVERITY_ERROR, but "not a CLI
-          # error, and none of severity/coverage/assurance/scope claim
-          # it" is an unattributed operational failure -- ERROR, exactly
-          # what legacy `scan`'s own identical catch-all used to publish,
-          # not a severity-policy guess an audit-only run could never
-          # actually produce.
+        elif [[ "${_NO_BASELINE:-false}" == "true" ]]; then
+          # The audit-only shape (`compare --no-baseline`) has no bare
+          # severity-driven exit-1 source at all (its own four orthogonal
+          # axes are audit_gate=3, contract_coverage=1, analysis_assurance=1,
+          # evidence_contract=7 -- never a bare severity-gate 1,
+          # `docs/reference/exit-codes.md`'s `compare --no-baseline`
+          # section), unlike a two-sided compare's legacy severity scheme,
+          # which has no OTHER source for exit 1 at all (the final `else`
+          # below). So this reads the report's own pre-fold
+          # `severity.exit_code`/`run_outcome.gate` directly rather than
+          # assuming severity the way the two-sided catch-all below does: a
+          # real signal still means SEVERITY_ERROR, but "not a CLI error,
+          # and none of severity/coverage/assurance/scope claim it" is an
+          # unattributed operational failure -- ERROR, not a severity-policy
+          # guess an audit-only run could never actually produce.
           _sev_exit=$(_severity_gate_exit)
           if [[ "$_sev_exit" != "0" && -n "$_sev_exit" ]]; then
             VERDICT="SEVERITY_ERROR"
@@ -4785,16 +4413,11 @@ else
         # (never folded together with another axis's own contribution the
         # way exit `1` is shared between severity/coverage/assurance/scope
         # above), so no report-based disambiguation is needed here. This
-        # arm is reached only through an audit-only `mode: scan` request the
-        # routing above translated into `compare --no-baseline ...
-        # --severity-preset ...` (see that translation's own comment) -- NOT
-        # through a native `mode: compare` request with `--no-baseline` in
-        # `extra-args`: this Action's own compare branch always supplies
-        # both old-library and new-library as positional operands, and
-        # `--no-baseline` itself takes exactly one, so combining them fails
-        # with a CLI usage error (exit 64) before ever reaching this case
-        # (Codex review, PR #1210, round 7 -- corrects this comment's own
-        # earlier, wrong claim that both routes reach here).
+        # arm is reached through the audit-only shape (old-library/
+        # abi-baseline both omitted) whenever the caller also opted in via
+        # `--severity-preset` (any value but `info-only`) -- the caller's
+        # own migration step per ADR-068's 2026-09-11 amendment, not
+        # something this file injects.
         # This is NOT a two-sided compatibility verdict: an audit reports no
         # `changes`/compatibility verdict at all (ADR-068 D2) -- the axis
         # only says a real, BREAKING/API_BREAK-classified candidate-side
@@ -4820,11 +4443,9 @@ else
         # ADR-037 D5's evidence-contract axis (`policy/exit_decision_
         # precedence.py`'s `EXIT_EVIDENCE_CONTRACT_ERROR`, ADR-064): a
         # pinned `--depth build`/`--depth source` whose live extraction did
-        # not reach it -- unconditional and un-spoofable, the same numeric
-        # exit code legacy `scan`'s own `_EXIT_EVIDENCE_CONTRACT_ERROR`
-        # used, now shared by `compare` (a two-sided run, or a translated
-        # `mode: scan` request with either shape) and `compare --no-baseline`
-        # alike (`report/no_baseline.py`'s own `evidence_contract` axis).
+        # not reach it -- unconditional and un-spoofable, shared by
+        # `compare` (a two-sided run) and `compare --no-baseline` alike
+        # (`report/no_baseline.py`'s own `evidence_contract` axis).
         # Before this arm existed, this exit code fell into the generic
         # `*) VERDICT="ERROR"` case below -- which does still fail the step
         # via the top-level `VERDICT == "ERROR"` branch further down, so
@@ -4834,19 +4455,17 @@ else
         ;;
       5)
         # ADR-068 §3 #19's budget-overflow abort (`--budget`,
-        # `cli_compare_fold.py`'s own `sys.exit(5)`): `compare` shares this
-        # exit code with legacy `scan`'s own `--budget` guard. Reachable
-        # here for a baseline `mode: scan` request, whose own `--budget`
-        # forwarding (this file's own compare-command assembly, gated on
-        # `_SCAN_HAS_BASELINE`) reaches `compare` unchanged -- before this
+        # `cli_compare_fold.py`'s own `sys.exit(5)`). Reachable for a
+        # baseline compare's own `--budget` forwarding (this file's own
+        # compare-command assembly, gated on `_NO_BASELINE`) -- before this
         # arm existed, exit 5 fell into the generic `*) VERDICT="ERROR"`
         # case below, publishing `ERROR` instead of the documented
-        # `BUDGET_OVERFLOW` and skipping the budget-specific summary/
-        # comment handling both `mode: scan` verdicts have always used
-        # (Codex review, PR #1210, round 10 -- an audit-only request never
-        # reaches this exit code at all: `compare --no-baseline` rejects
-        # `--budget` outright, and this Action's own preflight rejects the
-        # input upfront for that shape before ever invoking the CLI).
+        # `BUDGET_OVERFLOW` and skipping the budget-specific summary/comment
+        # handling (Codex review, PR #1210, round 10 -- an audit-only
+        # request never reaches this exit code at all: `compare
+        # --no-baseline` rejects `--budget` outright, and this Action's own
+        # preflight rejects the input upfront for that shape before ever
+        # invoking the CLI).
         VERDICT="BUDGET_OVERFLOW"
         echo "::warning::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
         ;;
@@ -4906,8 +4525,13 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
   {
-    if [[ "$MODE" == "scan" ]]; then
-      echo "## abicheck Source-Intelligence Scan Report"
+    # An audit-only run (compare --no-baseline) has no baseline and reports
+    # no compatibility verdict at all -- the unconditional "ABI
+    # Compatibility Report" heading recreated exactly the unsupported
+    # compatibility claim the AUDIT_CLEAN/AUDIT_RISK verdict text below was
+    # written to avoid (Codex review, fresh evidence).
+    if [[ "$MODE" == "compare" && "${_NO_BASELINE:-false}" == "true" ]]; then
+      echo "## abicheck ABI Audit Report"
     else
       echo "## abicheck ABI Compatibility Report"
     fi
@@ -5010,6 +4634,13 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # audit (ADR-068 D2) -- only the candidate-side findings themselves.
         echo "> **Verdict: AUDIT_GATE** 🛑 — A gating audit finding was detected against the candidate's own public surface (no baseline was compared). This is not a two-sided compatibility verdict; see the JSON report's \`findings[]\` for what gated. Pass \`severity-preset: info-only\` to stop gating on audit findings."
         ;;
+      DRY_RUN)
+        # An audit-only (no-baseline) dry run: `compare --dry-run` performs
+        # no analysis and writes no report, so there is no candidate-side
+        # finding (or absence of one) to claim either way -- distinct from
+        # AUDIT_CLEAN, which asserts a real audit ran and found nothing.
+        echo "> **Verdict: DRY_RUN** ℹ️ — This was a preview of the command that would run (\`--dry-run\`); no analysis was performed. This is not a compatibility verdict, and not AUDIT_CLEAN/AUDIT_RISK — see the command preview above for what a real run would do."
+        ;;
       AUDIT_CLEAN)
         # Codex review, PR #1210, round 6: exit 0 on a no-baseline audit
         # with no candidate-side findings at all previously fell through to
@@ -5087,7 +4718,17 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     echo ""
     echo "| Property | Value |"
     echo "|----------|-------|"
-    if [[ "$MODE" == "compare" ]]; then
+    if [[ "$MODE" == "compare" && "${_NO_BASELINE:-false}" == "true" ]]; then
+      # Audit-only shape (old-library/abi-baseline both omitted): there is
+      # no OLD side at all, so the Old/New pair below would be misleading --
+      # show the single audited binary instead, the same shape legacy
+      # `mode: scan`'s own audit-only summary row used.
+      echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
+      if [[ -n "${INPUT_SOURCES:-}" ]]; then
+        echo "| Sources | \`${INPUT_SOURCES}\` |"
+      fi
+      echo "| Depth | ${INPUT_DEPTH:-headers} |"
+    elif [[ "$MODE" == "compare" ]]; then
       echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
       echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"
       echo "| Policy | ${INPUT_POLICY:-strict_abi} |"
@@ -5095,18 +4736,6 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
       echo "| Old root | \`${INPUT_OLD_ROOT:-}\` |"
       echo "| New root | \`${INPUT_NEW_ROOT:-}\` |"
-    elif [[ "$MODE" == "scan" ]]; then
-      # `new-library-set` used to render its own row here (it had no
-      # INPUT_NEW_LIBRARY at all); that input is retired and rejected in
-      # preflight now, so a scan summary always has a single binary.
-      echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
-      if [[ -n "${INPUT_AGAINST:-}" ]]; then
-        echo "| Against | \`${INPUT_AGAINST}\` |"
-      fi
-      if [[ -n "${INPUT_SOURCES:-}" ]]; then
-        echo "| Sources | \`${INPUT_SOURCES}\` |"
-      fi
-      echo "| Depth | ${INPUT_DEPTH:-auto} |"
     elif [[ "$MODE" == "deps-tree" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
     fi
@@ -5267,7 +4896,7 @@ _build_json_cmd() {
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
   case "$MODE" in
-    compare | scan) ;;
+    compare) ;;
     *) return 0 ;;
   esac
   # A dry run performed no real comparison -- posting a comment would either
@@ -5383,13 +5012,9 @@ _maybe_post_pr_comment() {
     run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
 
-  # scan's own JSON carries no artifact/library name (unlike compare's
-  # "library") -- name it explicitly so the comment header doesn't just say
-  # "artifact" (pr_comment_scan.py's `from_scan` fallback).
+  # compare's own JSON (baseline or audit-only alike) always carries a
+  # "library" field -- no separate --subject fallback needed.
   local subject_args=()
-  if [[ "$MODE" == "scan" && -n "${SCAN_ARTIFACT:-}" ]]; then
-    subject_args=(--subject "$(basename -- "$SCAN_ARTIFACT")")
-  fi
 
   # Codex review: on a Windows Git Bash runner, `actions/setup-python`
   # exposes `python`/`python.exe` but not always `python3` -- a hard-coded
@@ -5541,157 +5166,6 @@ elif [[ "$MODE" == "dump" ]]; then
   # dump: a producer — non-zero is always an error (already mapped above)
   :
 
-elif [[ "$MODE" == "scan" ]]; then
-  # Keyed on the raw `$MODE` input (Codex review, round 19, fresh evidence):
-  # this dispatch decides whether the *step* fails -- the caller's own
-  # fail-on-* contract, which is `mode: scan`'s regardless of which CLI
-  # actually ran internally (every `mode: scan` request now runs
-  # `compare`/`compare --no-baseline`, ADR-068 D2/Phase 4 commit 1 and its
-  # 2026-09-10 amendment). Before an earlier fix, a baseline scan routed
-  # through `compare` (a `--pattern-verdicts`-enabled request) fell through
-  # to the generic `compare` branch below instead -- so an explicit
-  # `severity-preset: strict` already correctly made the underlying
-  # `compare` CLI invocation exit non-zero (the round-14/16
-  # severity-preset-forwarding fixes), but this *wrapper*-level dispatch
-  # still honored `compare`'s own `fail-on-api-break: false` default and let
-  # the Action step pass anyway -- a false green a `mode: scan` caller's
-  # workflow, written against scan's documented "severity policy is
-  # unconditional" contract, never expected. `$VERDICT`/`$GATE_TIER` were
-  # already normalized to CLI-agnostic labels
-  # (API_BREAK/BREAKING/SEVERITY_ERROR/AUDIT_GATE/...) by the earlier
-  # exit-code dispatch above by the time this block reads them, so
-  # switching the *selector* here to `$MODE` changes nothing about how
-  # those labels are read -- only which caller's fail-on-* contract applies
-  # to them.
-  #
-  # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
-  # fails the step (the budget is a guard that must not be silently swallowed).
-  if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
-        && "$ADVISORY_BREAK" != "true" ]]; then
-    echo "::error::ABI break detected by scan. Set fail-on-breaking: false to continue despite breaks."
-    FINAL_EXIT=1
-  fi
-
-  # API_BREAK (scan exit 2) covers baseline/source API breaks AND a cross-check
-  # the user promoted with --crosscheck KEY=error (the scan CLI maps both to
-  # exit 2). They share one tier, so fail-on-api-break gates them uniformly — we
-  # cannot tell from the exit code alone whether a promoted check fired, so
-  # keying off the crosscheck flag would wrongly fail an unrelated API break
-  # when fail-on-api-break is false (Codex review).
-  if [[ "${GATE_TIER:-$VERDICT}" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
-        && "$ADVISORY_BREAK" != "true" ]]; then
-    echo "::error::API/source break detected by scan (includes promoted --crosscheck=error gates). Set fail-on-api-break: false to ignore."
-    FINAL_EXIT=1
-  fi
-
-  if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
-    echo "::error::Scan exceeded its budget. Pin a shallower level or raise the budget."
-    FINAL_EXIT=1
-  fi
-
-  # EVIDENCE_CONTRACT_ERROR (exit 7, ADR-037 D5 -- cli_scan.py's own
-  # dedicated _EXIT_EVIDENCE_CONTRACT_ERROR, unconditional and
-  # un-spoofable regardless of format or JSON report) unconditionally
-  # fails the step too, the same way NOT_COMPARABLE and BUDGET_OVERFLOW
-  # do -- no fail-on-* flag governs it, since this axis means no
-  # compatibility comparison ran at all. This verdict doesn't match the
-  # top-level `VERDICT == "ERROR"` branch's own `FINAL_EXIT=1`, so it
-  # needs this explicit twin or the step would silently pass. Generic
-  # wording, same reason as the exit-7 dispatch's own comment: two
-  # independent _EvidenceContractError raise sites, only one of which is
-  # a pinned depth with missing evidence.
-  if [[ "$VERDICT" == "EVIDENCE_CONTRACT_ERROR" ]]; then
-    echo "::error::Scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5) — see the command's own error message above for the exact cause."
-    FINAL_EXIT=1
-  fi
-
-  # NOT_COMPARABLE (exit 6, ADR-050 D2) unconditionally fails the step, same
-  # as ERROR did before this verdict was split out of it above -- no
-  # fail-on-* flag governs it, since a scope/profile mismatch means no
-  # compatibility comparison ran at all, not that one ran and found (or
-  # didn't find) a break.
-  if [[ "$VERDICT" == "NOT_COMPARABLE" ]]; then
-    echo "::error::scan --against reported NOT_COMPARABLE: the candidate and baseline were not extracted under a comparable profile/scope contract. See the JSON report's diff.reason for what mismatched."
-    FINAL_EXIT=1
-  fi
-
-  # AUDIT_GATE (exit 3, ADR-068 2026-09-10 amendment) unconditionally fails
-  # the step too, the same way NOT_COMPARABLE/EVIDENCE_CONTRACT_ERROR do --
-  # no fail-on-* flag governs it. The CLI's own `--severity-preset` opt-in
-  # (injected as `default` by the routing above whenever an audit-only
-  # `mode: scan` request stated no preset of its own) IS the gating
-  # decision already made -- there is no second, Action-level fail-on-*
-  # layer to apply on top of it, matching how legacy `scan`'s audit mode
-  # gated its own process exit unconditionally, no flag needed.
-  if [[ "$VERDICT" == "AUDIT_GATE" ]]; then
-    echo "::error::abicheck --no-baseline reports a gating audit finding (exit code 3): see the JSON report's findings[] for what gated. This is NOT a compatibility break -- no baseline was compared."
-    FINAL_EXIT=1
-  fi
-
-  # A severity-scheme `scan --against` gates natively at exit 1 on an
-  # error-level addition/quality finding, so scan can now publish
-  # SEVERITY_ERROR. Without this branch the mapping above named the verdict
-  # and the step still succeeded -- the explicitly configured policy gate
-  # silently did nothing (Codex review).
-  #
-  # Unconditional, exactly like the compare branch below: fail-on-breaking /
-  # fail-on-api-break select which *compatibility* tiers gate, and a severity
-  # policy is not one of those tiers -- it is the user having already said
-  # "this category is an error". Routing it through a compatibility flag
-  # would let fail-on-api-break: false switch off an addition gate that has
-  # nothing to do with API breaks.
-  if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
-    echo "::error::Severity-level error detected by abicheck scan."
-    FINAL_EXIT=1
-  fi
-
-  # A severity gate does not only produce exit 1. `potential_breaking=error`
-  # gates at 2 and `abi_breaking=error` at 4, and those map to the API_BREAK /
-  # BREAKING labels above -- where `fail-on-api-break` defaults to *false*, so
-  # a category the user explicitly configured as an error let the step succeed
-  # (Codex review). The verdict label is left alone (it is the right one for
-  # the compatibility axis); what changes is that an explicitly-configured
-  # severity block is not subject to a compatibility flag.
-  #
-  # A promoted cross-check is deliberately excluded: it also raises the
-  # published gate (`_promote_published_gate`), but it is not a severity
-  # category and keeps following fail-on-api-break, as it did before.
-  _sev_cats=$(_severity_gate_categories)
-  _sev_cats_real=$(tr ',' '\n' <<<"$_sev_cats" | sed 's/^ *//;s/ *$//' \
-    | grep -v '^promoted_crosscheck$' | grep -v '^$' | head -1)
-  if [[ -n "$_sev_cats_real" && "$VERDICT" != "SEVERITY_ERROR" ]]; then
-    echo "::error::abicheck scan is blocked by severity policy (${_sev_cats_real} configured as error); see the severity gate in the report."
-    FINAL_EXIT=1
-  fi
-
-  # ADR-049 Phase 7's contract-coverage axis is orthogonal and unconditional
-  # -- no fail-on-* flag disables it, matching the SEVERITY_ERROR tier above
-  # (AGENTS.md: "no fail-on-* condition at all... a coverage failure raises
-  # a clean 0 to 1 and can never lower a gate's 2/4"). Reads `_coverage_
-  # gated()` DIRECTLY rather than keying off VERDICT/GATE_TIER=="COVERAGE_
-  # INCOMPLETE" (an earlier revision did the latter, Codex review): the
-  # max-fold means a higher-priority axis (a real BREAKING/API_BREAK) wins
-  # the VERDICT/GATE_TIER label and the CLI's own exit code, so that label
-  # never reaches "COVERAGE_INCOMPLETE" even though contract_coverage_
-  # exit_contribution genuinely is 1 -- with fail-on-breaking: false, that
-  # left the coverage floor completely unenforced. `_coverage_gated()`
-  # already reads the report's own zeroed contribution under `contract.
-  # unresolved: warn`, so this stays inert in that case regardless.
-  if _coverage_gated; then
-    echo "::error::abicheck scan could not close the selected --contract domain on the available evidence; see contract_coverage_failures in the JSON report. Accept incomplete assurance with contract.unresolved: warn to allow."
-    FINAL_EXIT=1
-  fi
-
-  # P0.4's analysis-assurance axis, unconditional for the identical reason
-  # the contract-coverage axis immediately above is: no fail-on-* flag
-  # governs it, and `_assurance_gated()` is read directly rather than the
-  # VERDICT/GATE_TIER label so a higher-priority BREAKING/API_BREAK exit
-  # cannot silently swallow it.
-  if _assurance_gated; then
-    echo "::error::abicheck scan's own evidence was not fully complete under assurance.require_complete; see analysis_assurance in the JSON report for what fell short."
-    FINAL_EXIT=1
-  fi
-
 else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
@@ -5713,20 +5187,19 @@ else
     FINAL_EXIT=1
   fi
 
-  # NOT_COMPARABLE (exit 16, ADR-050 D2 -- compare's own equivalent of
-  # scan's exit 6) unconditionally fails the step, same as the scan
-  # branch's own check above and for the same reason: a scope/profile
-  # mismatch means no compatibility comparison ran at all, not that one
-  # ran and found (or didn't find) a break. This arm was missing entirely
-  # before this fix (Codex review, PR #1160, round 7, fresh evidence) --
-  # before the exit-16 dispatch arm existed, that exit code fell into the
-  # generic `VERDICT="ERROR"` case, which *does* fail the step via this
-  # function's own first `if` branch; adding the correct, more specific
-  # NOT_COMPARABLE verdict without also adding this check silently
-  # regressed a real `mode: compare` scope mismatch to a passing step.
+  # NOT_COMPARABLE (exit 16, ADR-050 D2) unconditionally fails the step: a
+  # scope/profile mismatch means no compatibility comparison ran at all,
+  # not that one ran and found (or didn't find) a break. This arm was
+  # missing entirely before this fix (Codex review, PR #1160, round 7,
+  # fresh evidence) -- before the exit-16 dispatch arm existed, that exit
+  # code fell into the generic `VERDICT="ERROR"` case, which *does* fail
+  # the step via this function's own first `if` branch; adding the correct,
+  # more specific NOT_COMPARABLE verdict without also adding this check
+  # silently regressed a real `mode: compare` scope mismatch to a passing
+  # step.
   if [[ "$VERDICT" == "NOT_COMPARABLE" ]]; then
-    # Unlike scan's own NOT_COMPARABLE message above, this cannot point at
-    # "the JSON report's diff.reason" (Codex review, fresh evidence):
+    # This cannot point at "the JSON report's diff.reason" (Codex review,
+    # fresh evidence):
     # compare's own comparability-gate refusal (`_report_not_comparable()`)
     # raises before any DiffResult exists, so there is no `diff` key at all
     # -- its `--format json` document carries the mismatch detail at root
@@ -5741,45 +5214,37 @@ else
     FINAL_EXIT=1
   fi
 
-  # AUDIT_GATE (exit 3, ADR-068 2026-09-10 amendment): in practice never
-  # actually fires on this native `mode: compare` branch (a translated
-  # `mode: scan` audit-only request is dispatched through the scan-mode
-  # branch above instead, keyed on the raw `$MODE` input) -- this Action's
-  # own compare branch always supplies both old-library and new-library as
-  # positional operands, and `--no-baseline` itself takes exactly one, so
-  # an `extra-args` attempt to combine them fails with a CLI usage error
-  # (exit 64) long before `$VERDICT` could ever become AUDIT_GATE here
-  # (Codex review, PR #1210, round 7 -- corrects this comment's own
-  # earlier, wrong reachability claim). Kept as defense-in-depth alongside
-  # the scan-mode branch's own identical check, in case that ever changes.
+  # AUDIT_GATE (exit 3, ADR-068 2026-09-10 amendment) unconditionally fails
+  # the step -- no fail-on-* flag governs it, matching NOT_COMPARABLE/
+  # EVIDENCE_CONTRACT_ERROR above. Reachable here whenever this compare
+  # invocation omitted old-library (the audit-only shape, `compare
+  # --no-baseline`) and a real BREAKING/API_BREAK-classified candidate-side
+  # finding was present while a severity preset (other than `info-only`)
+  # was in effect (`--severity-preset` input, or `extra-args`).
   if [[ "$VERDICT" == "AUDIT_GATE" ]]; then
     echo "::error::abicheck --no-baseline reports a gating audit finding (exit code 3): see the JSON report's findings[] for what gated. This is NOT a compatibility break -- no baseline was compared."
     FINAL_EXIT=1
   fi
 
   # BUDGET_OVERFLOW (exit 5, `cli_compare_fold.py`'s own `sys.exit(5)`)
-  # unconditionally fails the step too, the same way the scan-mode
-  # branch's own check above does and for the same reason: `compare
-  # --help-all` documents `--budget` as making a CI job "fail clearly
-  # (exit 5)" -- no fail-on-* flag governs it. Reachable here for a native
-  # `mode: compare` request that passes `--budget` through the documented
-  # `extra-args` escape hatch (the dedicated `budget` input is scan-only;
-  # compare has no such input of its own). Missing entirely until this fix
-  # (Codex review, PR #1210, round 11, fresh evidence): the round-10 fix
-  # that mapped exit 5 to the more specific `BUDGET_OVERFLOW` verdict
-  # (previously it fell into the generic `VERDICT="ERROR"` case, which
-  # *does* fail the step via this function's own first `if` branch) only
-  # added the matching `FINAL_EXIT=1` check to the scan-mode branch, so a
-  # native compare's own budget overflow silently regressed from a failing
-  # step to a passing one.
+  # unconditionally fails the step too: `compare --help-all` documents
+  # `--budget` as making a CI job "fail clearly (exit 5)" -- no fail-on-*
+  # flag governs it. Reachable here for the dedicated `budget` input (a
+  # baseline compare) or via the documented `extra-args` escape hatch on
+  # any other compare shape. Missing entirely until this fix (Codex review,
+  # PR #1210, round 11, fresh evidence): the round-10 fix that mapped exit 5
+  # to the more specific `BUDGET_OVERFLOW` verdict (previously it fell into
+  # the generic `VERDICT="ERROR"` case, which *does* fail the step via this
+  # function's own first `if` branch) initially missed this matching
+  # `FINAL_EXIT=1` check, so a budget overflow silently regressed from a
+  # failing step to a passing one.
   if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
     echo "::error::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
     FINAL_EXIT=1
   fi
 
   # EVIDENCE_CONTRACT_ERROR (exit 7, ADR-037 D5) unconditionally fails the
-  # step too, same as the scan-mode branch's own check above and for the
-  # same reason: no compatibility comparison ran at all, so no fail-on-*
+  # step too: no compatibility comparison ran at all, so no fail-on-*
   # flag governs it. This arm was missing entirely until this fix -- before
   # the exit-7 dispatch arm above existed for a native `mode: compare`/
   # `compare --no-baseline` request, that exit code fell into the generic
@@ -5800,9 +5265,10 @@ else
     FINAL_EXIT=1
   fi
 
-  # ADR-049 Phase 7's contract-coverage axis, unconditional exactly like the
-  # scan-mode check above and for the same reason -- see that comment. Reads
-  # `_coverage_gated()` directly rather than the VERDICT/GATE_TIER label, so
+  # ADR-049 Phase 7's contract-coverage axis, unconditional for the same
+  # "no compatibility comparison ran at all" reason as the checks above.
+  # Reads `_coverage_gated()` directly rather than the VERDICT/GATE_TIER
+  # label, so
   # a BREAKING/API_BREAK exit that outranks the coverage axis in the max-fold
   # (and, with the matching fail-on-* flag false, would otherwise leave the
   # step green) cannot silently swallow it.

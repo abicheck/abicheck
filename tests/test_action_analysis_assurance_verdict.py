@@ -171,14 +171,17 @@ class TestRunShRejectsTheRetiredInputDirectly:
         assert "require-complete-analysis" in outputs["_stdout"], outputs["_stdout"]
         assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
 
-    def test_scan_mode_fails_the_step(self, tmp_path: Path) -> None:
+    def test_no_baseline_compare_mode_fails_the_step(self, tmp_path: Path) -> None:
+        """mode: scan itself is retired outright (ADR-068) -- its own
+        replacement, an audit-only ``compare --no-baseline`` (old-library/
+        abi-baseline both omitted), must reject the retired input the same
+        unconditional way the two-sided shape above does."""
         bindir = _stub_abicheck(tmp_path, exit_code=0, report={"verdict": "COMPATIBLE"})
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
                 "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             },
             bindir,
@@ -311,10 +314,16 @@ class TestConfigDrivenAssuranceGateReadsTheReport:
         )
         assert outputs["_exit"] == 0, outputs
 
-    def test_scan_mode_reads_the_nested_contribution_too(self, tmp_path: Path) -> None:
-        """`scan --against` nests the field under `diff`, same as its
-        coverage sibling (`_either()` in `_report_query`). `scan` mode's own
-        assurance check is unconditional (mirrors `_coverage_gated()`
+    def test_the_nested_diff_shape_is_read_too(self, tmp_path: Path) -> None:
+        """`_either()` in `_report_query` reads this field from the document
+        root, else falls back to a `diff`-nested copy -- a shape legacy
+        `scan --against` reports used before ADR-068 retired that mode
+        outright, kept here as a direct test of the query helper's own
+        fallback robustness (`test_action_coverage_verdict.py`'s
+        `_scan_outputs()` tests its `contract_coverage_exit_contribution`
+        sibling the identical way) rather than a claim that a real
+        `mode: compare` invocation produces this exact document today. The
+        assurance check itself is unconditional (mirrors `_coverage_gated()`
         immediately above it) and reads `_assurance_gated()` directly rather
         than the published VERDICT label -- a real BREAKING verdict outranks
         ANALYSIS_INCOMPLETE in `_escalate_verdict_to_report`'s severity
@@ -331,9 +340,9 @@ class TestConfigDrivenAssuranceGateReadsTheReport:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
             },
@@ -346,21 +355,21 @@ class TestConfigDrivenAssuranceGateReadsTheReport:
 class TestConfigDrivenAssuranceGateReadsTheNoBaselineShapeToo:
     """Finding 3 (P2, PR #1222 Codex review): ``_assurance_gated()`` (fixed
     above to read ``analysis_assurance_exit_contribution``) didn't account
-    for the DIFFERENT report shape a ``mode: scan``/``--no-baseline``
-    audit-only run produces -- that document
+    for the DIFFERENT report shape a ``compare --no-baseline`` audit-only
+    run produces (the real replacement for legacy ``mode: scan`` with no
+    baseline, ADR-068) -- that document
     (``report/no_baseline.py::_document_json``) has no top-level
     ``analysis_assurance_exit_contribution`` key at all (unlike the
-    two-sided ``compare`` shape) and no ``diff`` wrapper either (unlike
-    ``scan --against``'s shape, which ``test_scan_mode_reads_the_nested_
-    contribution_too`` above already covers) -- the same information lives
-    under ``exit_axes.analysis_assurance`` instead. Before the fix, an
-    audit-only run with ``assurance.require_complete: true`` read a missing
-    key here, silently answered "not gated", and this Action reported a
-    plain ERROR instead of the correct ANALYSIS_INCOMPLETE classification
-    even though the CLI itself correctly exited 1. ``INPUT_AGAINST`` is
+    two-sided ``compare`` shape) and no ``diff`` wrapper either (unlike the
+    legacy nested shape ``test_the_nested_diff_shape_is_read_too`` above
+    covers) -- the same information lives under
+    ``exit_axes.analysis_assurance`` instead. Before the fix, an audit-only
+    run with ``assurance.require_complete: true`` read a missing key here,
+    silently answered "not gated", and this Action reported a plain ERROR
+    instead of the correct ANALYSIS_INCOMPLETE classification even though
+    the CLI itself correctly exited 1. ``INPUT_OLD_LIBRARY`` is
     deliberately never set below -- that omission is what selects the
-    ``--no-baseline`` audit path (``run.sh``'s own ``MODE == "scan" &&
-    -z INPUT_AGAINST`` dispatch)."""
+    ``compare --no-baseline`` audit path."""
 
     def _no_baseline_report(self, *, contribution: int) -> dict:
         return {
@@ -381,7 +390,7 @@ class TestConfigDrivenAssuranceGateReadsTheNoBaselineShapeToo:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -402,7 +411,7 @@ class TestConfigDrivenAssuranceGateReadsTheNoBaselineShapeToo:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),

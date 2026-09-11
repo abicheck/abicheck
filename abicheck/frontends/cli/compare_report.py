@@ -69,11 +69,18 @@ if TYPE_CHECKING:
 
 
 def _apply_scoped_gating(
-    result: Any, old: Any, new: Any, policy: str, pf: PolicyFile | None,
+    result: Any,
+    old: Any,
+    new: Any,
+    policy: str,
+    pf: PolicyFile | None,
     *,
-    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
-    used_by_old_input: Path, used_by_new_input: Path,
-    exit_code_scheme: str, sev_config: Any,
+    used_by_apps: tuple[ConsumerAppInput, ...],
+    required_symbols: tuple[str, ...],
+    used_by_old_input: Path,
+    used_by_new_input: Path,
+    exit_code_scheme: str,
+    sev_config: Any,
     suppression: Any,
 ) -> int | None:
     """Apply whichever ADR-043 scoped gate this run selected, if any.
@@ -84,25 +91,46 @@ def _apply_scoped_gating(
     """
     if used_by_apps:
         return _apply_used_by_scoping(
-            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
-            policy, pf,
-            exit_code_scheme=exit_code_scheme, sev_config=sev_config,
+            result,
+            used_by_apps,
+            used_by_old_input,
+            used_by_new_input,
+            old,
+            new,
+            policy,
+            pf,
+            exit_code_scheme=exit_code_scheme,
+            sev_config=sev_config,
             suppression=suppression,
         )
     if required_symbols:
         return _apply_required_symbol_scoping(
-            result, required_symbols, old, new, policy, pf,
-            exit_code_scheme=exit_code_scheme, sev_config=sev_config,
+            result,
+            required_symbols,
+            old,
+            new,
+            policy,
+            pf,
+            exit_code_scheme=exit_code_scheme,
+            sev_config=sev_config,
             suppression=suppression,
         )
     return None
 
 
 def _render_compare_report(
-    result: Any, old: Any, new: Any, *,
-    fmt: str, follow_deps: bool, show_only: str | None, report_mode: str,
-    show_impact: bool, severity_config: Any,
-    demangle: bool, contract_evaluation: bool,
+    result: Any,
+    old: Any,
+    new: Any,
+    *,
+    fmt: str,
+    follow_deps: bool,
+    show_only: str | None,
+    report_mode: str,
+    show_impact: bool,
+    severity_config: Any,
+    demangle: bool,
+    contract_evaluation: bool,
     require_complete_analysis: bool = False,
     audit_suppressions: bool = False,
 ) -> str:
@@ -126,9 +154,13 @@ def _render_compare_report(
     them and no fourth fold-in is needed here any more.
     """
     text = _render_output(
-        fmt, result, old, new,
+        fmt,
+        result,
+        old,
+        new,
         follow_deps=follow_deps,
-        show_only=show_only, report_mode=report_mode,
+        show_only=show_only,
+        report_mode=report_mode,
         show_impact=show_impact,
         severity_config=severity_config,
         demangle=demangle,
@@ -136,9 +168,12 @@ def _render_compare_report(
         require_complete_analysis=require_complete_analysis,
     )
     text = _fold_scoped_compat_into_text(
-        text, fmt, result,
+        text,
+        fmt,
+        result,
         severity_config=severity_config,
-        show_only=show_only, report_mode=report_mode,
+        show_only=show_only,
+        report_mode=report_mode,
         contract_evaluation=contract_evaluation,
         demangle=demangle,
     )
@@ -196,15 +231,19 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 
 
 def _reject_flags_unsupported_for_set_inputs(
-    ctx: click.Context, *,
+    ctx: click.Context,
+    *,
     env_matrix_path: Path | None,
-    used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
-    diagnostic_comparison: bool, audit_suppressions: bool,
+    used_by_apps: tuple[ConsumerAppInput, ...],
+    required_symbols: tuple[str, ...],
+    diagnostic_comparison: bool,
+    audit_suppressions: bool,
     include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
     suppress: Path | None = None,
-    budget: str | None = None, pdb_path: Path | None = None,
+    budget: str | None = None,
+    pdb_path: Path | None = None,
 ) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -227,14 +266,16 @@ def _reject_flags_unsupported_for_set_inputs(
     """
     _reject_set_input_flags(
         env_matrix_path,
-        used_by_apps=used_by_apps, required_symbols=required_symbols,
+        used_by_apps=used_by_apps,
+        required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
         audit_suppressions=audit_suppressions,
         suppress=suppress,
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
-        budget=budget, pdb_path=pdb_path,
+        budget=budget,
+        pdb_path=pdb_path,
     )
     _reject_compile_context_for_set_inputs(ctx)
     return _reject_evidence_flags_for_set_inputs(ctx)
