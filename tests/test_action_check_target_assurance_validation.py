@@ -80,3 +80,82 @@ class TestValidateInputsAssuranceBundleInteraction:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(),
+    reason="actions/check-target/validate-inputs.sh not found",
+)
+class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
+    """P2 finding (Codex review, fresh evidence, PR #1222 fourth round):
+    ``analysis-assurance-complete``'s truthiness check in action.yml's own
+    "Generate assurance-overlay config" step (``if:
+    inputs.analysis-assurance-complete == 'true'``) only recognizes the
+    exact lowercase string 'true' -- ANY other value (a stray 'True',
+    'yes', or a typo) is silently treated as false, SKIPPING that step
+    entirely rather than failing, so a caller who clearly intended to
+    enable the assurance floor instead gets a normal, unenforced analysis
+    run with no diagnostic at all. Unlike its sibling boolean-like input
+    ``allow-new-target`` (validated by the ``case "$ALLOW_NEW_TARGET" in
+    true | false) ;; *) _fail ...`` pattern immediately above this input in
+    ``validate-inputs.sh``), ``analysis-assurance-complete`` had no such
+    validation at all before this fix -- added here, matching that exact
+    existing pattern rather than inventing a new style."""
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            pytest.param("True", id="capital-T"),
+            pytest.param("yes", id="yes"),
+            pytest.param("complete", id="typo-word"),
+            pytest.param("1", id="numeric-one"),
+        ],
+    )
+    def test_unrecognized_value_fails_loud(
+        self, tmp_path: Path, bad_value: str
+    ) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": bad_value,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+        assert f"analysis-assurance-complete '{bad_value}' is not recognized" in (
+            result.stdout + result.stderr
+        )
+
+    def test_true_still_passes(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_false_still_passes(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_omitted_defaults_to_false_and_still_passes(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {**_BASE_IDENTITY, "INPUT_BASELINE_PATH": "./b"},
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr

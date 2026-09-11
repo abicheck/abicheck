@@ -163,6 +163,18 @@ case "$ALLOW_NEW_TARGET" in
   true | false) ;;
   *) _fail "allow-new-target '$ALLOW_NEW_TARGET' is not recognized. Use 'true' or 'false'." ;;
 esac
+case "$ANALYSIS_ASSURANCE_COMPLETE" in
+  true | false) ;;
+  # action.yml's own "Generate assurance-overlay config" step guards on the
+  # exact lowercase string comparison `inputs.analysis-assurance-complete ==
+  # 'true'` -- any other value (a stray 'True', 'yes', or a typo) silently
+  # reads as false there, SKIPPING that step entirely rather than failing,
+  # so a caller who clearly intended to enable the assurance floor instead
+  # gets a normal, unenforced analysis run with no diagnostic at all (Codex
+  # review). Same "not recognized" enum-validation pattern as
+  # allow-new-target immediately above.
+  *) _fail "analysis-assurance-complete '$ANALYSIS_ASSURANCE_COMPLETE' is not recognized. Use 'true' or 'false'." ;;
+esac
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
   _fail "consumer-binary is required when target-kind is 'app-consumer'."
 fi
