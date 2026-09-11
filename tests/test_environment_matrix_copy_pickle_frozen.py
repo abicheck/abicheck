@@ -430,13 +430,51 @@ class TestFrozenStrDictContract:
 
     def test_direct_attribute_reassignment_raises(self) -> None:
         """Replacing the private backing store wholesale
-        (`instance._data = {...}`) is an equally effective mutation vector
+        (`instance._items = (...)`) is an equally effective mutation vector
         to the item-level ones above -- blocked by this class's own
         `__setattr__` override."""
         d = FrozenStrDict({"a": "1"})
         with pytest.raises(TypeError):
-            d._data = {"a": "2"}  # type: ignore[misc]
+            d._items = (("a", "2"),)  # type: ignore[misc]
         assert dict(d) == {"a": "1"}
+
+    def test_backing_store_is_a_tuple_with_no_mutable_container_reachable(
+        self,
+    ) -> None:
+        """Codex review, PR #1221, round 12: the *reported* vector was
+        reaching the round-9 `Mapping` redesign's private `_data` plain
+        `dict` directly -- `instance._data["GLIBC"] = "2.34"` mutated that
+        dict object in place without ever touching `__setattr__` at all,
+        since `__setattr__` only blocked *reassigning* `_data` wholesale,
+        not mutating what it already pointed to. The fix backs the mapping
+        with a `tuple` of pairs instead, which has no mutating method to
+        reach in the first place. This asserts both halves: the private
+        attribute is no longer even named `_data` (the exact reported
+        repro string must fail with `AttributeError`), and whatever it is
+        now named is a `tuple`, which cannot be item-assigned at all."""
+        d = FrozenStrDict({"GLIBC": "2.28"})
+        assert not hasattr(d, "_data")
+        assert isinstance(d._items, tuple)
+        with pytest.raises(TypeError):
+            d._items[0] = ("GLIBC", "2.34")  # type: ignore[index]
+
+    def test_reported_repro_string_no_longer_mutates(self) -> None:
+        """The finding's own exact reported repro,
+        ``request.env_matrix.runtime_floors._data["GLIBC"] = "2.34"``,
+        applied directly to a `FrozenStrDict` instance: it must no longer
+        be able to mutate the instance's observable contents or hash,
+        regardless of whether it raises `AttributeError` (no `_data`
+        attribute exists any more) or `TypeError` (whatever the backing
+        attribute is now doesn't support item assignment)."""
+        d = FrozenStrDict({"GLIBC": "2.28"})
+        original_contents = dict(d)
+        original_hash = hash(d)
+
+        with pytest.raises((AttributeError, TypeError)):
+            d._data["GLIBC"] = "2.34"  # type: ignore[attr-defined]
+
+        assert dict(d) == original_contents
+        assert hash(d) == original_hash
 
     def test_reinit_on_already_constructed_instance_raises_and_preserves_hash(
         self,
