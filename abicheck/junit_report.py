@@ -613,7 +613,7 @@ def _build_testsuite(
     props = ET.SubElement(ts, "properties")
     _add_disposition_audit_properties(props, result, severity_config, report_document=_resolved_document(envelope, report_document))
     _add_scoped_properties(props, result)
-    _add_env_matrix_property(props, result)
+    _add_env_matrix_property(props, result, report_document=_resolved_document(envelope, report_document))
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
     # rootCauseId/rootCause attributes to each <failure> rather than
@@ -691,10 +691,11 @@ def _emit_missing_contract_testcases(
                     fail.set("rootCause", entry[1])
 
 
-def _add_env_matrix_property(props: ET.Element, result: DiffResult) -> None:
-    """Mirrors no_baseline_render.py's env_matrix_source_sha256 property;
-    omitted, not an empty-string property, when no matrix was declared."""
-    digest = getattr(result, "env_matrix_source_sha256", None)
+def _add_env_matrix_property(props: ET.Element, result: DiffResult, report_document: ReportDocument | None = None) -> None:
+    """Mirrors no_baseline_render.py's env_matrix_source_sha256 property; omitted, not an empty-string property, when no matrix was declared.
+    *report_document* (ADR-061 gap C), when given, is read instead of the mutable *result* (Codex review, fresh evidence)."""
+    from .report.envelope import env_matrix_digest_reusing_document
+    digest = env_matrix_digest_reusing_document(result, report_document)
     if digest is None:
         return
     p = ET.SubElement(props, "property")
