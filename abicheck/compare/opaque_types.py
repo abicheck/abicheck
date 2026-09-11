@@ -201,7 +201,12 @@ class OpaqueTypeIndex:
         return bool(self.stable or self.local)
 
     @classmethod
-    def build(cls, declarations: Mapping[str, list[RecordType]]) -> OpaqueTypeIndex:
+    def build(
+        cls,
+        declarations: Mapping[str, list[RecordType]],
+        *,
+        stable_ids: set[StableEntityId] | None = None,
+    ) -> OpaqueTypeIndex:
         """Build a two-tier index from a bare-name -> declarations map.
 
         For a call site that has its own already-computed set of bare
@@ -215,6 +220,24 @@ class OpaqueTypeIndex:
         own index directly instead of through this classmethod, since it
         additionally needs the per-spelling ``stable_by_local`` breakdown
         this simpler builder does not compute.
+
+        *stable_ids*, when given, replaces the naive "every ``entity_id``
+        resolved among *any* declaration in *declarations*" default with a
+        caller-verified set. Required whenever *declarations* was grouped by
+        bare spelling rather than by a criterion that already pairs
+        declarations by identity: two *different* entities can share one
+        bare ``RecordType.name`` (Codex review, PR #1218, two rounds) --
+        first a genuinely opaque declaration colliding with an unrelated
+        visible one, then a subtler case where each side's own opaque
+        declaration under a shared spelling is a *different* entity
+        entirely (old's declaration went visible in new; new's opaque
+        declaration under that same spelling is a namesake that was never
+        opaque in old). Grouping by spelling alone cannot distinguish either
+        case from a real single entity that is genuinely opaque on both
+        sides or genuinely absent from the other side -- only the caller,
+        which can resolve identity across both snapshots directly, can. See
+        :func:`find_opaque_struct_types` for the verification this performs
+        before passing a set here.
 
         ``complete`` is left at its dataclass default (``True``) here on
         purpose, but that default is *not* a completeness proof the way
@@ -231,10 +254,16 @@ class OpaqueTypeIndex:
         for name, decls in declarations.items():
             for t in decls:
                 local.add(snapshot_local_identity(name, t.entity_id))
-                resolved = stable_entity_id(t.entity_id)
-                if resolved is not None:
-                    stable.add(resolved)
-        return cls(stable=frozenset(stable), local=frozenset(local))
+                if stable_ids is None:
+                    resolved = stable_entity_id(t.entity_id)
+                    if resolved is not None:
+                        stable.add(resolved)
+        return cls(
+            stable=frozenset(stable_ids)
+            if stable_ids is not None
+            else frozenset(stable),
+            local=frozenset(local),
+        )
 
     def contains(self, change: Change, spelling: str, *, strict: bool = False) -> bool:
         """Whether *change* names an opaque declaration.
@@ -420,26 +449,64 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
 
     # Only a declaration that itself satisfies ``is_opaque`` may contribute
-    # its stable EntityId here -- a bare-name collision between this opaque
-    # declaration and an unrelated *visible* record sharing the same
-    # rendered ``RecordType.name`` (e.g. two differently-namespaced
-    # ``Handle`` types) must not smuggle the visible record's own stable id
-    # into the opaque index just because the two share a spelling (Codex
-    # review, PR #1218): that would let a qualified, identity-carrying
-    # Change for the *visible* type match the stable tier and be wrongly
-    # downgraded, a strictly worse outcome than the pre-migration bare
-    # string comparison for that same collision. This does not narrow the
-    # bare-spelling local tier: `OpaqueTypeIndex.build`'s `local` entries
-    # compare equal by spelling alone (`SnapshotLocalIdentity.entity_id` is
-    # `compare=False`), so "Handle" still lands in `local` from the
-    # qualifying opaque declaration alone -- the pre-migration
-    # `c.symbol in truly_opaque` fallback is unaffected either way.
+    # to the local (bare-spelling) tier here -- the pre-migration
+    # `c.symbol in truly_opaque` fallback only ever compared against opaque
+    # declarations' own names, so a non-opaque namesake must not join
+    # `declarations` even for the always-safe spelling tier.
     declarations: dict[str, list[RecordType]] = {}
     for snap in (old, new):
         for t in snap.types:
             if t.name in truly_opaque and t.is_opaque:
                 declarations.setdefault(t.name, []).append(t)
-    return OpaqueTypeIndex.build(declarations)
+
+    # The *stable* tier needs a stricter, identity-paired check than "any
+    # opaque declaration under a qualifying spelling" -- two rounds of Codex
+    # review on PR #1218 found that grouping by bare name alone lets a
+    # stable id ride along on a coincidence rather than actual opacity:
+    #
+    # 1. An opaque ``ns::Handle`` and an unrelated, *visible* ``other::
+    #    Handle`` collide on the bare spelling "Handle" -- adding every
+    #    same-named declaration's id (not just the opaque one's) would
+    #    smuggle the visible declaration's own stable id into the index.
+    # 2. Even restricted to `is_opaque` declarations, ``old_opaque &
+    #    new_opaque`` only proves *some* declaration named "Handle" is
+    #    opaque on *each* side -- not that it is the *same* declaration.
+    #    If ``ns::Handle`` is opaque in old but goes visible in new, while
+    #    an unrelated ``other::Handle`` is opaque only in new, "Handle"
+    #    still lands in `truly_opaque` via the intersection, and
+    #    ``ns::Handle``'s own old-side stable id would wrongly enter the
+    #    index even though *that specific entity* is not opaque on both
+    #    sides at all.
+    #
+    # Resolving per stable EntityId across both snapshots (independent of
+    # bare-name grouping) closes both: an id may enter the stable tier only
+    # when the *same* entity is confirmed opaque under this function's own
+    # criterion --- opaque on both sides, or genuinely absent (by identity,
+    # not by name) from the other snapshot entirely.
+    old_by_stable_id: dict[StableEntityId, RecordType] = {}
+    for t in old.types:
+        resolved = stable_entity_id(t.entity_id)
+        if resolved is not None:
+            old_by_stable_id[resolved] = t
+    new_by_stable_id: dict[StableEntityId, RecordType] = {}
+    for t in new.types:
+        resolved = stable_entity_id(t.entity_id)
+        if resolved is not None:
+            new_by_stable_id[resolved] = t
+
+    stable_ids: set[StableEntityId] = set()
+    for snap, other_by_id in ((old, new_by_stable_id), (new, old_by_stable_id)):
+        for t in snap.types:
+            if t.name not in truly_opaque or not t.is_opaque:
+                continue
+            resolved = stable_entity_id(t.entity_id)
+            if resolved is None:
+                continue
+            other_t = other_by_id.get(resolved)
+            if other_t is None or other_t.is_opaque:
+                stable_ids.add(resolved)
+
+    return OpaqueTypeIndex.build(declarations, stable_ids=stable_ids)
 
 
 #: Matches whitespace or a leading cv-qualifier keyword, repeated -- the

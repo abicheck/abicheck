@@ -761,6 +761,35 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         out = _downgrade_opaque_struct_changes([change], old, new)
         assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
 
+    def test_a_now_visible_types_own_stable_id_is_not_smuggled_in_via_a_namesake(
+        self,
+    ) -> None:
+        """A second, subtler false positive (Codex review round 2, PR
+        #1218): ``ns::Handle`` is opaque only in ``old`` and goes *visible*
+        in ``new`` (same entity, same stable id, ``is_opaque`` flips), while
+        an unrelated ``other::Handle`` happens to become opaque only in
+        ``new``. ``old_opaque & new_opaque`` still puts the shared bare name
+        "Handle" in ``truly_opaque`` -- but that intersection only proves
+        *some* declaration named "Handle" is opaque on each side, not that
+        it is the *same* declaration. Restricting to ``is_opaque``
+        declarations alone (the first-round fix) is not enough: without
+        entity-level pairing, ``ns::Handle``'s own old-side stable id would
+        still enter the stable tier, wrongly suppressing its own,
+        genuinely-observable layout change in ``new`` (the type is no
+        longer opaque -- consumers can see it)."""
+        stable_id = _STABLE_ID
+        other_id = _OTHER_STABLE_ID
+        old = _snap([_record("Handle", is_opaque=True, entity_id=stable_id)])
+        new = _snap(
+            [
+                _record("Handle", is_opaque=False, entity_id=stable_id),
+                _record("Handle", is_opaque=True, entity_id=other_id),
+            ]
+        )
+        change = _struct_size_change("ns::Handle", entity_id=stable_id)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
 
 # -- Primitive-level property tests: OpaqueTypeIndex.build ------------------
 
