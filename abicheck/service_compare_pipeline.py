@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING, Any
 from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
+from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .policy.depth_projection import (
     project_build_source_pack_to_depth,
@@ -77,7 +78,6 @@ from .workflows.request_inputs import InputSpec, required_path
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .environment_matrix import EnvironmentMatrix
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import SideResolution

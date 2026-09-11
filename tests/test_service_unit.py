@@ -3384,12 +3384,13 @@ class TestContractEvaluationThreading:
         # docstring), then project_policy_overrides (findings-analysis-fixes
         # batch, second review round, defect 4: the release fan-out's own
         # `.abicheck.yml` `policy.overrides` gap), same rule.
-        assert params[-12:] == [
+        assert params[-13:] == [
             "diagnostic_comparison", "contract_evaluation",
             "include_dependencies", "contract_mode", "pack_policy_overrides",
             "pack_internal_namespaces", "compile_context", "depth",
             "severity_preset", "public_header_dirs",
             "collapse_versioned_symbols", "project_policy_overrides",
+            "env_matrix",
         ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
