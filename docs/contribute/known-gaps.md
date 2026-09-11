@@ -7893,7 +7893,7 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
 
-### ADR-061 gap F: ten nested `buildsource`/`compat`/`impact` modules still carry no disposition
+### ADR-061 gap F: eleven nested `buildsource`/`compat`/`impact` modules still carry no disposition
 
 [ADR-061](adr/061-responsibility-package-architecture.md)'s gap F requires
 every unclassified first-party module under `abicheck/` to carry one of
@@ -7908,34 +7908,43 @@ this gap (enumerating every `.py` file under `abicheck/` not already
 covered by a canonical layer directory, a layer's `legacy_paths`, or an
 existing `debt.yaml` entry) found 44 such nested modules, all under
 `abicheck/buildsource/`, `abicheck/compat/`, `abicheck/impact/`, and
-`abicheck/schemas/`. 34 of them were classified by adding them to the
+`abicheck/schemas/`. 33 of them were classified by adding them to the
 appropriate layer's `legacy_paths` in `architecture/modules.yaml` (the
 "migrate through a named responsibility slice" disposition — verified,
 not merely asserted, by a full `scripts/check_architecture.py` run showing
 no new `dependency-direction`/`dependency-cycle`/`unclassified-import`
-findings after the change). The remaining ten could not be classified the
-same way without breaking that verification, and are recorded here
+findings after the change). The remaining eleven could not be classified
+the same way without breaking that verification, and are recorded here
 instead, following the same "trial classification measured N new
 violations, blocked" pattern this ADR's other gaps already use for
 `comparability.py`/`build_context.py`/etc.
 
-**Blocked `migrate` dispositions** — each module's own outgoing imports are
-clean for its named target layer, but a *different*, already-classified
-module imports it directly from a layer that target does not allow, so
-classifying it would immediately trip `check_architecture.py`'s
-`dependency-direction` check. Each needs the same fix this ADR's other
-blocked entries name: route the offending caller through a workflows-owned
-wrapper (or otherwise decouple it) before the target classification is
-safe — not attempted here, per this ADR's "not the same-PR fix" bar for
-migrations that already have caller-side test/behavior surface to
-preserve.
+**Blocked `migrate` dispositions**, two shapes:
+
+- *Caller-forced* (the common case below): each module's own outgoing
+  imports are clean for its named target layer, but a *different*,
+  already-classified module imports it directly from a layer that target
+  does not allow, so classifying it would immediately trip
+  `check_architecture.py`'s `dependency-direction` check. Each needs the
+  same fix this ADR's other blocked entries name: route the offending
+  caller through a workflows-owned wrapper (or otherwise decouple it)
+  before the target classification is safe — not attempted here, per this
+  ADR's "not the same-PR fix" bar for migrations that already have
+  caller-side test/behavior surface to preserve.
+- *Self-dependency* (`build_evidence.py`, the one exception below): the
+  module's *own* outgoing import, not a caller, is what blocks its target
+  classification. The caller-side remedy above (wrap or decouple the
+  caller) does not apply here — the fix is to move or decouple the
+  blocking dependency inside the module itself.
 
 - `abicheck/buildsource/build_evidence.py` (target: `model` — its own
   docstring is literally "Build-system-neutral build evidence model", and
   `abicheck/buildsource/pack.py` (already `model`-classified) imports it
-  directly, ruling out `extract`) — blocked because it itself imports
-  `.comdat_groups` (`extract`-classified), which `model`'s empty
-  `may_import` forbids.
+  directly, ruling out `extract`) — a *self-dependency* block: it itself
+  imports `.comdat_groups` (`extract`-classified), which `model`'s empty
+  `may_import` forbids. Unlike every other entry below, no caller needs to
+  change — `comdat_groups` (or the piece of it this module actually uses)
+  would need to move or be decoupled from this module directly.
 - `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
   sibling adapters) — blocked because `abicheck/cli_project.py`
   (`frontends`) imports it directly; `frontends` may not import `extract`.
@@ -7985,8 +7994,29 @@ preserve.
   `policy.classification` through this one intermediate file — rather than
   recording it as the blocked `frontends -> policy` case it actually is.
 
-**Retain, deliberately unclassified ("no single layer" leaf)**:
+**Retain, deliberately unclassified**:
 
+- `abicheck/buildsource/source_graph.py` — a pure back-compat re-export
+  facade (its own docstring: "Back-compat facade: source-graph values/
+  construction/comparison split"), not a real implementation module. Every
+  name it used to define now lives in already-classified siblings
+  (`model.graph_facts`/`model.source_graph` for values, `extract`-classified
+  `source_graph_build.py`/`source_graph_build_source_abi.py`/
+  `source_graph_query.py` for construction, `compare`-classified
+  `source_graph_compare.py` for comparison); this module only re-exports
+  those names (`X as X`) so a pre-existing `from .source_graph import ...`
+  call site keeps resolving. No internal first-party module actually
+  imports it any more (every real internal caller already imports the
+  split-out siblings directly) — it exists purely for external/legacy
+  callers. Classifying it `workflows` (as an earlier version of this
+  change did) would misstate its responsibility: it coordinates nothing,
+  and giving a pure re-export facade a real layer identity is exactly the
+  kind of false ownership this ADR's facade rules (root-level
+  `public_root_surfaces`/`facades`) exist to prevent elsewhere — this
+  module is simply nested, so that schema doesn't reach it. Root-level
+  `architecture/modules.yaml` facade tracking is schema-limited the same
+  way `dispositions.yaml` is (root paths only), which is why this is
+  recorded here rather than there.
 - `abicheck/impact/model.py` — the identical shape gap B already
   established for `checker_policy.py`/`contract_gating.py`/`reclassify.py`:
   `abicheck/checker_types.py` (`model`, whose `may_import` is empty)

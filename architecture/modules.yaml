@@ -315,7 +315,6 @@
         "abicheck/buildsource/check_report_run_outcome.py",
         "abicheck/buildsource/cross_source_checks.py",
         "abicheck/buildsource/evidence_report.py",
-        "abicheck/buildsource/source_graph.py",
         "abicheck/bundle.py",
         "abicheck/bundle_analysis.py",
         "abicheck/bundle_detector_heuristics.py",
