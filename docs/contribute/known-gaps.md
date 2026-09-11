@@ -7936,13 +7936,6 @@ preserve.
   directly, ruling out `extract`) — blocked because it itself imports
   `.comdat_groups` (`extract`-classified), which `model`'s empty
   `may_import` forbids.
-- `abicheck/buildsource/source_abi.py` (target: `model` — same reasoning
-  as `build_evidence.py`: `pack.py` imports it directly, and its own
-  docstring says "the model is pure data") — not independently blocked
-  today (it has no problematic outgoing import of its own), but recorded
-  as `model` rather than `extract` for the same `pack.py`-forces-the-target
-  reason, and left unclassified pending `build_evidence.py`'s own
-  resolution so the two model-shaped siblings move together.
 - `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
   sibling adapters) — blocked because `abicheck/cli_project.py`
   (`frontends`) imports it directly; `frontends` may not import `extract`.
@@ -7977,6 +7970,20 @@ preserve.
   both already `workflows`) — blocked because
   `abicheck/post_processing_reachability.py` (`policy`) also imports it
   directly (lazily); `policy` may not import `workflows`.
+- `abicheck/compat/_helpers.py` (target: `frontends` — split directly out
+  of `compat/cli.py` per its own module docstring, implements ABICC CLI
+  translations, imports `click`, and is imported only by `compat/cli.py`
+  itself, already `frontends`-classified) — blocked because its own body
+  imports `..policy.classification` directly, which `frontends`' `may_import`
+  (`model`/`workflows`/`report` only) forbids. Its sibling `compat/_errors.py`
+  carries no such import (only `click` and the already-`model`-classified
+  `errors.py`) and was reclassified to `frontends` in this same pass —
+  verified empirically, not merely asserted, the same way every `migrate`
+  disposition in this gap was. Classifying `_helpers.py` under `workflows`
+  instead (as a superficial fix) would not be a correct disposition: it
+  would paper over the real edge — `compat/cli.py` (`frontends`) reaching
+  `policy.classification` through this one intermediate file — rather than
+  recording it as the blocked `frontends -> policy` case it actually is.
 
 **Retain, deliberately unclassified ("no single layer" leaf)**:
 
