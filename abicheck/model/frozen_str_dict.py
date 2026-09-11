@@ -37,102 +37,162 @@ branch -- which, even with that reducer registered, reconstructs *another*
 genuinely-frozen result), not the plain, JSON-serializable ``dict``
 ``json.dumps()`` needs.
 
-A ``dict`` *subclass* like :class:`FrozenStrDict` sidesteps this entirely:
-``_asdict_inner``'s ``isinstance(obj, dict)`` branch recognizes it natively,
-and ``type(obj)(...)`` reconstructs an instance of this class from the
-recursed key/value pairs -- and since every mutation method below is
-disabled, the result is exactly as immutable as the input. A ``dict``
-subclass instance is itself accepted natively by ``json.dumps()`` too (the
-encoder tests ``isinstance(o, dict)``, not ``type(o) is dict``), so
-``json.dumps(dataclasses.asdict(...))`` round-trips such a field losslessly
-with no manual unwrapping required.
+Why not a ``dict`` *subclass* either (Codex review, fresh evidence, PR
+#1221, round 9): an earlier version of this class *was* a ``dict``
+subclass, with every mutating method overridden to raise. That closes every
+mutation reachable through the subclass's own bound methods, but not one
+that bypasses them entirely: ``dict.__setitem__(instance, "GLIBC", "2.34")``
+-- calling the *base class's* method directly, rather than
+``instance.__setitem__(...)`` -- still mutates the instance's underlying
+``dict`` storage in place, because that storage lives in the object itself
+(every ``dict`` subclass shares the same C-level slots) and
+``dict.__setitem__`` operates on whatever object it is given, irrespective
+of which subclass overrides that name. No amount of instance-method
+overriding can close this: it is not a gap in which methods were
+overridden, it is that *being* a ``dict`` at the C level always exposes
+this back door. If an :class:`~abicheck.workflows.contracts.CompareRequest`
+carrying this mapping is already a set/dict member, that mutation silently
+changes its hash out from under the container -- exactly the hash-invariant
+violation every previous round of this fix was trying to close, just
+reached through one more entry point.
+
+The fix: don't be a ``dict`` at all. :class:`FrozenStrDict` now subclasses
+``collections.abc.Mapping`` instead, backed by a private ``_data`` plain
+``dict`` that is never exposed for mutation and has no relationship to
+``instance``'s own class the way subclass storage does -- there is no
+``Mapping.__setitem__`` (or any other base-class mutator) to call directly
+in the first place, on this class or any ancestor, so the base-class-method
+bypass is categorically impossible rather than merely unencountered.
+
+This does mean giving up the free ride ``_asdict_inner``'s
+``isinstance(obj, dict)`` branch gave the previous, ``dict``-subclass
+design: a ``Mapping``-but-not-``dict`` object instead falls to
+``_asdict_inner``'s final ``copy.deepcopy(obj)`` branch (verified against
+this repository's supported Python versions' actual
+``dataclasses._asdict_inner`` source), so :meth:`FrozenStrDict.__deepcopy__`
+is what makes ``dataclasses.asdict()`` over a field of this type still
+produce a plain, JSON-serializable ``dict`` -- see that method's own
+docstring for why it deliberately returns a plain ``dict`` rather than
+another :class:`FrozenStrDict`, and
+:meth:`abicheck.environment_matrix.EnvironmentMatrix.__deepcopy__` for how a
+*direct* ``copy.deepcopy()`` of the containing dataclass (a different call
+than the one ``asdict()`` makes) still keeps this field's own immutability.
 """
+
 from __future__ import annotations
 
+import copy as _copy
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 
-class FrozenStrDict(dict[str, str]):
-    """An immutable, hashable ``str -> str`` mapping; a ``dict`` subclass so
-    ``dataclasses.asdict()`` recurses into it natively (see this module's
-    own docstring for the full rationale).
+class FrozenStrDict(Mapping[str, str]):
+    """An immutable, hashable ``str -> str`` mapping; a ``Mapping`` (never a
+    ``dict``) so no direct base-class mutator call can reach its storage --
+    see this module's own docstring for the full rationale and why an
+    earlier ``dict``-subclass design could not close that gap by overriding
+    instance methods alone.
 
-    Construction (``FrozenStrDict(some_dict)``) is unaffected by the
-    disabled mutators below: CPython's ``dict.__init__``/``dict.update``
-    populate a dict's storage directly at the C level rather than through
-    the Python-visible ``__setitem__`` slot, so building a new instance from
-    a plain mapping still works; only *post-construction* mutation raises.
-    ``__reduce__`` makes both ``pickle`` and ``copy.deepcopy`` reconstruct
-    through that same safe constructor path (``self.__class__(dict(self))``)
-    rather than ``copy``'s generic item-by-item ``_reconstruct``, which
-    would otherwise call the disabled ``__setitem__`` and raise.
+    Backed by a private ``_data`` plain ``dict``, set exactly once in
+    ``__init__`` and never exposed for mutation -- there is no
+    ``__setitem__``/``__delitem__``/etc. at all, on this class or on
+    ``Mapping`` (whose only abstract/mixin methods are read-only:
+    ``__getitem__``, ``__iter__``, ``__len__``, plus the read-only mixins
+    ``get``/``keys``/``items``/``values``/``__contains__``/``__eq__``/
+    ``__ne__`` those three provide).
 
-    Every entry point CPython's ``dict`` uses to mutate contents in place is
-    overridden below: ``__setitem__``, ``__delitem__``, ``__ior__`` (the
-    ``|=`` in-place-union operator -- easy to miss since it neither calls
-    ``__setitem__`` nor ``update()``, and inheriting it unblocked would let
-    ``matrix.runtime_floors |= {...}`` silently mutate a shared instance in
-    place, Codex review round 8), ``update``, ``pop``, ``popitem``,
-    ``clear``, and ``setdefault``. ``copy()`` is deliberately left alone: it
-    returns a fresh plain ``dict``, not a mutation of ``self``.
-
-    ``__init__`` itself is the newest entry in that list (Codex review, PR
-    #1221, round 11): since ``FrozenStrDict`` is a ``dict`` subclass rather
-    than a fresh wrapper object, calling ``.__init__(...)`` a *second* time
-    directly on an already-constructed instance re-runs ``dict.__init__``,
-    which repopulates the instance's storage in place at the C level --
-    bypassing every mutator override above, none of which intercept
-    ``__init__`` being invoked again. Guarded with a one-shot sentinel
-    (``_initialized``, a plain instance attribute -- this class defines no
-    ``__slots__``, so normal attribute assignment works and is not itself one
-    of the mutators disabled above) set only after the *first* real
-    ``dict.__init__`` call completes; a further call raises instead of
-    mutating. The first call -- ordinary construction, including the
-    ``__reduce__``-driven reconstruction pickle/``copy.deepcopy`` use -- is
-    unaffected, since the sentinel is not yet set on a brand-new instance.
+    Constructs from anything ``dict(...)`` itself accepts (another mapping,
+    an iterable of key/value pairs, or keyword arguments), so
+    ``FrozenStrDict(some_dict)``/``FrozenStrDict(other_frozen_str_dict)``
+    both work the way the previous ``dict``-subclass version did.
     """
 
-    _initialized: bool
+    __slots__ = ("_data",)
+    _data: dict[str, str]
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if getattr(self, "_initialized", False):
+    def __init__(
+        self,
+        data: Mapping[str, str] | Iterable[tuple[str, str]] = (),
+        /,
+        **kwargs: str,
+    ) -> None:
+        # Codex review, PR #1221, round 11 (still applicable after the
+        # round-9 `Mapping` redesign): calling `.__init__(...)` a *second*
+        # time directly on an already-constructed instance must not
+        # silently repopulate `_data` in place -- the same hash-invariant
+        # violation every other mutation vector this class closes would
+        # cause. `hasattr` is a reliable one-shot sentinel here since
+        # `_data` is declared via `__slots__` and is unset until this
+        # method's own first `object.__setattr__` call below.
+        if hasattr(self, "_data"):
             raise TypeError("FrozenStrDict is immutable")
-        super().__init__(*args, **kwargs)
-        self._initialized = True
+        object.__setattr__(self, "_data", dict(data, **kwargs))
 
-    def __setitem__(self, key: str, value: str) -> None:
+    # -- Mapping's three abstract methods -----------------------------------
+
+    def __getitem__(self, key: str) -> str:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    # -- Genuine immutability: no attribute (re)assignment either -----------
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Blocks `instance._data = {...}` -- reassigning the private backing
+        # dict wholesale would be an equally effective mutation vector to
+        # the ones this class exists to close, and unlike a `dict` subclass
+        # this class has no C-level storage a base-class method could reach
+        # around `__setattr__` in the first place, so this check alone is
+        # sufficient (no separate `dict.__setitem__`-style bypass exists for
+        # a `Mapping`-only object -- there is no base class with mutating
+        # methods to call directly).
         raise TypeError("FrozenStrDict is immutable")
 
-    def __delitem__(self, key: str) -> None:
+    def __delattr__(self, name: str) -> None:
         raise TypeError("FrozenStrDict is immutable")
 
-    def __ior__(self, other: Any) -> FrozenStrDict:  # type: ignore[override, misc]
-        # ``matrix.runtime_floors |= {...}`` calls this, not ``__setitem__``/
-        # ``update`` -- ``dict.__ior__`` mutates the receiver in place at the
-        # C level and returns it, bypassing every other override above
-        # entirely. Left unblocked, it would silently mutate a
-        # ``FrozenStrDict`` already embedded in a hashed container (Codex
-        # review, PR #1221) exactly like the mutators below, just via a
-        # different bytecode op (``BINARY_OP`` inplace-or, not ``STORE_SUBSCR``).
-        raise TypeError("FrozenStrDict is immutable")
+    # -- repr/equality/hash ---------------------------------------------------
 
-    def update(self, *args: Any, **kwargs: Any) -> None:
-        raise TypeError("FrozenStrDict is immutable")
-
-    def pop(self, *args: Any, **kwargs: Any) -> Any:
-        raise TypeError("FrozenStrDict is immutable")
-
-    def popitem(self) -> tuple[str, str]:
-        raise TypeError("FrozenStrDict is immutable")
-
-    def clear(self) -> None:
-        raise TypeError("FrozenStrDict is immutable")
-
-    def setdefault(self, *args: Any, **kwargs: Any) -> Any:
-        raise TypeError("FrozenStrDict is immutable")
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self._data!r})"
 
     def __hash__(self) -> int:  # type: ignore[override]
-        return hash(tuple(sorted(self.items())))
+        return hash(tuple(sorted(self._data.items())))
+
+    # -- pickle ---------------------------------------------------------------
 
     def __reduce__(self) -> tuple[Any, tuple[dict[str, str]]]:
-        return (self.__class__, (dict(self),))
+        # Reconstructs through the normal constructor, producing another
+        # genuine (immutable) `FrozenStrDict` -- pickling is not the call
+        # `dataclasses.asdict()` makes (see `__deepcopy__` below for that
+        # one), so there is no JSON-serialization pressure here forcing a
+        # plain-`dict` result the way there is for deepcopy.
+        return (self.__class__, (dict(self._data),))
+
+    # -- deepcopy ---------------------------------------------------------------
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, str]:
+        """Return a *plain*, independent ``dict`` deep copy -- deliberately
+        **not** another :class:`FrozenStrDict`.
+
+        ``dataclasses.asdict()``'s ``_asdict_inner`` recurses into a plain
+        ``dict`` field natively, but falls back to literally
+        ``copy.deepcopy(obj)`` for any value whose type is neither a
+        dataclass, ``list``, ``dict``/subclass, nor ``tuple``/subclass --
+        which is exactly the branch a ``Mapping``-but-not-``dict`` value
+        like this one takes (see this module's own docstring). That is the
+        *only* mechanism available to make ``asdict()``'s output JSON-safe
+        for this field now that it can no longer ride the ``dict``-subclass
+        branch, which is the entire reason ``FrozenStrDict`` exists. A
+        *direct* ``copy.deepcopy()`` of the dataclass that holds this field
+        (rather than of this object standing alone, or via ``asdict()``) is
+        a different call -- see
+        ``EnvironmentMatrix.__deepcopy__``, which reconstructs a genuine,
+        still-immutable ``FrozenStrDict`` for that path instead of
+        delegating to this method.
+        """
+        return _copy.deepcopy(self._data, memo)

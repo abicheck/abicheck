@@ -50,7 +50,6 @@ import copy
 import dataclasses
 import json
 import pickle
-from collections.abc import Callable
 
 import pytest
 from hypothesis import given, strategies as st
@@ -74,7 +73,8 @@ def _populated_matrix() -> EnvironmentMatrix:
         libstdcxx_dual_abi="cxx11",
         runtime_floors={"GLIBC": "2.28", "CXXABI": "1.3.13"},
         sycl=SyclConstraints(
-            implementation="dpcpp", backends=["level_zero", "opencl"],
+            implementation="dpcpp",
+            backends=["level_zero", "opencl"],
             min_pi_version="2",
         ),
         cuda=CudaConstraints(
@@ -145,7 +145,9 @@ class TestPickle:
         assert restored == matrix
 
     @pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
-    def test_pickle_round_trips_at_every_supported_protocol(self, protocol: int) -> None:
+    def test_pickle_round_trips_at_every_supported_protocol(
+        self, protocol: int
+    ) -> None:
         matrix = _populated_matrix()
         restored = pickle.loads(pickle.dumps(matrix, protocol=protocol))
         assert restored == matrix
@@ -163,17 +165,23 @@ class TestPickle:
         restored = pickle.loads(pickle.dumps(matrix))
         assert hash(restored) == hash(matrix)
 
-    def test_pickle_result_runtime_floors_stays_frozen_dict_subclass(self) -> None:
+    def test_pickle_result_runtime_floors_stays_frozen_str_dict(self) -> None:
         """`runtime_floors` round-trips as `model.frozen_str_dict.FrozenStrDict`
         (Codex review, PR #1221, Finding 2 follow-up), not a
         `types.MappingProxyType` -- see `test_environment_matrix_hashable.
         py::TestGenuineImmutability` for why the field switched away from a
-        proxy. Still genuinely immutable after the round trip: a plain
-        `dict` would not raise on item assignment here."""
+        proxy. Since round 9, `FrozenStrDict` is a `collections.abc.Mapping`,
+        deliberately *not* a `dict` subclass any more (see
+        `model.frozen_str_dict`'s own module docstring for why) -- so this
+        now asserts the mapping *type* directly rather than
+        `isinstance(..., dict)`. Still genuinely immutable after the round
+        trip: a plain `dict` would not raise on item assignment here."""
+        from abicheck.model.frozen_str_dict import FrozenStrDict
+
         matrix = _populated_matrix()
         restored = pickle.loads(pickle.dumps(matrix))
-        assert isinstance(restored.runtime_floors, dict)
-        assert type(restored.runtime_floors) is not dict
+        assert isinstance(restored.runtime_floors, FrozenStrDict)
+        assert not isinstance(restored.runtime_floors, dict)
         with pytest.raises(TypeError):
             restored.runtime_floors["GLIBC"] = "9.9"  # type: ignore[index]
 
@@ -212,7 +220,9 @@ class TestAsdictStillWorks:
 
     def test_asdict_over_an_empty_matrix_is_json_serializable(self) -> None:
         matrix = EnvironmentMatrix()
-        assert json.loads(json.dumps(dataclasses.asdict(matrix)))["runtime_floors"] == {}
+        assert (
+            json.loads(json.dumps(dataclasses.asdict(matrix)))["runtime_floors"] == {}
+        )
 
     def test_asdict_runtime_floors_matches_to_dict_runtime_floors(self) -> None:
         """``asdict()``'s ``runtime_floors`` and ``to_dict()``'s own
@@ -294,7 +304,8 @@ class TestSetMembershipSurvivesAttemptedMutation:
 
 _short_text = st.text(
     alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), max_codepoint=0x7A),
-    min_size=0, max_size=12,
+    min_size=0,
+    max_size=12,
 )
 _runtime_floor_value = st.from_regex(r"[0-9]{1,3}(\.[0-9]{1,3}){0,3}", fullmatch=True)
 
@@ -338,138 +349,104 @@ def test_property_deepcopy_hash_matches_original(matrix: EnvironmentMatrix) -> N
 # `model.frozen_str_dict.FrozenStrDict` itself: a reusable primitive, tested directly against its
 # own contract (root AGENTS.md's "Primitive-level property tests"), not only
 # through its one current caller (`EnvironmentMatrix.runtime_floors`).
+#
+# Codex review, PR #1221, round 9: `FrozenStrDict` stopped being a `dict`
+# subclass (see `model.frozen_str_dict`'s own module docstring for why --
+# `dict.__setitem__(instance, ...)`, calling the *base class's* method
+# directly, could reach around every instance-method override the previous,
+# `dict`-subclass design put in place). It is now a `collections.abc.Mapping`
+# with no mutating method anywhere in its MRO, so most of the mutator-probe
+# machinery this section used to need (an exhaustive `dir(dict)` sweep
+# proving every mutating `dict` method was individually overridden) no
+# longer applies: there is nothing dict-shaped left to override, on this
+# class or any base class, so a probe like `d.__setitem__(...)` now fails
+# with a plain `AttributeError` ("no such attribute") rather than the
+# `TypeError` an explicit override used to raise.
 # ---------------------------------------------------------------------------
 
 _str_dicts = st.dictionaries(_short_text, _short_text, max_size=5)
-
-# The full, explicitly-verified set of `dict`-mutation entry points
-# `FrozenStrDict` must block (Codex review, PR #1221, round 8: `__ior__` --
-# the `|=` in-place-union operator -- was the one initially missing, since it
-# mutates the receiver at the C level without going through `__setitem__` or
-# `update()`). Kept as one shared table so the exhaustive `dir(dict)` sweep
-# below (`test_dict_mutator_probes_cover_every_mutating_dict_method`) and the
-# per-method `test_every_mutator_raises` parametrization can't drift apart.
-_DICT_MUTATOR_PROBES: dict[str, Callable[[dict[str, str]], object]] = {
-    "setitem": lambda d: d.__setitem__("x", "y"),
-    "delitem": lambda d: d.__delitem__(next(iter(d))),
-    "ior": lambda d: d.__ior__({"x": "y"}),
-    "update": lambda d: d.update({"x": "y"}),
-    "pop": lambda d: d.pop(next(iter(d))),
-    "popitem": lambda d: d.popitem(),
-    "clear": lambda d: d.clear(),
-    "setdefault": lambda d: d.setdefault("x", "y"),
-    # `FrozenStrDict` is a `dict` subclass, not a fresh wrapper object, so
-    # calling `.__init__(...)` a *second* time directly on an
-    # already-constructed instance re-runs `dict.__init__`, which
-    # repopulates the receiver's storage in place at the C level --
-    # bypassing every other mutator override entirely, since none of them
-    # intercept `__init__` being invoked again (Codex review, PR #1221,
-    # round 11).
-    "init": lambda d: d.__init__({"x": "y"}),
-}
 
 
 class TestFrozenStrDictContract:
     def test_construction_preserves_contents(self) -> None:
         assert dict(FrozenStrDict({"a": "1", "b": "2"})) == {"a": "1", "b": "2"}
 
+    def test_is_a_mapping_not_a_dict(self) -> None:
+        """The load-bearing type change itself (Codex review, PR #1221,
+        round 9): no longer `isinstance(x, dict)`, so generic dict-mutating
+        utility code that checks `isinstance` before calling a mutator
+        cannot reach this class's storage at all -- and there is no
+        `Mapping.__setitem__`/`__delitem__`/etc. to call directly either,
+        since `Mapping` (unlike `MutableMapping`) declares none."""
+        from collections.abc import Mapping
+
+        d = FrozenStrDict({"a": "1"})
+        assert isinstance(d, Mapping)
+        assert not isinstance(d, dict)
+
     @pytest.mark.parametrize(
-        "mutate", list(_DICT_MUTATOR_PROBES.values()), ids=list(_DICT_MUTATOR_PROBES)
+        "mutator_name",
+        [
+            "__setitem__",
+            "__delitem__",
+            "__ior__",
+            "update",
+            "pop",
+            "popitem",
+            "clear",
+            "setdefault",
+        ],
     )
-    def test_every_mutator_raises(self, mutate) -> None:  # type: ignore[no-untyped-def]
+    def test_no_mutating_dict_method_exists_at_all(self, mutator_name: str) -> None:
+        """Stronger than "raises when called": these methods must not exist
+        on this class or any base in its MRO -- `Mapping` provides only the
+        read-only mixins (`get`/`keys`/`items`/`values`/`__contains__`/
+        `__eq__`/`__ne__`), never a mutator. Proves the base-class-bypass
+        vector the finding reported (calling a mutating method through the
+        base class directly, e.g. `dict.__setitem__(instance, ...)`) is
+        categorically unreachable here: there is no base class in the MRO
+        that defines one to call."""
+        d = FrozenStrDict({"a": "1"})
+        assert not hasattr(d, mutator_name)
+
+    def test_bracket_assignment_raises_type_error(self) -> None:
         d = FrozenStrDict({"a": "1"})
         with pytest.raises(TypeError):
-            mutate(d)
+            d["a"] = "2"  # type: ignore[index]
 
-    def test_every_probed_mutator_is_actually_overridden(self) -> None:
-        """Belt-and-suspenders over the parametrized test above: each probed
-        name must correspond to a method `FrozenStrDict` itself defines (not
-        merely inherits), so a probe that happens to raise `TypeError` for an
-        unrelated reason (e.g. a missing key) can't mask a missing override."""
-        dunder_names = {
-            "setitem": "__setitem__",
-            "delitem": "__delitem__",
-            "ior": "__ior__",
-            "init": "__init__",
-        }
-        for probe_name in _DICT_MUTATOR_PROBES:
-            attr_name = dunder_names.get(probe_name, probe_name)
-            assert attr_name in vars(FrozenStrDict), (
-                f"FrozenStrDict does not define its own {attr_name!r} override"
-            )
+    def test_dict_dunder_bypass_raises_type_error(self) -> None:
+        """The finding's own literal reported vector: calling `dict`'s base
+        class method *directly* against a `FrozenStrDict` instance, rather
+        than through the instance's own (now-nonexistent) `__setitem__`.
+        Since `FrozenStrDict` is no longer a `dict` at all, `dict`'s
+        C-level `__setitem__` descriptor refuses an instance of the wrong
+        type outright -- there is no shared storage left for it to reach."""
+        d = FrozenStrDict({"a": "1"})
+        with pytest.raises(TypeError):
+            dict.__setitem__(d, "a", "2")  # type: ignore[arg-type]
+        with pytest.raises(TypeError):
+            dict.__delitem__(d, "a")  # type: ignore[arg-type]
+        assert dict(d) == {"a": "1"}
 
-    def test_dict_mutator_probes_cover_every_mutating_dict_method(self) -> None:
-        """The probe table above must itself be exhaustive against this
-        Python's real ``dict`` mutation surface, not just the set
-        ``FrozenStrDict`` happens to override today -- otherwise a future
-        Python release adding a new in-place ``dict`` mutator could go
-        unnoticed by both this test file and ``FrozenStrDict`` alike, the
-        same way ``__ior__`` did (Codex review round 8). For every callable
-        name in ``dir(dict)`` not already in the probe table, invoke it on a
-        fresh plain ``dict`` and check whether it actually changed -- a name
-        that mutates and isn't in the table is a real, unaudited gap.
-
-        Two probe shapes are tried, not just one: a zero-argument call
-        catches most in-place mutators (``clear()``, ``popitem()``, ...), but
-        ``__init__`` itself slipped past a zero-arg-only version of this
-        sweep in Codex review round 11 (PR #1221) precisely because
-        ``dict.__init__()`` called with *no* arguments on an
-        already-populated dict is a documented no-op -- it does not mutate,
-        even though ``dict.__init__(some_mapping)`` (the shape that matters,
-        and the one a `FrozenStrDict.__init__` override actually has to
-        guard) very much does. So every candidate also gets a one-argument
-        call with a plausible replacement mapping; either shape mutating is
-        enough to flag the name.
-        """
-        probed_attr_names = {
-            "setitem": "__setitem__",
-            "delitem": "__delitem__",
-            "ior": "__ior__",
-            "init": "__init__",
-        }
-        already_covered = {
-            probed_attr_names.get(name, name) for name in _DICT_MUTATOR_PROBES
-        }
-        discovered_unaudited: list[str] = []
-        for name in dir(dict):
-            if name in already_covered:
-                continue
-            attr = getattr(dict, name, None)
-            if not callable(attr):
-                continue
-
-            def _mutated(call: Callable[[dict[str, str]], object]) -> bool:
-                probe: dict[str, str] = {"a": "1"}
-                try:
-                    call(probe)
-                except Exception:
-                    return False  # wrong arity/type for this probe shape
-                return probe != {"a": "1"}
-
-            zero_arg_mutated = _mutated(lambda p, name=name: getattr(p, name)())
-            one_arg_mutated = _mutated(
-                lambda p, name=name: getattr(p, name)({"probe-key": "probe-value"})
-            )
-            if zero_arg_mutated or one_arg_mutated:
-                discovered_unaudited.append(name)
-        assert not discovered_unaudited, (
-            "dict grew (or this Python version has) a mutating method the "
-            f"probe table above does not cover: {sorted(discovered_unaudited)}"
-        )
+    def test_direct_attribute_reassignment_raises(self) -> None:
+        """Replacing the private backing store wholesale
+        (`instance._data = {...}`) is an equally effective mutation vector
+        to the item-level ones above -- blocked by this class's own
+        `__setattr__` override."""
+        d = FrozenStrDict({"a": "1"})
+        with pytest.raises(TypeError):
+            d._data = {"a": "2"}  # type: ignore[misc]
+        assert dict(d) == {"a": "1"}
 
     def test_reinit_on_already_constructed_instance_raises_and_preserves_hash(
         self,
     ) -> None:
-        """Codex review, PR #1221, round 11: ``FrozenStrDict`` is a ``dict``
-        subclass, not a fresh object, so calling ``.__init__(...)`` directly
-        on an already-constructed instance re-runs ``dict.__init__`` and
-        repopulates the receiver in place -- silently, since none of the
-        other disabled mutators intercept ``__init__``. Left unguarded, this
-        changes the hash of an instance that may already be a member of a
-        set/dict (e.g. embedded in an already-hashed ``CompareRequest``),
-        exactly the hash-invariant violation the earlier ``__ior__`` fix (see
-        the module docstring above) closed from a different angle. Must
-        raise instead, leaving contents and hash untouched.
+        """Codex review, PR #1221, round 11 (still applicable to the round-9
+        `Mapping` redesign): calling `.__init__(...)` a *second* time
+        directly on an already-constructed instance must not silently
+        repopulate its backing store -- exactly the hash-invariant
+        violation the earlier `__ior__` fix closed from a different angle.
+        Must raise instead, leaving contents and hash untouched.
         """
         d = FrozenStrDict({"GLIBC": "2.34"})
         original_contents = dict(d)
@@ -499,9 +476,21 @@ class TestFrozenStrDictContract:
         assert dict(d) == original_contents
         assert hash(d) == original_hash
 
-    def test_json_serializable_directly(self) -> None:
+    def test_json_serializable_via_plain_dict_conversion(self) -> None:
+        """Codex review, PR #1221, round 9 follow-up: a *bare*
+        `json.dumps(frozen_str_dict_instance)` is no longer supported now
+        that this class is a `Mapping`, not a `dict` -- the stdlib JSON
+        encoder's fast path requires `isinstance(obj, dict)` exactly (or a
+        `default=` callback). `dict(d)`/`json.dumps(d, default=dict)` are
+        the two supported ways to serialize one directly; the load-bearing
+        production contract (`dataclasses.asdict()` over a *containing*
+        dataclass) is covered separately below and by
+        `TestAsdictStillWorks` above, which is unaffected by this."""
         d = FrozenStrDict({"a": "1", "b": "2"})
-        assert json.loads(json.dumps(d)) == {"a": "1", "b": "2"}
+        with pytest.raises(TypeError):
+            json.dumps(d)
+        assert json.loads(json.dumps(dict(d))) == {"a": "1", "b": "2"}
+        assert json.loads(json.dumps(d, default=dict)) == {"a": "1", "b": "2"}
 
     def test_json_serializable_via_asdict_of_a_containing_dataclass(self) -> None:
         @dataclasses.dataclass
@@ -513,14 +502,26 @@ class TestFrozenStrDictContract:
         assert json.loads(json.dumps(d)) == {"floors": {"GLIBC": "2.28"}}
 
     @given(data=_str_dicts)
-    def test_property_deepcopy_round_trips_and_stays_frozen(
+    def test_property_deepcopy_produces_an_independent_plain_dict(
         self, data: dict[str, str]
     ) -> None:
+        """`FrozenStrDict.__deepcopy__` deliberately returns a *plain*,
+        mutable `dict` (see its own docstring: this is what makes
+        `dataclasses.asdict()`'s `copy.deepcopy(obj)` fallback produce
+        JSON-safe output now that this class is a `Mapping`, not a `dict`
+        subclass). A *direct* `copy.deepcopy(matrix)` over a containing
+        `EnvironmentMatrix` is a different call and keeps `runtime_floors`
+        genuinely immutable -- see
+        `TestDeepcopy.test_deepcopy_result_is_still_frozen` above and
+        `EnvironmentMatrix.__deepcopy__`'s own docstring."""
         d = FrozenStrDict(data)
         cloned = copy.deepcopy(d)
-        assert dict(cloned) == data
-        with pytest.raises(TypeError):
-            cloned["new"] = "value"
+        assert type(cloned) is dict
+        assert cloned == data
+        # Independent storage: mutating the plain-dict clone must not be
+        # observable through `d` (which stays immutable regardless).
+        cloned["new-key"] = "new-value"
+        assert "new-key" not in d
 
     @given(data=_str_dicts)
     def test_property_pickle_round_trips_and_stays_frozen(
@@ -533,12 +534,16 @@ class TestFrozenStrDictContract:
             restored["new"] = "value"
 
     @given(data=_str_dicts)
-    def test_property_hashable_and_order_independent(self, data: dict[str, str]) -> None:
+    def test_property_hashable_and_order_independent(
+        self, data: dict[str, str]
+    ) -> None:
         forward = FrozenStrDict(data)
         reversed_ = FrozenStrDict(dict(reversed(list(data.items()))))
         assert hash(forward) == hash(reversed_)
 
     @given(data=_str_dicts)
-    def test_property_json_round_trip_is_lossless(self, data: dict[str, str]) -> None:
+    def test_property_json_round_trip_is_lossless_via_dict_conversion(
+        self, data: dict[str, str]
+    ) -> None:
         d = FrozenStrDict(data)
-        assert json.loads(json.dumps(d)) == data
+        assert json.loads(json.dumps(dict(d))) == data

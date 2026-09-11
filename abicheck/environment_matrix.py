@@ -59,9 +59,12 @@ other layer may import — the layer's own comment names the one dependency
 (``diff_versioning.py``'s dotted-version parser) that had to move to
 ``model/dotted_version.py`` first to make that legal.
 """
+
 from __future__ import annotations
 
+import copy
 import copyreg
+import dataclasses
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -156,9 +159,9 @@ class SyclConstraints:
     dataclass that still needs to normalize a field at construction time.
     """
 
-    implementation: str = ""              # "dpcpp" | "adaptivecpp"
+    implementation: str = ""  # "dpcpp" | "adaptivecpp"
     backends: tuple[str, ...] = field(default_factory=tuple)  # ("level_zero", "opencl")
-    min_pi_version: str = ""              # minimum PI version required
+    min_pi_version: str = ""  # minimum PI version required
 
     def __post_init__(self) -> None:
         # Codex review, P2 follow-up: a plain mutable `list` field remains
@@ -193,9 +196,9 @@ class CudaConstraints:
     gpu_architectures: tuple[str, ...] = field(
         default_factory=tuple
     )  # ("sm_80", "sm_90")
-    driver_range: tuple[str, str] | None = None   # (min_version, max_version)
+    driver_range: tuple[str, str] | None = None  # (min_version, max_version)
     toolkit_version: str = ""
-    require_ptx: bool = False              # require PTX for forward-compat
+    require_ptx: bool = False  # require PTX for forward-compat
 
     def __post_init__(self) -> None:
         # See `SyclConstraints.__post_init__` above for why this freezes
@@ -218,10 +221,18 @@ class CudaConstraints:
 #: Top-level keys :meth:`EnvironmentMatrix.from_dict` understands; anything
 #: else is ignored with a warning in lenient mode, or rejected outright in
 #: ``strict=True`` mode.
-_KNOWN_KEYS = frozenset({
-    "compilers", "abi_version", "libstdcxx_dual_abi",
-    "sycl", "cuda", "target_os", "target_arch", "runtime_floors",
-})
+_KNOWN_KEYS = frozenset(
+    {
+        "compilers",
+        "abi_version",
+        "libstdcxx_dual_abi",
+        "sycl",
+        "cuda",
+        "target_os",
+        "target_arch",
+        "runtime_floors",
+    }
+)
 
 #: Nested ``sycl:``/``cuda:`` keys :meth:`EnvironmentMatrix.from_dict`
 #: understands -- same lenient-warn/strict-reject treatment as the top-level
@@ -288,7 +299,15 @@ def _parse_sycl_constraints(
     sycl_data: dict[str, Any], *, strict: bool = False
 ) -> SyclConstraints:
     """Parse the validated ``sycl`` section into :class:`SyclConstraints`."""
-    _check_unknown_keys(sycl_data, _KNOWN_SYCL_KEYS, "EnvironmentMatrix.sycl", strict=strict)
+    _check_unknown_keys(
+        sycl_data, _KNOWN_SYCL_KEYS, "EnvironmentMatrix.sycl", strict=strict
+    )
+    # Codex review, PR #1221: this reflection check previously covered only
+    # the outer `EnvironmentMatrix` (see `from_dict` below), so a non-scalar
+    # `sycl.implementation`/`min_pi_version` reached the plain `str(...)`
+    # coercions unchecked and was silently stringified. Same reflection
+    # helper, not a hand-written per-field check.
+    validate_scalar_str_fields(sycl_data, SyclConstraints)
     backends = sycl_data.get("backends", [])
     if not isinstance(backends, list):
         raise ValueError(
@@ -306,7 +325,12 @@ def _parse_cuda_constraints(
     cuda_data: dict[str, Any], *, strict: bool = False
 ) -> CudaConstraints:
     """Parse the validated ``cuda`` section into :class:`CudaConstraints`."""
-    _check_unknown_keys(cuda_data, _KNOWN_CUDA_KEYS, "EnvironmentMatrix.cuda", strict=strict)
+    _check_unknown_keys(
+        cuda_data, _KNOWN_CUDA_KEYS, "EnvironmentMatrix.cuda", strict=strict
+    )
+    # Same gap/fix as `_parse_sycl_constraints` above: validate
+    # `cuda.toolkit_version` before its `str(...)` coercion below.
+    validate_scalar_str_fields(cuda_data, CudaConstraints)
     gpu_archs = cuda_data.get("gpu_architectures", [])
     if not isinstance(gpu_archs, list):
         raise ValueError(
@@ -317,6 +341,11 @@ def _parse_cuda_constraints(
     driver_range_raw = cuda_data.get("driver_range")
     driver_range = None
     if isinstance(driver_range_raw, (list, tuple)) and len(driver_range_raw) == 2:
+        # Codex review, PR #1221: the shape check above accepted a
+        # 2-element list containing a dict/list element, which the bare
+        # `str(...)` calls then silently stringified -- same fix as
+        # `sycl.backends`/`cuda.gpu_architectures`/`compilers`.
+        _validate_str_list_elements(list(driver_range_raw), "cuda.driver_range")
         driver_range = (str(driver_range_raw[0]), str(driver_range_raw[1]))
     elif driver_range_raw is not None:
         raise ValueError(
@@ -401,7 +430,7 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
             raise ValueError(
                 f"'runtime_floors.{key}' must be a quoted string version: "
                 f"unquoted YAML floats lose trailing zeros "
-                f"(2.40 parses as 2.4). Write {key}: \"{value}\" "
+                f'(2.40 parses as 2.4). Write {key}: "{value}" '
                 f"with the intended digits."
             )
         if key_upper in _NON_NUMERIC_RUNTIME_FLOOR_KEYS and not isinstance(value, str):
@@ -427,7 +456,10 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"{type(value).__name__}: {value!r}"
             )
         floor = str(value)
-        if key_upper == _WHEEL_ARCH_RUNTIME_FLOOR_KEY and floor.lower() not in WHEEL_ARCH_CLAIMS:
+        if (
+            key_upper == _WHEEL_ARCH_RUNTIME_FLOOR_KEY
+            and floor.lower() not in WHEEL_ARCH_CLAIMS
+        ):
             # Codex review, PR #1221, Finding 1: a WHEEL_ARCH value that
             # merely passed the str-type check above (e.g. the typo'd
             # "x86-64" for "x86_64", or any other unrecognized token) still
@@ -470,8 +502,8 @@ class EnvironmentMatrix:
 
     # Host toolchain
     compilers: tuple[str, ...] = field(default_factory=tuple)
-    abi_version: str | None = None                    # -fabi-version value
-    libstdcxx_dual_abi: str | None = None             # "cxx11" | "old"
+    abi_version: str | None = None  # -fabi-version value
+    libstdcxx_dual_abi: str | None = None  # "cxx11" | "old"
 
     # Declared deployment runtime floors, keyed by ELF version-node prefix
     # (case-insensitive; normalized to upper): {"GLIBC": "2.28",
@@ -480,12 +512,11 @@ class EnvironmentMatrix:
     # already ships it) and one above the floor is BREAKING (a declared target
     # can no longer load the binary); unspecified prefixes keep the default
     # RISK classification. A read-only :class:`FrozenStrDict` (see
-    # ``__post_init__``), not a plain mutable ``dict`` -- callers still read
-    # it via ``.get(...)``/``[...]``/``.items()``, all of which it supports
-    # identically to a plain ``dict`` (it's a ``dict`` subclass), while also
-    # being what makes ``dataclasses.asdict()`` over this field JSON-safe
-    # (Codex review, PR #1221, Finding 2 -- see ``FrozenStrDict``'s own
-    # docstring for why a ``MappingProxyType`` could not do this).
+    # ``__post_init__``): callers still read it via
+    # ``.get(...)``/``[...]``/``.items()`` identically to a plain ``dict``.
+    # A ``collections.abc.Mapping``, deliberately *not* a ``dict`` subclass
+    # (PR #1221 round 9 -- see ``FrozenStrDict``'s own docstring for why),
+    # while still keeping ``dataclasses.asdict()`` JSON-safe over this field.
     runtime_floors: Mapping[str, str] = field(default_factory=dict)
 
     # Heterogeneous stack constraints
@@ -539,9 +570,7 @@ class EnvironmentMatrix:
         ``FrozenInstanceError`` here).
         """
         object.__setattr__(self, "compilers", tuple(self.compilers))
-        object.__setattr__(
-            self, "runtime_floors", FrozenStrDict(self.runtime_floors)
-        )
+        object.__setattr__(self, "runtime_floors", FrozenStrDict(self.runtime_floors))
 
     def __hash__(self) -> int:
         """A structural hash over a hashable projection of every field.
@@ -560,12 +589,11 @@ class EnvironmentMatrix:
         fields beyond ``tuple(sorted(...))`` on ``runtime_floors.items()``
         so key insertion order never changes the hash of two mappings
         holding the same entries. ``__eq__`` is left as the
-        dataclass-generated structural comparison: a plain-``dict``-subclass
-        instance compares equal to another mapping (or dict) with the same
-        entries, and ``tuple``/``tuple`` compare structurally, so two
-        instances built from differently-ordered-but-equal inputs still
-        compare equal via ``__eq__`` and therefore must (and do) hash equal
-        here -- the hash/eq contract every hashable type must satisfy.
+        dataclass-generated structural comparison: a ``FrozenStrDict``
+        instance compares equal to any mapping with the same entries, and
+        ``tuple``/``tuple`` compare structurally, so two instances built
+        from differently-ordered-but-equal inputs still compare equal via
+        ``__eq__`` and therefore must (and do) hash equal here.
         """
         return hash(
             (
@@ -580,8 +608,40 @@ class EnvironmentMatrix:
             )
         )
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> EnvironmentMatrix:
+        """Deep-copy while keeping ``runtime_floors`` a genuinely immutable
+        :class:`FrozenStrDict` (Codex review, PR #1221, round 9 follow-up).
+
+        ``FrozenStrDict.__deepcopy__`` deliberately returns a *plain*
+        ``dict`` -- required so ``dataclasses.asdict()``'s own
+        ``copy.deepcopy(obj)`` fallback produces JSON-safe output for that
+        field (it is a ``Mapping``, not a ``dict`` subclass; see that
+        method's docstring). A *direct* ``copy.deepcopy(matrix)`` is a
+        different call (``asdict()`` never calls ``deepcopy`` on the whole
+        dataclass), so left to the default per-field mechanism it would
+        inherit that same plain-``dict`` degradation on the clone. This
+        override closes that gap: every field deep-copies normally except a
+        :class:`FrozenStrDict` one, reconstructed as one from an
+        independently deep-copied backing dict.
+        """
+        if id(self) in memo:
+            return memo[id(self)]  # type: ignore[no-any-return]
+        new = object.__new__(type(self))
+        memo[id(self)] = new
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            copied: Any
+            if isinstance(value, FrozenStrDict):
+                copied = FrozenStrDict(copy.deepcopy(dict(value), memo))
+            else:
+                copied = copy.deepcopy(value, memo)
+            object.__setattr__(new, f.name, copied)
+        return new
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any], *, strict: bool = False) -> EnvironmentMatrix:
+    def from_dict(
+        cls, data: dict[str, Any], *, strict: bool = False
+    ) -> EnvironmentMatrix:
         """Parse from a dictionary (e.g., loaded from YAML).
 
         *strict* controls how an unrecognized top-level or nested
@@ -614,7 +674,9 @@ class EnvironmentMatrix:
 
         compilers = data.get("compilers", [])
         if not isinstance(compilers, list):
-            raise ValueError(f"'compilers' must be a list, got {type(compilers).__name__}")
+            raise ValueError(
+                f"'compilers' must be a list, got {type(compilers).__name__}"
+            )
         _validate_str_list_elements(compilers, "compilers")
 
         sycl = _parse_sycl_constraints(sycl_data, strict=strict)

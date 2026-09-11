@@ -177,70 +177,55 @@ class CompareRequest:
     # ``cli_compare_release_pairwise._run_compare_pair``), which a config-
     # only value with no request field cannot reach.
     env_matrix: EnvironmentMatrix | None = None
-    #: Backward-compatibility shim (Codex review, fresh evidence on this PR):
-    #: before this PR's ADR-068 D5 demotion, ``env_matrix_path: Path`` was
-    #: itself the documented, released ``CompareRequest`` field (see the
-    #: ``CHANGELOG.md`` 0.4.0 entry crediting
-    #: ``CompareRequest.env_matrix_path``, and this field's own long history
-    #: in ``git log`` well before this PR). The ADR-068 amendment's claim
-    #: that "the typed Python API is unaffected" was true for
-    #: ``checker.compare(..., env_matrix=...)`` but did not hold for this
-    #: dataclass's own constructor shape -- a real Tier-2 caller built
-    #: exactly like the documented ``CompareRequest(..., env_matrix_path=
-    #: Path(...))`` example now failed with ``TypeError`` at construction,
-    #: not a deprecation warning. Kept as a genuine, still-accepted
-    #: constructor parameter rather than silently dropped: ``__post_init__``
-    #: below resolves it into ``env_matrix`` the same way the old CLI flag
-    #: used to (via ``workflows.input_resolution.load_env_matrix``), so
-    #: every pre-existing ``env_matrix_path=`` caller keeps working
-    #: unchanged. ``None`` (the default) is a pure no-op. Supplying both
-    #: this and ``env_matrix`` is a usage error (raised eagerly) rather than
-    #: silently picking a winner -- there is no principled precedence
-    #: between "here is the resolved value" and "load it from this file" the
-    #: caller didn't ask for.
+    #: Backward-compatibility shim: before this PR's ADR-068 D5 demotion,
+    #: ``env_matrix_path: Path`` was itself the documented, released
+    #: ``CompareRequest`` field (``CHANGELOG.md``'s 0.4.0 entry). Kept as a
+    #: still-accepted constructor parameter, but stays pure request
+    #: *intent* until :meth:`CompareRequest.effective_env_matrix` resolves
+    #: it lazily, at the plan/execution boundary -- **not** in
+    #: ``__post_init__`` (Codex review, PR #1221 follow-up: eager
+    #: resolution at construction both broke a caller that builds the
+    #: request before the matrix file exists, and let a queued request
+    #: classify against contents cached before a later edit; see
+    #: ``effective_env_matrix``'s docstring). ``None`` is a pure no-op.
+    #: Supplying both this and ``env_matrix`` is a usage error, raised
+    #: eagerly in ``__post_init__`` (that half needs no file I/O) -- there
+    #: is no principled precedence between the two.
     env_matrix_path: Path | None = None
-    #: Internal bookkeeping (not public API): the ``Path`` ``env_matrix`` was
-    #: last *derived* from here, or ``None`` when ``env_matrix`` is absent or
-    #: was given explicitly rather than resolved from a path.
-    #: ``compare=False``/``repr=False`` so it never affects equality,
-    #: hashing, or ``repr()``.
-    #:
-    #: Fresh Codex review on this same shim: an earlier version *reset*
-    #: ``env_matrix_path`` to ``None`` right after resolving it, so a caller
-    #: could no longer inspect the path it gave, and
-    #: ``request.replace(env_matrix_path=new_path)`` on an already-resolved
-    #: request combined the *inherited* resolved ``env_matrix`` with the
-    #: *new* path and spuriously hit the "not both" error below -- even
-    #: though replacing the path is an unambiguous "re-resolve from here"
-    #: request. This field lets ``__post_init__`` tell "derived" (may be
-    #: silently re-resolved against a new path) apart from "explicit" (still
-    #: conflicts with any path) without erasing ``env_matrix_path`` itself.
-    _env_matrix_resolved_path: Path | None = field(
-        default=None, compare=False, repr=False
-    )
 
     def __post_init__(self) -> None:
-        if self.env_matrix_path is None:
-            return
-        requested_path = Path(self.env_matrix_path)
-        if self.env_matrix is not None and self._env_matrix_resolved_path is None:
-            # Never derived here (on this request or a `.replace()`
-            # ancestor) -- a genuinely explicit value, so pairing it with a
-            # path is the ambiguous combination this guard rejects.
+        # Codex review, PR #1221 follow-up: an earlier version *loaded*
+        # `env_matrix_path` from disk right here, at construction time --
+        # violating `workflows/AGENTS.md`'s "Change checklist" (a request
+        # field carries intent; the resolved value belongs at the
+        # plan/execution boundary). So this validates only the structural
+        # "not both" invariant, which needs no I/O at all, and leaves
+        # `env_matrix_path` unresolved -- `effective_env_matrix()` below
+        # performs the real, lazy load at classify time instead.
+        if self.env_matrix is not None and self.env_matrix_path is not None:
             raise ValidationError(
                 "CompareRequest: pass either env_matrix or env_matrix_path, "
                 "not both (ambiguous which one should take effect)"
             )
-        if (
-            self._env_matrix_resolved_path == requested_path
-            and self.env_matrix is not None
-        ):
-            return  # already resolved from this exact path
 
+    def effective_env_matrix(self) -> EnvironmentMatrix | None:
+        """Resolve ``env_matrix``/``env_matrix_path`` intent into the
+        :class:`~abicheck.environment_matrix.EnvironmentMatrix` a comparison
+        should classify against.
+
+        Pure -- never mutates ``self`` -- and performs any file I/O only
+        when called, so this always reflects the file's *current* contents
+        rather than one cached at construction time. Called from
+        :func:`abicheck.service_compare_pipeline.classify_compare_pair`
+        instead of reading ``env_matrix`` directly.
+        """
+        if self.env_matrix is not None:
+            return self.env_matrix
+        if self.env_matrix_path is None:
+            return None
         from .input_resolution import load_env_matrix
 
-        object.__setattr__(self, "env_matrix", load_env_matrix(requested_path))
-        object.__setattr__(self, "_env_matrix_resolved_path", requested_path)
+        return load_env_matrix(Path(self.env_matrix_path))
 
     # ADR-050 D2: force a tentative diff through a genuine comparability-
     # contract mismatch (scope/profile fingerprint drift) instead of the

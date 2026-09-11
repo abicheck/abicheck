@@ -40,7 +40,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.environment_matrix import EnvironmentMatrix
+from abicheck.environment_matrix import (
+    CudaConstraints,
+    EnvironmentMatrix,
+    SyclConstraints,
+)
 from abicheck.model.dataclass_scalar_validation import scalar_str_field_types
 from abicheck.model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 
@@ -50,6 +54,12 @@ from abicheck.model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 #: dataclass in the future changes this parametrization automatically
 #: instead of the test silently going stale.
 _SCALAR_STR_FIELDS = sorted(scalar_str_field_types(EnvironmentMatrix))
+
+#: Same idea, one level down: `SyclConstraints`'/`CudaConstraints`' own
+#: plain scalar `str` fields (PR #1221, round-9 finding 2 -- these were not
+#: covered by the outer `EnvironmentMatrix` reflection check at all).
+_SYCL_SCALAR_STR_FIELDS = sorted(scalar_str_field_types(SyclConstraints))
+_CUDA_SCALAR_STR_FIELDS = sorted(scalar_str_field_types(CudaConstraints))
 
 
 class TestNonNumericRuntimeFloorKeysRejectWrongShapeValues:
@@ -257,6 +267,101 @@ class TestScalarStrFieldsRejectWrongShapeValues:
             "target_os",
             "target_arch",
         }
+
+
+class TestNestedSyclCudaScalarFieldsRejectWrongShapeValues:
+    """Codex review, PR #1221, round-9 finding 2: the reflection check above
+    (``TestScalarStrFieldsRejectWrongShapeValues``) validated only the
+    outer ``EnvironmentMatrix``'s own scalar fields -- ``SyclConstraints``'
+    ``implementation``/``min_pi_version`` and ``CudaConstraints``'
+    ``toolkit_version`` still reached their plain ``str(...)`` coercions
+    unchecked, so e.g. ``deployment.sycl.implementation: {bad: shape}`` or
+    ``sycl.min_pi_version: [1.0]`` silently became the nonsense literal
+    string ``"{'bad': 'shape'}"``/``"[1.0]"`` instead of the promised
+    configuration error. The fix reuses the identical
+    ``validate_scalar_str_fields`` reflection helper against
+    ``SyclConstraints``/``CudaConstraints`` at the point each nested section
+    is parsed, mirroring the outer check exactly.
+    """
+
+    @pytest.mark.parametrize("field_name", _SYCL_SCALAR_STR_FIELDS)
+    @pytest.mark.parametrize(
+        "bad_value",
+        [{"bad": "shape"}, [1.0], True, 1, 1.5],
+        ids=["mapping", "list", "bool", "int", "float"],
+    )
+    def test_sycl_field_wrong_shape_rejected(
+        self, field_name: str, bad_value: object
+    ) -> None:
+        with pytest.raises(ValueError, match="must be a string"):
+            EnvironmentMatrix.from_dict({"sycl": {field_name: bad_value}})
+
+    @pytest.mark.parametrize("field_name", _SYCL_SCALAR_STR_FIELDS)
+    def test_sycl_field_valid_string_still_parses(self, field_name: str) -> None:
+        matrix = EnvironmentMatrix.from_dict({"sycl": {field_name: "some-value"}})
+        assert getattr(matrix.sycl, field_name) == "some-value"
+
+    @pytest.mark.parametrize("field_name", _CUDA_SCALAR_STR_FIELDS)
+    @pytest.mark.parametrize(
+        "bad_value",
+        [{"bad": "shape"}, [1.0], True, 1, 1.5],
+        ids=["mapping", "list", "bool", "int", "float"],
+    )
+    def test_cuda_field_wrong_shape_rejected(
+        self, field_name: str, bad_value: object
+    ) -> None:
+        with pytest.raises(ValueError, match="must be a string"):
+            EnvironmentMatrix.from_dict({"cuda": {field_name: bad_value}})
+
+    @pytest.mark.parametrize("field_name", _CUDA_SCALAR_STR_FIELDS)
+    def test_cuda_field_valid_string_still_parses(self, field_name: str) -> None:
+        matrix = EnvironmentMatrix.from_dict({"cuda": {field_name: "some-value"}})
+        assert getattr(matrix.cuda, field_name) == "some-value"
+
+    def test_reflection_found_known_sycl_scalar_fields(self) -> None:
+        assert set(_SYCL_SCALAR_STR_FIELDS) == {"implementation", "min_pi_version"}
+
+    def test_reflection_found_known_cuda_scalar_fields(self) -> None:
+        assert set(_CUDA_SCALAR_STR_FIELDS) == {"toolkit_version"}
+
+    def test_sycl_min_pi_version_list_end_to_end_config_error(self) -> None:
+        """The finding's own literal reported example."""
+        with pytest.raises(ValueError, match="must be a string"):
+            EnvironmentMatrix.from_dict({"sycl": {"min_pi_version": [1.0]}})
+
+    def test_sycl_implementation_dict_end_to_end_config_error(self) -> None:
+        """The finding's own literal reported example."""
+        with pytest.raises(ValueError, match="must be a string"):
+            EnvironmentMatrix.from_dict({"sycl": {"implementation": {"bad": "shape"}}})
+
+
+class TestCudaDriverRangeElementValidation:
+    """Codex review, PR #1221, round-9 finding 2: ``cuda.driver_range``'s
+    2-element-list *shape* check did not validate each element's own type,
+    so ``driver_range: [{bad: shape}, "580.0"]`` passed the outer
+    ``len(...) == 2`` check and reached the bare ``str(...)`` coercion,
+    stringifying the dict element into a meaningless literal instead of
+    raising. Mirrors ``sycl.backends``/``cuda.gpu_architectures``/
+    ``compilers``' own element-type checks (round 8's
+    ``_validate_str_list_elements`` fix).
+    """
+
+    @pytest.mark.parametrize(
+        "bad_element",
+        [{"bad": "shape"}, [1.0], True, 1, 1.5],
+        ids=["mapping", "list", "bool", "int", "float"],
+    )
+    def test_dict_or_list_element_rejected(self, bad_element: object) -> None:
+        with pytest.raises(ValueError, match="must be strings"):
+            EnvironmentMatrix.from_dict(
+                {"cuda": {"driver_range": [bad_element, "580.0"]}}
+            )
+
+    def test_both_elements_strings_still_parses(self) -> None:
+        matrix = EnvironmentMatrix.from_dict(
+            {"cuda": {"driver_range": ["525.0", "580.0"]}}
+        )
+        assert matrix.cuda.driver_range == ("525.0", "580.0")
 
 
 class TestScalarFieldsAndHashabilityRoundTrip:

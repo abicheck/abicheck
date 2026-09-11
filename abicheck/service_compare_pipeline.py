@@ -601,9 +601,9 @@ def classify_compare_pair(
         # front-end parity with the CLI, where the two flags are gone too.
         pattern_verdicts=request.pattern_verdicts,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
-        # ADR-020b / ADR-068 D5: the already-resolved `EnvironmentMatrix`
-        # (former `--env-matrix FILE`, now `.abicheck.yml`'s `deployment:`).
-        env_matrix=request.env_matrix,
+        # ADR-020b / ADR-068 D5: `effective_env_matrix()` resolves a lazy
+        # `env_matrix_path` here, at classify time (see its own docstring).
+        env_matrix=request.effective_env_matrix(),
         diagnostic_comparison=request.diagnostic_comparison,
         contract_evaluation=request.contract_evaluation,
         contract_mode=request.contract_mode,

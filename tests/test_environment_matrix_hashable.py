@@ -195,16 +195,20 @@ class TestGenuineImmutability:
     def test_runtime_floors_is_not_a_plain_mutable_dict(self) -> None:
         """`runtime_floors` is frozen into `model.frozen_str_dict.FrozenStrDict`
         (Codex review, PR #1221, Finding 2 follow-up) rather than a
-        `types.MappingProxyType`: a `dict` *subclass*, so `dataclasses.
-        asdict()` recognizes and recurses into it natively (producing a
-        JSON-serializable plain-dict-shaped result) instead of falling back
-        to `copy.deepcopy`, which -- even with `MappingProxyType`'s own
-        `copyreg` reducer registered -- would reconstruct another proxy, not
-        a plain `dict`. `type(matrix.runtime_floors) is not dict` still
-        holds (it's a dedicated subclass, not literally `dict`), and item
+        `types.MappingProxyType`. Since round 9 it is a
+        `collections.abc.Mapping`, deliberately **not** a `dict` subclass
+        any more: a `dict` subclass could not actually close every
+        mutation vector (`dict.__setitem__(instance, ...)`, calling the
+        *base class's* method directly, still reached its shared C-level
+        storage regardless of which instance methods were overridden -- see
+        `model.frozen_str_dict`'s own module docstring). `dataclasses.
+        asdict()` still produces a JSON-serializable plain-dict-shaped
+        result for this field, now via `FrozenStrDict.__deepcopy__`
+        (`_asdict_inner`'s fallback for a non-`dict` value) rather than the
+        `isinstance(obj, dict)` fast path a `dict` subclass rode. Item
         assignment still raises (see the next test)."""
         matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
-        assert isinstance(matrix.runtime_floors, dict)
+        assert not isinstance(matrix.runtime_floors, dict)
         assert type(matrix.runtime_floors) is not dict
 
     def test_runtime_floors_item_assignment_raises(self) -> None:

@@ -312,7 +312,9 @@ class TestCompareRequestValidate:
         assert req.validation_errors() == []
 
     def test_unsupported_depth_rejected(self):
-        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth="graph")
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), depth="graph"
+        )
         errors = req.validation_errors()
         assert len(errors) == 1
         assert "graph" in errors[0]
@@ -494,8 +496,21 @@ class TestCompareRequestRemovedFieldDoesNotShiftPositionalArgs:
         new = InputSpec(path=Path("new"))
         with pytest.raises(TypeError):
             CompareRequest(
-                old, new, "c++", "clang", False, "strict_abi", None, None,
-                True, None, None, False, False, None, "env-matrix.yaml",
+                old,
+                new,
+                "c++",
+                "clang",
+                False,
+                "strict_abi",
+                None,
+                None,
+                True,
+                None,
+                None,
+                False,
+                False,
+                None,
+                "env-matrix.yaml",
             )
 
 
@@ -521,7 +536,12 @@ class TestCompareResult:
         diff = DiffResult(old_version="1.0", new_version="2.0", library="lib")
         old = AbiSnapshot(library="lib", version="1.0")
         new = AbiSnapshot(library="lib", version="2.0")
-        return CompareResult(diff=diff, old_snapshot=old, new_snapshot=new), diff, old, new
+        return (
+            CompareResult(diff=diff, old_snapshot=old, new_snapshot=new),
+            diff,
+            old,
+            new,
+        )
 
     def test_as_tuple_matches_the_legacy_return_shape(self):
         # The whole point of the wrapper is that it is a *rename* of the tuple,
@@ -623,10 +643,15 @@ class TestCompareRequestEnvMatrixPathCompat:
     ``TypeError`` at construction, not a graceful fallback -- despite that
     PR's own ADR-068 amendment claiming the typed Python API was
     unaffected. ``env_matrix_path`` is kept as a genuine, still-accepted
-    constructor parameter that ``__post_init__`` resolves into
-    ``env_matrix`` via ``workflows.input_resolution.load_env_matrix`` (the
-    same loader the retired CLI flag itself used), so both spellings now
-    construct an equivalent request. See ``tests/test_environment_drift.py::
+    constructor parameter that stays pure request *intent* --
+    :meth:`CompareRequest.effective_env_matrix` resolves it (via
+    ``workflows.input_resolution.load_env_matrix``, the same loader the
+    retired CLI flag itself used) lazily, at the point a workflow actually
+    classifies the request, **not** in ``__post_init__``: a follow-up Codex
+    review on this same shim found that resolving eagerly at construction
+    broke a caller that builds the request before the matrix file exists,
+    and would let a queued request classify against contents cached before
+    the file was later edited. See ``tests/test_environment_drift.py::
     TestLoadEnvMatrix::test_compare_request_carries_a_resolved_matrix_not_a_path``
     for the sibling ``env_matrix=`` coverage this mirrors.
     """
@@ -649,8 +674,10 @@ class TestCompareRequestEnvMatrixPathCompat:
             new=InputSpec(path=tmp_path / "new.so"),
             env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"}),
         )
-        assert via_path.env_matrix is not None
-        assert via_path.env_matrix == via_value.env_matrix
+        # The raw field stays unresolved until something actually asks for
+        # the effective matrix -- construction alone must do no file I/O.
+        assert via_path.env_matrix is None
+        assert via_path.effective_env_matrix() == via_value.effective_env_matrix()
         # Fresh Codex review, follow-up: `env_matrix_path` must keep
         # reflecting what the caller actually passed -- a typed caller that
         # wants to inspect or log the original path it gave must still be
@@ -658,27 +685,54 @@ class TestCompareRequestEnvMatrixPathCompat:
         # the `.replace()` half of this same contract).
         assert via_path.env_matrix_path == p
 
+    def test_env_matrix_path_load_is_deferred_past_construction(self, tmp_path) -> None:
+        """Codex review (P1, fresh evidence on PR #1221): a `CompareRequest`
+        built before its matrix file exists must not fail at construction --
+        only when the effective matrix is actually resolved, at the
+        classify boundary. This is the load-bearing behavioral difference
+        from the previous round's eager-``__post_init__`` design."""
+        missing = tmp_path / "not-yet-written.yaml"
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=missing,
+        )
+        assert req.env_matrix_path == missing
+
+        with pytest.raises(ValidationError, match="Cannot read environment matrix"):
+            req.effective_env_matrix()
+
+        # Writing the file *after* construction and resolving again must
+        # see it -- proving resolution genuinely happens at call time, not
+        # from a value cached somewhere on the request.
+        missing.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        resolved = req.effective_env_matrix()
+        assert resolved is not None
+        assert resolved.runtime_floors == {"GLIBC": "2.28"}
+
     def test_env_matrix_path_missing_file_raises_validation_error(
         self, tmp_path
     ) -> None:
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=tmp_path / "nope.yaml",
+        )
         with pytest.raises(ValidationError, match="Cannot read environment matrix"):
-            CompareRequest(
-                old=InputSpec(path=tmp_path / "old.so"),
-                new=InputSpec(path=tmp_path / "new.so"),
-                env_matrix_path=tmp_path / "nope.yaml",
-            )
+            req.effective_env_matrix()
 
     def test_env_matrix_path_malformed_yaml_raises_validation_error(
         self, tmp_path
     ) -> None:
         p = tmp_path / "env.yaml"
         p.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=p,
+        )
         with pytest.raises(ValidationError, match="Invalid environment matrix"):
-            CompareRequest(
-                old=InputSpec(path=tmp_path / "old.so"),
-                new=InputSpec(path=tmp_path / "new.so"),
-                env_matrix_path=p,
-            )
+            req.effective_env_matrix()
 
     def test_passing_both_env_matrix_and_env_matrix_path_is_a_usage_error(
         self, tmp_path
@@ -706,10 +760,12 @@ class TestCompareRequestEnvMatrixPathCompat:
         request combined the *inherited* resolved `env_matrix` with the
         *new* path and incorrectly raised the "not both" error -- even
         though the caller's clear intent was "re-resolve from this new
-        path," not "give me both a path and a matrix at once." Both are
-        fixed by tracking, internally, whether the current `env_matrix` was
-        *derived* from a path here (and from which one) rather than given
-        explicitly.
+        path," not "give me both a path and a matrix at once." Now that
+        resolution never happens eagerly, there is no "inherited resolved
+        value" to collide with in the first place: `env_matrix` stays
+        `None` for a path-only request at every step, so `.replace()`
+        simply updates which path a later `effective_env_matrix()` call
+        will read.
         """
         p1 = tmp_path / "env1.yaml"
         p1.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
@@ -722,13 +778,17 @@ class TestCompareRequestEnvMatrixPathCompat:
             env_matrix_path=p1,
         )
         assert req.env_matrix_path == p1
-        assert req.env_matrix is not None
-        assert req.env_matrix.runtime_floors == {"GLIBC": "2.28"}
+        assert req.env_matrix is None
+        resolved1 = req.effective_env_matrix()
+        assert resolved1 is not None
+        assert resolved1.runtime_floors == {"GLIBC": "2.28"}
 
         replaced = req.replace(env_matrix_path=p2)
         assert replaced.env_matrix_path == p2
-        assert replaced.env_matrix is not None
-        assert replaced.env_matrix.runtime_floors == {"GLIBC": "2.31"}
+        assert replaced.env_matrix is None
+        resolved2 = replaced.effective_env_matrix()
+        assert resolved2 is not None
+        assert resolved2.runtime_floors == {"GLIBC": "2.31"}
 
     def test_replace_with_env_matrix_path_over_an_explicit_env_matrix_still_raises(
         self, tmp_path
@@ -737,7 +797,7 @@ class TestCompareRequestEnvMatrixPathCompat:
         *explicitly* by the original caller (never derived from a path
         here), `.replace(env_matrix_path=...)` must still raise the "not
         both" error -- that really is an ambiguous combination, unlike the
-        derived-value case in the test above."""
+        path-only case in the test above."""
         from abicheck.environment_matrix import EnvironmentMatrix
 
         p = tmp_path / "env.yaml"
@@ -753,9 +813,7 @@ class TestCompareRequestEnvMatrixPathCompat:
         with pytest.raises(ValidationError, match="not both"):
             req.replace(env_matrix_path=p)
 
-    def test_request_stays_hashable_after_env_matrix_path_resolution(
-        self, tmp_path
-    ) -> None:
+    def test_request_stays_hashable_with_env_matrix_path_set(self, tmp_path) -> None:
         p = tmp_path / "env.yaml"
         p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
 
@@ -765,11 +823,12 @@ class TestCompareRequestEnvMatrixPathCompat:
             env_matrix_path=p,
         )
         assert isinstance(hash(req), int)
-        # `.replace()` on an already-resolved request must not re-trigger
-        # the "not both" usage error (the exact regression a naive
-        # `__post_init__` that didn't consume `env_matrix_path` would hit).
+        # `.replace()` must not re-trigger the "not both" usage error, and
+        # must leave `env_matrix_path` (and the still-unresolved
+        # `env_matrix`) alone when it only changes an unrelated field.
         replaced = req.replace(lang="c")
         assert replaced.lang == "c"
+        assert replaced.env_matrix_path == p
         assert replaced.env_matrix == req.env_matrix
 
     def test_no_env_matrix_path_or_value_is_a_pure_no_op(self, tmp_path) -> None:
@@ -779,3 +838,4 @@ class TestCompareRequestEnvMatrixPathCompat:
         )
         assert req.env_matrix is None
         assert req.env_matrix_path is None
+        assert req.effective_env_matrix() is None
