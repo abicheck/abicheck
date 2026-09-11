@@ -348,6 +348,32 @@ class TestBaselineScanBudgetOverflowMapsToExitFive:
         assert outputs.get("verdict") == "BUDGET_OVERFLOW", outputs
         assert outputs.get("exit-code") == "5", outputs
 
+
+class TestNativeCompareBudgetOverflowFailsTheStep:
+    """Codex review, PR #1210, round 11, fresh evidence: the round-10 fix
+    above only added a `FINAL_EXIT=1` check for `BUDGET_OVERFLOW` to the
+    scan-mode final-exit-code branch -- a native `mode: compare` request
+    passing `--budget` through the documented `extra-args` escape hatch
+    (compare has no dedicated `budget` input of its own) now gets the more
+    specific `BUDGET_OVERFLOW` verdict too, but nothing failed the step on
+    it there, silently regressing a real budget overflow from a failing
+    step to a passing one (`compare --help-all` documents `--budget` as
+    making a CI job "fail clearly, exit 5")."""
+
+    def test_budget_overflow_fails_the_step(self, tmp_path: Path) -> None:
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(_snapshot_path(_GATING_CASE)),
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_GATING_CASE)),
+                "INPUT_EXTRA_ARGS": "--budget 0s",
+            },
+        )
+        assert outputs.get("verdict") == "BUDGET_OVERFLOW", outputs
+        assert outputs.get("exit-code") == "5", outputs
+        assert outputs["_returncode"] != 0, outputs
+
     def test_fully_suppressed_finding_reports_audit_risk_not_audit_clean(
         self, tmp_path: Path
     ) -> None:

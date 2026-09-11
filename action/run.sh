@@ -5700,6 +5700,26 @@ else
     FINAL_EXIT=1
   fi
 
+  # BUDGET_OVERFLOW (exit 5, `cli_compare_fold.py`'s own `sys.exit(5)`)
+  # unconditionally fails the step too, the same way the scan-mode
+  # branch's own check above does and for the same reason: `compare
+  # --help-all` documents `--budget` as making a CI job "fail clearly
+  # (exit 5)" -- no fail-on-* flag governs it. Reachable here for a native
+  # `mode: compare` request that passes `--budget` through the documented
+  # `extra-args` escape hatch (the dedicated `budget` input is scan-only;
+  # compare has no such input of its own). Missing entirely until this fix
+  # (Codex review, PR #1210, round 11, fresh evidence): the round-10 fix
+  # that mapped exit 5 to the more specific `BUDGET_OVERFLOW` verdict
+  # (previously it fell into the generic `VERDICT="ERROR"` case, which
+  # *does* fail the step via this function's own first `if` branch) only
+  # added the matching `FINAL_EXIT=1` check to the scan-mode branch, so a
+  # native compare's own budget overflow silently regressed from a failing
+  # step to a passing one.
+  if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
+    echo "::error::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
+    FINAL_EXIT=1
+  fi
+
   # EVIDENCE_CONTRACT_ERROR (exit 7, ADR-037 D5) unconditionally fails the
   # step too, same as the scan-mode branch's own check above and for the
   # same reason: no compatibility comparison ran at all, so no fail-on-*

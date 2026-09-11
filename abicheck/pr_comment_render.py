@@ -108,7 +108,22 @@ def _header(model: CommentModel) -> tuple[str, str]:
             # coverage ledger, or evidence_contract); "🛑 Analysis
             # incomplete" below names which one when there's a finding for it.
             return "🛑", "Audit: this run blocks the step"
-        if not model.breaking and not model.review and not model.has_incomplete:
+        # A policy override can reclassify an audit finding as
+        # "compatible" (bucketed into `model.safe`, not `breaking`/
+        # `review`), and a fully-suppressed audit has only
+        # `suppressed_count` -- both left this check believing the run
+        # found nothing at all (Codex review, PR #1210, round 11, fresh
+        # evidence): the Action still publishes AUDIT_RISK/exit-code 0 for
+        # either shape, and the body renders the finding(s), so the
+        # headline must not claim "no baseline to compare" (a green,
+        # nothing-happened headline) alongside a body that shows one.
+        if (
+            not model.breaking
+            and not model.review
+            and not model.has_incomplete
+            and not model.safe
+            and model.suppressed_count == 0
+        ):
             return "✅", "Audit — no baseline to compare"
         return "⚠️", "Audit — candidate-side finding(s), not gated"
     if (

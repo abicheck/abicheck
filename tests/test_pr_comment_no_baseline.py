@@ -349,6 +349,46 @@ class TestFindingFreeBlockedAuditStillPosts:
         assert should_post(model, "changes") is True
 
 
+class TestFindingBearingAuditNeverGetsTheCleanHeadline:
+    """Codex review, PR #1210, round 11: a policy override can reclassify
+    an audit finding as "compatible" (bucketed into `model.safe`, not
+    `breaking`/`review`), and a fully-suppressed audit has only
+    `suppressed_count` -- both left the clean-headline check believing the
+    run found nothing at all, even though the Action still publishes
+    AUDIT_RISK/exit-code 0 for either shape and the body renders the
+    finding(s)."""
+
+    def test_compatible_classified_finding_does_not_get_the_clean_headline(
+        self,
+    ) -> None:
+        report = _audit_report(
+            findings=[
+                {
+                    "kind": "exported_not_public",
+                    "symbol": "_Z1fv",
+                    "description": "irrelevant for this test",
+                    "verdict": "COMPATIBLE",
+                    "category": "quality",
+                    "evolution": "persistent",
+                    "candidate_side_enrichment": False,
+                    "observed_value": "_Z1fv",
+                }
+            ]
+        )
+        model = build_model(report)
+        assert model.safe, "fixture must actually land in the safe bucket"
+        assert not model.breaking and not model.review
+        body = render_comment(model, sha="deadbeef")
+        assert "no baseline to compare" not in body
+
+    def test_fully_suppressed_finding_does_not_get_the_clean_headline(self) -> None:
+        report = _audit_report(suppressed_count=1)
+        model = build_model(report)
+        assert not model.breaking and not model.review and not model.safe
+        body = render_comment(model, sha="deadbeef")
+        assert "no baseline to compare" not in body
+
+
 class TestPolicyReflectsTheReportsOwnResolvedValue:
     """Codex review, PR #1210, round 5: the no-baseline report previously
     carried no top-level `policy` key at all, so the comment always
