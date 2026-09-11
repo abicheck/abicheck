@@ -66,13 +66,16 @@ def _l2_seed_config(
     but never run), then folds the CLI build-DB overrides in exactly as embed
     does, so L2 seeding resolves the *same* DB L3 will.
 
-    ``build_targets`` (P0.2, Codex review): folded in the same way, so an
-    explicit ``--build-target`` scopes the L2 include/compile-context seed's
-    own ``collect_inline_pack`` call identically to ``embed_build_source``'s
-    L3/L4/L5 collection -- without this, a multi-target Bazel workspace could
-    seed L2 from an unrelated target's include dirs/dialect flags even though
-    the caller explicitly scoped L3 evidence to one root, producing a snapshot
-    parsed under the wrong compile context despite target-scoped L3 evidence.
+    ``build_targets`` (P0.2, Codex review): folded in the same way, so a
+    ``build.targets``/``InputSpec.build_targets`` scope (``--build-target``
+    itself was removed as a CLI flag; only the config field and the typed-API
+    parameter remain, see the ``dump --build-target`` removal changelog entry)
+    scopes the L2 include/compile-context seed's own ``collect_inline_pack``
+    call identically to ``embed_build_source``'s L3/L4/L5 collection --
+    without this, a multi-target Bazel workspace could seed L2 from an
+    unrelated target's include dirs/dialect flags even though the caller
+    explicitly scoped L3 evidence to one root, producing a snapshot parsed
+    under the wrong compile context despite target-scoped L3 evidence.
 
     A malformed/invalid config surfaces loudly elsewhere (``embed_build_source``,
     the compile-context resolver); this is a best-effort include-dir hint, so it
