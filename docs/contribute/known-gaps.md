@@ -6675,6 +6675,17 @@ question about a third artifact abicheck was not given, which is
 
 ### `compare --no-baseline` does not yet reproduce `scan`'s audit-mode findings
 
+**Resolved.** `abicheck compare --no-baseline CANDIDATE` correctly reports
+the cross-source hygiene findings today — verified live against a G20 audit
+fixture (`compare --no-baseline catalog/cases/case143_audit_accidental_export/
+snapshot.abi.json --format json` reports the expected `exported_not_public`
+finding, `"verdict": null`, and `"changes": []`) as of the `scan` command's
+own removal (ADR-068 Phase 6). `docs/use/evidence-depth.md`'s "Single-build
+audit" section already reflects the fix (closed 2026-09-09/10, per its own
+text) and every G20 audit case's README now runs `compare --no-baseline`
+directly; this entry is left below as the historical record of the bug and
+its root cause, not a live description of current behavior.
+
 Found while migrating the Phase 4 documentation and corpora of
 [`plans/one-comparison-product.md`](plans/one-comparison-product.md)
 (ADR-068 D2, §3 row 2). `abicheck compare --no-baseline CANDIDATE` exists,
@@ -7892,3 +7903,31 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 `tests/regressions/manifest_tool_surface.py` for the fixture half; the
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
+
+---
+
+## `evidence.tier_shortcut_without_substitute`'s regression coverage was deleted with `scan` — not fixed here
+
+`tests/regressions/manifest.py`'s `evidence.tier_shortcut_without_substitute`
+bug class stated an invariant about evidence-tier cost shortcuts (a shortcut
+that skips one evidence source because another is expected to supply the
+same facts may only be taken when that substitute is actually present) and
+was covered by exactly one guard: `cli_scan_helpers._uses_debug_presence_only`,
+exercised by `tests/test_scan_depth_evidence_shortcut.py` and
+`tests/test_scan_compare_parity.py`. All three — the guard function and both
+seed tests — were deleted outright when `scan` was removed (ADR-068 Phase 6);
+neither the guard nor an equivalent was ported to `compare`/`dump`.
+
+**Not fixed here.** This doc-sweep pass could not verify whether any of
+`compare`/`dump`'s own L3/L4/L5 collect-mode decisions take the same
+"skip X because Y is expected to substitute" shape, and did not write a new
+test either way — that requires reading the current collect-mode resolution
+code with the same care the original guard's author gave it, which is
+implementation work, not a documentation fix. The manifest's own seed_tests
+were repointed at `tests/test_evidence_depth_levels.py`/
+`tests/test_depth_evidence_contract_liveness.py` purely so the registry
+entry stays mechanically valid (a `BugClass` needs a real, collectible seed
+test) — neither actually proves this class's invariant. The real follow-up:
+audit `compare`/`dump`'s collect-mode decisions for this shortcut shape, and
+either write a new guard + test for a genuine instance, or record that none
+exists any more (the shortcut may have been scan-exclusive).

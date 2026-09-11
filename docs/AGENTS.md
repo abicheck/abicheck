@@ -117,9 +117,10 @@ path, not the nav position.
     — is navigated under the **Concepts** tab: verdicts,
     `evidence-and-detectability.md`, `architecture.md`, build/source data,
     graph coverage, impact assessment,
-    `elf-symbol-filtering.md` (a specific abicheck scan-mode behavior, not
-    general ABI knowledge — kept out of the educational tab even though its
-    file lives in the same directory), and `limitations.md`.
+    `elf-symbol-filtering.md` (a specific abicheck `compare`/`dump` ELF-only
+    mode behavior, not general ABI knowledge — kept out of the educational
+    tab even though its file lives in the same directory), and
+    `limitations.md`.
 
   A page whose job is genuinely both — mapping a general ABI concept to the
   exact `ChangeKind`s/evidence tiers abicheck emits for it, e.g.

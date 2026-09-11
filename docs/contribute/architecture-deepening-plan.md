@@ -622,12 +622,22 @@ on C6 completing first.
 
 ---
 
-### C12 — `LayerProvider` keep-vs-delete decision
+### C12 — `LayerProvider` keep-vs-delete decision *(resolved: Option 1, by removal)*
 
 > **Provenance.** The second item the architecture review that produced PR
 > #536 named and deferred: "the `LayerProvider` keep-vs-delete decision."
 > Unlike C11, this is not a decomposition — it is a binary call this document
 > lays out evidence for but does not make unilaterally.
+>
+> **Resolved 2026-09-11 (ADR-068 Phase 6).** The `scan` command was removed
+> outright, and `scan_engine.py`/`service_scan.py` — the two modules whose
+> direct-call orchestration this section's "zero production implementers"
+> finding rested on — were deleted with it. `providers.py`/
+> `tests/test_providers.py` themselves survive (nothing scan-exclusive about
+> the `Protocol` itself), but the analysis below, which named those two
+> modules by their real (then-current) names as evidence for Option 1, is
+> now a historical record of the investigation that led there rather than a
+> live description of the current codebase — read it as such.
 
 **Problem.** `abicheck/buildsource/providers.py` (127 lines) defines the
 ADR-035 D10 `LayerProvider` `Protocol` (`capabilities()`/`estimate()`/`run()`)

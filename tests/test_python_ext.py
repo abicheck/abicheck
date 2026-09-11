@@ -613,16 +613,29 @@ def _write_snapshot(tmp_path: object, snap: AbiSnapshot) -> str:
 
 
 def _scan_abi3(path: str, *args: str) -> object:
-    """Invoke ``scan <path> --depth binary`` with extra args."""
+    """Invoke the candidate-side ``--abi3`` audit via ``compare PATH PATH``
+    (ADR-068 D3: the audit is now `compare`'s, not a removed `scan`
+    command's; comparing the candidate against itself is the documented
+    single-artifact idiom, since `--abi3` is not yet wired to
+    `--no-baseline`)."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    return CliRunner().invoke(main, ["scan", path, "--depth", "binary", *args])
+    return CliRunner().invoke(main, ["compare", path, path, *args])
 
 
-#: Promote the audit finding to a hard gate (scan's advisory→error path).
-_GATE = ("--crosscheck", "python_stable_abi_violation=error")
+def _gate_policy(tmp_path: object, severity: str = "warn") -> str:
+    """A `--policy` override file that promotes `python_stable_abi_violation`
+    to `severity` (`compare`'s replacement for scan's `--crosscheck
+    KEY=error` promotion). Default `warn` maps to `API_BREAK`/exit `2`,
+    matching what the removed `scan --crosscheck KEY=error` promotion used
+    to gate at; `.abicheck.yml`'s `overrides:` scheme maps `break` to the
+    stronger `BREAKING`/exit `4` instead (`policy_file.py`)."""
+    policy_path = f"{tmp_path}/gate-policy.yaml"
+    with open(policy_path, "w", encoding="utf-8") as fh:
+        fh.write(f"overrides:\n  python_stable_abi_violation: {severity}\n")
+    return policy_path
 
 
 def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
@@ -631,25 +644,14 @@ def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9")
+    result = _scan_abi3(path, "--abi3", "3.9", "--format", "json")
     assert result.exit_code == 0, result.output
     assert "python_stable_abi_violation" in result.output
 
-    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
-    assert gated.exit_code == 2, gated.output
-
-
-def test_scan_crosscheck_rejects_compare_time_python_kinds(tmp_path: object) -> None:
-    # Only the single-artifact audit finding is promotable via --crosscheck. The
-    # compare-time kinds gate through compare's own verdict, so promoting them
-    # here is rejected as an unknown cross-check (documented boundary).
-    snap = _ext_snapshot("2.0", ["PyList_New"])
-    path = _write_snapshot(tmp_path, snap)
-    result = _scan_abi3(
-        path, "--abi3", "3.9", "--crosscheck", "python_abi3_dropped=error"
+    gated = _scan_abi3(
+        path, "--abi3", "3.9", "--policy", _gate_policy(tmp_path), "--format", "json"
     )
-    assert result.exit_code != 0
-    assert "unknown cross-check" in result.output
+    assert gated.exit_code == 2, gated.output
 
 
 def test_scan_abi3_clean_passes(tmp_path: object) -> None:
@@ -657,9 +659,12 @@ def test_scan_abi3_clean_passes(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
+    result = _scan_abi3(
+        path, "--abi3", "3.12", "--policy", _gate_policy(tmp_path), "--format", "json"
+    )
     assert result.exit_code == 0, result.output
-    assert "python_stable_abi_violation" not in result.output
+    doc = json.loads(result.output[result.output.index("{") :])
+    assert doc["changes"] == []
 
 
 def test_scan_abi3_rejects_non_extension(tmp_path: object) -> None:
@@ -681,25 +686,27 @@ def test_scan_abi3_flags_private_import(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    result = _scan_abi3(
+        path, "--abi3", "3.9", "--policy", _gate_policy(tmp_path), "--format", "json"
+    )
     assert result.exit_code == 2, result.output
     assert "python_stable_abi_violation" in result.output
 
 
 def test_scan_abi3_json_output_carries_finding(tmp_path: object) -> None:
-    import json as _json
-
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
     result = _scan_abi3(path, "--abi3", "3.9", "--format", "json")
     assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
-    # The abi3 audit coverage row records it ran AND names the offending symbol,
-    # so a CI artifact tells the user which import to fix (not just a count).
-    rows = {row.get("layer"): row for row in data.get("coverage", [])}
-    assert "abi3_audit" in rows
-    assert "_PyObject_LookupSpecial" in rows["abi3_audit"]["detail"]
+    data = json.loads(result.output[result.output.index("{") :])
+    # The finding names the offending symbol, so a CI artifact tells the user
+    # which import to fix (not just a count).
+    changes = [
+        c for c in data["changes"] if c["kind"] == "python_stable_abi_violation"
+    ]
+    assert len(changes) == 1
+    assert "_PyObject_LookupSpecial" in changes[0]["description"]
 
 
 def test_scan_abi3_text_report_names_offending_symbol(tmp_path: object) -> None:
@@ -723,7 +730,7 @@ def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
 
 
 def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:
-    # `scan --abi3 3.9` on a version-specific `foo.cpython-311.so` must not
+    # `--abi3 3.9` on a version-specific `foo.cpython-311.so` must not
     # certify it clean: the SOABI tag itself pins it to 3.11, so it cannot
     # satisfy the abi3 floor no matter how stable its imports are.
     src = "foo.cpython-311-x86_64-linux-gnu.so"
@@ -735,7 +742,9 @@ def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:
     assert "python_stable_abi_violation" in result.output
     assert "cpython-311" in result.output
     # And it gates when promoted.
-    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
+    gated = _scan_abi3(
+        path, "--abi3", "3.9", "--policy", _gate_policy(tmp_path), "--format", "json"
+    )
     assert gated.exit_code == 2, gated.output
 
 
@@ -828,15 +837,17 @@ def test_audit_supplied_floor_used_when_no_lower_declared() -> None:
 
 
 def test_scan_abi3_honors_lower_declared_floor_end_to_end(tmp_path: object) -> None:
-    # Codex P2 (a233b36): `scan --abi3 3.12 --crosscheck …=error` on a cp39-abi3
-    # artifact importing a 3.11-only symbol must FAIL (exit 2), not certify clean
-    # — the tag still advertises 3.9 where the symbol is missing.
+    # Codex P2 (a233b36): `--abi3 3.12` gated via policy override, on a
+    # cp39-abi3 artifact importing a 3.11-only symbol, must FAIL (exit 2), not
+    # certify clean — the tag still advertises 3.9 where the symbol is missing.
     src = "foo.cp39-abi3-win_amd64.pyd"
     snap = _ext_snapshot(
         "2.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
     )
     path = _write_snapshot(tmp_path, snap)
-    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
+    result = _scan_abi3(
+        path, "--abi3", "3.12", "--policy", _gate_policy(tmp_path), "--format", "json"
+    )
     assert result.exit_code == 2, result.output
     assert "python_stable_abi_violation" in result.output
 

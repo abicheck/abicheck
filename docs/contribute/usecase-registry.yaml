@@ -341,12 +341,12 @@ use_cases:
     note: >
       ADR-043: the baseline registry (push/pull/list/delete) was removed
       outright — a baseline is simply an old dump/library/directory/package
-      passed directly to `compare OLD NEW` or `scan ARTIFACT --against OLD`.
-      Pinning is the caller's own responsibility (a path, a URL-fetched file,
-      a release asset) rather than a managed registry.
+      passed directly to `compare OLD NEW`. Pinning is the caller's own
+      responsibility (a path, a URL-fetched file, a release asset) rather
+      than a managed registry.
     evidence:
-      modules: [abicheck/cli_scan.py, abicheck/cli_compare_helpers.py]
-      tests: [tests/test_cli_scan.py, tests/test_compare_dispatch.py]
+      modules: [abicheck/cli_compare_helpers.py]
+      tests: [tests/test_compare_dispatch.py]
 
   - id: UC-WF-debian-symbols
     axis: workflow
@@ -495,7 +495,7 @@ use_cases:
         abicheck/stable_abi.py,
         abicheck/stable_abi_data.py,
         abicheck/diff_python.py,
-        abicheck/cli_scan.py,
+        abicheck/cli_compare_helpers.py,
       ]
       tests: [tests/test_python_ext.py]
     notes: >
@@ -506,11 +506,13 @@ use_cases:
       for a target Py_LIMITED_API floor; diff_python raises
       PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module) at
       compare time. Interpreter-floor conformance is checked by the
-      `abicheck scan --abi3` audit (diff_python.audit_stable_abi_imports; the
-      user supplies the target floor, which a bare .abi3.so does not carry),
-      which audits a single module and surfaces a violation the export-table view
-      would call COMPATIBLE (advisory, or gated via
-      --crosscheck python_stable_abi_violation=error).
+      `abicheck compare CANDIDATE CANDIDATE --abi3 VERSION` audit (ADR-068
+      D3; diff_python.audit_stable_abi_imports; comparing the candidate
+      against itself is the single-artifact idiom, since --abi3 is not yet
+      wired to --no-baseline; the user supplies the target floor, which a
+      bare .abi3.so does not carry), which surfaces a violation the
+      export-table view would call COMPATIBLE (advisory, or gated via a
+      --policy overrides: python_stable_abi_violation: warn/break).
 
   - id: UC-WF-audit
     axis: workflow
@@ -891,44 +893,35 @@ use_cases:
   - id: UC-WORKFLOW-pr-source-tier
     axis: workflow
     name: Always-on compiler-free PR pre-scan + deterministic level selection
-    status: complete
+    status: partial
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     evidence:
       modules:
         - abicheck/buildsource/pattern_facts.py
         - abicheck/buildsource/preprocessor_facts.py
-        - abicheck/buildsource/risk.py
         - abicheck/model/evidence_depth_levels.py
-        - abicheck/cli_scan.py
       tests:
         - tests/test_pattern_facts.py
-        - tests/test_preprocessor_scan.py
-        - tests/test_risk.py
+        - tests/test_preprocessor_facts.py
         - tests/test_evidence_depth_levels.py
-        - tests/test_cli_scan.py
-        - tests/test_perf_binary_scan.py
         - tests/test_scenarios.py
     next_steps: >
-      ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
-      (`buildsource/pattern_facts.py`); and the deterministic `scan` orchestrator
-      (`cli_scan.py`) — classify → always-on tier (pattern S3 + crosscheck D4) →
-      the pinned level (`--mode` preset or explicit `--source-method`/`--depth`,
-      resolved by `model/evidence_depth_levels.py`) → one coverage-annotated report,
-      with `--baseline` comparison and a `--budget` failure guard (exit 5 on
-      overflow, never shrinks scope). The numeric risk score (`buildsource/risk.py`,
-      tunable `risk_rules`) changes depth ONLY under `--source-method auto`
-      (opt-in). Reuses the existing collect-mode/replay-scope machinery; emits
-      RISK/API_BREAK only (authority rule). The D7 POI work-list
-      (`buildsource/poi.py`) focuses the expensive scan (Phase 3b, done). The S2
-      preprocessor pre-scan (`buildsource/preprocessor_facts.py`) — per-TU ABI
-      macro-value capture + divergence and public-header private/generated-header
-      leak detection, conditional on a compile DB + `clang -E` — is done and wired
-      into `scan` with honest coverage. Depth semantics are tracked end-to-end:
-      the binary rung stays artifact-only (L0/L1) even when matrix-wide headers,
-      sources, or compile DB flags are present, with a slow native-ELF perf guard
-      and scenario catalog entry preventing source-pattern/L3 work from leaking
-      back into `--depth binary`. Phase 1 (D2) complete.
+      ADR-035 D2/D3. REGRESSED (ADR-068 Phase 6): the `scan` command that
+      orchestrated this tier end to end — classify → always-on tier
+      (pattern S3 + crosscheck D4) → the pinned level → one
+      coverage-annotated report, with `--baseline` comparison and a
+      `--budget` failure guard — is gone with no CLI replacement; neither
+      `compare` nor `dump` wires the always-on pre-scan/crosscheck tier in.
+      The numeric risk-score module was deleted with it (ADR-068's own
+      call-site audit found no `compare`-pipeline caller). What survives
+      as tested, CLI-independent primitives: the
+      compiler-free lexical pattern pre-scan (`buildsource/pattern_facts.py`),
+      the preprocessor pre-scan (`buildsource/preprocessor_facts.py`), and
+      the depth vocabulary (`model/evidence_depth_levels.py`, still used by
+      `compare`/`dump`'s own `--depth` resolution). Re-wiring an always-on
+      PR pre-scan tier onto `compare`/`dump` would be new feature work, not
+      a restoration.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
@@ -957,52 +950,46 @@ use_cases:
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow
     name: Single-release ABI-hygiene audit (no baseline compare)
-    status: complete
+    status: partial
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     evidence:
       modules:
-        - abicheck/cli_scan.py
         - abicheck/buildsource/cross_source_checks.py
       tests:
-        - tests/test_scan_estimate.py
         - tests/test_cross_source_checks.py
     next_steps: >
-      ADR-035 D8. DONE: `scan --audit` runs the D2 pattern facts + D4 cross-checks
-      intra-version with no baseline and renders the hygiene catalog (accidental
-      ABI surface, public-not-exported, header/build-context mismatch,
-      private-header leaks + advisory pattern facts), severity-mapped via
-      `--crosscheck KEY=LEVEL` (`_audit_exit_code`: RISK advisory, API_BREAK →
-      exit 2, promoted checks gate). REMAINS: `surface-report` reuse and the deeper one-time checks
-      (ODR variants, visibility/versioning hygiene, RTTI-for-internal-types) once
-      their ChangeKinds land (Phase 2 tail).
+      ADR-035 D8. REGRESSED (ADR-068 Phase 6): `scan --audit`, which ran the
+      D2 pattern facts + D4 cross-checks intra-version with no baseline and
+      rendered the combined hygiene catalog (accidental ABI surface,
+      public-not-exported, header/build-context mismatch, private-header
+      leaks + advisory pattern facts) with `--crosscheck KEY=LEVEL`
+      severity mapping, is gone with no CLI replacement — `compare
+      --no-baseline` performs a single-build compatibility audit but does
+      not wire in the cross-source-check engine. `run_crosschecks`
+      (`buildsource/cross_source_checks.py`) itself remains a tested,
+      CLI-independent library primitive. REMAINS: giving it a CLI front
+      door again (new feature work, not a restoration), `surface-report`
+      reuse, and the deeper one-time checks (ODR variants,
+      visibility/versioning hygiene, RTTI-for-internal-types) once their
+      ChangeKinds land (Phase 2 tail).
 
   - id: UC-WORKFLOW-evidence-directed-scope
     axis: workflow
     name: Evidence-directed scan focusing (binary/header facts steer source scan)
-    status: complete
+    status: planned
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
-    evidence:
-      modules:
-        - abicheck/buildsource/poi.py
-        - abicheck/cli_scan.py
-      tests:
-        - tests/test_poi.py
     next_steps: >
-      ADR-035 D7. DONE: `buildsource/poi.py` (`build_points_of_interest`) computes
-      a points-of-interest work-list from the changed-path floor + pattern-scan
-      escalation triggers + L0/L1/L2 export deltas + risk score (reverse of the
-      explain-finding localization walk); the floor is unconditional (risk/deltas
-      only add, never drop a changed TU). `scan` runs the pattern pre-scan first
-      and feeds `poi.changed_paths()` into the source-replay scope. The
-      `scan --baseline` path now reads a cheap, header-free L0 view of both sides
-      (`_load_exports_for_poi`) so the export-delta walk runs live, and
-      `resolve_symbol_tus` turns the resulting symbol POIs into declaring TUs
-      (via the baseline's cached L5 graph) that join the replay seed *and* the
-      `crosscheck` changed-path work-list. REMAINS: symbol→TU resolution only
-      fires when the baseline carries an L5 graph (the full-depth ADR-035 D9
-      baseline); a shallow baseline still focuses on changed paths only.
+      ADR-035 D7. REGRESSED (ADR-068 Phase 6): the points-of-interest module
+      (`build_points_of_interest`), which computed a points-of-interest
+      work-list from the changed-path floor + pattern-scan escalation
+      triggers + L0/L1/L2 export deltas + risk score to focus `scan`'s
+      source-replay scope, was deleted outright — ADR-068's own call-site
+      audit found no `compare`-pipeline caller, since evidence-directed
+      focusing was exclusively a `scan` behavior. No replacement exists;
+      `compare`'s own source-replay scope is unaffected because it never
+      depended on this focusing mechanism.
 
   - id: UC-TC-build-emitted-facts
     axis: toolchain
@@ -1034,28 +1021,31 @@ use_cases:
   - id: UC-REPORTING-scan-coverage-estimate
     axis: reporting
     name: Scan coverage/confidence report + per-project cost estimate
-    status: complete
+    status: partial
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     evidence:
       modules:
-        - abicheck/cli_scan.py
+        - abicheck/dry_run_estimate.py
         - abicheck/service.py
       tests:
-        - tests/test_cli_scan.py
-        - tests/test_scan_estimate.py
+        - tests/test_dry_run_contract.py
+        - tests/test_compare_cost_preview.py
     next_steps: >
-      ADR-035 D9/D10. DONE: `scan` emits one report (text/JSON) carrying the
-      per-tier coverage table (intrinsic L0-L2 + pattern-scan S3 + L3/L4/L5 pack
-      coverage + per-crosscheck rows + the POI focus summary), the resolved level,
-      and the risk score, so a partial scan is legible (never a bare "source scan
-      failed"). DONE: the typed `ScanRequest`/`CostEstimate`/`LayerResult`/`Budget`
-      API + `service.estimate_scan()` (probes TU count from the compile DB /
-      source tree + header fan-out), surfaced as `scan --estimate` — a
-      dry-run that scans nothing. REMAINS: the full
-      `ScanResult`/`run_scan` refactor (move the `cli_scan` orchestration body into
-      `service.py`) and the provider-agreement/confidence matrix rendered by
-      reporter/PR-comment/SARIF.
+      ADR-035 D9/D10. REGRESSED (ADR-068 Phase 6): the `scan`-emitted
+      per-tier coverage report (intrinsic L0-L2 + pattern-scan S3 + L3/L4/L5
+      pack coverage + per-crosscheck rows + the POI focus summary) and the
+      risk score it carried are gone with the command — no replacement
+      renders that combined confidence view. DONE (survives, unaffected):
+      the typed `CostEstimate`/`LayerResult`/`Budget` dry-run cost model,
+      split into the leaf module `dry_run_estimate.py` and re-exported by
+      `service.py` unchanged (`estimate_scan()` — the name is historical,
+      the function itself is not scan-specific: it probes TU count from the
+      compile DB/source tree + header fan-out for any dry-run cost preview,
+      including `compare`'s own). REMAINS: no CLI surface renders a
+      per-tier coverage/confidence report today; the provider-agreement
+      matrix would need a new consumer command if this capability is
+      restored.
 
   # ── Source-scan & cross-source example corpus (ADR-035 / G20) ──────────────
   - id: UC-WORKFLOW-audit-example-corpus
@@ -1124,21 +1114,24 @@ use_cases:
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
     evidence:
-      modules: [abicheck/buildsource/poi.py, abicheck/buildsource/source_link.py]
-      tests: [tests/test_poi_scenarios.py, tests/test_source_evidence_integrity.py]
+      modules: [abicheck/buildsource/source_link.py]
+      tests: [tests/test_source_evidence_integrity.py]
     next_steps: >
-      ADR-035 D7 (G20.3). DONE: test-only scenario suites
-      (`tests/test_poi_scenarios.py`, `tests/test_source_evidence_integrity.py`)
-      asserting on the scan plan, not just the verdict — an export delta targeting
-      the changed symbol, an exported template instantiation seed, the D7
-      changed-path floor (a mis-weighted `risk_rules` cannot drop a changed TU),
-      and the D4 unlinked-source-evidence integrity guard (the oneDAL shape: many
-      exports, TUs parsed, zero matched symbols reported as degraded, never clean).
-      ALSO DONE: the §3.3 `_layers_from_coverage` plumbing — the L4 source-link
-      boundary integrity counters (`exported_symbols`/`matched_symbols`/
-      `unmatched_symbols` + `facts`) now ride the crosscheck coverage row
-      (`crosscheck._coverage_row`/`_CheckOutput`) onto the rendered
-      `ScanResult` layer (`service_scan.LayerResult.counters`), so a degraded
-      link is named on the report even when ODR runs clean
-      (`test_source_evidence_integrity.py::test_integrity_counters_surface_on_rendered_scan_layers`).
-      REMAINING: nothing in this entry. See plan Phase 3.
+      ADR-035 D7 (G20.3). REGRESSED (ADR-068 Phase 6): the POI-focusing half
+      of this corpus — an export delta targeting the changed symbol, an
+      exported template instantiation seed, and the D7 changed-path floor
+      (a mis-weighted risk score cannot drop a changed TU) — was a
+      test-only scenario suite (`tests/test_poi_scenarios.py`) asserting on
+      `scan`'s own plan; it was deleted along with its own points-of-interest module
+      (see `UC-WORKFLOW-evidence-directed-scope`), since the mechanism it
+      tested no longer exists. DONE (survives): the D4
+      unlinked-source-evidence integrity guard (the oneDAL shape: many
+      exports, TUs parsed, zero matched symbols reported as degraded, never
+      clean) and the §3.3 boundary-integrity counters
+      (`exported_symbols`/`matched_symbols`/`unmatched_symbols` + `facts`)
+      — `tests/test_source_evidence_integrity.py` was retargeted to read
+      these directly off `run_crosschecks`'s own coverage row
+      (`cross_source_checks._coverage_row`/`_CheckOutput`) rather than a
+      rendered `scan` report layer, so a degraded link is still named even
+      when ODR runs clean
+      (`test_integrity_counters_surface_on_rendered_scan_layers`).

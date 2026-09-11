@@ -152,9 +152,9 @@ BREAKING, not risk). See
 
 ## Intra-Version Hygiene (audit — no baseline needed)
 
-`abicheck scan libfoo.so` (with no `--against`) lints a *single* build for bad
-ABI hygiene — problems you can see without a previous version. Absence of
-`--against` is already a one-build audit; there is no separate `--audit` flag.
+`abicheck compare --no-baseline libfoo.so` lints a *single* build for bad
+ABI hygiene — problems you can see without a previous version. `--no-baseline`
+declares that no prior surface exists, turning the comparison into an audit.
 All 🟡 COMPATIBLE_WITH_RISK.
 
 | Finding | What it flags | Example |

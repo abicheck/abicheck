@@ -223,7 +223,7 @@ Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, 
 pip install abicheck
 ```
 
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `ABICHECK_AST_FRONTEND=clang` (or `.abicheck.yml`'s `compile.frontend: clang` on `dump`/`compare`; `scan` also has its own `--ast-frontend clang` flag), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `ABICHECK_AST_FRONTEND=clang` (or `.abicheck.yml`'s `compile.frontend: clang`), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
@@ -255,7 +255,7 @@ Inputs can be shared libraries, JSON snapshots, release directories, or packages
 
 ## Which command do I need?
 
-The whole CLI is seven root commands. Most single-library projects only ever need `compare` and `dump`.
+The whole CLI is six root commands. Most single-library projects only ever need `compare` and `dump`.
 
 | I want to… | Use |
 |------------|-----|
@@ -298,7 +298,7 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 | `8` | any | A library was **proven** removed from a multi-library release (NEW's inventory proven complete, ADR-065) and `.abicheck.yml`'s `gate.fail_on_removed_library` is set; under the default scheme, only when no `2`/`4` already applies. An unmatched library under an unproven inventory is an incomplete scope instead (exit `0`, or `1` with `scope.on_incomplete: block`; a run that completed no comparison exits `1`) |
 | `64` | usage error | Bad flags or inputs |
 
-`--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `scan`, `deps compare`, and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
+`--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `deps compare` and `compat` add per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
 
 ### Policies and suppressions
 

@@ -111,7 +111,7 @@ When the internal declaration's own file is among the revision's changed
 paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
 higher confidence — "this call reaches a file that changed this revision"
 is a stronger signal than "this call reaches *something* internal" — and
-`abicheck scan --since` wires the changed-path set through automatically.
+`abicheck compare --since` wires the changed-path set through automatically.
 
 ## Why this matters for a real release
 

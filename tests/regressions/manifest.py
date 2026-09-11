@@ -349,7 +349,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
             "tests/test_explicit_source_extractor_propagation.py",
-            "tests/test_dump_scan_l3_comparability.py",
         ),
         known_gaps=(
             KnownGap(
@@ -367,20 +366,25 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "override, output/report options) — of these only the "
                     "frontend concern has since had any of this treatment, "
                     "and only for one chain: `--ast-frontend` -> the L4 "
-                    "source-ABI replay backend, where `scan` accepted the "
-                    "value and then ignored it "
+                    "source-ABI replay backend, where the now-removed "
+                    "`scan` command used to accept the value and then "
+                    "ignore it "
                     "(tests/test_explicit_source_extractor_propagation.py, "
                     "exhaustive over the frontend x env domain, grounded in "
-                    "_make_source_extractor, with the end-to-end half in "
-                    "tests/test_dump_scan_l3_comparability.py). The same "
+                    "_make_source_extractor; its own former end-to-end half, "
+                    "tests/test_dump_scan_l3_comparability.py, was deleted "
+                    "with `scan` — ADR-068 Phase 6 — and not replaced, since "
+                    "the divergence it proved no longer has a second command "
+                    "to diverge from). The same "
                     "concern's *other* consumers (the L2 header parse, the "
-                    "preprocessor/pattern pre-scans) are untouched, and one "
-                    "frontend divergence is deliberately still open rather "
-                    "than closed: an UNFLAGGED `auto` resolves to clang for "
-                    "`scan` and castxml for `dump`/`compare`, which is a "
-                    "real default change to make deliberately (the CLI "
+                    "preprocessor/pattern pre-scans) are untouched. `scan`'s "
+                    "own UNFLAGGED `auto` frontend resolution (clang, vs. "
+                    "`dump`/`compare`'s castxml) — a real default "
+                    "divergence this class had left deliberately open "
+                    "rather than closed (the CLI "
                     "cleanup phase-two plan's PR 3A item 2), not a "
-                    "propagation bug to patch. consumer_compile was chosen "
+                    "propagation bug to patch — is moot now that `scan` "
+                    "itself is gone. consumer_compile was chosen "
                     "as the first "
                     "worked example specifically because #860/#883's own "
                     "history and this class's pre-existing seed tests "
@@ -529,8 +533,8 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1186,),
         seed_tests=(
-            "tests/test_scan_depth_evidence_shortcut.py",
-            "tests/test_scan_compare_parity.py",
+            "tests/test_evidence_depth_levels.py",
+            "tests/test_depth_evidence_contract_liveness.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -541,26 +545,37 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "Only the DWARF-vs-header-AST shortcut "
-                    "(`cli_scan_helpers._uses_debug_presence_only`) is "
-                    "covered. The same shape exists wherever one "
-                    "extractor is skipped on the expectation that a "
-                    "richer one runs; none of the L3/L4/L5 collect-mode "
-                    "decisions has an equivalent 'the substitute is "
-                    "actually present' guard or generalized test yet."
+                    "REGRESSED (ADR-068 Phase 6): this bug class's own "
+                    "seed tests, `tests/test_scan_depth_evidence_shortcut.py`"
+                    "/`tests/test_scan_compare_parity.py`, were deleted with "
+                    "`scan` — the guard they exercised, "
+                    "`cli_scan_helpers._uses_debug_presence_only` (the "
+                    "DWARF-vs-header-AST shortcut), no longer exists at "
+                    "all. The two tests substituted above "
+                    "(`test_evidence_depth_levels.py`, "
+                    "`test_depth_evidence_contract_liveness.py`) exercise "
+                    "adjacent depth/evidence-contract behavior so this "
+                    "entry keeps a real, collectible seed, but neither "
+                    "proves the specific invariant this class states: that "
+                    "a cost shortcut skipping one evidence source because "
+                    "another is expected to supply it may only be taken "
+                    "when that substitute is actually present. No "
+                    "`compare`/`dump`-side equivalent of that shortcut has "
+                    "been identified or tested. Writing one (or confirming "
+                    "none of `compare`/`dump`'s own collect-mode decisions "
+                    "take this shape) is the real, not-yet-done follow-up."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
             KnownGap(
                 description=(
-                    "`--depth binary` is excluded from the seed test's "
-                    "scan-vs-compare matrix: the two genuinely diverge "
-                    "there (`scan` extracts symbols only, "
-                    "`compare --depth binary` still reads DWARF and "
-                    "reports `type_size_changed`), which is a question "
-                    "about whether `compare`'s binary rung honours its "
-                    "own pin rather than about this shortcut. Predates "
-                    "ADR-068 Phase 4 on both sides and is untested."
+                    "Even before the regression above: only the one "
+                    "DWARF-vs-header-AST shortcut was ever covered. The "
+                    "same shape exists wherever one "
+                    "extractor is skipped on the expectation that a "
+                    "richer one runs; none of the L3/L4/L5 collect-mode "
+                    "decisions has an equivalent 'the substitute is "
+                    "actually present' guard or generalized test."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

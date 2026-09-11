@@ -245,8 +245,8 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > layers in [Build Info & Sources](build-source-data.md).
 >
 > **Layers (`L`) vs. the depth dial.** The `L0`–`L5` codes name *evidence
-> layers* — *what* abicheck sees and how much that evidence is trusted. The
-> `abicheck scan` command has one knob, `--depth`
+> layers* — *what* abicheck sees and how much that evidence is trusted.
+> `compare`/`dump` have one knob, `--depth`
 > (`binary|headers|build|source` — exactly four public rungs), that selects
 > **how far down** these layers to collect. The [`--depth` dial section
 > below](#the-depth-dial-how-much-evidence-to-collect) explains the mapping

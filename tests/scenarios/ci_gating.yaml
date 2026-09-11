@@ -104,30 +104,21 @@ scenarios:
     automated: true
     test: test_sc_malformed_input
 
-  - id: SC-SCAN-BINARY-DEPTH-MATRIX-ARGS
-    title: Binary-depth scan ignores matrix-wide source/build inputs
+  - id: SC-COMPARE-BINARY-DEPTH-MATRIX-ARGS
+    title: Binary-depth compare ignores matrix-wide source/build inputs
     persona: CI maintainer running a depth matrix
     narrative: >
       A CI matrix often builds one command template and varies only --depth,
       leaving --headers, --sources, and --build-info on every rung. The binary
-      rung must remain an L0/L1 artifact scan: it should ignore those deeper
-      inputs, skip the source pattern scan and L3 collection, and return the same
-      binary verdict quickly.
+      rung must remain an L0/L1 artifact comparison: it should ignore those
+      deeper inputs and return the same binary verdict quickly (ADR-068
+      Phase 6 retired `scan`, which used to run this).
     flow:
-      # `scan` here, not `compare`, because this scenario's whole point is the
-      # coverage block's `skipped`/`not_collected` rows and `scan`'s pinned-depth
-      # contract -- neither of which `compare` reproduces yet (ADR-068 plan §3
-      # row 28). It moves onto `compare` when that row closes.
-      - abicheck scan new.json --against old.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
+      - abicheck compare old.json new.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
     expected:
       exit_code: 4
       verdict: BREAKING
-      coverage:
-        L0_binary: present
-        L1_debug: not_collected
-        L2_header: skipped
-        pattern_scan: not_collected
-        L3_build: not_collected
+      requested_depth: binary
     validates: UC-WORKFLOW-pr-source-tier
     automated: true
     test: test_sc_scan_binary_depth_matrix_args

@@ -503,7 +503,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             {
                 "contribute/known-gaps.md",
                 "reference/config-file.md",
-                "reference/exit-codes.md#L99",
+                "reference/exit-codes.md#L98",
                 "contribute/plans/g35-multi-artifact-scan.md",
                 "contribute/adr/006-package-level-comparison.md",
                 "contribute/adr/023-bundle-aware-multi-binary-analysis.md",
@@ -756,6 +756,12 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "contribute/plans/one-comparison-product.md",
                 "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
                 "contribute/adr/index.md",
+                # C12's "LayerProvider keep-vs-delete decision" section names
+                # scan_engine.py/service_scan.py/cli_scan.py as evidence for a
+                # now-resolved architecture-review finding; the resolution
+                # note above it marks the section as a historical record of
+                # that investigation, not a live description of the codebase.
+                "contribute/architecture-deepening-plan.md",
                 "use/evidence-depth.md",
                 "use/github-action-source-scans.md",
                 "reference/exit-codes.md",

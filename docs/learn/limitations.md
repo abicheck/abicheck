@@ -41,8 +41,9 @@ maintained by Kitware and available via conda-forge, Homebrew, apt, or direct do
 
 **Debug info cross-check** uses DWARF (Linux only) and PDB (Windows). PDB
 support extracts struct/class/union layouts, enum types, calling conventions, and
-toolchain info from PDB files produced by MSVC (`/Zi` flag). Use `--pdb-path` to
-specify the PDB file location if automatic discovery fails. **Mach-O has no
+toolchain info from PDB files produced by MSVC (`/Zi` flag). Use `.abicheck.yml`'s
+`debug.pdb_path` to specify the PDB file location if automatic discovery fails.
+**Mach-O has no
 debug-info cross-check**: `abicheck` has no Mach-O debug-map/DWARF reader
 today, so a headerless macOS `.dylib`'s own binary/debug-info evidence is
 always L0 (exports + load-command metadata) only, even when the binary

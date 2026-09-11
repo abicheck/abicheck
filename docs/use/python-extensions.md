@@ -48,21 +48,23 @@ the imported CPython C-API symbols plus whether the module is a stable-ABI
     the undefined-symbol table carries no per-symbol provider — those names don't
     appear as imports anyway.)
 
-### 1. Audit a single module — `scan --abi3`
+### 1. Audit a single module — `compare --abi3`
 
 ```console
-$ abicheck scan --binary foo.abi3.so --abi3 3.9
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3 3.9
 …
-  abi3_audit         ran           118 CPython import(s) audited against
-                                   Py_LIMITED_API 3.9; 1 violation finding(s)
-
-Cross-source findings (advisory)
-  [warning] python_stable_abi_violation: 1
+- **python_stable_abi_violation**: abi3 extension 'foo' imports non-stable CPython symbol: _PyObject_LookupSpecial
+…
+Verdict: COMPATIBLE_WITH_RISK
 ```
 
-`scan --abi3 <floor>` classifies every imported CPython symbol against the
-vendored, authoritative Stable-ABI set (all `[function.*]`/`[data.*]` entries
-from CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
+`--abi3 <floor>` audits the **candidate (NEW)** side — comparing a module
+against itself is the idiom for a single-artifact audit today, since
+`--abi3` is not yet wired to `--no-baseline` (it is rejected there as a
+usage error rather than silently ignored). It classifies
+every imported CPython symbol against the vendored, authoritative Stable-ABI
+set (all `[function.*]`/`[data.*]` entries from CPython's
+`Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
 
 - **private/internal symbols** — a `_Py*`/`PyUnstable_*` name *not* in the
   Stable-ABI set → a **violation** (the module reached outside the Limited API);
@@ -101,19 +103,25 @@ build is a contradiction the audit surfaces rather than silently certifies.
     is missing on the 3.9 the tag still advertises. The finding names the floor
     it used so the lowering is explicit.
 
-**Gating.** Like every single-artifact `scan` check, stable-ABI violations are
-**advisory by default** (they appear in the report but do not fail the scan) —
-"adoption never starts by blocking merges". To gate CI on them, promote the
-finding to an error:
+**Gating.** Stable-ABI violations are **advisory by default** (they appear in
+the report but do not fail the audit) — "adoption never starts by blocking
+merges". To gate CI on them, promote the finding through a policy override
+(`--policy` pointing at a document, or `.abicheck.yml`'s own `overrides:`
+block — see [Policy Files](policies.md)):
 
-```console
-$ abicheck scan --binary foo.abi3.so --abi3 3.9 \
-      --crosscheck python_stable_abi_violation=error
+```yaml
+overrides:
+  python_stable_abi_violation: warn   # -> API_BREAK / exit 2; "break" -> BREAKING / exit 4
 ```
 
-Then a violation raises the exit code to the source-break tier (`2`), failing
-the build. Exit `0` = clean or advisory-only; a usage error (bad `--abi3`, or
-`--abi3` on a non-extension) exits non-zero.
+```console
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3 3.9 --policy my-policy.yml
+```
+
+A promoted violation then raises `compare`'s own ordinary verdict/exit code
+(`API_BREAK`/`2` for `warn`, `BREAKING`/`4` for `break`) — see
+[exit codes](../reference/exit-codes.md). Exit `0` = clean or advisory-only;
+a usage error (bad `--abi3`, or `--abi3` on a non-extension) exits `64`.
 
 ### 2. Compare two versions — `compare`
 

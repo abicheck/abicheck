@@ -129,7 +129,7 @@ extending a flat root prefix family.
 | Add an ABI entity/value shared across stages | `model/` |
 | Match old/new entities or identify a raw change | `compare/` |
 | Decide relevance, suppression, classification, severity, or gating | `policy/` |
-| Coordinate dump, compare, scan, release, aggregate, project, or dependency behavior | `workflows/` |
+| Coordinate dump, compare, release, aggregate, project, or dependency behavior | `workflows/` |
 | Serialize snapshots/baselines, own their schemas/migrations, or manage caches | `storage/` |
 | Add a report field, report schema, or output format | `report/` |
 | Add a CLI flag, Python adapter, or ABICC translation | `frontends/` |
@@ -1143,7 +1143,7 @@ split-out module over growing the parent toward the cap.
 ### Adding a new top-level command
 
 **First, ask whether it should be a *root* command at all (ADR-043/ADR-054).**
-The public root surface is exactly `dump`, `compare`, `scan`, `deps`, `compat`,
+The public root surface is exactly `dump`, `compare`, `deps`, `compat`,
 `aggregate`, `project` — and `tests/test_cli_root_surface.py` pins that set as
 an executable contract, so a new root registration fails CI until the test is
 updated too. Before adding one, a new root command must clear **every** one of

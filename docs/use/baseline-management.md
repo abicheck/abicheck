@@ -43,7 +43,7 @@ breaking changes before they ship.
 > addressing/integrity layer (`library:version:platform` keys,
 > checksum-on-pull) has no direct equivalent. For a one-off "compare against
 > a previous build" without managing a baseline file yourself, see
-> [`scan --against`](create-baseline.md#scan-against-for-a-one-off-comparison).
+> [comparing two native libraries directly](create-baseline.md#comparing-two-native-libraries-directly-without-a-pre-dumped-baseline).
 
 > **A whole-product (multi-library) baseline is a separate, library-only
 > module, not a CLI feature.** Everything above is per-library. A product

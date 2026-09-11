@@ -144,7 +144,7 @@ no consumer can pin
 ([case145](../reference/examples/case145_audit_unversioned_export.md)):
 
 ```bash
-abicheck scan libfoo.so.1 -H include/
+abicheck compare --no-baseline libfoo.so.1 -H include/
 ```
 
 Profile contents and the other ecosystem profiles are owned by

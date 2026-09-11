@@ -31,15 +31,19 @@ directories, and translation units were in view.
 
 | Dial | Use |
 |---|---|
-| `--lang c\|c++` | language of the surface |
-| `--compiler`, `--compiler-prefix` | select the compiler driver used for header extraction |
-| `--compiler-option` (repeatable) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
-| `--sysroot`, `--include` / `-I`, `--nostdinc` | header search context |
-| `--ast-frontend` | which header-AST backend parses the headers |
-| `--env-matrix` | compare across several environments in one run |
+| `--include` / `-I` | header search context (CLI-reachable) |
+| `--env-matrix` | compare across several environments in one run (CLI-reachable) |
+| `compile:` block, `lang:` key | language of the surface (`c`/`c++`) |
+| `compile:` block, `compiler:` key | compiler driver or cross-toolchain prefix used for header extraction |
+| `compile:` block, `options:` key | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
+| `compile:` block, `sysroot:`/`nostdinc:` keys | more header search context |
+| `compile:` block, `frontend:` key | which header-AST backend parses the headers |
 
-Project-level defaults belong in `.abicheck.yml` rather than repeated on the
-command line; the exhaustive key reference is
+The `compile:` family above has **no CLI spelling at all** — `.abicheck.yml`
+is the only way to set it (ADR-068 D5 guard #2; `scan`, which used to expose
+the same family as CLI flags, was removed outright). Every other
+project-level default belongs in `.abicheck.yml` too rather than repeated on
+the command line; the exhaustive key reference is
 [the config file page](../../docs/reference/config-file.md), and
 `abicheck project validate` checks a project's own configuration.
 

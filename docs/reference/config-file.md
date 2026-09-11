@@ -228,22 +228,23 @@ See [Evidence depth](../use/evidence-depth.md) and the
 
 ### `compile:`
 
-The L2 header compile context (ADR-037 D4). On `compare`/`dump` this is
+The L2 header compile context (ADR-037 D4). This is
 Phase 7's CONFIG surface (one-comparison-product.md §4.1/§4.2, ADR-037
-D8.1) — every field below has **no CLI spelling at all** on those two
-commands, with no escape hatch (ADR-068 D5 guard #2); `scan` still exposes
-the identical family as CLI flags (`--ast-frontend`/`--compiler`/
-`--compiler-prefix`/`--compiler-option`/`--sysroot`/`--nostdinc`/
-`--allow-ast-frontend-fallback`/`--allow-unsupported-castxml`/
-`--frontend-context`/`--lang`, `CLI > config`).
+D8.1) — every field below has **no CLI spelling at all**, with no escape
+hatch (ADR-068 D5 guard #2). `scan` used to expose the identical family as
+CLI flags (`--ast-frontend`/`--compiler`/`--compiler-prefix`/
+`--compiler-option`/`--sysroot`/`--nostdinc`/`--allow-ast-frontend-fallback`/
+`--allow-unsupported-castxml`/`--frontend-context`/`--lang`), but ADR-068
+Phase 6 removed `scan` outright — `compile:` is now the *only* way to set
+any of these, on every command.
 
 - `frontend:` — AST frontend (`auto`/`castxml`/`clang`/`hybrid`,
   case-insensitive — `hybrid` runs castxml and clang together and merges
-  them). Was `--ast-frontend` on compare/dump.
+  them). Was `--ast-frontend`.
 - `std:` — C/C++ standard, e.g. `c++17`.
 - `include_dirs:`/`defines:` — lists.
-- `sysroot:` — was `--sysroot` on compare/dump.
-- `nostdinc:` — boolean; was `--nostdinc`/`--no-nostdinc` on compare/dump.
+- `sysroot:` — was `--sysroot`.
+- `nostdinc:` — boolean; was `--nostdinc`/`--no-nostdinc`.
 - `compiler:` — path to the compiler binary, **or** a cross-toolchain
   prefix (e.g. `aarch64-linux-gnu-`) when the value ends in `-`. Merges the
   former `--compiler`/`--compiler-prefix` pair into one spelling (ADR-068
@@ -251,7 +252,7 @@ the identical family as CLI flags (`--ast-frontend`/`--compiler`/
   own `compiler_prefix:` key).
 - `options:` — a list of raw compiler flags passed through verbatim, each a
   single whitespace-free atom like `std:`/`defines:` below. Was the
-  repeatable `--compiler-option` on compare/dump.
+  repeatable `--compiler-option`.
 - `ast_frontend_fallback:` — boolean; was `--allow-ast-frontend-fallback`
   (itself always a pure `ABICHECK_ALLOW_AST_FALLBACK` env-var toggle, so a
   config `true` has the identical effect).
@@ -259,7 +260,7 @@ the identical family as CLI flags (`--ast-frontend`/`--compiler`/
   (same env-var-toggle shape as `ast_frontend_fallback:` above, via
   `ABICHECK_ALLOW_UNSUPPORTED_CASTXML`).
 - `frontend_context:` — `host`/`device`; was `--frontend-context`.
-- `lang:` — `c++`/`c`; was `--lang` on compare/dump. Defaults to `c++`
+- `lang:` — `c++`/`c`; was `--lang`. Defaults to `c++`
   when unset (no header/source-content language inference exists in this
   codebase to do better than that fixed default).
 
@@ -445,15 +446,12 @@ Both are recognized top-level keys (so they do not trigger the unknown-key
 error), but they are handled outside the `compare` config merge:
 
 - **`risk_rules:`** — a mapping of rule-name → `{ paths: [...], weight: <int> }`
-  path-glob risk profile, parsed by `RiskRules.from_dict` in
-  `buildsource/risk.py`. **Nothing loads it any more:** `scan --risk-rules`,
-  the one option that ever read a `risk_rules:` block, is retired
-  (ADR-068's second 2026-09-09 amendment, ruling (b)), along with the
-  risk-driven `auto` depth escalation the profile fed. The key stays
-  recognized (so an existing file does not trigger the unknown-key error)
-  and the scorer still runs against its built-in default profile to produce
-  the *reported* risk score, but the score no longer selects an evidence
-  level: pin `--depth` to ask for one. See
+  path-glob risk profile. **Nothing loads it any more:** the risk-scoring
+  module it configured was deleted along with `scan` (ADR-068 Phase 6) — no
+  code path reads a `risk_rules:` block, computes a risk score, or uses one
+  to auto-select an evidence level any more. The key stays recognized (so an
+  existing file does not trigger the unknown-key error); pin `--depth`
+  explicitly to choose an evidence level. See
   [Evidence depth](../use/evidence-depth.md).
 - **`crosschecks:`** — reserved. The active mechanism for tuning cross-checks is
   `scan`'s repeatable `--crosscheck KEY=LEVEL` flag; the current code does not

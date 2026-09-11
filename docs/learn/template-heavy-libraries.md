@@ -107,7 +107,7 @@ container's cgroup limit, rather than by CPU count alone. Ask before you
 spend:
 
 ```bash
-abicheck scan libfoo.so -H include/ --sources . --depth source \
+abicheck compare --no-baseline libfoo.so -H include/ --sources . --depth source \
   --since origin/main --dry-run
 ```
 

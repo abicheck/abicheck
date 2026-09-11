@@ -688,24 +688,15 @@ Every JSON report carries a top-level `report_schema_version` field
 > carry different version numbers at the same time; consumers should read
 > whichever field belongs to the file they loaded.
 >
-> `scan --format json` is a **third, separate shape**: it emits a `ScanOutcome`
-> object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …). It carries its
-> own top-level `scan_schema_version` field (`MAJOR.MINOR`, importable as
-> `abicheck.schemas.SCAN_SCHEMA_VERSION`) — independent of, and not
-> interchangeable with, `report_schema_version`. Through `1.30` the typed
-> Python `ScanResult.to_dict()` envelope stamped the same value and nested
-> the `ScanOutcome` dict under its `report` key; that type was removed in
-> ADR-068 Phase 4, so `scan --format json` is the only shape the marker
-> applies to now. There is currently no
-> packaged `.schema.json` for scan output (unlike `compare`'s
-> `compare_report.schema.json`); the version field is honored the same way
-> (accept a shared `MAJOR`, ignore unknown keys) until one exists.
->
-> `scan --against`'s baseline summary carries an optional `coverage_warnings`
-> list (`scan_schema_version` 1.21), mirroring `compare`'s own top-level
-> field of the same name and shape — e.g. a warning that the two compared
-> binaries are byte-identical (a possible mistaken input, not a real
-> "no ABI differences" result). Omitted when there is nothing to warn about.
+> **Historical note.** Before `scan`'s removal (ADR-068 Phase 6), `scan
+> --format json` emitted a third, separate `ScanOutcome`-shaped JSON document
+> (`mode`, `level`, `risk`, `verdict`, `exit_code`, …) carrying its own
+> top-level `scan_schema_version` field, independent of and not
+> interchangeable with `report_schema_version`. That format, its schema
+> version constant, and every code path that read or wrote it are gone along
+> with the command — a stored `scan --format json` document from before the
+> removal is a historical artifact, not something any current command
+> produces or consumes.
 
 ```json
 {

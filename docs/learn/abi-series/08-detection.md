@@ -102,7 +102,7 @@ context:
 | **`.abicheck.yml` `compile:` block** | the project's stable, reviewed include roots / `std` / `defines` | per-invocation cross-compile specifics (those stay CLI) |
 | **compile database** (`compile_commands.json`) | the authoritative per-TU `-I`/`-std`/`-D` the library was actually built with | *(threading it into L2 is a planned step; today it feeds L3–L5)* |
 
-The practical takeaway for [`abicheck scan`](../../use/evidence-depth.md#compile-context-for-header-parsing-l2):
+The practical takeaway for [`compare`/`dump`](../../use/evidence-depth.md#compile-context-for-header-parsing-l2):
 auto-detection makes the common case (find the C++ stdlib) work with no flags,
 but the **project-specific** context — include roots, dialect, feature macros —
 must come from a compile DB, the config `compile:` block, or explicit flags, or

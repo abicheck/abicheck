@@ -121,7 +121,7 @@ shrinking scope — and where `--dry-run` tells you what a depth would cost
 before you spend it.
 
 ```bash
-abicheck scan libfoo.so -H include/ --sources . --depth source --budget 15m
+abicheck compare --no-baseline libfoo.so -H include/ --sources . --depth source --budget 15m
 ```
 
 ## Release cut

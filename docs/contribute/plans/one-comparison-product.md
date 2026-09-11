@@ -772,7 +772,10 @@ section's *actual* state, not the target it originally described:
   exiting 64 on every rung: `--binary`/`--baseline`/`--baseline-header`/
   `--source-method` are all removed spellings) and its dead `graph` rung is
   dropped. `tests/scenarios/ci_gating.yaml`'s SC-SCAN-BINARY-DEPTH-MATRIX-ARGS
-  `flow:` line is corrected to a command that parses.
+  (renamed SC-COMPARE-BINARY-DEPTH-MATRIX-ARGS) `flow:` line and its
+  `test_sc_scan_binary_depth_matrix_args` automated counterpart are
+  corrected onto `compare --depth binary`, verified to actually parse and
+  exit `4`/`BREAKING`.
   `examples/workflows/audit-release` and the G20 audit cases were annotated
   as blocked rather than dropped from the coverage denominator at the time;
   both moved to `compare --no-baseline` on 2026-09-09/10 once the audit path
