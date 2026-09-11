@@ -145,3 +145,32 @@ def test_step_body_script_is_not_left_inside_the_workspace(tmp_path: Path) -> No
     )
     assert result.returncode == 0, result.stderr
     assert not [name for name in result.tree() if "_step_body" in name]
+
+
+def test_body_reaches_bash_byte_for_byte(tmp_path: Path) -> None:
+    """No newline translation between the YAML body and bash.
+
+    Codex review (PR #1230): writing the script with `Path.write_text` used
+    Python's default `newline=None`, which rewrites every ``\\n`` to
+    ``\\r\\n`` on Windows. Git Bash keeps that carriage return inside shell
+    tokens, so a heredoc delimiter line becomes ``EOF\\r`` and never
+    terminates the heredoc -- a real body like the ``assurance_overlay``
+    step's would fail differently rather than run. The oracle here is the
+    shell's own heredoc/quoting behavior, not the harness's notion of a
+    newline: this body cannot succeed under CRLF.
+    """
+    workspace = make_workspace(tmp_path)
+    run = (
+        "cat <<'MARKER_EOF' >> \"$GITHUB_OUTPUT\"\n"
+        "marker=intact\n"
+        "MARKER_EOF\n"
+        'value="no-trailing-cr"\n'
+        'printf "%s\\n" "value=$value" >> "$GITHUB_OUTPUT"\n'
+    )
+    result = run_step({"run": run}, workspace=workspace)
+    assert result.returncode == 0, result.stderr
+    assert result.outputs["marker"] == "intact"
+    # A surviving CR would ride along at the end of the value rather than
+    # failing the shell, so assert the exact string, not a prefix.
+    assert result.outputs["value"] == "no-trailing-cr"
+    assert "\r" not in "".join(result.output_lines)

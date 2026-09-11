@@ -264,8 +264,15 @@ def run_step(
     # failing for a reason unrelated to the step it models. The file lives
     # beside the workspace, not inside it, so `StepResult.tree()` and the
     # `$RUNNER_TEMP` assertions keep seeing only what the step itself created.
+    #
+    # Written as explicit bytes, never `write_text`: on Windows the default
+    # `newline=None` translates every "\n" to "\r\n", and Git Bash keeps that
+    # carriage return inside shell tokens -- a heredoc delimiter line becomes
+    # `EOF\r`, so the heredoc never terminates, and `set -euo pipefail`-style
+    # bodies break on the trailing CR (Codex review, PR #1230). The body must
+    # reach bash byte-for-byte as the YAML holds it.
     body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
-    body.write_text(step["run"], encoding="utf-8")
+    body.write_bytes(step["run"].encode("utf-8"))
     proc = subprocess.run(
         # `-e` as well as pipefail: the runner invokes a `run:` body as
         # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without it a
