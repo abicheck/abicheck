@@ -5,9 +5,10 @@
 root command is deleted outright (`abicheck scan` exits 64, naming
 `compare`/`compare --no-baseline` as the replacement), its scan-only
 modules and tests are deleted, and `tests/parity/` is now a compare-only
-regression corpus. Three flag demotions Phase 6 unblocked
-(`compare --env-matrix`, `compare --require-complete-analysis`,
-`dump --build-target`) remain open, unimplemented followups — see
+regression corpus. Of the three flag demotions Phase 6 unblocked,
+`compare --env-matrix` is now implemented (see the 2026-09-11 amendment
+below); `compare --require-complete-analysis` and `dump --build-target`
+remain open, unimplemented followups — see
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
 exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends
@@ -672,6 +673,40 @@ test_audit_gate_axis_honors_a_policy_promoted_verdict` (live, an
 `overrides:` policy document promoting `case143`'s finding, verified to
 flip its exit code from `0` to `3` with no change to which finding is
 reported).
+
+## Amendment (2026-09-11): `compare --env-matrix` demoted to `.abicheck.yml`'s `deployment:` config key
+
+Phase 6 (`scan` retirement) named three flag demotions it unblocked but did
+not itself implement: `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` — the plan's own
+"Blocked by `scan`" ruling (`one-comparison-product.md` §7k) recorded
+`--env-matrix` as blocked specifically on `scan`'s own `action/run.sh`
+routing predicate translating a `mode: scan` request onto `compare`, not as
+an open architectural question about whether the demotion itself was
+correct (it was already ruled CONFIG in §4.1). With `scan` (and its
+`action/run.sh` translation layer) deleted, that blocker is gone, and this
+amendment closes it: `compare --env-matrix FILE` is retired (old spelling
+exits 64, no alias, per D8's hard-removal-no-deprecation-window rule), and
+`.abicheck.yml`'s new top-level `deployment:` block — embedding
+`EnvironmentMatrix`'s existing YAML shape (`compilers`, `sycl:`/`cuda:`
+sub-blocks, `runtime_floors:`) verbatim, via `EnvironmentMatrix.from_dict`
+— is now the only front-end-reachable source of declared deployment
+constraints, on both a bare `compare` and the directory/package release
+fan-out (`cli_compare_release.py`/`cli_compare_release_pairwise.py` resolve
+`BuildConfig.deployment` per library, the same as every other project-config
+field the fan-out already reads — so the constraint now applies across a
+release the way `--env-matrix` itself, a single-invocation flag, never did).
+The typed Python API's `compare(..., env_matrix=...)` parameter is
+unaffected: it is ordinary per-comparison evidence data, the same shape
+every other CONFIG-demoted field keeps as a typed-API parameter alongside
+its `.abicheck.yml` route — only the CLI flag surface and its
+`--support-promise`-shaped strict-schema enforcement moved.
+`compare --require-complete-analysis` remains the one
+still-open, unimplemented deferral from this same list; see
+`docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for its
+exact scope. This amendment closes the `--env-matrix` deferral the plan
+already ruled on; it does not reopen that ruling or the CONFIG
+classification itself.
 
 ## Alternatives considered
 
