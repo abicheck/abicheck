@@ -517,3 +517,76 @@ class TestRenameAndMoveTogether:
             ),
         )
         assert outcome == OUTCOME_RENAMED, outcome
+
+
+class TestQuotedMarkerLookalikes:
+    """Codex review (PR #1229): `closure_location_free_identity` protects
+    `"..."` quoted spans — a C++ fixed-string NTTP spelling marker-shaped
+    text is source *content*, not a declaring location — but the marker
+    extraction did not, so the two functions disagreed about which text is
+    a marker. A quoted lookalike changing therefore read as a location
+    change, and a genuine rename reported the combined outcome.
+
+    Stated as the agreement invariant between the two complements, which
+    is the property that must hold for any identity, rather than only for
+    the reported pair."""
+
+    _QUOTED_ONLY = (
+        ('Tag<"lambda:a.h:1:2">', 'Tag<"lambda:b.h:3:4">'),
+        ('Tag<"lambda at a.h:1:2">', 'Tag<"lambda at b.h:3:4">'),
+        ('N<"unnamed struct at a.h:5:5">', 'N<"unnamed struct at b.h:6:6">'),
+    )
+
+    def test_quoted_lookalikes_carry_no_marker_evidence(self) -> None:
+        from abicheck.model.graph_identity import closure_marker_files
+
+        for old_qn, new_qn in self._QUOTED_ONLY:
+            assert closure_marker_files(old_qn) == (), old_qn
+            assert closure_marker_files(new_qn) == (), new_qn
+
+    def test_a_rename_spelled_only_in_quotes_stays_a_rename(self) -> None:
+        for old_qn, new_qn in self._QUOTED_ONLY:
+            outcome = _classify_outcome(
+                _identity(old_qn, "", "sig:o\x1fs"),
+                _identity(new_qn, "", "sig:n\x1fs"),
+            )
+            assert outcome == OUTCOME_RENAMED, (old_qn, new_qn, outcome)
+
+    def test_a_real_marker_beside_a_quoted_lookalike_still_counts(self) -> None:
+        """The negative control: protecting quoted spans must not blind the
+        extraction to a real marker sharing the identity with one."""
+        from abicheck.model.graph_identity import closure_marker_files
+
+        assert closure_marker_files(
+            'Mix<(lambda at real.h:1:2),"lambda:fake.h:9:9">'
+        ) == ("real.h",)
+        outcome = _classify_outcome(
+            _identity(
+                'Mix<(lambda at old.h:1:2),"lambda:fake.h:9:9">', "", "sig:x\x1fs"
+            ),
+            _identity(
+                'Mix<(lambda at new.h:3:4),"lambda:fake.h:9:9">', "", "sig:x\x1fs"
+            ),
+        )
+        assert outcome == OUTCOME_MOVED, outcome
+
+    def test_the_two_complements_agree_on_what_is_a_marker(self) -> None:
+        """The general statement: whenever the location-free key is
+        unchanged, every marker the extraction reports is one the key
+        actually stripped — so the two can never disagree about whether a
+        span is location evidence."""
+        from abicheck.model.graph_identity import (
+            closure_location_free_identity,
+            closure_marker_files,
+        )
+
+        for identity in (
+            'Tag<"lambda:a.h:1:2">',
+            "w<(lambda at /a/foo.h:4:37)>",
+            'Mix<(lambda at real.h:1:2),"lambda:fake.h:9:9">',
+            "Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>",
+            "ns::Widget",
+        ):
+            stripped = closure_location_free_identity(identity)
+            for basename in closure_marker_files(identity):
+                assert basename not in stripped, (identity, basename, stripped)

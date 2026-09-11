@@ -451,9 +451,20 @@ def closure_marker_files(identity: str) -> tuple[str, ...]:
     already records.
     """
     normalized = _normalize_graph_identity(identity)
+    # Skip a match inside a ``"..."`` quoted literal, exactly as
+    # :func:`closure_location_free_identity` does (Codex review, PR #1229):
+    # a quoted C++ fixed-string NTTP spelling marker-shaped text is source
+    # *content*, not a declaring location. Without this, that function
+    # rightly reads `Tag<"lambda:a.h:1:2">` -> `Tag<"lambda:b.h:3:4">` as a
+    # genuine rename while this one called it a move, and the pair reported
+    # the combined outcome for a location change that never happened. The
+    # two functions are complements over the same markers, so they must
+    # agree on which text IS a marker.
+    quoted_spans = _quoted_spans(normalized)
     return tuple(
         _basename(match.group(0).rsplit(":", 3)[-3])
         for match in _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.finditer(normalized)
+        if not any(start <= match.start() < end for start, end in quoted_spans)
     )
 
 
