@@ -464,6 +464,22 @@ def with_resolved_gate(
     no per-library equivalent of this field yet) preserves the previous
     "copy the existing default forward" behavior rather than silently
     asserting a value nobody resolved.
+
+    An explicit ``True`` also stamps ``field_provenance["gate.
+    require_complete_analysis"]`` (P2, Codex review, fresh evidence after
+    the fix above: the receipt carried the *value* but not *why* it was
+    enabled). ``assurance.require_complete`` has no D7 resolver of its own
+    -- ``resolve_compare_config`` reads it straight off ``.abicheck.yml``
+    with no CLI override and no pack route (the same "simple config-demoted
+    key" shape as ``gate.fail_on_removed_library``/``release.dso_only``,
+    neither of which is projected into the canonical resolver's
+    ``ProjectCompatibilityInputs`` either), so an explicit ``True`` can only
+    ever have come from the project config document the caller resolved --
+    this function can safely name that source itself rather than the
+    caller constructing and threading a provenance object for a value with
+    only one possible non-default origin. ``False``/``None`` get no entry,
+    the same "absent, not defaulted" rule *severity_provenance* follows for
+    an unsupplied category.
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
 
@@ -471,6 +487,11 @@ def with_resolved_gate(
     provenance = dict(config.provenance)
     for category, entry in severity_provenance.items():
         provenance[SEVERITY_CATEGORY_FIELDS[category]] = entry
+    if require_complete_analysis:
+        provenance["gate.require_complete_analysis"] = ValueProvenance(
+            layer=SelectorLayer.PROJECT_CONFIG,
+            field_location="assurance.require_complete",
+        )
     resolved_require_complete_analysis = (
         config.gate.require_complete_analysis
         if require_complete_analysis is None

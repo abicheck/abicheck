@@ -35,7 +35,7 @@ from abicheck.compatibility_evaluation_config import (
 )
 from abicheck.contract_context import build_persisted_context, with_resolved_gate
 from abicheck.contract_evidence import ContractEvidenceBlock, PersistedContractContext
-from abicheck.contract_relevance_types import ContractMode
+from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.severity import SeverityConfig, SeverityLevel
 
 
@@ -59,7 +59,9 @@ def _base_context(
 
 
 def _apply(
-    ctx: PersistedContractContext, *, require_complete_analysis: bool | None = None
+    ctx: PersistedContractContext,
+    *,
+    require_complete_analysis: bool | None = None,
 ) -> PersistedContractContext:
     return with_resolved_gate(
         ctx,
@@ -155,3 +157,38 @@ class TestWithResolvedGateThreadsRequireCompleteAnalysis:
             result.evaluation_context.resolved_config.gate.require_complete_analysis
             is True
         )
+
+
+class TestWithResolvedGateStampsRequireCompleteAnalysisProvenance:
+    """P2 (Codex review, fresh evidence after the fix above landed): the
+    resolved *value* was threaded through, but ``field_provenance["gate.
+    require_complete_analysis"]`` stayed absent -- the receipt could show
+    *that* the gate was enabled but not *why*. Fixed by having
+    ``with_resolved_gate`` itself stamp a ``PROJECT_CONFIG``-layer entry
+    whenever an explicit ``True`` is passed -- that field has no CLI
+    override and no pack route, so ``True`` can only ever have come from
+    ``.abicheck.yml``'s ``assurance.require_complete``."""
+
+    def test_provenance_entry_is_stamped_when_true(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=True)
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+
+    def test_false_leaves_the_field_absent(self) -> None:
+        """The "absent, not defaulted" rule: an unset/false field gets no
+        fabricated provenance entry, mirroring an unsupplied severity
+        category."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=False)
+        provenance = result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in provenance
+
+    def test_omitted_leaves_the_field_absent(self) -> None:
+        """Same rule for the omitted (``None``, fallback-to-context) case."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=None)
+        provenance = result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in provenance

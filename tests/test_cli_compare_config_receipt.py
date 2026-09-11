@@ -771,3 +771,72 @@ class TestRequireCompleteAnalysisReceiptConsistency:
         assert top_level == "False", payload["effective_config_fields"]
         assert contract_context_value is False, payload["contract_context"]
         assert (top_level == "True") == (contract_context_value is True)
+
+
+class TestRequireCompleteAnalysisFieldProvenance:
+    """P2 (Codex review, fresh evidence after
+    ``TestRequireCompleteAnalysisReceiptConsistency`` above landed): that fix
+    threaded the resolved *value* through to ``with_resolved_gate``, but
+    ``field_provenance["gate.require_complete_analysis"]`` was still absent
+    from the persisted receipt -- the receipt could show *that* the gate was
+    enabled but not *why* (which layer/file resolved it). Fixed by
+    constructing the entry directly in ``record_resolved_config`` (this
+    field has no D7 resolver of its own -- see ``with_resolved_gate``'s own
+    docstring for why that is the correct fix rather than projecting it
+    into ``ProjectCompatibilityInputs``)."""
+
+    def test_provenance_entry_present_when_config_sets_it(self, tmp_path: Path) -> None:
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        entry = field_provenance.get("gate.require_complete_analysis")
+        assert entry is not None, field_provenance
+        assert entry["layer"] == "project_config", entry
+        assert entry["field_location"] == "assurance.require_complete", entry
+
+    def test_provenance_entry_absent_when_not_set(self, tmp_path: Path) -> None:
+        """Negative control: the "absent, not defaulted" rule -- an unset
+        field gets no provenance entry at all, mirroring how an unsupplied
+        severity category is handled."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        assert "gate.require_complete_analysis" not in field_provenance
