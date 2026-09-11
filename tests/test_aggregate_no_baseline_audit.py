@@ -457,3 +457,41 @@ class TestNoBaselineAuditCompatibilityAnalyzedCount:
         d = r.to_dict()
         # The one real verdict counts; the audit-only completion does not.
         assert d["compatibility"]["analyzed_targets"] == 1
+
+
+class TestNoBaselineAuditTargetDictExposesCompletionSeparateFromVerdict:
+    """Codex review, fourth round, fresh evidence: `TargetReport.to_dict()`'s
+    `state: "analyzed"` alone conflates two different facts for this shape
+    -- a real compatibility comparison occurred, or a `compare
+    --no-baseline` audit completed with no compatibility axis to report at
+    all (ADR-068 D2). Before this shape existed, `state: "analyzed"`
+    implied a non-null `compatibility_verdict`; a same-MAJOR consumer
+    relying on that implication could misread the null verdict as
+    unreported rather than structurally absent.
+    `completed_without_compatibility_verdict` (schema 1.11) exposes the
+    distinction directly, present only when true."""
+
+    def test_a_completed_audit_marks_the_target_dict_explicitly(
+        self, tmp_path: Path
+    ):
+        _write_no_baseline_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        d = r.targets[0].to_dict()
+        assert d["state"] == "analyzed"
+        assert d["compatibility_verdict"] is None
+        assert d["completed_without_compatibility_verdict"] is True
+
+    def test_a_real_compatibility_verdict_does_not_set_the_flag(
+        self, tmp_path: Path
+    ):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        d = r.targets[0].to_dict()
+        assert d["state"] == "analyzed"
+        assert "completed_without_compatibility_verdict" not in d
+
+    def test_an_unavailable_target_does_not_set_the_flag(self, tmp_path: Path):
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        d = r.targets[0].to_dict()
+        assert d["state"] == "unavailable"
+        assert "completed_without_compatibility_verdict" not in d

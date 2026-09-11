@@ -165,7 +165,20 @@ from .resolve import (
 #: purely so a consumer can distinguish "checked and clean" from "completed
 #: an audit with no compatibility result" instead of the latter silently
 #: reading as the former.
-AGGREGATE_SCHEMA_VERSION = "1.10"
+#:
+#: ``1.11`` (Codex review, third round, fresh evidence) adds
+#: ``completed_without_compatibility_verdict`` to a target entry, present
+#: only when true. `TargetReport.to_dict()`'s `state: "analyzed"` alone
+#: conflates two different facts for the no-baseline audit shape -- a real
+#: compatibility comparison occurred, or an audit completed with no
+#: compatibility axis to report at all (ADR-068 D2) -- and before that
+#: shape existed, `state: "analyzed"` implied a non-null
+#: `compatibility_verdict`; a same-MAJOR consumer relying on that
+#: implication could misread the null verdict as unreported rather than
+#: structurally absent. Additive and inert like ``1.10``: adds a predicate
+#: a consumer can check, never changes ``gate.exit_code`` or ``state``
+#: itself.
+AGGREGATE_SCHEMA_VERSION = "1.11"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -561,6 +574,22 @@ class TargetReport:
         }
         if self.unexpected:
             d["unexpected"] = True
+        if self.completed_without_compatibility_verdict:
+            # Codex review, fresh evidence: `state: "analyzed"` alone
+            # conflates two different facts for this one shape -- a real
+            # compatibility comparison occurred, or a `compare
+            # --no-baseline` audit completed with no compatibility axis to
+            # report at all (ADR-068 D2). Before this shape existed,
+            # `state: "analyzed"` implied a non-null `compatibility_
+            # verdict`; a same-MAJOR consumer relying on that implication
+            # could misread the null verdict as unreported rather than
+            # structurally absent. Exposed as its own additive, present-
+            # only-when-true predicate (matching `unexpected`'s own
+            # pattern) rather than changing `state`'s existing two-value
+            # enum, so coverage/rendering can keep using the wider
+            # `analyzed` meaning while a consumer that cares about the
+            # distinction has a real field to check.
+            d["completed_without_compatibility_verdict"] = True
         profile_id = self.profile_id
         if profile_id is not None:
             d["profile_id"] = profile_id
