@@ -108,6 +108,51 @@ See ``compare/vtable_evidence.py``'s own "T9 second slice" docstring note
 for the consumer half (``vtable_transition_is_evidenced`` declining on
 the resulting ``FactStatus.PARTIAL``), and ``tests/test_dwarf_vtable_
 completeness.py`` for the producer-side bug-class test suite.
+
+**Two known residual gaps, accepted rather than papered over** (Codex
+review, both investigated and declined for this PR -- mirroring
+``compare/vtable_evidence.py``'s own "Two known false negatives, accepted
+rather than papered over" section one level up):
+
+* **Bases compared by bare name, not full cross-CU identity.** A legal
+  class deriving from two distinct, differently-namespaced bases sharing
+  one bare spelling (``D : one::A, two::A``) resolves both edges to the
+  name ``"A"`` (``resolve_base_name_and_key`` intentionally returns only
+  the bare name). The multiset fix above catches a *count* mismatch, but
+  not a same-count, wrong-identity one (a duplicate DIE capturing
+  ``two::A`` where the retained side has ``one::A``). Closing this for
+  real needs a per-edge cross-CU DIE-identity comparison -- and the
+  builder's own identity-carrying structures
+  (``_base_edges_by_record``/``_virtual_base_edges_by_record``) are not a
+  drop-in source for it: ``_base_edges_by_record`` is deliberately
+  incomplete (only appended when ``DW_AT_data_member_location`` is
+  present -- it exists for ``_finalize_vptr_offsets``'s own
+  offset-0-primary-base search, a different purpose with a different
+  completeness bar), so building a reliable multiset from it here would
+  silently under-count for any base lacking that attribute. A correct fix
+  needs its own dedicated, complete edge-identity tracking structure --
+  new builder state, not a reuse of existing structures scoped for
+  another consumer -- which is real, separate design work, not a
+  same-shape follow-up to the multiset fix.
+* **Duplicate vtable/base membership is compared as a set, not an ordered
+  sequence** (``test_reordered_duplicate_stays_present``, part of this
+  module's own original test suite, pins this as *intentional*: "DWARF's
+  per-CU child emission order is not guaranteed to agree, and that alone
+  must not read as a completeness gap"). A genuine cross-CU reordering of
+  the *same* class's virtual-method DIEs (as opposed to reordering
+  artifacts of unrelated per-CU emission) is not reproduced against any
+  real compiler this investigation checked -- declaration order in the
+  shared header drives DIE emission order for the same class regardless
+  of which CU compiles it. Making the comparison order-sensitive would
+  directly regress that already-tested, deliberate design choice (order
+  differences across a snapshot's own duplicate CUs would start reading
+  as completeness gaps), a real behavior change this targeted bug-class
+  fix should not make as a drive-by.
+
+Both remain open, real, and worth a dedicated follow-up rather than a
+speculative patch bolted onto this PR's own targeted scope -- see this
+module's own git history / the PR's review thread for the full
+back-and-forth.
 """
 
 from __future__ import annotations
