@@ -129,16 +129,25 @@ def _scan_report():
     }
 
 
-def test_cli_pr_comment_subject_applies_to_scan_report(tmp_path):
+def test_cli_pr_comment_rejects_a_stored_scan_report(tmp_path):
+    """A *stored*, previously-generated scan-shaped report is no longer a
+    supported input -- `scan` was deleted outright (ADR-068 Phase 6, no
+    deprecation window), along with this tool's own scan-shaped adapter.
+    Feeding one in must be a loud, actionable ClickException, never a
+    silent fall-through to the compare-shaped renderer (which reads the
+    wrong key -- `changes` instead of `diff.findings` -- and would render a
+    false "no changes" comment for a report that may carry real findings).
+    This test used to instead prove `--subject` reached a rendered scan
+    report's own subject line; that capability went with `scan` itself."""
     report = tmp_path / "scan.json"
     report.write_text(json.dumps(_scan_report()), encoding="utf-8")
     out = tmp_path / "comment.md"
     result = _run_cli(
         [str(report), "--subject", "libfoo.so", "--on", "always", "-o", str(out)]
     )
-    assert result.exit_code == 0
-    body = out.read_text(encoding="utf-8")
-    assert "libfoo.so" in body
+    assert result.exit_code != 0
+    assert "scan_schema_version" in result.output
+    assert "compare" in result.output
 
 
 def test_cli_pr_comment_subject_ignored_for_compare_report(tmp_path):

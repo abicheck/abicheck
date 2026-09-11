@@ -194,7 +194,7 @@ class TestReportBuildersThreadExplicitId:
         )
         assert report["check_id"] == "libpvxs@p#c@headers~l4-plugin"
 
-    def test_augment_report_scan_shaped_report_bumps_scan_schema_version(self):
+    def test_augment_report_scan_shaped_report_leaves_scan_schema_version_alone(self):
         """Codex review, fresh evidence: a no-baseline audit run
         (check-target's scan mode) augments a *scan*-shaped report
         (detected by _stamp_schema_version via the presence of
@@ -202,11 +202,16 @@ class TestReportBuildersThreadExplicitId:
         constructor for both compare- and scan-shaped reports -- so the
         widened check_id lexical contract (the ~<explicit_id>/
         !<environment_id> tail) reaches a scan report too, not just a
-        compare one. Only REPORT_SCHEMA_VERSION had been bumped for G42;
-        this pins that SCAN_SCHEMA_VERSION was bumped in lockstep so a
-        scan consumer can feature-detect the widened shape."""
-        from abicheck.schemas import SCAN_SCHEMA_VERSION
-
+        compare one. `scan` was deleted outright (ADR-068 Phase 6, no
+        deprecation window) -- there is no current scan schema version left
+        to bump a *stored* scan-shaped report to any more (this test used
+        to pin that SCAN_SCHEMA_VERSION was bumped in lockstep with
+        REPORT_SCHEMA_VERSION for G42; that constant is gone), so the
+        report's own scan_schema_version is left exactly as stored, the
+        same "don't misstamp a scan-shaped document" rule
+        _stamp_schema_version already applies to report_schema_version
+        (Codex review, second round, PR #1211). check_id computation is
+        unaffected either way -- it doesn't read scan_schema_version."""
         report = {"scan_schema_version": "1.0", "verdict": "COMPATIBLE"}
         out = augment_report(
             report,
@@ -217,5 +222,6 @@ class TestReportBuildersThreadExplicitId:
             gate_mode="local",
             explicit_id="l4-plugin",
         )
-        assert out["scan_schema_version"] == SCAN_SCHEMA_VERSION
+        assert out["scan_schema_version"] == "1.0"  # left exactly as stored
+        assert "report_schema_version" not in out
         assert out["check_id"] == "libpvxs@p#c@headers~l4-plugin"

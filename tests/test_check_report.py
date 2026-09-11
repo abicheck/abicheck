@@ -209,12 +209,12 @@ class TestAugmentReport:
         assert out["report_schema_version"] != "2.12"  # bumped to the current version
 
     def test_scan_report_gets_scan_schema_version_not_report_schema_version(self):
-        """A scan report (baseline-channel: none) has its own schema marker
-        and shape -- no library/old_file/summary/changes/... -- so it must
-        never be stamped with report_schema_version (the *compare*-report
-        schema's marker): a downstream validator selecting a schema by that
-        key's presence would pick compare_report.schema.json for a report
-        that structurally can never satisfy it (Codex review)."""
+        """A *stored* scan report must never be stamped with
+        report_schema_version (the compare-report schema's marker) --
+        `scan` was deleted outright (ADR-068 Phase 6), so there is no
+        current schema, or current scan_schema_version, to stamp a stored
+        one against; its own scan_schema_version is left exactly as
+        stored (Codex review)."""
         scan_report = {
             "scan_schema_version": "1.1",
             "verdict": "COMPATIBLE",
@@ -230,7 +230,7 @@ class TestAugmentReport:
             gate_mode="local",
         )
         assert "report_schema_version" not in out
-        assert out["scan_schema_version"] != "1.1"  # bumped to the current version
+        assert out["scan_schema_version"] == "1.1"  # left exactly as stored
 
     def test_bundle_release_report_gets_no_schema_version_stamp(self):
         """A kind: bundle / directory-package compare report (the per-library

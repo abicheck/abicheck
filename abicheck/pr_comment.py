@@ -1041,6 +1041,11 @@ def _as_int(value: object) -> int:
     return 0
 
 
+class UnsupportedReportShapeError(ValueError):
+    """Raised by :func:`build_model` for a report shape this renderer no
+    longer supports -- currently only a stored, scan-shaped report."""
+
+
 def build_model(
     report: dict[str, object],
     gate_api_break: bool = False,
@@ -1056,11 +1061,31 @@ def build_model(
     ``_incomplete_is_blocking``); the ordinary Breaking bucket's
     classification is a compatibility judgement, not a gate one (ADR-042),
     so it is unaffected by either flag.
+
+    Raises :class:`UnsupportedReportShapeError` for a report carrying
+    ``scan_schema_version`` -- the ``scan``-shaped report dict
+    (``diff.findings``/``crosscheck.counts_by_check`` rather than
+    ``changes[]``). ``scan`` itself was deleted outright (ADR-068 Phase 6,
+    hard removal, no deprecation window) along with this renderer's own
+    ``from_scan`` adapter; a *stored*, previously-generated scan report fed
+    to this tool now gets a loud, actionable error instead of silently
+    falling through to :func:`_from_compare` (which reads the wrong key,
+    ``changes`` instead of ``diff.findings``, and would render a false
+    "no changes" comment for a report that may carry real findings).
     """
     if isinstance(report.get("libraries"), list):
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):
         return _from_appcompat(report, gate_api_break, gate_breaking)
+    if "scan_schema_version" in report:
+        raise UnsupportedReportShapeError(
+            "This report was produced by the retired `scan` command "
+            "(recognised by its 'scan_schema_version' key) and is no longer "
+            "a supported input -- `scan` was deleted outright (ADR-068 "
+            "Phase 6, no deprecation window). Re-run the comparison with "
+            "`compare` (with a stored baseline) or `compare --no-baseline` "
+            "and feed this tool the resulting report instead."
+        )
     if "audit_report_schema_version" in report:
         return _from_no_baseline(report, gate_api_break, gate_breaking)
     return _from_compare(report, gate_api_break, gate_breaking)

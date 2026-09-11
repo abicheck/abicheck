@@ -441,22 +441,26 @@ def _is_valid_coverage_contribution(raw: object) -> bool:
 
 
 def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
-    """Stamp the schema marker matching *report*'s actual shape.
-
-    A scan report (baseline-channel: none) has its own schema marker and shape
-    (level/risk/coverage/... -- no library/old_file/summary/changes/...) -- bump
-    it to the latest version for this envelope's new additive fields instead of
-    also stamping ``report_schema_version`` (the *compare*-report schema's
-    marker), which would make a downstream validator select
-    ``compare_report.schema.json`` for a report that structurally can never
-    satisfy it (Codex review).
+    """Stamp ``report_schema_version`` only where it actually applies.
 
     A ``kind: bundle`` / directory-package compare report (the per-library
     release fan-out's own summary shape: verdict/old_dir/new_dir/libraries/...)
     has never had a schema of its own; it is left unversioned rather than
-    falsely claiming the single-pair compare schema (same rationale). ADR-047
-    §7's identity/policy-gate fields still apply regardless of report shape.
+    falsely claiming the single-pair compare schema. ADR-047 §7's
+    identity/policy-gate fields still apply regardless of report shape.
+
+    A stored, previously-generated ``scan``-shaped report (recognised by its
+    own ``scan_schema_version`` key -- ``level``/``coverage``/nested-``diff``,
+    structurally incompatible with ``compare_report.schema.json``) is left
+    alone the same way: ``scan`` was deleted outright (ADR-068 Phase 6, no
+    deprecation window), so there is no current schema, and no current
+    ``scan_schema_version``, to stamp a *stored* one against -- doing so
+    would produce an invalid document carrying both markers at once, and a
+    downstream validator would wrongly select the compare schema by the
+    newly-added key's mere presence (Codex review).
     """
+    if "scan_schema_version" in report:
+        return
     if not ("libraries" in report and "old_dir" in report):
         out["report_schema_version"] = REPORT_SCHEMA_VERSION
 
