@@ -347,7 +347,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         comparable` only fires when a side carries header-derived
         declarations, which no plain-ELF fixture has)."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         facts_path = self._old_facts(tmp_path)
         new_dir = tmp_path / "new"
@@ -370,9 +371,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
                 elf=_meta(soname="libcore.so", exports=["core_fn"]),
             )
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
         monkeypatch.setattr(
-            service_mod,
+            compare_policy_mod,
             "compare_snapshots",
             lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
@@ -401,7 +402,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         instead of the exception escaping to a global refusal (Codex
         review, thirtieth round); the CLI still exits 16 on it."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         facts_path = self._old_facts(tmp_path)
         new_dir = tmp_path / "new"
@@ -415,7 +416,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             lambda d, include_private=False: [new_so],
         )
         monkeypatch.setattr(
-            service_mod,
+            input_resolution_mod,
             "resolve_input",
             lambda path, **kwargs: AbiSnapshot(
                 library="libcore.so",
@@ -458,7 +459,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         whether the caller's own policy document declared any (Codex
         review; the highest-leverage gap in this driver)."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.checker_policy import ChangeKind, Verdict as VerdictEnum
         from abicheck.policy_file import PolicyFile
 
@@ -481,7 +483,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
                 elf=_meta(soname="libcore.so", exports=["core_fn"]),
             )
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
         captured: dict[str, object] = {}
 
         def _fake_compare_snapshots(
@@ -490,7 +492,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             captured["policy_file"] = policy_file
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
 
-        monkeypatch.setattr(service_mod, "compare_snapshots", _fake_compare_snapshots)
+        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _fake_compare_snapshots)
 
         # Omitted: unchanged behavior, None reaches the per-library call.
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -514,7 +516,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         gap the ``policy_file`` fix above closed for reclassify/override
         rules)."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.workflows.suppression import SuppressionList
 
         facts_path = self._old_facts(tmp_path)
@@ -529,7 +532,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             lambda d, include_private=False: [new_so],
         )
         monkeypatch.setattr(
-            service_mod,
+            input_resolution_mod,
             "resolve_input",
             lambda path, **kwargs: AbiSnapshot(
                 library="libcore.so",
@@ -545,7 +548,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             captured["suppress"] = suppress
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
 
-        monkeypatch.setattr(service_mod, "compare_snapshots", _fake_compare_snapshots)
+        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _fake_compare_snapshots)
 
         # Omitted: unchanged behavior, None reaches the per-library call.
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -567,7 +570,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         bundle_verdict`` never saw the policy file at all. Pinned end to end
         via the real returned ``BundleDiffResult``, not a mock."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.policy_file import PolicyFile
 
         facts_path = self._old_facts(tmp_path)
@@ -582,7 +586,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             lambda d, include_private=False: [new_so],
         )
         monkeypatch.setattr(
-            service_mod,
+            input_resolution_mod,
             "resolve_input",
             lambda path, **kwargs: AbiSnapshot(
                 library="libcore.so",
@@ -591,7 +595,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             ),
         )
         monkeypatch.setattr(
-            service_mod,
+            compare_policy_mod,
             "compare_snapshots",
             lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
@@ -621,7 +625,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         derived from one production helper" for at least this one detector
         family."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.policy_file import PolicyFile
 
         old_fn = Function(
@@ -666,7 +670,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
                 functions=[new_fn],
             )
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
 
         # Baseline: no override -- the real compare_snapshots reports this
         # kind's built-in default verdict, BREAKING.
@@ -710,7 +714,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         lexicographically but must lose to it under real version
         comparison."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         facts_path = self._old_facts(tmp_path)
         new_dir = tmp_path / "new"
@@ -737,9 +742,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
                 elf=_meta(soname="libcore.so", exports=["core_fn"]),
             )
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
         monkeypatch.setattr(
-            service_mod,
+            compare_policy_mod,
             "compare_snapshots",
             lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
@@ -760,7 +765,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         clang/icpx-only host) died rather than using the caller's own
         resolved compiler binding/frontend."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.compile_context import CompileContext
 
         facts_path = self._old_facts(tmp_path)
@@ -784,9 +790,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
                 elf=_meta(soname="libcore.so", exports=["core_fn"]),
             )
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
         monkeypatch.setattr(
-            service_mod,
+            compare_policy_mod,
             "compare_snapshots",
             lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
@@ -816,7 +822,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         library must not leak onto a library with no entry in that map, which
         must keep falling back to the uniform default."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.compile_context import CompileContext
 
         metadata = {
@@ -849,9 +856,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
                 elf=_meta(soname=path.name, exports=["fn"]),
             )
 
-        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve_input)
+        monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
         monkeypatch.setattr(
-            service_mod,
+            compare_policy_mod,
             "compare_snapshots",
             lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 new.library, verdict=Verdict.NO_CHANGE
@@ -902,7 +909,8 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         metadata = {"libcore.so": _meta(soname="libcore.so", exports=["core_fn"])}
         facts = capture_bundle_facts(_per_library_snapshots(metadata))
@@ -920,7 +928,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
             lambda d, include_private=False: [new_so],
         )
         monkeypatch.setattr(
-            service_mod,
+            input_resolution_mod,
             "resolve_input",
             lambda path, **kwargs: AbiSnapshot(
                 library="libcore.so",
@@ -934,14 +942,14 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
         # metric-drift stage on for every caller -- so the spy asserts the
         # keyword's *absence*, the stronger property: a re-introduced
         # parameter (a way for this driver to opt out again) fails here.
-        real_compare_snapshots = service_mod.compare_snapshots
+        real_compare_snapshots = compare_policy_mod.compare_snapshots
         seen_kwargs: list[dict[str, object]] = []
 
         def _spy_compare_snapshots(old, new, *args, **kwargs):
             seen_kwargs.append(dict(kwargs))
             return real_compare_snapshots(old, new, *args, **kwargs)
 
-        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _spy_compare_snapshots)
 
         compare_release_against_bundle_facts(facts_path, new_dir)
 
@@ -956,7 +964,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
         ``public_surface_grew`` the same way a scalar `compare` of the
         identical pair does."""
         import abicheck.package as package_mod
-        import abicheck.service as service_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
 
         old_snapshot = AbiSnapshot(
             library="libcore.so",
@@ -983,7 +991,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
             lambda d, include_private=False: [new_so],
         )
         monkeypatch.setattr(
-            service_mod,
+            input_resolution_mod,
             "resolve_input",
             lambda path, **kwargs: AbiSnapshot(
                 library="libcore.so",

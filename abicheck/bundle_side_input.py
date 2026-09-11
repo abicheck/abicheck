@@ -402,7 +402,11 @@ def compare_release_against_bundle_facts(
     either, since a suppression rule is authored against one library's own
     symbol/type identity, not a cross-library relationship.
     """
-    from . import service
+    # Real workflows-package owners, not the flat `abicheck.service` facade:
+    # `service.py` also re-exports frontends-classified
+    # `service_render.render_output`, and this module is workflows-classified,
+    # so importing `service.py` itself here would widen that workflows ->
+    # frontends edge instead of letting it close (ADR-061 gap A).
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
     from .errors import (
@@ -418,7 +422,9 @@ def compare_release_against_bundle_facts(
     from .workflows.bundle_facts_library_overrides import (
         validate_matched_library_overrides,
     )
+    from .workflows.compare_policy import compare_snapshots
     from .workflows.extraction import build_match_map
+    from .workflows.input_resolution import resolve_input
     from .workflows.release_scope import mismatch_kind
 
     old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
@@ -493,7 +499,7 @@ def compare_release_against_bundle_facts(
         lib_includes = (per_library_includes or {}).get(key, includes)
         lib_compile = (per_library_compile or {}).get(key, compile)
         try:
-            new_snapshot = service.resolve_input(
+            new_snapshot = resolve_input(
                 new_path,
                 headers=lib_headers,
                 includes=lib_includes,
@@ -527,7 +533,7 @@ def compare_release_against_bundle_facts(
             # unconditional at Tier 2"): pattern-verdict modulation
             # (ADR-068 D4) is the identical class of AUTO analysis and was
             # missing the same way here -- forced True for the same reason.
-            diff = service.compare_snapshots(
+            diff = compare_snapshots(
                 old_snapshot,
                 new_snapshot,
                 suppress,
