@@ -502,6 +502,18 @@ use_cases:
       ]
       tests: [tests/test_python_ext.py]
     notes: >
+      Capability is real and working (verified live, independent of the note
+      below: `compare foo.abi3.so foo.abi3.so --abi3 3.9` against a snapshot
+      carrying a stable-ABI violation exits 0 and reports it as a
+      `COMPATIBLE_WITH_RISK` deployment-risk finding). The `tests` evidence
+      above is currently stale, not proof of this: 11 of `test_python_ext.py`'s
+      own tests (`test_scan_abi3_*`) still invoke the deleted `scan` command
+      via a `_scan_abi3()` helper and fail with `No such command 'scan'`
+      (exit 64) rather than exercising `compare --abi3` at all — see
+      `docs/contribute/known-gaps.md`'s "~46 test files still invoke the
+      deleted scan command directly" for the full account and why it isn't
+      fixed here (a docs-only follow-up).
+
       An abi3 module's compatibility surface is the set of CPython C-API symbols
       it IMPORTS, not what it exports. python_ext recognises extension modules
       (Cython/pybind11/nanobind/C) from the PyInit_* export and Py* import
