@@ -307,8 +307,7 @@ def resolve_compare_request(
             on ``DiffResult.evidence_contract_error``).
         PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
             finds a requested evidence input no resolved collector/backend
-            combination can satisfy (ADR-063 Phase 4) — e.g. a
-            ``.abicheck.yml`` ``build.targets`` declaration combined with a
+            combination can satisfy (ADR-063 Phase 4) — e.g. a ``.abicheck.yml`` ``build.targets`` declaration combined with a
             pre-captured Bazel ``aquery``/``cquery`` jsonproto.
         SnapshotError: If either input cannot be loaded.
     """
