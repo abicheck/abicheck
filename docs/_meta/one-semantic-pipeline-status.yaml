@@ -207,6 +207,29 @@ concepts:
       remains open (the DWARF per-TU completeness gap and the seven
       case-(a) fields are unaffected by this correction -- those remain
       exactly as open as stated above).
+      **2026-09-11 T9 third-slice correction (supersedes the "DWARF per-TU
+      completeness gap" claim above):** that gap is now closed too. DWARF
+      genuinely can capture bases/virtual_bases/vtable per translation
+      unit, unlike PDB -- dwarf_snapshot.py now cross-checks each
+      non-retained ODR-duplicate DIE's own membership against the retained
+      definition's before discarding it, and downgrades exactly the
+      sibling fact(s) among bases_fact/virtual_bases_fact/vtable_fact that
+      actually disagreed to Fact.partial(...) -- per field, not a blanket
+      per-record decision. vtable_transition_is_evidenced's decline check
+      now includes FactStatus.PARTIAL alongside UNSUPPORTED, gated per
+      field at each field's own point of use: vtable_fact at the
+      function's top-level gate (both sides), virtual_bases_fact at the
+      final size/virtual-bases fallback branch that actually reads it --
+      bases_fact is not part of this function's decline logic at all,
+      since it never reads bases/bases_fact. diff_cxx_rules.
+      virtual_method_addition also gained its own explicit
+      vtable_fact_declined(...) check, since the top-level PARTIAL decline
+      can now return False before its owned-signature branch runs even for
+      a genuinely new virtual method -- an invariant that function's own
+      fallthrough logic used to rely on. See this concept's own
+      `investigated_declined` entry below for the full account. Only the
+      seven case-(a) fields and the shared declined-comparison accounting
+      remain open.
     investigated_declined:
       - item: >-
           FactStatus gating for the vtable/TYPE_VTABLE_CHANGED cluster
@@ -225,18 +248,50 @@ concepts:
           evidenced declines outright on either side's vtable_fact.status
           is FactStatus.UNSUPPORTED, never on NOT_COLLECTED/FAILED, so the
           leaf-class regression this decline also protects is unaffected).
-          What remains open: the DWARF per-translation-unit completeness
-          gap (a producer-capability signal cannot express a per-TU scope
-          gap -- DWARF genuinely can capture this family, unlike PDB), and
-          the seven case-(a) fields still on the fact_provenance mechanism
-          (a separate, blocked item -- no safe conversion without a
-          legacy-hybrid load-path fix, not a decline).
+          Narrowed further by T9's third slice (2026-09-11): the DWARF
+          per-translation-unit completeness gap is now closed too. DWARF
+          genuinely can capture bases/virtual_bases/vtable (unlike PDB),
+          so the signal is per-record scope, not per-producer capability --
+          dwarf_snapshot.py's own "first definition wins" ODR handling
+          already discards every non-retained CU's own copy of a record
+          type; the new extract/dwarf_vtable_completeness.py leaf module
+          now compares that discarded copy's own bases/virtual_bases/vtable
+          membership against the retained definition's before discarding
+          it, and downgrades exactly the sibling fact(s) that actually
+          disagreed to Fact.partial(...) (the existing FactStatus member,
+          not a new one) -- per-field, not a blanket per-record decision
+          (a Codex review round found the first landed version downgraded
+          all three whenever any one disagreed; builder._vtable_evidence_
+          conflicts is dict[str, set[str]], not set[str], to track which
+          field(s) per record). vtable_transition_is_evidenced's own
+          decline check now includes FactStatus.PARTIAL alongside
+          UNSUPPORTED, gated per field at each field's own point of use:
+          vtable_fact at the function's top-level gate (both sides),
+          virtual_bases_fact at the final size/virtual-bases fallback
+          branch that actually reads it -- bases_fact is not part of this
+          function's decline logic at all, since this function never reads
+          bases/bases_fact (a second Codex round caught the first version
+          of this consumer-side fix still gating the whole function on
+          bases_fact/virtual_bases_fact together, which would suppress a
+          fully-evidenced vtable change whenever only bases disagreed).
+          diff_cxx_rules._transitive_bases needed no code change -- it
+          already treats any non-PRESENT status as incomplete via
+          _fact_str_list_confirmed. vptr_offset_bits_fact is deliberately
+          left untouched (see compare/vtable_evidence.py's own "NOT
+          consulted here" note). What remains open: the seven case-(a)
+          fields still on the fact_provenance mechanism (a separate,
+          blocked item -- no safe conversion without a legacy-hybrid
+          load-path fix, not a decline), and the shared declined-comparison
+          accounting this item's text also calls for.
         tracked_as: >-
           duplication-and-convergence-assessment.md Phase 6 item 4 / track
           T9; the full three-round reasoning lives once, canonically, in
-          diff_types_vtable.py's own module docstring, and the T9 first
-          slice's own reasoning lives in compare/vtable_evidence.py's "T9
-          closure" docstring note.
+          diff_types_vtable.py's own module docstring, the T9 first slice's
+          own reasoning lives in compare/vtable_evidence.py's "T9 closure"
+          docstring note, and the T9 third slice's own reasoning lives in
+          that same module's "T9 second slice" docstring note (numbered
+          relative to that module's own history) plus
+          extract/dwarf_vtable_completeness.py's own module docstring.
   identity:
     primitive: complete
     producers: partial
