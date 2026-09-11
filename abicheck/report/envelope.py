@@ -237,3 +237,30 @@ def resolved_document(
     envelope-driven render and the envelope's document *is* the shared one.
     """
     return envelope.document if envelope is not None else report_document
+
+
+def env_matrix_digest_reusing_document(
+    result: DiffResult,
+    document: ReportDocument | None,
+) -> str | None:
+    """The env-matrix deployment-floor digest, reused from a shared
+    ``ReportDocument`` when one exists, mirroring
+    ``disposition_audit.disposition_audit_dict_reusing_document``.
+
+    The document already froze ``env_matrix_source_sha256`` off ``result`` at
+    build time (``build_report_document``/``build_html_document``), so a
+    renderer holding an already-resolved document (via ``resolved_document``)
+    must read the digest from there rather than re-reading the *mutable*
+    ``result`` a second time -- a mutation to
+    ``result.env_matrix_source_sha256`` after the document/envelope was built
+    must never leak into a still-later render of that same document (Codex
+    review, fresh evidence -- SARIF's and JUnit's own projections were still
+    reading ``result`` directly after every other format was fixed for this
+    exact class). A direct caller with no document at all (no envelope, no
+    ``report_document``) keeps the prior, independent behaviour of reading
+    *result* straight.
+    """
+    if document is None:
+        return result.env_matrix_source_sha256
+    value = document.to_mapping().get("env_matrix_source_sha256")
+    return value if isinstance(value, str) else None

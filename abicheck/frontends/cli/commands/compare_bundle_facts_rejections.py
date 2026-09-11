@@ -227,7 +227,6 @@ def reject_unsupported_options(
     from ....cli_compare_options import _reject_set_input_flags
 
     _reject_set_input_flags(
-        kwargs.get("env_matrix_path"),
         # Workstream D-S1: a --used-by-manifest-named consumer is exactly as
         # unsupported here as a bare --used-by one (this dispatch runs before
         # run_compare's own used_by_apps/used_by_manifests merge) -- folded

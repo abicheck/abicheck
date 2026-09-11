@@ -65,6 +65,7 @@ from typing import Any
 
 from ..change_registry_types import Verdict
 from ..checker_types import DiffResult
+from ..environment_matrix import EnvironmentMatrix
 from ..errors import ValidationError
 from ..model import AbiSnapshot
 from ..model.change_catalog.kinds import ChangeKind
@@ -156,11 +157,76 @@ class CompareRequest:
     # "c++", "clang", ...)`` shape (this file's own example, well short of
     # this boundary) is unaffected.
     _: KW_ONLY
-    # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML). When
-    # its ``runtime_floors`` are set, new symbol-version requirements classify
-    # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)
-    # instead of the default deployment-RISK verdict.
+    # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML).
+    # When its ``runtime_floors`` are set, new symbol-version requirements
+    # classify against the declared floors (≤ floor → COMPATIBLE, > floor →
+    # BREAKING) instead of the default deployment-RISK verdict. Demoted off
+    # the CLI (this PR, ADR-068 D5): the former ``--env-matrix FILE`` is now
+    # ``.abicheck.yml``'s ``deployment:`` config key, resolved once by
+    # ``resolve_compare_config`` into a real ``EnvironmentMatrix`` -- so this
+    # field now carries the already-*resolved* value, not a path to load,
+    # with no surviving CLI flag of its own. Kept as a genuine
+    # ``CompareRequest`` field (rather than dropped like
+    # ``bundle_system_providers``/``fail_on_removed_library``, which never
+    # reach ``classify_compare_pair`` at all) because it is a per-comparison
+    # classification input, not a release-level gating knob -- the same
+    # reasoning that keeps ``collapse_versioned_symbols``/
+    # ``public_header_dirs`` as real fields here: both need a genuine
+    # channel into the directory/package release fan-out's per-library
+    # ``compare_snapshots`` call (``service_compare_pipeline.run_compare`` /
+    # ``cli_compare_release_pairwise._run_compare_pair``), which a config-
+    # only value with no request field cannot reach.
+    env_matrix: EnvironmentMatrix | None = None
+    #: Backward-compatibility shim: before this PR's ADR-068 D5 demotion,
+    #: ``env_matrix_path: Path`` was itself the documented, released
+    #: ``CompareRequest`` field (``CHANGELOG.md``'s 0.4.0 entry). Kept as a
+    #: still-accepted constructor parameter, but stays pure request
+    #: *intent* until :meth:`CompareRequest.effective_env_matrix` resolves
+    #: it lazily, at the plan/execution boundary -- **not** in
+    #: ``__post_init__`` (Codex review, PR #1221 follow-up: eager
+    #: resolution at construction both broke a caller that builds the
+    #: request before the matrix file exists, and let a queued request
+    #: classify against contents cached before a later edit; see
+    #: ``effective_env_matrix``'s docstring). ``None`` is a pure no-op.
+    #: Supplying both this and ``env_matrix`` is a usage error, raised
+    #: eagerly in ``__post_init__`` (that half needs no file I/O) -- there
+    #: is no principled precedence between the two.
     env_matrix_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        # Codex review, PR #1221 follow-up: an earlier version *loaded*
+        # `env_matrix_path` from disk right here, at construction time --
+        # violating `workflows/AGENTS.md`'s "Change checklist" (a request
+        # field carries intent; the resolved value belongs at the
+        # plan/execution boundary). So this validates only the structural
+        # "not both" invariant, which needs no I/O at all, and leaves
+        # `env_matrix_path` unresolved -- `effective_env_matrix()` below
+        # performs the real, lazy load at classify time instead.
+        if self.env_matrix is not None and self.env_matrix_path is not None:
+            raise ValidationError(
+                "CompareRequest: pass either env_matrix or env_matrix_path, "
+                "not both (ambiguous which one should take effect)"
+            )
+
+    def effective_env_matrix(self) -> EnvironmentMatrix | None:
+        """Resolve ``env_matrix``/``env_matrix_path`` intent into the
+        :class:`~abicheck.environment_matrix.EnvironmentMatrix` a comparison
+        should classify against.
+
+        Pure -- never mutates ``self`` -- and performs any file I/O only
+        when called, so this always reflects the file's *current* contents
+        rather than one cached at construction time. Called from
+        :func:`abicheck.service_compare_pipeline.classify_compare_pair`
+        instead of reading ``env_matrix`` directly.
+        """
+        if self.env_matrix is not None:
+            return self.env_matrix
+        if self.env_matrix_path is None:
+            return None
+        from .input_resolution import load_env_matrix
+
+        return load_env_matrix(Path(self.env_matrix_path))
+
     # ADR-050 D2: force a tentative diff through a genuine comparability-
     # contract mismatch (scope/profile fingerprint drift) instead of the
     # default hard ``ProfileMismatchError``/``ScopeMismatchError``. Opt-in;
@@ -404,8 +470,6 @@ class CompareRequest:
             and not Path(self.policy_file_path).exists()
         ):
             errors.append(f"policy file not found: {self.policy_file_path}")
-        if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
-            errors.append(f"environment matrix file not found: {self.env_matrix_path}")
         # ADR-049 Phase 6 (Codex review): the same two rules the CLI applies
         # to --contract, so a typed caller fails fast and with identical text
         # instead of having the mode silently ignored (contract_evaluation

@@ -82,7 +82,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--diagnostic-comparison",
         "--dry-run",
         "--dump-manifest",
-        "--env-matrix",
         "--follow-deps",
         "--format",
         "--header",

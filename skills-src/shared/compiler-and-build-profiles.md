@@ -48,6 +48,11 @@ compare, not how headers are parsed) and remains a per-run `compare` flag:
 Project-level defaults belong in `.abicheck.yml`; the exhaustive key
 reference is [the config file page](../../docs/reference/config-file.md),
 and `abicheck project validate` checks a project's own configuration.
+Declared deployment constraints (target compilers, SYCL/CUDA backends,
+`GLIBC`/`GLIBCXX`/`CXXABI` runtime floors) are one such project-level
+default: they live in `.abicheck.yml`'s `deployment:` block, not a CLI
+flag, and apply to every comparison of the project — a bare `compare` and
+the directory/package release fan-out alike.
 
 ## Two distinct failure modes, do not conflate them
 

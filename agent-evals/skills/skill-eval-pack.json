@@ -522,7 +522,7 @@
       "roots": [
         ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:1af4a14c0c4ebac83292b642d6784112ae469ead7cacdb5f5cce1c9754e04bb1"
+      "tree": "sha256:fa669482f5a2e278925f78b77966e6224e7e90fb5318e771c41da2447b39cd8c"
     }
   }
 }

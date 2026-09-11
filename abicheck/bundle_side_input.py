@@ -98,6 +98,7 @@ if TYPE_CHECKING:
     from .bundle_models import BundleDiffResult, BundleSignatureEvidence, BundleSnapshot
     from .checker_types import DiffResult
     from .compile_context import CompileContext
+    from .environment_matrix import EnvironmentMatrix
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
     from .workflows.suppression import SuppressionList
@@ -268,6 +269,7 @@ def compare_release_against_bundle_facts(
     suppress: SuppressionList | None = None,
     include_dependencies: bool = False,
     max_json_object_nodes: int | None = None,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> BundleDiffResult:
     """End-to-end driver: a stored OLD-side ``BundleFacts`` file compared
     against a live NEW-side directory/package extraction root (G38 Phase 13).
@@ -401,6 +403,18 @@ def compare_release_against_bundle_facts(
     native release fan-out does not apply per-library suppression there
     either, since a suppression rule is authored against one library's own
     symbol/type identity, not a cross-library relationship.
+
+    *env_matrix*, when given, is forwarded to each per-library
+    ``service.compare_snapshots()`` call as its own *env_matrix* argument --
+    the same ``.abicheck.yml`` ``deployment:``-resolved
+    :class:`~abicheck.environment_matrix.EnvironmentMatrix` the scalar
+    ``compare`` path already threads through (``resolved_cfg.deployment``,
+    ``cli_compare_helpers.py``). Previously this driver had no channel for
+    it at all: a real ``deployment.runtime_floors`` config was silently
+    ignored for a stored-OLD-facts-vs-live-NEW comparison, so a runtime-
+    floor violation that should be BREAKING under the scalar path passed as
+    a mere RISK here instead (Codex review). Omitted (the default):
+    behavior is unchanged from before this parameter existed.
     """
     # Real workflows-package owners, not the flat `abicheck.service` facade:
     # `service.py` also re-exports frontends-classified
@@ -539,6 +553,7 @@ def compare_release_against_bundle_facts(
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
+                env_matrix=env_matrix,
                 # pattern_verdicts is deliberately NOT forced True here:
                 # ADR-027 (accepted) defers flipping --pattern-verdicts to
                 # default-on pending FP-rate/parity validation; ADR-068,
@@ -646,4 +661,15 @@ def compare_release_against_bundle_facts(
     result.scope_record = scope_record
     result.extraction_failures = dict(failed)
     result.not_comparable_members = dict(not_comparable)
+    # Codex review, P2 (Finding 5): computed directly from the resolved
+    # `env_matrix` this function already has -- not inferred after the fact
+    # from whichever per-library `DiffResult` happens to carry
+    # `env_matrix_source_sha256` (which the release fan-out's own round-6
+    # fix already established as wrong: indistinguishable from "no
+    # deployment contract at all" whenever the run completes zero matched
+    # pairs). Same shared `env_matrix_content_digest()` the fan-out uses, so
+    # the two can't independently drift.
+    from .checker import env_matrix_content_digest
+
+    result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
     return result

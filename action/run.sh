@@ -1491,7 +1491,7 @@ _extra_args_is_value_option() {
     --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
     --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
     --debug-format | --debug-info | --debug-root | --debuginfod-url | \
-    --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
+    --depth | --devel-pkg | --dump-manifest | --format | \
     --frontend-context | --header | --include | --instantiation-manifest | \
     --lang | --ld-library-path | --manifest | --max-findings | \
     --output | --output-dir | --pack | \

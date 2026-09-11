@@ -92,7 +92,7 @@ from .cli_resolve import (
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import AbicheckError, PolicyError, ProfileMismatchError, ScopeMismatchError
+from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.options import reject_incoherent_secondary_writes
@@ -912,7 +912,6 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context, *,
-    env_matrix_path: Path | None,
     used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
     include_labels: dict[Path, str] | None,
@@ -941,7 +940,6 @@ def _reject_flags_unsupported_for_set_inputs(
     :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`).
     """
     _reject_set_input_flags(
-        env_matrix_path,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
@@ -1207,7 +1205,6 @@ def run_compare(
     # both below). explain_patterns renders the always-on ledger via
     # `--view patterns`, same as show_filtered/audit_suppressions below.
     explain_patterns: bool,
-    env_matrix_path: Path | None,
     verbose: bool,
     use_cases_manifest: Path | None = None,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
@@ -1386,7 +1383,6 @@ def run_compare(
     if {old_kind, new_kind} & {"directory", "package"}:
         release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
-            env_matrix_path=env_matrix_path,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
@@ -1582,6 +1578,7 @@ def run_compare(
             depth=release_depth,
             public_header_dirs=project_config_public_header_dirs(project_cfg),
             collapse_versioned_symbols=collapse_versioned_symbols,
+            env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
             # Codex review (PR #1154 follow-up): --view's derived values were
             # silently dropped from this dispatch -- forwarded raw
             # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
@@ -1931,11 +1928,12 @@ def run_compare(
         if evaluation_config is not None and contract_evaluation
         else contract_mode
     )
-    from .service import compare_snapshots, load_env_matrix
-    try:
-        env_matrix = load_env_matrix(env_matrix_path)
-    except AbicheckError as exc:
-        raise click.UsageError(str(exc)) from exc
+    from .service import compare_snapshots
+    # ADR-020b / ADR-068 D5: `deployment:` (former `--env-matrix FILE`) is
+    # config-only now -- `resolved_cfg.deployment` is the single already-
+    # resolved `EnvironmentMatrix`, sourced straight from `.abicheck.yml`,
+    # no CLI override, no separate file to load here.
+    env_matrix = resolved_cfg.deployment
     try:
         deadline.check()  # same boundary check as the resolve stage above
         result = compare_snapshots(

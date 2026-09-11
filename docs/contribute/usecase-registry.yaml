@@ -624,16 +624,22 @@ use_cases:
       DT_RELR, glibc >= 2.36) against a declared floor and emits
       platform_baseline_floor_raised (new deployment-RISK ChangeKind) — fires
       even with no old/new delta, unlike the existing runtime_floor_raised
-      contract. Declared via --env-matrix's existing runtime_floors
-      (ADR-020b) — no dedicated CLI flag; runtime_floors keys are matched
-      case-insensitively, same as apply_runtime_floor_contract.
+      contract. Declared via .abicheck.yml's deployment.runtime_floors
+      (ADR-020b/ADR-068 D5) — no dedicated CLI flag; runtime_floors keys are
+      matched case-insensitively, same as apply_runtime_floor_contract.
       package.parse_manylinux_glibc_floor() derives the floor from a
       manylinux wheel tag (PEP 600 + legacy aliases) for programmatic/future
       auto-derivation use — not yet wired into any CLI path.
-      compare-release (directory/package release fan-out) does not support
-      --env-matrix yet, so this check does not run there either. Both gaps
-      are deliberately out of scope for G10 (see its plan's acceptance
-      criteria, which this entry's evidence satisfies in full) and are
+      compare-release (directory/package release fan-out) DOES apply the
+      project's declared deployment: block to every library in the fan-out
+      now (ADR-068 D5's demotion resolves it once per release and forwards
+      it unchanged to each library's own compare, cli_compare_release_
+      pairwise.py) — this check runs there too. The remaining gap is
+      auto-derivation, not fan-out support: this entry's own evidence
+      requires an explicit deployment.runtime_floors declaration everywhere,
+      single-pair or release alike. That auto-derivation gap is deliberately
+      out of scope for G10 (see its plan's acceptance
+      criteria, which this entry's evidence satisfies in full) and is
       tracked as the multi-platform follow-up under G27
       (UC-TC-wheel-deployment-claims): auto-deriving the floor from a
       compared wheel's own tag and enforcing it end-to-end in a single
@@ -710,7 +716,7 @@ use_cases:
       check_macos_deployment_target_floor (diff_wheel_deployment.py) is the
       macOS half of G10's idea: LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION vs. a
       declared MACOS_DEPLOYMENT_TARGET floor, same runtime_floors/
-      --env-matrix mechanism. package.py gained
+      .abicheck.yml deployment: mechanism. package.py gained
       parse_musllinux_floor/parse_macos_deployment_target_floor tag parsers
       alongside G10's parse_manylinux_glibc_floor (all three share
       _wheel_platform_tag_segment). New ChangeKinds:
@@ -745,9 +751,10 @@ use_cases:
       ChangeKinds: wheel_rpath_not_portable, wheel_closure_dependency_violation.
       STILL PLANNED: end-to-end CLI auto-derivation (a single
       `compare old.whl new.whl` deriving runtime_floors from the *new*
-      wheel's own filename tag with no --env-matrix flag needed — today all
-      of the checks above, including G10's original GLIBC one, still require
-      an explicit --env-matrix declaration); Windows UCRT/MSVC-runtime
+      wheel's own filename tag with no .abicheck.yml deployment: block
+      needed — today all of the checks above, including G10's original
+      GLIBC one, still require an explicit deployment.runtime_floors
+      declaration); Windows UCRT/MSVC-runtime
       requirement checking; CPU-ISA-baseline (dispatch-symbol-name
       heuristic) detection; the full per-tag allowed-dependency policy (the
       general wheel-closure check, beyond the vendored-hash-specific case

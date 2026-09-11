@@ -131,14 +131,22 @@ __all__ = [
 #: this always-present block also gains the additive ``schema_staleness_
 #: status`` key.
 #:
-#: ``1.4`` adds the top-level ``disposition_audit`` block (ADR-067 C-S2) --
-#: purely additive, a straightforward MINOR bump under the policy stated
-#: above. Closes the gap where an audit that suppressed every one of its
-#: findings still read, in an ``abicheck aggregate`` fan-in, as
-#: ``detected_total: 0``/``suppressed: 0``: the rule-attributed
-#: ``suppressed`` list was already on this document, but nothing folded it
-#: into the one block every other report shape's own fan-in reads (Codex
-#: review, fresh evidence).
+#: ``1.4`` -- two independent additive fields landed together, both MINOR
+#: bumps under the policy stated above:
+#:
+#: * mirrors ``REPORT_SCHEMA_VERSION``'s ``4.2`` (Codex review, P2): an
+#:   additive, top-level ``env_matrix_source_sha256`` key, present only
+#:   when this audit's candidate was actually run under a declared
+#:   ``deployment.runtime_floors``/``EnvironmentMatrix`` contract -- the
+#:   identical digest a two-sided ``compare`` report of the same matrix
+#:   carries under this same name. Absent (not ``null``) when the run
+#:   declared none, matching the compare-side convention.
+#: * adds the top-level ``disposition_audit`` block (ADR-067 C-S2). Closes
+#:   the gap where an audit that suppressed every one of its findings still
+#:   read, in an ``abicheck aggregate`` fan-in, as ``detected_total: 0``/
+#:   ``suppressed: 0``: the rule-attributed ``suppressed`` list was already
+#:   on this document, but nothing folded it into the one block every other
+#:   report shape's own fan-in reads (Codex review, fresh evidence).
 AUDIT_REPORT_SCHEMA_VERSION = "1.4"
 
 #: Deprecated alias kept for one release so an in-flight import does not
@@ -436,6 +444,18 @@ class NoBaselineDocument:
     #: field states what *did* classify the findings, not what a caller
     #: asked for.
     policy: str = "strict_abi"
+    #: The declared-deployment-floor contract's content digest (Codex
+    #: review, P2), read straight off ``DiffResult.env_matrix_source_sha256``
+    #: -- the same field ``run_no_baseline_compare`` stamps onto its
+    #: ``DiffResult`` via ``dataclasses.replace`` for exactly this reason
+    #: (see that function's own docstring). ``None`` when this audit's
+    #: candidate declared no ``deployment.runtime_floors``/
+    #: ``EnvironmentMatrix`` contract at all -- without this field, a
+    #: candidate that stays within its declared floor (and so produces no
+    #: finding) was indistinguishable, in every rendered report, from one
+    #: run with no deployment contract in effect at all, even though the
+    #: matrix genuinely governed this run.
+    env_matrix_source_sha256: str | None = None
     #: ADR-067 C-S2's raw-versus-effective disposition ledger
     #: (``report.disposition_audit.compute_disposition_audit``), already
     #: serialized -- the same block every two-sided ``compare`` report

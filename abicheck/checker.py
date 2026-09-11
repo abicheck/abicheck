@@ -777,7 +777,23 @@ def _env_matrix_contract_changes(
       and can fire even when the floor never moved between old and new, which
       is exactly the manylinux-tag violation case (a binary that has always
       required a newer glibc than its wheel tag promises). Their findings are
-      returned, suppression-filtered, for the caller to fold into ``kept``.
+      run through ``diff_versioning.promote_baseline_violation_findings`` —
+      the two of the six whose catalog default is RISK
+      (``PLATFORM_BASELINE_FLOOR_RAISED``/``MACOS_DEPLOYMENT_TARGET_RAISED``)
+      only ever fire on an actual violation, so any occurrence of one is
+      unconditionally promoted to BREAKING (the other four already default to
+      BREAKING in the catalog, or — ``WHEEL_RPATH_NOT_PORTABLE`` — are
+      deliberately left at RISK; see that function's own docstring) —
+      *before* suppression filtering, not after (Codex review, P2):
+      ``_filter_suppressed_changes`` records a suppressed change at whatever
+      verdict it already carries, so promoting first is what keeps "Record
+      before disposing" (root ``AGENTS.md``) honest here — a suppressed
+      occurrence of one of these two kinds still records what it actually
+      was (BREAKING) rather than silently downgrading to the catalog's
+      unpromoted RISK default merely because it also happened to be
+      suppressed. This also matches the no-baseline audit path
+      (``workflows.env_matrix_audit``), which has no suppression step to
+      race against at all.
 
     The wheel checks (``G27``) each additionally require the dedicated
     ``runtime_floors["WHEEL_CONTEXT"]`` key *inside themselves* — not just any
@@ -795,6 +811,7 @@ def _env_matrix_contract_changes(
         apply_runtime_floor_contract,
         check_musllinux_glibc_dependency,
         check_platform_baseline_floor,
+        promote_baseline_violation_findings,
     )
     from .diff_wheel_deployment import (
         check_macos_deployment_target_floor,
@@ -830,10 +847,38 @@ def _env_matrix_contract_changes(
         check_wheel_rpath_not_portable(new_elf, floors),
         check_wheel_closure_dependency_violation(new_elf, floors),
     ):
+        # Promote BEFORE suppression filtering (Codex review, P2): a
+        # PLATFORM_BASELINE_FLOOR_RAISED/MACOS_DEPLOYMENT_TARGET_RAISED
+        # finding that a suppression rule also happens to match must still
+        # be *recorded* at its correctly-promoted BREAKING verdict --
+        # _filter_suppressed_changes only relocates a Change into
+        # `suppressed`, it never alters severity, so whichever verdict is
+        # on the Change at the moment it is filtered is the one the
+        # disposition audit trail preserves ("Record before disposing",
+        # root AGENTS.md).
+        promote_baseline_violation_findings(check_changes)
         produced.extend(
             _filter_suppressed_changes(check_changes, suppression, suppressed, ledger)
         )
     return produced
+
+
+def env_matrix_content_digest(env_matrix: EnvironmentMatrix | None) -> str | None:
+    """The canonical ``sha256:<hex>`` content digest of *env_matrix*'s
+    resolved configuration, or ``None`` when none was declared (Codex
+    review, PR #1221 follow-up). The one place this is computed: reused by
+    :func:`~abicheck.workflows.no_baseline_compare.run_no_baseline_compare`
+    and a release fan-out at release scope (no per-library ``DiffResult``
+    to read it off of when zero pairs complete). Uses ``EnvironmentMatrix.
+    to_dict()``, not ``dataclasses.asdict()``: the latter cannot traverse
+    the ``MappingProxyType``-typed ``runtime_floors`` field (frozen for the
+    hash-invariant fix, same follow-up).
+    """
+    if env_matrix is None:
+        return None
+    from .contract_evidence_collect import content_digest
+
+    return "sha256:" + content_digest(env_matrix.to_dict())
 
 
 def compare(
@@ -1328,18 +1373,10 @@ def compare(
         else None
     )
 
-    # Canonical content digest of the resolved --env-matrix (Codex review,
-    # PR #803, fresh evidence): `dataclasses.asdict` recursively serializes
-    # `EnvironmentMatrix`'s own nested `SyclConstraints`/`CudaConstraints`
-    # dataclasses into a plain, JSON-safe dict for `content_digest`. `None`
-    # when no --env-matrix was given at all.
-    import dataclasses as _dataclasses
-
-    env_matrix_source_sha256 = (
-        "sha256:" + content_digest(_dataclasses.asdict(env_matrix))
-        if env_matrix is not None
-        else None
-    )
+    # Canonical content digest of the resolved deployment matrix (Codex
+    # review, PR #803; `.abicheck.yml`'s `deployment:` key, ADR-068 D5) --
+    # see `env_matrix_content_digest`'s own docstring above.
+    env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
     result = DiffResult(
         old_version=old.version,
