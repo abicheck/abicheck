@@ -453,3 +453,28 @@ class TestNativeCompareBudgetOverflowFailsTheStep:
         assert outputs["_returncode"] == 0, outputs
         assert outputs.get("verdict") == "AUDIT_RISK", outputs
         assert outputs.get("exit-code") == "0", outputs
+
+
+class TestAuditOnlyJobSummaryHeadingIsNotACompatibilityReport:
+    """Codex review, fresh evidence: with the default `add-job-summary:
+    true`, an audit-only invocation has `MODE=compare` and previously
+    received the unconditional "## abicheck ABI Compatibility Report"
+    heading -- recreating exactly the unsupported compatibility claim the
+    AUDIT_CLEAN/AUDIT_RISK verdict text below it was written to avoid
+    (compare --no-baseline has no baseline and reports no compatibility
+    verdict at all, ADR-068 D2)."""
+
+    def test_audit_only_summary_uses_an_audit_heading_not_a_compatibility_one(
+        self, tmp_path: Path
+    ) -> None:
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
+                "INPUT_ADD_JOB_SUMMARY": "true",
+            },
+        )
+        assert outputs["_returncode"] == 0, outputs
+        summary = (tmp_path / "github_step_summary").read_text(encoding="utf-8")
+        assert "## abicheck ABI Audit Report" in summary, summary
+        assert "## abicheck ABI Compatibility Report" not in summary, summary

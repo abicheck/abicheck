@@ -4446,7 +4446,16 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
   {
-    echo "## abicheck ABI Compatibility Report"
+    # An audit-only run (compare --no-baseline) has no baseline and reports
+    # no compatibility verdict at all -- the unconditional "ABI
+    # Compatibility Report" heading recreated exactly the unsupported
+    # compatibility claim the AUDIT_CLEAN/AUDIT_RISK verdict text below was
+    # written to avoid (Codex review, fresh evidence).
+    if [[ "$MODE" == "compare" && "${_NO_BASELINE:-false}" == "true" ]]; then
+      echo "## abicheck ABI Audit Report"
+    else
+      echo "## abicheck ABI Compatibility Report"
+    fi
     echo ""
 
     case $VERDICT in
