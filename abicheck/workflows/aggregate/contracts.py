@@ -57,6 +57,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from abicheck.change_registry_types import Verdict
@@ -343,6 +344,64 @@ class CoverageStatus(str, Enum):
 #: 2 potential-breaking / 4 abi-breaking). Anything else in a ``severity`` block
 #: is a corrupt gate, not a value we silently reinterpret.
 _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
+
+
+@dataclass(frozen=True)
+class _LoadedReport:
+    """``load.py``'s own per-report-file result, before ``execute.py``
+    folds it (plus the expected-target contract) into a :class:`TargetReport`.
+
+    Lives here, not in ``load.py`` itself, so a report-shape-specific loader
+    split out of ``load.py`` (e.g. ``no_baseline_load.py``, the
+    ``compare --no-baseline`` audit-document shape) can build one without an
+    import cycle back into ``load.py`` — the same reason ``GateInfo``/
+    ``ReportFindings`` already live in their own leaf modules this one
+    imports. ``load.py`` re-exports this name (``from .contracts import
+    _LoadedReport``) so every existing ``from .load import _LoadedReport``
+    call site (e.g. ``execute.py``) is unaffected by the move.
+    """
+
+    target_id: str
+    verdict: Verdict | None
+    gate: GateInfo | None
+    library: str | None
+    head_sha: str | None
+    reason: str | None
+    path: Path
+    #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
+    #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26);
+    #: ``0`` for a report that carries none (no ``--contract`` domain).
+    contract_coverage_exit: int = 0
+    #: Whether the report listed any coverage failure at all -- true even
+    #: when ``contract.unresolved=warn`` zeroed the contribution above.
+    contract_coverage_incomplete: bool = False
+    #: Whether the report stated a usable contribution at all -- see
+    #: :func:`~abicheck.workflows.aggregate.gate._contract_coverage_declared`.
+    contract_coverage_declared: bool = False
+    #: ``None`` on every failure branch below (none establishes what the
+    #: comparison found); otherwise ``parse_report_findings``'s result.
+    findings: ReportFindings | None = None
+    #: P0.4's orthogonal analysis-assurance contribution, read off the
+    #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
+    #: without ``--require-complete-analysis``.
+    analysis_assurance_exit: int = 0
+    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
+    #: recomputed; ``None`` when it carries none (fail-open like the above).
+    effective_config_digest: str | None = None
+    #: ADR-065's scope-completeness contribution (``scope_axis``); ``0`` for
+    #: every scalar comparison and every complete release.
+    scope_completeness_exit: int = 0
+    #: Whether the report recorded an incomplete scope, gating or accepted.
+    scope_completeness_incomplete: bool = False
+    #: ADR-067 C-S2: the report's own ``disposition_audit`` block, read
+    #: verbatim (``disposition_axis.disposition_audit_block``), never
+    #: recomputed here -- ``None`` for a report that carries none (every
+    #: `scan` report today, and an unreadable/malformed one).
+    disposition_audit: Mapping[str, Any] | None = None
+    #: See :attr:`TargetReport.completed_without_compatibility_verdict` --
+    #: threaded through unchanged by ``execute.py``. ``False`` everywhere
+    #: except the ``no_baseline`` branch of ``load.py``/``no_baseline_load.py``.
+    completed_without_compatibility_verdict: bool = False
 
 
 @dataclass(frozen=True)

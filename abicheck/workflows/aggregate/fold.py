@@ -39,6 +39,7 @@ from .matrix import (
     build_finding_matrix,
     render_finding_matrix_lines,
 )
+from .profile_matrix_render import render_profile_entry_line
 from .reconcile import ReportFindings
 from .resolve import (
     OnMissingRequired,
@@ -408,22 +409,14 @@ class AggregateResult:
                     if not any(r.analyzed for r in reports):
                         unanalyzed.append(pid)
                     else:
-                        # At least one completed no-baseline audit and zero
-                        # real compatibility verdicts: this profile made no
-                        # compatibility claim at all, clean or otherwise --
-                        # flagged explicitly rather than left to fall through
-                        # every list and render as "clean" (Codex review,
-                        # fresh evidence), which would upgrade one-sided
-                        # audit completion into an unsupported compatibility
-                        # claim. Still independently `affected` when its
-                        # gate blocks -- the two facts are orthogonal, the
-                        # same way a `COMPATIBLE`-but-gated profile below is
-                        # both "affected" and has a real verdict.
+                        # At least one completed no-baseline audit, zero
+                        # real verdicts: see `ProfileMatrixEntry.audit_
+                        # only_profiles`'s own docstring for why this is
+                        # tracked separately rather than left to render as
+                        # "clean". Independently `affected` when its gate
+                        # blocks -- the two facts are orthogonal.
                         audit_only.append(pid)
-                        gate_blocking = any(
-                            r.gate is not None and r.gate.blocking for r in reports
-                        )
-                        if gate_blocking:
+                        if any(r.gate is not None and r.gate.blocking for r in reports):
                             affected.append(pid)
                     continue
                 worst = max(verdicts, key=lambda v: _VERDICT_RANK[v])
@@ -643,97 +636,11 @@ class AggregateResult:
         return out
 
     def _render_profile_entry_line(self, entry: ProfileMatrixEntry) -> str:
-        """One base target's row in the profile matrix.
-
-        Four mutually exclusive shapes -- affected, clean everywhere, partly
-        clean with some profile never producing an analyzed result or
-        producing no compatibility claim at all, and nothing "clean" at
-        all -- then independent suffixes that qualify whichever shape was
-        chosen.
-        """
-        unanalyzed = entry.unanalyzed_profiles
-        audit_only = entry.audit_only_profiles
-        # A profile is only "clean" if it produced a real, checked
-        # compatibility verdict -- neither unanalyzed (nothing ran) nor
-        # audit-only (a completed `compare --no-baseline` audit, ADR-068
-        # D2: it makes no compatibility claim at all, clean or otherwise).
-        # Folding the latter into "clean" would upgrade one-sided audit
-        # completion into a compatibility statement this shape never
-        # actually makes (Codex review, fresh evidence).
-        not_clean = set(unanalyzed) | set(audit_only)
-        if entry.affected_profiles:
-            line = (
-                f"  {entry.base_target}: affected on "
-                f"{', '.join(entry.affected_profiles)} "
-                f"(checked on {', '.join(entry.profiles)})"
-            )
-            if unanalyzed:
-                # An affected profile and an unanalyzed one can
-                # coexist on the same target -- don't let "checked
-                # on" imply the unanalyzed one produced a result too
-                # (Codex review).
-                line += f"; no analyzed result on {', '.join(unanalyzed)}"
-            if audit_only:
-                line += f"; audit-only (no compatibility verdict) on {', '.join(audit_only)}"
-        elif not not_clean:
-            line = (
-                f"  {entry.base_target}: clean on all checked profiles "
-                f"({', '.join(entry.profiles)})"
-            )
-        elif len(not_clean) < len(entry.profiles):
-            # Some profiles are clean, others never produced an analyzed
-            # result, or produced only an audit-only completion -- never
-            # call either of the latter two "clean" (Codex review).
-            clean = [p for p in entry.profiles if p not in not_clean]
-            line = f"  {entry.base_target}: clean on {', '.join(clean)} (checked on {', '.join(entry.profiles)})"
-            if unanalyzed:
-                line += f"; no analyzed result on {', '.join(unanalyzed)}"
-            if audit_only:
-                line += f"; audit-only (no compatibility verdict) on {', '.join(audit_only)}"
-        elif not audit_only:
-            line = (
-                f"  {entry.base_target}: no analyzed result on any "
-                f"checked profile ({', '.join(entry.profiles)})"
-            )
-        elif not unanalyzed:
-            line = (
-                f"  {entry.base_target}: audit-only (no compatibility "
-                f"verdict) on all checked profiles ({', '.join(entry.profiles)})"
-            )
-        else:
-            line = (
-                f"  {entry.base_target}: no analyzed result on "
-                f"{', '.join(unanalyzed)}; audit-only (no compatibility "
-                f"verdict) on {', '.join(audit_only)} "
-                f"(checked on {', '.join(entry.profiles)})"
-            )
-        if entry.incomplete_profiles:
-            line += f" [incomplete coverage on {', '.join(entry.incomplete_profiles)}]"
-        if entry.contract_incomplete_profiles:
-            # Qualifies whatever precedes it, exactly as the
-            # incomplete-coverage suffix above does -- including a
-            # "clean" line, which stays accurate: clean is a
-            # statement about compatibility, and this is the
-            # orthogonal evidence axis saying the domain never
-            # closed. Without it a profile that raised the exit to 1
-            # on contract coverage alone read as flatly clean.
-            line += (
-                f" [contract evidence incomplete on "
-                f"{', '.join(entry.contract_incomplete_profiles)}]"
-            )
-        if entry.analysis_incomplete_profiles:
-            # The exact sibling suffix, for the exact sibling reason (Codex
-            # review): a profile that raised the exit to 1 purely on the
-            # analysis-assurance axis must not read as flatly clean either.
-            line += (
-                f" [analysis assurance incomplete on "
-                f"{', '.join(entry.analysis_incomplete_profiles)}]"
-            )
-        if entry.scope_incomplete_profiles:
-            line += (
-                f" [scope incomplete on {', '.join(entry.scope_incomplete_profiles)}]"
-            )
-        return line
+        """One base target's row in the profile matrix -- see
+        :func:`~.profile_matrix_render.render_profile_entry_line` (split out
+        for architecture/debt.yaml's ``no_growth`` ceiling; a pure function
+        of *entry*, so it needs no ``AggregateResult`` state)."""
+        return render_profile_entry_line(entry)
 
     def _render_coverage_and_gate_lines(self) -> list[str]:
         """The closing Coverage: and Gate: blocks."""
@@ -854,16 +761,11 @@ class AggregateResult:
             "compatibility": {
                 "verdict": verdict.value if verdict is not None else None,
                 # Not `len(self._compat_targets)` -- that set is scoped for
-                # *gate* participation (it also includes gated unexpected
-                # targets) and, since the no-baseline audit fan-in widened
-                # `TargetReport.analyzed`, can include a completed audit
-                # whose own `compatibility_verdict` is always `None`
-                # (ADR-068 D2). Counting it here would report
-                # `{"verdict": null, "analyzed_targets": 1}` -- a completed
-                # audit dressed up as an analyzed-but-somehow-verdictless
-                # compatibility result (Codex review, fresh evidence). Only
-                # targets that actually produced a compatibility verdict
-                # belong in this axis's own count.
+                # *gate* participation and can include a completed
+                # no-baseline audit whose `compatibility_verdict` is always
+                # `None` (ADR-068 D2), which would otherwise report
+                # `{"verdict": null, "analyzed_targets": 1}` (Codex review,
+                # fresh evidence). Count only targets with a real verdict.
                 "analyzed_targets": sum(
                     1
                     for t in self._compat_targets

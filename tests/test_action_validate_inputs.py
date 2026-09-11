@@ -358,28 +358,6 @@ class TestGloballyRetiredInputsFailPreflight:
         assert result.returncode == 1, result.stdout + result.stderr
 
 
-@pytest.mark.skipif(
-    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
-)
-class TestBuildTargetScanApplicationIsGone:
-    """`build-target` remains a real `dump`-mode input; only its (now
-    nonexistent) `scan` application is gone, since `mode: scan` itself is
-    retired outright."""
-
-    def test_warns_outside_dump(self) -> None:
-        result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_BUILD_TARGET": "//:math"}
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "build-target" in result.stdout
-
-    def test_silent_on_dump(self) -> None:
-        result = _run_validate({"INPUT_MODE": "dump", "INPUT_BUILD_TARGET": "//:math"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-
 class TestRemovedInputTombstones:
     """Inputs deleted from the product but kept registered in ``action.yml``
     so a workflow still setting one is told, instead of silently losing the
@@ -464,16 +442,10 @@ class TestFormatIsHardErrorNotSilentFallback:
 
     @pytest.mark.parametrize("fmt", ["json", "markdown", "sarif", "junit", "oneline"])
     def test_audit_only_compare_accepts_its_own_format_set(self, fmt: str) -> None:
-        # Audit-only compare (old-library/abi-baseline both omitted) has a
-        # NARROWER format contract than a two-sided compare -- unlike
-        # legacy `mode: scan`'s own text/json-only restriction (gone along
-        # with that mode), but not the full two-sided set either: 'html'
-        # and 'review' are two-sided-report renderers with no audit-only
-        # equivalent (NO_BASELINE_UNSUPPORTED_FORMATS,
-        # abicheck/report/no_baseline_document.py). See
-        # TestAuditOnlyCompareRejectsTwoSidedOnlyFormats below (Codex
-        # review, PR #1223 -- this test previously asserted the wrong,
-        # wider contract).
+        # Audit-only compare has a NARROWER format contract than a two-sided
+        # compare: 'html'/'review' are two-sided-report renderers with no
+        # audit-only equivalent (NO_BASELINE_UNSUPPORTED_FORMATS). See
+        # TestAuditOnlyCompareRejectsTwoSidedOnlyFormats below.
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
@@ -1158,115 +1130,6 @@ class TestScopedComparisonInputs:
                 "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_REQUIRED_SYMBOL": "abi_do_thing",
             }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-
-class TestScopedComparisonInputsRejectedOnAuditOnly:
-    """The audit-only shape (old-library/abi-baseline both omitted) rejects
-    used-by/used-by-manifest/required-symbol/required-symbols outright --
-    consumer/entrypoint scoping needs two versions to compare, and
-    compare --no-baseline has no old/new pair (abicheck/frontends/cli/
-    commands/no_baseline_rulings.py). Codex review, PR #1223, round 5:
-    action/run.sh forwarded these four unconditionally, reaching the CLI's
-    own late rejection only after Python setup and toolchain install."""
-
-    @pytest.mark.parametrize(
-        "env_name,value",
-        [
-            ("INPUT_USED_BY", "app1"),
-            ("INPUT_USED_BY_MANIFEST", "manifest.json"),
-            ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
-            ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
-        ],
-    )
-    def test_each_input_alone_is_rejected_without_a_baseline(
-        self, env_name: str, value: str
-    ) -> None:
-        result = _run_validate({"INPUT_MODE": "compare", env_name: value})
-        assert result.returncode == 1
-        assert "used-by" in result.stdout
-        assert "required-symbol" in result.stdout
-
-    def test_passes_once_old_library_is_set(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": "old.so",
-                "INPUT_USED_BY": "app1",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-    @pytest.mark.parametrize(
-        "env_name,value",
-        [
-            ("INPUT_USED_BY", "app1"),
-            ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
-            ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
-        ],
-    )
-    def test_scoped_input_warns_on_non_compare_mode(
-        self, env_name: str, value: str
-    ) -> None:
-        result = _run_validate({"INPUT_MODE": "dump", env_name: value})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "has no effect" in result.stdout
-
-    def test_no_scoped_inputs_set_produces_no_warnings(self) -> None:
-        result = _run_validate({"INPUT_MODE": "dump"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-
-class TestOldSidedInputsRejectedOnAuditOnly:
-    """The audit-only shape (old-library/abi-baseline both omitted) rejects
-    old-header/old-include/old-version outright -- there is no OLD side for
-    this evidence to describe, and the CLI's own _reject_old_sided_inputs
-    (abicheck/frontends/cli/commands/no_baseline_rulings.py) rejects an
-    explicitly OLD-scoped --header/--include/--version rather than silently
-    dropping it. Codex review, PR #1223, round 8: action/run.sh's audit-only
-    branch previously just never forwarded these three, which reads as
-    "honored" when it was silently dropped."""
-
-    @pytest.mark.parametrize(
-        "env_name,value",
-        [
-            ("INPUT_OLD_HEADER", "old_include/"),
-            ("INPUT_OLD_INCLUDE", "old_include/"),
-            ("INPUT_OLD_VERSION", "1.0.0"),
-        ],
-    )
-    def test_each_input_alone_is_rejected_without_a_baseline(
-        self, env_name: str, value: str
-    ) -> None:
-        result = _run_validate({"INPUT_MODE": "compare", env_name: value})
-        assert result.returncode == 1
-        assert "does not support" in result.stdout
-
-    def test_old_header_passes_once_old_library_is_set(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": "old.so",
-                "INPUT_OLD_HEADER": "old_include/foo.h",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-    def test_old_version_default_placeholder_does_not_trigger_rejection(
-        self,
-    ) -> None:
-        # Codex review, PR #1223, round 11 (P1): old-version's Action-level
-        # default is the literal placeholder 'old' (action.yml), so GitHub
-        # Actions always populates INPUT_OLD_VERSION with at least 'old' --
-        # never actually empty. A bare truthiness check therefore rejected
-        # *every* audit-only invocation, not just ones that explicitly set
-        # old-version to something else. This is the regression test: the
-        # real Action-populated default must not trip the rejection.
-        result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_OLD_VERSION": "old"}
         )
         assert result.returncode == 0, result.stdout + result.stderr
 

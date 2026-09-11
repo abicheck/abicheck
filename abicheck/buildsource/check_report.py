@@ -64,6 +64,7 @@ from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION
+from . import check_report_no_baseline as _no_baseline
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
 from .check_report_run_outcome import backfill_run_outcome, synthetic_run_outcome
@@ -220,34 +221,8 @@ def derive_effective_depth(
         if isinstance(scan_depth, str) and scan_depth in _DEPTH_RANK:
             achieved = scan_depth
             source = "scan"
-        else:
-            # `compare --no-baseline`'s own audit document (ADR-068 D2)
-            # carries neither `old_evidence_depth`/`new_evidence_depth`
-            # (there is no OLD side) nor a `level` block (that's legacy
-            # scan's own shape) -- its achieved depth is recorded only in
-            # `run_outcome.assurance.effective_depth`, the same
-            # `AnalysisAssurance.to_dict()` block a two-sided compare
-            # report nests there too (Codex review, fresh evidence). Without
-            # this branch every completed audit fell through to the
-            # "neither signal present" case below: reported `state:
-            # unknown` unconditionally (even a perfectly on-depth audit),
-            # and -- because that branch trusts the *request* verbatim as
-            # the reported `effective_depth` -- a pinned `depth: source`
-            # audit that only actually reached `headers` was stamped
-            # `effective_depth: source`, silently claiming the depth it
-            # asked for rather than the one it got.
-            run_outcome = report.get("run_outcome")
-            assurance = (
-                run_outcome.get("assurance") if isinstance(run_outcome, dict) else None
-            )
-            audit_depth = (
-                assurance.get("effective_depth")
-                if isinstance(assurance, dict)
-                else None
-            )
-            if isinstance(audit_depth, str) and audit_depth in _DEPTH_RANK:
-                achieved = audit_depth
-                source = "audit"
+        elif (audit_result := _no_baseline.no_baseline_effective_depth(report)) and audit_result[0] in _DEPTH_RANK:
+            achieved, source = audit_result
     if achieved is None:
         # Neither signal is present -- shouldn't happen for real compare/scan
         # --format json output, but trust the request rather than silently
@@ -306,48 +281,12 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     run_outcome = report.get("run_outcome")
     if isinstance(run_outcome, dict):
         report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
-    # A `compare --no-baseline` audit's own AUDIT_GATE axis (ADR-068's
-    # 2026-09-10 amendment) is a THIRD way this report can drive a blocking
-    # gate, structurally invisible to both zeroings above: `run_outcome.
-    # gate` for this shape is always `PolicyGateDecision.NONE` regardless of
-    # AUDIT_GATE (`report/no_baseline.py::_run_outcome` -- that field
-    # tracks the two-sided compatibility gate, not this candidate-side
-    # one), and there is no `severity` block either. The signal lives only
-    # in `exit_axes.audit_gate`, which `aggregate.load._load_report_file`
-    # reads directly to build this shape's own `GateInfo` -- so leaving it
-    # unneutralized left an advisory audit's real gating finding still
-    # blocking the trailing aggregate job, exactly the failure mode every
-    # other axis in this function exists to prevent (Codex review, fresh
-    # evidence). `exit_axes.analysis_assurance` gets the identical
-    # treatment for the identical reason (Codex review, second round,
-    # fresh evidence): this shape carries no dedicated root
-    # `analysis_assurance_exit_contribution` key at all (unlike a two-sided
-    # report), so the generic contract-coverage-block loop below -- which
-    # already zeroes that dedicated key -- finds nothing to act on; the
-    # aggregate's own audit loader reads `exit_axes.analysis_assurance`
-    # directly (via `max()` against that always-absent dedicated key), so
-    # an unneutralized value there still gated an explicitly advisory
-    # `require-complete-analysis: true` audit. `exit_axes.evidence_contract`
-    # is deliberately left untouched -- it is a comparison-never-completed-
-    # style failure, not a compatibility/assurance-style finding advisory
-    # mode neutralizes, the same distinction the exit-block loop below draws
-    # for its own five "never completed" contributions.
-    exit_axes = report.get("exit_axes")
-    if isinstance(exit_axes, dict):
-        updated_axes = dict(exit_axes)
-        for axis in ("audit_gate", "analysis_assurance"):
-            if axis in updated_axes:
-                updated_axes[axis] = 0
-        report["exit_axes"] = updated_axes
-    # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
-    # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
-    # *prefers* it over the top-level `exit_code` zeroed just above -- so
-    # zeroing only that left an explicitly advisory check blocking the
-    # trailing aggregate anyway (Codex review). Same shape, same remedy, and
-    # deliberately the same shared-path discipline as the coverage axis
-    # below: the traversal is imported, never re-derived here, because a
-    # local copy is precisely what let the scan-shaped block slip through
-    # once already.
+    _no_baseline.neutralize_no_baseline_axes(report)
+    # A severity-scheme `scan --against` (schema 1.9+) publishes a real gate
+    # at `diff.severity`, preferred by `GateInfo.from_scan_report` over the
+    # top-level `exit_code` zeroed above -- zeroing only that left an
+    # advisory check blocking the aggregate anyway (Codex review). Shared
+    # traversal, imported not re-derived, per the coverage axis below.
     _zero_nested_severity_gates(report)
     # ADR-049 Phase 7's contract-coverage axis is a *second* way this report
     # can raise an exit code, orthogonal to the compatibility gate above and
@@ -520,22 +459,7 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
     downstream validator would wrongly select the compare schema by the
     newly-added key's mere presence (Codex review).
     """
-    if "scan_schema_version" in report:
-        return
-    # A `compare --no-baseline` audit document carries its own
-    # `audit_report_schema_version` counter, in its own namespace
-    # (`report/no_baseline_document.py`) -- deliberately not
-    # `report_schema_version`, since the packaged `compare_report.schema.
-    # json` tells consumers to accept any version sharing its MAJOR
-    # component, so stamping an audit into that field would offer a
-    # *different* document under the compare report's identity (the exact
-    # reasoning that field's own docstring gives). Recognised by its own
-    # `no_baseline` discriminator, the same one `_classify_verdict` above
-    # uses, rather than only by the schema-version key's presence, so a
-    # stray hand-authored document missing that key is still left alone
-    # (Codex review, fresh evidence: an unguarded audit document previously
-    # got `report_schema_version` stamped onto it here unconditionally).
-    if "audit_report_schema_version" in report or report.get("no_baseline") is True:
+    if "scan_schema_version" in report or _no_baseline.has_own_no_baseline_schema_version(report):
         return
     if not ("libraries" in report and "old_dir" in report):
         out["report_schema_version"] = REPORT_SCHEMA_VERSION
@@ -605,46 +529,7 @@ def _classify_verdict(
         msg = report.get("error") or "no comparison completed: zero library-name pairs matched between OLD and NEW"
         out["operational_errors"] = [{"kind": "no_comparison_completed", "message": str(msg)}]
         return
-    # `compare --no-baseline`'s own audit document (`report/no_baseline.py`)
-    # always carries `verdict: null` -- ADR-068 D2, "an audit reports no
-    # additions, removals, or compatibility verdict at all," so `raw_verdict`
-    # is unconditionally `None` here, never a legacy compatibility verdict.
-    # Checked via the same `no_baseline` discriminator `action/run.sh`'s own
-    # `no_baseline_audit` report query uses, before either of the checks
-    # below -- without this, `None` matches neither `LEGACY_VERDICT_VALUES`
-    # nor `OPERATIONAL_ERROR_VERDICT` and fell through to the generic
-    # `scan_guard_triggered` branch, misclassifying every no-baseline audit
-    # -- including a clean, zero-finding one -- as an operational failure.
-    # `final_exit_code()` treats any `operational_errors` entry as
-    # unconditional exit 1, ignoring `gate-mode: advisory`/`deferred`
-    # entirely, so this silently failed every `check-target` single-build
-    # audit using the audit-only shape (Codex review, fresh evidence).
-    # There is intentionally no `compatibility_verdict` to set here (D2
-    # again): an audit has none, and leaving the key unset is the truthful
-    # answer, not a degraded one.
-    if report.get("no_baseline") is True:
-        # A no-baseline audit is not immune to operational failure -- a
-        # pinned evidence contract it could not satisfy (`run_outcome.
-        # operational: evidence_contract_error`, exit 7) means no valid
-        # analysis ran at all, same as any other operational sentinel this
-        # function recognizes. Checked before the unconditional "no error"
-        # exemption below: without this, `gate-mode: advisory`/`deferred`
-        # turned a failed audit into a quiet exit 0, since no valid
-        # analysis completed to report a candidate-side finding from
-        # (Codex review, fresh evidence).
-        operational_status = run_outcome.get("operational")
-        if isinstance(operational_status, str) and operational_status not in (
-            OperationalStatus.NONE.value,
-            "",
-        ):
-            msg = report.get("error") or (
-                f"audit did not complete: {operational_status}"
-            )
-            out["operational_errors"] = [
-                {"kind": operational_status, "message": str(msg)}
-            ]
-            return
-        out.setdefault("operational_errors", [])
+    if _no_baseline.classify_no_baseline_verdict(out, report, run_outcome):
         return
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict

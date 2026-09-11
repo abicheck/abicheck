@@ -23,9 +23,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from .contracts import DEFAULT_REPORT_PREFIX, AggregateError, TargetReport
+from .contracts import (
+    DEFAULT_REPORT_PREFIX,
+    AggregateError,
+    TargetReport,
+    _LoadedReport,
+)
 from .fold import AggregateResult
-from .load import _load_report_file, _LoadedReport
+from .load import _load_report_file
 from .resolve import (
     ExpectedTargets,
     OnMissingRequired,
