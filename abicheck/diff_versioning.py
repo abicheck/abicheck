@@ -297,6 +297,60 @@ def apply_runtime_floor_contract(
     return changes
 
 
+#: Change kinds produced by the *standalone* declared-runtime-floor /
+#: wheel-packaging checks (:func:`check_platform_baseline_floor`,
+#: ``diff_wheel_deployment.check_macos_deployment_target_floor``,
+#: ``diff_wheel_deployment.check_wheel_rpath_not_portable``) whose catalog
+#: default verdict is RISK even though each of these three checks -- unlike
+#: :func:`apply_runtime_floor_contract`'s delta reclassification, which can
+#: land on either COMPATIBLE or BREAKING depending on direction -- only ever
+#: emits a finding when the candidate's own requirement already *exceeds*
+#: the declared floor (each returns ``[]``/``None`` in every within-floor
+#: case; see each function's own docstring). A finding of one of these kinds
+#: existing at all is therefore unconditionally a floor violation: a
+#: declared deployment target cannot load this artifact. The other three
+#: standalone checks (``check_musllinux_glibc_dependency``,
+#: ``check_wheel_tag_architecture_mismatch``,
+#: ``check_wheel_closure_dependency_violation``) already default to
+#: BREAKING in the catalog and need no promotion.
+_BASELINE_VIOLATION_ONLY_KINDS = frozenset(
+    {
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
+    }
+)
+
+
+def promote_baseline_violation_findings(changes: list[Change]) -> list[Change]:
+    """Promote every :data:`_BASELINE_VIOLATION_ONLY_KINDS` finding to BREAKING.
+
+    Shared by both call sites that can produce these findings: the two-sided
+    ``checker._env_matrix_contract_changes`` and the no-baseline audit's
+    ``workflows.env_matrix_audit`` (ADR-068 D3) -- a candidate-only floor
+    violation means the same thing regardless of whether an OLD snapshot was
+    available to diff against, so both paths must reach the same verdict for
+    the identical violation. Findings already carrying a modulation (from an
+    earlier hook) are left untouched, matching
+    :func:`apply_runtime_floor_contract`'s own convention. Mutates and
+    returns *changes*.
+    """
+    for change in changes:
+        if change.kind not in _BASELINE_VIOLATION_ONLY_KINDS:
+            continue
+        if change.effective_verdict is not None:
+            continue
+        change.effective_verdict = Verdict.BREAKING
+        change.modulation_reason = (
+            "declared deployment baseline exceeded: this check only fires "
+            "when the candidate's own requirement already exceeds the "
+            "declared floor, so declared deployment targets cannot load "
+            "this artifact"
+        )
+        change.modulation_rule = "baseline_violation_always_breaking"
+    return changes
+
+
 #: Versioned-symbol namespaces a platform-baseline floor can be declared for.
 #: GLIBC is G10's original scope; GLIBCXX (libstdc++) and CXXABI (the C++
 #: Itanium ABI runtime, also shipped by libstdc++) are G27's extension — a
@@ -705,12 +759,21 @@ def detect_version_script_missing(
 #: needs glibc" (musllinux_glibc_dependency_detected), or "a vendored
 #: dependency has no RPATH to ever be found" (wheel_closure_dependency_violation)
 #: — recommending a bump for these is actively misleading remediation advice
-#: (Codex review #583).
+#: (Codex review #583). The same reasoning applies to
+#: :data:`_BASELINE_VIOLATION_ONLY_KINDS` once
+#: :func:`promote_baseline_violation_findings` gives one of them
+#: ``effective_verdict=BREAKING``: "the binary requires a newer GLIBC/macOS
+#: SDK than the declared deployment floor promises" or "RPATH isn't
+#: $ORIGIN-relative" are fixed by rebuilding against the older sysroot or
+#: repairing the RPATH, never by a SONAME bump.
 _SONAME_BUMP_CANNOT_FIX_KINDS = frozenset(
     {
         ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
         ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
         ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
     }
 )
 

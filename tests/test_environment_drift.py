@@ -34,6 +34,8 @@ sys.path.insert(0, str(_REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
 from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
+from abicheck.checker_types import Change  # noqa: E402
+from abicheck.diff_helpers import make_change  # noqa: E402
 from abicheck.diff_platform_elf_dynamic import (  # noqa: E402
     _diff_dt_relr,
     _diff_elf_dynamic_section,
@@ -44,6 +46,7 @@ from abicheck.diff_time64 import _diff_time64_abi  # noqa: E402
 from abicheck.diff_versioning import (  # noqa: E402
     _parse_dotted_numeric_version,
     apply_runtime_floor_contract,
+    promote_baseline_violation_findings,
 )
 from abicheck.elf_metadata import ElfImport, ElfMetadata  # noqa: E402
 from abicheck.environment_matrix import EnvironmentMatrix  # noqa: E402
@@ -377,7 +380,14 @@ class TestPlatformBaselineFloorRaised:
 
         return _snap(_make()), _snap(_make())
 
-    def test_exceeds_declared_floor_emits_risk_finding_with_no_delta(self) -> None:
+    def test_exceeds_declared_floor_emits_breaking_finding_with_no_delta(
+        self,
+    ) -> None:
+        # PLATFORM_BASELINE_FLOOR_RAISED's catalog default verdict is RISK,
+        # but check_platform_baseline_floor only ever fires on an actual
+        # floor violation, so promote_baseline_violation_findings
+        # unconditionally promotes it to BREAKING (Codex review, P1) --
+        # even with no old->new delta at all.
         old, new = self._unchanged_pair("GLIBC_2.34")
         result = compare(
             old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.27"})
@@ -388,7 +398,8 @@ class TestPlatformBaselineFloorRaised:
         )
         assert floor.old_value == "GLIBC_2.27"
         assert floor.new_value == "GLIBC_2.34"
-        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert floor.effective_verdict is Verdict.BREAKING
+        assert result.verdict is Verdict.BREAKING
 
     def test_within_declared_floor_stays_clean(self) -> None:
         old, new = self._unchanged_pair("GLIBC_2.17")
@@ -582,6 +593,129 @@ class TestPlatformBaselineFloorRaised:
 
         elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
         assert check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.20"}) == []
+
+
+class TestPromoteBaselineViolationFindings:
+    """``promote_baseline_violation_findings`` (Codex review, P1): the three
+    standalone checks whose catalog default verdict is RISK
+    (``PLATFORM_BASELINE_FLOOR_RAISED``/``MACOS_DEPLOYMENT_TARGET_RAISED``/
+    ``WHEEL_RPATH_NOT_PORTABLE``) each only ever emit a finding when the
+    candidate's own requirement already exceeds the declared floor -- so any
+    occurrence of one of these three kinds must be unconditionally promoted
+    to BREAKING, regardless of which check produced it, while every other
+    kind (including the three standalone checks that already default to
+    BREAKING) is left untouched. States the invariant generally, over every
+    member of the promoted set, rather than pinning one example kind."""
+
+    _PROMOTED_KINDS = (
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
+    )
+
+    #: Sibling standalone-check kinds that already default to BREAKING in
+    #: the catalog and must not be touched by this promotion at all (their
+    #: ``effective_verdict`` must stay unset -- the catalog default already
+    #: does the right thing without a modulation).
+    _UNPROMOTED_KINDS = (
+        ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
+        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+        ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+    )
+
+    def _change(self, kind: ChangeKind) -> Change:
+        return make_change(kind, symbol="<platform-baseline>", name="libfoo.so")
+
+    @pytest.mark.parametrize("kind", _PROMOTED_KINDS)
+    def test_every_promoted_kind_becomes_breaking(self, kind: ChangeKind) -> None:
+        change = self._change(kind)
+        assert change.effective_verdict is None
+        (result,) = promote_baseline_violation_findings([change])
+        assert result is change
+        assert result.effective_verdict is Verdict.BREAKING
+        assert result.modulation_rule == "baseline_violation_always_breaking"
+
+    @pytest.mark.parametrize("kind", _UNPROMOTED_KINDS)
+    def test_unrelated_breaking_default_kinds_are_left_alone(
+        self, kind: ChangeKind
+    ) -> None:
+        change = self._change(kind)
+        promote_baseline_violation_findings([change])
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
+
+    def test_a_kind_outside_either_set_is_left_alone(self) -> None:
+        # Negative control unrelated to runtime-floor/wheel-packaging
+        # entirely -- the function must not touch it.
+        change = self._change(ChangeKind.RUNTIME_FLOOR_RAISED)
+        promote_baseline_violation_findings([change])
+        assert change.effective_verdict is None
+
+    @pytest.mark.parametrize("kind", _PROMOTED_KINDS)
+    def test_an_existing_modulation_is_never_overwritten(
+        self, kind: ChangeKind
+    ) -> None:
+        # Matches apply_runtime_floor_contract's own convention: a finding
+        # some earlier hook already modulated is left exactly as that hook
+        # left it.
+        change = self._change(kind)
+        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.modulation_rule = "some_earlier_hook"
+        promote_baseline_violation_findings([change])
+        assert change.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert change.modulation_rule == "some_earlier_hook"
+
+    def test_mutates_and_returns_the_same_list(self) -> None:
+        changes = [self._change(k) for k in self._PROMOTED_KINDS]
+        result = promote_baseline_violation_findings(changes)
+        assert result is changes
+        assert all(c.effective_verdict is Verdict.BREAKING for c in changes)
+
+    def test_empty_list_is_a_no_op(self) -> None:
+        assert promote_baseline_violation_findings([]) == []
+
+    def test_two_sided_and_no_baseline_paths_agree_for_every_promoted_kind(
+        self,
+    ) -> None:
+        """The generalized sibling of ``TestRunNoBaselineCompareEnvMatrix``
+        in ``tests/test_no_baseline_compare.py`` (which pins one example,
+        GLIBC/PLATFORM_BASELINE_FLOOR_RAISED): for every one of the three
+        promoted kinds, a two-sided ``compare()`` of a floor-violating
+        candidate against itself and a ``--no-baseline`` audit of the
+        identical candidate must reach the identical BREAKING verdict."""
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        cases = {
+            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED: (
+                _elf(
+                    needed=["libc.so.6"],
+                    versions_required={"libc.so.6": ["GLIBC_2.34"]},
+                ),
+                {"GLIBC": "2.28"},
+            ),
+            ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED: (
+                None,
+                {"MACOS_DEPLOYMENT_TARGET": "10.14"},
+            ),
+            ChangeKind.WHEEL_RPATH_NOT_PORTABLE: (
+                _elf(rpath="/usr/local/lib"),
+                {"WHEEL_CONTEXT": "1"},
+            ),
+        }
+        for kind, (elf, floors) in cases.items():
+            if elf is None:
+                continue  # macOS case needs MachoMetadata; covered directly
+                # by tests/test_diff_wheel_deployment.py's own end-to-end
+                # class instead of being duplicated here with a second
+                # synthetic-fixture builder.
+            matrix = EnvironmentMatrix(runtime_floors=floors)
+            candidate = _snap(elf)
+            two_sided = compare(candidate, candidate, env_matrix=matrix)
+            no_baseline = run_no_baseline_compare(candidate, env_matrix=matrix)
+            assert kind in _kinds(two_sided.changes), kind
+            assert kind in {c.kind for c in no_baseline.findings}, kind
+            assert two_sided.verdict is Verdict.BREAKING, kind
+            assert no_baseline.diff.verdict == two_sided.verdict, kind
 
 
 class TestMusllinuxGlibcDependency:
@@ -849,7 +983,9 @@ class TestPlatformBaselineFloorCliEndToEnd:
                 "--config", str(cfg_p), "--format", "json",
             ],
         )
-        assert result.exit_code == 0, result.output  # COMPATIBLE_WITH_RISK
+        # promote_baseline_violation_findings promotes this finding to
+        # BREAKING (Codex review, P1); legacy exit-code scheme: 4 = ABI break.
+        assert result.exit_code == 4, result.output
         assert "platform_baseline_floor_raised" in result.output
 
     def test_within_floor_stays_clean(self, tmp_path) -> None:

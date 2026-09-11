@@ -234,7 +234,15 @@ class TestMacosDeploymentTargetFloorCliEndToEnd:
     ``test_environment_drift.py::TestPlatformBaselineFloorCliEndToEnd`` for
     the real CLI-level ``deployment:`` coverage."""
 
-    def test_raised_floor_surfaces_as_risk(self) -> None:
+    def test_raised_floor_surfaces_as_breaking(self) -> None:
+        # MACOS_DEPLOYMENT_TARGET_RAISED's catalog default verdict is RISK,
+        # but check_macos_deployment_target_floor only ever fires on an
+        # actual floor violation (it returns [] when the requirement is
+        # within the declared floor), so
+        # diff_versioning.promote_baseline_violation_findings
+        # unconditionally promotes any occurrence to BREAKING (Codex
+        # review, P1) -- a declared deployment target genuinely cannot
+        # load this binary.
         old = _snap(_macho(min_os_version="12.3"))
         new = _snap(_macho(min_os_version="12.3"))
         result = compare(
@@ -245,7 +253,7 @@ class TestMacosDeploymentTargetFloorCliEndToEnd:
             ),
         )
         assert ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED in _kinds(result.changes)
-        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict is Verdict.BREAKING
 
     def test_raised_floor_reaches_compare_via_from_dict(self) -> None:
         # End-to-end through the documented EnvironmentMatrix.from_dict path
@@ -975,7 +983,15 @@ class TestWheelClosureDependencyViolationUnit:
 
 
 class TestWheelRpathAndClosureCliEndToEnd:
-    def test_absolute_rpath_surfaces_as_risk(self) -> None:
+    def test_absolute_rpath_surfaces_as_breaking(self) -> None:
+        # WHEEL_RPATH_NOT_PORTABLE's catalog default verdict is RISK, but
+        # check_wheel_rpath_not_portable only ever fires on an actual
+        # violation (it returns [] when every RPATH/RUNPATH entry is
+        # $ORIGIN-relative), so
+        # diff_versioning.promote_baseline_violation_findings
+        # unconditionally promotes any occurrence to BREAKING (Codex
+        # review, P1) -- the search path resolves nothing on a clean
+        # install.
         old = _elf_snap(_elf(rpath="/usr/local/lib"))
         new = _elf_snap(_elf(rpath="/usr/local/lib"))
         result = compare(
@@ -986,7 +1002,7 @@ class TestWheelRpathAndClosureCliEndToEnd:
             ),
         )
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(result.changes)
-        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict is Verdict.BREAKING
 
     def test_unresolvable_vendored_dependency_surfaces_as_breaking(self) -> None:
         old = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))

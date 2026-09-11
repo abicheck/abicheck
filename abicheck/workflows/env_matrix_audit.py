@@ -76,7 +76,13 @@ def env_matrix_candidate_findings(
     declares no floors is bit-for-bit unchanged from before this function
     existed. Deliberately does **not** call
     ``diff_versioning.apply_runtime_floor_contract`` -- see this module's
-    own docstring for why that half has no candidate-only meaning.
+    own docstring for why that half has no candidate-only meaning. It *does*
+    call ``diff_versioning.promote_baseline_violation_findings`` (Codex
+    review), the same shared promotion
+    ``checker._env_matrix_contract_changes`` applies to its own standalone
+    checks' output: three of these six checks only ever fire on an actual
+    floor violation, so any finding of one of those three kinds is
+    unconditionally BREAKING here too, not left at its RISK catalog default.
     """
     if env_matrix is None or not env_matrix.runtime_floors:
         return []
@@ -85,6 +91,7 @@ def env_matrix_candidate_findings(
     from ..diff_versioning import (
         check_musllinux_glibc_dependency,
         check_platform_baseline_floor,
+        promote_baseline_violation_findings,
     )
     from ..diff_wheel_deployment import (
         check_macos_deployment_target_floor,
@@ -113,6 +120,7 @@ def env_matrix_candidate_findings(
         check_wheel_closure_dependency_violation(new_elf, floors),
     ):
         findings.extend(check_changes)
+    promote_baseline_violation_findings(findings)
     for finding in findings:
         finding.candidate_side_enrichment = True
     return findings

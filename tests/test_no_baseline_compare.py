@@ -177,10 +177,14 @@ class TestRunNoBaselineCompareEnvMatrix:
     def test_env_matrix_declared_floor_produces_finding(self) -> None:
         """``check_platform_baseline_floor`` fires regardless of whether
         anything moved relative to an old snapshot (it reads only the
-        candidate's own declared requirement against the floor) -- its
-        default verdict is RISK (``COMPATIBLE_WITH_RISK``), same as an
+        candidate's own declared requirement against the floor). Its catalog
+        default verdict is RISK, but it only ever fires on an actual floor
+        *violation* (it returns nothing when the requirement is within the
+        declared floor), so ``diff_versioning.
+        promote_baseline_violation_findings`` unconditionally promotes any
+        occurrence to BREAKING (Codex review, P1) -- matching what an
         ordinary two-sided ``compare`` of this candidate against an
-        unrelated OLD would report for the identical declared floor."""
+        unrelated OLD reports for the identical declared floor."""
         from abicheck.checker_policy import ChangeKind, Verdict
         from abicheck.environment_matrix import EnvironmentMatrix
         from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
@@ -197,7 +201,8 @@ class TestRunNoBaselineCompareEnvMatrix:
             if c.kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
         ]
         assert finding.candidate_side_enrichment is True
-        assert result.diff.verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert finding.effective_verdict is Verdict.BREAKING
+        assert result.diff.verdict is Verdict.BREAKING
         # The identity half stays absolutely empty -- ADR-068 D3's own
         # invariant, unaffected by this candidate-only finding.
         assert all(
@@ -278,6 +283,83 @@ class TestRunNoBaselineCompareEnvMatrix:
         candidate = self._candidate_requiring("2.34")
         no_baseline = run_no_baseline_compare(candidate)
         assert no_baseline.diff.env_matrix_source_sha256 is None
+
+
+class TestNoBaselineReportEnvMatrixDigest:
+    """Codex review (P2): the digest ``run_no_baseline_compare`` stamps onto
+    its ``DiffResult`` must actually reach the rendered report -- carrying
+    it only on the in-process ``DiffResult`` left a persisted/rendered audit
+    indistinguishable from one run with no deployment contract at all
+    whenever the candidate stays within its declared floor (no finding, so
+    no other evidence of the matrix in the output)."""
+
+    def _candidate_requiring(self, required: str) -> AbiSnapshot:
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+        elf = ElfMetadata(
+            soname="libfoo.so",
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": [f"GLIBC_{required}"]},
+            symbols=[ElfSymbol(name="foo", visibility="default")],
+        )
+        return AbiSnapshot(library="libfoo.so", version="1.0", elf=elf)
+
+    def test_json_report_carries_the_digest(self) -> None:
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.report.no_baseline import (
+            compute_no_baseline_document,
+            no_baseline_json_report,
+        )
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        candidate = self._candidate_requiring("2.34")
+        result = run_no_baseline_compare(candidate, env_matrix=matrix)
+
+        doc = compute_no_baseline_document(result)
+        assert doc.env_matrix_source_sha256 == result.diff.env_matrix_source_sha256
+        assert doc.env_matrix_source_sha256 is not None
+
+        report = no_baseline_json_report(result)
+        assert report["env_matrix_source_sha256"] == result.diff.env_matrix_source_sha256
+
+    def test_json_report_digest_matches_two_sided_compare_report(self) -> None:
+        """Same field name/value a two-sided ``compare`` JSON report would
+        carry for the identical matrix -- proven directly against
+        ``reporter.to_json``'s own output, not merely against the in-memory
+        ``DiffResult`` field."""
+        import json
+
+        from abicheck.checker import compare
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.report.no_baseline import no_baseline_json_report
+        from abicheck.reporter import to_json
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        candidate = self._candidate_requiring("2.34")
+
+        two_sided = compare(candidate, candidate, env_matrix=matrix)
+        two_sided_report = json.loads(to_json(two_sided))
+        assert "env_matrix_source_sha256" in two_sided_report
+
+        no_baseline = run_no_baseline_compare(candidate, env_matrix=matrix)
+        no_baseline_report = no_baseline_json_report(no_baseline)
+        assert (
+            no_baseline_report["env_matrix_source_sha256"]
+            == two_sided_report["env_matrix_source_sha256"]
+        )
+
+    def test_json_report_omits_the_key_when_no_matrix_was_declared(self) -> None:
+        """Omitted, not ``null`` -- matching every other additive optional
+        key in this report (e.g. ``contract_coverage_failures``)."""
+        from abicheck.report.no_baseline import no_baseline_json_report
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        candidate = self._candidate_requiring("2.34")
+        result = run_no_baseline_compare(candidate)
+        report = no_baseline_json_report(result)
+        assert "env_matrix_source_sha256" not in report
 
 
 class TestNoBaselineReport:

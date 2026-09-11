@@ -777,7 +777,14 @@ def _env_matrix_contract_changes(
       and can fire even when the floor never moved between old and new, which
       is exactly the manylinux-tag violation case (a binary that has always
       required a newer glibc than its wheel tag promises). Their findings are
-      returned, suppression-filtered, for the caller to fold into ``kept``.
+      suppression-filtered, then run through
+      ``diff_versioning.promote_baseline_violation_findings`` — the three of
+      the six whose catalog default is RISK (``PLATFORM_BASELINE_FLOOR_RAISED``/
+      ``MACOS_DEPLOYMENT_TARGET_RAISED``/``WHEEL_RPATH_NOT_PORTABLE``) only
+      ever fire on an actual violation, so any occurrence of one is
+      unconditionally promoted to BREAKING (the other three already default
+      to BREAKING in the catalog) — before being returned for the caller to
+      fold into ``kept``.
 
     The wheel checks (``G27``) each additionally require the dedicated
     ``runtime_floors["WHEEL_CONTEXT"]`` key *inside themselves* — not just any
@@ -795,6 +802,7 @@ def _env_matrix_contract_changes(
         apply_runtime_floor_contract,
         check_musllinux_glibc_dependency,
         check_platform_baseline_floor,
+        promote_baseline_violation_findings,
     )
     from .diff_wheel_deployment import (
         check_macos_deployment_target_floor,
@@ -833,6 +841,7 @@ def _env_matrix_contract_changes(
         produced.extend(
             _filter_suppressed_changes(check_changes, suppression, suppressed, ledger)
         )
+    promote_baseline_violation_findings(produced)
     return produced
 
 
