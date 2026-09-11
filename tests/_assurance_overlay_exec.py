@@ -55,21 +55,32 @@ def _overlay_step() -> dict[str, Any]:
 
 def _run_overlay(workspace: Path, env: dict[str, str]) -> Any:
     """``run_step`` against the overlay step, defaulting ``SOURCES_ROOT``/
-    ``SOURCES_PAIRWISE`` to empty (single-sided) for every test that isn't
+    ``SOURCES_PAIRWISE``/``SOURCES_MERGE_COMPILE`` to empty (single-sided,
+    single-document-exclusive ``compile:``) for every test that isn't
     specifically exercising PR #1222 Finding 2's ``build.compile_db``-
-    resolution behavior, or (``SOURCES_PAIRWISE``) PR #1222 fourth round's
-    single-sided-vs-ambiguous compile:/source:/debug: promotion.
+    resolution behavior, or (``SOURCES_PAIRWISE``/``SOURCES_MERGE_COMPILE``)
+    PR #1222 fourth round's single-sided-vs-ambiguous compile:/source:/
+    debug: promotion and its own compile:-specific MERGE-vs-REPLACE
+    distinction (mode: compare vs. mode: scan -- see
+    ``apply_sources_root_config_blocks``'s own ``merge_compile`` parameter
+    docstring).
 
     ``_workflow_exec.run_step`` leaves any step ``env:`` key the caller
     doesn't override at its literal, un-evaluated ``${{ ... }}`` GitHub
     Actions expression text (see its own docstring) -- without this
     default, every pre-existing test in this module (none of which name
-    ``SOURCES_ROOT``/``SOURCES_PAIRWISE`` at all) would suddenly see that
-    literal expression string as the shell's actual ``$SOURCES_ROOT``/
-    ``$SOURCES_PAIRWISE`` value the moment the step gained that env key,
-    rather than the empty string these tests intend.
+    ``SOURCES_ROOT``/``SOURCES_PAIRWISE``/``SOURCES_MERGE_COMPILE`` at all)
+    would suddenly see that literal expression string as the shell's
+    actual ``$SOURCES_ROOT``/``$SOURCES_PAIRWISE``/
+    ``$SOURCES_MERGE_COMPILE`` value the moment the step gained that env
+    key, rather than the empty string these tests intend.
     """
-    merged = {"SOURCES_ROOT": "", "SOURCES_PAIRWISE": "", **env}
+    merged = {
+        "SOURCES_ROOT": "",
+        "SOURCES_PAIRWISE": "",
+        "SOURCES_MERGE_COMPILE": "",
+        **env,
+    }
     return run_step(_overlay_step(), workspace=workspace, env=merged)
 
 

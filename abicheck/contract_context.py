@@ -415,6 +415,7 @@ def with_resolved_gate(
     severity: SeverityConfig,
     severity_provenance: Mapping[str, ValueProvenance],
     require_complete_analysis: bool | None = None,
+    require_complete_analysis_stated: bool = False,
     project_config_path: str | None = None,
     project_config_sha256: str | None = None,
 ) -> PersistedContractContext:
@@ -455,13 +456,15 @@ def with_resolved_gate(
     provenance entry any more (PR G2 deleted the manual selector; purely
     derived now).
 
-    *require_complete_analysis*/*project_config_path*/
-    *project_config_sha256* are the sibling ``gate.require_complete_analysis``
-    field's own resolved value and provenance identity, threaded through for
-    the identical reason as *severity_provenance* above -- see
-    ``contract_gate_require_complete_provenance.py``'s module docstring for
-    the full account (split out purely to stay under this file's own
-    ``no_growth`` cap).
+    *require_complete_analysis*/*require_complete_analysis_stated*/
+    *project_config_path*/*project_config_sha256* are the sibling ``gate.
+    require_complete_analysis`` field's own resolved value, whether the
+    project config *literally stated* it (as opposed to an omitted key
+    defaulting to the same resolved value), and provenance identity,
+    threaded through for the identical reason as *severity_provenance*
+    above -- see ``contract_gate_require_complete_provenance.py``'s module
+    docstring for the full account (split out purely to stay under this
+    file's own ``no_growth`` cap).
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
     from .contract_gate_require_complete_provenance import (
@@ -476,6 +479,7 @@ def with_resolved_gate(
         resolve_require_complete_analysis_provenance(
             default_value=config.gate.require_complete_analysis,
             require_complete_analysis=require_complete_analysis,
+            require_complete_analysis_stated=require_complete_analysis_stated,
             project_config_path=project_config_path,
             project_config_sha256=project_config_sha256,
         )

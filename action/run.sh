@@ -487,12 +487,37 @@ _merge_config_overlay_with_discovered_project_config() {
   #     regressed dump's own single-sided use of a --sources tree's
   #     compile:/debug: settings the moment any compile-context input was
   #     also set).
+  # $7: optional; "true" selects a genuine per-field MERGE for `compile:`
+  #     specifically (`abicheck.action_config_overlay.apply_sources_root_
+  #     config_blocks`'s own `merge_compile` parameter) instead of the
+  #     wholesale REPLACE every other promoted block still uses -- Codex
+  #     review, fresh evidence, PR #1222 fourth round, second finding on
+  #     this fix: within the single-sided ($6 omitted) bucket, `compile:`
+  #     does NOT always resolve the same way. `dump`/`scan --against`
+  #     genuinely select `compile:` from exactly ONE document (the
+  #     `--sources` tree's own, when no explicit `--build-config` is given
+  #     -- `cli_options.merge_compile_config`'s own `build_config if
+  #     explicit_config else discover_build_config(sources)`, mutually
+  #     exclusive alternatives), the same single-document shape as
+  #     build:/sources:/source:/debug: -- pass "" (the default) there.
+  #     `compare`'s own single-sided shape (a stored-snapshot old operand,
+  #     `_compile_context_sources_pairwise`'s own docstring) is different:
+  #     the checkout-root document's `compile:` is ALREADY independently
+  #     resolved first, unconditionally
+  #     (`cli_compare_helpers.resolve_compile_context(..., build_config=
+  #     cfg_path, ...)`), and the live side's own `--sources` tree only
+  #     folds ON TOP of that via a SECOND `merge_compile_config` call
+  #     (`compare.py`'s `_maybe_dump_side`) -- a genuine two-stage MERGE,
+  #     so pass "true" there. Meaningless (never read) when $6 is
+  #     "pairwise", since `compile:` is excluded from `_sources_root_blocks`
+  #     entirely in that case.
   local overlay_json="$1"
   local out_path="$2"
   local base_source="$3"
   local merge_mode="${4:-discover}"
   local sources_root="${5:-}"
   local sources_pairwise="${6:-}"
+  local sources_merge_compile="${7:-}"
   # Codex review, PR #1159, third round: in "explicit" mode base_source is
   # the caller-supplied build-config input, which is very often a
   # checkout-relative path (e.g. `build-config: .abicheck.yml`) -- exactly
@@ -543,6 +568,7 @@ _merge_config_overlay_with_discovered_project_config() {
       ABICHECK_OVERLAY_JSON="$overlay_json" \
       ABICHECK_SOURCES_ROOT="$sources_root" \
       ABICHECK_SOURCES_PAIRWISE="$sources_pairwise" \
+      ABICHECK_SOURCES_MERGE_COMPILE="$sources_merge_compile" \
       PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
 # Discovers the real project .abicheck.yml (if any) the same way
 # discover_project_config() does -- config_paths.find_config_in_dir(),
@@ -780,6 +806,15 @@ else:
     # matching the ORIGINAL five-block version of this fix before the
     # second review round overcorrected it for every mode at once.
     sources_pairwise = os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
+    # Codex review, fresh evidence, PR #1222 fourth round, second finding:
+    # within the single-sided bucket, `compile:` does NOT always resolve
+    # the same way -- see this shell function's own $7 docstring and
+    # `apply_sources_root_config_blocks`'s own `merge_compile` parameter
+    # docstring for the exact distinction (dump/scan single-document
+    # REPLACE vs. compare's checkout-then-sources two-stage MERGE).
+    sources_merge_compile = (
+        os.environ.get("ABICHECK_SOURCES_MERGE_COMPILE", "") == "true"
+    )
     _sources_root_blocks = (
         ("build", "sources")
         if sources_pairwise
@@ -820,6 +855,26 @@ else:
             # `load_build_config`'s own empty-BuildConfig outcome exactly.
             if isinstance(sources_loaded, dict):
                 _validate_or_exit(sources_loaded, sources_found)
+            # Rebase EACH document's own compile.include_dirs against ITS
+            # OWN project root BEFORE merging (Codex review, fresh
+            # evidence, PR #1222 fourth round): `compile:` is now a real
+            # per-field MERGE inside apply_sources_root_config_blocks (see
+            # that function's own docstring), not a wholesale block
+            # replace -- so a merged include_dirs can hold entries from
+            # BOTH documents. The single later rebase_relative_config_paths()
+            # call (below, at module scope) anchors against only ONE root,
+            # which would silently mis-resolve the OTHER document's own
+            # relative entries now that compile: is no longer a
+            # whole-document selection. Pre-resolving each document's own
+            # entries to absolute paths here, before the merge, makes that
+            # later single-anchor call a safe no-op for both (an
+            # already-absolute path is left untouched).
+            if found_path is not None:
+                base = rebase_relative_config_paths(base, found_path=found_path)
+            if isinstance(sources_loaded, dict):
+                sources_loaded = rebase_relative_config_paths(
+                    sources_loaded, found_path=sources_found
+                )
             # "sources" (plural -- public_headers/exclude/graph) is a
             # DISTINCT top-level block from "source" (singular). Which
             # blocks get replaced depends on sources_pairwise, computed
@@ -831,7 +886,10 @@ else:
             # independently drift the way the assurance-overlay step's own
             # entirely-missing promotion once did.
             base = apply_sources_root_config_blocks(
-                base, sources_loaded, blocks=_sources_root_blocks
+                base,
+                sources_loaded,
+                blocks=_sources_root_blocks,
+                merge_compile=sources_merge_compile,
             )
             # found_path is reassigned to sources_found ONLY when compile:
             # was actually sourced from it (single-sided callers) -- it
@@ -839,7 +897,11 @@ else:
             # caller's compile: block (never sourced from the sources root,
             # per above) must keep resolving against whichever document
             # actually supplied base["compile"] (the checkout-root config,
-            # if any).
+            # if any). Now that both documents' own include_dirs entries
+            # are already absolute (above), this reassignment only matters
+            # for a caller that never merges compile: at all (pairwise) --
+            # the rebase call below is otherwise a no-op regardless of
+            # which root it names.
             if not sources_pairwise:
                 found_path = sources_found
 
@@ -1079,6 +1141,36 @@ _compile_context_sources_pairwise() {
   fi
 }
 
+# Whether the caller's own single-sided `compile:` resolution (see
+# _compile_context_sources_pairwise's own docstring for what "single-sided"
+# covers) is a genuine two-stage MERGE (echoes "true") or a single-document
+# EXCLUSIVE selection/REPLACE (echoes "", the default) -- Codex review,
+# fresh evidence, PR #1222 fourth round, second finding: within the
+# single-sided bucket, `compile:` does NOT always resolve the same way.
+# `dump`/`scan --against` (`$MODE != "compare"`) call `merge_compile_config`
+# exactly ONCE, where `build_config`/`sources` are mutually exclusive
+# alternatives (`cli_options.merge_compile_config`'s own `cfg = build_config
+# if explicit_config else discover_build_config(sources)`) -- the
+# `--sources` tree's own document supplies `compile:` EXCLUSIVELY when no
+# explicit `--build-config` is given, the identical single-document shape
+# `build:`/`sources:`/`source:`/`debug:` already use, so this echoes ""
+# (REPLACE) for them. `compare`'s own single-sided shape (`$MODE ==
+# "compare"`, which -- per _compile_context_sources_pairwise's own
+# docstring -- only reaches this bucket at all with a stored-snapshot old
+# operand) is different: `cli_compare_helpers.py`'s own
+# `resolve_compile_context(..., build_config=cfg_path, ...)` ALWAYS
+# independently resolves the checkout-root document's `compile:` block
+# FIRST, unconditionally, and the live side's own `--sources` tree only
+# folds ON TOP of that via a SECOND `merge_compile_config` call
+# (`compare.py`'s `_maybe_dump_side`) -- a genuine two-stage MERGE, so this
+# echoes "true" for `compare`. See `apply_sources_root_config_blocks`'s own
+# `merge_compile` parameter docstring for the full account.
+_compile_context_sources_merge_compile() {
+  if [[ "$MODE" == "compare" ]]; then
+    echo "true"
+  fi
+}
+
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
   # (dump, single-pair compare, and scan -- which has no CLI of its own left
@@ -1269,11 +1361,13 @@ PYEOF
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" \
         "${INPUT_BUILD_CONFIG}" "explicit" "${INPUT_SOURCES:-}" \
-        "$(_compile_context_sources_pairwise)"
+        "$(_compile_context_sources_pairwise)" \
+        "$(_compile_context_sources_merge_compile)"
     else
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD" \
-        "discover" "${INPUT_SOURCES:-}" "$(_compile_context_sources_pairwise)"
+        "discover" "${INPUT_SOURCES:-}" "$(_compile_context_sources_pairwise)" \
+        "$(_compile_context_sources_merge_compile)"
     fi
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")

@@ -25,13 +25,28 @@ an already-capped file.
 CLI override and no pack route (the same "simple config-demoted key" shape
 as ``gate.fail_on_removed_library``/``release.dso_only``, neither of which
 is projected into the canonical resolver's ``ProjectCompatibilityInputs``
-either), so an explicit ``True`` can only ever have come from the project
-config document the caller resolved -- :func:`with_resolved_gate` can name
-that source itself rather than the caller constructing and threading a
+either), so a resolved value that differs from the built-in default (i.e.
+an explicit ``True``) can only ever have come from the project config
+document the caller resolved -- :func:`with_resolved_gate` can name that
+source itself rather than the caller constructing and threading a
 provenance object for a value with only one possible non-default origin.
-``False``/``None`` get no entry, the same "absent, not defaulted" rule the
-sibling per-category ``severity_provenance`` follows for an unsupplied
-category.
+
+An entirely-omitted key (or an ``assurance:`` block present without
+``require_complete``) still gets NO entry -- the same "absent, not
+defaulted" rule the sibling per-category ``severity_provenance`` follows
+for an unsupplied category. But an EXPLICIT ``assurance.require_complete:
+false`` is a real, deliberate statement in the document, not the same
+thing as never having considered the setting at all (Codex review, fresh
+evidence, PR #1222 fourth round) -- a ``--contract`` receipt built from the
+old "``False``/``None`` both get no entry" rule could not tell "the project
+opted out of complete-assurance enforcement" apart from "the project never
+mentioned it". *require_complete_analysis_stated* carries that distinction
+in from the caller (which alone knows whether the raw document's
+``assurance.require_complete`` key was literally present -- this function's
+own two ``bool``/``bool | None`` parameters below are already collapsed
+past that point) so an explicit ``false`` gets a real provenance entry
+(the config path/digest, and the literal value ``false``) while an omitted
+key still produces none.
 
 *project_config_path*/*project_config_sha256* identify the exact
 ``.abicheck.yml`` document that supplied ``assurance.require_complete`` --
@@ -61,6 +76,7 @@ def resolve_require_complete_analysis_provenance(
     *,
     default_value: bool,
     require_complete_analysis: bool | None,
+    require_complete_analysis_stated: bool = False,
     project_config_path: str | None,
     project_config_sha256: str | None,
 ) -> tuple[bool, ValueProvenance | None]:
@@ -72,16 +88,23 @@ def resolve_require_complete_analysis_provenance(
     resolved the field). *require_complete_analysis* is the front end's own
     resolved value; ``None`` (the release fan-out's own caller, which has
     no per-library equivalent of this field yet) preserves *default_value*
-    unchanged rather than silently asserting a value nobody resolved. See
-    the module docstring for why only an explicit ``True`` gets a
-    ``ValueProvenance`` entry.
+    unchanged rather than silently asserting a value nobody resolved.
+
+    *require_complete_analysis_stated* is whether the resolved project
+    config LITERALLY carried an ``assurance.require_complete`` key (true or
+    false) rather than omitting it -- distinct from *require_complete_
+    analysis* itself, which already collapses "explicit false" and
+    "omitted, defaulted" onto the identical resolved value. See the module
+    docstring for why a config an explicit ``true`` OR an explicit ``false``
+    both need a real ``ValueProvenance`` entry, while an omitted key still
+    gets none.
     """
     resolved_value = (
         default_value
         if require_complete_analysis is None
         else require_complete_analysis
     )
-    if not require_complete_analysis:
+    if not require_complete_analysis and not require_complete_analysis_stated:
         return resolved_value, None
     return resolved_value, ValueProvenance(
         layer=SelectorLayer.PROJECT_CONFIG,

@@ -460,7 +460,27 @@ class TestCompileContextPairwiseOldLibraryClassification:
         ``_old_library_is_stored_snapshot`` is content-sniffed and
         simplified to its actual invariant (class docstring) -- so each
         case here writes real bytes exercising that rule, not just a
-        suggestively-named, empty/nonexistent path."""
+        suggestively-named, empty/nonexistent path.
+
+        ``compile:`` itself is NOT "the same single-sided promotion as
+        dump" (Codex review, fresh evidence, PR #1222 fourth round, second
+        finding -- corrected here): unlike `dump`/`scan --against`'s
+        genuine single-document-exclusive ``compile:`` selection,
+        ``compare``'s own ``resolve_compile_context(..., build_config=
+        cfg_path, ...)`` ALWAYS independently resolves the checkout-root
+        document's ``compile:`` block FIRST, unconditionally (confirmed by
+        calling the real function directly against fixtures shaped exactly
+        like this test's own), and NEW's own ``--sources`` tree only folds
+        ON TOP of that already-resolved context via a second
+        ``merge_compile_config`` call (``compare.py``'s
+        ``_maybe_dump_side``) -- so a genuine per-field conflict (like this
+        test's own ``sysroot``, set by BOTH documents to different values)
+        resolves to the CHECKOUT's value, not the sources-root's; only a
+        key the checkout document does NOT set falls through to the
+        sources-root one. ``source:``/``debug:`` stay genuinely
+        single-document-exclusive (``resolved_cfg``'s own single load, no
+        second-stage fold), so those two keep asserting the sources-root's
+        value below."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -486,12 +506,51 @@ class TestCompileContextPairwiseOldLibraryClassification:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        # Same single-sided promotion as dump: NEW is the only operand that
-        # does any live header/debug extraction here, so the sources-root's
-        # own compile:/source:/debug: are the intended, only source for it.
-        assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
+        # source:/debug: ARE single-document-exclusive here (no live "other
+        # side" to leak into), so the sources-root's own values win outright.
         assert doc["source"] == {"method": "s6"}
         assert doc["debug"] == {"format": "dwarf"}
+        # compile: is a genuine two-stage MERGE for `compare` (see the
+        # docstring above) -- the checkout document's own `sysroot` was
+        # independently resolved FIRST and wins this real conflict; the
+        # sources-root's differing value never applies at all.
+        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
+
+    def test_compile_disjoint_keys_merge_under_compare_with_stored_old_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """The disjoint-key (no conflict) sibling of the test above,
+        proving the MERGE direction rather than only which side wins a
+        conflict: the checkout document sets ONLY ``compile.std``, the
+        sources-root document sets ONLY ``compile.include_dirs`` -- the
+        merged overlay must carry BOTH, exactly what the real
+        ``resolve_compile_context``/``merge_compile_config`` two-stage fold
+        (confirmed by calling those functions directly against fixtures
+        shaped like this one) would produce for the identical documents."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  std: c++20\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [foo]\n", encoding="utf-8"
+        )
+        (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
+        cmd, _ = _run_region_with_cwd(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_OLD_LIBRARY": "old.abicheck.json",
+            },
+            tmp_path,
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["std"] == "c++20"
+        assert doc["compile"]["include_dirs"] == [str((src_dir / "foo").resolve())]
 
     def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary(
         self, tmp_path: Path

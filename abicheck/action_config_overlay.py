@@ -104,8 +104,7 @@ covering the "sources-root promotion" step both call sites perform when no
 explicit ``--config`` is given: a ``--sources`` tree carrying its own
 ``.abicheck.yml`` (found via ``config_paths.discover_build_config`` --
 non-recursive, anchored at the sources root, never walking up) supplies
-``build:``/``sources:`` (and, for a genuinely single-sided caller,
-``compile:``/``source:``/``debug:`` too) EXCLUSIVELY, mirroring
+``build:``/``sources:``/``source:``/``debug:`` EXCLUSIVELY, mirroring
 ``embed_build_source()``'s own ``build_config or
 discover_build_config(raw_sources)`` selection -- see that function's own
 docstring for why a checkout-root-discovered document must never supply
@@ -115,6 +114,15 @@ merge; the assurance-overlay step never performed it at all, silently
 letting its synthesized overlay shadow a sources-root ``.abicheck.yml``'s
 own ``build:``/``sources:`` settings (compile-DB selection, build-system
 targets, graph-detail settings) the moment ``build-config`` was omitted.
+``compile:`` (for a genuinely single-sided caller) is promoted too, but --
+PR #1222 fourth round, Codex review -- as a real per-field MERGE, not a
+wholesale block replace: ``cli_options.merge_compile_config`` folds a
+sources-root document's ``compile:`` on top of an ALREADY-resolved
+checkout-config-derived context, field by field, so replacing the whole
+block silently drops any checkout-only ``compile:`` setting the
+sources-root document doesn't happen to also specify. See
+:func:`_merge_compile_block`'s own docstring for the exact per-field
+precedence reproduced.
 """
 
 from __future__ import annotations
@@ -345,11 +353,23 @@ def discovered_compile_db_resolves(compile_db: str, sources_root: str) -> bool:
     fields above. Swallows ``OSError``/``ValueError`` from a malformed glob
     pattern, an unreadable directory, or an unresolvable path the same way
     a real caller would want: a glob (or path) that cannot even be
-    evaluated has not "resolved".
+    evaluated has not "resolved". An absolute *compile_db* pattern is
+    likewise treated as "does not resolve" rather than raised: ``build.
+    compile_db`` is documented as a glob RELATIVE to *sources_root*, so an
+    absolute pattern can never validly resolve against it, but
+    ``Path.glob`` itself raises ``NotImplementedError`` (not ``OSError``/
+    ``ValueError``) for an absolute pattern on every Python version this
+    project supports (confirmed still true on 3.13/3.14) -- left uncaught,
+    that crashed this function (and, in ``check-target``, made the "Run
+    analysis" step's own condition evaluate unexpectedly) instead of
+    yielding the safe "doesn't resolve" outcome (CodeRabbit review, fresh
+    evidence).
     """
     if not sources_root:
         return False
     try:
+        if Path(compile_db).is_absolute():
+            return False
         root = Path(sources_root).resolve()
         for match in Path(sources_root).glob(compile_db):
             if not match.is_file():
@@ -357,8 +377,138 @@ def discovered_compile_db_resolves(compile_db: str, sources_root: str) -> bool:
             if match.resolve().is_relative_to(root):
                 return True
         return False
-    except (OSError, ValueError):
+    except (OSError, ValueError, NotImplementedError):
         return False
+
+
+#: ``compile:`` sub-keys that ``cli_options.merge_compile_config`` never
+#: reads from a *second*, ``sources=``-supplied document at all -- each is
+#: consumed exactly once, from the single already-resolved project config
+#: (``resolved_cfg``/``project_cfg`` in ``cli_compare_helpers.py``/
+#: ``frontends/cli/dump_debug_config.py``, and ``apply_compile_config_env_
+#: toggles``'s own single ``bc`` parameter), the same one-document-only
+#: shape ``source:``/``debug:`` have (see the module-level note on
+#: ``_COMPILE_SOURCES_ONLY_KEYS`` below). Promoting one of these three from
+#: a sources-root document would grant it an effect the real per-side
+#: ``compare``/``dump`` pipeline never gives it once an explicit
+#: ``--build-config`` (this overlay) is in play, so they are excluded from
+#: promotion entirely -- the checkout document's own value (if any) is all
+#: that ever applies.
+_COMPILE_CHECKOUT_ONLY_KEYS = frozenset(
+    {"ast_frontend_fallback", "allow_unsupported_castxml", "lang"}
+)
+
+#: ``compile:`` sub-keys for which ``merge_compile_config`` lets the
+#: *later*-folded document's own value win outright once it sets one,
+#: rather than the earlier one persisting -- the reverse of every other
+#: scalar field below. ``nostdinc``: ``nostdinc = cli_ctx.nostdinc if
+#: nostdinc_explicit else bool(bc.compile_nostdinc)`` -- with no real CLI
+#: ``--nostdinc`` in play (true for this synthesized, config-only overlay),
+#: this unconditionally takes the CURRENT stage's own ``bc.compile_
+#: nostdinc`` (default ``False`` if unset), discarding whatever the prior
+#: stage resolved. ``frontend_context``: ``bc.compile_frontend_context or
+#: cli_ctx.frontend_context`` -- the current stage's own value wins
+#: whenever it sets one; only an *unset* current-stage value falls back to
+#: the prior stage's. Since the real pipeline always folds the checkout
+#: document first and a per-side ``--sources`` document second, "current
+#: stage" here is the sources-root document -- so for these two keys
+#: specifically the sources-root document's own value should win over the
+#: checkout document's when both set one.
+_COMPILE_SOURCES_WINS_KEYS = frozenset({"nostdinc", "frontend_context"})
+
+#: ``compile:`` list-valued sub-keys ``merge_compile_config`` always
+#: CONCATENATES across the two folded documents rather than letting either
+#: replace the other -- never a plain override in either direction. Each
+#: entry's value is the concatenation order the real function produces:
+#: ``include_dirs`` appends the later (sources-root) document's entries
+#: after the earlier (checkout) document's own (``includes = tuple(cli_
+#: includes) + tuple(... bc.compile_include_dirs ...)`` -- both search
+#: paths are honored, so this is a pure ordering nicety, not a semantic
+#: conflict). ``defines``/``options`` synthesize each document's own
+#: literal ``-D``/pass-through argv tokens and prepend the CURRENT stage's
+#: own tokens ahead of whatever the prior stage already resolved
+#: (``gcc_option_tokens = tuple(config_tokens) + gcc_option_tokens``) --
+#: meaning the earlier (checkout) document's own tokens end up LAST in the
+#: final argv and therefore win a same-flag conflict (a compiler honors a
+#: repeated flag's final occurrence), the same "checkout wins a genuine
+#: conflict" direction the plain scalar fields below take. This overlay
+#: reproduces that ordering as data (sources-root entries first, checkout
+#: entries appended after) rather than reconstructing raw argv tokens, so
+#: ``compile.defines``/``compile.options`` stay legible, structured document
+#: keys instead of collapsing into ``compile.options`` token soup.
+_COMPILE_SOURCES_FIRST_LIST_KEYS = frozenset({"defines", "options"})
+_COMPILE_CHECKOUT_FIRST_LIST_KEYS = frozenset({"include_dirs"})
+
+
+def _merge_compile_block(
+    checkout_blk: dict[str, object], sources_blk: dict[str, object]
+) -> dict[str, object]:
+    """Merge a checkout-root and a sources-root ``compile:`` block the way
+    ``cli_options.merge_compile_config`` folds a ``sources=``-supplied
+    document on top of an already-resolved (CLI + checkout-config)
+    ``CompileContext`` -- see that function's own precedence for each
+    field, and the three key-bucket constants above for the exact rule
+    transcribed for each.
+
+    Deliberately expressed over the raw ``compile:`` mapping rather than by
+    round-tripping through a real ``CompileContext``: that dataclass fuses
+    ``std``/``defines``/``options`` into opaque compiler-argv tokens for
+    feeding a header-AST subprocess, which cannot be losslessly
+    reconstructed back into ``compile.std``/``compile.defines``/``compile.
+    options`` document keys (and this overlay must keep them as such --
+    the nested "Run analysis" invocation's own ``load_build_config`` re-parses
+    this synthesized document exactly like any other project config).
+
+    For every scalar key not covered by one of the three buckets above
+    (``frontend``, ``std``, ``sysroot``, ``compiler``) ``merge_compile_
+    config`` only consults the later-folded (sources-root) document's value
+    when the earlier-folded (checkout) one left the field unset/default --
+    an explicit checkout value blocks the sources-root one from applying at
+    all (``frontend``: ``cli_ctx.frontend if (... or cli_ctx.frontend !=
+    "auto") else ...``; ``sysroot``/``compiler``: ``cli_ctx.<field> if
+    cli_ctx.<field> is not None else bc.<field>``). So the default rule
+    here is: the checkout document's own value wins when it sets one; the
+    sources-root document's value fills the field only when checkout leaves
+    it unset.
+    """
+
+    def _as_list(value: object) -> list[object]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        # A schema-invalid non-list value here (already rejected by
+        # validate_base_config for a real document) -- treated as a single
+        # element rather than raised, matching this module's own "this
+        # function only merges, it does not re-validate" scope.
+        return [value]
+
+    merged: dict[str, object] = dict(checkout_blk)
+    for key in _COMPILE_SOURCES_FIRST_LIST_KEYS:
+        combined = _as_list(sources_blk.get(key)) + _as_list(checkout_blk.get(key))
+        if combined:
+            merged[key] = combined
+    for key in _COMPILE_CHECKOUT_FIRST_LIST_KEYS:
+        combined = _as_list(checkout_blk.get(key)) + _as_list(sources_blk.get(key))
+        if combined:
+            merged[key] = combined
+    for key, value in sources_blk.items():
+        if (
+            key in _COMPILE_SOURCES_FIRST_LIST_KEYS
+            or key in _COMPILE_CHECKOUT_FIRST_LIST_KEYS
+            or key in _COMPILE_CHECKOUT_ONLY_KEYS
+        ):
+            continue
+        if key in _COMPILE_SOURCES_WINS_KEYS:
+            merged[key] = value
+        elif key not in checkout_blk:
+            merged[key] = value
+        # else: checkout already set this key and it isn't one of the
+        # "sources wins" keys above -- checkout's own value stays, matching
+        # merge_compile_config's real precedence for frontend/sysroot/
+        # compiler/std (the last of which is checkout-wins via the argv-
+        # ordering trick the list-key handling above already reproduces).
+    return merged
 
 
 def apply_sources_root_config_blocks(
@@ -366,10 +516,44 @@ def apply_sources_root_config_blocks(
     sources_doc: object,
     *,
     blocks: tuple[str, ...],
+    merge_compile: bool = False,
 ) -> dict[str, object]:
-    """Return a COPY of *base* with each key in *blocks* REPLACED by
-    whatever *sources_doc* defines for that same top-level key -- or
-    removed from the copy entirely when *sources_doc* doesn't define it.
+    """Return a COPY of *base* with each key in *blocks* updated from
+    whatever *sources_doc* defines for that same top-level key.
+
+    *merge_compile* selects which of the two real ``compile:`` resolution
+    shapes this promotion should reproduce for the *particular command*
+    the caller is building an overlay for -- ``cli_options.
+    merge_compile_config`` is NOT one shape for every caller (Codex review,
+    fresh evidence, PR #1222 fourth round, second finding on this same
+    fix): a bare ``dump``/``scan --against`` invocation resolves ``compile:``
+    with exactly ONE ``merge_compile_config`` call, where ``build_config``
+    (the CLI's own ``--build-config``, never auto-discovered from cwd for
+    these two commands) and ``sources=<the --sources tree>`` are mutually
+    EXCLUSIVE alternatives (``cfg = build_config if explicit_config else
+    discover_build_config(sources)``) -- when no explicit ``--build-config``
+    is given, the ``--sources`` tree's own document supplies ``compile:``
+    EXCLUSIVELY, the identical single-document-selection shape as ``build:``/
+    ``sources:``/``source:``/``debug:`` above, so ``merge_compile=False``
+    (REPLACE, the default) is correct there. ``compare``'s own per-side
+    IMPLICIT dump (``frontends/cli/commands/compare.py``'s
+    ``_maybe_dump_side``) is different: it always independently resolves the
+    checkout-root document's ``compile:`` block FIRST, unconditionally,
+    via ``cli_compare_helpers.py``'s own ``resolve_compile_context(...,
+    build_config=cfg_path, ...)`` (``cfg_path`` is the explicit ``--config``
+    OR the cwd-upward-discovered project config -- resolved regardless of
+    whether ``--sources`` was even given), and only THEN calls
+    ``merge_compile_config`` a SECOND time with ``build_config=None,
+    sources=<that side's tree>`` to fold the tree's own ``compile:`` ON TOP
+    of that already-resolved context -- a genuine two-stage MERGE, so
+    ``merge_compile=True`` is correct there. The caller decides which shape
+    applies (``run.sh``'s ``$MODE`` shell variable / ``actions/check-target/
+    action.yml``'s own ``mode:`` computation already distinguish the two:
+    ``compare`` -- with a non-live/stored-snapshot old-side, the only
+    ``compare`` shape that ever reaches this promotion at all, per
+    ``_compile_context_sources_pairwise``'s own docstring -- means the
+    IMPLICIT-dump/MERGE shape; ``dump``/``scan`` mean the single-document/
+    REPLACE shape).
 
     This is the block-selection half of ``action/run.sh``'s own
     ``_merge_config_overlay_with_discovered_project_config`` (its
@@ -381,28 +565,56 @@ def apply_sources_root_config_blocks(
     own ``.abicheck.yml`` (found via :func:`abicheck.config_paths.
     discover_build_config` -- non-recursive, anchored at the sources root
     itself, never walking up to parents, unlike a checkout-root discovery
-    that walks up from a starting directory) is used EXCLUSIVELY for the
-    blocks it defines; a checkout-root document found by a separate,
-    upward-walking discovery is never even consulted for them. This
-    function only performs the REPLACE-per-block step -- the caller
-    discovers *sources_doc*'s own file (typically via
-    ``discover_build_config``), reads and schema-validates it
-    (:func:`validate_base_config`), and decides *blocks* (``("build",
-    "sources")`` at minimum -- ``embed_build_source()``'s own scope --
-    plus ``"compile"``/``"source"``/``"debug"`` for a caller whose
-    ``compile:``/``source:``(singular)/``debug:`` resolution is genuinely
-    single-sided for this operand, see ``run.sh``'s own
-    ``_compile_context_sources_pairwise`` for that distinction).
+    that walks up from a starting directory) supplies ``build:``/
+    ``sources:``/``source:``/``debug:`` EXCLUSIVELY -- each of those four
+    blocks is a genuine single-document selection in the real pipeline too
+    (``embed_build_source()``'s ``build_config or discover_build_config(...)``
+    for the first two; ``resolved_cfg``/``project_cfg``'s single load for
+    the latter two -- see ``cli_compare_helpers.py``, ``frontends/cli/
+    dump_debug_config.py``), so REPLACING the checkout document's block
+    wholesale (or clearing it when *sources_doc* doesn't define it) is
+    correct for all four: a checkout-root document found by a separate,
+    upward-walking discovery is never even consulted for them once a
+    distinct sources-root document exists.
+
+    ``compile:`` is different (Codex review, fresh evidence, PR #1222
+    fourth round): ``cli_options.merge_compile_config`` is a genuine
+    TWO-STAGE fold -- the checkout document's ``compile:`` block is folded
+    into the CLI compile context FIRST (``resolve_compile_context``'s own
+    ``build_config=cfg_path`` call), then a second ``merge_compile_config``
+    call layers the sources-root document's own ``compile:`` block ON TOP
+    of that already-resolved context, per-field, for a caller whose
+    ``compile:`` resolution is genuinely single-sided for this operand
+    (``run.sh``'s own ``_compile_context_sources_pairwise`` distinction,
+    threaded into *blocks* by both callers). REPLACING the whole block
+    wholesale -- what this function used to do for every key uniformly --
+    silently drops any checkout-level ``compile:`` setting the sources-root
+    document doesn't happen to also specify (``compile.std``, an explicit
+    ``include_dirs``, ...), changing the compiled/analyzed surface purely
+    because this promotion ran. :func:`_merge_compile_block` reproduces
+    ``merge_compile_config``'s real per-field precedence instead (see its
+    own docstring and the three key-bucket constants above it for exactly
+    which side wins for which key).
 
     A non-``dict`` *sources_doc* (``None`` for an empty file, or any other
-    non-mapping value) is treated as an empty document -- every block in
-    *blocks* is REMOVED from the copy rather than left untouched, matching
-    ``load_build_config``'s own empty-``BuildConfig`` outcome for the
-    identical case: an existing-but-empty/malformed-shape sources-root
+    non-mapping value) is treated as an empty document -- every OTHER block
+    in *blocks* is REMOVED from the copy rather than left untouched,
+    matching ``load_build_config``'s own empty-``BuildConfig`` outcome for
+    the identical case: an existing-but-empty/malformed-shape sources-root
     config file is not "no config found" (``discover_build_config``'s own
     selection is exclusive), so it must clear whatever the checkout-root
     document happened to declare under the same key, not silently leave it
-    in place.
+    in place. ``compile:`` under ``merge_compile=True`` is the one
+    exception even here: an empty sources-root document still means
+    "sources-root sets nothing", which ``_merge_compile_block`` already
+    treats as a no-op fold rather than a block-clearing one -- there is no
+    checkout-level ``compile:`` setting for an empty sources-root document
+    to legitimately erase, since the real two-stage ``merge_compile_config``
+    fold never clears a field the earlier stage set just because the later
+    document is empty/absent. Under ``merge_compile=False`` (the default),
+    ``compile:`` follows the SAME clear-on-empty rule as every other block
+    -- matching the single-document-exclusive selection ``dump``/``scan``
+    actually perform.
 
     *base* is never mutated -- the caller's own reference is left
     untouched, matching :func:`strip_untrusted_execution_keys`'s and
@@ -411,7 +623,19 @@ def apply_sources_root_config_blocks(
     base = dict(base)
     doc = sources_doc if isinstance(sources_doc, dict) else {}
     for key in blocks:
-        if key in doc:
+        if key == "compile" and merge_compile:
+            checkout_compile = base.get("compile")
+            checkout_blk = (
+                checkout_compile if isinstance(checkout_compile, dict) else {}
+            )
+            sources_compile = doc.get("compile")
+            sources_blk = sources_compile if isinstance(sources_compile, dict) else {}
+            merged_compile = _merge_compile_block(checkout_blk, sources_blk)
+            if merged_compile:
+                base[key] = merged_compile
+            else:
+                base.pop(key, None)
+        elif key in doc:
             base[key] = doc[key]
         else:
             base.pop(key, None)

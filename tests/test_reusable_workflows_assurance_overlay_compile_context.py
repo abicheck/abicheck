@@ -194,7 +194,9 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         # compile: was NOT promoted from the sources root (pairwise), so
         # the checkout-root document's own compile.include_dirs survives,
         # rebased against the CHECKOUT root (workspace), not src_dir.
-        assert written["compile"]["include_dirs"] == [str(workspace / "include")]
+        assert written["compile"]["include_dirs"] == [
+            str((workspace / "include").resolve())
+        ]
 
     def test_single_sided_mode_rebases_compile_include_dirs_from_sources_root(
         self, tmp_path: Path
@@ -203,10 +205,60 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         a relative compile.include_dirs entry in THAT document must rebase
         against the SOURCES root, not the checkout root -- found_path must
         be reassigned to the sources-root document, mirroring run.sh's own
-        identical rule."""
+        identical rule.
+
+        ``compile:`` is a real per-field MERGE under ``mode: compare``
+        (Codex review, fresh evidence, PR #1222 fourth round -- see
+        ``apply_sources_root_config_blocks``'s own ``merge_compile``
+        parameter docstring): a checkout document's own ``compile.
+        include_dirs`` is never dropped just because the sources-root
+        document also sets one, so both entries survive -- the checkout's
+        own (rebased against the CHECKOUT root) first, the sources-root's
+        own (rebased against the SOURCES root) appended after, matching
+        ``cli_options.merge_compile_config``'s own ``tuple(cli_includes) +
+        tuple(bc.compile_include_dirs...)`` ordering exactly. This test
+        states ``SOURCES_MERGE_COMPILE: true`` explicitly, modeling
+        ``mode: compare``; the sibling test right below states the
+        opposite (``mode: scan``) to prove the two really differ."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
-            "compile:\n  include_dirs: [wrong]\n", encoding="utf-8"
+            "compile:\n  include_dirs: [checkout_only]\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [include]\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["include_dirs"] == [
+            str((workspace / "checkout_only").resolve()),
+            str((src_dir / "include").resolve()),
+        ]
+
+    def test_single_sided_scan_mode_still_replaces_compile_include_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        """The REPLACE-mode sibling of the test above: with
+        ``SOURCES_MERGE_COMPILE`` left at its default (empty, modeling
+        ``mode: scan``), a checkout document's own conflicting
+        ``compile.include_dirs`` is DISCARDED entirely -- ``scan``
+        genuinely selects ``compile:`` from exactly ONE document (its
+        ``--sources`` tree's own, when no explicit ``--build-config`` is
+        given), the same single-document-exclusive shape ``build:``/
+        ``sources:``/``source:``/``debug:`` already use."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [checkout_only]\n", encoding="utf-8"
         )
         src_dir = workspace / "src"
         src_dir.mkdir()
@@ -223,7 +275,55 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["compile"]["include_dirs"] == [str(src_dir / "include")]
+        assert written["compile"]["include_dirs"] == [
+            str((src_dir / "include").resolve())
+        ]
+
+    def test_single_sided_mode_merges_compile_preserving_checkout_only_keys(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 fourth
+        round): a fresh regression from the PREVIOUS round's own fix --
+        when BOTH the checkout root and the sources root carry their own
+        ``.abicheck.yml``, and this step determined the invocation is
+        single-sided-safe under ``mode: compare`` (promoting ``compile:``
+        from the sources-root document as a genuine per-field MERGE), the
+        overlay used to REPLACE the checkout's entire ``compile:`` block
+        wholesale with the sources-root's own, silently dropping any
+        checkout-level ``compile:`` setting the sources-root document
+        doesn't happen to also specify. The real (non-overlay) ``compare``
+        resolution path never does that -- ``cli_compare_helpers.py``'s
+        ``resolve_compile_context`` folds the checkout document's
+        ``compile:`` block into the compile context FIRST, then
+        ``cli_options.merge_compile_config`` layers the sources-root
+        document's own ``compile:`` block ON TOP, per field -- so a
+        checkout-only key (``compile.std``, set by neither the CLI nor the
+        sources-root document) always survives. This test states that
+        exact scenario: the checkout config sets ONLY ``compile.std`` and
+        the sources-root config sets ONLY ``compile.include_dirs`` (no
+        conflicting key), so the merged overlay must carry BOTH."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  std: c++20\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [foo]\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["std"] == "c++20"
+        assert written["compile"]["include_dirs"] == [str((src_dir / "foo").resolve())]
 
     def test_ambiguous_sources_root_promotion_still_subject_to_stripping(
         self, tmp_path: Path

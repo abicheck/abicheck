@@ -841,6 +841,86 @@ class TestRequireCompleteAnalysisFieldProvenance:
         ]
         assert "gate.require_complete_analysis" not in field_provenance
 
+    def test_provenance_entry_absent_when_assurance_block_omits_the_key(
+        self, tmp_path: Path
+    ) -> None:
+        """An ``assurance:`` block present WITHOUT ``require_complete`` is
+        the same "not stated" case as an entirely-omitted block above --
+        still no provenance entry. ``require_complete`` is currently the
+        ONLY key ``assurance:`` accepts, so an empty mapping is the one way
+        to state "the block is present but the key isn't"."""
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("assurance: {}\n", encoding="utf-8")
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        assert "gate.require_complete_analysis" not in field_provenance
+
+    def test_provenance_entry_present_for_an_explicit_false(
+        self, tmp_path: Path
+    ) -> None:
+        """P2 finding (Codex review, fresh evidence, PR #1222 fourth
+        round): an EXPLICIT ``assurance.require_complete: false`` is a
+        real, deliberate statement in the document -- distinct from never
+        having mentioned the setting at all (the negative control above)
+        -- and must produce a real provenance entry naming the config path/
+        digest, even though the resolved gate value (``false``) is
+        identical to the built-in default."""
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: false\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        gate = payload["contract_context"]["evaluation_context"]["resolved_config"][
+            "gate"
+        ]
+        assert gate["require_complete_analysis"] is False
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        entry = field_provenance.get("gate.require_complete_analysis")
+        assert entry is not None, field_provenance
+        assert entry["layer"] == "project_config", entry
+        assert entry["field_location"] == "assurance.require_complete", entry
+        assert entry["path"] == str(config_path), entry
+        assert entry["sha256"], entry
+
 
 class TestRequireCompleteAnalysisProvenanceIdentity:
     """P2 (Codex review, fresh evidence after

@@ -62,6 +62,7 @@ def _apply(
     ctx: PersistedContractContext,
     *,
     require_complete_analysis: bool | None = None,
+    require_complete_analysis_stated: bool = False,
     project_config_path: str | None = None,
     project_config_sha256: str | None = None,
 ) -> PersistedContractContext:
@@ -76,6 +77,7 @@ def _apply(
         ),
         severity_provenance={},
         require_complete_analysis=require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
         project_config_path=project_config_path,
         project_config_sha256=project_config_sha256,
     )
@@ -196,6 +198,84 @@ class TestWithResolvedGateStampsRequireCompleteAnalysisProvenance:
         result = _apply(ctx, require_complete_analysis=None)
         provenance = result.evaluation_context.resolved_config.provenance
         assert "gate.require_complete_analysis" not in provenance
+
+
+class TestWithResolvedGateDistinguishesExplicitFalseFromOmitted:
+    """P2 finding (Codex review, fresh evidence, PR #1222 fourth round): a
+    config explicitly stating ``assurance.require_complete: false`` used to
+    take the SAME "no provenance" branch as an entirely-omitted key -- both
+    produce the identical resolved value (``False``), so a ``--contract``
+    receipt built from that value alone could not distinguish "the project
+    deliberately opted out of complete-assurance enforcement" from "the
+    project never considered this setting at all". Fixed by threading the
+    "was this key literally present" boolean (*require_complete_analysis_
+    stated*) separately from the resolved value -- see
+    ``contract_gate_require_complete_provenance.py``'s own docstring."""
+
+    def test_explicit_false_gets_a_real_provenance_entry(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(
+            ctx,
+            require_complete_analysis=False,
+            require_complete_analysis_stated=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="deadbeef" * 8,
+        )
+        provenance = result.evaluation_context.resolved_config.provenance
+        entry = provenance["gate.require_complete_analysis"]
+        assert entry.layer is SelectorLayer.PROJECT_CONFIG
+        assert entry.field_location == "assurance.require_complete"
+        assert entry.source_kind == "project_config"
+        assert entry.path == "/repo/.abicheck.yml"
+        assert entry.sha256 == "deadbeef" * 8
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is False
+        )
+
+    def test_explicit_false_without_stated_still_leaves_the_field_absent(
+        self,
+    ) -> None:
+        """*require_complete_analysis_stated* defaults to ``False`` --
+        a caller that never resolves the "was this literally in the
+        document" bit at all keeps getting the pre-existing behavior
+        (``TestWithResolvedGateStampsRequireCompleteAnalysisProvenance.
+        test_false_leaves_the_field_absent`` above), so this fix is purely
+        additive for every existing caller."""
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=False)
+        provenance = result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in provenance
+
+    def test_omitted_key_stays_distinguishable_from_explicit_false(
+        self,
+    ) -> None:
+        """The two cases the finding requires stay distinguishable in the
+        SAME receipt shape: an omitted ``assurance:`` key (or an
+        ``assurance:`` block present without ``require_complete``) still
+        produces no provenance entry at all, while an explicit ``false``
+        produces a real one -- so the persisted ``--contract`` receipt can
+        tell them apart."""
+        omitted_ctx = _base_context(require_complete_analysis=False, scope=None)
+        omitted_result = _apply(
+            omitted_ctx,
+            require_complete_analysis=False,
+            require_complete_analysis_stated=False,
+        )
+        stated_ctx = _base_context(require_complete_analysis=False, scope=None)
+        stated_result = _apply(
+            stated_ctx,
+            require_complete_analysis=False,
+            require_complete_analysis_stated=True,
+            project_config_path="/repo/.abicheck.yml",
+            project_config_sha256="cafef00d" * 8,
+        )
+        omitted_provenance = (
+            omitted_result.evaluation_context.resolved_config.provenance
+        )
+        stated_provenance = stated_result.evaluation_context.resolved_config.provenance
+        assert "gate.require_complete_analysis" not in omitted_provenance
+        assert "gate.require_complete_analysis" in stated_provenance
 
 
 class TestWithResolvedGateThreadsProjectConfigIdentity:

@@ -804,6 +804,7 @@ def _report_compare_result(
     demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
     secondary_writes: tuple[tuple[str, Path], ...],
     require_complete_analysis: bool = False,
+    require_complete_analysis_stated: bool = False,
     depth: str | None = None,
     use_cases_manifest: Path | None = None,
     project_config_path: Path | None = None,
@@ -823,6 +824,14 @@ def _report_compare_result(
     document/digest that supplied ``assurance.require_complete``, the same
     identity every other project-config-sourced provenance entry in this
     receipt already carries (P2, Codex review, fresh evidence).
+
+    *require_complete_analysis_stated* is whether the resolved project
+    config LITERALLY carried an ``assurance.require_complete`` key (true or
+    false), distinct from *require_complete_analysis* itself, which already
+    collapses an explicit ``false`` and an omitted key onto the same
+    resolved value -- see ``contract_gate_require_complete_provenance.py``'s
+    own module docstring (Codex review, fresh evidence, PR #1222 fourth
+    round, second finding).
     """
     from .cli_buildsource import attach_evidence_metrics
     from .cli_compare_receipt import record_resolved_config
@@ -833,6 +842,7 @@ def _report_compare_result(
         evaluation_config,
         project_config_path=project_config_path,
         project_config_sha256=project_config_sha256,
+        require_complete_analysis_stated=require_complete_analysis_stated,
     )
 
     # P0.4 (P1 review, round 9): `DiffResult.requested_depth` -- the G30
@@ -1165,6 +1175,12 @@ def run_compare(
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
     require_complete_analysis = resolved_cfg.require_complete_analysis  # former CLI flag
+    # Was assurance.require_complete literally stated (vs. an omitted key
+    # defaulting to the same resolved value)? See
+    # contract_gate_require_complete_provenance.py's module docstring.
+    require_complete_analysis_stated = (
+        getattr(project_cfg, "assurance_require_complete", None) is not None
+    )
     # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
     # --debug-format are gone as CLI flags (hidden, already config-backed
     # duplicates) -- config-only now, read straight off the resolved config
@@ -1843,6 +1859,7 @@ def run_compare(
         follow_deps=follow_deps,
         secondary_writes=secondary_writes,
         require_complete_analysis=require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
         depth=depth,
         use_cases_manifest=use_cases_manifest,
         project_config_path=cfg_path,

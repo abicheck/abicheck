@@ -416,6 +416,21 @@ class TestDiscoveredCompileDbResolves:
             pytest.skip("symlinks not supported on this filesystem")
         assert discovered_compile_db_resolves("compile_commands.json", str(sources))
 
+    def test_an_absolute_compile_db_pattern_does_not_raise_or_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review, fresh evidence: ``Path(sources_root).
+        glob(compile_db)`` raises ``NotImplementedError`` (not ``OSError``/
+        ``ValueError``) for an absolute *compile_db* pattern -- confirmed
+        still true on this interpreter. ``build.compile_db`` is documented
+        as a glob RELATIVE to the ``--sources`` root, so an absolute
+        pattern can never validly resolve against it; left uncaught, this
+        crashed the whole assurance-overlay step instead of yielding the
+        safe "doesn't resolve" outcome."""
+        (tmp_path / "etc_passwd_stand_in.json").write_text("[]", encoding="utf-8")
+        absolute_pattern = str(tmp_path / "etc_passwd_stand_in.json")
+        assert not discovered_compile_db_resolves(absolute_pattern, str(tmp_path))
+
     def test_relative_sources_root_still_resolves(self, tmp_path: Path) -> None:
         (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
         cwd = Path.cwd()
@@ -501,3 +516,184 @@ class TestApplySourcesRootConfigBlocks:
             base, {"build": {"system": "cmake"}}, blocks=()
         )
         assert out == base
+
+
+class TestApplySourcesRootConfigBlocksCompileMerge:
+    """P1 finding (Codex review, fresh evidence, PR #1222 fourth round): a
+    fresh regression from the previous round's own fix -- ``compile:`` was
+    being REPLACED wholesale by ``apply_sources_root_config_blocks``, the
+    same treatment correct for ``build:``/``sources:``/``source:``/
+    ``debug:`` above but wrong for ``compile:`` specifically, since
+    ``cli_options.merge_compile_config`` folds a sources-root document's
+    ``compile:`` block onto an ALREADY-resolved checkout-config context,
+    field by field, rather than selecting one document's block exclusively.
+    These are direct unit tests for that per-field merge, at the raw
+    ``compile:`` mapping level -- see ``_merge_compile_block``'s own
+    docstring for the exact precedence transcribed from
+    ``merge_compile_config``. All pass ``merge_compile=True`` explicitly,
+    modeling ``mode: compare`` (the checkout-then-sources two-stage fold)
+    -- ``merge_compile``'s own default (``False``) models ``dump``/
+    ``scan``'s single-document-exclusive selection instead, covered by
+    ``TestApplySourcesRootConfigBlocksCompileReplace`` below.
+    """
+
+    def test_checkout_only_key_survives_a_disjoint_sources_root_promotion(
+        self,
+    ) -> None:
+        """The scenario the regression report names directly: a checkout
+        document sets ONLY ``compile.std``, a sources-root document sets
+        ONLY ``compile.include_dirs`` (no overlapping key) -- the merged
+        ``compile:`` must carry BOTH, matching what ``merge_compile_config``
+        would produce for the identical two documents."""
+        base = {"compile": {"std": "c++20"}}
+        sources_doc = {"compile": {"include_dirs": ["foo"]}}
+        out = apply_sources_root_config_blocks(
+            base,
+            sources_doc,
+            blocks=("build", "sources", "compile", "source", "debug"),
+            merge_compile=True,
+        )
+        assert out["compile"]["std"] == "c++20"
+        assert out["compile"]["include_dirs"] == ["foo"]
+
+    def test_sources_root_only_scalar_key_is_promoted(self) -> None:
+        base = {"compile": {"std": "c++20"}}
+        sources_doc = {"compile": {"sysroot": "/opt/sysroot"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"] == {"std": "c++20", "sysroot": "/opt/sysroot"}
+
+    def test_checkout_scalar_value_wins_a_genuine_conflict(self) -> None:
+        """``frontend``/``sysroot``/``compiler``/``std`` all resolve like
+        ``merge_compile_config``'s own ``cli_ctx.<field> if cli_ctx.<field>
+        is not None else bc.<field>`` -- the checkout document's own value
+        (folded first, in the real two-stage pipeline) blocks a
+        sources-root value for the SAME key from applying at all."""
+        base = {"compile": {"std": "c++17", "sysroot": "/checkout/sysroot"}}
+        sources_doc = {"compile": {"std": "c++20", "sysroot": "/sources/sysroot"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["std"] == "c++17"
+        assert out["compile"]["sysroot"] == "/checkout/sysroot"
+
+    def test_include_dirs_concatenates_checkout_first(self) -> None:
+        base = {"compile": {"include_dirs": ["a"]}}
+        sources_doc = {"compile": {"include_dirs": ["b"]}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["include_dirs"] == ["a", "b"]
+
+    def test_defines_concatenates_sources_first(self) -> None:
+        """``defines``/``options`` synthesize argv tokens in
+        ``merge_compile_config``, prepending the current (sources-root)
+        stage's own tokens ahead of the prior (checkout) stage's already-
+        resolved ones -- reproduced here as data, sources-root entries
+        first, checkout entries appended after."""
+        base = {"compile": {"defines": ["CHECKOUT=1"]}}
+        sources_doc = {"compile": {"defines": ["SOURCES=1"]}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["defines"] == ["SOURCES=1", "CHECKOUT=1"]
+
+    def test_nostdinc_lets_sources_root_win_when_it_sets_one(self) -> None:
+        """``nostdinc`` is the one field ``merge_compile_config`` lets the
+        LATER-folded document's own value win outright (see
+        ``_COMPILE_SOURCES_WINS_KEYS``'s own docstring)."""
+        base = {"compile": {"nostdinc": True}}
+        sources_doc = {"compile": {"nostdinc": False}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["nostdinc"] is False
+
+    def test_frontend_context_lets_sources_root_win_when_it_sets_one(self) -> None:
+        base = {"compile": {"frontend_context": "host"}}
+        sources_doc = {"compile": {"frontend_context": "device"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["frontend_context"] == "device"
+
+    def test_checkout_only_fields_are_never_promoted_from_sources_root(self) -> None:
+        """``ast_frontend_fallback``/``allow_unsupported_castxml``/``lang``
+        are read from a SINGLE, already-resolved project config in the real
+        pipeline (``apply_compile_config_env_toggles``'s own single ``bc``
+        parameter; ``resolved_cfg.compile_lang`` in
+        ``cli_compare_helpers.py``) -- never folded with a second,
+        sources-root document at all, so promoting one from the
+        sources-root document here would grant it an effect it never has
+        downstream."""
+        base = {"compile": {"lang": "c"}}
+        sources_doc = {
+            "compile": {
+                "lang": "cpp",
+                "ast_frontend_fallback": True,
+                "allow_unsupported_castxml": True,
+            }
+        }
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"] == {"lang": "c"}
+
+    def test_empty_sources_root_document_is_a_no_op_for_compile(self) -> None:
+        """Unlike ``build:``/``sources:``/``source:``/``debug:`` (where an
+        empty/non-mapping sources-root document CLEARS the base's own
+        block, matching an exclusive single-document selection),
+        ``compile:`` under ``merge_compile=True`` is a genuine merge -- an
+        empty sources-root document sets nothing, which is a no-op fold,
+        not a block-clearing one."""
+        base = {"compile": {"std": "c++20"}}
+        out = apply_sources_root_config_blocks(
+            base, None, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"] == {"std": "c++20"}
+
+    def test_no_checkout_compile_block_still_promotes_sources_root(self) -> None:
+        base: dict[str, object] = {}
+        sources_doc = {"compile": {"std": "c++20"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"] == {"std": "c++20"}
+
+    def test_does_not_mutate_the_input(self) -> None:
+        base = {"compile": {"std": "c++20"}}
+        original = {"compile": {"std": "c++20"}}
+        apply_sources_root_config_blocks(
+            base,
+            {"compile": {"include_dirs": ["foo"]}},
+            blocks=("compile",),
+            merge_compile=True,
+        )
+        assert base == original
+
+
+class TestApplySourcesRootConfigBlocksCompileReplace:
+    """The default-``merge_compile`` (``False``) sibling of the class
+    above, modeling ``dump``/``scan --against``'s genuine single-document-
+    exclusive ``compile:`` selection -- Codex review, fresh evidence, PR
+    #1222 fourth round, second finding on this same fix: within the
+    single-sided bucket, ``compile:`` does NOT always resolve the same way
+    (see ``apply_sources_root_config_blocks``'s own ``merge_compile``
+    parameter docstring)."""
+
+    def test_conflicting_checkout_value_is_replaced_not_merged(self) -> None:
+        base = {"compile": {"std": "c++17", "sysroot": "/checkout/sysroot"}}
+        sources_doc = {"compile": {"std": "c++20"}}
+        out = apply_sources_root_config_blocks(base, sources_doc, blocks=("compile",))
+        assert out["compile"] == {"std": "c++20"}
+
+    def test_empty_sources_root_document_clears_compile(self) -> None:
+        """Unlike the MERGE case above, an empty/non-mapping sources-root
+        document under the default ``merge_compile=False`` CLEARS the
+        checkout's own ``compile:`` block, matching the exclusive
+        single-document selection ``build:``/``sources:``/``source:``/
+        ``debug:`` already use."""
+        base = {"compile": {"std": "c++20"}}
+        out = apply_sources_root_config_blocks(base, None, blocks=("compile",))
+        assert "compile" not in out

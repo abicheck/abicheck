@@ -584,14 +584,13 @@ def record_resolved_config(
     *,
     project_config_path: Any = None,
     project_config_sha256: str | None = None,
+    require_complete_analysis_stated: bool = False,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    *project_config_path*/*project_config_sha256* (the caller's own
-    ``cfg_path``/``cfg_sha``) are forwarded, not re-read, to
-    :func:`~abicheck.contract_context.with_resolved_gate` for its own
-    ``gate.require_complete_analysis`` provenance entry -- see that
-    function's own docstring.
+    *project_config_path*/*project_config_sha256*/*require_complete_
+    analysis_stated* are forwarded, not re-derived, to :func:`~abicheck.
+    contract_context.with_resolved_gate` -- see its own docstring.
 
     A no-op unless ``--contract`` produced a context (and unless the caller
     resolved a *config* at all). Runs before any report is rendered, so
@@ -641,6 +640,7 @@ def record_resolved_config(
             for category in _SEVERITY_CATEGORIES
         },
         require_complete_analysis=resolved_cfg.require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
         project_config_path=str(project_config_path) if project_config_path else None,
         project_config_sha256=project_config_sha256,
     )

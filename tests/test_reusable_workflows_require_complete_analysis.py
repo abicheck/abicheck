@@ -191,6 +191,24 @@ class TestAnalysisAssuranceCompleteConfigOverlay:
         assert "inputs.baseline-channel != 'none'" in expr
         assert "'pairwise'" in expr
 
+    def test_sources_merge_compile_env_matches_mode_compare(self) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 fourth round,
+        second finding on this same fix): within the single-sided bucket
+        above, ``compile:`` does not always resolve the same way -- the
+        overlay step's own ``SOURCES_MERGE_COMPILE`` env value must be
+        'true' in EXACTLY the combination whose nested "Run analysis"
+        invocation runs ``mode: compare`` (``inputs.baseline-channel !=
+        'none'``) and empty otherwise (``mode: scan``, where ``compile:``
+        genuinely is a single-document-exclusive selection, like
+        ``build:``/``sources:``/``source:``/``debug:``)."""
+        data = _load(CHECK_TARGET_ACTION)
+        overlay_step = next(
+            s for s in data["runs"]["steps"] if s.get("id") == "assurance_overlay"
+        )
+        expr = overlay_step["env"]["SOURCES_MERGE_COMPILE"]
+        assert "inputs.baseline-channel != 'none'" in expr
+        assert "'true'" in expr
+
 
 class TestAssuranceOverlayGenerationExecuted:
     """Executes the "Generate assurance-overlay config" step's real Python

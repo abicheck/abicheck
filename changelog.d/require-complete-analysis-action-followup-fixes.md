@@ -147,3 +147,45 @@
   with no assurance floor at all, with no diagnostic. Now validated with
   the same `case ... in true | false) ;; *) _fail ...` pattern its
   sibling inputs already use.
+- **The assurance-overlay step's `compile:` sources-root promotion no
+  longer silently drops checkout-only settings.** The previous fix
+  above (`apply_sources_root_config_blocks`) REPLACED `compile:` wholesale
+  for a single-sided invocation, the same treatment correct for `build:`/
+  `sources:`/`source:`/`debug:` — but wrong for `compile:` under `mode:
+  compare` specifically, since `cli_options.merge_compile_config` there is
+  a genuine TWO-STAGE fold (the checkout document's `compile:` resolved
+  first via `resolve_compile_context`, then the sources-root document's
+  own `compile:` folded ON TOP, per field, in `compare.py`'s implicit
+  per-side dump) — replacing the whole block silently dropped any
+  checkout-level `compile:` setting the sources-root document didn't also
+  specify. `apply_sources_root_config_blocks` gained a `merge_compile`
+  parameter selecting a genuine per-field merge (a new
+  `_merge_compile_block` helper reproducing `merge_compile_config`'s real
+  precedence per key) instead of a blind replace; both `action/run.sh` and
+  the assurance-overlay step now pass it only for the shape that's
+  genuinely a two-stage fold (`mode: compare`) and leave it off (REPLACE,
+  the single-document-exclusive shape `dump`/`scan --against` actually
+  use) otherwise — investigating this rigorously against the real
+  `merge_compile_config`/`resolve_compile_context` functions also found
+  and fixed a pre-existing, latent instance of the same wholesale-replace
+  bug in a `compare`-with-stored-old-snapshot scenario that predates this
+  round's own fix.
+- **The assurance-overlay step's `discovered_compile_db_resolves` no
+  longer crashes on an absolute `build.compile_db` pattern.**
+  `Path.glob()` raises `NotImplementedError` (neither `OSError` nor
+  `ValueError`) for an absolute glob pattern, which this function's
+  `except (OSError, ValueError):` did not catch — an absolute
+  `build.compile_db` value crashed the whole "Generate assurance-overlay
+  config" / compile-context-overlay step instead of the safe "doesn't
+  resolve" outcome its own documented contract already promises for a
+  pattern that can't validly resolve against the `--sources` root.
+- **A `--contract` compare's persisted receipt can now tell "the project
+  explicitly opted out of `assurance.require_complete`" apart from "the
+  project never mentioned it".** An explicit `assurance.require_complete:
+  false` used to take the same no-provenance branch as an entirely-omitted
+  key, since both resolve to the identical `False` value —
+  `contract_context.with_resolved_gate()`/`record_resolved_config()` now
+  also thread whether the project config LITERALLY carried the key
+  (`require_complete_analysis_stated`), so an explicit `false` gets a real
+  `field_provenance["gate.require_complete_analysis"]` entry (naming the
+  config's path/digest) while an omitted key still gets none.
