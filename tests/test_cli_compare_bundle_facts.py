@@ -1030,3 +1030,71 @@ class TestRenderJsonCarriesRunOutcome:
         run_outcome = payload["run_outcome"]
         assert run_outcome["compatibility"] == "NO_CHANGE"
         assert run_outcome["gate"] == "none"
+
+
+class TestBundleFactsRendererCarriesEnvMatrixDigest:
+    """Codex review, P2 (Finding 5, round 7): the top-level BundleFacts
+    JSON/Markdown renderers must project ``BundleDiffResult.
+    env_matrix_source_sha256`` the same way the two-sided ``compare``
+    report and the release fan-out's own summary already do -- present
+    only when a ``deployment:`` contract was actually resolved."""
+
+    def _result(self, *, env_matrix_source_sha256: str | None) -> object:
+        from abicheck.bundle_models import BundleDiffResult
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+
+        diff = DiffResult(
+            old_version="old", new_version="new", library="libfoo.so",
+            changes=[], verdict=Verdict.NO_CHANGE,
+        )
+        return BundleDiffResult(
+            old_root=Path("/old"), new_root=Path("/new"), per_library=[diff],
+            env_matrix_source_sha256=env_matrix_source_sha256,
+        )
+
+    def test_json_carries_the_digest_when_present(self, tmp_path: Path) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+
+        out = _render_json(
+            self._result(env_matrix_source_sha256="sha256:" + "ab" * 32),
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
+        payload = json.loads(out)
+        assert payload["env_matrix_source_sha256"] == "sha256:" + "ab" * 32
+
+    def test_json_omits_the_digest_when_absent(self, tmp_path: Path) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+
+        out = _render_json(
+            self._result(env_matrix_source_sha256=None),
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
+        payload = json.loads(out)
+        assert "env_matrix_source_sha256" not in payload
+
+    def test_markdown_carries_the_digest_when_present(self, tmp_path: Path) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts import (
+            _render_markdown,
+        )
+
+        text = _render_markdown(
+            self._result(env_matrix_source_sha256="sha256:" + "cd" * 32),
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
+        assert "sha256:" + "cd" * 32 in text
+
+    def test_markdown_omits_the_digest_when_absent(self, tmp_path: Path) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts import (
+            _render_markdown,
+        )
+
+        text = _render_markdown(
+            self._result(env_matrix_source_sha256=None),
+            old_facts_path=tmp_path / "old.bundlefacts.json",
+            new_dir=tmp_path / "new",
+        )
+        assert "Deployment floor digest" not in text

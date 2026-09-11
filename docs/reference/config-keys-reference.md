@@ -130,6 +130,14 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 |---|---|
 | `version` | int |
 
+## Nested config blocks (parsed via a shared value type)
+
+Parsed by `BuildConfig` itself, but each embeds a richer, independently-owned value type's own YAML shape wholesale instead of a flat scalar/list subkey set, so it has no row in the `## Blocks` tables above:
+
+### `deployment:`
+
+Embeds `abicheck.environment_matrix.EnvironmentMatrix`'s own YAML shape wholesale (`compilers`, `abi_version`, `libstdcxx_dual_abi`, `runtime_floors` — a mapping of ELF version-node prefix to declared floor version — `sycl:`, `cuda:`, `target_os`, `target_arch`), parsed via `EnvironmentMatrix.from_dict`. See that module's own docstring for the exact shape and [Environment & Toolchain Drift](../learn/environment-drift.md) for the worked example. The former `compare --env-matrix FILE` flag.
+
 ## Other recognized top-level keys
 
 Recognized (so they don't trigger the unknown-key warning) but parsed by a sibling module rather than `BuildConfig` itself — see `abicheck/buildsource/CLAUDE.md`'s module map for which one:

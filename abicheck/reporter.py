@@ -548,6 +548,7 @@ def _to_json_leaf(
         # FIX-H: populate changes with union for backward-compat consumers
         "changes": leaf_changes_list + non_type_list,
     }
+    _reporter_contract_blocks.add_env_matrix_digest(d, result)
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
@@ -893,6 +894,7 @@ def _build_json_base(result: DiffResult) -> dict[str, object]:
     # Library file metadata (path, SHA-256, size) — always present for schema consistency
     d["old_file"] = _metadata_dict(getattr(result, "old_metadata", None))
     d["new_file"] = _metadata_dict(getattr(result, "new_metadata", None))
+    _reporter_contract_blocks.add_env_matrix_digest(d, result)
     d["summary"] = {
         "breaking": summary.breaking,
         "source_breaks": summary.source_breaks,

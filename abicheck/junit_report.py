@@ -56,7 +56,7 @@ from .report.junit_disposition import (
     # so every existing caller and test resolves unchanged).
     add_disposition_audit_properties as _add_disposition_audit_properties,
 )
-from .report.junit_scope import append_scope_suite
+from .report.junit_scope import append_env_matrix_suite, append_scope_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
@@ -613,6 +613,7 @@ def _build_testsuite(
     props = ET.SubElement(ts, "properties")
     _add_disposition_audit_properties(props, result, severity_config, report_document=_resolved_document(envelope, report_document))
     _add_scoped_properties(props, result)
+    _add_env_matrix_property(props, result, report_document=_resolved_document(envelope, report_document))
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
     # rootCauseId/rootCause attributes to each <failure> rather than
@@ -688,6 +689,18 @@ def _emit_missing_contract_testcases(
                 if entry is not None:
                     fail.set("rootCauseId", entry[0])
                     fail.set("rootCause", entry[1])
+
+
+def _add_env_matrix_property(props: ET.Element, result: DiffResult, report_document: ReportDocument | None = None) -> None:
+    """Mirrors no_baseline_render.py's env_matrix_source_sha256 property; omitted, not an empty-string property, when no matrix was declared.
+    *report_document* (ADR-061 gap C), when given, is read instead of the mutable *result* (Codex review, fresh evidence)."""
+    from .report.envelope import env_matrix_digest_reusing_document
+    digest = env_matrix_digest_reusing_document(result, report_document)
+    if digest is None:
+        return
+    p = ET.SubElement(props, "property")
+    p.set("name", "env_matrix_source_sha256")
+    p.set("value", digest)
 
 
 def _add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
@@ -1091,6 +1104,7 @@ def to_junit_xml_multi(
     error_libraries: list[dict[str, object]] | None = None,
     report_mode: str = "full",
     comparison_scope: Mapping[str, object] | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Convert multiple DiffResults to a JUnit XML string (compare-release).
 
@@ -1101,7 +1115,7 @@ def to_junit_xml_multi(
     ``<testsuite>`` with a single ``<error>`` testcase so CI dashboards
     reflect the failure.
 
-    *report_mode*: see :func:`to_junit_xml`. *comparison_scope*: ADR-065's section (``report.junit_scope``).
+    *report_mode*: see :func:`to_junit_xml`. *comparison_scope*: ADR-065's section (``report.junit_scope``). *env_matrix_source_sha256*: the release-wide deployment-floor digest -- see :func:`abicheck.report.junit_scope.append_env_matrix_suite`.
     """
     root = ET.Element("testsuites")
     root.set("name", "abicheck")
@@ -1139,6 +1153,7 @@ def to_junit_xml_multi(
     scope_tests, scope_errors = append_scope_suite(root, comparison_scope)
     total_tests += scope_tests
     total_errors += scope_errors
+    append_env_matrix_suite(root, env_matrix_source_sha256)
     root.set("tests", str(total_tests))
     root.set("failures", str(total_failures))
     root.set("errors", str(total_errors))

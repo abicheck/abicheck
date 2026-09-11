@@ -764,6 +764,140 @@ def test_the_audit_json_validates_against_its_own_published_schema() -> None:
     )
 
 
+def test_audit_env_matrix_source_sha256_validates_against_published_schema() -> None:
+    """Schema 1.4 (Codex review, P2): the audit document gains the identical
+    top-level env_matrix_source_sha256 field the two-sided compare report
+    already gained in schema 4.2, for the same declared-deployment-floor
+    contract. A real run resolving an EnvironmentMatrix must emit it and
+    validate against the packaged audit schema's declaration for it."""
+    jsonschema = pytest.importorskip("jsonschema")
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.environment_matrix import EnvironmentMatrix
+    from abicheck.model import AbiSnapshot
+    from abicheck.schemas import load_audit_report_schema
+
+    elf = ElfMetadata(
+        machine="EM_X86_64",
+        hash_styles=frozenset({"gnu"}),
+        needed=["libc.so.6"],
+        versions_required={"libc.so.6": ["GLIBC_2.34"]},
+    )
+    snapshot = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        elf=elf,
+        elf_only_mode=True,
+        platform="elf",
+    )
+    matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+    result = run_no_baseline_compare(snapshot, env_matrix=matrix)
+    payload, _ = render_no_baseline(result, "json")
+    doc = json.loads(payload)
+    assert "env_matrix_source_sha256" in doc
+    errors = list(
+        jsonschema.Draft202012Validator(load_audit_report_schema()).iter_errors(doc)
+    )
+    assert not errors, [e.message for e in errors]
+
+
+def test_audit_schema_declares_env_matrix_source_sha256() -> None:
+    from abicheck.schemas import load_audit_report_schema
+
+    schema = load_audit_report_schema()
+    prop = schema["properties"]["env_matrix_source_sha256"]
+    assert prop["type"] == "string"
+    assert prop["pattern"] == "^sha256:[0-9a-f]{64}$"
+    assert "env_matrix_source_sha256" not in schema.get("required", [])
+
+
+def _result_with_env_matrix():
+    """A ``--no-baseline`` result with a declared ``deployment:`` contract.
+
+    Factored out so every format's disclosure test builds the identical
+    fixture ``test_audit_env_matrix_source_sha256_validates_against_
+    published_schema`` already validates against the audit JSON schema,
+    rather than each format re-deriving its own.
+    """
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.environment_matrix import EnvironmentMatrix
+    from abicheck.model import AbiSnapshot
+
+    elf = ElfMetadata(
+        machine="EM_X86_64",
+        hash_styles=frozenset({"gnu"}),
+        needed=["libc.so.6"],
+        versions_required={"libc.so.6": ["GLIBC_2.34"]},
+    )
+    snapshot = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        elf=elf,
+        elf_only_mode=True,
+        platform="elf",
+    )
+    matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+    return run_no_baseline_compare(snapshot, env_matrix=matrix)
+
+
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS))
+def test_every_format_projects_the_env_matrix_digest_when_present(fmt: str) -> None:
+    """Codex review, P2: a within-floor audit is only distinguishable from a
+    run with no ``deployment:`` contract if *every* format carries the
+    digest ``env_matrix_source_sha256`` -- not only JSON. Each format's own
+    equivalent "digest"/provenance projection point must surface it.
+    """
+    result = _result_with_env_matrix()
+    doc = compute_no_baseline_document(result)
+    assert doc.env_matrix_source_sha256 is not None, "fixture precondition"
+    text, _ = render_no_baseline(result, fmt)
+
+    if fmt == "json":
+        payload = json.loads(text)
+        assert payload["env_matrix_source_sha256"] == doc.env_matrix_source_sha256
+    elif fmt == "sarif":
+        payload = json.loads(text)
+        props = payload["runs"][0]["properties"]
+        assert props["envMatrixSourceSha256"] == doc.env_matrix_source_sha256
+    elif fmt == "junit":
+        root = ET.fromstring(text)
+        props = {
+            p.get("name"): p.get("value") for p in root.findall("./properties/property")
+        }
+        assert props["env_matrix_source_sha256"] == doc.env_matrix_source_sha256
+    else:  # markdown, oneline
+        assert doc.env_matrix_source_sha256 in text, (
+            f"{fmt} does not surface the declared-deployment-floor digest"
+        )
+
+
+@pytest.mark.parametrize(("case", "filename"), _FIXTURES)
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS))
+def test_every_format_omits_the_env_matrix_digest_when_absent(
+    case: str, filename: str, fmt: str
+) -> None:
+    """The converse of the test above: no format may fabricate a digest, or
+    a placeholder for one, when this audit's candidate declared no
+    ``deployment:`` contract at all.
+    """
+    result = _result(case, filename)
+    doc = compute_no_baseline_document(result)
+    assert doc.env_matrix_source_sha256 is None, "fixture precondition"
+    text, _ = render_no_baseline(result, fmt)
+
+    if fmt == "json":
+        payload = json.loads(text)
+        assert "env_matrix_source_sha256" not in payload
+    elif fmt == "sarif":
+        payload = json.loads(text)
+        assert "envMatrixSourceSha256" not in payload["runs"][0]["properties"]
+    elif fmt == "junit":
+        root = ET.fromstring(text)
+        names = {p.get("name") for p in root.findall("./properties/property")}
+        assert "env_matrix_source_sha256" not in names
+    else:  # markdown, oneline
+        assert "deployment floor" not in text.lower()
+
+
 def test_junit_names_the_axis_that_gated_not_every_axis_that_could_have() -> None:
     """JUnit must say *which* orthogonal axis fired.
 

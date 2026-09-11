@@ -1125,3 +1125,76 @@ class TestCompareReleaseAgainstBundleFacts:
         # driver ran the real per-library compare end to end without
         # raising, and recorded no unexpected analysis error.
         assert result.analysis_errors == []
+
+
+class TestCompareReleaseAgainstBundleFactsEnvMatrix:
+    """Codex review finding 3: a stored-OLD-facts-vs-live-NEW compare with a
+    declared ``deployment.runtime_floors`` config previously had no channel
+    into this driver's per-library ``service.compare_snapshots()`` calls at
+    all, so a runtime-floor violation that should be BREAKING silently
+    stayed at its default RISK verdict -- an ordinary two-sided ``compare``
+    of the identical pair correctly reported BREAKING."""
+
+    def _old_facts_with_glibc_floor(self, tmp_path: Path, required: str) -> Path:
+        old_elf = ElfMetadata(
+            soname="libcore.so",
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": [f"GLIBC_{required}"]},
+            symbols=[ElfSymbol(name="core_fn", visibility="default")],
+        )
+        facts = capture_bundle_facts(
+            {"libcore.so": AbiSnapshot(library="libcore.so", version="old", elf=old_elf)}
+        )
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+        return facts_path
+
+    def _new_elf_requiring(self, required: str) -> ElfMetadata:
+        return ElfMetadata(
+            soname="libcore.so",
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": [f"GLIBC_{required}"]},
+            symbols=[ElfSymbol(name="core_fn", visibility="default")],
+        )
+
+    def test_env_matrix_raises_runtime_floor_finding_to_breaking(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.package as package_mod
+        import abicheck.workflows.input_resolution as input_resolution_mod
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        facts_path = self._old_facts_with_glibc_floor(tmp_path, "2.28")
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        new_elf = self._new_elf_requiring("2.34")
+        # ADR-061 gap A: real owner is workflows.input_resolution now.
+        monkeypatch.setattr(
+            input_resolution_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so", version="new", elf=new_elf
+            ),
+        )
+        # compare_snapshots is deliberately left real (env_matrix forwarding is under test).
+
+        # Baseline: no declared floor -- the version-requirement raise
+        # stays at its default (non-BREAKING) verdict.
+        result_default = compare_release_against_bundle_facts(facts_path, new_dir)
+        assert len(result_default.per_library) == 1
+        assert result_default.per_library[0].verdict is not Verdict.BREAKING
+
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        result_declared = compare_release_against_bundle_facts(
+            facts_path, new_dir, env_matrix=matrix
+        )
+        assert len(result_declared.per_library) == 1
+        assert result_declared.per_library[0].verdict is Verdict.BREAKING

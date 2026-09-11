@@ -1058,8 +1058,16 @@ def _format_release_summary(
     scope_terms: ComparisonScopeTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up) is the release-
+    wide deployment-floor digest computed once, at release scope, by the
+    caller directly from the resolved ``EnvironmentMatrix`` -- forwarded to
+    the JSON branch's envelope field and effective-config-fields block only
+    (markdown/JUnit render no such field today). ``None`` when this
+    release's candidate declared no ``deployment:`` contract at all.
     *scope_terms* (ADR-065 S2): the one resolved scope every format reads.
 
     *demangle* (Codex review, PR #1154 follow-up: `compare --view demangle`/
@@ -1087,6 +1095,7 @@ def _format_release_summary(
         return _format_release_junit(
             diff_pairs, matrix_result, library_results, severity_config=severity_config,
             scope_terms=scope_terms, show_only=show_only,
+            env_matrix_source_sha256=env_matrix_source_sha256,
         )
     if fmt == "json":
         return _format_release_json(
@@ -1102,6 +1111,7 @@ def _format_release_summary(
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
             show_only=show_only,
+            env_matrix_source_sha256=env_matrix_source_sha256,
         )
     md = _format_release_markdown(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
@@ -1109,6 +1119,7 @@ def _format_release_summary(
         scope_section=scope_terms.section if scope_terms is not None else None,
         severity_config=severity_config,
         show_only=show_only,
+        env_matrix_source_sha256=env_matrix_source_sha256,
     )
     if demangle:
         from .demangle import demangle_text
@@ -1125,6 +1136,7 @@ def _format_release_junit(
     severity_config: SeverityConfig | None = None,
     scope_terms: ComparisonScopeTerms | None = None,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Render the release summary as a JUnit XML report.
 
@@ -1183,6 +1195,17 @@ def _format_release_junit(
     release path would make it *more* restrictive than the single-pair
     command for the identical flag combination, which is the opposite of
     what every other ``--view``-forwarding fix in this file does.
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up, round-8): the
+    same release-wide deployment-floor digest the JSON envelope carries
+    (``_format_release_json``'s own parameter of the same name), forwarded
+    to :func:`abicheck.junit_report.to_junit_xml_multi`, which renders it as
+    a release-level ``<testsuite name="abicheck.deployment">`` property --
+    *not* left to whichever per-library ``DiffResult`` happens to carry its
+    own ``env_matrix_source_sha256`` field, since a release with zero
+    matched/completed pairs would then lose the digest entirely (no
+    ``<testsuite>`` exists to carry it), even though this same invocation's
+    JSON output records it correctly.
     """
     from .junit_report import to_junit_xml_multi
 
@@ -1220,6 +1243,7 @@ def _format_release_junit(
         severity_config=severity_config,
         error_libraries=error_libs if error_libs else None,
         comparison_scope=scope_terms.section if scope_terms is not None else None,
+        env_matrix_source_sha256=env_matrix_source_sha256,
     )
 
 
@@ -1318,6 +1342,7 @@ def _format_release_json(
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Render the release summary as a JSON document (``release_schema_
     version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
@@ -1445,6 +1470,26 @@ def _format_release_json(
         # indistinguishable from a genuinely clean run anywhere this JSON is
         # read from. Same "present only when active" gate as the field above.
         summary["contract_coverage_failure_count"] = contract_coverage_failure_count
+    # Codex review, P2 follow-up: the declared-deployment-floor contract's
+    # content digest, promoted once to the release envelope. Previously
+    # inferred by reading it off the first per-library entry that carried
+    # the key (`env_matrix` is threaded identically to every library's
+    # comparison in one release fan-out, `cli_compare_release_pairwise.py`'s
+    # own `env_matrix` parameter, so every entry that has it carries the
+    # identical digest) -- but a release with no matched pairs, or every
+    # pair failing before producing a `DiffResult`, then had *no* entry to
+    # read it off of at all, making a genuinely-configured `deployment:`
+    # contract indistinguishable from none. Now passed in directly by the
+    # caller, computed once at release scope from the resolved
+    # `EnvironmentMatrix` before any per-library compare even runs
+    # (`checker.env_matrix_content_digest`), so this envelope field (and
+    # `effective_config_fields["policy.env_matrix"]` below) is correct
+    # regardless of how many library comparisons actually completed.
+    # Omitted, not `null`, when this release's candidate declared no
+    # `deployment:` contract at all -- same additive convention as every
+    # other "present only when active" key in this function.
+    if env_matrix_source_sha256 is not None:
+        summary["env_matrix_source_sha256"] = env_matrix_source_sha256
     # Release-level public-surface scoping rollup (ADR-024, issue #235).
     # Present only when --scope-public-headers was active (per-library
     # entries then carry a "scope_resolved" key).
@@ -1536,6 +1581,7 @@ def _format_release_json(
         suppress=suppress, pack_application=pack_application,
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
+        env_matrix_source_sha256=env_matrix_source_sha256,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
@@ -1582,6 +1628,7 @@ def _format_release_markdown(
     scope_section: Mapping[str, object] | None = None,
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1619,6 +1666,15 @@ def _format_release_markdown(
     Markdown's own long-standing ``> Filtered by: ...`` note for the same
     reason: without it, a filtered-to-empty findings section next to
     ``verdict: BREAKING`` was indistinguishable from missing detail.
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up, round-8): the
+    same release-wide deployment-floor digest ``_format_release_json``'s
+    envelope field and ``_format_release_junit``'s release-level testsuite
+    property carry, rendered here as a bullet line -- mirroring scalar
+    ``compare`` Markdown's own ``render_markdown_document`` "Deployment
+    floor digest" bullet for the identical field. Omitted entirely (never
+    a placeholder line) when ``None``, i.e. this release's candidate
+    declared no ``deployment:`` contract at all.
     """
     from .cli_compare_receipt import (
         _release_md_library_findings,
@@ -1682,6 +1738,9 @@ def _format_release_markdown(
             f"| **Bundle** | {bundle_em} `{bundle_result.bundle_verdict.value}` "
             f"({bundle_count} cross-library finding{'s' if bundle_count != 1 else ''}) |",
         )
+    if env_matrix_source_sha256 is not None:
+        lines.append("")
+        lines.append(f"- Deployment floor digest: `{env_matrix_source_sha256}`")
     if show_only:
         # Codex review, fresh evidence ("Disclose active filters in release
         # Markdown"): the release Markdown substituted the filtered per-

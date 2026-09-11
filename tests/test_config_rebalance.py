@@ -330,6 +330,42 @@ class TestConfigPrecedence:
         params = inspect.signature(resolve_compare_config).parameters
         assert "cli_max_json_object_nodes" not in params
 
+    def test_deployment_default(self) -> None:
+        """ADR-020b / ADR-068 D5: the former `compare --env-matrix FILE`,
+        now `.abicheck.yml`'s `deployment:` config key -- unset resolves to
+        `None` (no declared matrix), same shape as the release-topology
+        knobs above."""
+        r = resolve_compare_config(
+            None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
+        )
+        assert r.deployment is None
+
+    def test_deployment_config_beats_default(self) -> None:
+        """`deployment:` is the only source -- no CLI override at all."""
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        cfg = BuildConfig(deployment=matrix)
+        r = resolve_compare_config(
+            cfg,
+            cli_severity_preset=None,
+            cli_scope_public=None,
+        )
+        assert r.deployment is matrix
+        assert r.deployment is not None
+        assert r.deployment.runtime_floors == {"GLIBC": "2.28"}
+
+    def test_deployment_has_no_cli_override(self) -> None:
+        """`resolve_compare_config` accepts no `cli_*` argument for
+        `deployment` (ADR-068 D5 guard #2, "no escape hatch")."""
+        import inspect
+
+        params = inspect.signature(resolve_compare_config).parameters
+        for removed in ("cli_env_matrix", "cli_env_matrix_path", "cli_deployment"):
+            assert removed not in params
+
 
 # ── round-trip ─────────────────────────────────────────────────────────────────
 
@@ -400,6 +436,94 @@ class TestConfigRoundtrip:
         )
         assert cfg.resource_limits_max_bundle_facts_decode_nodes == 5_000_000
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_deployment_block_invalid_type_rejected(self) -> None:
+        with pytest.raises(ValueError, match="deployment"):
+            BuildConfig.from_dict({"deployment": "not-a-mapping"})
+
+    def test_deployment_block_invalid_runtime_floor_rejected(self) -> None:
+        # Delegated straight to EnvironmentMatrix.from_dict's own validation
+        # (an unquoted YAML float loses trailing zeros) -- proves the
+        # delegation actually runs, not just a shape check.
+        with pytest.raises(ValueError, match="runtime_floors"):
+            BuildConfig.from_dict({"deployment": {"runtime_floors": {"GLIBC": 2.4}}})
+
+    def test_deployment_block_parses_and_roundtrips(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {
+                "deployment": {
+                    "target_os": "linux",
+                    "runtime_floors": {"GLIBC": "2.28", "GLIBCXX": "3.4.28"},
+                    "sycl": {
+                        "implementation": "dpcpp",
+                        "backends": ["level_zero", "opencl"],
+                    },
+                }
+            }
+        )
+        assert cfg.deployment is not None
+        assert cfg.deployment.target_os == "linux"
+        assert cfg.deployment.runtime_floors == {
+            "GLIBC": "2.28",
+            "GLIBCXX": "3.4.28",
+        }
+        assert cfg.deployment.sycl.implementation == "dpcpp"
+        # `backends` is frozen into a `tuple` at construction (Codex review,
+        # P2 follow-up, PR #1221's hash-invariant fix).
+        assert cfg.deployment.sycl.backends == ("level_zero", "opencl")
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_deployment_block_absent_is_none(self) -> None:
+        cfg = BuildConfig.from_dict({})
+        assert cfg.deployment is None
+        assert "deployment" not in cfg.to_dict()
+
+    def test_deployment_explicitly_empty_roundtrips_non_none(self) -> None:
+        """Codex review finding 1: `deployment: {}` (explicitly selected, but
+        empty) must not collapse into `deployment` absent (`None`) on a
+        `to_dict()`/`from_dict()` round-trip -- the two are different
+        states (`env_matrix_source_sha256` identity depends on telling them
+        apart), unlike every other block, whose emptiness genuinely does
+        mean "unset"."""
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        cfg = BuildConfig(deployment=EnvironmentMatrix())
+        assert cfg.deployment is not None
+        d = cfg.to_dict()
+        assert "deployment" in d
+        assert d["deployment"] == {}
+
+        reloaded = BuildConfig.from_dict(d)
+        assert reloaded.deployment is not None
+        assert reloaded.deployment == EnvironmentMatrix()
+        assert reloaded == cfg
+
+        # Contrast: no `deployment:` key at all still round-trips to `None`,
+        # not to the same non-`None` empty matrix.
+        absent = BuildConfig.from_dict({})
+        assert absent.deployment is None
+        assert "deployment" not in absent.to_dict()
+
+    def test_deployment_block_rejects_unknown_top_level_key(self) -> None:
+        """Codex review finding 2: a typo'd top-level `deployment:` key
+        (`runtime_floor` for `runtime_floors`) is a hard config error, not a
+        silently-ignored, log-only warning -- unlike `EnvironmentMatrix.
+        from_dict`'s own lenient default for a direct typed-API/`--env-
+        matrix`-era caller, `.abicheck.yml`'s strict-schema contract applies
+        to the embedded `deployment:` block too."""
+        with pytest.raises(ValueError, match="unknown key"):
+            BuildConfig.from_dict({"deployment": {"runtime_floor": {"GLIBC": "2.28"}}})
+
+    def test_deployment_block_rejects_unknown_nested_sycl_key(self) -> None:
+        """Same strict contract for a nested `sycl:`/`cuda:` subkey typo."""
+        with pytest.raises(ValueError, match="unknown key"):
+            BuildConfig.from_dict({"deployment": {"sycl": {"backend": ["level_zero"]}}})
+
+    def test_deployment_block_rejects_unknown_nested_cuda_key(self) -> None:
+        with pytest.raises(ValueError, match="unknown key"):
+            BuildConfig.from_dict(
+                {"deployment": {"cuda": {"gpu_architecture": ["sm_80"]}}}
+            )
 
     def test_yaml_file_roundtrip(self, tmp_path: Path) -> None:
         cfg = BuildConfig(
@@ -590,6 +714,12 @@ class TestRemovedConfigDuplicates:
         "--no-fail-on-removed-library",
         "--include-private-dso",
         "--on-incomplete-scope",
+        # ADR-020b / ADR-068 D5: the declared-deployment-constraints flag
+        # joined this list too -- `.abicheck.yml`'s `deployment:` config key
+        # (`BuildConfig.deployment`, embedding `EnvironmentMatrix`'s own
+        # YAML shape via `EnvironmentMatrix.from_dict`) is its only source
+        # now, no CLI escape hatch.
+        "--env-matrix",
         # `dump --build-target` (CLI cleanup, the build-target retirement):
         # `.abicheck.yml`'s `build.targets` is its only source now. Unlike
         # every entry above, this one was never a `compare` flag at all --

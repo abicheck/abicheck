@@ -48,12 +48,14 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ..config_paths import discover_build_config as _discover_build_config
+from ..environment_matrix import EnvironmentMatrix
 from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
 from .build_config_schema import (
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
+    deployment_findings as _deployment_type_findings,
     opt_int as _opt_int,
     parse_policy_overrides as _parse_policy_overrides,
     subkey_findings as _subkey_type_findings,
@@ -331,6 +333,12 @@ class BuildConfig:
     release_support_promise: str | None = None
     #: ``resource_limits:`` — Phase 7g: former ``--max-json-object-nodes``.
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
+    #: ``deployment:`` — ADR-020b §4.1 / ADR-068 D5: the former
+    #: ``compare --env-matrix FILE``. Embeds ``EnvironmentMatrix``'s YAML
+    #: shape inline (parsed via ``EnvironmentMatrix.from_dict``) instead of
+    #: a side file kept in sync by hand. ``None`` = unset; no surviving CLI
+    #: override at all (guard 2, no escape hatch).
+    deployment: EnvironmentMatrix | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -372,6 +380,7 @@ class BuildConfig:
             "baseline",
             "aggregate",
             "policy",
+            "deployment",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -494,6 +503,16 @@ class BuildConfig:
             if key not in cls._KNOWN_TOP_KEYS:
                 findings.append(f"unknown .abicheck.yml key {key!r}")
                 continue
+            if key == "deployment":
+                # ``environment_matrix.py`` was reclassified ``model`` in
+                # ``architecture/modules.yaml`` (ADR-061), which is exactly
+                # the one extra layer ``build_config_schema.py``'s
+                # ``extract`` classification may import -- so its own
+                # ``deployment_findings()`` is called directly here, the same
+                # module ``_subkey_findings`` above delegates to for every
+                # other block's own subkey type table.
+                findings += _deployment_type_findings(value)
+                continue
             known_block = cls._KNOWN_BLOCK_KEYS.get(key)
             if known_block is None:
                 findings += cls._scalar_findings(key, value)
@@ -522,6 +541,7 @@ class BuildConfig:
         release = _block(top, "release")
         resource_limits = _block(top, "resource_limits")
         policy = _block(top, "policy")
+        deployment_raw = top.get("deployment")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -640,6 +660,7 @@ class BuildConfig:
                 else 0
             ),
             policy_overrides=_parse_policy_overrides(policy),
+            deployment=EnvironmentMatrix.from_dict_or_none(deployment_raw, strict=True),
         )
 
     def _build_block(self) -> dict[str, Any]:
@@ -818,8 +839,9 @@ class BuildConfig:
             ("release", self._release_block()),
             ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
             ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
+            ("deployment", EnvironmentMatrix.dump_or_empty(self.deployment)),  # keys on is-not-None: empty != absent
         ):
-            if block:
+            if (self.deployment is not None) if key == "deployment" else block:
                 out[key] = block
 
         if self.version:

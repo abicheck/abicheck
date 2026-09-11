@@ -715,6 +715,21 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
     Tier-2 loader (mirrors :func:`abicheck.service.load_suppression_and_policy`):
     parse/shape errors surface as :class:`ValidationError` with identical text
     across front-ends.
+
+    No CLI flag or ``.abicheck.yml`` key feeds this any more (ADR-068 D5):
+    the former ``compare --env-matrix FILE`` was demoted to the
+    ``deployment:`` config key, parsed inline via
+    :meth:`~abicheck.environment_matrix.EnvironmentMatrix.from_dict` rather
+    than a side file (see ``buildsource.build_config.BuildConfig.deployment``).
+    This loader remains a plain, direct-Python-caller convenience for a
+    typed-API user who genuinely wants to load an ``EnvironmentMatrix`` from
+    its own YAML file (equivalent to
+    :meth:`~abicheck.environment_matrix.EnvironmentMatrix.from_yaml`, just
+    with this module's ``ValidationError`` wrapping) and pass it to
+    :func:`~abicheck.service.run_compare`'s/:class:`~abicheck.workflows.
+    contracts.CompareRequest`'s own ``env_matrix`` parameter directly --
+    not a CLI escape hatch, since nothing in the CLI/config resolution path
+    calls it any more.
     """
     if path is None:
         return None

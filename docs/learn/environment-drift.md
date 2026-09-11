@@ -49,20 +49,21 @@ longer loads on older distros.
   carrying those typedefs changed layout — and is reported as a single
   root-cause diagnostic alongside the per-symbol findings.
 
-### Declaring a target floor (`--env-matrix`)
+### Declaring a target floor (`deployment:`)
 
 Without a declared deployment target, a raised floor can only be a *risk*.
-Declare one and it becomes a decidable verdict:
+Declare one in `.abicheck.yml` and it becomes a decidable verdict:
 
 ```yaml
-# env-matrix.yaml
-runtime_floors:
-  GLIBC: "2.28"        # we ship to RHEL 8 / Ubuntu 20.04
-  GLIBCXX: "3.4.28"
+# .abicheck.yml
+deployment:
+  runtime_floors:
+    GLIBC: "2.28"        # we ship to RHEL 8 / Ubuntu 20.04
+    GLIBCXX: "3.4.28"
 ```
 
 ```console
-$ abicheck compare old.so new.so --env-matrix env-matrix.yaml
+$ abicheck compare old.so new.so
 ```
 
 A new requirement **at or below** a declared floor is `COMPATIBLE` (every
@@ -101,35 +102,43 @@ declared target is actually cut off. Teams that want risk findings to block
 CI even without floors can do that independently via the severity knobs
 (`severity.potential_breaking: error`).
 
-### Why a separate file and not `.abicheck.yml`?
+### A project-wide setting, not a per-invocation flag
 
-The environment matrix (ADR-020b) describes a **deployment target**, while
-`.abicheck.yml` describes the **project**. One project routinely checks the
-same pair of binaries against several targets — "does this break our RHEL 8
-tier?" and "our Ubuntu 24.04 tier?" are two invocations with two matrices and
-possibly two different verdicts — so the matrix rides per-invocation
-(`--env-matrix <file>`), like `--policy`, rather than being a single
-project-wide setting. It is also the same file that declares SYCL/CUDA
-deployment constraints, which are equally target-specific. A convenience
-`environment:` block in `.abicheck.yml` for single-target projects would be a
-reasonable follow-up, but the per-target file stays the primitive.
+The environment matrix (ADR-020b) describes a **deployment target**, and
+since ADR-068 D5 that declaration lives directly in `.abicheck.yml`'s
+`deployment:` block, alongside the rest of the project's stable contract
+(`severity:`, `scope:`, …) — there is no separate `--env-matrix FILE` flag
+any more. A team checking the same pair of binaries against several
+deployment tiers ("does this break our RHEL 8 tier?" and "our Ubuntu 24.04
+tier?") keeps one `.abicheck.yml` per tier (e.g. under separate CI job
+working directories, or via `--config`), the same way any other
+tier-specific project setting would be scoped. It is also the same block
+that declares SYCL/CUDA deployment constraints, which are equally
+target-specific.
 
 ### CI / GitHub Action usage
 
-Commit the matrix next to your workflow and pass it through; with the
-[GitHub Action](../use/github-action.md), use `extra-args`:
+Commit `deployment:` in the project's `.abicheck.yml`; the
+[GitHub Action](../use/github-action.md) picks it up automatically, no
+`extra-args` needed:
+
+```yaml
+# .abicheck.yml
+deployment:
+  runtime_floors:
+    GLIBC: "2.28"
+```
 
 ```yaml
 - uses: abicheck/abicheck-action@v1
   with:
     old: baseline/libfoo.so
     new: build/libfoo.so
-    extra-args: '--env-matrix .github/env-rhel8.yaml'
 ```
 
-Run the step once per supported target (matrix strategy over
-`env-*.yaml` files) to gate each deployment tier independently; drop
-`extra-args` to keep drift findings warning-only.
+Run the step once per supported target (matrix strategy over per-tier
+`.abicheck.yml` files, e.g. via `--config`) to gate each deployment tier
+independently; omit `deployment:` to keep drift findings warning-only.
 
 ## The binutils side: linker default drift
 

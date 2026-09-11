@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
     from .dry_run_estimate import CompileContext
+    from .environment_matrix import EnvironmentMatrix
     from .model import AbiSnapshot
     from .model.consumer_spec import ConsumerAppInput
     from .workflows.extraction import BuildConfig
@@ -541,6 +542,10 @@ class ResolvedCompareConfig:
     #: Phase 7: ``release.support_promise`` (``off``/``declared``).
     release_support_promise: str = "off"
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
+    #: ADR-020b §4.1 / ADR-068 D5: the former ``compare --env-matrix FILE``,
+    #: now the ``deployment:`` config key -- no CLI override. ``None`` when
+    #: unset.
+    deployment: EnvironmentMatrix | None = None
 
     @property
     def exit_code_scheme(self) -> str:
@@ -656,6 +661,7 @@ def resolve_compare_config(
     release_support_promise = (cfg.release_support_promise if cfg else None) or "off"
     release_include_private_dso = bool(cfg.release_include_private_dso) if cfg else False
     res_limit_nodes = cfg.resource_limits_max_bundle_facts_decode_nodes if cfg else None
+    deployment = cfg.deployment if cfg else None
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -686,6 +692,7 @@ def resolve_compare_config(
         release_support_promise=release_support_promise,
         release_include_private_dso=release_include_private_dso,
         resource_limits_max_bundle_facts_decode_nodes=res_limit_nodes,
+        deployment=deployment,
     )
 
 

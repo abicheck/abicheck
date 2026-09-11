@@ -47,6 +47,28 @@ GENERATED_NOTE = (
     "Run `python scripts/gen_config_reference.py` to regenerate. -->"
 )
 
+#: Top-level keys `BuildConfig` parses itself but whose value is not one of
+#: the flat scalar/bool/str/int/list/dict-of-str shapes `_KNOWN_BLOCK_KEYS`'s
+#: subkey tables can express -- each embeds a richer, independently-owned
+#: value type's own YAML shape wholesale (ADR-068 D5: `deployment:` embeds
+#: `abicheck.environment_matrix.EnvironmentMatrix`'s shape, parsed via
+#: `EnvironmentMatrix.from_dict`, the former `compare --env-matrix FILE`).
+#: Rendered under their own section rather than "Other recognized top-level
+#: keys" -- unlike that bucket, these ARE parsed by `BuildConfig` itself, so
+#: the "parsed by a sibling module" claim would be wrong for them.
+NESTED_VALUE_TYPE_KEYS: dict[str, str] = {
+    "deployment": (
+        "Embeds `abicheck.environment_matrix.EnvironmentMatrix`'s own YAML "
+        "shape wholesale (`compilers`, `abi_version`, `libstdcxx_dual_abi`, "
+        "`runtime_floors` — a mapping of ELF version-node prefix to declared "
+        "floor version — `sycl:`, `cuda:`, `target_os`, `target_arch`), "
+        "parsed via `EnvironmentMatrix.from_dict`. See that module's own "
+        "docstring for the exact shape and "
+        "[Environment & Toolchain Drift](../learn/environment-drift.md) for "
+        "the worked example. The former `compare --env-matrix FILE` flag."
+    ),
+}
+
 
 def _subkey_type(
     block: str,
@@ -97,7 +119,8 @@ def render() -> str:
     known_top = BuildConfig._KNOWN_TOP_KEYS
     known_blocks = BuildConfig._KNOWN_BLOCK_KEYS
     scalar_keys = _TOP_LEVEL_STR_KEYS | _TOP_LEVEL_INT_KEYS
-    other_keys = sorted(known_top - set(known_blocks) - scalar_keys)
+    nested_keys = set(NESTED_VALUE_TYPE_KEYS)
+    other_keys = sorted(known_top - set(known_blocks) - scalar_keys - nested_keys)
 
     lines = [
         GENERATED_NOTE,
@@ -139,6 +162,19 @@ def render() -> str:
         type_str = "int" if key in _TOP_LEVEL_INT_KEYS else "str"
         lines.append(f"| `{key}` | {type_str} |")
     lines.append("")
+
+    if nested_keys:
+        lines += [
+            "## Nested config blocks (parsed via a shared value type)",
+            "",
+            "Parsed by `BuildConfig` itself, but each embeds a richer, "
+            "independently-owned value type's own YAML shape wholesale "
+            "instead of a flat scalar/list subkey set, so it has no row in "
+            "the `## Blocks` tables above:",
+            "",
+        ]
+        for key in sorted(nested_keys):
+            lines += [f"### `{key}:`", "", NESTED_VALUE_TYPE_KEYS[key], ""]
 
     if other_keys:
         lines += [

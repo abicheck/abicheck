@@ -40,6 +40,32 @@ if TYPE_CHECKING:
     from .severity import GateDecision, SeverityConfig
 
 
+def add_env_matrix_digest(d: dict[str, Any], result: DiffResult) -> None:
+    """Add ``env_matrix_source_sha256`` when a declared deployment-floor
+    contract (ADR-020b ``EnvironmentMatrix``/``.abicheck.yml``'s
+    ``deployment:``) actually governed this comparison (Codex review, P2).
+
+    Additive, same convention as ``layer_coverage``/``evidence_metrics``
+    (``reporter._add_evidence_fields``): omitted rather than ``null`` when
+    no matrix was in effect, so an ordinary comparison with no declared
+    deployment contract sees no new key at all.
+    ``workflows.no_baseline_compare.run_no_baseline_compare`` stamps the
+    identical field (with the identical digest, for the identical matrix)
+    onto its own ``DiffResult``, and
+    ``report.no_baseline.compute_no_baseline_document`` carries it through
+    to ``NoBaselineDocument.env_matrix_source_sha256`` under this exact
+    field name -- matching this spelling/placement is what lets a JSON
+    consumer treat a two-sided ``compare`` report and a ``--no-baseline``
+    audit report identically for this field. Called from every JSON path
+    (full/root-cause mode via ``reporter._build_json_base``, leaf mode
+    directly) rather than only the canonical ``report/build.py`` path, so
+    the field's presence does not depend on ``--report-mode``.
+    """
+    digest = getattr(result, "env_matrix_source_sha256", None)
+    if digest is not None:
+        d["env_matrix_source_sha256"] = digest
+
+
 def add_contract_context(
     d: dict[str, Any],
     result: DiffResult,

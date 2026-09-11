@@ -282,6 +282,11 @@ topics:
       - abicheck/buildsource/inline.py
       - abicheck/buildsource/build_config.py
       - abicheck/buildsource/build_config_schema.py
+      # `deployment:` (ADR-020b/ADR-068 D5): the former `compare --env-matrix
+      # FILE` demoted into this key's own YAML shape, parsed via
+      # EnvironmentMatrix.from_dict -- see config-file.md's own `deployment:`
+      # section (anchor) and config-keys-reference.md's matching entry below.
+      - abicheck/environment_matrix.py
     reference_page: reference/config-keys-reference.md
     allowed_summaries:
       - skills-src/shared/compiler-and-build-profiles.md
