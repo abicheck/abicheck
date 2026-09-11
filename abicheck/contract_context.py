@@ -414,6 +414,7 @@ def with_resolved_gate(
     exit_code_scheme: str,
     severity: SeverityConfig,
     severity_provenance: Mapping[str, ValueProvenance],
+    require_complete_analysis: bool | None = None,
 ) -> PersistedContractContext:
     """Return *context* with the front end's real gate configuration recorded.
 
@@ -451,6 +452,18 @@ def with_resolved_gate(
     says about how the run was gated. *exit_code_scheme* itself carries no
     provenance entry any more (PR G2 deleted the manual selector; purely
     derived now).
+
+    *require_complete_analysis* is the front end's own resolved
+    ``assurance.require_complete`` value -- the exact sibling of
+    *exit_code_scheme*/*severity* above, threaded through for the identical
+    reason: :func:`build_evaluation_context` records a built-in-default
+    :class:`GateConfig` (``require_complete_analysis=False``) since it never
+    sees what the front end actually resolved that field to (CLI flag while
+    one existed, or ``.abicheck.yml``'s ``assurance.require_complete`` now).
+    Leaving it at ``None`` here (the release fan-out's own caller, which has
+    no per-library equivalent of this field yet) preserves the previous
+    "copy the existing default forward" behavior rather than silently
+    asserting a value nobody resolved.
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
 
@@ -458,6 +471,11 @@ def with_resolved_gate(
     provenance = dict(config.provenance)
     for category, entry in severity_provenance.items():
         provenance[SEVERITY_CATEGORY_FIELDS[category]] = entry
+    resolved_require_complete_analysis = (
+        config.gate.require_complete_analysis
+        if require_complete_analysis is None
+        else require_complete_analysis
+    )
     return replace(
         context,
         evaluation_context=replace(
@@ -469,7 +487,7 @@ def with_resolved_gate(
                     preset=config.gate.preset,
                     packs=config.gate.packs,
                     severity=severity,
-                    require_complete_analysis=config.gate.require_complete_analysis,
+                    require_complete_analysis=resolved_require_complete_analysis,
                     scope=config.gate.scope,
                 ),
                 provenance=provenance,

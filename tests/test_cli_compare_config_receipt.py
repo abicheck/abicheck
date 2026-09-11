@@ -690,3 +690,84 @@ class TestWiringContract:
         result = _Result()
         record_resolved_config(result, object(), None)
         assert result.contract_context is None
+
+
+class TestRequireCompleteAnalysisReceiptConsistency:
+    """P2 (Codex review, fresh evidence on the require-complete-analysis
+    retirement PR): for a ``--contract`` compare with
+    ``assurance.require_complete: true``, ``record_resolved_config`` used to
+    call ``with_resolved_gate`` without threading the resolved
+    ``require_complete_analysis`` value through, so it fell back to the
+    resolver's own built-in-default ``GateConfig.require_complete_
+    analysis=False``. The persisted receipt then disagreed with itself:
+    the top-level ``effective_config_fields["gate.require_complete_
+    analysis"]`` (sourced from ``resolved_cfg`, the value that actually
+    gated the run) read ``"True"`` while ``contract_context.
+    evaluation_context.resolved_config.gate.require_complete_analysis``
+    read ``False``. Both must now agree.
+    """
+
+    def test_both_representations_agree_when_true(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(tmp_path / ".abicheck.yml"),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        top_level = payload["effective_config_fields"]["gate.require_complete_analysis"]
+        contract_context_value = payload["contract_context"]["evaluation_context"][
+            "resolved_config"
+        ]["gate"]["require_complete_analysis"]
+
+        assert top_level == "True", payload["effective_config_fields"]
+        assert contract_context_value is True, payload["contract_context"]
+        # The actual agreement this test exists to pin: the receipt's two
+        # ways of stating the same field must not diverge.
+        assert (top_level == "True") == (contract_context_value is True)
+
+    def test_both_representations_agree_when_false(self, tmp_path: Path) -> None:
+        """Negative control: the default (no assurance.require_complete
+        set at all) must agree too, not just the True case this bug hid
+        behind (a fixed-input regression test only proves the reported
+        input, per this repo's own bug-class-regression-testing
+        convention -- the False side is a real, independently-checkable
+        sibling case, not a restatement of the same assertion)."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        top_level = payload["effective_config_fields"]["gate.require_complete_analysis"]
+        contract_context_value = payload["contract_context"]["evaluation_context"][
+            "resolved_config"
+        ]["gate"]["require_complete_analysis"]
+
+        assert top_level == "False", payload["effective_config_fields"]
+        assert contract_context_value is False, payload["contract_context"]
+        assert (top_level == "True") == (contract_context_value is True)

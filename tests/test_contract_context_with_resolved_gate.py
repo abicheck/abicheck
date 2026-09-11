@@ -58,7 +58,9 @@ def _base_context(
     )
 
 
-def _apply(ctx: PersistedContractContext) -> PersistedContractContext:
+def _apply(
+    ctx: PersistedContractContext, *, require_complete_analysis: bool | None = None
+) -> PersistedContractContext:
     return with_resolved_gate(
         ctx,
         exit_code_scheme="legacy",
@@ -69,6 +71,7 @@ def _apply(ctx: PersistedContractContext) -> PersistedContractContext:
             addition=SeverityLevel.INFO,
         ),
         severity_provenance={},
+        require_complete_analysis=require_complete_analysis,
     )
 
 
@@ -107,3 +110,48 @@ class TestWithResolvedGatePreservesScopedFields:
         gate = result.evaluation_context.resolved_config.gate
         assert gate.exit_code_scheme == "legacy"
         assert gate.severity.abi_breaking == SeverityLevel.ERROR
+
+
+class TestWithResolvedGateThreadsRequireCompleteAnalysis:
+    """P2 (Codex review, fresh evidence on the require-complete-analysis
+    retirement PR): before this fix, ``with_resolved_gate`` always fell back
+    to the *pre-existing* ``config.gate.require_complete_analysis`` (the
+    compatibility resolver's own built-in default, ``False``) regardless of
+    what the front end actually resolved the field to -- so a ``--contract``
+    compare with ``assurance.require_complete: true`` persisted a receipt
+    where ``effective_config_fields["gate.require_complete_analysis"]``
+    (sourced from the real resolved config) read ``True`` while
+    ``evaluation_context.resolved_config.gate.require_complete_analysis``
+    read ``False``, an internal inconsistency in the one receipt documented
+    as the complete resolved configuration. The fix adds an explicit
+    ``require_complete_analysis`` parameter the caller can pass its own
+    resolved value through -- these tests exercise that parameter directly,
+    independent of the pre-existing scoped-field-preservation tests above
+    (which never pass it, and so must keep observing the fallback)."""
+
+    def test_explicit_true_overrides_the_context_s_existing_false(self) -> None:
+        ctx = _base_context(require_complete_analysis=False, scope=None)
+        result = _apply(ctx, require_complete_analysis=True)
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is True
+        )
+
+    def test_explicit_false_overrides_the_context_s_existing_true(self) -> None:
+        ctx = _base_context(require_complete_analysis=True, scope=None)
+        result = _apply(ctx, require_complete_analysis=False)
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is False
+        )
+
+    def test_omitted_falls_back_to_the_context_s_existing_value(self) -> None:
+        # The pre-existing fallback behavior (None is the default), which
+        # every test above this class already exercises via `_apply`'s own
+        # default -- restated here explicitly as this class's own baseline.
+        ctx = _base_context(require_complete_analysis=True, scope=None)
+        result = _apply(ctx, require_complete_analysis=None)
+        assert (
+            result.evaluation_context.resolved_config.gate.require_complete_analysis
+            is True
+        )

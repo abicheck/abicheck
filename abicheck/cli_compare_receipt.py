@@ -633,6 +633,17 @@ def record_resolved_config(
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in _SEVERITY_CATEGORIES
         },
+        # P2 (Codex review, fresh evidence): without this, `with_resolved_
+        # gate` fell back to the resolver's own built-in-default
+        # `GateConfig.require_complete_analysis=False`, so a `--contract`
+        # run with `assurance.require_complete: true` persisted a receipt
+        # where `effective_config_fields["gate.require_complete_analysis"]`
+        # (sourced from `resolved_cfg`, the value that actually gated the
+        # run) read `True` while `evaluation_context.resolved_config.gate.
+        # require_complete_analysis` read `False` -- an internal
+        # inconsistency in the one receipt documented as the complete
+        # resolved configuration.
+        require_complete_analysis=resolved_cfg.require_complete_analysis,
     )
 
 
