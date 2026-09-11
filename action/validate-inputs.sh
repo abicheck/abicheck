@@ -206,7 +206,15 @@ case "$MODE" in
       if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
       fi
-      if [[ -n "${INPUT_OLD_VERSION:-}" ]]; then
+      # old-version's Action-level default is the literal placeholder
+      # 'old' (action.yml), always present even when the caller never set
+      # it -- indistinguishable from "not typed", so it is inert here
+      # exactly as the CLI's own _SIDED_DEFAULTS treats it, not a usage
+      # error. Only a real, non-default value is rejected (Codex review,
+      # PR #1223, round 11: the unconditional truthiness check below this
+      # comment previously rejected every audit-only invocation, since
+      # INPUT_OLD_VERSION is never actually empty).
+      if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
       fi
     fi

@@ -514,3 +514,50 @@ class TestRealAbicheckAnnotationsReachTheActionLog:
         combined = result.stdout + result.stderr
         assert "::error" in combined, combined
         assert "bar" in combined, combined
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAnnotateNotSupportedOnAuditOnlyShape:
+    """compare's audit-only shape (old-library/abi-baseline both omitted)
+    has no `annotations` array in its own report schema at all -- Codex
+    review, PR #1223, round 11: `annotate: true` on this shape previously
+    rendered nothing with no explanation, which reads as "requested but
+    nothing found" rather than "not supported on this shape". A dedicated
+    ::notice:: now says so explicitly instead."""
+
+    def test_annotate_on_audit_only_emits_a_not_supported_notice(
+        self, tmp_path: Path
+    ) -> None:
+        new_json = tmp_path / "new.json"
+        new_json.write_text("{}", encoding="utf-8")
+
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        stub = fake_bin / "abicheck"
+        payload = json.dumps({"findings": []})
+        stub.write_text(
+            "#!/usr/bin/env bash\n" f"cat <<'STUBJSON'\n{payload}\nSTUBJSON\n" "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+        env = {
+            **base_env,
+            "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": str(new_json),
+            "INPUT_FORMAT": "json",
+            "INPUT_ANNOTATE": "true",
+            "INPUT_ADD_JOB_SUMMARY": "false",
+            "INPUT_PR_COMMENT": "false",
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
+        }
+        result = subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        )
+        combined = result.stdout + result.stderr
+        assert "annotate is not supported for compare's audit-only shape" in combined, combined
+        assert "::error" not in _emitted_lines(result), combined

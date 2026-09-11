@@ -2553,7 +2553,11 @@ elif [[ "$MODE" == "compare" ]]; then
       echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-header/old-include -- there is no OLD side for this evidence to describe, and the CLI rejects an explicitly OLD-scoped --header/--include outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-header/old-include, or drop these inputs for this audit-only run."
       exit 1
     fi
-    if [[ -n "${INPUT_OLD_VERSION:-}" ]]; then
+    # old-version's Action-level default is the literal placeholder 'old'
+    # (action.yml), always present even when the caller never set it --
+    # inert here, not a usage error, same as validate-inputs.sh's mirror
+    # check (Codex review, PR #1223, round 11).
+    if [[ -n "${INPUT_OLD_VERSION:-}" && "${INPUT_OLD_VERSION}" != "old" ]]; then
       echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
       exit 1
     fi
@@ -3584,6 +3588,18 @@ _emit_annotations() {
     if [[ "${INPUT_ANNOTATE_ADDITIONS:-false}" == "true" ]]; then
       echo "::notice title=abicheck annotate::annotate-additions is true but annotate is false, so no annotations are rendered. Set annotate: true as well."
     fi
+    return 0
+  fi
+  # compare's audit-only shape (old-library/abi-baseline both omitted) has
+  # no `annotations` array in its own report schema at all (it has no
+  # additions/removals to annotate, only candidate-side `findings`) -- the
+  # `annotations` report query below would already silently print nothing
+  # for it, which reads as "requested but nothing found" rather than "not
+  # supported on this shape". Say so explicitly instead (Codex review, PR
+  # #1223, round 11) -- the same "never silently emit nothing" treatment
+  # every other annotate gap above already gets.
+  if [[ "$MODE" == "compare" && "${_NO_BASELINE:-false}" == "true" ]]; then
+    echo "::notice title=abicheck annotate::annotate is not supported for compare's audit-only shape (old-library/abi-baseline both omitted) -- its report has no additions/removals to annotate, only candidate-side findings (see the JSON report's findings[]). No annotations are rendered."
     return 0
   fi
   local _src _additions

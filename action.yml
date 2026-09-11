@@ -758,8 +758,13 @@ inputs:
   annotate:
     description: >
       Emit GitHub Actions workflow command annotations (inline PR-diff
-      comments) for ABI/API findings, in compare mode (single-pair and
-      directory/package release operands alike). Rendered by this Action
+      comments) for ABI/API findings, in compare mode's two-sided shape
+      (single-pair and directory/package release operands alike). Not
+      supported for compare's audit-only shape (old-library/abi-baseline
+      both omitted) -- its report has no additions/removals to annotate,
+      only candidate-side findings; requesting it there emits a
+      ::notice:: explaining why and renders nothing, rather than silently
+      producing zero annotations. Rendered by this Action
       itself from the run's own persisted JSON report (schema 2.43+), not
       by passing --annotate to the abicheck CLI -- no second comparison is
       ever run to collect them, for either operand shape. Has no effect on

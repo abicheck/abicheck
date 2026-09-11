@@ -1255,6 +1255,21 @@ class TestOldSidedInputsRejectedOnAuditOnly:
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
+    def test_old_version_default_placeholder_does_not_trigger_rejection(
+        self,
+    ) -> None:
+        # Codex review, PR #1223, round 11 (P1): old-version's Action-level
+        # default is the literal placeholder 'old' (action.yml), so GitHub
+        # Actions always populates INPUT_OLD_VERSION with at least 'old' --
+        # never actually empty. A bare truthiness check therefore rejected
+        # *every* audit-only invocation, not just ones that explicitly set
+        # old-version to something else. This is the regression test: the
+        # real Action-populated default must not trip the rejection.
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_OLD_VERSION": "old"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Drift guard: validate-inputs.sh intentionally duplicates run.sh's

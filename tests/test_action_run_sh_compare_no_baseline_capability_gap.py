@@ -241,6 +241,24 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
         assert outputs["_returncode"] == 1, outputs
         assert "does not support" in outputs["_stdout"], outputs
 
+    def test_old_version_default_placeholder_does_not_trigger_rejection(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1223, round 11 (P1): old-version's Action-level
+        # default is the literal placeholder 'old' (action.yml), so GitHub
+        # Actions always populates INPUT_OLD_VERSION with at least 'old' --
+        # never actually empty on a real invocation. A bare truthiness
+        # check therefore rejected *every* audit-only invocation, not just
+        # ones that explicitly set old-version to something else.
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
+                "INPUT_OLD_VERSION": "old",
+            },
+        )
+        assert outputs["_returncode"] == 0, outputs
+
 
 class TestAuditOnlyCompareUnaffectedWhenTheseInputsAreUnset:
     """The common case -- an audit-only compare that never touches since/
