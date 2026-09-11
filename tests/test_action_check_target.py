@@ -29,72 +29,18 @@ scripts delegate to is unit-tested in isolation in
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
-
-ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "check-target"
-RUN_SH = ACTION_DIR / "run.sh"
-VALIDATE_SH = ACTION_DIR / "validate-inputs.sh"
-
-PROFILE = "linux-x86_64-gcc13-release"
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
-def _run(
-    script: Path, env_extra: dict[str, str], cwd: Path
-) -> subprocess.CompletedProcess[str]:
-    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
-    env = {**base_env, "ACTION_PATH": str(ACTION_DIR), **env_extra}
-    return subprocess.run(
-        [_bash_executable(), str(script)],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=cwd,
-        check=False,
-    )
-
-
-def _run_finalize(
-    env_extra: dict[str, str], cwd: Path
-) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
-    github_output = cwd / "github_output"
-    github_output.write_text("")
-    result = _run(RUN_SH, {"GITHUB_OUTPUT": str(github_output), **env_extra}, cwd)
-    outputs: dict[str, str] = {}
-    for line in github_output.read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            outputs[k] = v
-    return result, outputs
-
-
-_BASE_IDENTITY = {
-    "INPUT_NAME": "libpvxs",
-    "INPUT_PROFILE": PROFILE,
-    "INPUT_BASELINE_CHANNEL": "accepted-main",
-    "INPUT_REQUESTED_DEPTH": "headers",
-    "INPUT_GATE_MODE": "local",
-    "INPUT_PROJECT": "epics-base/pvxs",
-    "INPUT_HEAD_SHA": "deadbeef",
-    "INPUT_BASE_REF": "main",
-    "INPUT_ACTION_VERSION": "abicheck/abicheck@v1",
-}
+from _check_target_exec import (
+    _BASE_IDENTITY,
+    ACTION_DIR,
+    PROFILE,
+    RUN_SH,
+    VALIDATE_SH,
+    _run,
+    _run_finalize,
+)
 
 
 def _write_compare_report(
@@ -462,50 +408,6 @@ class TestValidateInputs:
             tmp_path,
         )
         assert result.returncode == 0
-
-    def test_bundle_kind_rejects_analysis_assurance_complete(
-        self, tmp_path: Path
-    ) -> None:
-        # A caller invoking check-target directly (bypassing
-        # check-project.yml/project_targets.py's own run-plan validation)
-        # could otherwise pair kind: bundle with
-        # analysis-assurance-complete: true and reach a late, confusing
-        # operational failure deep inside cli_compare_options.py's
-        # _reject_set_input_flags instead of an immediate, clear
-        # input-validation error (Codex review).
-        result = _run(
-            VALIDATE_SH,
-            {
-                **_BASE_IDENTITY,
-                "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "binary",
-                "INPUT_BASELINE_PATH": "./b",
-                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
-            },
-            tmp_path,
-        )
-        assert result.returncode == 64
-        assert "analysis-assurance-complete is not supported for kind: bundle" in (
-            result.stdout + result.stderr
-        )
-
-    def test_bundle_kind_allows_analysis_assurance_complete_false(
-        self, tmp_path: Path
-    ) -> None:
-        result = _run(
-            VALIDATE_SH,
-            {
-                **_BASE_IDENTITY,
-                "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "binary",
-                "INPUT_BASELINE_PATH": "./b",
-                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false",
-            },
-            tmp_path,
-        )
-        assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.skipif(

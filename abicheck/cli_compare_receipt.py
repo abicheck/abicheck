@@ -587,25 +587,18 @@ def record_resolved_config(
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    *project_config_path*/*project_config_sha256* identify the real
-    ``.abicheck.yml`` document this same invocation already resolved (the
-    caller's own ``cfg_path``/``cfg_sha`` -- what built *config*'s other
-    project-config-sourced ``provenance`` entries in the first place).
-    Threaded through to :func:`~abicheck.contract_context.with_resolved_gate`
-    so a ``gate.require_complete_analysis`` entry sourced from
-    ``assurance.require_complete`` can name the same document/digest every
-    other project-config-sourced entry in this receipt already carries,
-    rather than a layer-only stub (P2, Codex review, fresh evidence). Not
-    re-read here -- only forwarded.
+    *project_config_path*/*project_config_sha256* (the caller's own
+    ``cfg_path``/``cfg_sha``) are forwarded, not re-read, to
+    :func:`~abicheck.contract_context.with_resolved_gate` for its own
+    ``gate.require_complete_analysis`` provenance entry -- see that
+    function's own docstring.
 
-    A no-op unless ``--contract`` produced a context (and unless
-    the caller resolved a *config* at all -- a run with neither
-    ``--contract`` nor ``--pack`` resolves nothing, since nothing
-    would read the result). Runs before any report is rendered, so every
-    output path sees one configuration resolved by the canonical resolver
-    rather than the core verb's argument-shaped reconstruction, and sees the
-    gate the run was actually scored with rather than :class:`GateConfig`'s
-    built-in defaults.
+    A no-op unless ``--contract`` produced a context (and unless the caller
+    resolved a *config* at all). Runs before any report is rendered, so
+    every output path sees one configuration resolved by the canonical
+    resolver rather than the core verb's argument-shaped reconstruction,
+    and sees the gate the run was actually scored with rather than
+    :class:`GateConfig`'s built-in defaults.
 
     *config* arrives already resolved rather than being resolved here: since
     ADR-049's ``--pack`` landed, the same object also *configures* the run
@@ -647,20 +640,8 @@ def record_resolved_config(
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in _SEVERITY_CATEGORIES
         },
-        # P2 (Codex review, fresh evidence): without this, `with_resolved_
-        # gate` fell back to the resolver's own built-in-default
-        # `GateConfig.require_complete_analysis=False`, so a `--contract`
-        # run with `assurance.require_complete: true` persisted a receipt
-        # where `effective_config_fields["gate.require_complete_analysis"]`
-        # (sourced from `resolved_cfg`, the value that actually gated the
-        # run) read `True` while `evaluation_context.resolved_config.gate.
-        # require_complete_analysis` read `False` -- an internal
-        # inconsistency in the one receipt documented as the complete
-        # resolved configuration.
         require_complete_analysis=resolved_cfg.require_complete_analysis,
-        project_config_path=(
-            str(project_config_path) if project_config_path is not None else None
-        ),
+        project_config_path=str(project_config_path) if project_config_path else None,
         project_config_sha256=project_config_sha256,
     )
 

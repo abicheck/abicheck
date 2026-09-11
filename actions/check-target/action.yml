@@ -733,20 +733,42 @@ runs:
             ABICHECK_OUT_PATH="$_assurance_out_path" \
             PYTHONPATH= "$PY" - <<'PYSCRIPT'
         import os
+        import sys
         from pathlib import Path
 
         import yaml
 
+        from abicheck.action_config_overlay import (
+            rebase_relative_config_paths,
+            strip_untrusted_execution_keys,
+        )
         from abicheck.cli_helpers_compare import discover_project_config
 
         base_path_env = os.environ.get("ABICHECK_BASE_CONFIG", "")
         data: dict = {}
         source_desc = "<build-config>"
+        # found_path anchors rebase_relative_config_paths() below -- the real,
+        # on-disk location `data` was loaded from, used only to resolve a
+        # config-relative `compile.include_dirs` entry against the correct
+        # project root. None means no config was found at all (nothing to
+        # rebase against, and nothing to merge onto but the bare overlay).
+        found_path: Path | None = None
         if base_path_env:
-            # An explicit build-config was given: use it as the base,
-            # unchanged from before.
+            # An explicit build-config was given: use it as the base. This is
+            # an operator's own deliberate action (the user named this exact
+            # file), already the trusted case cli_options.py's own
+            # `explicit_config = build_config is not None` check grants --
+            # see strip_untrusted_execution_keys's own docstring -- so
+            # build.query/compile.compiler/resource_limits are NOT stripped
+            # here, unchanged from before. A relative compile.include_dirs
+            # entry is still rebased below (Codex review, fresh evidence):
+            # that is a pure correctness concern independent of trust -- an
+            # explicit config with a relative include dir breaks exactly the
+            # same way a discovered one does the moment its document moves to
+            # this step's own $RUNNER_TEMP-located overlay file.
             base_path = Path(base_path_env)
             source_desc = str(base_path)
+            found_path = base_path
             with open(base_path, encoding="utf-8") as fh:
                 loaded = yaml.safe_load(fh)
             if loaded is not None:
@@ -768,6 +790,7 @@ runs:
             discovered = discover_project_config(Path(os.environ["ABICHECK_DISCOVER_START"]))
             if discovered is not None:
                 source_desc = str(discovered)
+                found_path = discovered
                 loaded = yaml.safe_load(discovered.read_text(encoding="utf-8"))
                 if loaded is not None:
                     if not isinstance(loaded, dict):
@@ -777,6 +800,55 @@ runs:
                             "overlay into it."
                         )
                     data = loaded
+            # Security (Codex review, third round): this discovered document
+            # is PR-controlled, untrusted content -- exactly what
+            # cli_options.py's compile.compiler gate and ADR-032 D5's
+            # build.query gate exist to withhold "explicit --config, operator
+            # authorized this to run" status from. But every downstream
+            # `--config`/`build-config` (this step's own `config-path` output,
+            # forwarded to "Run analysis" below) IS an explicit one from the
+            # nested root Action's own perspective -- forwarding this
+            # document unchanged would launder an untrusted build.query/
+            # compile.compiler into that trusted, executable-authorized
+            # status the moment a PR merely declares
+            # `analysis.assurance: complete` (or, on this Action's own
+            # `analysis-assurance-complete` input, any project using this
+            # check without an explicit build-config), a privilege-
+            # escalation / command-injection path. Strip/cap exactly the
+            # fields action/run.sh's own equivalent merge withholds from an
+            # auto-discovered config, via the identical shared
+            # implementation (abicheck.action_config_overlay -- see its
+            # module docstring) so the two can't independently drift.
+            data = strip_untrusted_execution_keys(data)
+            build_blk = data.get("build")
+            if isinstance(build_blk, dict) and "compile_db" in build_blk:
+                # Unlike action/run.sh's own equivalent handling, this step
+                # has no --sources root to validate the glob against (the
+                # nested "Run analysis" step resolves --sources separately,
+                # after this one has already run), so it always strips
+                # rather than keeping a demonstrably-resolving path.
+                build_blk = dict(build_blk)
+                del build_blk["compile_db"]
+                data["build"] = build_blk
+                print(
+                    "::warning::the discovered .abicheck.yml's "
+                    "build.compile_db was dropped from this synthesized "
+                    "--config overlay -- forwarding it would silently "
+                    "promote it to an explicit, must-not-be-missing "
+                    "compile-DB path; set build-config explicitly (naming a "
+                    "config you reviewed) to opt in.",
+                    file=sys.stderr,
+                )
+        if found_path is not None:
+            # Correctness (Codex review, fresh evidence): `data` is about to
+            # be written to a FRESH path (this step's own $RUNNER_TEMP-
+            # located overlay file, never `found_path`'s own directory), so a
+            # config-relative compile.include_dirs entry must be rewritten to
+            # an absolute path anchored at `found_path`'s own project root
+            # first -- left unrebased, it would silently resolve against the
+            # overlay file's own scratch location instead of the real
+            # project the moment this step runs.
+            data = rebase_relative_config_paths(data, found_path=found_path)
         assurance = data.get("assurance")
         # Only a missing key or an explicit null/empty value is safe to
         # treat as "no assurance block yet" and overlay onto. Normal

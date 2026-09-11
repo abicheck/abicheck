@@ -452,3 +452,235 @@ class TestAssuranceOverlayDiscoversProjectConfig:
             "assurance": {"require_complete": True},
         }
         assert "severity" not in written
+
+
+class TestAssuranceOverlayStripsExecutableKeysFromDiscoveredConfig:
+    """Finding 1 (P1, SECURITY, PR #1222 Codex review, commit 148c624be):
+
+    With ``analysis-assurance-complete: true`` and NO explicit
+    ``build-config``, the step used to copy the PR-controlled, auto-
+    discovered ``.abicheck.yml`` into the overlay VERBATIM -- including
+    ``build.query``/``compile.compiler``, both of which select code or an
+    executable to run. That merged overlay is then handed to the nested
+    root Action's own analysis step as an EXPLICIT ``--config``/
+    ``build-config`` -- and ``cli_options.py``'s ``compile.compiler`` gate
+    and ADR-032 D5's ``build.query`` gate treat "explicit --config" as
+    operator authorization to run either. So a PR that merely adds a
+    ``.abicheck.yml`` with a ``build.query``/``compile.compiler`` AND
+    declares ``checks[].analysis.assurance: complete`` (which any project
+    using ``analysis-assurance-complete: true`` without naming its own
+    build-config does automatically) gets those keys promoted from
+    untrusted, auto-discovered content to trusted-and-executable -- a
+    privilege-escalation / command-injection path.
+
+    Fixed by routing the discovered document through
+    ``abicheck.action_config_overlay.strip_untrusted_execution_keys`` --
+    the identical, shared implementation ``action/run.sh``'s own equivalent
+    merge (``_merge_config_overlay_with_discovered_project_config``) already
+    used for its own compile-context/release-topology overlays, so the two
+    call sites can't independently drift on this trust boundary again.
+    """
+
+    def test_discovered_build_query_is_stripped(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  query: cmake --build . --target print-abi-flags\n",
+            encoding="utf-8",
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        # The bug this finding names: build.query must never survive into
+        # the overlay this step hands to the nested Action as an explicit
+        # --config.
+        assert "query" not in written.get("build", {})
+        assert "build.query" in result.stderr
+
+    def test_discovered_compile_compiler_is_stripped(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  compiler: /tmp/evil-compiler.sh\n",
+            encoding="utf-8",
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "compiler" not in written.get("compile", {})
+        assert "compile.compiler" in result.stderr
+
+    def test_discovered_resource_limits_are_capped_not_raised(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 999999999\n",
+            encoding="utf-8",
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["resource_limits"]["max_bundle_facts_decode_nodes"] < 999999999
+
+    def test_discovered_build_compile_db_is_stripped(self, tmp_path: Path) -> None:
+        """This call site has no ``--sources`` root to validate the glob
+        against at all (unlike ``action/run.sh``'s own equivalent handling,
+        which keeps a demonstrably-resolving discovered ``compile_db``), so
+        it always strips."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
+        )
+        (workspace / "compile_commands.json").write_text("[]", encoding="utf-8")
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "compile_db" not in written.get("build", {})
+
+    def test_other_build_and_compile_settings_survive_the_strip(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: the strip must be scoped to exactly the four
+        execution/resource-ceiling keys -- every other build:/compile:
+        setting must reach the overlay unchanged."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n"
+            "  query: cmake --build . --target print-abi-flags\n"
+            "  system: cmake\n"
+            "compile:\n"
+            "  compiler: /tmp/evil-compiler.sh\n"
+            "  std: c++17\n",
+            encoding="utf-8",
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"system": "cmake"}
+        assert written["compile"] == {"std": "c++17"}
+
+    def test_explicit_build_config_query_and_compiler_are_not_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        """An operator's own explicit build-config is the trusted case
+        these same gates exist to allow (``cli_options.py``'s
+        ``explicit_config = build_config is not None``) -- naming the file
+        is itself the deliberate authorization, so neither key is stripped
+        from it, unchanged from before this fix."""
+        workspace = make_workspace(tmp_path)
+        explicit_config = workspace / "explicit.yml"
+        explicit_config.write_text(
+            "build:\n  query: cmake --build . --target print-abi-flags\n"
+            "compile:\n  compiler: /usr/bin/g++-custom\n",
+            encoding="utf-8",
+        )
+        result = run_step(
+            _overlay_step(),
+            workspace=workspace,
+            env={"BASE_CONFIG": str(explicit_config)},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"]["query"] == "cmake --build . --target print-abi-flags"
+        assert written["compile"]["compiler"] == "/usr/bin/g++-custom"
+        assert "build.query" not in result.stderr
+        assert "compile.compiler" not in result.stderr
+
+
+class TestAssuranceOverlayRebasesRelativeIncludeDirs:
+    """Finding 2 (P1, SECURITY-ADJACENT CORRECTNESS, PR #1222 Codex review,
+    commit 148c624be):
+
+    The overlay step writes its merged document to a FRESH path under
+    ``$RUNNER_TEMP`` (see ``TestAssuranceOverlayOutputPathIsPrivate`` above
+    for why). A ``compile.include_dirs`` entry in the base config that is
+    relative (e.g. ``[include]``) is documented to resolve against the
+    config file's own project root (``config_paths.project_root_for_config``)
+    -- but the nested root Action's CLI resolves it against wherever
+    ``--config`` actually points, which after this step runs is the
+    ``$RUNNER_TEMP`` overlay file's own directory, not the real project.
+    Left unrebased, this silently parses the wrong (or a nonexistent)
+    header surface with no diagnostic.
+
+    Fixed by rewriting every ``compile.include_dirs`` entry to an absolute
+    path anchored at the ORIGINAL config's own project root before writing
+    the overlay -- via the identical shared
+    ``abicheck.action_config_overlay.rebase_relative_config_paths``
+    ``action/run.sh``'s own compile-context/release-topology overlays
+    already use (see ``tests/test_action_release_topology_config.py``'s own
+    ``test_relative_include_dir_resolves_against_project_root_not_tmp`` for
+    that call site's identical regression test). Applies to BOTH a
+    discovered and an explicit base document -- this is a pure correctness
+    concern, independent of the trust question Finding 1 addresses.
+    """
+
+    def test_discovered_relative_include_dir_resolves_against_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [include]\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        resolved = written["compile"]["include_dirs"]
+        # The bug this finding names: an unrebased relative entry would
+        # instead resolve against the overlay file's own $RUNNER_TEMP-style
+        # scratch directory (never a real ancestor of `workspace`) once the
+        # nested Action's CLI reads it back from `config-path`.
+        assert resolved == [str((workspace / "include").resolve())]
+        config_path = Path(result.outputs["config-path"])
+        assert not resolved[0].startswith(str(config_path.parent))
+
+    def test_discovered_multiple_relative_include_dirs_all_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [a, b]\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["include_dirs"] == [
+            str((workspace / "a").resolve()),
+            str((workspace / "b").resolve()),
+        ]
+
+    def test_discovered_absolute_include_dir_is_left_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        abs_dir = str(tmp_path / "somewhere-else")
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            f"compile:\n  include_dirs: [{abs_dir}]\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["include_dirs"] == [abs_dir]
+
+    def test_explicit_build_config_relative_include_dir_also_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        """Finding 2 applies to an explicit build-config too -- an explicit
+        --config with a relative compile.include_dirs breaks exactly the
+        same way a discovered one does the moment its document moves to
+        this step's own overlay file."""
+        workspace = make_workspace(tmp_path)
+        explicit_dir = workspace / "explicit-project"
+        explicit_dir.mkdir()
+        explicit_config = explicit_dir / "explicit.yml"
+        explicit_config.write_text(
+            "compile:\n  include_dirs: [include]\n", encoding="utf-8"
+        )
+        result = run_step(
+            _overlay_step(),
+            workspace=workspace,
+            env={"BASE_CONFIG": str(explicit_config)},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["include_dirs"] == [
+            str((explicit_dir / "include").resolve())
+        ]

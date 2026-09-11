@@ -308,6 +308,7 @@
         "abicheck/compatibility_evaluation_wiring.py",
         "abicheck/contract_context.py",
         "abicheck/contract_context_io.py",
+        "abicheck/contract_gate_require_complete_provenance.py",
         "abicheck/contract_pipeline.py",
         "abicheck/contract_replay.py",
         "abicheck/contract_scoped_promotion.py",
@@ -378,6 +379,7 @@
         "report"
       ],
       "legacy_paths": [
+        "abicheck/action_config_overlay.py",
         "abicheck/cli.py",
         "abicheck/cli_aggregate.py",
         "abicheck/cli_audit.py",

@@ -455,83 +455,33 @@ def with_resolved_gate(
     provenance entry any more (PR G2 deleted the manual selector; purely
     derived now).
 
-    *require_complete_analysis* is the front end's own resolved
-    ``assurance.require_complete`` value -- the exact sibling of
-    *exit_code_scheme*/*severity* above, threaded through for the identical
-    reason: :func:`build_evaluation_context` records a built-in-default
-    :class:`GateConfig` (``require_complete_analysis=False``) since it never
-    sees what the front end actually resolved that field to (CLI flag while
-    one existed, or ``.abicheck.yml``'s ``assurance.require_complete`` now).
-    Leaving it at ``None`` here (the release fan-out's own caller, which has
-    no per-library equivalent of this field yet) preserves the previous
-    "copy the existing default forward" behavior rather than silently
-    asserting a value nobody resolved.
-
-    An explicit ``True`` also stamps ``field_provenance["gate.
-    require_complete_analysis"]`` (P2, Codex review, fresh evidence after
-    the fix above: the receipt carried the *value* but not *why* it was
-    enabled). ``assurance.require_complete`` has no D7 resolver of its own
-    -- ``resolve_compare_config`` reads it straight off ``.abicheck.yml``
-    with no CLI override and no pack route (the same "simple config-demoted
-    key" shape as ``gate.fail_on_removed_library``/``release.dso_only``,
-    neither of which is projected into the canonical resolver's
-    ``ProjectCompatibilityInputs`` either), so an explicit ``True`` can only
-    ever have come from the project config document the caller resolved --
-    this function can safely name that source itself rather than the
-    caller constructing and threading a provenance object for a value with
-    only one possible non-default origin. ``False``/``None`` get no entry,
-    the same "absent, not defaulted" rule *severity_provenance* follows for
-    an unsupplied category.
-
-    *project_config_path*/*project_config_sha256* identify the exact
-    ``.abicheck.yml`` document that supplied ``assurance.require_complete``
-    -- the same path/digest identity every OTHER project-config-sourced
-    ``field_provenance`` entry in this same receipt already carries (e.g.
-    the ``policy.overrides``/``surface.internal_namespaces`` entries
-    ``compatibility_evaluation_frontend.py`` builds with
-    ``path=project_path, sha256=project_sha256``). Without them, a project
-    whose ``.abicheck.yml`` sets ONLY ``assurance.require_complete`` (no
-    other override) left this entry naming just the layer -- unable to
-    identify or replay which exact document/revision enabled the gate
-    (P2, Codex review, fresh evidence). The caller already has these values
-    resolved for the SAME request (they are what built *config*'s own other
-    project-config-sourced entries); this function only threads them
-    through rather than re-reading the file a second time. ``None`` for
-    either (the release fan-out's own caller, which has no project-config
-    document of its own to name here) falls back to the layer-only entry
-    this function has always produced.
+    *require_complete_analysis*/*project_config_path*/
+    *project_config_sha256* are the sibling ``gate.require_complete_analysis``
+    field's own resolved value and provenance identity, threaded through for
+    the identical reason as *severity_provenance* above -- see
+    ``contract_gate_require_complete_provenance.py``'s module docstring for
+    the full account (split out purely to stay under this file's own
+    ``no_growth`` cap).
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
+    from .contract_gate_require_complete_provenance import (
+        resolve_require_complete_analysis_provenance,
+    )
 
     config = context.evaluation_context.resolved_config
     provenance = dict(config.provenance)
     for category, entry in severity_provenance.items():
         provenance[SEVERITY_CATEGORY_FIELDS[category]] = entry
-    if require_complete_analysis:
-        provenance["gate.require_complete_analysis"] = ValueProvenance(
-            layer=SelectorLayer.PROJECT_CONFIG,
-            source_kind="project_config" if project_config_path else None,
-            path=project_config_path,
-            sha256=project_config_sha256,
-            field_location="assurance.require_complete",
-            selected_by=(
-                (
-                    SelectedByEntry(
-                        layer=SelectorLayer.PROJECT_CONFIG,
-                        option="assurance.require_complete",
-                        path=project_config_path,
-                        sha256=project_config_sha256,
-                    ),
-                )
-                if project_config_path
-                else ()
-            ),
+    resolved_require_complete_analysis, require_provenance = (
+        resolve_require_complete_analysis_provenance(
+            default_value=config.gate.require_complete_analysis,
+            require_complete_analysis=require_complete_analysis,
+            project_config_path=project_config_path,
+            project_config_sha256=project_config_sha256,
         )
-    resolved_require_complete_analysis = (
-        config.gate.require_complete_analysis
-        if require_complete_analysis is None
-        else require_complete_analysis
     )
+    if require_provenance is not None:
+        provenance["gate.require_complete_analysis"] = require_provenance
     return replace(
         context,
         evaluation_context=replace(

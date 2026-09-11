@@ -596,15 +596,14 @@ from pathlib import Path
 
 import yaml
 
+from abicheck.action_config_overlay import (
+    rebase_relative_config_paths,
+    strip_untrusted_execution_keys,
+)
 from abicheck.buildsource.build_config import BuildConfig
-from abicheck.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
 from abicheck.config_paths import (
     discover_build_config,
     find_config_in_dir,
-    project_root_for_config,
-)
-from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
-    resolve_max_json_object_nodes_cfg,
 )
 
 
@@ -842,18 +841,18 @@ else:
 # already the trusted case cli_options.py's own `explicit_config` check
 # grants, so nothing here is stripped from it.
 if merge_mode != "explicit":
-    if isinstance(base.get("build"), dict) and "query" in base["build"]:
-        stripped_build = dict(base["build"])
-        del stripped_build["query"]
-        base["build"] = stripped_build
-        print(
-            "::warning::the discovered .abicheck.yml's build.query was dropped "
-            "from this Action's synthesized --config overlay -- an "
-            "auto-discovered config is never trusted to run a build-system "
-            "query; set build-config explicitly (naming a config you reviewed) "
-            "to opt in.",
-            file=sys.stderr,
-        )
+    # build.query/compile.compiler stripping and the resource_limits cap are
+    # identical in both spirit and implementation to
+    # actions/check-target/action.yml's own "Generate assurance-overlay
+    # config" step -- both fold a possibly-untrusted, auto-discovered base
+    # document into a synthesized, always-explicit overlay, and both must
+    # withhold the same executable-authorized status from it. Shared via
+    # abicheck.action_config_overlay (see its own module docstring) so the
+    # two can't silently drift; build.compile_db stays this function's own
+    # responsibility below (see that module's docstring for why -- this
+    # merge keeps a demonstrably-resolving discovered compile_db instead of
+    # always stripping it).
+    base = strip_untrusted_execution_keys(base)
     if isinstance(base.get("build"), dict) and "compile_db" in base["build"]:
         # A different concern from build.query above (that one is a trust/
         # execution gate) -- here the field itself is harmless, but
@@ -914,69 +913,12 @@ if merge_mode != "explicit":
                 "config you reviewed) to opt in.",
                 file=sys.stderr,
             )
-    if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
-        stripped_compile = dict(base["compile"])
-        del stripped_compile["compiler"]
-        base["compile"] = stripped_compile
-        print(
-            "::warning::the discovered .abicheck.yml's compile.compiler was "
-            "dropped from this Action's synthesized --config overlay -- an "
-            "auto-discovered config is never trusted to select a compiler "
-            "executable; set build-config explicitly (naming a config you "
-            "reviewed) to opt in.",
-            file=sys.stderr,
-        )
-    # Codex review, fresh evidence, third round: forwarding this merged
-    # overlay via --config makes the CLI's own explicit-vs-auto-discovered
-    # check (resolve_dispatch_compile_context's `_config_explicit`) see an
-    # *explicit* --config, which the compare_bundle_facts dispatch trusts to
-    # *raise* resource_limits.max_bundle_facts_decode_nodes past the
-    # conservative default -- laundering this discovered, repository-
-    # controlled value into that trusted status. Reuses the identical
-    # resolve_max_json_object_nodes_cfg() the CLI itself calls, with
-    # config_explicit=False, so the two can never drift: this only ever
-    # caps the value down (a lower budget is never a decode-bomb risk and
-    # is left untouched), never strips it outright.
-    if isinstance(base.get("resource_limits"), dict):
-        _configured_nodes = base["resource_limits"].get("max_bundle_facts_decode_nodes")
-        _capped_nodes = resolve_max_json_object_nodes_cfg(
-            _configured_nodes if isinstance(_configured_nodes, int) and not isinstance(_configured_nodes, bool) else None,
-            config_explicit=False,
-            default=DEFAULT_MAX_JSON_OBJECT_NODES,
-        )
-        if _capped_nodes != _configured_nodes:
-            stripped_rl = dict(base["resource_limits"])
-            stripped_rl["max_bundle_facts_decode_nodes"] = _capped_nodes
-            base["resource_limits"] = stripped_rl
-            print(
-                "::warning::the discovered .abicheck.yml's "
-                "resource_limits.max_bundle_facts_decode_nodes was capped to "
-                f"the conservative default ({DEFAULT_MAX_JSON_OBJECT_NODES}) "
-                "when synthesizing this Action's --config overlay -- an "
-                "auto-discovered config is never trusted to raise this "
-                "pre-json.loads() decode-bomb budget; set build-config "
-                "explicitly (naming a config you reviewed) to opt in.",
-                file=sys.stderr,
-            )
+    # compile.compiler stripping and the resource_limits cap are handled by
+    # strip_untrusted_execution_keys() above, alongside build.query -- see
+    # that call's own comment.
 
-if found_path is not None and isinstance(base.get("compile"), dict):
-    include_dirs = base["compile"].get("include_dirs")
-    if include_dirs is not None:
-        root = project_root_for_config(found_path)
-
-        def _abs(p: object) -> object:
-            if not isinstance(p, str):
-                return p
-            pp = Path(p)
-            return str(pp) if pp.is_absolute() else str((root / pp).resolve())
-
-        compile_blk = dict(base["compile"])
-        compile_blk["include_dirs"] = (
-            [_abs(p) for p in include_dirs]
-            if isinstance(include_dirs, list)
-            else _abs(include_dirs)
-        )
-        base["compile"] = compile_blk
+if found_path is not None:
+    base = rebase_relative_config_paths(base, found_path=found_path)
 
 for key, value in overlay.items():
     if isinstance(value, dict) and isinstance(base.get(key), dict):
