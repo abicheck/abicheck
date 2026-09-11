@@ -460,7 +460,12 @@ only_mutate = [
     "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)
     "abicheck/policy/selectors_namespace_glob.py",  # namespace-glob compile/match (moved out of suppression.py)
     "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
-    "abicheck/serialization.py",  # snapshot (de)serialization
+    "abicheck/serialization.py",  # snapshot (de)serialization facade (orchestration/warning logic)
+    "abicheck/storage/snapshot_codec.py",  # ADR-061 gap E closure package 6: the real codec's decode orchestration/platform-block decode, moved out of serialization.py
+    "abicheck/storage/snapshot_schema_versions.py",  # SCHEMA_VERSION history/thresholds, moved out of serialization.py
+    "abicheck/storage/snapshot_encode.py",  # AbiSnapshot -> dict/JSON encode direction, moved out of serialization.py
+    "abicheck/storage/snapshot_decode_declarations.py",  # functions/variables/types/enums/typedefs decode, moved out of serialization.py
+    "abicheck/storage/snapshot_reliability_flags.py",  # the seven *_facts_reliable flag computations, moved out of serialization.py
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = [
