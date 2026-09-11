@@ -60,8 +60,18 @@ def _padded_body(total_length: int) -> str:
     if total_length <= len(head):
         return head
     filler = "# padding\n"
-    pad = (total_length - len(head)) // len(filler) + 1
-    return head + filler * pad
+    remaining = total_length - len(head)
+    whole, partial = divmod(remaining, len(filler))
+    body = head + filler * whole
+    if partial:
+        # A truncated final comment line, so the body is *exactly* the
+        # requested length rather than rounded up past it -- otherwise the
+        # `limit - 1` case in the sweep below silently ran at or above the
+        # limit and proved nothing about the boundary (CodeRabbit review,
+        # PR #1230). `partial >= 1`, and a comment line of any length is
+        # still a valid, no-op shell line, so this never changes behavior.
+        body += "#" * (partial - 1) + "\n"
+    return body
 
 
 def _real_run_bodies() -> list[str]:
@@ -101,8 +111,11 @@ def _real_run_bodies() -> list[str]:
 )
 def test_run_step_executes_a_body_of_any_length(tmp_path: Path, size: int) -> None:
     workspace = make_workspace(tmp_path)
+    body = _padded_body(size)
+    # The sweep is only about the boundary if the body really is that long.
+    assert len(body) == size
     result = run_step(
-        {"run": _padded_body(size)},
+        {"run": body},
         workspace=workspace,
         env={"PADDED_SIZE": str(size)},
     )
@@ -121,8 +134,10 @@ def test_largest_real_step_body_is_executable_by_the_harness(tmp_path: Path) -> 
     assert bodies, "no run: steps discovered — the sweep above would be vacuous"
     longest = max(len(body) for body in bodies)
     workspace = make_workspace(tmp_path)
+    padded = _padded_body(longest)
+    assert len(padded) == longest
     result = run_step(
-        {"run": _padded_body(longest)},
+        {"run": padded},
         workspace=workspace,
         env={"PADDED_SIZE": str(longest)},
     )
@@ -145,6 +160,20 @@ def test_step_body_script_is_not_left_inside_the_workspace(tmp_path: Path) -> No
     )
     assert result.returncode == 0, result.stderr
     assert not [name for name in result.tree() if "_step_body" in name]
+    # Nor left behind beside it: the script is deleted in a `finally`, so a
+    # caller whose workspace parent is not a pytest-managed temporary
+    # directory never accumulates one file per step (CodeRabbit review).
+    assert not list(workspace.parent.glob("_step_body_*.sh"))
+
+
+def test_step_body_script_is_cleaned_up_even_when_the_body_fails(
+    tmp_path: Path,
+) -> None:
+    """The cleanup is in a `finally`, so a non-zero exit is covered too."""
+    workspace = make_workspace(tmp_path)
+    result = run_step({"run": "exit 3\n"}, workspace=workspace)
+    assert result.returncode == 3
+    assert not list(workspace.parent.glob("_step_body_*.sh"))
 
 
 def test_body_reaches_bash_byte_for_byte(tmp_path: Path) -> None:

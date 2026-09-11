@@ -273,19 +273,27 @@ def run_step(
     # reach bash byte-for-byte as the YAML holds it.
     body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
     body.write_bytes(step["run"].encode("utf-8"))
-    proc = subprocess.run(
-        # `-e` as well as pipefail: the runner invokes a `run:` body as
-        # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without it a
-        # command failing mid-body left returncode 0 here while the real step
-        # failed — every `assert result.returncode == 0` in the workflow tests
-        # was weaker than the thing it models (CodeRabbit review).
-        [bash_executable(), "-eo", "pipefail", str(body).replace("\\", "/")],
-        cwd=workspace,
-        env=step_env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        proc = subprocess.run(
+            # `-e` as well as pipefail: the runner invokes a `run:` body as
+            # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without
+            # it a command failing mid-body left returncode 0 here while the
+            # real step failed — every `assert result.returncode == 0` in the
+            # workflow tests was weaker than the thing it models (CodeRabbit
+            # review).
+            [bash_executable(), "-eo", "pipefail", str(body).replace("\\", "/")],
+            cwd=workspace,
+            env=step_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    finally:
+        # Unconditional, so a timeout or a spawn failure does not leave the
+        # script behind either: a caller passing a workspace whose parent is
+        # not itself a pytest-managed temporary directory would otherwise
+        # accumulate one file per step (CodeRabbit review, PR #1230).
+        body.unlink(missing_ok=True)
     # `$GITHUB_OUTPUT` is written by the step, not by us, so its bytes are
     # whatever the runner's shell produced. On Windows a non-ASCII input
     # reaches Git Bash through the ANSI code page and comes back as cp1252,
