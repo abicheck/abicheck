@@ -120,3 +120,30 @@
   (`abicheck.action_config_overlay.apply_sources_root_config_blocks`)
   `action/run.sh`'s own equivalent compile-context overlay merge now uses
   too, so the two callers cannot independently drift on this promotion.
+- **The assurance-overlay step's sources-root promotion now also carries
+  `compile:`/`source:`/`debug:`, not just `build:`/`sources:`, whenever
+  this check-target invocation is unambiguously single-sided.** The
+  previous fix above deliberately excluded these three blocks, believing
+  the step had no reliable way to tell whether the nested "Run analysis"
+  invocation resolves them single-sidedly or pair-wide. It does: this
+  step's own `kind`/`baseline-channel` inputs already determine "Run
+  analysis"'s `mode`/`old-library` (mirroring `action/run.sh`'s own
+  `_compile_context_sources_pairwise`) — `kind: target` (baseline or
+  audit) always resolves `old-library` to a stored JSON snapshot (or has
+  none at all), unconditionally single-sided; only `kind: bundle` with a
+  real baseline resolves `old-library` to a directory of live ELF member
+  binaries, genuinely pair-wide. A new `SOURCES_PAIRWISE` step env
+  (computed from those two inputs) now gates the block selection the
+  identical way `action/run.sh` already does, including reassigning the
+  `compile.include_dirs` rebase anchor to the sources-root document only
+  when `compile:` was actually promoted from it.
+- **`analysis-assurance-complete` now rejects any value other than
+  `true`/`false` instead of silently treating it as `false`.**
+  `validate-inputs.sh` had no enum validation for this input at all,
+  unlike its sibling boolean-like inputs (e.g. `allow-new-target`) — a
+  stray `True`, `yes`, or a typo used to be silently read as `false` by
+  the "Generate assurance-overlay config" step's exact-string `==
+  'true'` guard, SKIPPING that step entirely and running the analysis
+  with no assurance floor at all, with no diagnostic. Now validated with
+  the same `case ... in true | false) ;; *) _fail ...` pattern its
+  sibling inputs already use.
