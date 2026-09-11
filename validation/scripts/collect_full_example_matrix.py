@@ -433,6 +433,10 @@ def _lane_record(label: str, result: dict[str, Any] | None) -> dict[str, Any]:
         "got": result.get("got"),
         "message": result.get("message", ""),
         "kinds_strict": result.get("kinds_strict"),
+        # Ground-truth assertions this lane could not check (see the row-level
+        # field of the same name in `build_matrix`). Absent for every lane
+        # that checks everything its case declares.
+        "unvalidated_assertions": result.get("unvalidated_assertions") or [],
     }
 
 
@@ -589,6 +593,18 @@ def build_matrix(
             # lane's strict-kinds signal so "COVERED" isn't read as "fully
             # calibrated" when kinds_strict == "mismatch".
             "kinds_strict": (proof_lane_record or {}).get("kinds_strict"),
+            # Same reasoning one step further: a lane can pass while leaving
+            # part of the case's own ground truth unasserted, because the
+            # public report carries no equivalent of it. The audit lane's
+            # `provider_assertions` are today's instance -- case151 exists to
+            # prove two providers corroborate one finding, and nothing in the
+            # `compare --no-baseline` report exposes provider attribution
+            # (Codex review). Surfacing it here is what keeps COVERED from
+            # reading as "this case is fully proven".
+            "unvalidated_assertions": (proof_lane_record or {}).get(
+                "unvalidated_assertions"
+            )
+            or [],
             "lanes": lanes,
         }
         if runtime_lane is not None:

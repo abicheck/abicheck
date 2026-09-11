@@ -335,11 +335,27 @@ def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[s
       (ground truth's ``provider_assertions``) have no ``compare``-report
       equivalent yet -- ADR-068 Phase 6 retired the whole-audit orchestrator
       (``scan_engine.py``) that built them, and no replacement per-check
-      coverage projection has landed in ``report/no_baseline.py``. Not
-      checked here; the underlying provider/coverage facts are still
-      exercised directly by
+      coverage projection has landed in ``report/no_baseline.py``. It is
+      therefore **not** checked here, and a case whose ground truth carries
+      one says so in its own result (``unvalidated_assertions``) rather than
+      passing as a complete proof: case151 exists precisely to prove a
+      finding is corroborated by *both* ``public_header_ast`` and
+      ``source_index``, so a regression dropping the latter while still
+      emitting ``private_header_leak`` would be invisible to every check
+      this runner can make (Codex review). The underlying provider/coverage
+      facts are still exercised directly by
       ``abicheck/buildsource/cross_source_checks.py``'s own unit tests
-      (``tests/test_cross_source_checks.py``).
+      (``tests/test_cross_source_checks.py``) -- which is detector-level
+      proof, not proof of this case's public workflow behavior.
+
+    What *is* checked, and was not before: each ``findings[]`` row's own
+    retained ``verdict``. The top-level verdict being ``null`` is required
+    by D2 but says nothing about classification, so asserting only the
+    finding *kind* let a reclassification of e.g.
+    ``header_build_context_mismatch`` from ``API_BREAK`` to a risk or
+    compatible verdict pass silently (Codex review). The oracle is the
+    catalog's own hand-curated ``abi_break``/``api_break``/``bad_practice``
+    flags, not anything the implementation derives.
     """
     snapshot = example_catalog.case_dir(case_id) / "snapshot.abi.json"
     command = [
@@ -376,6 +392,14 @@ def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[s
         errors.append(
             f"finding kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
         )
+    finding_verdicts = sorted(
+        {
+            str(finding["verdict"])
+            for finding in (payload.get("findings") or [])
+            if isinstance(finding, dict) and finding.get("verdict")
+        }
+    )
+    errors.extend(_audit_verdict_errors(entry, finding_verdicts))
     result = _result(
         case_id,
         command,
@@ -388,7 +412,69 @@ def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[s
     )
     result["expected_kinds"] = sorted(expected_kinds)
     result["expected_returncode"] = 0
+    result["finding_verdicts"] = finding_verdicts
+    result["expected_finding_verdicts"] = sorted(_expected_audit_verdicts(entry))
+    # Machine-visible, not prose-only: `collect_full_example_matrix.py`
+    # surfaces this on the COVERED row the same way it surfaces
+    # `kinds_strict`, so a PASS here is never read as "every ground-truth
+    # assertion for this case was checked".
+    result["unvalidated_assertions"] = (
+        ["provider_assertions"] if entry.get("provider_assertions") else []
+    )
     return result
+
+
+#: Finding-level verdicts acceptable for each ground-truth classification
+#: flag. The catalog's flags are the oracle; this table is the only place
+#: they are mapped onto the report's own verdict vocabulary.
+_AUDIT_BREAK_VERDICTS = {
+    "abi_break": {"BREAKING"},
+    "api_break": {"API_BREAK"},
+}
+#: What a purely-hygiene case (`bad_practice`, no break flag) may emit. A
+#: break verdict here means the classification regressed in the *other*
+#: direction, which asserting only on kinds also missed.
+_AUDIT_HYGIENE_VERDICTS = {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}
+
+
+def _expected_audit_verdicts(entry: dict[str, Any]) -> set[str]:
+    """The finding-level verdicts *entry*'s ground truth allows."""
+    required: set[str] = set()
+    for flag, verdicts in _AUDIT_BREAK_VERDICTS.items():
+        if entry.get(flag):
+            required |= verdicts
+    return required or set(_AUDIT_HYGIENE_VERDICTS)
+
+
+def _audit_verdict_errors(entry: dict[str, Any], got: list[str]) -> list[str]:
+    """Compare an audit's per-finding verdicts against the catalog's flags.
+
+    A case flagged ``abi_break``/``api_break`` must actually carry a finding
+    at that severity -- the top-level verdict is ``null`` for every audit, so
+    without this the classification is unasserted. A hygiene-only case must
+    carry *no* break-severity finding, which catches the same regression in
+    the opposite direction.
+    """
+    allowed = _expected_audit_verdicts(entry)
+    if not got:
+        # No findings at all is already reported by the kinds check; adding a
+        # second error for it would just duplicate that message.
+        return []
+    breaking_expected = allowed != _AUDIT_HYGIENE_VERDICTS
+    if breaking_expected and not (set(got) & allowed):
+        return [
+            f"finding verdicts {got!r} carry none of {sorted(allowed)!r}, "
+            f"which this case's ground truth requires "
+            f"(abi_break={bool(entry.get('abi_break'))}, "
+            f"api_break={bool(entry.get('api_break'))})"
+        ]
+    if not breaking_expected and (unexpected := set(got) - allowed):
+        return [
+            f"finding verdicts {sorted(unexpected)!r} are break-severity, but "
+            f"this case's ground truth is hygiene-only "
+            f"(bad_practice={bool(entry.get('bad_practice'))})"
+        ]
+    return []
 
 
 def _make_pack(

@@ -32,8 +32,11 @@ directories, and translation units were in view.
 `--include` / `-I` is the one *compile-context* dial that stays a per-run CLI
 flag; every other compile-context dial is config-only (`.abicheck.yml`'s
 `compile:` block) — there is no per-run CLI spelling for those at all.
-`--env-matrix` is not a compile-context dial (it selects which environments to
-compare, not how headers are parsed) and remains a per-run `compare` flag:
+Deployment constraints are not a compile-context dial either (they declare
+which environments the library ships into, not how headers are parsed), and
+they are config-only too: ADR-068 D5 demoted the former `compare --env-matrix
+FILE` to `.abicheck.yml`'s `deployment:` key, which embeds the environment
+matrix inline. No CLI spelling for it exists any more.
 
 | Dial | Use |
 |---|---|
@@ -43,7 +46,7 @@ compare, not how headers are parsed) and remains a per-run `compare` flag:
 | `compile:`'s `options` key (list) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
 | `compile:`'s `sysroot`/`nostdinc` keys | header search context beyond `--include` |
 | `compile:`'s `frontend` key | which header-AST backend parses the headers |
-| `--env-matrix` (compare only) | compare across several environments in one run |
+| `deployment:`'s keys | declared target environments and runtime floors |
 
 Project-level defaults belong in `.abicheck.yml`; the exhaustive key
 reference is [the config file page](../../docs/reference/config-file.md),
