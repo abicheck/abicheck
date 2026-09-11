@@ -33,6 +33,7 @@ from hypothesis import given, strategies as st
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.opaque_types import OpaqueTypeIndex, find_opaque_struct_types
 from abicheck.diff_filtering import (
+    _OPAQUE_DOWNGRADEABLE,
     _downgrade_opaque_struct_changes,
     _downgrade_opaque_type_changes,
     _find_by_value_types,
@@ -699,8 +700,11 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         must be bit-for-bit the pre-migration bare-string-set result."""
         old = _snap([_record("Op", is_opaque=True)])
         new = _snap([_record("Op", is_opaque=True)])
-        out = _downgrade_opaque_struct_changes([_struct_size_change("Op")], old, new)
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes(
+            [_struct_size_change("Op")], old, new
+        )
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_stable_identity_closes_a_qualification_mismatch(self) -> None:
         """A real false negative the bare-string tracker could not see:
@@ -711,8 +715,11 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _record("Op", is_opaque=True, entity_id=_STABLE_ID)
         new = _record("Op", is_opaque=True, entity_id=_STABLE_ID)
         change = _struct_size_change("ns::Op", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes(
+            [change], _snap([old]), _snap([new])
+        )
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_a_stable_tier_miss_always_falls_back_to_spelling(self) -> None:
         """This index is never the product of a paired ``intersect()``, so
@@ -725,8 +732,11 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         # A change carrying an unrelated stable id, but the correct bare
         # spelling.
         change = _struct_size_change("Op", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes(
+            [change], _snap([old]), _snap([new])
+        )
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_embedded_by_value_stays_spelling_based_and_still_blocks_suppression(
         self,
@@ -740,7 +750,8 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _snap([op, wrapper])
         new = _snap([op, wrapper])
         change = _struct_size_change("Op", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_a_visible_types_stable_id_never_enters_the_index_via_a_name_collision(
@@ -764,7 +775,8 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _snap([opaque_handle, visible_handle])
         new = _snap([opaque_handle, visible_handle])
         change = _struct_size_change("other::Handle", entity_id=_OTHER_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_a_visible_types_bare_name_fallback_is_unaffected_by_the_is_opaque_filter(
@@ -782,8 +794,9 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _snap([opaque_handle, visible_handle])
         new = _snap([opaque_handle, visible_handle])
         change = _struct_size_change("Handle")
-        out = _downgrade_opaque_struct_changes([change], old, new)
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_a_now_visible_types_own_stable_id_is_not_smuggled_in_via_a_namesake(
         self,
@@ -811,7 +824,8 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
             ]
         )
         change = _struct_size_change("ns::Handle", entity_id=stable_id)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_missing_identity_evidence_on_the_other_side_is_not_treated_as_absence(
@@ -839,7 +853,8 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
             ]
         )
         change = _struct_size_change("ns::Handle", entity_id=stable_id)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_embedded_by_value_exclusion_matches_across_a_qualification_mismatch(
@@ -867,7 +882,8 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _snap([opaque_handle, wrapper])
         new = _snap([opaque_handle, wrapper])
         change = _struct_size_change("ns::Handle", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_a_stable_counterpart_under_a_different_spelling_is_checked_before_name_absence(
@@ -889,7 +905,36 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old_snap = _snap([old])
         new_snap = _snap([new])
         change = _struct_size_change("ns::Handle", entity_id=stable_id)
-        out = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        out, filtered = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        assert not filtered
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
+    def test_an_identity_less_counterpart_spelled_via_qualified_name_is_not_absence(
+        self,
+    ) -> None:
+        """An eighth false positive (Codex review, PR #1218, round 10): old's
+        opaque declaration is bare-named ("Handle") but its own
+        ``qualified_name`` is "ns::Handle"; new's now-visible counterpart is
+        spelled directly as "ns::Handle" in ``RecordType.name`` and carries
+        no resolvable ``entity_id`` at all. The stable tier's absence check
+        used to compare old's bare ``name`` ("Handle") against a
+        bare-``name``-only set built from ``new.types`` -- which never
+        contains "Handle" -- and conclude the entity was genuinely absent
+        from ``new``, wrongly adding old's stable id to the index and then
+        letting it suppress a real, observable layout change on the
+        now-visible type. Checking old's ``qualified_name`` too (mirroring
+        the identity bridge's own round-9 fix) recognizes "ns::Handle" as a
+        real counterpart, so this is not the asymmetric-absence case."""
+        stable_id = _STABLE_ID
+        old = _record(
+            "Handle", is_opaque=True, entity_id=stable_id, qualified_name="ns::Handle"
+        )
+        new = _record("ns::Handle", is_opaque=False, entity_id=None)
+        old_snap = _snap([old])
+        new_snap = _snap([new])
+        change = _struct_size_change("ns::Handle", entity_id=stable_id)
+        out, filtered = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_embedded_by_value_exclusion_ignores_an_unrelated_pointer_elsewhere_in_the_field(
@@ -913,7 +958,8 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _snap([opaque_handle, wrapper])
         new = _snap([opaque_handle, wrapper])
         change = _struct_size_change("ns::Handle", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_a_pointer_to_data_member_field_does_not_count_as_by_value_embedding(
@@ -934,7 +980,57 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         old = _snap([opaque_handle, wrapper])
         new = _snap([opaque_handle, wrapper])
         change = _struct_size_change("Handle", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
+
+class TestDowngradeOpaqueStructChangesNeverFabricatesAnAddition:
+    """A matched opaque change's *original* ``ChangeKind`` must survive --
+    never silently mislabeled as ``TYPE_FIELD_ADDED_COMPATIBLE`` (Codex
+    review, PR #1218, round 10). This predates the ADR-063 Phase 10
+    migration itself, but the migration is what brought this call site
+    under review: every ``_OPAQUE_DOWNGRADEABLE`` kind used to be replaced
+    unconditionally, turning an observed removal or mutation into a
+    fabricated addition -- a "record before disposing" violation (root
+    ``AGENTS.md``), since the *fact* reported (an addition) was not the
+    fact detected (a removal/mutation/size or alignment change)."""
+
+    @pytest.mark.parametrize(
+        "kind",
+        sorted(_OPAQUE_DOWNGRADEABLE - {ChangeKind.TYPE_FIELD_ADDED}, key=str),
+    )
+    def test_every_non_addition_downgradeable_kind_is_excluded_not_relabelled(
+        self, kind: ChangeKind
+    ) -> None:
+        from abicheck.diff_helpers import make_change
+
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        old = _snap([opaque_handle])
+        new = _snap([opaque_handle])
+        change = make_change(
+            kind, symbol="Handle", entity_id=_STABLE_ID, old_value="a", new_value="b"
+        )
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not out
+        assert filtered == [change]
+        assert filtered[0].kind == kind
+
+    def test_a_genuine_addition_is_still_relabelled_compatible(self) -> None:
+        from abicheck.diff_helpers import make_change
+
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        old = _snap([opaque_handle])
+        new = _snap([opaque_handle])
+        change = make_change(
+            ChangeKind.TYPE_FIELD_ADDED,
+            symbol="Handle",
+            entity_id=_STABLE_ID,
+            old_value="a",
+            new_value="b",
+        )
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not filtered
         assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
 
 
@@ -1172,8 +1268,11 @@ class TestResolveStructChangeEntityId:
         # be rendered qualified (a real producer-spelling difference) even
         # though RecordType.name is bare.
         change = _struct_size_change("ns::Handle")
-        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes(
+            [change], _snap([old]), _snap([new])
+        )
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     def test_declines_to_guess_under_ambiguity(self) -> None:
         """Two declarations named "Handle" resolve two different ids --
@@ -1259,7 +1358,8 @@ class TestResolveStructChangeEntityId:
         old_snap = _snap([old, wrapper])
         new_snap = _snap([old, wrapper])
         change = _struct_size_change("Handle")  # embedded by value -- not downgraded
-        out = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        out, filtered = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        assert not filtered
         assert out[0] is change
         assert out[0].entity_id is None
 
@@ -1291,8 +1391,11 @@ class TestStructChangeRecordName:
         old = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
         new = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
         change = _struct_field_removed_change("ns::Handle", "count")
-        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes(
+            [change], _snap([old]), _snap([new])
+        )
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_FIELD_REMOVED
 
     def test_the_spelling_tier_also_matches_a_field_level_change_by_record_name(
         self,
@@ -1305,8 +1408,11 @@ class TestStructChangeRecordName:
         old = _record("Handle", is_opaque=True)
         new = _record("Handle", is_opaque=True)
         change = _struct_field_removed_change("Handle", "count")
-        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes(
+            [change], _snap([old]), _snap([new])
+        )
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_FIELD_REMOVED
 
 
 class TestMemberPointerFollowsTemplatedOwners:
@@ -1332,8 +1438,9 @@ class TestMemberPointerFollowsTemplatedOwners:
         old = _snap([opaque_handle, wrapper])
         new = _snap([opaque_handle, wrapper])
         change = _struct_size_change("Handle", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
     @pytest.mark.parametrize(
         "field_type",
@@ -1356,8 +1463,9 @@ class TestMemberPointerFollowsTemplatedOwners:
         old = _snap([opaque_handle, wrapper])
         new = _snap([opaque_handle, wrapper])
         change = _struct_size_change("Handle", entity_id=_STABLE_ID)
-        out = _downgrade_opaque_struct_changes([change], old, new)
-        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+        out, filtered = _downgrade_opaque_struct_changes([change], old, new)
+        assert not out
+        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
 
 # -- Primitive-level property tests: _resolve_struct_change_entity_id ------

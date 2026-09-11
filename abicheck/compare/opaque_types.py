@@ -524,6 +524,28 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         if resolved is not None:
             new_by_stable_id[resolved] = t
 
+    # Every spelling (``name`` *and*, when present, ``qualified_name``) a
+    # declaration on each side is known by -- used only by the stable
+    # tier's own absence check just below, never by ``opaque_types``'s
+    # bare-name criterion above (that computation stays deliberately
+    # spelling-based/lossy per this function's own docstring; only the
+    # stable tier's identity-adjacent absence check needs the stricter
+    # multi-spelling view). A header-AST backend commonly stores the bare
+    # leaf in ``name`` and the real scoped spelling in ``qualified_name``
+    # (the same asymmetry ``_resolve_struct_change_entity_id``'s own
+    # round-9 fix closed for the sibling identity bridge) -- checking
+    # ``name`` alone here would misread a genuinely-present but
+    # identity-less counterpart spelled only via ``qualified_name`` as
+    # absent, letting an old opaque declaration's stable id enter the
+    # index and then get borrowed by that same counterpart's own
+    # ``qualified_name`` (Codex review, PR #1218, round 10).
+    old_all_spellings = old_type_names | {
+        t.qualified_name for t in old.types if t.qualified_name is not None
+    }
+    new_all_spellings = new_type_names | {
+        t.qualified_name for t in new.types if t.qualified_name is not None
+    }
+
     # Check the stable counterpart BY ID first, before ever consulting bare
     # names -- two producers can render the identical entity under two
     # different spellings (this whole module's own premise: "the header
@@ -547,9 +569,9 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # not a new criterion, only a faithful re-check of the one already used
     # to decide this name belongs in ``truly_opaque`` at all.
     stable_ids: set[StableEntityId] = set()
-    for snap, other_type_names, other_by_id in (
-        (old, new_type_names, new_by_stable_id),
-        (new, old_type_names, old_by_stable_id),
+    for snap, other_all_spellings, other_by_id in (
+        (old, new_all_spellings, new_by_stable_id),
+        (new, old_all_spellings, old_by_stable_id),
     ):
         for t in snap.types:
             if t.name not in truly_opaque or not t.is_opaque:
@@ -566,17 +588,22 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
                 # Otherwise: the same entity is visible on the other side
                 # -- decline, regardless of what its name looks like there.
                 continue
-            if t.name not in other_type_names:
+            known_spellings = {t.name}
+            if t.qualified_name is not None:
+                known_spellings.add(t.qualified_name)
+            if not (known_spellings & other_all_spellings):
                 # No entity anywhere on the other side resolves to this
-                # exact id, AND no declaration shares this bare name either
-                # -- genuinely absent by both identity and name, the
-                # asymmetric-existence criterion.
+                # exact id, AND no declaration shares this entity's name OR
+                # qualified name either -- genuinely absent by both
+                # identity and every known spelling, the asymmetric-
+                # existence criterion.
                 stable_ids.add(resolved)
-            # Otherwise: a declaration under this name exists on the other
-            # side, but this exact entity's own identity either did not
-            # resolve there or resolved to a different entity entirely --
-            # decline the stable-tier match. The always-safe spelling tier
-            # still applies via ``declarations``/``local`` above.
+            # Otherwise: a declaration under one of this entity's spellings
+            # exists on the other side, but this exact entity's own
+            # identity either did not resolve there or resolved to a
+            # different entity entirely -- decline the stable-tier match.
+            # The always-safe spelling tier still applies via
+            # ``declarations``/``local`` above.
 
     return OpaqueTypeIndex.build(declarations, stable_ids=stable_ids)
 

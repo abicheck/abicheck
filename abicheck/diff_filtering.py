@@ -1870,13 +1870,18 @@ def _downgrade_opaque_struct_changes(
     changes: list[Change],
     old: AbiSnapshot,
     new: AbiSnapshot,
-) -> list[Change]:
-    """Downgrade BREAKING changes for types that are opaque in both snapshots.
+) -> tuple[list[Change], list[Change]]:
+    """Downgrade/exclude BREAKING changes for types opaque in both snapshots.
 
     If a type is forward-declared only (is_opaque=True) in both old and new
     snapshots, consumers cannot allocate, embed, or sizeof the type — they
     only hold pointers. Layout changes detected via DWARF are invisible to
-    consumers and should be classified as compatible field additions.
+    consumers: a genuine field *addition* is relabelled compatible; every
+    other structural observation (removal, mutation, size/alignment change)
+    is excluded outright rather than relabelled, and returned as the second
+    element of the ``(kept, filtered)`` pair -- see the round-10 docstring
+    note below for why relabelling used to be unconditional and why that
+    was wrong.
 
     **Identity-tiered since ADR-063 Phase 10.** The opaqueness computation
     itself (asymmetric-existence + by-value-embedding) lives in
@@ -1933,27 +1938,57 @@ def _downgrade_opaque_struct_changes(
     :meth:`~abicheck.compare.opaque_types.OpaqueTypeIndex.contains` here,
     closing that pre-existing gap for the spelling tier at the same time
     as wiring the new stable tier through it correctly.
+
+    **Only a real addition is ever relabelled as one** (Codex review, PR
+    #1218, round 10): this predates the ADR-063 migration itself, but the
+    migration is what brought the site under review -- every matched
+    ``_OPAQUE_DOWNGRADEABLE`` kind, ``STRUCT_FIELD_REMOVED``/
+    ``STRUCT_FIELD_OFFSET_CHANGED``/``STRUCT_FIELD_TYPE_CHANGED`` included,
+    used to be unconditionally replaced with ``TYPE_FIELD_ADDED_COMPATIBLE``,
+    turning an observed *removal* or *mutation* into a fabricated addition --
+    a genuine "record before disposing" violation (root ``AGENTS.md``): the
+    original disposition (a removal, say) is not merely reclassified, it is
+    misreported as a different fact than the one detected. Only
+    ``ChangeKind.TYPE_FIELD_ADDED`` -- the one kind in
+    ``_OPAQUE_DOWNGRADEABLE`` that already *is* an addition -- is still
+    substituted with its own compatible counterpart (the observation is the
+    same shape, only the compatibility label changes). Every other matched
+    kind is excluded outright and returned in *filtered*, mirroring the
+    already-established ``_filter_opaque_size_changes`` shape so the
+    post-processing pipeline can route it into ``ctx.opaque_filtered`` --
+    the same non-gating, audited-but-hidden-by-default bucket
+    ``DowngradeOpaqueTypeChanges``'s own opaque-suppressed structural changes
+    reach, rather than either silently vanishing or being counted twice
+    under a fabricated replacement's own disposition.
     """
     index = _find_opaque_struct_types(old, new)
     if not index:
-        return changes
+        return changes, []
 
     result: list[Change] = []
+    filtered: list[Change] = []
     for c in changes:
         lookup_c = _resolve_struct_change_entity_id(c, old, new)
         record_name = _struct_change_record_name(c)
         if c.kind in _OPAQUE_DOWNGRADEABLE and index.contains(lookup_c, record_name):
-            # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
-            result.append(
-                make_change(
-                    ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-                    symbol=c.symbol,
-                    description=f"(opaque struct) {c.description}",
-                    old_value=c.old_value,
-                    new_value=c.new_value,
-                    source_location=c.source_location,
+            if c.kind == ChangeKind.TYPE_FIELD_ADDED:
+                # Genuine addition: relabel as its own compatible counterpart.
+                result.append(
+                    make_change(
+                        ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                        symbol=c.symbol,
+                        description=f"(opaque struct) {c.description}",
+                        old_value=c.old_value,
+                        new_value=c.new_value,
+                        source_location=c.source_location,
+                    )
                 )
-            )
+            else:
+                # Removal/mutation/size/alignment: the observation is not an
+                # addition, so it is excluded on its own merits (opaque
+                # layout is invisible to consumers) rather than fabricated
+                # into one -- see ``filtered``'s docstring note above.
+                filtered.append(c)
         else:
             result.append(c)
-    return result
+    return result, filtered

@@ -935,7 +935,34 @@ def test_determine_confidence_level_binary_only_low():
 
 
 def test_downgrade_opaque_struct_changes_rewrites_to_compatible():
-    # Opaque in both snapshots → structural change rewritten to a compatible add.
+    # Opaque in both snapshots, a genuine addition → rewritten to a
+    # compatible add (the one kind ``_downgrade_opaque_struct_changes``
+    # still relabels; see the size-change sibling test below for the
+    # non-addition case).
+    old = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
+    new = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
+    changes = [
+        Change(
+            kind=ChangeKind.TYPE_FIELD_ADDED,
+            symbol="Op",
+            description="grew",
+            old_value="8",
+            new_value="16",
+            source_location="x.h:1",
+        )
+    ]
+    out, filtered = _downgrade_opaque_struct_changes(changes, old, new)
+    assert len(out) == 1
+    assert not filtered
+    assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+    assert out[0].description.startswith("(opaque struct)")
+    assert out[0].old_value == "8"
+
+
+def test_downgrade_opaque_struct_changes_size_change_excluded_not_relabelled():
+    # Opaque in both snapshots, a non-addition structural change (size) →
+    # excluded outright (not rewritten into a fabricated addition; Codex
+    # review, PR #1218, round 10).
     old = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
     new = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
     changes = [
@@ -948,11 +975,11 @@ def test_downgrade_opaque_struct_changes_rewrites_to_compatible():
             source_location="x.h:1",
         )
     ]
-    out = _downgrade_opaque_struct_changes(changes, old, new)
-    assert len(out) == 1
-    assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
-    assert out[0].description.startswith("(opaque struct)")
-    assert out[0].old_value == "8"
+    out, filtered = _downgrade_opaque_struct_changes(changes, old, new)
+    assert not out
+    assert len(filtered) == 1
+    assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+    assert filtered[0] is changes[0]
 
 
 def test_downgrade_opaque_struct_changes_embedded_by_value_kept():
@@ -974,7 +1001,8 @@ def test_downgrade_opaque_struct_changes_embedded_by_value_kept():
     changes = [
         Change(kind=ChangeKind.STRUCT_SIZE_CHANGED, symbol="Op", description="d")
     ]
-    out = _downgrade_opaque_struct_changes(changes, mk(), mk())
+    out, filtered = _downgrade_opaque_struct_changes(changes, mk(), mk())
+    assert not filtered
     assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
 
@@ -1006,8 +1034,9 @@ def test_downgrade_opaque_struct_changes_pointer_field_not_embedded():
     changes = [
         Change(kind=ChangeKind.STRUCT_SIZE_CHANGED, symbol="Op", description="d")
     ]
-    out = _downgrade_opaque_struct_changes(changes, old, new)
-    assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+    out, filtered = _downgrade_opaque_struct_changes(changes, old, new)
+    assert not out
+    assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
 
 def test_downgrade_opaque_struct_changes_no_opaque_noop():
@@ -1016,7 +1045,9 @@ def test_downgrade_opaque_struct_changes_no_opaque_noop():
     changes = [
         Change(kind=ChangeKind.STRUCT_SIZE_CHANGED, symbol="Op", description="d")
     ]
-    assert _downgrade_opaque_struct_changes(changes, old, new) is changes
+    out, filtered = _downgrade_opaque_struct_changes(changes, old, new)
+    assert out is changes
+    assert not filtered
 
 
 def test_downgrade_opaque_struct_changes_non_matching_kind_passthrough():
@@ -1025,7 +1056,8 @@ def test_downgrade_opaque_struct_changes_non_matching_kind_passthrough():
     old = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
     new = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
     changes = [Change(kind=ChangeKind.FUNC_REMOVED, symbol="Op", description="d")]
-    out = _downgrade_opaque_struct_changes(changes, old, new)
+    out, filtered = _downgrade_opaque_struct_changes(changes, old, new)
+    assert not filtered
     assert out[0].kind == ChangeKind.FUNC_REMOVED
 
 

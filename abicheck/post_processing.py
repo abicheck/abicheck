@@ -158,20 +158,32 @@ class FilterOpaqueSizeChanges:
 
 
 class DowngradeOpaqueStructChanges:
-    """Downgrade changes for types opaque in both snapshots."""
+    """Downgrade/exclude changes for types opaque in both snapshots."""
 
     name = "downgrade_opaque_struct_changes"
-    # Substitution, not a drop: `_downgrade_opaque_struct_changes` replaces a
-    # breaking layout finding with a compatible `TYPE_FIELD_ADDED_COMPATIBLE`
-    # one describing the *same* observation. Recording the original as
-    # dropped would count that one observed change twice -- once as a
-    # disappearance, once as the replacement.
+    # Neither a bare substitution nor a bare drop, so this step is
+    # responsible for its own accounting rather than the generic per-step
+    # audit below (ADR-063 Phase 10, Codex review round 10): a genuine
+    # `TYPE_FIELD_ADDED` match is replaced with a compatible counterpart
+    # describing the same observation (recording the original as dropped
+    # would double-count it), while every other matched kind is a real
+    # exclusion -- not representable as that same kind of relabelling, since
+    # there is no "compatible removal"/"compatible mutation" ChangeKind --
+    # routed into `ctx.opaque_filtered` instead so it is still counted
+    # (`_bucket_total`) and later closed over the ledger as
+    # `non_gating`/`opaque_downgrade`, the same disposition
+    # `_filter_opaque_size_changes`'s own opaque exclusions already get.
+    # `None` here means exactly what it always meant: nothing this step
+    # drops without also accounting for it should be swept up as an
+    # unrecorded disappearance by the generic mechanism.
     dropped_finding_disposition = None
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _downgrade_opaque_struct_changes
 
-        return _downgrade_opaque_struct_changes(changes, ctx.old, ctx.new)
+        changes, filtered = _downgrade_opaque_struct_changes(changes, ctx.old, ctx.new)
+        ctx.opaque_filtered.extend(filtered)
+        return changes
 
 
 class DeduplicateAstDwarf:
