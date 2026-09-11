@@ -343,8 +343,12 @@ class BuildConfig:
     #: ``version:`` makes the config forward-compatible — an *unknown* key (a
     #: newer schema read by an older abicheck) **warns**, never errors, so a
     #: project can adopt a future key without breaking older installs. Keys parsed
-    #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
-    #: ``cross_source_checks.py``, ``targets``/``bundles``/``profiles``/``baseline``/
+    #: by sibling modules -- ``risk_rules`` named ``risk.py``, deleted outright
+    #: in ADR-068 Phase 6 along with ``scan`` (nothing loads a ``risk_rules:``
+    #: block any more; the key stays recognized so an existing file does not
+    #: trip the unknown-key warning) -- ``crosschecks`` was never actually
+    #: parsed by ``cross_source_checks.py`` or anything else, reserved key
+    #: only -- ``targets``/``bundles``/``profiles``/``baseline``/
     #: ``aggregate`` → ``project_targets.py``, ADR-047 §3/G30 P1.5; CLI cleanup
     #: phase two, PR 2 follow-up for ``aggregate``) are listed so they don't
     #: trip the warning.
@@ -439,9 +443,11 @@ class BuildConfig:
         """Type findings for a recognized top-level *scalar* key.
 
         ``risk_rules``/``crosschecks`` are deliberately excluded:
-        :meth:`from_dict` never parses them at all (they are consumed by
-        ``risk.py``/``cross_source_checks.py`` instead), so there is no from_dict-level
-        type contract to enforce for them here.
+        :meth:`from_dict` never parses them at all. ``risk_rules`` was
+        consumed by ``risk.py`` until that module was deleted outright in
+        ADR-068 Phase 6 (nothing loads it now); ``crosschecks`` has never
+        been parsed by anything, reserved key only. Neither has a
+        from_dict-level type contract to enforce here.
         """
         if value is None:
             return []

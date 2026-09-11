@@ -47,10 +47,10 @@ Use `auto` when the domain is a project-level decision you have already
 recorded elsewhere, and a named domain when this run is asking a specific
 question.
 
-`scan --against` accepts the same flag, with the same meaning:
+A stored-baseline `compare` accepts the same flag, with the same meaning:
 
 ```bash
-abicheck scan build/libfoo.so --against baseline.json \
+abicheck compare baseline.json build/libfoo.so \
   --contract exports
 ```
 

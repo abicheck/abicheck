@@ -23,9 +23,9 @@ rides the **same** result document as the comparison it enriches, with each
 finding marked ``candidate_side_enrichment`` -- never a second result, and
 never evaluated on OLD.
 
-Three properties are preserved verbatim from ``scan --abi3``
-(``scan_engine._run_abi3_audit``), which keeps its own copy untouched until
-Phase 6 deletes the command:
+Three properties were preserved verbatim from the retired ``scan --abi3``
+(``scan_engine._run_abi3_audit``, deleted outright in ADR-068 Phase 6 along
+with the rest of ``scan_engine.py`` -- no alias, no deprecation window):
 
 * the findings are the same ``python_stable_abi_violation`` rows produced by
   the same engine (:func:`~abicheck.diff_python.audit_stable_abi_imports`);

@@ -11,7 +11,7 @@ summarizes:
 depends_on:
   - abicheck/package.py
   - abicheck/debian_symbols.py
-  - abicheck/scan_abi3_resolve.py
+  - abicheck/workflows/abi3_audit.py
 lifecycle: active
 generated: false
 ---
@@ -91,7 +91,7 @@ only the stable subset available since a stated Python version. The
 one-build audit checks the promise against the binary:
 
 ```bash
-abicheck scan mymod.abi3.so --abi3 3.9
+abicheck compare --no-baseline mymod.abi3.so --abi3 3.9
 ```
 
 Two more surfaces follow. The Python-level API — the functions, classes

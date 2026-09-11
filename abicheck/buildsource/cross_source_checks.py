@@ -167,7 +167,7 @@ from .cross_source_checks_coherence import (  # noqa: E402
 class CrosscheckConfig:
     """Which cross-checks run, and the per-check finding cap.
 
-    ``enabled`` defaults to every check; the calling orchestrator (``compare``'s automatic stage, or ``scan``'s ``crosschecks:`` config block) narrows it.
+    ``enabled`` defaults to every check; the calling orchestrator (``compare``'s automatic stage) narrows it. The retired ``scan`` command's ``crosschecks:`` config block never actually parsed anything (reserved key only, per ``build_config.py``).
     ``max_per_check`` caps a single check's findings so a pathological library cannot flood the report; 0 disables the cap. ``changed_paths`` is the
     optional PR/revision changed-file set: ``public_to_internal_dependency`` elevates a finding whose internal target was changed (ADR-035 D4 "L5
     reachability ↔ PR changed files") — it only refines the message/confidence, the base finding fires regardless.

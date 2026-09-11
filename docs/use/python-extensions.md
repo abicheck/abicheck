@@ -48,10 +48,10 @@ the imported CPython C-API symbols plus whether the module is a stable-ABI
     the undefined-symbol table carries no per-symbol provider — those names don't
     appear as imports anyway.)
 
-### 1. Audit a single module — `scan --abi3`
+### 1. Audit a single module — `compare --no-baseline --abi3`
 
 ```console
-$ abicheck scan --binary foo.abi3.so --abi3 3.9
+$ abicheck compare --no-baseline foo.abi3.so --abi3 3.9
 …
   abi3_audit         ran           118 CPython import(s) audited against
                                    Py_LIMITED_API 3.9; 1 violation finding(s)
@@ -60,7 +60,7 @@ Cross-source findings (advisory)
   [warning] python_stable_abi_violation: 1
 ```
 
-`scan --abi3 <floor>` classifies every imported CPython symbol against the
+`--abi3 <floor>` classifies every imported CPython symbol against the
 vendored, authoritative Stable-ABI set (all `[function.*]`/`[data.*]` entries
 from CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
 
@@ -101,19 +101,26 @@ build is a contradiction the audit surfaces rather than silently certifies.
     is missing on the 3.9 the tag still advertises. The finding names the floor
     it used so the lowering is explicit.
 
-**Gating.** Like every single-artifact `scan` check, stable-ABI violations are
-**advisory by default** (they appear in the report but do not fail the scan) —
-"adoption never starts by blocking merges". To gate CI on them, promote the
-finding to an error:
+**Gating.** Stable-ABI violations are **advisory by default**
+(`python_stable_abi_violation` is a `RISK` kind — it appears in the report
+but does not fail the run) — "adoption never starts by blocking merges". To
+gate CI on them, promote the finding through a [policy file](policies.md)'s
+`overrides:` block:
 
-```console
-$ abicheck scan --binary foo.abi3.so --abi3 3.9 \
-      --crosscheck python_stable_abi_violation=error
+```yaml
+# policy.yml
+overrides:
+  python_stable_abi_violation: warn   # break|warn|risk|ignore
 ```
 
-Then a violation raises the exit code to the source-break tier (`2`), failing
-the build. Exit `0` = clean or advisory-only; a usage error (bad `--abi3`, or
-`--abi3` on a non-extension) exits non-zero.
+```console
+$ abicheck compare --no-baseline foo.abi3.so --abi3 3.9 --policy policy.yml
+```
+
+`warn` raises the exit code to the source-break tier (`2`), failing the
+build; `break` raises it all the way to the ABI-break tier (`4`). Exit `0` =
+clean or advisory-only; a usage error (bad `--abi3`, or `--abi3` on a
+non-extension) exits non-zero.
 
 ### 2. Compare two versions — `compare`
 

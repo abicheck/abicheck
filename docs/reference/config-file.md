@@ -444,20 +444,24 @@ forward compatibility.
 Both are recognized top-level keys (so they do not trigger the unknown-key
 error), but they are handled outside the `compare` config merge:
 
-- **`risk_rules:`** — a mapping of rule-name → `{ paths: [...], weight: <int> }`
-  path-glob risk profile, parsed by `RiskRules.from_dict` in
-  `buildsource/risk.py`. **Nothing loads it any more:** `scan --risk-rules`,
-  the one option that ever read a `risk_rules:` block, is retired
-  (ADR-068's second 2026-09-09 amendment, ruling (b)), along with the
-  risk-driven `auto` depth escalation the profile fed. The key stays
-  recognized (so an existing file does not trigger the unknown-key error)
-  and the scorer still runs against its built-in default profile to produce
-  the *reported* risk score, but the score no longer selects an evidence
-  level: pin `--depth` to ask for one. See
+- **`risk_rules:`** — formerly a mapping of rule-name → `{ paths: [...],
+  weight: <int> }` path-glob risk profile, parsed by `RiskRules.from_dict` in
+  `buildsource/risk.py`. **Nothing loads it any more, and there is no
+  replacement:** `scan --risk-rules`, the one option that ever read a
+  `risk_rules:` block, was retired ahead of the command itself (ADR-068's
+  second 2026-09-09 amendment, ruling (b)), and `buildsource/risk.py` —
+  including the risk scorer, not only the `auto`-depth-escalation half —
+  was deleted outright along with the rest of `scan` in ADR-068 Phase 6 (no
+  alias, no deprecation window). There is now no risk score of any kind,
+  reported or otherwise; `compare`'s `--depth` is always an explicit pin.
+  The key stays recognized (so an existing file does not trigger the
+  unknown-key error), but is inert. See
   [Evidence depth](../use/evidence-depth.md).
-- **`crosschecks:`** — reserved. The active mechanism for tuning cross-checks is
-  `scan`'s repeatable `--crosscheck KEY=LEVEL` flag; the current code does not
-  read a `crosschecks:` block from the file.
+- **`crosschecks:`** — reserved. It has never actually been read: cross-checks
+  (`buildsource/cross_source_checks.py`) run unconditionally as part of every
+  `compare` invocation, with no per-check tuning surface — the `scan`
+  command's repeatable `--crosscheck KEY=LEVEL` flag that once tuned them was
+  deleted along with `scan` itself (ADR-068 Phase 6).
 
 ---
 

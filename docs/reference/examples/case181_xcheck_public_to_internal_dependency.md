@@ -120,11 +120,18 @@ any edge that reaches a declaration whose own `SOURCE_DECLARES` provenance
 is a non-public file. Neither the binary nor the header AST carries a
 notion of "which internal function does this public function call" — only
 the source graph's call edges do, supplied by the `source_index` provider.
-When the internal declaration's own file is among the revision's changed
-paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
-higher confidence — "this call reaches a file that changed this revision"
-is a stronger signal than "this call reaches *something* internal" — and
-`abicheck scan --since` wires the changed-path set through automatically.
+`CrosscheckConfig.changed_paths` can raise the same finding to higher
+confidence when the internal declaration's own file is among the
+revision's changed paths — "this call reaches a file that changed this
+revision" is a stronger signal than "this call reaches *something*
+internal". The retired `scan --since` wired a changed-path set through to
+this automatically; `compare`'s own migrated cross-source-evolution path
+(`workflows.cross_source_evolution.compute_cross_source_evolution`, the
+`checker.compare()` call site this check now runs through) does not
+currently pass `--since`/`--changed-path` through to
+`CrosscheckConfig.changed_paths` at all, so this case is always reported at
+the lower "reaches something internal" confidence today, regardless of
+`--since`. See `docs/contribute/known-gaps.md`.
 
 ## Why this matters for a real release
 

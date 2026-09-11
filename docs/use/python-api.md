@@ -13,7 +13,7 @@ depends_on:
   - abicheck/model/header_ast_frontends.py
   - abicheck/service_dump_pipeline.py
   - abicheck/service_compare_pipeline.py
-  - abicheck/service_scan.py
+  - abicheck/dry_run_estimate.py
   - abicheck/deadline.py
   - abicheck/policy/depth_evidence_contract.py
 lifecycle: active
@@ -297,15 +297,16 @@ result = run_compare_request(CompareRequest(
 ))
 ```
 
-The one-sided audit (`scan` with no `--against`) has **no** Python entry
-point yet: `compare --no-baseline` is the CLI replacement, and (as of the
-fixes recorded in `docs/contribute/known-gaps.md`'s
+The one-sided audit (`compare --no-baseline`, formerly the retired `scan`
+with no `--against`) has **no** Python entry point yet. As of the fixes
+recorded in `docs/contribute/known-gaps.md`'s
 "`compare --no-baseline` does not yet reproduce `scan`'s audit-mode
-findings" entry) it now reproduces `scan`'s own candidate-side findings and,
-opt-in via `--severity-preset`, its exit-code gating too. Until a typed
-`CompareRequest`/`CompareResult`-shaped entry point exists for it, call the
-CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers)
-rather than the `abicheck scan` CLI, which this migration is retiring.
+findings" entry, `compare --no-baseline` reproduces the retired `scan`'s
+own candidate-side findings and, opt-in via `--severity-preset`, its
+exit-code gating too. Until a typed `CompareRequest`/`CompareResult`-shaped
+entry point exists for it, call the CLI directly (`subprocess`, or
+`abicheck.service`'s CLI-adjacent helpers) instead — `scan` itself was
+deleted outright in ADR-068 Phase 6, no alias, no deprecation window.
 
 `estimate_scan` — the dry-run per-layer cost projection — survives, but takes
 an `InputSpec` plus the run-scoped level arguments rather than a request:
