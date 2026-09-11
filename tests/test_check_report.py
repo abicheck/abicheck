@@ -265,6 +265,85 @@ class TestAugmentReport:
         assert out["check_id"] == "pvxs-bundle@p#c@headers"
         assert out["policy_gate_decision"] == "fail"
 
+    def _no_baseline_report(self, *, findings=(), exit_code=0):
+        """A minimal real `compare --no-baseline` audit document
+        (`report/no_baseline.py::_document_json`'s own shape)."""
+        return {
+            "audit_report_schema_version": "1.3",
+            "no_baseline": True,
+            "library": "libpvxs",
+            "new_version": "1.2.3",
+            "verdict": None,
+            "old_acquisition_state": "declared_absent",
+            "changes": [],
+            "findings": list(findings),
+            "exit_code": exit_code,
+        }
+
+    def test_no_baseline_audit_is_not_an_operational_error(self):
+        """Codex review, fresh evidence: a `compare --no-baseline` audit
+        report's `verdict` is always `null` -- neither a legacy compatibility
+        verdict nor the `"ERROR"` sentinel -- so it previously fell through
+        to the generic `scan_guard_triggered` operational-error branch,
+        which `final_exit_code()` fails unconditionally regardless of
+        gate-mode. A clean, zero-finding audit must classify as no
+        operational error at all."""
+        out = augment_report(
+            self._no_baseline_report(),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out.get("operational_errors") == []
+        assert (
+            final_exit_code(
+                "advisory",
+                real_exit_code=0,
+                operational_error=bool(out["operational_errors"]),
+            )
+            == 0
+        )
+
+    def test_no_baseline_audit_with_a_real_finding_is_still_not_operational(self):
+        """A gating candidate-side finding is a real, reportable result --
+        not an operational failure -- so `operational_errors` stays empty
+        even when the audit found something (the AUDIT_GATE/exit-3 axis is
+        orthogonal to this classification, handled entirely by the real
+        exit code the caller supplies)."""
+        out = augment_report(
+            self._no_baseline_report(
+                findings=[{"kind": "symbol_removed", "severity": "breaking"}],
+                exit_code=3,
+            ),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out.get("operational_errors") == []
+        assert "compatibility_verdict" not in out
+
+    def test_no_baseline_audit_keeps_its_own_schema_version_field(self):
+        """The audit's own `audit_report_schema_version` (`report/
+        no_baseline_document.py`'s own namespace, deliberately not
+        `report_schema_version` -- stamping the compare report's schema
+        counter onto it would offer a different document under the compare
+        report's identity) must be left untouched, and the compare-report
+        `report_schema_version` field must never be added to it."""
+        out = augment_report(
+            self._no_baseline_report(),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["audit_report_schema_version"] == "1.3"
+        assert "report_schema_version" not in out
+
     def test_degrades_effective_depth_from_real_report_signal(self):
         """The Codex-flagged bug: a producer-less build/source check (direct
         --build-info/--sources, no collect-facts composition) must not be

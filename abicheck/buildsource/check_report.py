@@ -461,6 +461,21 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
     """
     if "scan_schema_version" in report:
         return
+    # A `compare --no-baseline` audit document carries its own
+    # `audit_report_schema_version` counter, in its own namespace
+    # (`report/no_baseline_document.py`) -- deliberately not
+    # `report_schema_version`, since the packaged `compare_report.schema.
+    # json` tells consumers to accept any version sharing its MAJOR
+    # component, so stamping an audit into that field would offer a
+    # *different* document under the compare report's identity (the exact
+    # reasoning that field's own docstring gives). Recognised by its own
+    # `no_baseline` discriminator, the same one `_classify_verdict` above
+    # uses, rather than only by the schema-version key's presence, so a
+    # stray hand-authored document missing that key is still left alone
+    # (Codex review, fresh evidence: an unguarded audit document previously
+    # got `report_schema_version` stamped onto it here unconditionally).
+    if "audit_report_schema_version" in report or report.get("no_baseline") is True:
+        return
     if not ("libraries" in report and "old_dir" in report):
         out["report_schema_version"] = REPORT_SCHEMA_VERSION
 
@@ -528,6 +543,26 @@ def _classify_verdict(
             out["compatibility_verdict"] = run_outcome["compatibility"]
         msg = report.get("error") or "no comparison completed: zero library-name pairs matched between OLD and NEW"
         out["operational_errors"] = [{"kind": "no_comparison_completed", "message": str(msg)}]
+        return
+    # `compare --no-baseline`'s own audit document (`report/no_baseline.py`)
+    # always carries `verdict: null` -- ADR-068 D2, "an audit reports no
+    # additions, removals, or compatibility verdict at all," so `raw_verdict`
+    # is unconditionally `None` here, never a legacy compatibility verdict.
+    # Checked via the same `no_baseline` discriminator `action/run.sh`'s own
+    # `no_baseline_audit` report query uses, before either of the checks
+    # below -- without this, `None` matches neither `LEGACY_VERDICT_VALUES`
+    # nor `OPERATIONAL_ERROR_VERDICT` and fell through to the generic
+    # `scan_guard_triggered` branch, misclassifying every no-baseline audit
+    # -- including a clean, zero-finding one -- as an operational failure.
+    # `final_exit_code()` treats any `operational_errors` entry as
+    # unconditional exit 1, ignoring `gate-mode: advisory`/`deferred`
+    # entirely, so this silently failed every `check-target` single-build
+    # audit using the audit-only shape (Codex review, fresh evidence).
+    # There is intentionally no `compatibility_verdict` to set here (D2
+    # again): an audit has none, and leaving the key unset is the truthful
+    # answer, not a degraded one.
+    if report.get("no_baseline") is True:
+        out.setdefault("operational_errors", [])
         return
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict
