@@ -104,7 +104,12 @@ from copy import deepcopy
 from typing import Any
 
 from _gha_expr import eval_gha_expression
-from test_action_compile_context_parity import _DUMP_MODE_MARKER, _run_region
+from test_action_compile_context_parity import (
+    _DUMP_COMPILE_CONTEXT_START,
+    _DUMP_MODE_MARKER,
+    _read_compile_config_overlay,
+    _run_region,
+)
 from test_action_run_contract import ACTION_YML, _step_env_mapping
 from test_reusable_workflows_project_evidence import (
     CHECK_PROJECT,
@@ -821,8 +826,15 @@ def _assert_reaches_real_dump_cli_invocation(
     run.sh's own real dump-mode region (the existing
     test_action_compile_context_parity.py harness -- no new execution
     machinery, but its own `RUN_SH` edge is asserted first via
-    `_assert_run_abicheck_step_invokes_run_sh`), producing the real
-    --ast-frontend/--compiler/--compiler-option CLI flags."""
+    `_assert_run_abicheck_step_invokes_run_sh`), producing the synthesized
+    `--config` overlay `add_compile_context_flags` writes (Phase 7 --
+    `dump` has forwarded these as a `compile:` overlay, not raw
+    `--ast-frontend`/`--compiler`/`--compiler-option` flags, since before
+    this hop existed; a previous revision of this assertion read those raw
+    flags anyway and only ever passed by coincidentally matching an
+    unrelated, now-deleted legacy `scan`-branch occurrence of the same
+    search text elsewhere in `run.sh` -- ADR-068's 2026-09-10 amendment
+    deleted that branch, which is what surfaced the mismatch)."""
     _assert_run_abicheck_step_invokes_run_sh()
     env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
     for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
@@ -839,14 +851,11 @@ def _assert_reaches_real_dump_cli_invocation(
         env_by_input["sysroot"]: "",
         "INPUT_NOSTDINC": "false",
     }
-    cmd, _ = _run_region(_DUMP_MODE_MARKER, env)
-    assert "--ast-frontend" in cmd
-    assert cmd[cmd.index("--ast-frontend") + 1] == ast_frontend
-    assert "--compiler" in cmd
-    assert cmd[cmd.index("--compiler") + 1] == gcc_path
-    assert "--compiler-option" in cmd
-    options = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--compiler-option"]
-    assert options == gcc_options.split()
+    cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
+    compile_blk = _read_compile_config_overlay(cmd)
+    assert compile_blk["frontend"] == ast_frontend
+    assert compile_blk["compiler"] == gcc_path
+    assert compile_blk["options"] == gcc_options.split()
 
 
 def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> None:

@@ -42,12 +42,17 @@ per library meanwhile), `risk-rules` (and with it the risk-driven `auto`
 depth escalation — pin `depth:` explicitly instead) and `build-target` (use
 `mode: dump` to narrow a multi-target workspace). Setting any of them on a
 `mode: scan` step is now an explicit `::error::`, not a silent downgrade. A
-`budget` wall-clock guard is
-different: `compare` itself now has `--budget`, but the Action's `mode:
-compare` input still doesn't read it (a translation gap, not a missing CLI
-capability — see the table below).
+`budget` wall-clock guard is different: `compare` itself now has `--budget`,
+and `mode: scan` with a baseline (`against:`) forwards it exactly as
+before; but `mode: compare` doesn't read a `budget` input yet (a
+translation gap, not a missing CLI capability), and neither does an
+audit-only `mode: scan` (no `against:`) — `compare --no-baseline`'s own
+wall-clock guard isn't wired to that path (ADR-068 D2), so setting
+`budget:`/`since:`/`changed-path:` on an audit-only scan is rejected
+upfront with an explicit `::error::`, the same "reject, don't silently
+narrow" treatment as the four retired inputs above — see the table below.
 
-### `mode: scan` is being retired — and is already translated where it can be
+### `mode: scan` is being retired — and is now fully translated
 
 [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
 retires `scan` as a second analysis product. The CLI command is removed
@@ -57,44 +62,44 @@ working across the CLI's removal and is itself dropped only in the Action's
 own next major, per [ADR-047](../contribute/adr/047-github-actions-integration-model.md)'s
 input lifecycle.
 
-Concretely, `action/run.sh` already re-issues a **baseline** `mode: scan`
-step as `abicheck compare` wherever the two commands are proven equivalent.
-Its `_SCAN_NEEDS_LEGACY_CLI` predicate is the exhaustive list of request
-shapes that still fall back to the legacy `scan` CLI — each is an
-independently verified capability gap, not a stylistic preference, and each
-is tracked in
-[known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli):
+Concretely, `action/run.sh` re-issues **every** `mode: scan` step as
+`abicheck compare` internally — a step with a real baseline
+(`against`/`abi-baseline`) becomes a plain two-sided `compare AGAINST
+ARTIFACT`; a step with none (audit-only) becomes `compare --no-baseline
+ARTIFACT`. There is no legacy `scan` CLI fallback left at all: ADR-068's
+second 2026-09-09 amendment closed every routing divergence but one
+(the audit-only shape's own exit-code behavior), and its 2026-09-10
+amendment closed that last one too (`policy/audit_gate_exit.py`'s
+orthogonal audit-gate exit axis). See
+[known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
+for the full closure history, including the two behavior changes this
+migration carries:
 
-| Your step sets… | Why it still runs legacy `scan` |
-|---|---|
-| no `against`/`abi-baseline` (audit-only) | `compare --no-baseline` does not reproduce the audit's findings yet |
-| `budget` | `compare` has its own `--budget` flag now (exit `5` on overflow applies to both commands) — this is an Action-translation gap (`action/run.sh` still forces `INPUT_BUDGET` onto the legacy route), not a missing CLI capability, and closes once that translation is updated |
-| `crosscheck` | no `compare` flag equivalent; `policy.overrides.<CHANGE_KIND>` in `.abicheck.yml` is the replacement spelling for the `KEY=error` half, and the engine axis behind it is ADR-064 surface a later slice retires |
-| no `depth` at all | `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers`; `scan`'s own `auto` now always resolves to `headers` (the risk-driven escalation is retired, ADR-068 (b)), so the two agree except when `sources`/`build-info` is given |
-| `depth: build` or `depth: source` | `compare` now has its own evidence-contract floor (exit `7`), but it's narrower than `scan`'s: `scan`'s floor is unconditional, while `compare`'s is exempted whenever both operands are already-serialized snapshots (see [Evidence Depth](evidence-depth.md)'s "pinned depth is a contract" warning) — routing onto it could silently narrow the guarantee this Action's users rely on, so it stays on the legacy CLI |
-| a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |
-| an `against:` ending `.json`/`.json.gz`/`.json.zst`, or any file content-detected as a JSON snapshot | `compare` and `scan` disagree on snapshot-baseline handling |
-| `output-file`, or an effective `format: json` (from the input or an `extra-args` override), or a `-o`/`--output` in `extra-args` | the two commands write different file shapes |
-| `--write` in `extra-args` | `compare` accepts `--write` too, but the Action's own PR-comment JSON injection already manages a `--write json=…` slot itself, so a user-supplied one forces legacy routing to avoid a collision, not because the flag is missing on `compare` |
-| `--abi3 FLOOR` in `extra-args` | `compare` accepts `--abi3` too (`cli_compare_helpers.fold_abi3_into_extra_changes`, ADR-068 Phase 2d) — but with genuinely different gating: `scan`'s own audit only ever lands the finding in the advisory `crosscheck` report, gated solely via `--crosscheck python_stable_abi_violation=error`, while `compare --abi3` folds it into the real diff that policy/suppression/verdict score like any other finding. Routing a baseline `--abi3` scan onto `compare` would silently change an existing workflow's verdict/exit code, so any value forces legacy CLI |
-| a scan-only flag in `extra-args` (`--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the compile-context family) | no `compare` equivalent for the flag itself |
-| anything other than an explicit bare `--pattern-verdicts` in `extra-args` | `compare`'s pattern-verdict modulation is unconditional (ADR-068 D4) with no flag left to disable it, while `scan --against` still defaults it off |
+!!! warning "Two behavior changes landed with this migration"
+    - ADR-068's second 2026-09-09 amendment stopped `scan --against` from
+      stripping cross-source findings to advisory-only. A baseline scan of a
+      library with an accidental export, an unversioned exported symbol, or
+      any other cross-source-only issue now reports that finding as a real,
+      policy-gated result — the same way `compare` always did. It can raise
+      the step's verdict, and under a severity preset that treats
+      `RISK`/`API_BREAK` as error-level, its exit code.
+    - ADR-068's 2026-09-10 amendment changed how an **audit-only** step
+      (no `against`/`abi-baseline`) gates. Legacy `scan`'s own audit mode
+      gated unconditionally, no flag needed, whenever a candidate-side
+      finding was `BREAKING`/`API_BREAK`-classified. The translated
+      `compare --no-baseline` path reproduces that gating at its own
+      orthogonal exit code, `3` (published as the `AUDIT_GATE` verdict
+      output), but the axis itself is **opt-in**: this Action injects
+      `severity-preset: default` automatically whenever an audit-only step
+      states no preset of its own, which is what keeps the *default*
+      behavior identical to legacy `scan`. If your workflow already sets
+      `severity-preset` on an audit-only step (`info-only` included), that
+      value is honored exactly as given — the injection never overrides an
+      explicit choice. Pass `severity-preset: info-only` if you want an
+      audit-only step to report findings without ever gating on them.
 
-The routing is invisible in your YAML: the same inputs, outputs, and verdict
-either way. It matters only when you read the step's log and see which
-command actually ran. **The ~17 `mode: scan` branches in `action/run.sh`
-disappear only when the last row above closes** — the predicate shrinks, it
-does not vanish, until then.
-
-!!! warning "One behavior change already landed for baseline `mode: scan`"
-    ADR-068's 2026-09-09 amendment stopped `scan --against` from stripping
-    cross-source findings to advisory-only. A baseline scan of a library
-    with an accidental export, an unversioned exported symbol, or any other
-    cross-source-only issue now reports that finding as a real, policy-gated
-    result — the same way `compare` always did. It can raise the step's
-    verdict, and under a severity preset that treats `RISK`/`API_BREAK` as
-    error-level, its exit code. This is a documented breaking change to the
-    `mode: scan` contract, not a regression.
+    Both are documented breaking changes to the `mode: scan` contract, not
+    regressions.
 
 > **New to what these layers see?** The concept-track
 > [level-by-level walk-through](../learn/what-each-level-sees.md)

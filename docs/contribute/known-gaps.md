@@ -6863,15 +6863,35 @@ while every other fixture, `case143` included, stays `0` — the same split
 `test_scan_baseline_exit_codes_documented_for_the_gated_fixtures` pins for
 legacy `scan` itself on the same committed snapshots. The typed Python API
 carries no `--no-baseline` support at all yet, so there is no
-`CompareResult`-shaped consumer to extend today; the composite Action does
-not invoke `compare --no-baseline` for `mode: scan` either (the 2026-09-09
-amendment above already records that gap as separately blocked), so there
-is no live `action/run.sh` call site to translate onto today — both are
-recorded as the amendment's own residual scope, not silently dropped. See
+`CompareResult`-shaped consumer to extend today. See
 [ADR-068's 2026-09-10 amendment](adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)
 for the full account. `scan`'s retirement (§3 of
 `docs/contribute/plans/one-comparison-product.md`) is no longer blocked on
 this gap specifically; the plan's own tracking is updated to match.
+
+**The composite Action's own translation has since landed too.** At the
+time the paragraph above was written, `action/run.sh` did not invoke
+`compare --no-baseline` for `mode: scan` at all -- audit-only requests
+stayed on the legacy `scan` CLI unconditionally (the 2026-09-09 amendment's
+own remaining routing condition), so there was no live call site to
+translate onto. That has closed: audit-only `mode: scan` now routes to
+`compare --no-baseline` unconditionally too, the same way a baseline scan
+already routed to plain `compare AGAINST ARTIFACT`. The Action injects
+`--severity-preset default` on the translated invocation whenever the
+caller stated no preset of its own (neither the dedicated `severity-preset`
+input nor an explicit `extra-args --severity-preset ...`), which is what
+keeps `mode: scan`'s own documented default-gating behavior intact across
+the migration -- a caller who already asked for a preset (`info-only`
+included) keeps exactly the preset it asked for. Exit `3` is published as a
+new `AUDIT_GATE` Action verdict output, alongside `COVERAGE_INCOMPLETE`/
+`SEVERITY_ERROR`, and fails the step unconditionally (no `fail-on-*` input
+governs it, since an audit reports no compatibility verdict to follow).
+There is no `MODE == "scan"` condition left in `action/run.sh`'s own
+command assembly that exists to serve a legacy-CLI fallback. See
+`tests/test_action_run_sh_audit_gate.py` for the end-to-end coverage
+(real `run.sh`, real `abicheck`, the same G20 corpus fixtures this entry's
+own parity lane already used) and `action.yml`'s `verdict` output
+description for the user-facing contract.
 
 **An audit's contract-coverage ledger still names an `old` side.** Now that
 `compare --no-baseline --contract public` publishes
@@ -7390,8 +7410,24 @@ phase owns). Tractable when picked up: thread `sources`/`build_info`/
 the audit pipeline the way the two-sided path already does, and extend
 `_SUPPORTED_FORMATS`.
 
+**Closed (2026-09-10 ADR-068 amendment).** The audit-only gap this
+paragraph deferred to closed (see the 2026-09-10 amendment recorded on this
+entry's own `compare --no-baseline` sibling above), and the mechanical
+follow-up landed with it: `action/run.sh`'s routing predicate
+(`_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`, the immediate successor to
+`_SCAN_NEEDS_LEGACY_CLI` below) and every `MODE == "scan"` branch that
+existed only to serve its legacy-CLI fallback are deleted -- there is no
+`CMD+=(scan)` site left anywhere in `run.sh`. Every `mode: scan` request
+(audit-only or baseline) now assembles `compare`/`compare --no-baseline`
+through one shared branch, with `--severity-preset default` injected on the
+audit-only shape whenever the caller stated no preset of its own (see the
+sibling entry's own "composite Action's own translation has since landed
+too" note for the full account, and `tests/test_action_run_sh_audit_gate.py`
+for the end-to-end coverage against real fixtures).
+
 Not fixed here (deferred to a follow-up in this same phase, once the audit-
-only gap above closes): `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI` predicate
+only gap above closes -- historical text, kept for the record; see the
+"Closed" note just above): `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI` predicate
 itself, and the ~17 `MODE == "scan"` branches it guards, are not yet deleted
 — doing so safely requires the audit-only routing above to actually work
 (today's Action still routes every audit-only `mode: scan` request to the

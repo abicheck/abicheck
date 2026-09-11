@@ -93,6 +93,39 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 
 
 def _header(model: CommentModel) -> tuple[str, str]:
+    if model.no_baseline_audit:
+        # No two-sided comparison ran, so none of the "ABI BREAKING"/"Source
+        # API changed; binary ABI unchanged" wording below applies (Codex
+        # review, PR #1210, rounds 3-5). Blocking-ness comes from the
+        # report's own overall `exit_code` (`no_baseline_audit_blocking`,
+        # every orthogonal axis max-folded into it -- not bucket membership,
+        # and checked even when every bucket is empty: `evidence_contract`
+        # (exit 7) can block with no itemizable finding at all).
+        if model.no_baseline_audit_blocking:
+            if model.no_baseline_audit_gate_fired:
+                return "🛑", "Audit gate: candidate-side finding blocks this step"
+            # A different orthogonal axis blocked (e.g. --contract's
+            # coverage ledger, or evidence_contract); "🛑 Analysis
+            # incomplete" below names which one when there's a finding for it.
+            return "🛑", "Audit: this run blocks the step"
+        # A policy override can reclassify an audit finding as
+        # "compatible" (bucketed into `model.safe`, not `breaking`/
+        # `review`), and a fully-suppressed audit has only
+        # `suppressed_count` -- both left this check believing the run
+        # found nothing at all (Codex review, PR #1210, round 11, fresh
+        # evidence): the Action still publishes AUDIT_RISK/exit-code 0 for
+        # either shape, and the body renders the finding(s), so the
+        # headline must not claim "no baseline to compare" (a green,
+        # nothing-happened headline) alongside a body that shows one.
+        if (
+            not model.breaking
+            and not model.review
+            and not model.has_incomplete
+            and not model.safe
+            and model.suppressed_count == 0
+        ):
+            return "✅", "Audit — no baseline to compare"
+        return "⚠️", "Audit — candidate-side finding(s), not gated"
     if (
         model.mode == "scan"
         and model.scan_audit_only
@@ -388,10 +421,16 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     # could terminate this code span and inject arbitrary Markdown into the
     # sticky comment otherwise. `_esc` (used everywhere else a value is
     # rendered inside a code span) neutralizes both.
-    context = (
-        f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
-        f"`{_esc(model.subject)}`"
-    )
+    if model.no_baseline_audit:
+        # No comparison ran at all (`old_acquisition_state: declared_absent`
+        # in the report) -- "vs `baseline`" would claim one did (Codex
+        # review, PR #1210, round 4).
+        context = f"{head_ref} — audit, no baseline · `{_esc(model.policy)}` · `{_esc(model.subject)}`"
+    else:
+        context = (
+            f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
+            f"`{_esc(model.subject)}`"
+        )
     counts_line = f"**{b} breaking** · {r} needs review · {s} safe"
     # The incomplete count is a distinct axis (analysis quality, not
     # compatibility — see module docstring) and only shown when non-zero, so

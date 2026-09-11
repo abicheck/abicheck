@@ -54,17 +54,17 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 
-# The FIRST `elif [[ "$MODE" == "scan" ]]; then` in the file is scan's
-# translated-to-compare branch (ADR-068 D2) -- reached whenever
-# `$_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI` is false, which (since ADR-068's
-# second 2026-09-09 amendment) means exactly a genuine baseline is present.
-# Anchored on its own unique header comment rather than the bare mode-test
-# line itself: that exact substring also appears inside a comment in
-# `_compile_context_sources_pairwise()`'s own docstring in `action/run.sh`
-# (referencing this very branch), which sits well before the real branch
-# and would make a plain `text.index()` search anchor to the wrong (and
-# non-executable) location.
-_SCAN_TRANSLATED_MODE_MARKER = "# ── Scan mode, internally routed through"
+# `elif [[ "$MODE" == "scan" ]]; then` in the file is scan's sole surviving
+# command-assembly branch (ADR-068 D2; its 2026-09-10 amendment removed the
+# legacy CLI branch and its own routing predicate entirely, so this is the
+# only `mode: scan` branch left, covering both the baseline and
+# audit-only/`--no-baseline` shapes). Anchored on its own unique header
+# comment rather than the bare mode-test line itself: that exact substring
+# also appears inside a comment in `_compile_context_sources_pairwise()`'s
+# own docstring in `action/run.sh` (referencing this very branch), which
+# sits well before the real branch and would make a plain `text.index()`
+# search anchor to the wrong (and non-executable) location.
+_SCAN_TRANSLATED_MODE_MARKER = "# ── Scan mode, routed through `compare`"
 # This branch's own call to the shared helper -- a one-line region, mirroring
 # dump's identical single-line extraction (`_run_region_with_cwd` only needs
 # `add_compile_context_flags` to actually run; it does not need every other

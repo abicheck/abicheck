@@ -483,6 +483,121 @@ def _from_compare(
     )
 
 
+#: `compare --no-baseline`'s per-finding `verdict` field (`Verdict` enum,
+#: uppercase) -> `_bucket_changes`'s own lowercase `severity` vocabulary
+#: (`_SEVERITY_BUCKET`'s keys). `Verdict.NO_CHANGE` never appears on a real
+#: finding, so it has no entry here; an unmapped/missing value falls back to
+#: `_SEVERITY_BUCKET`'s own `"unknown"` default (reviewed, per-finding).
+_NO_BASELINE_VERDICT_TO_SEVERITY = {
+    "BREAKING": "breaking",
+    "API_BREAK": "api_break",
+    "COMPATIBLE_WITH_RISK": "risk",
+    "COMPATIBLE": "compatible",
+}
+
+
+def _from_no_baseline(
+    report: dict[str, object],
+    gate_api_break: bool = False,
+    gate_breaking: bool = True,
+) -> CommentModel:
+    """Build a :class:`CommentModel` from ``compare --no-baseline``'s audit
+    report shape (``audit_report_schema_version``/top-level ``findings``) --
+    the report this Action's audit-only ``mode: scan`` translation now
+    produces (ADR-068).
+
+    Reuses ``_bucket_changes`` (``compare``'s own bucketing) rather than a
+    parallel implementation: each finding already carries the same
+    ``kind``/``symbol``/``description`` field names ``_bucket_changes``/
+    ``_detail_text`` read, plus a ``verdict`` field
+    (``BREAKING``/``API_BREAK``/``COMPATIBLE_WITH_RISK``/``COMPATIBLE``)
+    translated here to ``_bucket_changes``'s lowercase ``severity``
+    vocabulary via :data:`_NO_BASELINE_VERDICT_TO_SEVERITY`.
+
+    Modeled as ``mode="scan"`` (bucket-derived counts, no scan-specific
+    verdict/risk note) with the dedicated ``no_baseline_audit``/
+    ``no_baseline_audit_blocking``/``no_baseline_audit_gate_fired`` flags
+    below driving ``_header``'s own headline -- NOT ``scan_audit_only``
+    (Codex review, PR #1210, round 3): that flag's own headline
+    special-case only fires when every bucket is empty, so a real
+    candidate-side finding here would otherwise fall through to the
+    ordinary two-sided "ABI BREAKING"/"Source API changed; binary ABI
+    unchanged" wording, which falsely implies a before/after comparison
+    this run never performed. ``no_baseline_audit_blocking`` is read
+    directly from the report's own top-level ``exit_code`` -- already
+    max-folded across every orthogonal axis (round 4: an earlier revision
+    read only ``exit_axes.audit_gate``, which missed a run blocked by, say,
+    ``--contract``'s coverage axis alone) -- rather than re-derived from
+    severity/bucket membership here, since a Review-bucket api_break-
+    severity finding does not by itself mean this run's exit actually
+    failed (the audit_gate axis is opt-in via ``--severity-preset``, and
+    the other axes are independent of it). ``no_baseline_audit_gate_fired``
+    additionally records whether ``exit_axes.audit_gate`` specifically was
+    the (or a) contributor, purely to pick the more specific headline
+    wording.
+
+    Without this branch, ``build_model`` fell through to ``_from_compare``,
+    which reads ``report["changes"]`` -- always ``[]`` on a no-baseline
+    report, since a real finding lives under the top-level ``findings`` key
+    instead -- so a gating audit finding rendered as "No ABI changes" and,
+    under the default ``pr-comment-on: changes``, was never posted at all
+    (Codex review, PR #1210).
+    """
+    findings_raw = report.get("findings")
+    changes_shaped: list[dict[str, object]] = []
+    if isinstance(findings_raw, list):
+        for f in findings_raw:
+            if not isinstance(f, dict):
+                continue
+            item = dict(f)
+            item["severity"] = _NO_BASELINE_VERDICT_TO_SEVERITY.get(
+                str(item.get("verdict", "")), "unknown"
+            )
+            changes_shaped.append(item)
+    breaking, review, safe, incomplete = _bucket_changes(
+        changes_shaped, gate_api_break, {}
+    )
+    incomplete_blocking = _incomplete_is_blocking(
+        incomplete, gate_api_break, gate_breaking, {}
+    )
+    incomplete = incomplete + _contract_coverage_findings(report)
+    contract_exit = report.get("contract_coverage_exit_contribution")
+    contract_coverage_blocking = isinstance(contract_exit, int) and contract_exit >= 1
+    if contract_coverage_blocking:
+        incomplete_blocking = True
+    suppressed_count = report.get("suppressed_count")
+    exit_axes = report.get("exit_axes")
+    audit_gate_exit = (
+        exit_axes.get("audit_gate") if isinstance(exit_axes, dict) else None
+    )
+    audit_gate_fired = isinstance(audit_gate_exit, int) and audit_gate_exit > 0
+    overall_exit_code = report.get("exit_code")
+    audit_blocking = isinstance(overall_exit_code, int) and overall_exit_code > 0
+    return CommentModel(
+        mode="scan",
+        subject=str(report.get("library", "artifact")),
+        # No comparison ran (old_acquisition_state: declared_absent) -- only
+        # used as a fallback value, since `_header_block` skips the
+        # "vs `old_label`" context line entirely for `no_baseline_audit`
+        # (Codex review, PR #1210, round 4).
+        old_label="(no baseline)",
+        new_label=str(report.get("new_version", "candidate")),
+        policy=str(report.get("policy", "strict_abi")),
+        breaking=breaking,
+        review=review,
+        safe=safe,
+        incomplete=incomplete,
+        incomplete_blocking=incomplete_blocking,
+        contract_coverage_blocking=contract_coverage_blocking,
+        breaking_categories=_breaking_categories(breaking),
+        breaking_severities=_breaking_severities(breaking),
+        no_baseline_audit=True,
+        no_baseline_audit_blocking=audit_blocking,
+        no_baseline_audit_gate_fired=audit_gate_fired,
+        suppressed_count=suppressed_count if isinstance(suppressed_count, int) else 0,
+    )
+
+
 def _from_appcompat(
     report: dict[str, object],
     gate_api_break: bool = False,
@@ -948,6 +1063,8 @@ def build_model(
         return _from_appcompat(report, gate_api_break, gate_breaking)
     if "scan_schema_version" in report:
         return from_scan(report, gate_api_break, gate_breaking)
+    if "audit_report_schema_version" in report:
+        return _from_no_baseline(report, gate_api_break, gate_breaking)
     return _from_compare(report, gate_api_break, gate_breaking)
 
 
@@ -965,4 +1082,27 @@ def should_post(model: CommentModel, on: str) -> bool:
         # ADR-065: an incompletely checked scope is a change to what the
         # comment can claim, so it posts under --on=changes too.
         or model.scope_notice is not None
+        # vision.md's "record before disposing" rule (Codex review, PR
+        # #1210, round 5, on the no-baseline audit shape, but the gap is
+        # general): a run whose every finding a --suppress rule matched has
+        # total_changes == 0 (they're removed from the compatibility
+        # buckets by the time this model exists), yet the run genuinely
+        # detected something and disposed of it by a real rule -- a fact
+        # "--on=changes" should surface, not treat the same as "nothing
+        # happened". Without this, --pr-comment-mode: update could delete a
+        # previous sticky comment the moment every finding it once showed
+        # became suppressed.
+        or model.suppressed_count > 0
+        # Codex review, PR #1210, round 8: a no-baseline audit blocked
+        # solely on an axis with no itemizable finding at all (e.g.
+        # evidence_contract=7, a requested evidence depth that could not be
+        # reached) leaves every bucket above empty -- `total_changes`,
+        # `scope_notice`, and `suppressed_count` all read as "nothing
+        # happened" even though the run's own overall `exit_code` recorded
+        # a real block. `no_baseline_audit_blocking` is exactly the signal
+        # `_header()` already uses to render the 🛑 blocking headline
+        # instead of a green one for this shape -- read it here too, so
+        # `--on=changes` can't produce no comment (or delete a previous
+        # sticky one) for a run the headline itself calls blocking.
+        or model.no_baseline_audit_blocking
     )

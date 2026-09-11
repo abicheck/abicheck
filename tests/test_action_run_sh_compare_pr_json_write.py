@@ -94,7 +94,11 @@ def _compare_argv(
     }
     result = subprocess.run(
         [bash_executable(), str(RUN_SH)],
-        capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert captured.is_file(), "abicheck stub was never invoked"
@@ -103,7 +107,9 @@ def _compare_argv(
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareDoesNotInjectALosingWrite:
-    @pytest.mark.parametrize("spelling", ["--write json=mine.json", "--write=json=mine.json"])
+    @pytest.mark.parametrize(
+        "spelling", ["--write json=mine.json", "--write=json=mine.json"]
+    )
     def test_a_user_write_suppresses_the_internal_one(
         self, tmp_path: Path, spelling: str
     ) -> None:
@@ -125,6 +131,24 @@ class TestCompareDoesNotInjectALosingWrite:
         # to avoid.
         argv = _compare_argv(tmp_path, {})
         assert argv.count("--write") == 1, argv
+        assert "abicheck-pr-json" in argv, argv
+
+    def test_a_non_json_user_write_no_longer_suppresses_the_internal_one(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1210, round 9: `--write` is repeatable for a
+        # single-pair operand (`compare --help-all`; confirmed live), so a
+        # non-json `extra-args --write` must not suppress the internal
+        # `--write json=$PR_JSON` sidecar the way an already-json one still
+        # correctly does (the sibling test above) -- see
+        # `_extra_args_write_would_conflict`'s own docstring. The directory/
+        # package (release) counterpart of this test is in
+        # TestCompareInjectsWriteForReleaseStyleOperandToo below, and
+        # asserts the opposite: there, only one `--write` is supported at
+        # all, so a non-json one still suppresses.
+        argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"})
+        assert argv.count("--write") == 2, argv
+        assert "mine.md" in argv, argv
         assert "abicheck-pr-json" in argv, argv
 
     def test_a_json_primary_still_injects_nothing(self, tmp_path: Path) -> None:
@@ -250,6 +274,29 @@ class TestCompareInjectsWriteForReleaseStyleOperandToo:
         assert "mine.json" in argv
         assert "abicheck-pr-json" not in argv, argv
 
+    def test_a_non_json_user_write_also_suppresses_the_internal_one_for_a_directory(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1210, round 9: unlike a single-pair operand
+        # (`--write` is repeatable there), a directory/package operand only
+        # supports ONE `--write` at all (`compare --help-all`), so a
+        # non-json one must still suppress the internal injection here --
+        # this is the one case `_extra_args_write_would_conflict` still
+        # treats as "any --write conflicts", not just an already-json one.
+        old_dir = tmp_path / "old_release"
+        new_dir = tmp_path / "new_release"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"},
+            old=old_dir,
+            new=new_dir,
+        )
+        assert argv.count("--write") == 1, argv
+        assert "mine.md" in argv
+        assert "abicheck-pr-json" not in argv, argv
+
 
 @pytest.mark.skipif(
     not sys.platform.startswith("linux")
@@ -333,7 +380,11 @@ class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
         }
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
         )
         # run.sh's own fail-on-breaking wrapper maps a real ABI break to
         # exit 1 (its own step-failure convention), not abicheck's raw
@@ -410,16 +461,16 @@ def _compare_github_output(
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "_out=''\n"
-        'while [[ $# -gt 0 ]]; do\n'
+        "while [[ $# -gt 0 ]]; do\n"
         '  case "$1" in\n'
-        "    -o) _out=\"$2\"; shift 2 ;;\n"
+        '    -o) _out="$2"; shift 2 ;;\n'
         "    *) shift ;;\n"
         "  esac\n"
         "done\n"
         'if [[ -n "$_out" ]]; then\n'
-        '  printf \'not-actually-sarif\\n\' > "$_out"\n'
+        "  printf 'not-actually-sarif\\n' > \"$_out\"\n"
         "else\n"
-        "  echo '{\"verdict\":\"COMPATIBLE\"}'\n"
+        '  echo \'{"verdict":"COMPATIBLE"}\'\n'
         "fi\n"
         "exit 0\n",
         encoding="utf-8",
@@ -449,7 +500,11 @@ def _compare_github_output(
     }
     result = subprocess.run(
         [bash_executable(), str(RUN_SH)],
-        capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return github_output.read_text(encoding="utf-8"), result.stdout + result.stderr
@@ -552,17 +607,26 @@ def test_both_branches_share_the_same_write_guard() -> None:
     without it; asserting every call site references the shared helper keeps
     a future edit to one from silently leaving the others behind.
 
-    Three call sites since ADR-068 D2 / plan Phase 4 commit 1: `compare`'s
-    own branch, the legacy `scan` CLI branch (unchanged), and the new
-    `compare`-translated `mode: scan` branch's baseline-compare sub-case
-    (its audit-only/`--no-baseline` sub-case has no secondary --write to
-    guard at all -- see that branch's own comment).
+    Two call sites since ADR-068 D2 / plan Phase 4 commit 1 and its
+    2026-09-10 amendment: `compare`'s own native branch, and the
+    `compare`/`compare --no-baseline`-translated `mode: scan` branch, which
+    shares one PR_JSON sidecar-injection call site for both its baseline
+    and audit-only sub-cases (there is no longer a separate legacy `scan`
+    CLI branch to carry a third).
+
+    `_extra_args_has_write_flag` (a blanket "any --write at all" check) was
+    replaced by `_extra_args_write_would_conflict` in round 9 (Codex
+    review, PR #1210) -- `--write` is repeatable for a single-pair/audit-
+    only operand, so a non-json `--write` in extra-args no longer needs to
+    suppress this script's own `--write json=...` injection there; only a
+    directory/package (release) operand, where the CLI supports just one
+    `--write`, still does. Same shared-helper invariant, new name.
     """
     text = RUN_SH.read_text(encoding="utf-8")
     guarded = [
-        line for line in text.splitlines() if "_extra_args_has_write_flag" in line
+        line for line in text.splitlines() if "_extra_args_write_would_conflict" in line
     ]
     # One definition, one or more docstring cross-references per branch, and
-    # three actual call sites -- assert on the calls specifically.
-    calls = [line for line in guarded if "! _extra_args_has_write_flag" in line]
-    assert len(calls) == 3, guarded
+    # two actual call sites -- assert on the calls specifically.
+    calls = [line for line in guarded if "! _extra_args_write_would_conflict" in line]
+    assert len(calls) == 2, guarded

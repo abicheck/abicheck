@@ -110,8 +110,11 @@ def pr_comment_cmd(
 
     REPORT is a JSON file from 'abicheck compare --format json' (directory/
     package fan-out and --used-by/--required-symbol(s) scoped reports all
-    produce a compatible shape) or 'abicheck scan --against ... --format
-    json' (recognised by its own 'scan_schema_version' key). When
+    produce a compatible shape), 'abicheck scan --against ... --format
+    json' (recognised by its own 'scan_schema_version' key), or 'abicheck
+    compare --no-baseline ... --format json' (recognised by its own
+    'audit_report_schema_version' key -- the Action's own audit-only
+    mode: scan translation, ADR-068, produces this shape). When
     --on=never, or --on=changes and the report has no changes, nothing is
     written (an empty --output file is produced) so the caller can skip
     posting. Action/library-only: invoke as `python -m abicheck.cli_pr_comment`,
@@ -138,7 +141,9 @@ def pr_comment_cmd(
         # subject from the report itself and never looks at this key.
         data["subject"] = subject
 
-    model = build_model(data, gate_api_break=gate_api_break, gate_breaking=gate_breaking)
+    model = build_model(
+        data, gate_api_break=gate_api_break, gate_breaking=gate_breaking
+    )
     if not should_post(model, post_on):
         # Nothing to post — leave an empty file so a `-s` check skips posting.
         if output is not None:
@@ -151,5 +156,7 @@ def pr_comment_cmd(
     _write_or_echo(output, body)
 
 
-if __name__ == "__main__":  # pragma: no cover - exercised via subprocess in Action tests
+if (
+    __name__ == "__main__"
+):  # pragma: no cover - exercised via subprocess in Action tests
     pr_comment_cmd()

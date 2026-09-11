@@ -41,17 +41,16 @@ from pathlib import Path
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _ALIAS_START_MARKER = 'MODE="${INPUT_MODE:-compare}"'
 _ALIAS_END_MARKER = 'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"'
-# ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
-# routings -- the legacy `scan` CLI branch (gated on
-# `_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`, unchanged code) and a
-# `compare`-translated branch. The --against/FORCE_AUDIT_ONLY gating this
-# file exercises is the legacy branch's own, unchanged logic, so the marker
-# is anchored there specifically rather than to the (now ambiguous) bare
-# `'elif [[ "$MODE" == "scan" ]]; then'`, which the new translated branch's
-# header also matches.
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" && "$_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI" == "true" ]]; then'
-_AGAINST_START_MARKER = 'add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"'
-_AGAINST_END_MARKER = 'add_single_flag "--lang" "${INPUT_LANG:-}"'
+# ADR-068 D2 / plan Phase 4 commit 1, and its 2026-09-10 amendment: `mode:
+# scan` now routes unconditionally to `compare`/`compare --no-baseline` --
+# there is no legacy-CLI branch left at all. The `--against`/
+# `FORCE_AUDIT_ONLY` gating this file exercises lives in `_SCAN_HAS_BASELINE`'s
+# own computation, evaluated once before either shape is assembled, so this
+# is what the alias's effect is now tested through.
+_SCAN_HAS_BASELINE_START_MARKER = "_SCAN_HAS_BASELINE=false"
+_SCAN_HAS_BASELINE_END_MARKER = (
+    "\n\n# ADR-068's second 2026-09-09 amendment ruling table"
+)
 
 
 def _alias_region() -> str:
@@ -63,18 +62,14 @@ def _alias_region() -> str:
 
 
 def _against_region() -> str:
-    """The scan-mode ``--against``/``FORCE_AUDIT_ONLY`` gating, extracted
-    verbatim from run.sh (excludes the closing marker line itself so the
-    harness controls what runs after).
-
-    ``--config`` also appears verbatim in the dump-mode branch, so the search
-    for the start/end markers is anchored to begin only after the scan-mode
-    branch itself starts, not the first (dump-mode) occurrence.
-    """
+    """The scan-mode ``--against``/``FORCE_AUDIT_ONLY`` gating (now
+    ``_SCAN_HAS_BASELINE``'s own computation), extracted verbatim from
+    run.sh -- including the closing ``fi`` this time (unlike this module's
+    other extraction helper), since ``_SCAN_HAS_BASELINE``'s own gating is a
+    single, self-contained ``if`` block rather than a trailing statement."""
     text = RUN_SH.read_text(encoding="utf-8")
-    scan_branch = text.index(_SCAN_MODE_MARKER)
-    start = text.index(_AGAINST_START_MARKER, scan_branch)
-    end = text.index(_AGAINST_END_MARKER, start)
+    start = text.index(_SCAN_HAS_BASELINE_START_MARKER)
+    end = text.index(_SCAN_HAS_BASELINE_END_MARKER, start)
     return text[start:end]
 
 
@@ -153,21 +148,29 @@ class TestEstimateAliasesDryRun:
 
 
 class TestAuditAliasSkipsAgainst:
-    def _run(self, env_extra: dict[str, str]) -> list[str]:
-        # add_single_flag is defined earlier in run.sh (line ~60); redefine a
-        # minimal equivalent here since we only extract the alias region, not
-        # the whole file, to keep the harness self-contained and fast.
-        harness = 'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\nCMD=()\n'
-        script = harness + _against_region() + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+    """`_SCAN_HAS_BASELINE` (the flag that now decides between `compare
+    AGAINST ARTIFACT` and `compare --no-baseline ARTIFACT`) must read
+    `false` exactly when the `audit: true` alias (`FORCE_AUDIT_ONLY`) forced
+    an audit, regardless of whether `against`/`abi-baseline` resolved to a
+    value elsewhere in the workflow -- the same behavior the pre-migration
+    `--against` forwarding guard had."""
+
+    def _run(self, env_extra: dict[str, str]) -> str:
+        script = (
+            'MODE="scan"\n'
+            + _against_region()
+            + '\necho "SCAN_HAS_BASELINE=$_SCAN_HAS_BASELINE"\n'
+        )
         env = {**os.environ, **env_extra}
         out = _run_bash_script(script, env)
-        return out.stdout.splitlines()
+        return out.stdout
 
-    def test_audit_true_skips_against_even_when_configured(self) -> None:
-        cmd = self._run({"FORCE_AUDIT_ONLY": "true", "INPUT_AGAINST": "baseline.so"})
-        assert "--against" not in cmd
+    def test_audit_true_forces_no_baseline_even_when_against_configured(
+        self,
+    ) -> None:
+        out = self._run({"FORCE_AUDIT_ONLY": "true", "INPUT_AGAINST": "baseline.so"})
+        assert "SCAN_HAS_BASELINE=false" in out
 
     def test_audit_false_forwards_against(self) -> None:
-        cmd = self._run({"FORCE_AUDIT_ONLY": "false", "INPUT_AGAINST": "baseline.so"})
-        assert "--against" in cmd
-        assert "baseline.so" in cmd
+        out = self._run({"FORCE_AUDIT_ONLY": "false", "INPUT_AGAINST": "baseline.so"})
+        assert "SCAN_HAS_BASELINE=true" in out
