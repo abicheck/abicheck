@@ -1165,8 +1165,79 @@ concepts:
       None outstanding for the shipped design (a deterministic closure
       walk over snapshot declarations). D5's own literal "traversal over
       one authoritative mergeable graph" text remains unfulfilled by
-      design (see Phase 3 (D5) amendment) rather than by an open gap;
-      AbiSnapshot.surface_graph itself still has no production reader.
+      design (see Phase 3 (D5) amendment) rather than by an open gap.
+      **Phase 10 checklist row landed:** AbiSnapshot.surface_graph now has
+      five real production readers -- internal_leak.py,
+      buildsource/cross_source_checks.py (two call sites),
+      buildsource/evidence_report.py, evidence_depth.py, and
+      cli_graph.py. **Preference order security-corrected in PR #1216
+      review** (two rounds): each reader prefers build_source.source_graph,
+      falling back to surface_graph only when the former is absent -- NOT
+      surface_graph-first as this row's plan text originally specified. A
+      real --sources/--build-info embed can leave build_source.source_graph
+      a strictly richer, real L3-L5 evidence graph than the always-on,
+      header-only-only surface_graph; preferring the weaker graph silently
+      dropped real call-graph/dependency edges, letting a
+      genuinely-reachable internal removal be misjudged unreachable and
+      suppressed (a BREAKING->COMPATIBLE false negative under a
+      reachability: proven-unreachable-only policy). surface_graph is still
+      the correct fallback for a depth-projected snapshot (build_source.
+      source_graph clears at the "source" depth floor; surface_graph, an L2
+      fact, clears lower, at "binary") and for a pre-Phase-3 document. A
+      second review round separately found cli_graph.py's first pass missed
+      the current single-file sectioned wire format (schema v42+) every
+      real dump --sources -o snapshot actually uses; fixed by decoding
+      through serialization.snapshot_from_dict rather than hand-walking a
+      third JSON shape. A third review round found two more issues: an
+      isinstance-based narrow of the deliberately-structural
+      SurfaceGraphLike protocol would reject a valid typed-API
+      implementation for no reason (switched to a type-only cast), and the
+      surface_graph fallback did not check the pack's own L5 coverage row
+      -- policy/depth_projection.py deliberately clears build_source.
+      source_graph while stamping an explicit NOT_COLLECTED row for a
+      --depth build comparison, and falling back to the retained
+      surface_graph there resurrected L5-labeled findings/depth claims for
+      a comparison whose own report said L5 was excluded. Both readers now
+      only fall back when the pack records no L5 coverage row at all.
+      tests/test_surface_graph_reader_migration.py pins output parity
+      between the pre/post-Phase-3 shapes per reader, a dedicated "prefers
+      the richer build_source.source_graph" regression test per reader, and
+      a depth-projection-exclusion regression test. A fourth review round
+      found the depth-projection guard had only been applied to two of the
+      five readers (internal_leak.py and cross_source_checks.py's two
+      checks still used the unguarded fallback) and a deeper root cause:
+      depth_projection._mark_layers_not_collected only rewrote an existing
+      L5 coverage row, never inserted one for a pack that started with
+      none at all, defeating the "no row at all" signal the guard relies
+      on. Fixed _mark_layers_not_collected itself (inserts a missing row
+      now) rather than special-casing every caller again, and consolidated
+      all five readers onto one shared evidence_depth.
+      resolve_l5_source_graph(snap, pack) resolver so the fallback rule
+      cannot independently drift per call site as it already had three
+      times. That consolidation also fixed a third finding: the third
+      round's cast(...) for _side_source_graph was unsound there
+      specifically (diff_source_graph_findings reads concrete-only
+      SourceGraphSummary attributes the SurfaceGraphLike protocol doesn't
+      declare) -- the shared resolver now requires isinstance(...,
+      SourceGraphSummary) uniformly. **Not closed by this row:**
+      deleting the L5 builder's own in-memory identity-aliasing
+      (service_header_graph_attach.py's _attach_header_graph, which
+      threads one shared SourceGraphSummary instance into both
+      AbiSnapshot.surface_graph and a synthesized snap.build_source.
+      source_graph purely so a legacy build_source.source_graph reader
+      still sees the header-only graph). Investigation during this row
+      found strictly more readers of that synthesized pack than the five
+      named above -- coverage reporting (evidence_report.optional_coverage/
+      layer_presence), cli_buildsource.py's own _layer_payload_empty/
+      build_source_already_satisfies, and embed.py's own backfill logic
+      all depend on snap.build_source being populated for a plain
+      (--sources-less) dump -- so removing the synthesized pack outright is
+      a wider, separately-scoped change than "the five named readers",
+      not something this row's own audit covers. Recorded as an explicit
+      open gap per AGENTS.md's decision-making principles rather than
+      forced through unverified; tracked as a follow-up sub-item of this
+      same Phase 10 checklist row in
+      docs/contribute/plans/one-semantic-pipeline.md.
 
   analysis_plan:
     primitive: complete

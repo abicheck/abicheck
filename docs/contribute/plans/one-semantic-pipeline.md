@@ -16979,6 +16979,157 @@ not new design.
   alias assignment in the L5 builder — the one piece this row can actually
   remove once every reader stops going through it.
 
+  **Five-reader migration landed, with a security correction to the
+  preference order this row's own text originally specified (PR #1216
+  review).** All five named readers (`internal_leak.py`,
+  `buildsource/cross_source_checks.py`'s two call sites,
+  `buildsource/evidence_report.py`, `evidence_depth.py`, `cli_graph.py`) now
+  read `graph = (snap.build_source.source_graph if snap.build_source else
+  None) or snap.surface_graph` — `build_source.source_graph` **first**, not
+  `surface_graph` first as this section originally specified. A security
+  reviewer correctly found that a real `--sources`/`--build-info` embed can
+  leave `build_source.source_graph` a strictly richer, real L3-L5 evidence
+  graph than the always-on, header-only-only `surface_graph`
+  (`_attach_header_graph` builds the latter from headers alone and never
+  updates it once written; `buildsource/embed.py`'s backfill only ever
+  adopts the header-only graph into an *empty* `build_source.source_graph`,
+  never displacing a real one) — so the originally-specified
+  surface_graph-first order silently drops real call-graph/dependency edges
+  whenever the two diverge, letting a genuinely-reachable internal removal
+  be misjudged unreachable and suppressed under a
+  `reachability: proven-unreachable-only` policy (a BREAKING→COMPATIBLE
+  false negative). `surface_graph` is still the correct fallback for a
+  depth-projected snapshot, where `policy/depth_projection.py` clears
+  `build_source.source_graph` at the "source" depth floor while retaining
+  `surface_graph` (an L2 fact) down to the "binary" floor, and for a
+  pre-Phase-3 document carrying `build_source.source_graph` with no
+  `surface_graph` at all — the corrected order still resolves both cases
+  identically to the original one, since it only changes behavior when the
+  two graphs are genuinely different objects. The pack-aware equivalent for
+  a call site whose *pack* may be an out-of-band one the caller resolved
+  independently of the snapshot (`evidence_report._side_source_graph`/
+  `evidence_depth._l5_payload_empty`) applies the same corrected order,
+  still only substituting `surface_graph` when the pack in hand actually
+  **is** `snap.build_source`, never for an unrelated
+  `--old/new-build-info`/`--old/new-sources` pack, per those two modules'
+  own pre-existing "never default *pack* to `snap.build_source`" contract.
+  `cli_graph.py`'s `_load_source_graph` has no `AbiSnapshot` in scope at all
+  (it loads a bare graph JSON file or an out-of-band pack directory), so its
+  migration is the dict-shaped analogue: a full embedded-snapshot JSON
+  document (flat *or* the current single-file sectioned wire format, schema
+  v42+ — a second review-round finding, since the first draft's hand-rolled
+  dict walk missed the sectioned shape every real `dump --sources -o`
+  snapshot actually uses today) is now decoded through
+  `serialization.snapshot_from_dict` and its graph read with the same
+  corrected preference order. `tests/test_surface_graph_reader_migration.py`
+  pins output parity between the pre-Phase-3 shape (`surface_graph` absent)
+  and the post-Phase-3 shape (`surface_graph` populated as the *same*
+  object) for all five, plus a dedicated "prefers the richer
+  `build_source.source_graph`" regression test per reader proving the two
+  graphs are read correctly when they are genuinely different objects.
+
+  **Two further corrections from the same review round.** (1) The
+  `SurfaceGraphLike` narrow in `cross_source_checks.py`/
+  `evidence_report.py` used `assert isinstance(graph, SourceGraphSummary)`
+  to satisfy mypy — but `SurfaceGraphLike` (`model/graph_facts.py`) is
+  deliberately structural so a typed-API caller may supply a conforming,
+  non-`SourceGraphSummary` implementation, and both call sites only ever
+  read `.nodes`/`.edges` (protocol members) afterward; a runtime assert
+  would reject such a caller for no reason. Switched to a type-only
+  `cast(...)`. (2) `_side_source_graph`/`_l5_payload_empty`'s
+  `surface_graph` fallback did not check whether the pack's own manifest
+  already recorded an explicit (even `NOT_COLLECTED`) L5 coverage row.
+  `policy/depth_projection.py` deliberately clears `build_source.
+  source_graph` to `None` for a `--depth build` (or shallower) comparison
+  *while stamping that exact row* and leaving `surface_graph` untouched (an
+  L2 fact, cleared at a lower floor) -- so the fallback, unguarded, silently
+  resurrected L5-labeled graph-diff findings and a `"source"` depth label
+  for a comparison whose own report said L5 was excluded. Both functions
+  now only fall back when the pack's manifest records **no** L5 coverage
+  row at all (`pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH) is
+  None`) -- the one case left needing the fallback is a pack that never
+  went through any collection/projection pipeline at all (e.g. a bare
+  typed-API-constructed snapshot). Regression tests added for both: a
+  depth-projected pack (explicit `NOT_COLLECTED` row) must not fall back,
+  while a pack with no coverage row recorded still does.
+
+  **Fourth review round: two more corrections, plus a real root-cause fix
+  this time rather than another per-call-site patch.** (1) The
+  coverage-row-aware guard above had only been applied to
+  `_side_source_graph`/`_l5_payload_empty` -- `internal_leak.py`'s
+  `compute_call_graph_leak_paths` and `cross_source_checks.py`'s two checks
+  (`_check_private_header_leak`, `_check_public_to_internal_dependency`)
+  still used the unguarded `build_source.source_graph or surface_graph`
+  fallback, so the identical depth-exclusion leak this phase already fixed
+  once was still open in three more places. (2) A deeper bug in the guard
+  itself: `policy/depth_projection.py`'s `_mark_layers_not_collected` only
+  ever *rewrote* an L5 coverage row that already existed -- for a pack that
+  started with **no** coverage rows tracked at all (a hand-built/
+  typed-API-constructed `BuildSourcePack`), a `--depth build` projection
+  cleared `source_graph` but left `coverage_for(L5)` reading `None`
+  regardless, defeating the "no row at all" signal the guard relies on to
+  tell "genuinely never collected" apart from "collected, then projected
+  away." Fixed at the root (`_mark_layers_not_collected` now inserts a
+  fresh `NOT_COLLECTED` row for a layer with no existing row, not only
+  rewriting rows that already exist) rather than special-cased in each
+  reader again, closing the gap for every current and future caller of that
+  function at once. This round also consolidated the fallback logic itself:
+  four independently-maintained near-duplicates had already drifted three
+  times across four review rounds, so all five readers now go through one
+  shared `evidence_depth.resolve_l5_source_graph(snap, pack)` resolver
+  (`_side_source_graph`/`_l5_payload_empty` are now thin wrappers over it).
+  That consolidation also fixed a third finding from this round: the
+  `SurfaceGraphLike`-vs-`SourceGraphSummary` cast the previous round
+  introduced for `_side_source_graph` was actually unsound at *that*
+  specific call site (unlike `cross_source_checks.py`'s own narrows) --
+  `diff_source_graph_findings` downstream reads concrete-only attributes
+  (`narrowed_scope`/`extractor_passes`/`degraded_passes`) the
+  `SurfaceGraphLike` protocol doesn't declare, so a merely-structural
+  implementation would reach it and crash. The shared resolver now requires
+  a genuine `SourceGraphSummary` for the fallback uniformly (an
+  `isinstance` check, not a blind cast), accepting a small, deliberate loss
+  of typed-API flexibility for `cross_source_checks.py`'s/
+  `internal_leak.py`'s own narrower needs (protocol members only) in
+  exchange for one call-site-independent, uniformly-safe contract.
+  Regression tests added: `internal_leak.py`/`cross_source_checks.py` both
+  now have a depth-exclusion test alongside their existing
+  "prefers-the-richer-graph" one, `_mark_layers_not_collected` has a direct
+  unit test for the missing-row-insertion fix, and
+  `resolve_l5_source_graph` has a direct test pinning the non-concrete
+  rejection.
+
+  **The in-memory alias-assignment deletion is NOT done, and is being left
+  open rather than forced through unverified.** The one place that builds
+  the alias — `service_header_graph_attach.py`'s `_attach_header_graph` —
+  threads one shared `SourceGraphSummary` instance into
+  `AbiSnapshot.surface_graph` *and* a synthesized `snap.build_source`
+  (`BuildSourcePack(root=Path(""), source_graph=graph)`) for the
+  always-on, header-only (L2) graph case, purely so a legacy
+  `build_source.source_graph` reader still sees it even when no
+  `--sources`/`--build-info` ran. A real audit for this row (not limited to
+  the five named readers) found this synthesized pack has further
+  production readers this checklist never named: coverage reporting
+  (`evidence_report.optional_coverage`/`layer_presence`,
+  `evidence_report.detect_coverage_asymmetry`), `cli_buildsource.py`'s own
+  `_layer_payload_empty`/`build_source_already_satisfies`, and
+  `buildsource/embed.py`'s own `--sources`/`--build-info` backfill logic
+  (`existing = snap.build_source; ... existing.source_graph is not None`)
+  — every one of them would silently regress (reporting `NOT_COLLECTED`
+  L5 coverage for a plain header-only dump, or skipping the header-only
+  graph backfill entirely) if `_attach_header_graph` stopped populating
+  `snap.build_source` for this case. None of those call sites were part of
+  this row's five-reader scope, and auditing and migrating them too is a
+  materially larger, separately-scoped change than this row's own text
+  anticipated ("the one piece this row can actually remove" undersold the
+  blast radius). Per this file's own root-`AGENTS.md`-inherited
+  decision-making principles ("if a genuinely general fix isn't feasible
+  in one pass, say so explicitly and record the gap"), that deletion is
+  left as an explicitly named, separately-scoped follow-up rather than
+  performed against an incomplete audit. Until it lands, `git grep -n
+  "surface_graph = graph"` inside `service_header_graph_attach.py` still
+  finds the alias-construction site outside history — expected, and
+  tracked here rather than silently left implied-closed.
+
   **"Delete the legacy-document aliasing fallback in `snapshot_from_dict()`"
   is no longer this row's to do — that fallback was itself retracted
   earlier in this same phase (see the correction above), and a further
