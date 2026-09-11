@@ -426,17 +426,20 @@ class TestSchemaStalenessStatus:
             assert aa.schema_staleness_status == "clean", flag_name
             assert not any(flag_name in n for n in aa.notes), (flag_name, aa.notes)
 
-    def test_deprecation_flag_needs_a_known_other_side_producer_too(self) -> None:
-        """Codex review, PR #1209 round 8: unlike ``clang_restrict_facts_
-        reliable``/``clang_field_initializer_facts_reliable`` (plain header
-        confirmation is enough), ``clang_deprecation_facts_reliable``'s one
-        real consumer (``diff_symbols._diff_func_deprecated``) calls
-        ``fact_provenance.fact_producer`` on BOTH sides and skips the pair
-        if EITHER call resolves ``None`` -- which it does whenever that
-        side's own ``ast_producer`` isn't positively known, even when that
-        side is otherwise confirmed header-aware (a legacy snapshot that
-        predates provenance tracking entirely: real header evidence, no
-        recorded producer)."""
+    def test_deprecation_flag_still_taints_with_unknown_other_side_producer(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 10, fresh evidence -- reverses this
+        module's own round-8 reply. ``fact_provenance.fact_producer(new,
+        ...)`` does resolve ``None`` when ``new``'s own ``ast_producer``
+        isn't positively known (a legacy snapshot that predates provenance
+        tracking, even though it's otherwise confirmed header-aware), so
+        THIS pair's deprecation detector can't run right now -- but that is
+        itself just another schema-vintage-degraded fact, not a permanent
+        incompatibility: regenerating ``new`` (not just ``old``) WOULD
+        restore detection. Reporting "clean" here would silently hide a
+        real, larger evidence gap (round 8's mistake) rather than surface
+        it, which is exactly backwards for what this status exists to do."""
         old = AbiSnapshot(
             version="1.0",
             library="libfoo.so.1",
@@ -452,29 +455,28 @@ class TestSchemaStalenessStatus:
             from_headers=True,
             # ast_producer left unset: confirmed header-aware, but no
             # positively known producer -- fact_producer(new, ...) always
-            # resolves None regardless, so the detector never runs.
+            # resolves None regardless, so the detector never runs FOR
+            # THIS PAIR right now. Still a real, regeneratable gap.
         )
         assert degraded_reliability_facts(old) == ["clang_deprecation_facts_reliable"]
 
         result = checker.compare(old, new)
         aa = result.analysis_assurance
-        assert aa.schema_staleness_status == "clean"
-        assert not any("clang_deprecation_facts_reliable" in n for n in aa.notes), (
-            aa.notes
-        )
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_deprecation_facts_reliable" in n for n in aa.notes), aa.notes
 
-    def test_deprecation_flag_clean_when_other_side_is_itself_degraded_clang(
+    def test_deprecation_flag_still_taints_when_other_side_is_itself_degraded_clang(
         self,
     ) -> None:
-        """The narrower mirror case round 8 also covers:
-        ``fact_provenance.fact_producer`` special-cases an ``ast_producer ==
-        "clang"`` side whose OWN ``clang_deprecation_facts_reliable`` is
-        False -- that side resolves to ``None`` for a ``:deprecated``/
-        ``:is_scoped`` key too, so a pair where BOTH sides are degraded,
-        confirmed-header "clang" producers can never run the detector at
-        all, and reporting "degraded" for it would be a spurious signal
-        (not merely a conservative one) -- no PAIRWISE finding is even
-        structurally possible."""
+        """The mirror case round 10 also corrects: a pair where BOTH sides
+        are degraded, confirmed-header "clang" producers must still report
+        "degraded" -- the round-8 reasoning ("no comparison can structurally
+        run for either side's sake, so this would be a spurious signal") was
+        wrong. It IS a real, larger evidence gap: regenerating EITHER (or
+        both) stale side(s) with the current abicheck would restore
+        detection, and silently reporting "clean" would let a genuine
+        deprecated-attribute change between two pre-v19 snapshots go
+        undetected while ``--require-complete-analysis`` still succeeds."""
         old = AbiSnapshot(
             version="1.0",
             library="libfoo.so.1",
@@ -496,19 +498,26 @@ class TestSchemaStalenessStatus:
 
         result = checker.compare(old, new)
         aa = result.analysis_assurance
-        assert aa.schema_staleness_status == "clean"
-        assert not any("clang_deprecation_facts_reliable" in n for n in aa.notes), (
-            aa.notes
-        )
+        assert aa.schema_staleness_status == "degraded"
+        assert any(
+            "old snapshot" in n and "clang_deprecation_facts_reliable" in n
+            for n in aa.notes
+        ), aa.notes
+        assert any(
+            "new snapshot" in n and "clang_deprecation_facts_reliable" in n
+            for n in aa.notes
+        ), aa.notes
 
     def test_deprecation_flag_still_taints_with_known_other_side_producer(
         self,
     ) -> None:
-        """The positive mirror: an ``other`` side that IS confirmed header-
-        aware with a positively known, non-degraded producer (castxml or
-        clang -- deprecated/is_scoped are cross-comparable, so no producer
-        MATCH is required, only that one is known) must still taint the
-        status -- the narrowing above must not over-exempt a pair where the
+        """The positive mirror: an ``other`` side that IS confirmed
+        header-aware, with a castxml or clang producer (deprecated/
+        is_scoped are cross-comparable, so no producer MATCH is required --
+        round 10 further dropped the "and the producer must be KNOWN"
+        requirement entirely, see :func:`_other_side_supports_known_
+        producer_comparison`'s own docstring), must still taint the status
+        -- the narrowing above must not over-exempt a pair where the
         detector genuinely does run. "hybrid" is covered separately (round
         9: a hybrid producer alone is not enough -- see
         ``test_deprecation_flag_still_taints_with_hybrid_other_side_when_

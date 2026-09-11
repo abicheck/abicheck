@@ -143,22 +143,23 @@ _PAIR_HEADER_ONLY_GATED_FLAGS: frozenset[str] = frozenset(
 )
 
 #: ``clang_deprecation_facts_reliable`` (Codex review, PR #1209 round 8,
-#: fresh evidence): ``diff_symbols._diff_func_deprecated`` calls
-#: ``fact_provenance.fact_producer`` independently on BOTH sides and skips
-#: the pair entirely if either call returns ``None`` -- which it does
-#: whenever *that* side isn't confirmed header-aware (the
-#: :data:`_PAIR_HEADER_ONLY_GATED_FLAGS` half of the gate) OR that side's
-#: own ``ast_producer`` isn't positively known (``None`` -- a legacy
-#: snapshot that predates provenance tracking entirely) OR that side is
-#: ITSELF a degraded, confirmed-header "clang" producer for this exact fact
-#: family (``fact_producer``'s own ``ast_producer == "clang" and not
-#: clang_deprecation_facts_reliable`` exclusion for a ``:deprecated``/
-#: ``:is_scoped`` key -- in which case no comparison can structurally run
-#: for either side's sake, so reporting "degraded" here would be a spurious
-#: signal, not a conservative one). Mirrored exactly in :func:`_other_side_
-#: supports_known_producer_comparison` rather than approximated with a bare
-#: header-confirmation check, which a confirmed-header-but-unknown-producer
-#: (or itself-degraded-clang) ``other`` would incorrectly still taint.
+#: revised round 10 -- see :func:`_other_side_supports_known_producer_
+#: comparison`'s own docstring for the full corrected account).
+#: ``diff_symbols._diff_func_deprecated`` calls ``fact_provenance.
+#: fact_producer`` independently on BOTH sides and skips the pair entirely
+#: if either call returns ``None``, which happens whenever *that* side
+#: isn't confirmed header-aware -- the SAME single condition
+#: :data:`_PAIR_HEADER_ONLY_GATED_FLAGS` already checks for its two
+#: members. This flag needed its own category rather than joining that set
+#: outright for exactly one further nuance ``fact_producer``'s hybrid
+#: branch introduces: a "hybrid" ``other`` needs an actually-recorded
+#: per-declaration provenance entry too, not just the producer label (see
+#: :func:`_other_side_has_hybrid_deprecation_provenance`). An earlier
+#: revision of this comment (round 8) also excluded an unknown or
+#: itself-degraded-clang ``other`` producer -- reverted in round 10 as a
+#: real bug, not a refinement: both are themselves schema-vintage-degraded
+#: facts, not a permanent incompatibility, so excluding on that basis
+#: silently turned "both sides are stale" into a false "clean".
 _PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS: frozenset[str] = frozenset(
     {"clang_deprecation_facts_reliable"}
 )
@@ -204,6 +205,26 @@ def _other_side_has_hybrid_deprecation_provenance(other: AbiSnapshot) -> bool:
     field (``model/snapshot.py``), so checking whether it contains ANY key
     of the right shape is an existence scan over data already on the
     object, not a new walk of declarations/types to resolve a value.
+
+    **Third known, accepted limitation (Codex review, PR #1209 round 10):**
+    this existence scan is whole-snapshot, not per-DECLARATION -- an
+    unrelated ``:deprecated``/``:is_scoped`` provenance entry for some OTHER
+    function/enum elsewhere in *other* makes this return ``True`` even when
+    every declaration actually matched against the stale side lacks its own
+    key, so the detector still declines those specific pairs while this
+    reports the pair as merely "degraded" rather than excluding it. Fully
+    precise would mean walking matched declaration pairs between *snap* and
+    *other* to check each one's own key -- exactly the per-declaration probe
+    this module's "rollup over already-computed snapshot-level fields"
+    contract (see the module docstring's first known limitation) declines
+    to attempt. This is the safe direction (over-reporting ``"degraded"``,
+    never fabricating ``"complete"``), unlike the round-8/10
+    unknown-and-degraded-producer bug this same round's evidence also
+    disproved (see :func:`_other_side_supports_known_producer_comparison`'s
+    own docstring) -- that one silently hid a real gap; this one only ever
+    over-taints. Left as a second, deliberately accepted per-declaration
+    limitation on this exact flag rather than a third revision of this
+    heuristic.
     """
     return any(
         key.endswith(":deprecated") or key.endswith(":is_scoped")
@@ -212,23 +233,45 @@ def _other_side_has_hybrid_deprecation_provenance(other: AbiSnapshot) -> bool:
 
 
 def _other_side_supports_known_producer_comparison(other: AbiSnapshot) -> bool:
-    """Whether ``fact_provenance.fact_producer(other, <a deprecated/
-    is_scoped key>)`` could resolve non-``None`` for SOME declaration --
-    mirroring that function's own gating logic exactly (confirmed header
-    awareness, a positively known ``ast_producer``, not itself an
-    unreliable confirmed-header "clang" producer for this same fact family,
-    and -- for a "hybrid" producer specifically -- an actually-recorded
-    per-declaration provenance entry, see :func:`_other_side_has_hybrid_
-    deprecation_provenance`) rather than approximating it with header
-    confirmation alone.
+    """Whether *other* being confirmed header-aware is enough to say the
+    deprecation detector COULD still reach a real comparison for this pair
+    -- confirmed header awareness, and -- for a "hybrid" producer
+    specifically -- an actually-recorded per-declaration provenance entry
+    (see :func:`_other_side_has_hybrid_deprecation_provenance`).
+
+    **Round 10 correction (Codex review, PR #1209, fresh evidence):** an
+    earlier revision of this function ALSO excluded *other* for having an
+    unknown (``None``) ``ast_producer`` or for being itself an unreliable
+    confirmed-header "clang" producer for this exact fact family --
+    reasoning that ``fact_producer(other, ...)`` really does resolve
+    ``None`` in both cases, so the detector "structurally can't run for
+    either side's sake." That reasoning was WRONG: unlike a genuine
+    cross-backend PRODUCER MISMATCH (:data:`_PAIR_PRODUCER_GATED_FLAGS`'s
+    va_list/var_access case, where regenerating the stale side alone can
+    NEVER fix the pair -- the two backends' value representations are
+    permanently incompatible), an unknown or degraded ``other`` producer is
+    itself just ANOTHER schema-vintage-degraded fact -- regenerating that
+    side too (not just the one this function was asked about) WOULD restore
+    detection. Excluding on that basis silently turned "both sides are
+    stale" into "clean," hiding a real, larger evidence gap -- exactly the
+    P1 bug ``--require-complete-analysis`` exists to catch (a deprecated
+    attribute added between two pre-v19 snapshots going undetected while
+    the run still reports success). ``fact_producer``'s per-side gates
+    ((a) header confirmation, (b) a known ``ast_producer``, (c) not itself
+    degraded-clang) are ALL properties of that one side's own dump that a
+    fresh regeneration resolves -- none of them are the PERMANENT,
+    cross-side incompatibility :data:`_PAIR_PRODUCER_GATED_FLAGS` guards
+    against. Only (a) -- a genuinely different EVIDENCE TIER for the
+    CURRENT run (already reported through this module's sibling context-
+    status axes, e.g. a ``--depth binary``/DWARF-only comparison that never
+    carried header evidence at all) -- is a legitimate exclusion reason
+    here; (b)/(c) are removed.
     """
     if not _other_side_is_header_confirmed(other):
         return False
-    if other.ast_producer == "clang" and not other.clang_deprecation_facts_reliable:
-        return False
     if other.ast_producer == "hybrid":
         return _other_side_has_hybrid_deprecation_provenance(other)
-    return other.ast_producer in ("castxml", "clang")
+    return True
 
 
 #: ``param_kind_facts_reliable`` (Codex review, PR #1209 round 9, fresh

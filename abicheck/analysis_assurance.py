@@ -382,16 +382,6 @@ class AnalysisAssurance:
     #: finding naming this same gap), or ``"not_evaluated"`` (neither side
     #: carries L3 build evidence -- nothing to be asymmetric about).
     l3_context_status: str = "not_evaluated"
-    #: ``"clean"`` (neither side carries a fact this abicheck's tool-upgrade
-    #: reliability machinery marks stale) or ``"degraded"`` (at least one
-    #: side does -- either its own ``schema_version`` predates this
-    #: abicheck's, or it was re-saved since without ever being regenerated;
-    #: see ``policy.analysis_assurance_degraded_facts.degraded_reliability_
-    #: facts``). Unlike
-    #: the other context-status fields above, this one has no
-    #: ``"asymmetric"`` state: a single side's stale fact already means the
-    #: affected detector(s) declined to trust it for this comparison.
-    schema_staleness_status: str = "clean"
     #: ``"comparable"``, ``"inconsistent"`` (``fact_set_inconsistent`` on
     #: either side's L4 surface, OR a hard ``fact_set`` name/version mismatch
     #: BETWEEN the two sides -- the same cross-side check ``diff_source_abi``'s
@@ -420,6 +410,25 @@ class AnalysisAssurance:
     #: Human-readable notes explaining any non-``complete`` status, folded
     #: from the same underlying signals rather than duplicating their wording.
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: ``"clean"`` (neither side carries a fact this abicheck's tool-upgrade
+    #: reliability machinery marks stale) or ``"degraded"`` (at least one
+    #: side does -- either its own ``schema_version`` predates this
+    #: abicheck's, or it was re-saved since without ever being regenerated;
+    #: see ``policy.analysis_assurance_degraded_facts.degraded_reliability_
+    #: facts``). Unlike the other context-status fields above, this one has
+    #: no ``"asymmetric"`` state: a single side's stale fact already means
+    #: the affected detector(s) declined to trust it for this comparison.
+    #: Appended at the END of the field list, after every pre-existing
+    #: field including ``notes`` -- not inserted among the other context-
+    #: status fields where it conceptually belongs -- specifically so this
+    #: dataclass's generated POSITIONAL constructor stays backward
+    #: compatible: an external caller passing the pre-existing trailing
+    #: fields (``fact_set_comparability``/``graph_completeness``/
+    #: ``layout_unverified_detectors``/``notes``) positionally would
+    #: otherwise have silently rebound them to the wrong fields the moment
+    #: this one was inserted earlier in the list (Codex review, PR #1209
+    #: round 10).
+    schema_staleness_status: str = "clean"
 
     def to_dict(self) -> dict[str, Any]:
         return {
