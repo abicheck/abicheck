@@ -1692,6 +1692,34 @@ def _check_issues(
             "target check instead, and add it to this bundle once a real "
             "release has published a baseline-set covering every member."
         )
+    # Codex review (fresh evidence after the earlier inert-setting finding):
+    # checks[].analysis.assurance: complete is enforced by translating it
+    # into check-target's analysis-assurance-complete input, which in turn
+    # merges assurance.require_complete: true into the resolved
+    # `.abicheck.yml` and forwards it to a real `compare` invocation
+    # (analysis_assurance_gate.py's own module docstring). For a bundle
+    # check that `compare` invocation is the directory/package release
+    # fan-out, which cli_compare_options.py/cli_compare_helpers.py
+    # unconditionally rejects `assurance.require_complete: true` for (a
+    # bundle comparison has no single `analysis_assurance` result to gate
+    # on -- there is one contribution per library, not one for the whole
+    # release). Forwarding it anyway would turn a previously working bundle
+    # check into a hard CLI usage/operational error instead of the
+    # actionable rejection a declared-but-unsupported setting deserves
+    # elsewhere in this function. Reject it here, at run-plan generation
+    # time, the same way allow_new_target is rejected just above -- bundle-
+    # level assurance enforcement (a real per-bundle-member semantics) is
+    # out of scope for this fix.
+    if is_bundle and check.analysis_assurance == "complete":
+        issues.append(
+            f"{where}: analysis.assurance: complete is not supported for a "
+            "bundle check -- a bundle comparison is a directory/package "
+            "release fan-out with no single analysis_assurance result to "
+            "gate on, and the underlying `compare` invocation rejects "
+            "`assurance.require_complete: true` for that operand outright. "
+            "Scope the assurance check to an individual library-kind target "
+            "check instead."
+        )
     return issues
 
 
