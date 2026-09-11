@@ -133,6 +133,24 @@ class TestCompareDoesNotInjectALosingWrite:
         assert argv.count("--write") == 1, argv
         assert "abicheck-pr-json" in argv, argv
 
+    def test_a_non_json_user_write_no_longer_suppresses_the_internal_one(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1210, round 9: `--write` is repeatable for a
+        # single-pair operand (`compare --help-all`; confirmed live), so a
+        # non-json `extra-args --write` must not suppress the internal
+        # `--write json=$PR_JSON` sidecar the way an already-json one still
+        # correctly does (the sibling test above) -- see
+        # `_extra_args_write_would_conflict`'s own docstring. The directory/
+        # package (release) counterpart of this test is in
+        # TestCompareInjectsWriteForReleaseStyleOperandToo below, and
+        # asserts the opposite: there, only one `--write` is supported at
+        # all, so a non-json one still suppresses.
+        argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"})
+        assert argv.count("--write") == 2, argv
+        assert "mine.md" in argv, argv
+        assert "abicheck-pr-json" in argv, argv
+
     def test_a_json_primary_still_injects_nothing(self, tmp_path: Path) -> None:
         # Pre-existing behaviour, pinned here so the new guard cannot be
         # mistaken for what suppresses this case.
@@ -254,6 +272,29 @@ class TestCompareInjectsWriteForReleaseStyleOperandToo:
         )
         assert argv.count("--write") == 1, argv
         assert "mine.json" in argv
+        assert "abicheck-pr-json" not in argv, argv
+
+    def test_a_non_json_user_write_also_suppresses_the_internal_one_for_a_directory(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1210, round 9: unlike a single-pair operand
+        # (`--write` is repeatable there), a directory/package operand only
+        # supports ONE `--write` at all (`compare --help-all`), so a
+        # non-json one must still suppress the internal injection here --
+        # this is the one case `_extra_args_write_would_conflict` still
+        # treats as "any --write conflicts", not just an already-json one.
+        old_dir = tmp_path / "old_release"
+        new_dir = tmp_path / "new_release"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        argv = _compare_argv(
+            tmp_path,
+            {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"},
+            old=old_dir,
+            new=new_dir,
+        )
+        assert argv.count("--write") == 1, argv
+        assert "mine.md" in argv
         assert "abicheck-pr-json" not in argv, argv
 
 
@@ -572,12 +613,20 @@ def test_both_branches_share_the_same_write_guard() -> None:
     shares one PR_JSON sidecar-injection call site for both its baseline
     and audit-only sub-cases (there is no longer a separate legacy `scan`
     CLI branch to carry a third).
+
+    `_extra_args_has_write_flag` (a blanket "any --write at all" check) was
+    replaced by `_extra_args_write_would_conflict` in round 9 (Codex
+    review, PR #1210) -- `--write` is repeatable for a single-pair/audit-
+    only operand, so a non-json `--write` in extra-args no longer needs to
+    suppress this script's own `--write json=...` injection there; only a
+    directory/package (release) operand, where the CLI supports just one
+    `--write`, still does. Same shared-helper invariant, new name.
     """
     text = RUN_SH.read_text(encoding="utf-8")
     guarded = [
-        line for line in text.splitlines() if "_extra_args_has_write_flag" in line
+        line for line in text.splitlines() if "_extra_args_write_would_conflict" in line
     ]
     # One definition, one or more docstring cross-references per branch, and
     # two actual call sites -- assert on the calls specifically.
-    calls = [line for line in guarded if "! _extra_args_has_write_flag" in line]
+    calls = [line for line in guarded if "! _extra_args_write_would_conflict" in line]
     assert len(calls) == 2, guarded

@@ -1721,17 +1721,7 @@ _extra_args_options() {
 
 # Whether the user's own `extra-args` passthrough already requests
 # `--write` (documented, supported usage — `extra-args` is a general CLI
-# escape hatch). If it does, injecting our own internal one ahead of it is
-# unsafe: Click applies both occurrences and the *last* one wins, so the
-# actual scan/compare run would silently honor the user's value instead of
-# ours, writing their chosen format/path rather than the internal
-# `$PR_JSON` sidecar this script expects to read back --
-# `$PR_JSON` then stays an empty mktemp file, and `_maybe_post_pr_comment`
-# falls through to a full rerun anyway (which the internal injection exists
-# specifically to avoid), except now confusingly alongside a stray empty
-# temp file (Codex review). Skipping our own injection when the user's is
-# present restores the older, always-correct "no PR_JSON at all" fallback
-# path instead.
+# escape hatch).
 #
 # Fed through a `<<<` here-string rather than `< <(...)` process
 # substitution (Codex review, P1, fresh evidence): this file's own
@@ -1745,6 +1735,36 @@ _extra_args_has_write_flag() {
     [[ "$_name" == "--write" ]] && return 0
   done <<<"$(_extra_args_options)"
   return 1
+}
+
+# Would injecting our own internal `--write json=$PR_JSON` conflict with a
+# `--write` the user's own `extra-args` already requests? $1 is "release"
+# for a directory/package operand, "single" otherwise.
+#
+# This used to be a blanket "any user --write at all" check, on the theory
+# that `--write` was a scalar Click option where a repeated occurrence
+# silently drops the earlier one -- but `--write` is documented and
+# live-verified as *repeatable* for a single-pair/audit-only operand
+# (`compare --help-all`: "Repeatable: pass --write more than once to emit
+# several artifacts from the same analysis"; confirmed live: `--write
+# markdown=a.md --write json=b.json` produces both files, and even two
+# `--write json=...` at different paths both render). So for a single-pair
+# or audit-only run, the ONLY real conflict is the user's own `--write`
+# already being `json=...` -- appending a second, redundant JSON write
+# would work but serves no purpose (`_extra_args_write_json_path` already
+# recovers that same path for `_json_report_src` to read). A release
+# (directory/package) operand is the one genuine constraint: only one
+# `--write` is supported there at all (Codex review, PR #1210, round 9 --
+# the blanket check previously left every audit-only scan combining
+# `extra-args: --write markdown=...`/`--write sarif=...` with no JSON
+# sidecar at all, publishing the generic COMPATIBLE/ERROR-adjacent verdict
+# `_resolve_clean_exit_verdict` needs a real report to avoid).
+_extra_args_write_would_conflict() {
+  if [[ "$1" == "release" ]]; then
+    _extra_args_has_write_flag
+    return
+  fi
+  [[ -n "$(_extra_args_write_json_path)" ]]
 }
 
 # Same shape again, for a third defect (Codex review, P1, fresh evidence):
@@ -2966,20 +2986,15 @@ elif [[ "$MODE" == "compare" ]]; then
     # CLI cleanup phase two, PR E: the per-library release fan-out
     # (directory/package operands) now supports --write directly --
     # json/markdown/junit only, the same set --format itself accepts there,
-    # which is exactly what this injection ever requests -- so this no
-    # longer needs the _is_release_style_operand carve-out it used to. The
-    # release engine renders the JSON from the same already-computed
-    # per-library results its primary (markdown, by default) render uses,
-    # without re-running any library's comparison, matching how --write
-    # already worked for a single-pair operand.
-    #
-    # Skipped when the user's own `extra-args` already carries `--write`,
-    # the same guard the scan branch below applies (Codex review):
-    # extra-args is appended *after* this, and Click honors the last
-    # occurrence, so ours would lose and leave $PR_JSON empty -- at which
-    # point _maybe_post_pr_comment reruns the whole comparison just to obtain
-    # JSON, doubling a potentially expensive analysis to produce a file this
-    # very injection existed to avoid rerunning for.
+    # which is exactly what this injection ever requests. The release
+    # engine renders the JSON from the same already-computed per-library
+    # results its primary (markdown, by default) render uses, without
+    # re-running any library's comparison, matching how --write already
+    # worked for a single-pair operand. Unlike single-pair, though, "only
+    # one --write is supported there" (compare --help-all) -- so whether
+    # injecting our own would conflict with the user's own extra-args
+    # --write genuinely depends on which operand shape this is; see
+    # _extra_args_write_would_conflict's own docstring.
     #
     # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`: a `format:
     # json` step whose own extra-args overrides to a non-json format really
@@ -2991,8 +3006,13 @@ elif [[ "$MODE" == "compare" ]]; then
     # branch at all -- the `elif` above it returns before `OUTPUT_FILE`/`-o`/
     # this injection are considered, so there is no separate dry-run check
     # needed here.
+    _write_kind="single"
+    if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+       || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+      _write_kind="release"
+    fi
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
-       && ! _extra_args_has_write_flag; then
+       && ! _extra_args_write_would_conflict "$_write_kind"; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -3337,8 +3357,20 @@ elif [[ "$MODE" == "scan" ]]; then
     # rationale (including why this is unconditional on `pr-comment`).
     # Live-verified: `compare --no-baseline --write json=... --format
     # markdown` works identically to the baseline shape.
+    #
+    # Always "single" here, never "release": scan's own `new-library`
+    # (ARTIFACT) is always a single binary/snapshot -- neither the baseline
+    # nor audit-only shape accepts a directory/package operand at all (see
+    # the earlier `scan does not accept a directory or package for
+    # new-library` rejection above), so `--write`'s repeatability is never
+    # constrained the way a release/directory compare's is (Codex review,
+    # PR #1210, round 9: a `--write markdown=...`/`--write sarif=...` in
+    # extra-args used to unconditionally suppress this injection, leaving
+    # `_resolve_clean_exit_verdict` with no JSON report to recognize the
+    # no-baseline shape from at all -- a risk-bearing audit exited 0 as the
+    # generic COMPATIBLE verdict instead of AUDIT_CLEAN/AUDIT_RISK).
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
-       && ! _extra_args_has_write_flag; then
+       && ! _extra_args_write_would_conflict "single"; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -3974,15 +4006,19 @@ _emit_annotations() {
   if [[ -z "$_src" ]]; then
     # A user-supplied `--write FORMAT=PATH` in extra-args targeting a
     # non-json FORMAT (markdown/junit/sarif/html/review) leaves genuinely
-    # no JSON report anywhere: the primary format isn't json either (or
-    # _json_report_src would already have found it), and `--write` only
-    # ever has room for one secondary format -- appending our own
-    # `--write json=...` after the user's own would silently drop theirs
-    # (the exact collision `_extra_args_has_write_flag` exists to prevent),
-    # not add a second report. Unlike the `json=` case
-    # `_extra_args_write_json_path` recovers, there is nothing to discover
-    # here, so say so rather than silently emitting nothing (Codex review,
-    # fresh evidence).
+    # no JSON report anywhere in one real remaining case: a directory/
+    # package (release) operand, where only one `--write` is supported at
+    # all (`compare --help-all`), so the compare/scan command-assembly
+    # sections above deliberately do NOT append a second, internal `--write
+    # json=...` alongside the user's own there (`_extra_args_write_would_
+    # conflict`'s own docstring has the full account, including why a
+    # single-pair/audit-only operand does NOT reach this branch at all
+    # anymore -- `--write` is repeatable there, so this script's own
+    # injection now runs alongside the user's non-json one instead of being
+    # unconditionally suppressed, Codex review, PR #1210, round 9). Unlike
+    # the `json=` case `_extra_args_write_json_path` recovers, there is
+    # nothing to discover here, so say so rather than silently emitting
+    # nothing (Codex review, fresh evidence).
     #
     # Gated on the effective format, not the nominal one (Codex review, PR
     # #998, fresh evidence): `format: json` overridden by `extra-args

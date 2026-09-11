@@ -142,6 +142,24 @@ class TestScanInjectsWriteByEffectiveFormat:
         assert "mine.json" in argv
         assert "abicheck-pr-json" not in argv, argv
 
+    def test_a_non_json_user_write_no_longer_suppresses_the_internal_one(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1210, round 9: `--write` is repeatable for
+        # scan's own always-single-artifact operand (never a directory/
+        # package) -- confirmed live against the real CLI -- so a
+        # non-json `extra-args --write` (markdown/sarif/junit/html/review)
+        # must NOT suppress the internal `--write json=$PR_JSON` sidecar
+        # the way an already-json one still correctly does (the sibling
+        # test above). Before this fix, a risk-bearing audit combined with
+        # e.g. `--write markdown=...` had no JSON report to recognize the
+        # no-baseline shape from at all, and silently published the
+        # generic COMPATIBLE verdict instead of AUDIT_CLEAN/AUDIT_RISK.
+        argv = _scan_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"})
+        assert argv.count("--write") == 2, argv
+        assert "mine.md" in argv, argv
+        assert "abicheck-pr-json" in argv, argv
+
     def test_an_effective_dry_run_via_extra_args_suppresses_the_injection(
         self, tmp_path: Path
     ) -> None:

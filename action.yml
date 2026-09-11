@@ -733,7 +733,14 @@ inputs:
   severity-preset:
     description: >
       Severity preset: 'default', 'strict', or 'info-only'.
-      Controls exit codes and report labels. Only applies to compare mode.
+      Controls exit codes and report labels. Applies to compare mode and
+      to scan mode (both the baseline shape and the audit-only shape,
+      where it is also this Action's own documented opt-out from the
+      injected `severity-preset: default` gating -- see the AUDIT_GATE
+      verdict entry below). Does not apply to dump, deps-tree, or
+      deps-compare (Codex review, PR #1210, round 9 -- this description
+      previously said "Only applies to compare mode", which predates
+      `scan`'s own migration onto `compare`).
     required: false
   require-complete-analysis:
     description: >
