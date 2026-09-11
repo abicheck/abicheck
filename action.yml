@@ -716,9 +716,11 @@ inputs:
       Severity preset: 'default', 'strict', or 'info-only'.
       Controls exit codes and report labels. Applies to compare mode --
       both the two-sided shape and the audit-only shape, where it is also
-      this Action's own documented opt-out from the injected
-      `severity-preset: default` audit-gate (see the AUDIT_GATE verdict
-      entry below). Does not apply to dump, deps-tree, or deps-compare.
+      the required opt-in for the AUDIT_GATE audit-gate axis: that axis is
+      inactive by default (see the AUDIT_GATE verdict entry below), so set
+      this to a value other than 'info-only' to gate an audit-only run on a
+      BREAKING/API_BREAK-classified finding. Does not apply to dump,
+      deps-tree, or deps-compare.
     required: false
   require-complete-analysis:
     description: >
@@ -846,13 +848,13 @@ outputs:
       omitted -- the replacement for a baseline-less mode: scan/audit: true
       request, ADR-068): AUDIT_GATE (a real, BREAKING/API_BREAK-classified
       finding was detected against the candidate's own public surface while
-      a severity preset other than `info-only` was in effect -- either
-      because the severity-preset input was set, or because this Action
-      injected `severity-preset: default` for you, which it does
-      automatically whenever the audit-only shape states no preset of its
-      own, so it gates by default the same way legacy `mode: scan`'s own
-      audit mode always did, unless you explicitly opt out with
-      `severity-preset: info-only`. This is NOT a two-sided compatibility
+      a severity preset other than `info-only` was in effect. Gating is
+      opt-in: this Action never injects a preset on your behalf, so you
+      must set the severity-preset input yourself (e.g. `default`) to get
+      this axis at all -- unlike legacy `mode: scan`'s own audit mode,
+      which gated by default with no flag needed; see the migration notes
+      in this file's `mode` input and in docs/use/github-action.md. This is
+      NOT a two-sided compatibility
       verdict -- an audit reports no additions, removals, or compatibility
       verdict at all; only the candidate-side findings themselves. Exit
       code 3, fails the step unconditionally, since no fail-on-* input
@@ -1030,6 +1032,7 @@ runs:
         INPUT_SINCE: ${{ inputs.since }}
         INPUT_CHANGED_PATH: ${{ inputs.changed-path }}
         INPUT_BUDGET: ${{ inputs.budget }}
+        INPUT_FOLLOW_DEPS: ${{ inputs.follow-deps }}
         INPUT_USED_BY: ${{ inputs.used-by }}
         INPUT_USED_BY_MANIFEST: ${{ inputs.used-by-manifest }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}

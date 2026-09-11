@@ -162,6 +162,22 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
         assert outputs["_returncode"] == 1, outputs
         assert "does not support budget" in outputs["_stdout"], outputs
 
+    def test_follow_deps_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review, PR #1223: `--follow-deps` was still reaching the CLI
+        # on the audit-only shape even though `compare --no-baseline`
+        # rejects it outright (the DT_NEEDED walk isn't wired to that path,
+        # abicheck/frontends/cli/commands/no_baseline_rulings.py) -- caught
+        # here, upfront, the same as since/changed-path/budget above.
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
+                "INPUT_FOLLOW_DEPS": "true",
+            },
+        )
+        assert outputs["_returncode"] == 1, outputs
+        assert "does not support follow-deps" in outputs["_stdout"], outputs
+
 
 class TestAuditOnlyCompareUnaffectedWhenTheseInputsAreUnset:
     """The common case -- an audit-only compare that never touches since/
@@ -287,6 +303,10 @@ class TestTwoSidedCompareStillForwardsSinceChangedPathBudget:
     def test_require_complete_analysis_reaches_compare(self) -> None:
         cmd = _run_cmd({**_BASELINE_INPUTS, "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"})
         assert "--require-complete-analysis" in cmd, cmd
+
+    def test_follow_deps_reaches_compare(self) -> None:
+        cmd = _run_cmd({**_BASELINE_INPUTS, "INPUT_FOLLOW_DEPS": "true"})
+        assert "--follow-deps" in cmd, cmd
 
 
 class TestAuditOnlyCompareForwardsRequireCompleteAnalysis:

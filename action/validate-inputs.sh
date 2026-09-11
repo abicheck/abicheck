@@ -177,6 +177,9 @@ case "$MODE" in
       if [[ -n "${INPUT_BUDGET:-}" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
       fi
+      if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support follow-deps -- compare --no-baseline's DT_NEEDED dependency walk is not wired to this path yet (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports follow-deps, or drop follow-deps for this audit-only run."
+      fi
     fi
     # compare's full --format choice set is json|markdown|sarif|html|junit|
     # review (`abicheck compare --help-all`); a directory/package operand
@@ -194,6 +197,17 @@ case "$MODE" in
          || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
         if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "junit" ]]; then
           _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', and 'junit' are available for a directory/package comparison."
+        fi
+      elif [[ -z "$OLD_LIBRARY" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
+        # Audit-only shape (`compare --no-baseline`): the CLI's own
+        # NO_BASELINE_UNSUPPORTED_FORMATS (abicheck/report/
+        # no_baseline_document.py) rejects 'html' and 'review' outright --
+        # both are two-sided-report renderers with no audit-only
+        # equivalent. Caught here, before Python/toolchain install, rather
+        # than only after setup as a CLI UsageError (Codex review).
+        if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "sarif" \
+              && "$FORMAT" != "junit" && "$FORMAT" != "oneline" ]]; then
+          _fail "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'junit', and 'oneline' are available for compare --no-baseline (html and review are two-sided-only renderers). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports html/review, instead."
         fi
       elif [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "sarif" \
             && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" \

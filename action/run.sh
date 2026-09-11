@@ -2540,6 +2540,10 @@ elif [[ "$MODE" == "compare" ]]; then
       echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
       exit 1
     fi
+    if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support follow-deps -- compare --no-baseline's DT_NEEDED dependency walk is not wired to this path yet (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports follow-deps, or drop follow-deps for this audit-only run."
+      exit 1
+    fi
   fi
   CMD+=(compare)
   if [[ "$_NO_BASELINE" == "true" ]]; then

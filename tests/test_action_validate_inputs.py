@@ -444,14 +444,18 @@ class TestFormatIsHardErrorNotSilentFallback:
         assert "does not support format" in result.stdout
         assert "warning" not in result.stdout.lower()
 
-    @pytest.mark.parametrize("fmt", ["json", "markdown", "sarif", "html", "junit"])
-    def test_audit_only_compare_accepts_the_full_compare_format_set(
-        self, fmt: str
-    ) -> None:
-        # Audit-only compare (old-library/abi-baseline both omitted) has
-        # the identical format contract as a two-sided compare -- unlike
-        # legacy `mode: scan`'s own text/json-only restriction, which is
-        # gone along with that mode.
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "sarif", "junit", "oneline"])
+    def test_audit_only_compare_accepts_its_own_format_set(self, fmt: str) -> None:
+        # Audit-only compare (old-library/abi-baseline both omitted) has a
+        # NARROWER format contract than a two-sided compare -- unlike
+        # legacy `mode: scan`'s own text/json-only restriction (gone along
+        # with that mode), but not the full two-sided set either: 'html'
+        # and 'review' are two-sided-report renderers with no audit-only
+        # equivalent (NO_BASELINE_UNSUPPORTED_FORMATS,
+        # abicheck/report/no_baseline_document.py). See
+        # TestAuditOnlyCompareRejectsTwoSidedOnlyFormats below (Codex
+        # review, PR #1223 -- this test previously asserted the wrong,
+        # wider contract).
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
@@ -460,6 +464,20 @@ class TestFormatIsHardErrorNotSilentFallback:
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("fmt", ["html", "review"])
+    def test_audit_only_compare_rejects_two_sided_only_formats(
+        self, fmt: str
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": fmt,
+            }
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "does not support format" in result.stdout
 
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
     @pytest.mark.parametrize("fmt", ["sarif", "xml"])
