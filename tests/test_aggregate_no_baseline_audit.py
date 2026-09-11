@@ -68,12 +68,18 @@ def _write_no_baseline_report(
     evidence_contract_axis: int = 0,
     findings: list | None = None,
     prefix: str = "abi-report-",
+    report_target_id: str | None = None,
 ) -> Path:
     """A real `compare --no-baseline` audit document
     (`report/no_baseline.py::_document_json`'s own shape): `verdict` is
     always JSON `null` (ADR-068 D2), and its own gate-worthy axes live
     only in `exit_axes`, not in a `severity` block or a compare-scheme
-    top-level `exit_code`."""
+    top-level `exit_code`.
+
+    *report_target_id*, when given, is written as the report's own
+    self-identified `target_id` (a `check_id`-shaped value, for
+    `profile_matrix` tests) -- otherwise the report carries none and the
+    aggregate falls back to the filename-derived *target_id*."""
     exit_axes = {
         "audit_gate": audit_gate_axis,
         "contract_coverage": 0,
@@ -82,23 +88,22 @@ def _write_no_baseline_report(
         "incomplete_scope": 0,
         "no_comparison_completed": 0,
     }
+    payload: dict[str, object] = {
+        "audit_report_schema_version": "1.3",
+        "no_baseline": True,
+        "library": "libfoo.so",
+        "verdict": None,
+        "changes": [],
+        "findings": findings or [],
+        "exit_axes": exit_axes,
+        "exit_code": max(exit_axes.values()),
+        "contract_coverage_exit_contribution": 0,
+        "policy": "strict_abi",
+    }
+    if report_target_id is not None:
+        payload["target_id"] = report_target_id
     path = d / f"{prefix}{target_id}.json"
-    path.write_text(
-        json.dumps(
-            {
-                "audit_report_schema_version": "1.3",
-                "no_baseline": True,
-                "library": "libfoo.so",
-                "verdict": None,
-                "changes": [],
-                "findings": findings or [],
-                "exit_axes": exit_axes,
-                "exit_code": max(exit_axes.values()),
-                "contract_coverage_exit_contribution": 0,
-                "policy": "strict_abi",
-            }
-        )
-    )
+    path.write_text(json.dumps(payload))
     return path
 
 
@@ -205,3 +210,71 @@ class TestNoBaselineAuditGate:
         finding = r.targets[0].findings.findings[0]
         assert finding.kind == "symbol_removed"
         assert finding.symbol == "libfoo_free"
+
+
+class TestNoBaselineAuditTextRenderingAndProfileMatrix:
+    """Codex review, third round, fresh evidence: `TargetReport.analyzed`
+    is widened for a completed no-baseline audit, but several *consumers*
+    of `analyzed` still assumed it implies a non-null `compatibility_
+    verdict` -- `_render_target_line()`'s `assert t.compatibility_verdict
+    is not None` crashed `abicheck aggregate --format text` outright for
+    any such target (including the text invocation `check-project.yml`
+    itself runs), and `profile_matrix` labelled the same completed audit
+    both `incomplete` and `unanalyzed`, indistinguishable from a report
+    that never arrived."""
+
+    def test_format_text_does_not_crash_on_a_completed_audit(self, tmp_path: Path):
+        _write_no_baseline_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        text = r.render_text()
+        assert "no compatibility verdict" in text
+        assert LINUX in text
+
+    def test_format_text_shows_a_gating_audits_blocking_gate(self, tmp_path: Path):
+        _write_no_baseline_report(tmp_path, LINUX, audit_gate_axis=3)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        text = r.render_text()
+        assert "gate: blocking" in text
+        assert "audit_gate" in text
+
+    def test_profile_matrix_does_not_mark_a_completed_audit_incomplete_or_unanalyzed(
+        self, tmp_path: Path
+    ):
+        tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path, LINUX, prefix=f"abi-report-{LINUX}-", report_target_id=tid
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        assert len(r.profile_matrix) == 1
+        entry = r.profile_matrix[0]
+        assert entry.incomplete_profiles == ()
+        assert entry.unanalyzed_profiles == ()
+        assert entry.verdict_by_profile == {"profileA": None}
+
+    def test_profile_matrix_marks_a_gating_audit_affected(self, tmp_path: Path):
+        tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path,
+            LINUX,
+            prefix=f"abi-report-{LINUX}-",
+            report_target_id=tid,
+            audit_gate_axis=3,
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        entry = r.profile_matrix[0]
+        assert entry.affected_profiles == ("profileA",)
+        assert entry.incomplete_profiles == ()
+        assert entry.unanalyzed_profiles == ()
+
+    def test_profile_matrix_still_marks_a_genuinely_missing_required_report_incomplete(
+        self, tmp_path: Path
+    ):
+        """Regression guard for the fix's own scope: a required profile
+        whose report genuinely never arrived -- not a completed audit --
+        must still land in `incomplete_profiles`, unaffected by the
+        `completed_without_compatibility_verdict` carve-out."""
+        tid = f"{LINUX}@profileA#release@headers"
+        r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
+        entry = r.profile_matrix[0]
+        assert entry.incomplete_profiles == ("profileA",)
+        assert entry.unanalyzed_profiles == ("profileA",)

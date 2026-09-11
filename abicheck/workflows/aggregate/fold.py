@@ -354,7 +354,19 @@ class AggregateResult:
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
-                if any(r.compatibility_verdict is None and r.required for r in reports):
+                # A `compare --no-baseline` audit's `completed_without_
+                # compatibility_verdict=True` reports are excluded from this
+                # "no verdict" check (Codex review, fresh evidence): its
+                # missing `compatibility_verdict` is by design (ADR-068 D2),
+                # not the report-never-arrived/failed case this line exists
+                # to catch, and the previous version marked every such
+                # required check's profile `incomplete` unconditionally.
+                if any(
+                    r.compatibility_verdict is None
+                    and r.required
+                    and not r.completed_without_compatibility_verdict
+                    for r in reports
+                ):
                     incomplete.append(pid)
                 # Same predicate as `contract_coverage_targets`, and checked
                 # before the `continue` below: a profile can be short of
@@ -381,8 +393,25 @@ class AggregateResult:
                     if r.compatibility_verdict is not None
                 ]
                 if not verdicts:
+                    # Zero real compatibility verdicts. Still not
+                    # `unanalyzed_profiles` if this profile's reports
+                    # include a *completed* no-baseline audit -- it ran
+                    # successfully and simply has no compatibility axis to
+                    # report (Codex review, fresh evidence: the previous
+                    # version put every such profile in both
+                    # `incomplete_profiles` and `unanalyzed_profiles`,
+                    # indistinguishable from a report that never arrived at
+                    # all). `verdict_by_profile` stays `None` either way --
+                    # there is no worst verdict to report in both cases.
                     verdict_by_profile[pid] = None
-                    unanalyzed.append(pid)
+                    if not any(r.analyzed for r in reports):
+                        unanalyzed.append(pid)
+                    else:
+                        gate_blocking = any(
+                            r.gate is not None and r.gate.blocking for r in reports
+                        )
+                        if gate_blocking:
+                            affected.append(pid)
                     continue
                 worst = max(verdicts, key=lambda v: _VERDICT_RANK[v])
                 verdict_by_profile[pid] = worst.value
@@ -722,7 +751,23 @@ class AggregateResult:
                 f"{t.target_id}{tag}: ⚠ unavailable — "
                 f"{t.reason or 'no report'}{forced_gate}"
             )
-        assert t.compatibility_verdict is not None
+        if t.compatibility_verdict is None:
+            # `t.analyzed` is true (the branch above already returned
+            # otherwise) but there is still no compatibility verdict --
+            # `completed_without_compatibility_verdict` (a `compare
+            # --no-baseline` audit, ADR-068 D2: it completed successfully
+            # and has none by design, unlike every other analyzed-target
+            # shape this function otherwise renders, which always carries a
+            # real `Verdict`). Codex review, fresh evidence: the previous
+            # `assert t.compatibility_verdict is not None` below made
+            # `abicheck aggregate --format text` crash outright on any such
+            # target, including the text invocation `check-project.yml`
+            # itself runs.
+            forced_gate = ""
+            if t.gate is not None and t.gate.blocking:
+                cats = ", ".join(t.gate.blocking_categories)
+                forced_gate = f" [gate: blocking{f' ({cats})' if cats else ''}]"
+            return f"{t.target_id}{tag}: audit completed — no compatibility verdict (no baseline){forced_gate}"
         verdict = t.compatibility_verdict.value
         if t.gate is not None and t.gate.blocking:
             cats = ", ".join(t.gate.blocking_categories)

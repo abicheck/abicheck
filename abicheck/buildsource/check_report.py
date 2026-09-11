@@ -318,14 +318,27 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     # unneutralized left an advisory audit's real gating finding still
     # blocking the trailing aggregate job, exactly the failure mode every
     # other axis in this function exists to prevent (Codex review, fresh
-    # evidence). `exit_axes.evidence_contract` is deliberately left
-    # untouched -- it is a comparison-never-completed-style failure, not a
-    # compatibility-style finding advisory mode neutralizes, the same
-    # distinction the exit-block loop below draws for its own five
-    # "never completed" contributions.
+    # evidence). `exit_axes.analysis_assurance` gets the identical
+    # treatment for the identical reason (Codex review, second round,
+    # fresh evidence): this shape carries no dedicated root
+    # `analysis_assurance_exit_contribution` key at all (unlike a two-sided
+    # report), so the generic contract-coverage-block loop below -- which
+    # already zeroes that dedicated key -- finds nothing to act on; the
+    # aggregate's own audit loader reads `exit_axes.analysis_assurance`
+    # directly (via `max()` against that always-absent dedicated key), so
+    # an unneutralized value there still gated an explicitly advisory
+    # `require-complete-analysis: true` audit. `exit_axes.evidence_contract`
+    # is deliberately left untouched -- it is a comparison-never-completed-
+    # style failure, not a compatibility/assurance-style finding advisory
+    # mode neutralizes, the same distinction the exit-block loop below draws
+    # for its own five "never completed" contributions.
     exit_axes = report.get("exit_axes")
-    if isinstance(exit_axes, dict) and "audit_gate" in exit_axes:
-        report["exit_axes"] = {**exit_axes, "audit_gate": 0}
+    if isinstance(exit_axes, dict):
+        updated_axes = dict(exit_axes)
+        for axis in ("audit_gate", "analysis_assurance"):
+            if axis in updated_axes:
+                updated_axes[axis] = 0
+        report["exit_axes"] = updated_axes
     # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
     # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
     # *prefers* it over the top-level `exit_code` zeroed just above -- so

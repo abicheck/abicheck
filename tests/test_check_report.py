@@ -893,6 +893,34 @@ class TestAugmentReport:
         )
         assert out["exit_axes"]["evidence_contract"] == 7
 
+    def test_advisory_neutralizes_a_no_baseline_audits_exit_axes_analysis_assurance(
+        self,
+    ) -> None:
+        """Codex review, second round, fresh evidence: a no-baseline audit
+        carries no dedicated root `analysis_assurance_exit_contribution`
+        key at all (unlike a two-sided report), so the generic
+        contract-coverage-block neutralization loop -- which already zeroes
+        that dedicated key -- finds nothing to act on for this shape. The
+        aggregate's own audit loader reads `exit_axes.analysis_assurance`
+        directly, so leaving it unneutralized still gated an explicitly
+        advisory `require-complete-analysis: true` audit."""
+        out = augment_report(
+            self._no_baseline_report(exit_code=1)
+            | {
+                "exit_axes": {
+                    "audit_gate": 0,
+                    "analysis_assurance": 1,
+                    "evidence_contract": 0,
+                }
+            },
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_axes"]["analysis_assurance"] == 0
+
     def test_advisory_also_neutralizes_the_analysis_assurance_axis(self):
         """P0.4's analysis-assurance contribution is the exact sibling of
         the contract-coverage one above -- a second, independent way this
