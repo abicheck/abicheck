@@ -37,6 +37,9 @@ from pathlib import Path
 from _assurance_overlay_exec import _run_overlay, _written_overlay
 from _workflow_exec import make_workspace
 
+from abicheck.cli_options import merge_compile_config
+from abicheck.dry_run_estimate import CompileContext
+
 
 class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
     """P1 finding (Codex review, fresh evidence, PR #1222 fourth round):
@@ -69,21 +72,38 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
 
     P1 finding, PR #1222 eighth round (Codex review, fresh evidence):
     within the single-sided (non-pairwise) bucket, ``source:``(singular)/
-    ``debug:`` do NOT resolve the same way ``compile:`` does. `compile:`
+    ``debug:`` do NOT resolve the same way ``compile:`` used to. `compile:`
     genuinely two-stage-merges a sources-root document on top of the
-    checkout config for BOTH `mode: compare`'s single-sided shape
-    (``SOURCES_MERGE_COMPILE: true``) and `dump`/`scan`'s single-document
-    shape (``SOURCES_MERGE_COMPILE`` unset) -- but `source:`/`debug:` are
+    checkout config for `dump`/`scan`'s single-document shape
+    (``SOURCES_MERGE_COMPILE`` unset) -- but `source:`/`debug:` are
     single-document-selected off the sources-root tree ONLY for `dump`/
     `scan`; `compare`'s own pipeline never re-resolves either from a
     per-side ``--sources`` tree at all, always taking both from the
-    CHECKOUT project config alone. So the single-sided bucket is really
-    two cases, not one: `mode: compare` (``SOURCES_MERGE_COMPILE: true``)
-    promotes only ``build``/``sources``/``compile``; `dump`/`scan`
-    (``SOURCES_MERGE_COMPILE`` unset) promotes all five.
+    CHECKOUT project config alone.
+
+    P1 finding, PR #1222 eleventh round (Codex review, fresh evidence --
+    reverses the fourth round's own conclusion above): `compile:` is now
+    treated like `source:`/`debug:`, not merged from the sources root, for
+    `mode: compare`'s own single-sided shape (``SOURCES_MERGE_COMPILE:
+    true``) either. `frontends/cli/commands/compare.py`'s
+    ``_embed_inline_source_side`` already, unconditionally, folds the live
+    NEW side's own ``--sources`` tree's ``compile:`` block onto the CLI's
+    already-resolved compile context the moment ``--new-sources`` names a
+    raw tree -- regardless of whether ``--config``/``build-config`` was
+    explicit. So this step's own promotion additionally merging the same
+    sources-root document's ``compile:`` block folds it in TWICE, applying
+    a repeat-sensitive flag (``compile.options: [-include, foo.h]``) twice
+    in the final compiler invocation purely because
+    ``analysis.assurance: complete`` was enabled -- the exact P1 finding
+    these tests now assert against. The corrected single-sided bucket is
+    really two cases: `mode: compare` (``SOURCES_MERGE_COMPILE: true``)
+    promotes only ``build``/``sources``, leaving ``compile:`` at whatever
+    the checkout document/``BASE_CONFIG`` already supplied and letting the
+    CLI's own second stage run unaided; `dump`/`scan`
+    (``SOURCES_MERGE_COMPILE`` unset) promotes all five, unchanged.
     """
 
-    def test_single_sided_kind_target_promotes_compile_but_not_source_debug(
+    def test_single_sided_kind_target_leaves_compile_unpromoted(
         self, tmp_path: Path
     ) -> None:
         """kind: target (baseline-channel set, mode: compare against a
@@ -94,21 +114,14 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         (``inputs.baseline-channel != 'none'``), which is `mode: compare`'s
         own real single-sided signature.
 
-        P1 finding (Codex review, fresh evidence, PR #1222 eighth round):
-        this test used to state ``SOURCES_MERGE_COMPILE`` at its default
-        (empty) here -- silently mismodeling this step's own real env for
-        this exact kind/baseline-channel combination -- and asserted that
-        `source:`/`debug:` were promoted from the sources-root document,
-        which the real `compare` pipeline never does (it resolves both
-        exclusively from the CHECKOUT project config; see
-        ``apply_sources_root_config_blocks``'s own docstring). With
-        ``SOURCES_MERGE_COMPILE: true`` correctly stated, `compile:` is
-        still promoted (as a real per-field MERGE), `build:`/`sources:`
-        stay promoted, but `source:`/`debug:` must be ABSENT from the
-        overlay entirely -- the checkout document here defines neither, so
-        the real `compare` pipeline would see nothing for them, and the
-        overlay must not manufacture a value neither side actually
-        configured."""
+        P1 finding (Codex review, fresh evidence, PR #1222 eleventh
+        round): with no checkout-root ``.abicheck.yml`` at all, the
+        overlay must carry NO ``compile:`` key whatsoever -- neither
+        promoted nor merged from the sources-root document, which the CLI's
+        own ``_embed_inline_source_side`` will fold in on its own, exactly
+        once, when "Run analysis" actually runs. ``build:``/``sources:``
+        stay promoted (unaffected by this fix); ``source:``/``debug:``
+        stay absent, as before."""
         workspace = make_workspace(tmp_path)
         src_dir = workspace / "src"
         src_dir.mkdir()
@@ -130,7 +143,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["compile"] == {"std": "c++20"}
+        assert "compile" not in written
         assert "source" not in written
         assert "debug" not in written
         assert written["build"] == {"system": "cmake"}
@@ -138,15 +151,19 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
     def test_single_sided_compare_mode_preserves_checkout_source_debug(
         self, tmp_path: Path
     ) -> None:
-        """P1 finding (Codex review, fresh evidence, PR #1222 eighth
-        round): the companion positive control for the fix above -- when
-        the CHECKOUT document (not the sources-root one) sets `source:`/
+        """The companion positive control for the fix above -- when the
+        CHECKOUT document (not the sources-root one) sets `source:`/
         `debug:`, those checkout values must survive into the overlay
         UNCHANGED for `mode: compare`'s single-sided shape
         (SOURCES_MERGE_COMPILE: true), exactly matching the real
         `compare` pipeline's own checkout-only resolution -- even though
         the sources-root document sets conflicting values of its own,
-        which must be ignored entirely."""
+        which must be ignored entirely. ``compile:`` (P1 finding, PR #1222
+        eleventh round) follows the identical rule now: the checkout
+        document here declares no ``compile:`` block at all, so the
+        overlay must carry none either -- the sources-root document's own
+        ``compile: std: c++20`` is never promoted/merged into it, left
+        entirely for the CLI's own single, unconditional fold."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "source:\n  method: headers\ndebug:\n  format: btf\n",
@@ -173,7 +190,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         written = _written_overlay(result)
         assert written["source"] == {"method": "headers"}
         assert written["debug"] == {"format": "btf"}
-        assert written["compile"] == {"std": "c++20"}
+        assert "compile" not in written
 
     def test_single_sided_audit_mode_promotes_compile_source_debug(
         self, tmp_path: Path
@@ -185,7 +202,10 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         SOURCES_PAIRWISE value (empty) as the baseline path above, since
         check-target's own env formula is ``inputs.kind == 'bundle' &&
         inputs.baseline-channel != 'none'`` -- false for EITHER kind when
-        baseline-channel is 'none'."""
+        baseline-channel is 'none'. Unlike `mode: compare` above,
+        ``SOURCES_MERGE_COMPILE`` is unset here (`scan`'s own
+        single-document-REPLACE shape), so `compile:` IS still promoted --
+        this fix is scoped to `mode: compare` only."""
         workspace = make_workspace(tmp_path)
         src_dir = workspace / "src"
         src_dir.mkdir()
@@ -273,28 +293,20 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
             str((workspace / "include").resolve())
         ]
 
-    def test_single_sided_mode_rebases_compile_include_dirs_from_sources_root(
+    def test_single_sided_compare_mode_rebases_compile_include_dirs_from_checkout_root(
         self, tmp_path: Path
     ) -> None:
-        """When compile: IS promoted from the sources root (single-sided),
-        a relative compile.include_dirs entry in THAT document must rebase
-        against the SOURCES root, not the checkout root -- found_path must
-        be reassigned to the sources-root document, mirroring run.sh's own
-        identical rule.
-
-        ``compile:`` is a real per-field MERGE under ``mode: compare``
-        (Codex review, fresh evidence, PR #1222 fourth round -- see
-        ``apply_sources_root_config_blocks``'s own ``merge_compile``
-        parameter docstring): a checkout document's own ``compile.
-        include_dirs`` is never dropped just because the sources-root
-        document also sets one, so both entries survive -- the checkout's
-        own (rebased against the CHECKOUT root) first, the sources-root's
-        own (rebased against the SOURCES root) appended after, matching
-        ``cli_options.merge_compile_config``'s own ``tuple(cli_includes) +
-        tuple(bc.compile_include_dirs...)`` ordering exactly. This test
-        states ``SOURCES_MERGE_COMPILE: true`` explicitly, modeling
-        ``mode: compare``; the sibling test right below states the
-        opposite (``mode: scan``) to prove the two really differ."""
+        """P1 finding (Codex review, fresh evidence, PR #1222 eleventh
+        round): the `mode: compare` single-sided sibling of the pairwise
+        test above -- now that `compile:` is NEVER promoted/merged from
+        the sources root for this shape either (see this class's own
+        docstring), a checkout-root document's own `compile.include_dirs`
+        must rebase against the CHECKOUT root exactly like the pairwise
+        case, and the sources-root document's own conflicting
+        `include_dirs` entry must be ignored entirely (not appended) --
+        the previous round's own test here asserted the opposite (a
+        two-document merge anchored partly against the sources root),
+        which was the double-fold bug itself."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  include_dirs: [checkout_only]\n", encoding="utf-8"
@@ -316,8 +328,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["compile"]["include_dirs"] == [
-            str((workspace / "checkout_only").resolve()),
-            str((src_dir / "include").resolve()),
+            str((workspace / "checkout_only").resolve())
         ]
 
     def test_single_sided_scan_mode_still_replaces_compile_include_dirs(
@@ -330,7 +341,9 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         genuinely selects ``compile:`` from exactly ONE document (its
         ``--sources`` tree's own, when no explicit ``--build-config`` is
         given), the same single-document-exclusive shape ``build:``/
-        ``sources:``/``source:``/``debug:`` already use."""
+        ``sources:``/``source:``/``debug:`` already use. Unaffected by
+        the ``mode: compare`` fix above -- ``dump``/``scan`` still
+        genuinely need this single-document selection."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  include_dirs: [checkout_only]\n", encoding="utf-8"
@@ -354,29 +367,22 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
             str((src_dir / "include").resolve())
         ]
 
-    def test_single_sided_mode_merges_compile_preserving_checkout_only_keys(
+    def test_single_sided_compare_mode_leaves_checkout_only_compile_keys_untouched(
         self, tmp_path: Path
     ) -> None:
-        """P1 finding (Codex review, fresh evidence, PR #1222 fourth
-        round): a fresh regression from the PREVIOUS round's own fix --
-        when BOTH the checkout root and the sources root carry their own
-        ``.abicheck.yml``, and this step determined the invocation is
-        single-sided-safe under ``mode: compare`` (promoting ``compile:``
-        from the sources-root document as a genuine per-field MERGE), the
-        overlay used to REPLACE the checkout's entire ``compile:`` block
-        wholesale with the sources-root's own, silently dropping any
-        checkout-level ``compile:`` setting the sources-root document
-        doesn't happen to also specify. The real (non-overlay) ``compare``
-        resolution path never does that -- ``cli_compare_helpers.py``'s
-        ``resolve_compile_context`` folds the checkout document's
-        ``compile:`` block into the compile context FIRST, then
-        ``cli_options.merge_compile_config`` layers the sources-root
-        document's own ``compile:`` block ON TOP, per field -- so a
-        checkout-only key (``compile.std``, set by neither the CLI nor the
-        sources-root document) always survives. This test states that
-        exact scenario: the checkout config sets ONLY ``compile.std`` and
-        the sources-root config sets ONLY ``compile.include_dirs`` (no
-        conflicting key), so the merged overlay must carry BOTH."""
+        """P1 finding (Codex review, fresh evidence, PR #1222 eleventh
+        round): the `mode: compare` single-sided sibling of the scan-mode
+        REPLACE test above, proving the two really differ in the OPPOSITE
+        direction from before -- when BOTH the checkout root and the
+        sources root carry their own ``compile:``, `mode: compare`'s own
+        overlay must carry ONLY the checkout document's own keys, with the
+        sources-root document's own ``compile.include_dirs`` never
+        appearing at all (not merged in, not replacing). A previous round
+        (fourth) merged the two per-field here, believing this step needed
+        to reproduce the real pipeline's SECOND merge stage itself; the CLI
+        already performs that second stage, unconditionally, inside
+        ``_embed_inline_source_side`` when "Run analysis" actually runs --
+        this step supplies only the checkout-side FIRST stage now."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  std: c++20\n", encoding="utf-8"
@@ -397,30 +403,18 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["compile"]["std"] == "c++20"
-        assert written["compile"]["include_dirs"] == [str((src_dir / "foo").resolve())]
+        assert written["compile"] == {"std": "c++20"}
 
-    def test_single_sided_mode_merge_preserves_checkout_nostdinc_true(
+    def test_single_sided_compare_mode_ignores_sources_root_nostdinc(
         self, tmp_path: Path
     ) -> None:
-        """P1 finding (Codex review, fresh evidence, PR #1222 fifth round):
-        ``_merge_compile_block`` classified ``nostdinc`` alongside
-        ``frontend_context`` in ``_COMPILE_SOURCES_WINS_KEYS`` -- "the
-        later-folded (sources-root) document wins outright once it sets
-        one". That is ``frontend_context``'s real precedence, but not
-        ``nostdinc``'s: the real two-call shape
-        (``cli_compare_helpers.py``'s ``nostdinc_explicit=
-        _nostdinc_explicit or compile_context.nostdinc`` feeding
-        ``cli_options.merge_compile_config``) makes an already-``True``
-        checkout value survive a sources-root ``compile.nostdinc: false``
-        -- true wins from EITHER document, not just "whichever was folded
-        last". Before this fix, a checkout ``compile.nostdinc: true`` with
-        a sources-root ``compile.nostdinc: false`` collapsed to ``false``
-        in the merged overlay, silently re-enabling standard include paths
-        for the assurance-overlay run and changing the observed header
-        include environment (and therefore possibly the API/findings)
-        purely because ``analysis.assurance: complete`` triggered this
-        promotion path."""
+        """P1 finding (Codex review, fresh evidence, PR #1222 eleventh
+        round): a sources-root ``compile.nostdinc`` setting must have NO
+        effect at all on `mode: compare`'s own overlay any more -- the
+        checkout's own ``nostdinc: true`` survives completely unchanged,
+        and the sources-root document's conflicting ``nostdinc: false`` is
+        never consulted, let alone OR-merged with it (the fourth/fifth
+        round's own per-field merge behavior, now removed for this shape)."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  nostdinc: true\n", encoding="utf-8"
@@ -441,55 +435,17 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["compile"]["nostdinc"] is True
+        assert written["compile"] == {"nostdinc": True}
 
-    def test_single_sided_mode_merge_nostdinc_false_when_neither_side_sets_it(
+    def test_single_sided_compare_mode_ignores_sources_root_frontend(
         self, tmp_path: Path
     ) -> None:
-        """Companion negative control for the OR-semantics fix above: when
-        neither document opts into ``nostdinc``, the merged overlay must
-        stay ``false`` -- the fix must not accidentally always force
-        ``nostdinc`` on."""
-        workspace = make_workspace(tmp_path)
-        (workspace / ".abicheck.yml").write_text(
-            "compile:\n  std: c++20\n", encoding="utf-8"
-        )
-        src_dir = workspace / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  nostdinc: false\n", encoding="utf-8"
-        )
-        result = _run_overlay(
-            workspace,
-            {
-                "BASE_CONFIG": "",
-                "SOURCES_ROOT": str(src_dir),
-                "SOURCES_PAIRWISE": "",
-                "SOURCES_MERGE_COMPILE": "true",
-            },
-        )
-        assert result.returncode == 0, result.stderr
-        written = _written_overlay(result)
-        assert written["compile"]["nostdinc"] is False
-
-    def test_single_sided_mode_merge_checkout_auto_frontend_lets_sources_win(
-        self, tmp_path: Path
-    ) -> None:
-        """P1 finding (Codex review, fresh evidence, PR #1222 sixth round):
-        ``_merge_compile_block`` treated a checkout ``compile.frontend:
-        auto`` as "checkout already set this key", permanently blocking a
-        sources-root ``compile.frontend: clang``/``castxml`` from ever
-        applying, purely because the sentinel string was present under the
-        key. The real two-call shape
-        (``cli_options.merge_compile_config``'s ``frontend = cli_ctx.
-        frontend if (frontend_explicit or cli_ctx.frontend != "auto") else
-        (bc.compile_frontend or "auto")``) treats a checkout-stage result of
-        literal ``"auto"`` exactly like an absent key: the sources-root
-        document's value wins outright. Before this fix the merged overlay
-        kept ``"auto"`` instead of promoting the sources-root's concrete
-        ``clang``, silently changing which AST backend the assurance-overlay
-        run's ``compile.frontend`` selects back to the default instead of
-        the sources tree's own explicit choice."""
+        """Companion to the ``nostdinc`` test above for ``compile.
+        frontend``: even the ``"auto"`` sentinel case (which the old
+        per-field merge treated specially, letting a concrete sources-root
+        value win) must now leave the checkout's own ``"auto"`` completely
+        untouched -- the sources-root document's ``compile.frontend:
+        clang`` is never consulted at all for this shape any more."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  frontend: auto\n", encoding="utf-8"
@@ -510,69 +466,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         )
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
-        assert written["compile"]["frontend"] == "clang"
-
-    def test_single_sided_mode_merge_checkout_concrete_frontend_wins(
-        self, tmp_path: Path
-    ) -> None:
-        """Companion positive control for the sentinel-handling fix above:
-        a checkout ``compile.frontend`` that is a real, non-``"auto"``
-        value must still win over a DIFFERING sources-root value -- the fix
-        must only exempt the literal ``"auto"`` sentinel, not blanket-flip
-        the whole field to sources-wins. Matches ``merge_compile_config``'s
-        own truth table: ``cli_ctx.frontend != "auto"`` is ``True`` once the
-        checkout stage resolved to a concrete value, so the sources-root
-        document's own value is never even consulted."""
-        workspace = make_workspace(tmp_path)
-        (workspace / ".abicheck.yml").write_text(
-            "compile:\n  frontend: clang\n", encoding="utf-8"
-        )
-        src_dir = workspace / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  frontend: castxml\n", encoding="utf-8"
-        )
-        result = _run_overlay(
-            workspace,
-            {
-                "BASE_CONFIG": "",
-                "SOURCES_ROOT": str(src_dir),
-                "SOURCES_PAIRWISE": "",
-                "SOURCES_MERGE_COMPILE": "true",
-            },
-        )
-        assert result.returncode == 0, result.stderr
-        written = _written_overlay(result)
-        assert written["compile"]["frontend"] == "clang"
-
-    def test_single_sided_mode_merge_both_auto_frontend_stays_auto(
-        self, tmp_path: Path
-    ) -> None:
-        """Companion negative control: when both documents leave
-        ``frontend`` at the ``"auto"`` sentinel (explicitly or by omission),
-        the merged overlay must stay ``"auto"`` -- the fix must not
-        accidentally invent a concrete frontend neither side asked for."""
-        workspace = make_workspace(tmp_path)
-        (workspace / ".abicheck.yml").write_text(
-            "compile:\n  frontend: auto\n", encoding="utf-8"
-        )
-        src_dir = workspace / "src"
-        src_dir.mkdir()
-        (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  frontend: auto\n", encoding="utf-8"
-        )
-        result = _run_overlay(
-            workspace,
-            {
-                "BASE_CONFIG": "",
-                "SOURCES_ROOT": str(src_dir),
-                "SOURCES_PAIRWISE": "",
-                "SOURCES_MERGE_COMPILE": "true",
-            },
-        )
-        assert result.returncode == 0, result.stderr
-        written = _written_overlay(result)
-        assert written["compile"]["frontend"] == "auto"
+        assert written["compile"] == {"frontend": "auto"}
 
     def test_ambiguous_sources_root_promotion_still_subject_to_stripping(
         self, tmp_path: Path
@@ -776,3 +670,150 @@ class TestAssuranceOverlayEscapesWorkflowCommandInjection:
         lines = result.stderr.splitlines()
         assert not any(line.startswith("::") for line in lines[1:])
         assert "%0A" in result.stderr
+
+
+class TestAssuranceOverlayDoesNotDoubleFoldRepeatSensitiveCompileFlags:
+    """P1 finding (Codex review, fresh evidence, PR #1222 eleventh round):
+    ``actions/check-target/action.yml``'s "Generate assurance-overlay
+    config" step, for a stored-baseline ``mode: compare`` run
+    (``analysis-assurance-complete: true``), used to fold a sources-root
+    document's ``compile:`` block into the synthesized overlay as a
+    genuine per-field MERGE onto the checkout document's own ``compile:``
+    -- believing it needed to reproduce the real pipeline's OWN two-stage
+    ``compile:`` merge itself, because forwarding the overlay as an
+    explicit ``--config`` would otherwise suppress the second stage.
+
+    It doesn't: ``frontends/cli/commands/compare.py``'s
+    ``_embed_inline_source_side`` performs that second stage
+    UNCONDITIONALLY whenever ``--new-sources`` names a raw tree, via its
+    own ``cli_options.merge_compile_config`` call, regardless of whether
+    ``--config``/``build-config`` was explicit. So the old overlay-level
+    merge folded the SAME sources-root document's ``compile:`` block in
+    TWICE -- once via the overlay's own promotion, once again inside
+    ``_embed_inline_source_side``'s always-running merge -- and a
+    repeat-sensitive raw compiler flag like ``-include shim.h``
+    (``compile.options``) ended up applied TWICE in the final resolved
+    compiler invocation purely because ``analysis.assurance: complete``
+    was enabled.
+
+    These tests exercise the REAL glue end to end rather than asserting
+    the overlay's own YAML text in isolation (the "assert behavior via
+    the real pipeline, not structural text" principle root ``AGENTS.md``
+    states): first the step's real Python body generates the overlay
+    (exactly as ``TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks``
+    above does), then the REAL ``cli_options.merge_compile_config`` --
+    the exact function both ``resolve_compile_context`` (stage 1, the
+    checkout side) and ``_embed_inline_source_side`` (stage 2, the
+    sources-root side) call -- is invoked twice against that generated
+    overlay and the sources-root tree, in the identical shape ``compare``'s
+    own real dispatch invokes it, so a regression reintroducing the
+    double-fold at either layer would reproduce the doubled flag here."""
+
+    def test_minus_include_flag_applies_exactly_once_through_the_real_two_stage_merge(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        # Deliberately no checkout-root .abicheck.yml at all -- the
+        # repeat-sensitive flag lives ONLY in the sources-root document,
+        # the exact shape that manufactures a duplicate out of thin air if
+        # the overlay generator (wrongly) also promotes it.
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  options: ['-include', 'shim.h']\n", encoding="utf-8"
+        )
+
+        # Stage 0: the real "Generate assurance-overlay config" step, for
+        # the exact env shape a stored-baseline `mode: compare` run
+        # produces (SOURCES_MERGE_COMPILE: true, single-sided).
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        overlay_config = Path(result.outputs["config-path"])
+        written = _written_overlay(result)
+        # The fix itself, restated as a precondition: the generated
+        # overlay must not already carry the sources-root's own
+        # -include/shim.h -- if it did, the assertion below would pass
+        # for the wrong reason (a doubled flag hiding behind a stage-1
+        # value that already contains it once).
+        assert "compile" not in written or "-include" not in written.get(
+            "compile", {}
+        ).get("options", [])
+
+        # Stage 1: what `compare`'s own `resolve_compile_context` does --
+        # fold the (now checkout-only) overlay config into a fresh
+        # CompileContext, with no --sources tree involved yet.
+        stage1_ctx, stage1_includes = merge_compile_config(
+            CompileContext(),
+            (),
+            overlay_config,
+            sources=None,
+        )
+        # Stage 2: what `_embed_inline_source_side` does for the live NEW
+        # side -- fold the SAME sources-root tree's own document on top of
+        # the already-resolved stage-1 context, unconditionally.
+        stage2_ctx, _stage2_includes = merge_compile_config(
+            stage1_ctx,
+            stage1_includes,
+            None,
+            sources=src_dir,
+        )
+
+        assert stage2_ctx.gcc_option_tokens.count("-include") == 1
+        assert stage2_ctx.gcc_option_tokens.count("shim.h") == 1
+        include_idx = stage2_ctx.gcc_option_tokens.index("-include")
+        assert stage2_ctx.gcc_option_tokens[include_idx + 1] == "shim.h"
+
+    def test_minus_include_flag_from_checkout_also_applies_exactly_once(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion case: the repeat-sensitive flag lives in the CHECKOUT
+        document instead. The fix leaves it there untouched (never
+        promoted from the sources root, which sets nothing conflicting
+        here), and stage 2's own sources-root fold has nothing of its own
+        to contribute -- so it must still apply exactly once, sourced
+        entirely from stage 1."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  options: ['-include', 'shim.h']\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  std: c++20\n", encoding="utf-8"
+        )
+
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        overlay_config = Path(result.outputs["config-path"])
+
+        stage1_ctx, stage1_includes = merge_compile_config(
+            CompileContext(),
+            (),
+            overlay_config,
+            sources=None,
+        )
+        stage2_ctx, _stage2_includes = merge_compile_config(
+            stage1_ctx,
+            stage1_includes,
+            None,
+            sources=src_dir,
+        )
+
+        assert stage2_ctx.gcc_option_tokens.count("-include") == 1
+        assert stage2_ctx.gcc_option_tokens.count("shim.h") == 1

@@ -438,7 +438,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
             ("old_unrecognized.bin", b"not a recognized format at all"),
         ],
     )
-    def test_sources_root_compile_block_is_sourced_from_it_under_compare_with_stored_old_snapshot(
+    def test_sources_root_compile_block_is_never_sourced_from_it_under_compare_with_stored_old_snapshot(
         self, tmp_path: Path, old_library: str, content: bytes
     ) -> None:
         """A ``compare`` whose OLD operand is a stored snapshot (whatever a
@@ -459,20 +459,28 @@ class TestCompileContextPairwiseOldLibraryClassification:
 
         ``compile:`` itself is NOT "the same single-sided promotion as
         dump" (Codex review, fresh evidence, PR #1222 fourth round, second
-        finding -- corrected here): unlike `dump`/`scan --against`'s
-        genuine single-document-exclusive ``compile:`` selection,
-        ``compare``'s own ``resolve_compile_context(..., build_config=
-        cfg_path, ...)`` ALWAYS independently resolves the checkout-root
-        document's ``compile:`` block FIRST, unconditionally (confirmed by
-        calling the real function directly against fixtures shaped exactly
-        like this test's own), and NEW's own ``--sources`` tree only folds
-        ON TOP of that already-resolved context via a second
-        ``merge_compile_config`` call (``compare.py``'s
-        ``_maybe_dump_side``) -- so a genuine per-field conflict (like this
-        test's own ``sysroot``, set by BOTH documents to different values)
-        resolves to the CHECKOUT's value, not the sources-root's; only a
-        key the checkout document does NOT set falls through to the
-        sources-root one.
+        finding -- corrected here, then corrected AGAIN by the eleventh
+        round below): unlike `dump`/`scan --against`'s genuine
+        single-document-exclusive ``compile:`` selection, ``compare``'s
+        own ``resolve_compile_context(..., build_config=cfg_path, ...)``
+        ALWAYS independently resolves the checkout-root document's
+        ``compile:`` block FIRST, unconditionally (confirmed by calling the
+        real function directly against fixtures shaped exactly like this
+        test's own), and NEW's own ``--sources`` tree only folds ON TOP of
+        that already-resolved context via a second ``merge_compile_config``
+        call inside ``frontends/cli/commands/compare.py``'s
+        ``_embed_inline_source_side`` -- but (P1 finding, Codex review,
+        fresh evidence, PR #1222 eleventh round) that second stage runs
+        UNCONDITIONALLY, regardless of whether ``--config``/
+        ``build-config`` was explicit, so THIS overlay-generation script
+        must NOT reproduce it: doing so would fold the sources-root
+        document's own ``compile:`` block in a SECOND time on top of what
+        the CLI is about to fold in on its own, applying a
+        repeat-sensitive flag twice. This overlay must therefore leave
+        ``compile:`` at EXACTLY the checkout document's own value --
+        NEW's sources-root ``sysroot`` (whether conflicting or not) is
+        never consulted here at all any more, left entirely for the CLI's
+        own single, unconditional fold when "Run analysis" actually runs.
 
         ``source:``/``debug:`` are NOT the same shape as ``compile:``
         here, despite both being "single-sided" in the pairwise sense (P1
@@ -523,11 +531,14 @@ class TestCompileContextPairwiseOldLibraryClassification:
         # nothing for either key.
         assert "source" not in doc
         assert "debug" not in doc
-        # compile: is a genuine two-stage MERGE for `compare` (see the
-        # docstring above) -- the checkout document's own `sysroot` was
-        # independently resolved FIRST and wins this real conflict; the
-        # sources-root's differing value never applies at all.
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
+        # compile: is left at exactly the checkout document's own value --
+        # the sources-root document's own (conflicting) sysroot is never
+        # consulted here at all, deferred entirely to the CLI's own,
+        # single, unconditional fold (see the docstring above).
+        assert doc["compile"] == {
+            "sysroot": "/opt/checkout-sysroot",
+            "compiler": "/opt/gcc-14/bin/g++",
+        }
 
     def test_sources_root_source_debug_never_leak_into_compare_with_stored_old_snapshot(
         self, tmp_path: Path
@@ -565,17 +576,24 @@ class TestCompileContextPairwiseOldLibraryClassification:
         assert doc["source"] == {"method": "headers"}
         assert doc["debug"] == {"format": "btf"}
 
-    def test_compile_disjoint_keys_merge_under_compare_with_stored_old_snapshot(
+    def test_compile_disjoint_keys_do_not_merge_under_compare_with_stored_old_snapshot(
         self, tmp_path: Path
     ) -> None:
-        """The disjoint-key (no conflict) sibling of the test above,
-        proving the MERGE direction rather than only which side wins a
-        conflict: the checkout document sets ONLY ``compile.std``, the
-        sources-root document sets ONLY ``compile.include_dirs`` -- the
-        merged overlay must carry BOTH, exactly what the real
-        ``resolve_compile_context``/``merge_compile_config`` two-stage fold
-        (confirmed by calling those functions directly against fixtures
-        shaped like this one) would produce for the identical documents."""
+        """P1 finding (Codex review, fresh evidence, PR #1222 eleventh
+        round): the disjoint-key (no conflict) sibling of the test above,
+        proving the overlay generator no longer merges at all -- not even
+        for keys that wouldn't conflict. The checkout document sets ONLY
+        ``compile.std``, the sources-root document sets ONLY
+        ``compile.include_dirs``: a previous round's own overlay merged
+        the two per-field here (reproducing what it believed was the real
+        pipeline's own second merge stage), but that stage already runs,
+        unconditionally, inside the CLI's own ``_embed_inline_source_side``
+        when "Run analysis" actually invokes ``compare`` -- so this
+        overlay merging the two ITSELF would fold the sources-root
+        document's ``compile:`` block in a second, redundant time. The
+        generated overlay must therefore carry ONLY the checkout
+        document's own ``compile.std``, with no ``include_dirs`` key at
+        all."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  std: c++20\n", encoding="utf-8"
         )
@@ -598,8 +616,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        assert doc["compile"]["std"] == "c++20"
-        assert doc["compile"]["include_dirs"] == [str((src_dir / "foo").resolve())]
+        assert doc["compile"] == {"std": "c++20", "compiler": "/opt/gcc-14/bin/g++"}
 
     def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary(
         self, tmp_path: Path

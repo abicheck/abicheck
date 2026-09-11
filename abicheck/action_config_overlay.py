@@ -123,6 +123,36 @@ checkout-only ``compile:`` setting the sources-root document doesn't happen
 to also specify. See :func:`action_config_overlay_compile.merge_compile_block`'s own docstring for the
 exact per-field precedence reproduced.
 
+**P1 fix (Codex review, fresh evidence, PR #1222 eleventh round):** a
+``compare``-shaped caller (``merge_compile=True``) must NOT include
+``"compile"`` in *blocks* at all any more -- reversing the fourth round's
+own conclusion just above, which believed this promotion needed to
+reproduce BOTH stages of the real pipeline's own two-stage merge itself.
+It doesn't: ``frontends/cli/commands/compare.py``'s
+``_embed_inline_source_side`` performs the second stage (folding the live
+side's own ``--sources`` tree's ``compile:`` block onto the CLI's
+already-resolved compile context) UNCONDITIONALLY, regardless of whether
+``--config``/``build-config`` was explicit -- unlike ``build:``/
+``sources:``, whose own single-sided selection genuinely IS
+short-circuited by an explicit ``--config`` (see the "Sources-root
+promotion" paragraph above), which is what makes promoting THOSE two
+blocks necessary. A caller that also promotes ``compile:`` therefore folds
+the sources-root document's ``compile:`` block in TWICE -- once via this
+promotion, once again inside ``_embed_inline_source_side``'s own
+always-running merge -- applying a repeat-sensitive flag
+(``compile.options: [-include, foo.h]``) twice in the final compiler
+invocation purely because the overlay-generating feature
+(``analysis.assurance: complete``) was enabled. The correct shape for a
+``merge_compile=True`` caller is to leave ``compile:`` OUT of *blocks*
+entirely, supplying only the checkout-side half of the real pipeline's own
+two-stage merge and letting the CLI's own second stage run unaided --
+identical to how ``source:``/``debug:`` are already excluded for this same
+caller (see below). A ``dump``/``scan`` caller (``merge_compile=False``)
+is unaffected: an explicit ``--config`` genuinely DOES suppress the CLI's
+own ``compile:`` resolution from the ``--sources`` tree entirely there, so
+promoting it (as a real per-field merge, described above) remains the only
+way that setting ever reaches the run.
+
 ``source:``(singular)/``debug:`` are a THIRD, narrower shape (PR #1222
 eighth round, Codex review) -- unlike every block above, they are never
 safe to promote from a sources-root document for a caller whose single-
@@ -449,38 +479,52 @@ def apply_sources_root_config_blocks(
     whatever *sources_doc* defines for that same top-level key.
 
     *merge_compile* selects which of the two real ``compile:`` resolution
-    shapes this promotion should reproduce for the *particular command*
-    the caller is building an overlay for -- ``cli_options.
-    merge_compile_config`` is NOT one shape for every caller (Codex review,
-    fresh evidence, PR #1222 fourth round, second finding on this same
-    fix): a bare ``dump``/``scan --against`` invocation resolves ``compile:``
-    with exactly ONE ``merge_compile_config`` call, where ``build_config``
-    (the CLI's own ``--build-config``, never auto-discovered from cwd for
-    these two commands) and ``sources=<the --sources tree>`` are mutually
-    EXCLUSIVE alternatives (``cfg = build_config if explicit_config else
+    shapes a ``"compile"`` entry in *blocks* should reproduce for the
+    *particular command* the caller is building an overlay for --
+    ``cli_options.merge_compile_config`` is NOT one shape for every caller
+    (Codex review, fresh evidence, PR #1222 fourth round, second finding on
+    this same fix): a bare ``dump``/``scan --against`` invocation resolves
+    ``compile:`` with exactly ONE ``merge_compile_config`` call, where
+    ``build_config`` (the CLI's own ``--build-config``, never
+    auto-discovered from cwd for these two commands) and
+    ``sources=<the --sources tree>`` are mutually EXCLUSIVE alternatives
+    (``cfg = build_config if explicit_config else
     discover_build_config(sources)``) -- when no explicit ``--build-config``
     is given, the ``--sources`` tree's own document supplies ``compile:``
     EXCLUSIVELY, the identical single-document-selection shape as ``build:``/
     ``sources:``/``source:``/``debug:`` above, so ``merge_compile=False``
-    (REPLACE, the default) is correct there. ``compare``'s own per-side
-    IMPLICIT dump (``frontends/cli/commands/compare.py``'s
-    ``_maybe_dump_side``) is different: it always independently resolves the
-    checkout-root document's ``compile:`` block FIRST, unconditionally,
-    via ``cli_compare_helpers.py``'s own ``resolve_compile_context(...,
+    (REPLACE, the default) with ``"compile"`` included in *blocks* is
+    correct there. ``compare``'s own per-side inline embed
+    (``frontends/cli/commands/compare.py``'s ``_embed_inline_source_side``)
+    is different: it always independently resolves the checkout-root
+    document's ``compile:`` block FIRST, unconditionally, via
+    ``cli_compare_helpers.py``'s own ``resolve_compile_context(...,
     build_config=cfg_path, ...)`` (``cfg_path`` is the explicit ``--config``
     OR the cwd-upward-discovered project config -- resolved regardless of
     whether ``--sources`` was even given), and only THEN calls
     ``merge_compile_config`` a SECOND time with ``build_config=None,
     sources=<that side's tree>`` to fold the tree's own ``compile:`` ON TOP
-    of that already-resolved context -- a genuine two-stage MERGE, so
-    ``merge_compile=True`` is correct there. The caller decides which shape
-    applies (``run.sh``'s ``$MODE`` shell variable / ``actions/check-target/
-    action.yml``'s own ``mode:`` computation already distinguish the two:
-    ``compare`` -- with a non-live/stored-snapshot old-side, the only
-    ``compare`` shape that ever reaches this promotion at all, per
-    ``_compile_context_sources_pairwise``'s own docstring -- means the
-    IMPLICIT-dump/MERGE shape; ``dump``/``scan`` mean the single-document/
-    REPLACE shape).
+    of that already-resolved context -- a genuine two-stage MERGE, but this
+    second stage runs UNCONDITIONALLY, regardless of whether ``--config``
+    was explicit (Codex review, P1, fresh evidence, PR #1222 eleventh
+    round -- reverses this paragraph's own prior conclusion): unlike
+    ``build:``/``sources:``, an explicit ``--config`` does NOT suppress it.
+    So a ``compare``-shaped caller must NOT also include ``"compile"`` in
+    *blocks* -- doing so would fold the sources-root document's own
+    ``compile:`` block in a SECOND time, on top of what
+    ``_embed_inline_source_side`` is about to fold in a second time anyway.
+    ``merge_compile=True`` still names this shape (for callers that reach
+    this function with ``"compile"`` in *blocks* for some other reason —
+    the parameter combination is not itself forbidden), but neither current
+    caller (``action/run.sh``, ``actions/check-target/action.yml``) ever
+    passes both together any more: each computes its own
+    ``sources_merge_compile``/``_sources_merge_compile`` flag to EXCLUDE
+    ``"compile"`` from *blocks* in exactly the case that used to set
+    ``merge_compile=True`` alongside it, leaving ``compile:`` at the
+    checkout-only value and letting the CLI's own second stage run
+    unaided. The caller still decides ``dump``/``scan`` vs. ``compare``
+    shape the same way as before (``run.sh``'s ``$MODE`` shell variable /
+    ``actions/check-target/action.yml``'s own ``mode:`` computation).
 
     This is the block-selection half of ``action/run.sh``'s own
     ``_merge_config_overlay_with_discovered_project_config`` (its
@@ -524,24 +568,39 @@ def apply_sources_root_config_blocks(
     debug-info extraction in a way the real, non-overlay invocation never
     permits, purely because this promotion ran.
 
-    ``compile:`` is different (Codex review, fresh evidence, PR #1222
-    fourth round): ``cli_options.merge_compile_config`` is a genuine
-    TWO-STAGE fold -- the checkout document's ``compile:`` block is folded
-    into the CLI compile context FIRST (``resolve_compile_context``'s own
-    ``build_config=cfg_path`` call), then a second ``merge_compile_config``
-    call layers the sources-root document's own ``compile:`` block ON TOP
-    of that already-resolved context, per-field, for a caller whose
-    ``compile:`` resolution is genuinely single-sided for this operand
-    (``run.sh``'s own ``_compile_context_sources_pairwise`` distinction,
-    threaded into *blocks* by both callers). REPLACING the whole block
-    wholesale -- what this function used to do for every key uniformly --
-    silently drops any checkout-level ``compile:`` setting the sources-root
-    document doesn't happen to also specify (``compile.std``, an explicit
-    ``include_dirs``, ...), changing the compiled/analyzed surface purely
-    because this promotion ran. :func:`action_config_overlay_compile.merge_compile_block` reproduces
-    ``merge_compile_config``'s real per-field precedence instead (see its
-    own docstring and the key-bucket constants above it for exactly
-    which side wins for which key).
+    ``compile:`` under ``merge_compile=True`` is a real, documented
+    per-field merge behavior this function still supports (as opposed to
+    ``source:``/``debug:``, which are simply excluded from *blocks*
+    whenever this caller shape applies) -- ``cli_options.
+    merge_compile_config`` really is a genuine TWO-STAGE fold in the CLI
+    itself (the checkout document's ``compile:`` block folded into the
+    compile context FIRST via ``resolve_compile_context``'s own
+    ``build_config=cfg_path`` call, then a second ``merge_compile_config``
+    call layering the sources-root document's own ``compile:`` block ON
+    TOP, per field). But (P1 fix, PR #1222 eleventh round) **neither
+    current caller reaches this function with ``"compile"`` in *blocks*
+    while ALSO passing ``merge_compile=True`` any more** -- ``compare``'s
+    own single-sided shape already gets that second stage for free,
+    unconditionally, from ``_embed_inline_source_side`` itself, so
+    reproducing it here too would fold the sources-root document in twice;
+    both callers now compute their own ``sources_merge_compile``/
+    ``_sources_merge_compile`` flag to EXCLUDE ``"compile"`` from *blocks*
+    in exactly that case (mirroring how ``source:``/``debug:`` are already
+    excluded). This ``key == "compile" and merge_compile`` branch is
+    consequently unreached by either caller today; it is kept, rather than
+    deleted, as the one documented, tested primitive a *future* caller with
+    a genuine two-stage ``compile:`` merge need (unlike either current
+    caller) could still reach correctly. ``dump``/``scan`` (``merge_compile
+    =False``) still promotes ``"compile"`` as a plain REPLACE, same as
+    ``build:``/``sources:`` -- REPLACING the whole block wholesale (what
+    every block used to do uniformly, before the fourth round introduced
+    the merge behavior above for ``merge_compile=True``) is correct there
+    because that shape's own real resolution genuinely is single-document-
+    exclusive, so there is no checkout-level ``compile:`` setting a replace
+    could wrongly drop. See :func:`action_config_overlay_compile.
+    merge_compile_block`'s own docstring and the key-bucket constants
+    above it for exactly which side wins for which key, for the
+    ``merge_compile=True`` shape this branch still implements.
 
     A non-``dict`` *sources_doc* (``None`` for an empty file, or any other
     non-mapping value) is treated as an empty document -- every OTHER block
