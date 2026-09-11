@@ -680,6 +680,17 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
             # neither document asked for.
             ("auto", "auto", "auto"),
             ("auto", None, "auto"),
+            # Case-insensitive spellings (P1 finding, PR #1222 seventh
+            # round): the real pipeline's own config parsing
+            # (`build_config.BuildConfig.from_dict`'s `_lowered()`) accepts
+            # `compile.frontend` case-insensitively, matching the CLI's
+            # `click.Choice(AST_FRONTENDS, case_sensitive=False)` -- a
+            # checkout value that only lowercases to "auto" must be treated
+            # exactly like a lowercase "auto" sentinel, not a concrete
+            # checkout choice.
+            ("AUTO", "clang", "clang"),
+            ("Auto", "castxml", "castxml"),
+            ("AuTo", "clang", "clang"),
         ],
     )
     def test_frontend_auto_sentinel_merges_like_merge_compile_config(
@@ -703,7 +714,18 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         docstring for the exact enumeration this test mirrors) -- checkout
         ``"auto"``/absent lets sources win outright, any concrete checkout
         value wins outright over sources (even a differing concrete sources
-        value), and both-``"auto"``/both-absent stays ``"auto"``."""
+        value), and both-``"auto"``/both-absent stays ``"auto"``.
+
+        Seventh round (fresh evidence): the first fix's sentinel check
+        compared the raw, unnormalized checkout string, so a case variant a
+        real ``.abicheck.yml`` legitimately accepts (``build_config.
+        BuildConfig.from_dict``'s ``_lowered()`` lowercases ``compile.
+        frontend`` before validating it, matching the CLI's own
+        ``click.Choice(AST_FRONTENDS, case_sensitive=False)``) -- e.g.
+        ``AUTO``/``Auto`` -- was wrongly read as a concrete checkout choice,
+        discarding a sources-root ``clang``/``castxml`` selection. The
+        ``AUTO``/``Auto``/``AuTo`` cases below pin that the fix normalizes
+        case the same way before comparing."""
         base: dict[str, object] = (
             {"compile": {"frontend": checkout_frontend}}
             if checkout_frontend is not None

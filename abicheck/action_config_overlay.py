@@ -461,7 +461,32 @@ _COMPILE_OR_KEYS = frozenset({"nostdinc"})
 #: to the same ``"auto"`` through the ordinary "key not in checkout_blk"
 #: branch below) never blocks the sources-root value; any other checkout
 #: value always wins over the sources-root value, concrete or not.
+#:
+#: The sentinel check itself must match the real pipeline's own case
+#: normalization (Codex review, fresh evidence, PR #1222 seventh round): a
+#: real ``.abicheck.yml`` is parsed by ``build_config.BuildConfig.from_dict``,
+#: which folds ``compile.frontend`` through ``_lowered()`` (a plain
+#: ``str.lower()``) *before* validating it against the ``("auto", "castxml",
+#: "clang", "hybrid")`` choice set -- matching the CLI's own
+#: ``click.Choice(AST_FRONTENDS, case_sensitive=False)``. So a checkout
+#: document spelling ``compile.frontend: AUTO``/``Auto``/etc. resolves to the
+#: identical semantic-default sentinel a real run would see, and the overlay
+#: merge below must fold the checkout value through the same ``.lower()``
+#: before comparing it to the literal ``"auto"`` string -- a raw, case-
+#: sensitive comparison would treat ``AUTO`` as a concrete checkout choice
+#: and wrongly block a sources-root ``clang``/``castxml`` from ever applying.
 _COMPILE_AUTO_DEFAULT_KEYS = frozenset({"frontend"})
+
+
+def _lower_config_str(value: object) -> object:
+    """Lowercase *value* the same way ``build_config._lowered()`` normalizes
+    a real ``.abicheck.yml`` enum-ish scalar before validating it, so an
+    auto-sentinel comparison here matches the real pipeline's case-
+    insensitivity. Deliberately tolerant of a schema-invalid non-string
+    value (returned unchanged) -- this module only merges, it does not
+    re-validate (see :func:`_merge_compile_block`'s own docstring)."""
+    return value.lower() if isinstance(value, str) else value
+
 
 #: ``compile:`` list-valued sub-keys ``merge_compile_config`` always
 #: CONCATENATES across the two folded documents rather than letting either
@@ -552,7 +577,8 @@ def _merge_compile_block(
         elif key in _COMPILE_SOURCES_WINS_KEYS:
             merged[key] = value
         elif key not in checkout_blk or (
-            key in _COMPILE_AUTO_DEFAULT_KEYS and checkout_blk.get(key) == "auto"
+            key in _COMPILE_AUTO_DEFAULT_KEYS
+            and _lower_config_str(checkout_blk.get(key)) == "auto"
         ):
             merged[key] = value
         # else: checkout already set this key to something other than its
