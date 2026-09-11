@@ -66,6 +66,7 @@ if TYPE_CHECKING:
 __all__ = [
     "OpaqueTypeIndex",
     "find_by_value_types",
+    "find_opaque_struct_types",
     "find_opaque_types",
     "is_impl_source",
 ]
@@ -199,6 +200,42 @@ class OpaqueTypeIndex:
     def __bool__(self) -> bool:
         return bool(self.stable or self.local)
 
+    @classmethod
+    def build(cls, declarations: Mapping[str, list[RecordType]]) -> OpaqueTypeIndex:
+        """Build a two-tier index from a bare-name -> declarations map.
+
+        For a call site that has its own already-computed set of bare
+        ``RecordType.name`` spellings and wants to re-express it as a real
+        :class:`OpaqueTypeIndex` instead of hand-rolling a second bare-name
+        membership set (``diff_filtering._downgrade_opaque_struct_changes``'s
+        asymmetric-existence opaqueness criterion is the motivating case: it
+        is not itself an ``intersect()`` of two per-snapshot indices, so it
+        has no paired ``stable_by_local`` evidence to compute -- see the
+        ``complete`` default below). :func:`find_opaque_types` builds its
+        own index directly instead of through this classmethod, since it
+        additionally needs the per-spelling ``stable_by_local`` breakdown
+        this simpler builder does not compute.
+
+        ``complete`` is left at its dataclass default (``True``) here on
+        purpose, but that default is *not* a completeness proof the way
+        :meth:`intersect`'s own computed value is -- it only means "this
+        index was not produced by a paired old/new intersection, so there
+        is no narrower-than-``strict=False`` claim available." A caller
+        that only ever passes ``strict=False`` to :meth:`contains` (the
+        always-safe, non-narrowing default) is unaffected either way;
+        passing ``strict=True`` against an index built here would be an
+        unproven safety claim and callers must not do that.
+        """
+        stable: set[StableEntityId] = set()
+        local: set[SnapshotLocalIdentity] = set()
+        for name, decls in declarations.items():
+            for t in decls:
+                local.add(snapshot_local_identity(name, t.entity_id))
+                resolved = stable_entity_id(t.entity_id)
+                if resolved is not None:
+                    stable.add(resolved)
+        return cls(stable=frozenset(stable), local=frozenset(local))
+
     def contains(self, change: Change, spelling: str, *, strict: bool = False) -> bool:
         """Whether *change* names an opaque declaration.
 
@@ -310,6 +347,84 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
         local=frozenset(local),
         stable_by_local={k: frozenset(v) for k, v in stable_by_local.items()},
     )
+
+
+def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIndex:
+    """The DWARF-oriented, asymmetric-existence sibling of
+    :func:`find_opaque_types` -- ``diff_filtering._downgrade_opaque_struct_changes``'s
+    own opaqueness criterion, moved here (ADR-063 Phase 10) for the identical
+    reason :func:`find_opaque_types`/:func:`find_by_value_types` already sit
+    here rather than in ``diff_filtering.py``: a matching concern belongs at
+    its ADR-061 owner, and ``diff_filtering.py`` sits on a zero-slack
+    ``debt.yaml`` no-growth pin that this function's own logic (previously
+    inline there) would otherwise have exceeded.
+
+    A type is "opaque to consumers" under this function's criterion when:
+
+    * it is ``is_opaque`` on *both* sides, OR
+    * it is ``is_opaque`` on one side and entirely absent from the other
+      side's header-level type list (the DWARF-only-definition case: a
+      forward-declaration-only header paired with a snapshot that only saw
+      the type's full DWARF definition on the other side of the release)
+
+    and it is not embedded by value in any non-opaque record on either side.
+    Returns the empty index when nothing in *old*/*new* is opaque under this
+    criterion.
+
+    Deliberately does **not** reuse :func:`find_opaque_types`'s own
+    per-snapshot ``is_opaque``-or-``is_impl_source`` criterion or its
+    ``intersect()`` -- this function's asymmetric-existence rule (item 2
+    above) has no per-snapshot analogue to intersect two of, and mixing the
+    two criteria into one function would make either one harder to verify
+    against its own, independently-reviewed test suite. The two
+    opaque-suppression paths staying textually separate, each producing its
+    own :class:`OpaqueTypeIndex`, is the status quo this migration
+    preserves -- only *how* each already-computed name set answers "is this
+    ``Change`` about one of them" changed, not whether there are two paths.
+
+    ``opaque_types``/``embedded_types``/``truly_opaque`` stay plain
+    ``set[str]`` throughout -- both the asymmetric-existence check and the
+    by-value-embedding check are genuine rendered-text/bare-name-set
+    questions, not identity ones, mirroring why :func:`find_by_value_types`/
+    ``_type_is_by_value_referenced`` stay spelling-based too. Only the
+    *result* -- the final ``truly_opaque`` name set -- is re-expressed as a
+    two-tier index, via :meth:`OpaqueTypeIndex.build`, so a caller's own
+    ``Change`` membership test can consult a stable, cross-snapshot
+    ``EntityId`` first and the bare spelling second (never narrowing:
+    this index is not the product of a paired ``intersect()``, so it has
+    no completeness proof to license ``contains(..., strict=True)``).
+    """
+    old_opaque = {t.name for t in old.types if t.is_opaque}
+    new_opaque = {t.name for t in new.types if t.is_opaque}
+    old_type_names = {t.name for t in old.types}
+    new_type_names = {t.name for t in new.types}
+
+    opaque_types = (old_opaque & new_opaque) | (
+        (old_opaque - new_type_names) | (new_opaque - old_type_names)
+    )
+    if not opaque_types:
+        return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
+
+    non_opaque_old = {t.name: t for t in old.types if not t.is_opaque}
+    non_opaque_new = {t.name: t for t in new.types if not t.is_opaque}
+    embedded_types: set[str] = set()
+    for type_map in (non_opaque_old, non_opaque_new):
+        for t in type_map.values():
+            for f in t.fields:
+                ftype = f.type.rstrip(" *&")
+                if ftype in opaque_types and "*" not in f.type:
+                    embedded_types.add(ftype)
+
+    truly_opaque = opaque_types - embedded_types
+    if not truly_opaque:
+        return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
+
+    declarations: dict[str, list[RecordType]] = {}
+    for snap in (old, new):
+        for t in snap.types:
+            if t.name in truly_opaque:
+                declarations.setdefault(t.name, []).append(t)
+    return OpaqueTypeIndex.build(declarations)
 
 
 #: Matches whitespace or a leading cv-qualifier keyword, repeated -- the

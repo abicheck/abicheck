@@ -23,6 +23,7 @@ from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.dedup_key import hashable_value
 from .compare.opaque_types import (
     find_by_value_types,
+    find_opaque_struct_types,
     find_opaque_types,
     is_impl_source,
 )
@@ -38,14 +39,15 @@ from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
 
-# Back-compat aliases: the ADR-063 Phase 2 migration moved the opaque-type
-# index and its construction into their `compare/` owner, but
-# `tests/test_cov95_diff_filtering.py` imports all three from here by their
-# private names. Module-level bindings rather than `as`-aliased imports,
-# since ruff only recognizes the identical-name form as an intentional
-# re-export.
+# Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
+# opaque-type indices and their construction into their `compare/` owner,
+# but `tests/test_cov95_diff_filtering.py` imports several of them from
+# here by their private names. Module-level bindings rather than
+# `as`-aliased imports, since ruff only recognizes the identical-name form
+# as an intentional re-export.
 _find_opaque_types = find_opaque_types
 _find_by_value_types = find_by_value_types
+_find_opaque_struct_types = find_opaque_struct_types
 _is_impl_source = is_impl_source
 
 
@@ -1762,46 +1764,32 @@ def _downgrade_opaque_struct_changes(
     snapshots, consumers cannot allocate, embed, or sizeof the type — they
     only hold pointers. Layout changes detected via DWARF are invisible to
     consumers and should be classified as compatible field additions.
+
+    **Identity-tiered since ADR-063 Phase 10.** The opaqueness computation
+    itself (asymmetric-existence + by-value-embedding) lives in
+    :func:`~abicheck.compare.opaque_types.find_opaque_struct_types` — moved
+    there for the same reason :func:`~abicheck.compare.opaque_types.
+    find_opaque_types` already sits there rather than here (a matching
+    concern belongs at its ADR-061 owner, and this module sits on a
+    zero-slack ``debt.yaml`` no-growth pin). The final membership test
+    against each ``Change`` goes through
+    :meth:`~abicheck.compare.opaque_types.OpaqueTypeIndex.contains` rather
+    than a bare ``c.symbol in truly_opaque`` string-set test, closing the
+    same qualified-vs-bare spelling mismatch ``_downgrade_opaque_type_changes``
+    already closed for its own, separate opaque-suppression path: a stable,
+    cross-snapshot ``EntityId`` match is consulted first, and a
+    bare-spelling match remains the always-safe fallback (``strict=False``
+    — this index is not the product of a paired old/new ``intersect()``, so
+    it carries no proof of completeness that would license narrowing a miss
+    into "not opaque").
     """
-    # Build set of types that are opaque in both snapshots.
-    old_opaque = {t.name for t in old.types if t.is_opaque}
-    new_opaque = {t.name for t in new.types if t.is_opaque}
-    # Also check: type exists in one but not the other (forward-decl only in header,
-    # full definition only in DWARF) — treat as opaque if the header-level type
-    # doesn't exist OR is opaque.
-    old_type_names = {t.name for t in old.types}
-    new_type_names = {t.name for t in new.types}
-
-    # A type is "opaque to consumers" if:
-    # - It's opaque in both old and new, OR
-    # - It doesn't appear in the header-level type list at all (DWARF-only)
-    #   AND it's not embedded by-value in any non-opaque exported struct
-    opaque_types = (old_opaque & new_opaque) | (
-        (old_opaque - new_type_names) | (new_opaque - old_type_names)
-    )
-
-    if not opaque_types:
-        return changes
-
-    # Check that opaque types are not embedded by-value in non-opaque structs
-    non_opaque_old = {t.name: t for t in old.types if not t.is_opaque}
-    non_opaque_new = {t.name: t for t in new.types if not t.is_opaque}
-    embedded_types: set[str] = set()
-    for type_map in (non_opaque_old, non_opaque_new):
-        for t in type_map.values():
-            for f in t.fields:
-                # If a field type matches an opaque type name (not as pointer), the type is embedded by-value and layout changes matter
-                ftype = f.type.rstrip(" *&")
-                if ftype in opaque_types and "*" not in f.type:
-                    embedded_types.add(ftype)
-
-    truly_opaque = opaque_types - embedded_types
-    if not truly_opaque:
+    index = _find_opaque_struct_types(old, new)
+    if not index:
         return changes
 
     result: list[Change] = []
     for c in changes:
-        if c.kind in _OPAQUE_DOWNGRADEABLE and c.symbol in truly_opaque:
+        if c.kind in _OPAQUE_DOWNGRADEABLE and index.contains(c, c.symbol):
             # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
             result.append(
                 make_change(

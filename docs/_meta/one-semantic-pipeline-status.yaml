@@ -338,6 +338,41 @@ concepts:
       extract/pdb_scope.py's 4th limitation, not expected to close
       without new evidence of a CodeView record this module does not
       parse today.
+      Phase 10 (2026-09-11): a third, previously-unaudited
+      diff_filtering.py opaque-suppression path --
+      _downgrade_opaque_struct_changes, the DWARF-oriented asymmetric-
+      existence sibling of the already-migrated
+      _downgrade_opaque_type_changes -- was found still using a bare
+      set[str] of RecordType.name for its final Change membership test
+      (c.symbol in truly_opaque), missed by every prior Phase 2 slice
+      because those slices' own audit only named _find_opaque_types/
+      _downgrade_opaque_type_changes. Migrated onto the same
+      compare/opaque_types.OpaqueTypeIndex primitive via a new
+      OpaqueTypeIndex.build(declarations) classmethod (stable EntityId
+      first, RecordType.name spelling second, strict=False always --
+      this index is not the product of a paired intersect() and so
+      carries no completeness proof to license narrowing). The
+      function's own opaque_types/embedded_types/truly_opaque set
+      construction stays plain set[str] on purpose: both are genuine
+      rendered-text spelling questions (asymmetric type-list existence;
+      a field's own type string), not identity ones -- mirroring why
+      find_by_value_types/_type_is_by_value_referenced in
+      compare/opaque_types.py stay spelling-based too. Re-audited
+      type_reachability.py in the same pass and found nothing further to
+      migrate: its own remaining string-based machinery
+      (_spelling_index/_stripped_signature_spelling/
+      _typedef_spelling_targets/_namespace_suffix_spellings) was already
+      investigated and deliberately left on raw strings across three
+      prior slices (ninth, twelfth, fourteenth) for the reason already
+      recorded above -- those strings must appear inside rendered
+      signature text, not stand for an entity, and the module performs
+      no cross-snapshot pairing at all (each call analyzes one
+      snapshot), so there is no old/new identity comparison for a
+      stable tier to improve. Property tests added for
+      OpaqueTypeIndex.build itself (order-independence, no stable-tier
+      contribution without an entity_id, stable tier restricted to
+      cross-snapshot-stable ids) -- see
+      tests/test_opaque_identity_tiers.py.
     investigated_declined:
       - item: >-
           Promoting the `entity:` alias into a real match tier in

@@ -28,14 +28,17 @@ mechanism the implementation's spelling tier uses.
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, strategies as st
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.opaque_types import OpaqueTypeIndex
 from abicheck.diff_filtering import (
+    _downgrade_opaque_struct_changes,
     _downgrade_opaque_type_changes,
     _find_by_value_types,
     _find_opaque_types,
 )
-from abicheck.model import AbiSnapshot, Function, Param, RecordType, Variable
+from abicheck.model import AbiSnapshot, Function, Param, RecordType, TypeField, Variable
 from abicheck.model.identity import (
     Anonymous,
     EntityKind,
@@ -43,6 +46,7 @@ from abicheck.model.identity import (
     Record,
     entity_id_for_type,
 )
+from abicheck.model.identity_stability import entity_id_is_cross_snapshot_stable
 from abicheck.model.identity_tiers import (
     SnapshotLocalIdentity,
     StableEntityId,
@@ -621,3 +625,170 @@ def test_find_by_value_types_ignores_a_braced_structural_template_argument():
         functions=[Function(name="f", mangled="f", return_type=template_by_value)],
     )
     assert "S" in _find_by_value_types(snap_by_value, opaque)
+
+
+# -- ADR-063 Phase 10: `_downgrade_opaque_struct_changes`'s own,
+# previously-unmigrated bare `set[str]` opaqueness tracker -----------------
+
+
+def _record(
+    name: str, *, is_opaque: bool = False, entity_id=None, fields=()
+) -> RecordType:
+    return RecordType(
+        name=name,
+        kind="struct",
+        is_opaque=is_opaque,
+        entity_id=entity_id,
+        fields=list(fields),
+    )
+
+
+def _struct_size_change(symbol: str, entity_id=None):
+    from abicheck.diff_helpers import make_change
+
+    return make_change(
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        symbol=symbol,
+        old_value="8",
+        new_value="16",
+        entity_id=entity_id,
+    )
+
+
+class TestDowngradeOpaqueStructChangesIdentityTiers:
+    """``_downgrade_opaque_struct_changes`` used to test bare
+    ``c.symbol in truly_opaque`` string membership -- a second, independent
+    opaque-suppression tracker sitting right next to
+    ``_downgrade_opaque_type_changes``'s already-migrated
+    ``OpaqueTypeIndex``, missed by every prior ADR-063 Phase 2 slice (it is
+    not `find_opaque_types`'s own two-sided-intersection criterion at all;
+    it additionally treats a type absent from one side's header-level type
+    list as opaque). Now goes through the same
+    :class:`~abicheck.compare.opaque_types.OpaqueTypeIndex` primitive via
+    :meth:`OpaqueTypeIndex.build`, consulting a change's stable
+    ``EntityId`` first and its bare spelling second -- never narrowing,
+    since this index carries no paired-completeness proof the way
+    ``intersect()``'s own does."""
+
+    def test_bare_spelling_match_is_unchanged(self) -> None:
+        """No entity_id anywhere (the DWARF/PE/Mach-O-only shape): behavior
+        must be bit-for-bit the pre-migration bare-string-set result."""
+        old = _snap([_record("Op", is_opaque=True)])
+        new = _snap([_record("Op", is_opaque=True)])
+        out = _downgrade_opaque_struct_changes([_struct_size_change("Op")], old, new)
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+    def test_stable_identity_closes_a_qualification_mismatch(self) -> None:
+        """A real false negative the bare-string tracker could not see:
+        the change's own ``symbol`` is rendered differently from
+        ``RecordType.name`` (bare vs. namespace-qualified), but both
+        resolve to the same stable ``EntityId`` -- proof the two sides
+        agree on the declaration regardless of spelling."""
+        old = _record("Op", is_opaque=True, entity_id=_STABLE_ID)
+        new = _record("Op", is_opaque=True, entity_id=_STABLE_ID)
+        change = _struct_size_change("ns::Op", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+    def test_a_stable_tier_miss_always_falls_back_to_spelling(self) -> None:
+        """This index is never the product of a paired ``intersect()``, so
+        it carries no completeness proof -- a change whose own stable id
+        does not match any known-opaque one must still fall through to the
+        (always-safe) spelling tier rather than being treated as proof of
+        non-opacity."""
+        old = _record("Op", is_opaque=True, entity_id=_OTHER_STABLE_ID)
+        new = _record("Op", is_opaque=True, entity_id=_OTHER_STABLE_ID)
+        # A change carrying an unrelated stable id, but the correct bare
+        # spelling.
+        change = _struct_size_change("Op", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+    def test_embedded_by_value_stays_spelling_based_and_still_blocks_suppression(
+        self,
+    ) -> None:
+        """The by-value-embedding exclusion is a text/rendered-field-type
+        question, not an identity one (mirrors
+        ``compare.opaque_types.find_by_value_types`` staying spelling-based
+        for the identical reason) -- unaffected by this migration."""
+        op = _record("Op", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record("Wrapper", fields=[TypeField(name="inner", type="Op")])
+        old = _snap([op, wrapper])
+        new = _snap([op, wrapper])
+        change = _struct_size_change("Op", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
+
+# -- Primitive-level property tests: OpaqueTypeIndex.build ------------------
+
+
+_names = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll", "Lu"), max_codepoint=122),
+    min_size=1,
+    max_size=6,
+)
+_entity_ids = st.one_of(st.none(), st.just(_STABLE_ID), st.just(_UNSTABLE_ID))
+
+
+@st.composite
+def _declarations_map(draw):
+    names = draw(st.lists(_names, min_size=0, max_size=5, unique=True))
+    declarations: dict[str, list[RecordType]] = {}
+    for name in names:
+        count = draw(st.integers(min_value=1, max_value=3))
+        declarations[name] = [
+            _record(name, entity_id=draw(_entity_ids)) for _ in range(count)
+        ]
+    return declarations
+
+
+class TestOpaqueTypeIndexBuildProperties:
+    """:meth:`OpaqueTypeIndex.build` is the primitive
+    ``_downgrade_opaque_struct_changes`` now shares with the rest of the
+    identity-tiers migration -- AGENTS.md's "Primitive-level property
+    tests" doctrine applies to it directly, independent of that one
+    caller's own domain logic."""
+
+    @given(_declarations_map())
+    def test_every_declared_name_reaches_the_local_tier(self, declarations) -> None:
+        index = OpaqueTypeIndex.build(declarations)
+        for name in declarations:
+            assert SnapshotLocalIdentity(name) in index.local
+
+    @given(_declarations_map())
+    def test_stable_tier_only_ever_holds_cross_snapshot_stable_ids(
+        self, declarations
+    ) -> None:
+        index = OpaqueTypeIndex.build(declarations)
+        for stable in index.stable:
+            assert entity_id_is_cross_snapshot_stable(stable.entity_id)
+
+    @given(_declarations_map())
+    def test_no_entity_id_means_no_stable_tier_contribution(self, declarations) -> None:
+        """A declaration with ``entity_id=None`` never adds anything to the
+        stable tier -- the DWARF/PE/Mach-O-only shape degrades to exactly
+        the pre-migration bare ``set[str]`` behavior."""
+        only_local = {
+            name: [_record(name, entity_id=None) for _ in decls]
+            for name, decls in declarations.items()
+        }
+        index = OpaqueTypeIndex.build(only_local)
+        assert index.stable == frozenset()
+
+    @given(_declarations_map())
+    def test_build_is_independent_of_dict_insertion_order(self, declarations) -> None:
+        reversed_declarations = dict(reversed(list(declarations.items())))
+        assert OpaqueTypeIndex.build(declarations) == OpaqueTypeIndex.build(
+            reversed_declarations
+        )
+
+    @given(_declarations_map())
+    def test_build_never_licenses_strict_narrowing(self, declarations) -> None:
+        """``complete`` stays at the dataclass default (``True``) only in
+        the sense of "no narrower claim was computed" -- this builder must
+        never be mistaken for :meth:`OpaqueTypeIndex.intersect`'s own
+        *proven*-complete result. Callers (this test's own contract) must
+        only ever query it with ``strict=False``."""
+        index = OpaqueTypeIndex.build(declarations)
+        assert index.stable_by_local == {}
