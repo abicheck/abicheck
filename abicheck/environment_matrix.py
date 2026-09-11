@@ -201,10 +201,10 @@ class CudaConstraints:
     require_ptx: bool = False  # require PTX for forward-compat
 
     def __post_init__(self) -> None:
-        # See `SyclConstraints.__post_init__` above for why this freezes
-        # `gpu_architectures` into a `tuple` rather than merely hashing a
-        # `tuple(...)` projection of a still-mutable `list`.
+        # `driver_range` needs the same tuple-freeze, or `__hash__` raises.
         object.__setattr__(self, "gpu_architectures", tuple(self.gpu_architectures))
+        dr = self.driver_range
+        object.__setattr__(self, "driver_range", None if dr is None else tuple(dr))
 
     def __hash__(self) -> int:
         # `gpu_architectures` is already a tuple post-`__post_init__`.

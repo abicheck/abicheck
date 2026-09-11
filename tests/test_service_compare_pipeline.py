@@ -388,3 +388,135 @@ class TestDeadlineBoundaryCheck:
         request = self._request(tmp_path, budget_s=300)
         result = run_compare_request(request)
         assert result.diff is not None
+
+
+class TestEnvMatrixPathValidatedBeforeExtraction:
+    """Codex review, P2, fresh evidence on PR #1221's own ``__post_init__``
+    deferral fix: ``effective_env_matrix()`` used to run only inside
+    ``classify_compare_pair``, which is called *after*
+    ``resolve_compare_request`` has already completed its live extraction
+    (and potentially authorized build-query) work. So a legacy typed
+    ``CompareRequest`` with a missing/malformed ``env_matrix_path`` let that
+    work run before failing, whereas the previous, now-removed eager
+    ``validation_errors()`` check used to reject a bad path before any
+    extraction started. ``run_compare_request`` now resolves
+    ``env_matrix_path`` once, itself, before calling
+    ``resolve_compare_request`` at all -- proven here by asserting
+    resolution is never reached.
+
+    The complementary half of this contract -- that ``CompareRequest``
+    construction alone still performs zero file I/O (the very fix this
+    round must not regress) -- is covered by
+    ``tests/test_api_types.py::TestCompareRequestEnvMatrixPathCompat::
+    test_env_matrix_path_load_is_deferred_past_construction``.
+    """
+
+    def _request(self, tmp_path, *, env_matrix_path):
+        old_p = tmp_path / "old.abi.json"
+        new_p = tmp_path / "new.abi.json"
+        from abicheck.serialization import snapshot_to_json
+
+        old_p.write_text(
+            snapshot_to_json(AbiSnapshot(library="libtest.so", version="1.0")),
+            encoding="utf-8",
+        )
+        new_p.write_text(
+            snapshot_to_json(AbiSnapshot(library="libtest.so", version="2.0")),
+            encoding="utf-8",
+        )
+        return CompareRequest(
+            old=InputSpec.of(str(old_p)),
+            new=InputSpec.of(str(new_p)),
+            env_matrix_path=env_matrix_path,
+        )
+
+    def test_missing_env_matrix_path_fails_before_resolve_compare_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        reached_resolution = False
+
+        def _fail_if_called(*args, **kwargs):
+            nonlocal reached_resolution
+            reached_resolution = True
+            raise AssertionError(
+                "resolve_compare_request must not be reached when "
+                "env_matrix_path is malformed/missing"
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_compare_pipeline.resolve_compare_request",
+            _fail_if_called,
+        )
+
+        request = self._request(
+            tmp_path, env_matrix_path=tmp_path / "does-not-exist.yaml"
+        )
+        with pytest.raises(ValidationError, match="Cannot read environment matrix"):
+            run_compare_request(request)
+        assert reached_resolution is False
+
+    def test_malformed_env_matrix_path_fails_before_resolve_compare_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        reached_resolution = False
+
+        def _fail_if_called(*args, **kwargs):
+            nonlocal reached_resolution
+            reached_resolution = True
+            raise AssertionError(
+                "resolve_compare_request must not be reached when "
+                "env_matrix_path is malformed/missing"
+            )
+
+        monkeypatch.setattr(
+            "abicheck.service_compare_pipeline.resolve_compare_request",
+            _fail_if_called,
+        )
+
+        bad = tmp_path / "env.yaml"
+        bad.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+        request = self._request(tmp_path, env_matrix_path=bad)
+        with pytest.raises(ValidationError, match="Invalid environment matrix"):
+            run_compare_request(request)
+        assert reached_resolution is False
+
+    def test_construction_alone_still_performs_no_file_io(self, tmp_path) -> None:
+        """The original P1 bug this round must not regress: building a
+        ``CompareRequest`` (never passed through ``run_compare_request``)
+        must not raise or read the file, even for a path that does not
+        exist."""
+        missing = tmp_path / "not-yet-written.yaml"
+        request = self._request(tmp_path, env_matrix_path=missing)
+        assert request.env_matrix_path == missing
+
+    def test_valid_env_matrix_path_reaches_resolve_compare_request_and_succeeds(
+        self, tmp_path
+    ) -> None:
+        """A well-formed matrix must not be rejected by the new early
+        validation, and the comparison must complete normally, proving the
+        resolved matrix is genuinely threaded through to classification
+        rather than merely validated and discarded."""
+        from abicheck.service import run_compare_request
+
+        good = tmp_path / "env.yaml"
+        good.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        request = self._request(tmp_path, env_matrix_path=good)
+        result = run_compare_request(request)
+        assert result.diff is not None
+
+    def test_no_env_matrix_path_is_unaffected(self, tmp_path) -> None:
+        """A request with no `env_matrix_path`/`env_matrix` at all (the
+        overwhelmingly common case) must resolve to `None` early and still
+        complete normally -- the new early call must not itself require a
+        matrix to exist."""
+        from abicheck.service import run_compare_request
+
+        request = self._request(tmp_path, env_matrix_path=None)
+        result = run_compare_request(request)
+        assert result.diff is not None

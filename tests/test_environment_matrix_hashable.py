@@ -242,6 +242,46 @@ class TestGenuineImmutability:
         cuda = CudaConstraints(gpu_architectures=["sm_80", "sm_90"])
         assert isinstance(cuda.gpu_architectures, tuple)
 
+    def test_cuda_driver_range_from_list_is_a_tuple_and_hashable(self) -> None:
+        """Codex review, P2, follow-up finding: a typed caller constructing
+        the public model with the YAML-shaped
+        `CudaConstraints(driver_range=["525.0", "580.0"])` must not leave
+        `driver_range` as a mutable, unhashable `list` -- `__post_init__`
+        normalizes `gpu_architectures` this way already; `driver_range`
+        needs the identical treatment or `__hash__` raises
+        `TypeError: unhashable type: 'list'`."""
+        cuda = CudaConstraints(driver_range=["525.0", "580.0"])
+        assert isinstance(cuda.driver_range, tuple)
+        assert cuda.driver_range == ("525.0", "580.0")
+        assert hash(cuda) is not None
+
+    def test_cuda_driver_range_none_stays_hashable(self) -> None:
+        """The default (`driver_range=None`) must remain hashable too --
+        the fix must not assume `driver_range` is always iterable."""
+        cuda = CudaConstraints()
+        assert cuda.driver_range is None
+        assert hash(cuda) is not None
+
+    def test_cuda_driver_range_already_a_tuple_is_unaffected(self) -> None:
+        cuda = CudaConstraints(driver_range=("525.0", "580.0"))
+        assert isinstance(cuda.driver_range, tuple)
+        assert cuda.driver_range == ("525.0", "580.0")
+        assert hash(cuda) is not None
+
+    def test_environment_matrix_containing_list_driver_range_is_hashable(
+        self,
+    ) -> None:
+        """The regression as reported: a containing `EnvironmentMatrix` (and
+        by extension a `CompareRequest` holding one) must also be hashable
+        when its `cuda` field was constructed with a list `driver_range`."""
+        matrix = EnvironmentMatrix(
+            cuda=CudaConstraints(
+                gpu_architectures=["sm_80"],
+                driver_range=["525.0", "580.0"],
+            )
+        )
+        assert hash(matrix) is not None
+
     def test_dict_lookup_survives_a_mutation_that_would_have_broken_it(
         self,
     ) -> None:
