@@ -28,6 +28,7 @@ from .compare.elf_only_demangle import (
     prewarm_elf_only_demangling,
 )
 from .compare.fact_comparison import compare_facts
+from .compare.functions import function_identity_index
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -958,7 +959,11 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # ambiguity-checked alias tier ``_match_old_function``'s extern-C fallback
     # joins on. One shared primitive instead of a second hand-rolled multimap,
     # the same way ``build_type_map`` already backs flat *type* matching.
-    new_map = SymbolIdentityIndex.for_functions(_public_functions(new))
+    # Since ADR-063 Phase 6B's function cohort (``compare/functions.py``),
+    # built through ``SemanticIRIndex``/the legacy adapter rather than a
+    # direct ``AbiSnapshot.function_map`` read -- see that module's own
+    # docstring for why the *resolved* identity itself is unchanged.
+    new_map = function_identity_index(_public_functions(new), new)
     _prewarm_elf_only_demangling(old_map, new_map)
 
     # Lookups for the virtual-method-addition check below: type records

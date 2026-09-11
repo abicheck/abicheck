@@ -11766,6 +11766,82 @@ scoped (a `size_bits`/`alignment_bits`-shaped `CanonicalEntity` addition
 for records; nothing further needed for functions, whose spelling is
 already modeled) is the concrete next step, not a redesign.
 
+**Investigated (2026-09-11): a third checker cutover -- the function
+family. Groundwork landed; the cohort itself is NOT registered as closed.**
+This revisits, but does not contradict, the "declined for now" note above:
+that finding was about the SIGNATURE/matching-key problem specifically
+(`canonical_spelling`'s cross-backend agreement, bare-name-collision
+matching), which correctly found no bug there to close. This investigation
+targeted something else: the *architectural* invariant every other landed
+cohort already satisfies (a migrated module never reads the legacy flat
+collection directly), applied to the one part of `_diff_functions` that
+might migrate without inventing new normalizer output -- the old/new
+*matching index* itself (`SymbolIdentityIndex.for_functions`'s
+exact-mangled-name join plus its ambiguity-checked `extern "C"` name-alias
+fallback).
+
+*Why it does not close.* A function's identity has no legacy-vs-IR duality
+to adjudicate the way a typedef's or constant's does: `Function.entity_id`
+is resolved exactly once, at parse time, by every producer (DWARF, both
+header-AST backends, and the ELF-fallback exporter alike), and
+`extract/semantic_normalizer.py`'s own third-slice docstring is explicit
+that it "computes nothing about identity, only reads the `entity_id` each
+backend already resolved" when building a real `SemanticIR` occurrence for
+a function -- there is no second, independently-derived representation for
+`finding_identity.resolve_function_identity` to prefer over the flat
+`Function` object it already reads. A first draft of
+`abicheck/compare/functions.py`'s `function_identity_index` built a
+`SemanticIRIndex` per comparison (real IR when the snapshot carried one
+covering `FUNCTION`, else a new `legacy_function_ir` adapter projection)
+and looked up each function's `entity_id` in it -- but discarded the
+lookup's result, since the identity itself was still computed from the flat
+object regardless. Review (Codex, PR #1224) correctly flagged this as not a
+migration: a lookup whose result influences nothing cannot be
+distinguished, by any test or mutation run, from not existing at all, and
+registering it as a closed `MIGRATED_COHORTS` entry would have made the
+`semantic-ir-cutover` gate pass while `SemanticIR` content still cannot
+affect function matching -- false assurance for future work, exactly what
+that gate exists to prevent.
+
+*What actually landed.* `function_identity_index` is now an intentionally
+thin wrapper -- behaviorally identical to `SymbolIdentityIndex.for_functions`
+-- with no `SemanticIR`/adapter consumption to gate on, so `functions` is
+**not** added to `scripts/semantic_ir_cutover.py`'s `MIGRATED_COHORTS`.
+What does land and stays, as tested groundwork with no live caller yet (the
+same precedent `SemanticIRIndex` itself was accepted under -- "landed and
+proven correct in isolation first"): `abicheck/model/
+semantic_ir_legacy_adapter.py`'s `legacy_function_ir`, a real `SemanticIR`
+projection of the flat function map shaped like `legacy_typedef_ir`/
+`legacy_constant_ir`, and the `compare/functions.py` module boundary itself
+as the one place a future consumer belongs.
+
+*What a real cohort 3 would still need.* `CanonicalEntity` growing
+per-position payload facts a signature-level comparison could actually read
+-- a separately-addressable return-type spelling, `ref_qualifier`, variadic
+status (`canonical_spelling` today combines a whole signature into one
+opaque `"<return>(<param>, ...)"` string, and the third slice's own
+normalizer does not carry `ref_qualifier`/variadic status at all -- see
+`extract/semantic_normalizer.py`'s own "Deliberately excluded from this
+slice" list). Only once such a fact exists does a consumer have something
+real to read through the IR instead of the flat `Function` object, at which
+point registering the cohort reflects an actual migration rather than an
+architectural gesture with nothing behind it. Not attempted speculatively
+here, per this phase's own non-goal against inventing normalizer output
+with no detector ready to consume it.
+
+*Verification.* `tests/test_function_cutover.py` proves
+`function_identity_index` resolves identically to
+`SymbolIdentityIndex.for_functions` regardless of what the snapshot's
+`SemanticIR` looks like (absent, present-but-not-covering-`FUNCTION`,
+fully/partially covering, or the function itself having no `entity_id`),
+both directly and end-to-end through `diff_symbols._diff_functions` (via
+`checker.compare`) for a removed function, an added function, the `extern
+"C"` name-alias fallback, and an unchanged pair. `legacy_function_ir` is
+tested directly (`TestLegacyFunctionIr`). Full fast unit lane green; `ruff
+check`/`ruff format --check`/`mypy abicheck/` clean;
+`check_architecture.py`/`check_ai_readiness.py`/`semantic_ir_cutover.py`/
+`check_fp_rate.py`/`check_tier_accuracy.py` all pass with zero regressions.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
