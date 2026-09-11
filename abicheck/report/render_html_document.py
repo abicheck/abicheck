@@ -523,6 +523,25 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
         f"library between <b>{old_display}</b> and <b>{new_display}</b> versions"
     )
 
+    # Codex review, P2, round 11 (PR #1221): the same declared-deployment-
+    # floor digest the native HTML layout renders (see the `env_matrix_html`
+    # `<div class='meta'>` above) and JSON/Markdown/SARIF/JUnit already carry
+    # under `env_matrix_source_sha256` -- `build_html_document` already
+    # projects it into this document's shared fields (it is not compat-mode
+    # specific), but this second, ABICC-clone renderer never read it, so a
+    # `compat_html=True` report silently dropped an active deployment
+    # contract a `compat_html=False` report on the identical result showed.
+    # Rendered as its own row in the existing "Test Info" table -- the same
+    # key/value convention `Library Name`/`Version #1`/`Version #2` already
+    # use -- and omitted entirely (not an empty row) when no `deployment:`
+    # contract governed this run.
+    env_matrix_digest = d.get("env_matrix_source_sha256")
+    env_matrix_row = (
+        ""
+        if env_matrix_digest is None
+        else f"<tr><th>Deployment Floor Digest</th><td>{h(env_matrix_digest)}</td></tr>"
+    )
+
     sections_html = []
 
     sections_html.append(f"""
@@ -532,6 +551,7 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
 <tr><th>Library Name</th><td>{lib_display}</td></tr>
 <tr><th>Version #1</th><td>{old_display}</td></tr>
 <tr><th>Version #2</th><td>{new_display}</td></tr>
+{env_matrix_row}
 </table>
 {render_file_metadata(_file_metadata_from_mapping(d["file_metadata"]))}
 

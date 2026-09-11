@@ -358,6 +358,14 @@ _DICT_MUTATOR_PROBES: dict[str, Callable[[dict[str, str]], object]] = {
     "popitem": lambda d: d.popitem(),
     "clear": lambda d: d.clear(),
     "setdefault": lambda d: d.setdefault("x", "y"),
+    # `FrozenStrDict` is a `dict` subclass, not a fresh wrapper object, so
+    # calling `.__init__(...)` a *second* time directly on an
+    # already-constructed instance re-runs `dict.__init__`, which
+    # repopulates the receiver's storage in place at the C level --
+    # bypassing every other mutator override entirely, since none of them
+    # intercept `__init__` being invoked again (Codex review, PR #1221,
+    # round 11).
+    "init": lambda d: d.__init__({"x": "y"}),
 }
 
 
@@ -382,6 +390,7 @@ class TestFrozenStrDictContract:
             "setitem": "__setitem__",
             "delitem": "__delitem__",
             "ior": "__ior__",
+            "init": "__init__",
         }
         for probe_name in _DICT_MUTATOR_PROBES:
             attr_name = dunder_names.get(probe_name, probe_name)
@@ -396,16 +405,27 @@ class TestFrozenStrDictContract:
         Python release adding a new in-place ``dict`` mutator could go
         unnoticed by both this test file and ``FrozenStrDict`` alike, the
         same way ``__ior__`` did (Codex review round 8). For every callable
-        name in ``dir(dict)`` not already in the probe table, invoke it (with
-        a zero-argument call, the only generic signature that plausibly
-        mutates in place) on a fresh plain ``dict`` and check whether it
-        actually changed -- a name that mutates and isn't in the table is a
-        real, unaudited gap.
+        name in ``dir(dict)`` not already in the probe table, invoke it on a
+        fresh plain ``dict`` and check whether it actually changed -- a name
+        that mutates and isn't in the table is a real, unaudited gap.
+
+        Two probe shapes are tried, not just one: a zero-argument call
+        catches most in-place mutators (``clear()``, ``popitem()``, ...), but
+        ``__init__`` itself slipped past a zero-arg-only version of this
+        sweep in Codex review round 11 (PR #1221) precisely because
+        ``dict.__init__()`` called with *no* arguments on an
+        already-populated dict is a documented no-op -- it does not mutate,
+        even though ``dict.__init__(some_mapping)`` (the shape that matters,
+        and the one a `FrozenStrDict.__init__` override actually has to
+        guard) very much does. So every candidate also gets a one-argument
+        call with a plausible replacement mapping; either shape mutating is
+        enough to flag the name.
         """
         probed_attr_names = {
             "setitem": "__setitem__",
             "delitem": "__delitem__",
             "ior": "__ior__",
+            "init": "__init__",
         }
         already_covered = {
             probed_attr_names.get(name, name) for name in _DICT_MUTATOR_PROBES
@@ -417,19 +437,67 @@ class TestFrozenStrDictContract:
             attr = getattr(dict, name, None)
             if not callable(attr):
                 continue
-            probe: dict[str, str] = {"a": "1"}
-            try:
-                getattr(probe, name)()
-            except TypeError:
-                continue  # wrong arity for a zero-arg call -- not a signal
-            except Exception:
-                continue
-            if probe != {"a": "1"}:
+
+            def _mutated(call: Callable[[dict[str, str]], object]) -> bool:
+                probe: dict[str, str] = {"a": "1"}
+                try:
+                    call(probe)
+                except Exception:
+                    return False  # wrong arity/type for this probe shape
+                return probe != {"a": "1"}
+
+            zero_arg_mutated = _mutated(lambda p, name=name: getattr(p, name)())
+            one_arg_mutated = _mutated(
+                lambda p, name=name: getattr(p, name)({"probe-key": "probe-value"})
+            )
+            if zero_arg_mutated or one_arg_mutated:
                 discovered_unaudited.append(name)
         assert not discovered_unaudited, (
             "dict grew (or this Python version has) a mutating method the "
             f"probe table above does not cover: {sorted(discovered_unaudited)}"
         )
+
+    def test_reinit_on_already_constructed_instance_raises_and_preserves_hash(
+        self,
+    ) -> None:
+        """Codex review, PR #1221, round 11: ``FrozenStrDict`` is a ``dict``
+        subclass, not a fresh object, so calling ``.__init__(...)`` directly
+        on an already-constructed instance re-runs ``dict.__init__`` and
+        repopulates the receiver in place -- silently, since none of the
+        other disabled mutators intercept ``__init__``. Left unguarded, this
+        changes the hash of an instance that may already be a member of a
+        set/dict (e.g. embedded in an already-hashed ``CompareRequest``),
+        exactly the hash-invariant violation the earlier ``__ior__`` fix (see
+        the module docstring above) closed from a different angle. Must
+        raise instead, leaving contents and hash untouched.
+        """
+        d = FrozenStrDict({"GLIBC": "2.34"})
+        original_contents = dict(d)
+        original_hash = hash(d)
+
+        with pytest.raises(TypeError):
+            d.__init__({"GLIBC": "9.99", "EXTRA": "1.0"})
+
+        assert dict(d) == original_contents
+        assert hash(d) == original_hash
+
+    @given(data=_str_dicts)
+    def test_property_reinit_never_mutates_regardless_of_contents(
+        self, data: dict[str, str]
+    ) -> None:
+        """Generalization of the fixed-example test above: no matter what
+        the instance already holds or what a second ``__init__`` call is
+        given, re-initialization must raise and leave the instance
+        unchanged -- not just for the one reported ``GLIBC`` shape."""
+        d = FrozenStrDict(data)
+        original_contents = dict(d)
+        original_hash = hash(d)
+
+        with pytest.raises(TypeError):
+            d.__init__({"different-key": "different-value"})
+
+        assert dict(d) == original_contents
+        assert hash(d) == original_hash
 
     def test_json_serializable_directly(self) -> None:
         d = FrozenStrDict({"a": "1", "b": "2"})

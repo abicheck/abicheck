@@ -226,3 +226,39 @@
   adds a new in-place mutator this module hasn't audited, plus a
   belt-and-suspenders check that every probed name is an override
   `FrozenStrDict` actually defines, not one it merely inherits.
+- **`FrozenStrDict` now also blocks re-running `__init__` on an
+  already-constructed instance.** Being a `dict` subclass rather than a
+  fresh wrapper object, calling `.__init__(some_mapping)` a *second* time
+  directly on an existing instance re-ran `dict.__init__`, repopulating the
+  receiver's storage in place at the C level -- bypassing every mutator
+  override the earlier rounds above added, none of which intercept
+  `__init__` being invoked again. Left unguarded, this changes the hash of
+  an instance already embedded in a hashed container (e.g. a
+  `CompareRequest`), the identical hash-invariant violation the `__ior__`
+  fix above closed from a different angle. `__init__` now raises `TypeError`
+  on any call after the first, guarded by a one-shot `_initialized` sentinel
+  instance attribute set once real construction completes; ordinary
+  construction and the `__reduce__`-driven reconstruction `pickle`/
+  `copy.deepcopy` use are unaffected, since the sentinel is not yet set on a
+  brand-new instance. The `dir(dict)` completeness sweep above previously
+  missed this gap because its zero-argument probe call is exactly the shape
+  under which `dict.__init__()` on an already-populated dict is a documented
+  no-op -- it does not mutate, even though `dict.__init__(some_mapping)` (the
+  shape that actually matters) does. The sweep now also tries a one-argument
+  probe call for every candidate, so a future gap of this same shape is
+  caught mechanically instead of needing a human to notice the zero-arg
+  blind spot again.
+- **The compatibility HTML report (`compat_html=True`) now also renders the
+  declared-deployment-floor digest.** A prior round's fix projected
+  `env_matrix_source_sha256` into every `compare` output format including
+  "HTML" -- but there are two HTML code paths, and that fix only reached the
+  native `abicheck.report.render_html_document.render_html_document` layout;
+  the separate ABICC-compatible clone layout
+  (`_render_compat_html_document`, `generate_html_report(...,
+  compat_html=True)`) never read the field at all, so a `compat_html=True`
+  report silently omitted an active deployment contract a `compat_html=False`
+  report on the identical result showed. The digest now renders as a
+  "Deployment Floor Digest" row in that layout's existing "Test Info" table
+  (the same key/value convention its `Library Name`/`Version #1`/`Version
+  #2` rows already use), omitted entirely -- never a placeholder -- when no
+  `deployment:` contract governed the run.

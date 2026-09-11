@@ -75,7 +75,30 @@ class FrozenStrDict(dict[str, str]):
     place, Codex review round 8), ``update``, ``pop``, ``popitem``,
     ``clear``, and ``setdefault``. ``copy()`` is deliberately left alone: it
     returns a fresh plain ``dict``, not a mutation of ``self``.
+
+    ``__init__`` itself is the newest entry in that list (Codex review, PR
+    #1221, round 11): since ``FrozenStrDict`` is a ``dict`` subclass rather
+    than a fresh wrapper object, calling ``.__init__(...)`` a *second* time
+    directly on an already-constructed instance re-runs ``dict.__init__``,
+    which repopulates the instance's storage in place at the C level --
+    bypassing every mutator override above, none of which intercept
+    ``__init__`` being invoked again. Guarded with a one-shot sentinel
+    (``_initialized``, a plain instance attribute -- this class defines no
+    ``__slots__``, so normal attribute assignment works and is not itself one
+    of the mutators disabled above) set only after the *first* real
+    ``dict.__init__`` call completes; a further call raises instead of
+    mutating. The first call -- ordinary construction, including the
+    ``__reduce__``-driven reconstruction pickle/``copy.deepcopy`` use -- is
+    unaffected, since the sentinel is not yet set on a brand-new instance.
     """
+
+    _initialized: bool
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        if getattr(self, "_initialized", False):
+            raise TypeError("FrozenStrDict is immutable")
+        super().__init__(*args, **kwargs)
+        self._initialized = True
 
     def __setitem__(self, key: str, value: str) -> None:
         raise TypeError("FrozenStrDict is immutable")
