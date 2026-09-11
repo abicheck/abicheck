@@ -405,7 +405,7 @@ fi
 # workflow that still sets it fails before Python setup and the toolchain
 # install, matching this script's own fail-fast rationale.
 if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-  _fail "build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's config input (or let it auto-discover from sources)."
+  _fail "build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config input (or let it auto-discover from sources)."
 fi
 
 # new-library-set: retired (ADR-068 (b)). The scan-mode arm above rejects it

@@ -133,8 +133,8 @@ inputs:
       instead of a silently-ignored input: put the root target(s) in
       `.abicheck.yml`'s `build.targets` (Bazel only so far, e.g.
       `targets: ["//:math"]`) and pass the config with `mode: dump`'s
-      `config:` input, or let it auto-discover from `sources:`. `compare`
-      has no equivalent.
+      `build-config:` input, or let it auto-discover from `sources:`.
+      `compare` has no equivalent.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────

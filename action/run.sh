@@ -2671,7 +2671,7 @@ fi
 # `config`/`sources` inputs reach it exactly as they did before this
 # input existed.
 if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-  echo "::error::build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's config: input (or let it auto-discover from sources:)."
+  echo "::error::build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config: input (or let it auto-discover from sources:)."
   exit 1
 fi
 

@@ -5,9 +5,16 @@
 root command is deleted outright (`abicheck scan` exits 64, naming
 `compare`/`compare --no-baseline` as the replacement), its scan-only
 modules and tests are deleted, and `tests/parity/` is now a compare-only
-regression corpus. Three flag demotions Phase 6 unblocked
-(`compare --env-matrix`, `compare --require-complete-analysis`,
-`dump --build-target`) remain open, unimplemented followups — see
+regression corpus. Of the three flag demotions Phase 6 unblocked,
+`dump --build-target` is now implemented too: `frontends/cli/options/
+rulings.py`'s deferred ruling recorded its only real blocker as
+`--build-target` still being a live `scan` option (`plans/
+one-comparison-product.md`'s "One deferral's blocker re-attributed" note);
+with `scan` deleted, that blocker is gone and the flag is removed outright
+(old spelling exits 64, no alias; `.abicheck.yml`'s `build.targets` is the
+only front-end-reachable source now). `compare --env-matrix` and
+`compare --require-complete-analysis` remain open, unimplemented
+followups — see
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
 exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends
