@@ -243,7 +243,7 @@ evidence_policy:
 - `graph_risk_findings` — L5 reachability/impact risks. `fail` → `API_BREAK`.
 - `require_evidence` — when a listed layer is `true` but absent from either the
   baseline or target side of the compare, an `evidence_required_missing` finding
-  (`API_BREAK`) fails the run so a silently-degraded scan can't pass (ADR-033 D7).
+  (`API_BREAK`) fails the run so a silently-degraded analysis can't pass (ADR-033 D7).
 
 Each knob is **unset by default**: leaving it out keeps the finding's normal
 category, so existing runs are unchanged. Per ADR-028 D3 these knobs never turn
@@ -305,7 +305,7 @@ modify the final process exit status. Treat the table above as `compare` semanti
 A `--policy` is one project's own overrides. When the *same* overrides
 should be shared across projects, put them in a **pack** — a small versioned
 YAML document (`id`/`version`/`kind`/`assignments`) selected with
-`compare --pack` or `scan --against ... --pack` (repeatable):
+`compare --pack` (repeatable):
 
 ```yaml
 id: vendor_sdk_relaxations
@@ -330,11 +330,9 @@ when a domain is selected to measure coverage of — so assigning it without
 that flag is a usage error rather than a silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
-a `kind: gate` pack applies to `scan --against` the same way
-`--severity-preset`/`--exit-code-scheme` given directly already do — `scan`'s
-exit code has honoured the resolved severity/exit-code-scheme config since
-the fix that closed the "scan never consults severity" gap, and a gate pack
-is one more source for that same gate.
+a `kind: gate` pack applies the same way `--severity-preset`/
+`--exit-code-scheme` given directly already do — a gate pack is one more
+source for that same gate.
 A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
 `surface.internal_namespaces`/`gate.*`, similarly, all apply uniformly to
 every library on a directory/package (release) `compare` — the gate half
@@ -343,9 +341,7 @@ folds into the release fan-out's own resolved `GateOptions` object
 release comparison, pending verification that lifting it is safe (see the
 "7B's release-fan-out investigation landed" section of
 [the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)).
-`scan --pack` also requires `--against`, since a pack's only application
-there is the baseline comparison. Each rejection above is a usage error
-rather than a silently ignored flag.
+Each rejection above is a usage error rather than a silently ignored flag.
 
 For the full field vocabulary, the precedence rules, and what a resolution
 receipt records, see

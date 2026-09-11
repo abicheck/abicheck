@@ -39,7 +39,7 @@ generated: false
       still do so, orthogonally, via contract coverage below.
     - **Run-level contract coverage.** An orthogonal axis, independent of
       any single finding's decision: by default, if the selected domain's
-      required evidence is incomplete, `compare`/`scan --against` contribute
+      required evidence is incomplete, `compare` contributes
       an exit `1`, folded with `max` against the ordinary gate — it can
       raise a clean `0` to `1`, never lower a `2`/`4`, and it never rewrites
       any finding's `compatibility_decision`. The one exception is a
@@ -53,7 +53,7 @@ generated: false
       incomplete. See [Exit Codes](exit-codes.md).
 
     Outside both `--contract` and a selected `--pack`, a
-    `compare`/`scan` run resolves nothing from this object at all and every
+    `compare` run resolves nothing from this object at all and every
     other command is unaffected — contract evaluation is still an opt-in
     feature, not a default-on one. A selected `--pack` **alone** (no
     `--contract`) still resolves and applies its own fields,
@@ -224,7 +224,7 @@ assignments:
 |---|---|---|
 | `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` and `contract.unresolved` |
 | `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
-| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package; not `scan`) |
+| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
 judges against stays the user's own per-run choice — ADR-049 D3 forbids a
@@ -241,7 +241,7 @@ as in a `--policy`, so a renamed kind cannot silently disable a rule.
 
 ### Selecting a pack
 
-`compare --pack PATH` and `scan --against ... --pack PATH` select one
+`compare --pack PATH` selects one
 (repeatable). A selected pack **configures the run**: a `kind: policy` pack
 overriding `func_removed` changes the verdict and the exit code, and a
 `kind: gate` pack's severity moves what blocks CI. That is worth stating
@@ -252,13 +252,9 @@ before merge for exactly that reason.
 The "Applied today" column above is enforced, not documentation:
 a manifest assigning a field this build resolves but does not yet act on is a
 usage error naming the field and the reason, rather than an assignment silently
-recorded as active configuration (`abicheck.pack_application`). The same rule
-rejects a `kind: gate` pack on `scan`, whose exit code follows its
-compatibility verdict directly and so has no gate to move.
+recorded as active configuration (`abicheck.pack_application`).
 
-A further restriction, for the same "configure or reject" reason: `--pack`
-needs `--against` on `scan` (a pack's only application there is the baseline
-comparison's policy). On a directory/package (release) `compare`, a `kind:
+On a directory/package (release) `compare`, a `kind:
 policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
 internal_namespaces`/`gate.exit_code_scheme`/`gate.severity.<category>` all
 apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1

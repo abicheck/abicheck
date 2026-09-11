@@ -24,7 +24,7 @@ generated: false
 > ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)'s
 > `manifest.json`/`refs/`/`objects/sha256/...` layout) still exists as a
 > typed-API primitive (`project_snapshot_legacy.write_legacy_snapshot_package`)
-> and `compare`/`scan --against` still accept one as an input path — but no
+> and `compare` still accepts one as an input path — but no
 > `dump` CLI flag writes one today. The directory shape's real value (content
 > dedup, independent per-section objects) only pays off once a project shares
 > content across multiple artifacts, which nothing produces yet; for the
@@ -168,7 +168,7 @@ version, and reassembles the original document.
 `storage.sectioned_document`'s `to_sectioned_document`/
 `from_sectioned_document` package the same D8 split as one JSON document,
 reused by `serialization.snapshot_to_json`/`snapshot_from_dict` (the real
-`-o`/`--output`/stdout write and read path) so every `dump`/`compare`/`scan`
+`-o`/`--output`/stdout write and read path) so every `dump`/`compare`
 invocation gets it by default. `abicheck/project_snapshot_legacy.py`'s
 `write_legacy_snapshot_package`/`read_legacy_snapshot_document` remain the
 real, directory-backed round trip built on the primitives above
@@ -180,7 +180,7 @@ facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
   `dump` invocation writes the single-file sectioned shape instead (see
   above). The directory writer stays available as a typed-API primitive
   for a caller that wants it directly.
-- **`compare`/`scan --against`** still accept a `ProjectSnapshot` package
+- **`compare`** still accepts a `ProjectSnapshot` package
   directory as an input path — detected by a real, validated
   `manifest.json` read (`is_project_snapshot_package_dir`, which
   distinguishes it from a `BuildSourcePack`'s own identically-named

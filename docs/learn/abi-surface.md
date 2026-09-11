@@ -96,27 +96,41 @@ transitive ABI.
 Two abicheck features map directly onto this page:
 
 - **Public-surface scoping** — supply the public headers
-  (`-H include/ --public-header-dir include/`) and abicheck itself applies the
+  (`-H include/`) and abicheck itself applies the
   boundary: internal-type churn is scoped out
   ([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)–[120](../reference/examples/case120_internal_struct_reordered_scoped.md)),
   public changes stay. Without headers, every exported symbol is treated as
   contract — the safe over-approximation.
-- **Audit mode** (`abicheck scan` with no `--against` — there is no separate
-  `--audit` flag) — a single-build hygiene lint for a
-  *leaking* boundary: accidental exports
+- **A one-build audit** — `abicheck dump`. Auditing the boundary of a single
+  build is a different question from comparing two releases, and it does not
+  need a second version to answer: point `dump` at the build and its public
+  headers and it records, in one snapshot, both halves of the boundary this
+  page is about — the export table the loader will actually honour, and the
+  set of declarations your installed headers actually promise, each
+  declaration carrying the provenance (`public_header`, `private_header`,
+  `export_only`) that says which side it came from. Reading those two halves
+  against each other is what tells you the boundary is leaking: a symbol with
+  `origin: export_only` is exported but promised nowhere; a public signature
+  naming a type whose own origin is `private_header` drags a private type into
+  the contract. The catalog's audit cases walk each shape —
+  accidental exports
   ([case143](../reference/examples/case143_audit_accidental_export.md)), private-header
   leaks ([case144](../reference/examples/case144_audit_private_header_leak.md)),
   unversioned exports
   ([case145](../reference/examples/case145_audit_unversioned_export.md)), and exported
   RTTI for internal types
-  ([case146](../reference/examples/case146_audit_rtti_for_internal.md)). See
-  [Source-Scan Depth § single-build audit](../use/evidence-depth.md#single-build-audit-dump).
+  ([case146](../reference/examples/case146_audit_rtti_for_internal.md)) — and each
+  case's README shows how that reconciliation is computed. There is no CLI
+  command that prints those findings for you: the `scan` command that used to
+  is gone, and `dump`/`compare` do not replace it. What `dump` gives you is
+  the evidence, in one file, at whatever
+  [depth](../use/evidence-depth.md) you ask for.
 
 Both as commands. The one-build audit needs only the build and its public
-headers, and reports the leaking boundary:
+headers, and records the boundary as a snapshot you can read:
 
 ```bash
-abicheck scan libfoo.so -H include/
+abicheck dump libfoo.so -H include/ -o libfoo.abi.json
 ```
 
 The second shows the boundary applied to a *change*: an internal struct

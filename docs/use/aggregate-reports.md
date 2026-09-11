@@ -18,7 +18,7 @@ generated: false
 
 `abicheck aggregate` is a **report fan-in**, not another way to compare
 binaries. It never parses a `.so`/`.dll`/`.dylib` and never runs a header
-scan — it reads a directory of already-produced `compare`/`scan` JSON
+scan — it reads a directory of already-produced `compare` JSON
 reports (one per CI matrix leg) and reconciles them into one gate decision
 and, when the reports came from more than one compiler/build profile, one
 reconciled finding matrix.
@@ -59,8 +59,8 @@ other four (`gate`/`coverage`/`contract_coverage`/`analysis_assurance`,
 
 ```mermaid
 flowchart TD
-    R["Per-target compare/scan<br/>JSON reports"] --> A["compatibility<br/>(worst verdict — reporting only)"]
-    R --> B["gate<br/>(each report's own severity/scan<br/>gate, combined — never recomputed)"]
+    R["Per-target compare<br/>JSON reports"] --> A["compatibility<br/>(worst verdict — reporting only)"]
+    R --> B["gate<br/>(each report's own severity<br/>gate, combined — never recomputed)"]
     R --> C["coverage<br/>(did every REQUIRED target<br/>report at all?)"]
     R --> D["contract_coverage<br/>(for a target that DID report,<br/>was its own contract evidence complete?)"]
     R --> F["analysis_assurance<br/>(for a target that DID report,<br/>was its own evidence complete<br/>under --require-complete-analysis?)"]
@@ -76,8 +76,8 @@ flowchart TD
   policy can make a `COMPATIBLE` report block (`addition=error`) or a
   `BREAKING` report pass (a demoted severity preset).
 - **gate** — each report already carries its own gate decision
-  (`severity.{exit_code,blocking,blocking_categories}`, or a `scan` report's
-  own top-level `exit_code`). `aggregate` *combines* those — it never
+  (`severity.{exit_code,blocking,blocking_categories}`). `aggregate`
+  *combines* those — it never
   recomputes a gate from the compatibility verdict. Reading is fail-closed:
   a report whose gate block is present but corrupt makes that target
   *unavailable*, never silently reverting to the legacy path.
@@ -89,7 +89,7 @@ flowchart TD
   *did* report, was its own selected `--contract` domain's evidence
   complete? Read back from that report's own
   `contract_coverage_exit_contribution` and folded with `max`, exactly the
-  way `compare`/`scan --against` fold theirs. **This is a different
+  way `compare` folds its own. **This is a different
   question from plain `coverage`**: a required target can report
   successfully (no coverage gap) while its own contract-evidence domain was
   still incomplete (a contract-coverage gap) — both can independently
@@ -99,7 +99,7 @@ flowchart TD
   *did* report, was its own evidence complete under
   `--require-complete-analysis`? Read back from that report's own
   `analysis_assurance_exit_contribution` and folded with `max`, exactly the
-  way `compare`/`scan --against` fold theirs. The exact sibling of
+  way `compare` folds its own. The exact sibling of
   `contract_coverage` above, for a different question: a required target
   can report successfully with a closed `--contract` domain while its own
   broader evidence (depth, TU/export accounting, header-context drift, ...)

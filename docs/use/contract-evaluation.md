@@ -47,13 +47,6 @@ Use `auto` when the domain is a project-level decision you have already
 recorded elsewhere, and a named domain when this run is asking a specific
 question.
 
-`scan --against` accepts the same flag, with the same meaning:
-
-```bash
-abicheck scan build/libfoo.so --against baseline.json \
-  --contract exports
-```
-
 ## Reading the result
 
 ```bash
@@ -105,7 +98,7 @@ error naming the field and the reason.
 `compare --used-by APP` or `--required-symbol(s)` layered on top of
 `--contract` promotes a finding to `IN_CONTRACT` whenever it
 matches the app's actual imports or the plugin host's required entrypoints
-— stronger evidence than anything a header/export scan alone can infer,
+— stronger evidence than anything header/export evidence alone can infer,
 per ADR-049 §4.3:
 
 ```bash
@@ -142,13 +135,10 @@ summary usually wants to say which one fired.
 ## Common mistakes
 
 - **Expecting the Python API to infer evaluation from the mode.** The CLI
-  does — naming a domain is the whole request — but `CompareRequest`/
-  `ScanRequest` still require `contract_evaluation=True` *alongside*
-  `contract_mode`, and reject a mode given without it. They also have no
+  does — naming a domain is the whole request — but `CompareRequest` still
+  requires `contract_evaluation=True` *alongside* `contract_mode`, and
+  rejects a mode given without it. It also has no
   `auto`: pass `contract_mode=None` to leave the domain unstated.
-- **Passing `--contract` to `scan` without `--against`.** There is no
-  comparison to evaluate, so it is a usage error (exit `64`) rather than a
-  silently ignored flag.
 - **Suppressing to fix a coverage gap.** `--suppress` cannot reach a
   `CoverageFailure` — give the evaluator the missing evidence (headers,
   build info) or accept the gap explicitly with `contract.unresolved: warn`.
