@@ -17029,7 +17029,36 @@ not new design.
   in this plan scheduled to migrate or retire it; closing it is a real,
   separately-justified future phase, not a residual of Phase 10's cleanup.
 - Phase 2: `diff_filtering.py`/`type_reachability.py`'s bespoke string-
-  suffix ambiguity trackers.
+  suffix ambiguity trackers. **Closed (2026-09-11)**, in the shape the two
+  prior "Consumer 1"/"Consumer 2" migrations already established rather
+  than a further rewrite: a re-audit for this row found a *third*,
+  previously-unaudited `diff_filtering.py` opaque-suppression path,
+  `_downgrade_opaque_struct_changes` (the DWARF-oriented asymmetric-
+  existence sibling of the already-migrated
+  `_downgrade_opaque_type_changes`), still comparing bare
+  `c.symbol in truly_opaque` strings — missed by every earlier slice
+  because those slices' own text names only `_find_opaque_types`/
+  `_downgrade_opaque_type_changes`. Migrated onto
+  `compare/opaque_types.OpaqueTypeIndex` via a new
+  `OpaqueTypeIndex.build(declarations)` classmethod (stable `EntityId`
+  first, `RecordType.name` spelling second, always `strict=False` since
+  this index is not a paired `intersect()` and carries no completeness
+  proof). The function's own `opaque_types`/`embedded_types`/
+  `truly_opaque` set construction stays plain `set[str]` — both are
+  rendered-text spelling questions, not identity ones, the same
+  distinction `find_by_value_types` already draws. Re-verified, not
+  re-litigated, the three prior slices' (ninth/twelfth/fourteenth)
+  finding that the rest of `type_reachability.py`'s own machinery
+  (`_spelling_index`/`_stripped_signature_spelling`/
+  `_typedef_spelling_targets`/`_namespace_suffix_spellings`) stays on raw
+  strings by design: those strings must appear inside rendered signature
+  text rather than stand for an entity, and the module performs no
+  cross-snapshot pairing at all, so there is no old/new identity question
+  for a stable tier to improve. See the `identity` concept's
+  `removal_gate` in `docs/_meta/one-semantic-pipeline-status.yaml` for the
+  full account and `tests/test_opaque_identity_tiers.py`'s
+  `TestDowngradeOpaqueStructChangesIdentityTiers`/
+  `TestOpaqueTypeIndexBuildProperties` for the tests.
 - Phase 3: `surface.py`'s pre-graph traversal implementation and
   `export_surface.py`'s independent closure walk, once
   `PublicSurfaceQuery.resolve` is the only path either one calls; the

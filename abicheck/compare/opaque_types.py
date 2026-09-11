@@ -199,6 +199,71 @@ class OpaqueTypeIndex:
     def __bool__(self) -> bool:
         return bool(self.stable or self.local)
 
+    @classmethod
+    def build(
+        cls,
+        declarations: Mapping[str, list[RecordType]],
+        *,
+        stable_ids: set[StableEntityId] | None = None,
+    ) -> OpaqueTypeIndex:
+        """Build a two-tier index from a bare-name -> declarations map.
+
+        For a call site that has its own already-computed set of bare
+        ``RecordType.name`` spellings and wants to re-express it as a real
+        :class:`OpaqueTypeIndex` instead of hand-rolling a second bare-name
+        membership set (``diff_filtering._downgrade_opaque_struct_changes``'s
+        asymmetric-existence opaqueness criterion is the motivating case: it
+        is not itself an ``intersect()`` of two per-snapshot indices, so it
+        has no paired ``stable_by_local`` evidence to compute -- see the
+        ``complete`` default below). :func:`find_opaque_types` builds its
+        own index directly instead of through this classmethod, since it
+        additionally needs the per-spelling ``stable_by_local`` breakdown
+        this simpler builder does not compute.
+
+        *stable_ids*, when given, replaces the naive "every ``entity_id``
+        resolved among *any* declaration in *declarations*" default with a
+        caller-verified set. Required whenever *declarations* was grouped by
+        bare spelling rather than by a criterion that already pairs
+        declarations by identity: two *different* entities can share one
+        bare ``RecordType.name`` (Codex review, PR #1218, two rounds) --
+        first a genuinely opaque declaration colliding with an unrelated
+        visible one, then a subtler case where each side's own opaque
+        declaration under a shared spelling is a *different* entity
+        entirely (old's declaration went visible in new; new's opaque
+        declaration under that same spelling is a namesake that was never
+        opaque in old). Grouping by spelling alone cannot distinguish either
+        case from a real single entity that is genuinely opaque on both
+        sides or genuinely absent from the other side -- only the caller,
+        which can resolve identity across both snapshots directly, can. See
+        :func:`~abicheck.compare.opaque_struct_types.find_opaque_struct_types`
+        for the verification this performs before passing a set here.
+
+        ``complete`` is left at its dataclass default (``True``) here on
+        purpose, but that default is *not* a completeness proof the way
+        :meth:`intersect`'s own computed value is -- it only means "this
+        index was not produced by a paired old/new intersection, so there
+        is no narrower-than-``strict=False`` claim available." A caller
+        that only ever passes ``strict=False`` to :meth:`contains` (the
+        always-safe, non-narrowing default) is unaffected either way;
+        passing ``strict=True`` against an index built here would be an
+        unproven safety claim and callers must not do that.
+        """
+        stable: set[StableEntityId] = set()
+        local: set[SnapshotLocalIdentity] = set()
+        for name, decls in declarations.items():
+            for t in decls:
+                local.add(snapshot_local_identity(name, t.entity_id))
+                if stable_ids is None:
+                    resolved = stable_entity_id(t.entity_id)
+                    if resolved is not None:
+                        stable.add(resolved)
+        return cls(
+            stable=frozenset(stable_ids)
+            if stable_ids is not None
+            else frozenset(stable),
+            local=frozenset(local),
+        )
+
     def contains(self, change: Change, spelling: str, *, strict: bool = False) -> bool:
         """Whether *change* names an opaque declaration.
 
@@ -374,17 +439,104 @@ def _unqualified_type_token_matches(
     return re.finditer(pattern, text)
 
 
-#: A C/C++ declarator-grouping paren whose own content opens with a
-#: pointer/reference sigil -- the parens exist purely to override normal
-#: declarator precedence (an array/function suffix binds tighter than a
-#: bare ``*`` would), so ``"Handle (*)[3]"`` (pointer to an array of
-#: ``Handle``) and ``"Handle (*)(int)"`` (pointer to a function returning
-#: ``Handle``) are both genuinely indirect even though the ``*``/``&``
-#: itself sits inside a paren rather than immediately after the type name
-#: (Codex review on PR #1041, follow-up round). An optional leading
-#: ``Class::``-qualified scope covers the pointer-to-member spelling too
-#: (``"Handle (Class::*)[3]"``).
-_DECLARATOR_GROUP_RE = re.compile(r"\(\s*(?:\w+(?:::\w+)*::\s*)?[*&]")
+#: One qualified-scope segment of a pointer-to-member declarator's owner --
+#: a plain identifier, optionally followed by a template argument list.
+#: The argument list itself is skipped via :func:`~abicheck.model.
+#: qualified_name_split.skip_template_arguments` in
+#: :func:`_skip_member_pointer_owner_scope` (bracket-aware, so a nested
+#: ``<...>`` doesn't confuse the scan), not matched by this regex directly
+#: -- a regex alone cannot balance arbitrary nested angle brackets.
+_MEMBER_POINTER_SEGMENT_RE = re.compile(r"\w+")
+
+#: Bare whitespace only -- deliberately narrower than :data:`_CV_OR_SPACE_RE`
+#: (which also eats a cv-qualifier keyword), for the one place a grouping
+#: paren's own interior is scanned (:func:`_grouped_declarator_follows`);
+#: a cv-qualifier has no place directly inside ``(...)`` here.
+_WS_RE = re.compile(r"\s*")
+
+
+def _skip_member_pointer_owner_scope(text: str, pos: int) -> int:
+    """If *text* at *pos* is a pointer-to-member declarator's owner scope
+    -- one or more ``::``-joined segments, each optionally template-
+    qualified, ending in a final ``::`` (``"Owner::"``, ``"ns::Owner<int>::"``,
+    ``"Owner<Pair<int, int>>::"``, ...) -- return the index just past that
+    final ``::``. Otherwise return *pos* unchanged (no scope present; not
+    an error -- callers decide what "no scope" means for their own
+    declarator shape).
+
+    Shared by both the unparenthesized (:func:`_member_pointer_follows`)
+    and parenthesized (:func:`_grouped_declarator_follows`) pointer-to-
+    member shapes, so a templated owner is recognized identically in each
+    (Codex review, PR #1218, round 9: the parenthesized shape,
+    ``"Handle (Owner<int>::*)[3]"``, had its own separate, non-template-
+    aware regex and needed the identical fix round 7 already gave the
+    unparenthesized shape)."""
+    n = len(text)
+    cursor = pos
+    saw_scope = False
+    while True:
+        m = _MEMBER_POINTER_SEGMENT_RE.match(text, cursor)
+        if not m:
+            break
+        candidate = m.end()
+        if candidate < n and text[candidate] == "<":
+            candidate = skip_template_arguments(text, candidate)
+        if text.startswith("::", candidate):
+            cursor = candidate + 2
+            saw_scope = True
+            continue
+        break
+    return cursor if saw_scope else pos
+
+
+def _member_pointer_follows(text: str, pos: int) -> bool:
+    """Whether an *un*-parenthesized pointer-to-data-member declarator's
+    owner-scope-then-``*`` starts at *pos* -- ``"Owner::*member"``,
+    ``"ns::Owner<int>::*member"``, ....
+
+    ``"Handle Owner::*member"`` stores a byte offset into ``Owner``, not an
+    embedded ``Handle`` object, but needs no grouping parens the way a
+    pointer-to-member-function/array declarator does
+    (:func:`_grouped_declarator_follows` covers that parenthesized shape).
+    Codex review, PR #1218, round 6: this unparenthesized shape was
+    previously read as by-value, since the ``::*`` scope qualifier sits
+    between the type name and its own sigil, past what
+    :data:`_CV_OR_SPACE_RE` skips. Requires at least one ``::`` segment
+    before the trailing ``*`` -- a bare identifier with no scope at all
+    (e.g. plain ``"Owner*"``) is not member-pointer syntax and is already
+    handled, when relevant, by the plain sigil check in
+    :func:`_sigil_follows`."""
+    n = len(text)
+    end = _skip_member_pointer_owner_scope(text, pos)
+    return end != pos and end < n and text[end] == "*"
+
+
+def _grouped_declarator_follows(text: str, pos: int) -> bool:
+    """Whether *text* at *pos* is a declarator-grouping paren whose own
+    content -- after an optional, possibly template-qualified pointer-to-
+    member owner scope -- opens with a pointer/reference sigil: ``"(*)[3]"``,
+    ``"(Owner::*)[3]"``, ``"(Owner<int>::*)[3]"``, ``"(ns::Owner<int>::*)[3]"``.
+
+    The parens exist purely to override normal declarator precedence (an
+    array/function suffix binds tighter than a bare ``*`` would), so
+    ``"Handle (*)[3]"`` (pointer to an array of ``Handle``) and ``"Handle
+    (*)(int)"`` (pointer to a function returning ``Handle``) are both
+    genuinely indirect even though the ``*``/``&`` itself sits inside a
+    paren rather than immediately after the type name (Codex review on
+    PR #1041, follow-up round). The optional leading owner scope covers
+    the pointer-to-member spelling too, via the same template-aware
+    :func:`_skip_member_pointer_owner_scope` the unparenthesized shape
+    uses (Codex review, PR #1218, round 9 -- this parenthesized shape
+    previously matched its owner scope with a plain, non-template-aware
+    regex)."""
+    n = len(text)
+    if pos >= n or text[pos] != "(":
+        return False
+    cursor = pos + 1
+    m = _WS_RE.match(text, cursor)
+    cursor = m.end() if m else cursor
+    cursor = _skip_member_pointer_owner_scope(text, cursor)
+    return cursor < n and text[cursor] in "*&"
 
 
 def _sigil_follows(text: str, pos: int) -> bool:
@@ -392,14 +544,19 @@ def _sigil_follows(text: str, pos: int) -> bool:
     skipping whitespace and a leading cv-qualifier keyword
     (:data:`_CV_OR_SPACE_RE`), so ``"Handle *const"``/``"Handle const *"``
     (either cv-qualifier order or spacing) both still find the ``*`` -- or
-    wrapped in a declarator-grouping paren (:data:`_DECLARATOR_GROUP_RE`)
-    immediately following, so ``"Handle (*)[3]"``'s pointer-to-array
-    declarator is found too."""
+    wrapped in a declarator-grouping paren (:func:`_grouped_declarator_
+    follows`) immediately following, so ``"Handle (*)[3]"``'s
+    pointer-to-array declarator is found too -- or an unparenthesized
+    pointer-to-member declarator (:func:`_member_pointer_follows`), so
+    ``"Handle Owner::*member"`` (including a templated owner, either
+    shape) is found as well."""
     m = _CV_OR_SPACE_RE.match(text, pos)
     pos = m.end() if m else pos
     if pos < len(text) and text[pos] in "*&":
         return True
-    return _DECLARATOR_GROUP_RE.match(text, pos) is not None
+    if _grouped_declarator_follows(text, pos):
+        return True
+    return _member_pointer_follows(text, pos)
 
 
 def _occurrence_is_indirect(text: str, end: int) -> bool:

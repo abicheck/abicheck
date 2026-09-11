@@ -21,6 +21,13 @@ from collections import deque
 
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.dedup_key import hashable_value
+from .compare.opaque_struct_downgrade import (
+    OPAQUE_DOWNGRADEABLE_KINDS,
+    downgrade_opaque_struct_changes,
+    resolve_struct_change_entity_id,
+    struct_change_record_name,
+)
+from .compare.opaque_struct_types import find_opaque_struct_types
 from .compare.opaque_types import (
     find_by_value_types,
     find_opaque_types,
@@ -30,7 +37,6 @@ from .diff_helpers import (
     canonicalize_record_symbol,
     cross_tier_transition,
     depth_aware_bare_name,
-    make_change,
     record_canonical_names,
 )
 from .diff_symbols import _PUBLIC_VIS, _public_functions
@@ -38,15 +44,23 @@ from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
 
-# Back-compat aliases: the ADR-063 Phase 2 migration moved the opaque-type
-# index and its construction into their `compare/` owner, but
-# `tests/test_cov95_diff_filtering.py` imports all three from here by their
-# private names. Module-level bindings rather than `as`-aliased imports,
-# since ruff only recognizes the identical-name form as an intentional
-# re-export.
+# Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
+# opaque-type indices, their construction, and the struct-downgrade
+# machinery that consumes them into their `compare/` owner (round 10:
+# `opaque_struct_downgrade.py`, split out of this file once its own
+# no-growth debt baseline was exceeded -- see that module's docstring),
+# but `tests/test_cov95_diff_filtering.py`/`tests/test_opaque_identity_
+# tiers.py` import several of them from here by their private names.
+# Module-level bindings rather than `as`-aliased imports, since ruff only
+# recognizes the identical-name form as an intentional re-export.
 _find_opaque_types = find_opaque_types
 _find_by_value_types = find_by_value_types
+_find_opaque_struct_types = find_opaque_struct_types
 _is_impl_source = is_impl_source
+_OPAQUE_DOWNGRADEABLE = OPAQUE_DOWNGRADEABLE_KINDS
+_struct_change_record_name = struct_change_record_name
+_resolve_struct_change_entity_id = resolve_struct_change_entity_id
+_downgrade_opaque_struct_changes = downgrade_opaque_struct_changes
 
 
 # ── Post-processing: enrich and deduplicate ────────────────────────────────
@@ -346,8 +360,12 @@ def _enrich_source_locations(
     """Fill in source_location and qualified_name on Changes from the model data."""
     type_loc, func_loc, var_loc = _build_location_index(old, new)
 
-    old_qualified = _qualified_functions_by_mangled(old) | _qualified_variables_by_mangled(old)
-    new_qualified = _qualified_functions_by_mangled(new) | _qualified_variables_by_mangled(new)
+    old_qualified = _qualified_functions_by_mangled(
+        old
+    ) | _qualified_variables_by_mangled(old)
+    new_qualified = _qualified_functions_by_mangled(
+        new
+    ) | _qualified_variables_by_mangled(new)
     old_enum_names = _enum_canonical_names(old)
     new_enum_names = _enum_canonical_names(new)
 
@@ -584,7 +602,9 @@ def _enrich_affected_symbols(
     matcher = _SubstringMatcher(affected_types)
 
     # Build type→functions mapping from old snapshot, storing both demangled (display) and mangled (appcompat matching) names (FIX-A Part 3).
-    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub, matcher)
+    type_to_funcs, type_to_mangled = _build_type_to_funcs(
+        affected_types, old_pub, matcher
+    )
 
     # Also check if types are embedded in struct fields used by functions (Container has a Leaf field → functions taking Container* are affected).
     type_embeds = _build_type_embed_index(affected_types, old, matcher)
@@ -1531,7 +1551,9 @@ def _dedup_cross_kind(
 
 
 def _deduplicate_ast_dwarf(
-    changes: list[Change], old: AbiSnapshot | None = None, new: AbiSnapshot | None = None
+    changes: list[Change],
+    old: AbiSnapshot | None = None,
+    new: AbiSnapshot | None = None,
 ) -> list[Change]:
     """Remove DWARF findings that duplicate an AST finding for the same symbol.
 
@@ -1730,89 +1752,4 @@ def _downgrade_opaque_type_changes(
                 # so layout changes are invisible to consumers.
                 continue
         result.append(c)
-    return result
-
-
-# ChangeKinds that should be downgraded when the type is opaque in both snapshots.
-_OPAQUE_DOWNGRADEABLE: frozenset[ChangeKind] = frozenset(
-    {
-        ChangeKind.TYPE_SIZE_CHANGED,
-        ChangeKind.TYPE_FIELD_ADDED,
-        ChangeKind.TYPE_FIELD_REMOVED,
-        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-        ChangeKind.TYPE_ALIGNMENT_CHANGED,
-        ChangeKind.STRUCT_SIZE_CHANGED,
-        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-        ChangeKind.STRUCT_FIELD_REMOVED,
-        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-    }
-)
-
-
-def _downgrade_opaque_struct_changes(
-    changes: list[Change],
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> list[Change]:
-    """Downgrade BREAKING changes for types that are opaque in both snapshots.
-
-    If a type is forward-declared only (is_opaque=True) in both old and new
-    snapshots, consumers cannot allocate, embed, or sizeof the type — they
-    only hold pointers. Layout changes detected via DWARF are invisible to
-    consumers and should be classified as compatible field additions.
-    """
-    # Build set of types that are opaque in both snapshots.
-    old_opaque = {t.name for t in old.types if t.is_opaque}
-    new_opaque = {t.name for t in new.types if t.is_opaque}
-    # Also check: type exists in one but not the other (forward-decl only in header,
-    # full definition only in DWARF) — treat as opaque if the header-level type
-    # doesn't exist OR is opaque.
-    old_type_names = {t.name for t in old.types}
-    new_type_names = {t.name for t in new.types}
-
-    # A type is "opaque to consumers" if:
-    # - It's opaque in both old and new, OR
-    # - It doesn't appear in the header-level type list at all (DWARF-only)
-    #   AND it's not embedded by-value in any non-opaque exported struct
-    opaque_types = (old_opaque & new_opaque) | (
-        (old_opaque - new_type_names) | (new_opaque - old_type_names)
-    )
-
-    if not opaque_types:
-        return changes
-
-    # Check that opaque types are not embedded by-value in non-opaque structs
-    non_opaque_old = {t.name: t for t in old.types if not t.is_opaque}
-    non_opaque_new = {t.name: t for t in new.types if not t.is_opaque}
-    embedded_types: set[str] = set()
-    for type_map in (non_opaque_old, non_opaque_new):
-        for t in type_map.values():
-            for f in t.fields:
-                # If a field type matches an opaque type name (not as pointer), the type is embedded by-value and layout changes matter
-                ftype = f.type.rstrip(" *&")
-                if ftype in opaque_types and "*" not in f.type:
-                    embedded_types.add(ftype)
-
-    truly_opaque = opaque_types - embedded_types
-    if not truly_opaque:
-        return changes
-
-    result: list[Change] = []
-    for c in changes:
-        if c.kind in _OPAQUE_DOWNGRADEABLE and c.symbol in truly_opaque:
-            # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
-            result.append(
-                make_change(
-                    ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-                    symbol=c.symbol,
-                    description=f"(opaque struct) {c.description}",
-                    old_value=c.old_value,
-                    new_value=c.new_value,
-                    source_location=c.source_location,
-                )
-            )
-        else:
-            result.append(c)
     return result
