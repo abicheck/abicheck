@@ -393,22 +393,29 @@ class TestDeadlineBoundaryCheck:
 
 
 class TestEnvMatrixPathValidatedBeforeExtraction:
-    """Codex review, P2, fresh evidence on PR #1221's own ``__post_init__``
-    deferral fix: ``effective_env_matrix()`` used to run only inside
-    ``classify_compare_pair``, which is called *after*
-    ``resolve_compare_request`` has already completed its live extraction
-    (and potentially authorized build-query) work. So a legacy typed
-    ``CompareRequest`` with a missing/malformed ``env_matrix_path`` let that
-    work run before failing, whereas the previous, now-removed eager
-    ``validation_errors()`` check used to reject a bad path before any
-    extraction started. ``run_compare_request`` now resolves
-    ``env_matrix_path`` once, itself, before calling
-    ``resolve_compare_request`` at all -- proven here by asserting
-    resolution is never reached.
+    """Codex review, P2, third round on this exact issue.
+
+    Round 1 deferred ``env_matrix_path``'s file I/O out of
+    ``CompareRequest.__post_init__``. Round 2 ("the wrapper-only fix") made
+    ``run_compare_request`` resolve ``effective_env_matrix()`` once, early,
+    and thread the answer into ``classify_compare_pair`` -- but that fix
+    lived only in the wrapper, so a documented two-phase caller invoking
+    ``resolve_compare_request()`` directly (per ``workflows/AGENTS.md``'s
+    own two-phase split -- e.g. the native ``compare`` CLI's ADR-049
+    ``resolve_and_apply`` flow) still ran full side acquisition before any
+    matrix was ever read, and a matrix edited between resolution and
+    classification could change an already-resolved pair's outcome.
+
+    Round 3 (this class) moves the resolution into
+    ``resolve_compare_request`` itself, right after its own deadline check
+    and before any side acquisition, and stores the answer on
+    ``ResolvedComparePair.resolved_env_matrix`` -- so every caller of
+    ``resolve_compare_request``, not just ``run_compare_request``, gets the
+    same early failure and the same frozen, un-re-readable value.
 
     The complementary half of this contract -- that ``CompareRequest``
-    construction alone still performs zero file I/O (the very fix this
-    round must not regress) -- is covered by
+    construction alone still performs zero file I/O (the very fix round 1
+    made) -- is covered by
     ``tests/test_api_types.py::TestCompareRequestEnvMatrixPathCompat::
     test_env_matrix_path_load_is_deferred_past_construction``.
     """
@@ -432,61 +439,100 @@ class TestEnvMatrixPathValidatedBeforeExtraction:
             env_matrix_path=env_matrix_path,
         )
 
-    def test_missing_env_matrix_path_fails_before_resolve_compare_request(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        from abicheck.errors import ValidationError
-        from abicheck.service import run_compare_request
+    def _fail_if_planner_reached(self, monkeypatch) -> list[bool]:
+        """Fail if side-acquisition planning is reached.
 
-        reached_resolution = False
+        ``AnalysisPlanner.resolve`` is the first thing
+        ``resolve_compare_request`` calls *after* its env-matrix resolution
+        (see the function's own body) -- monkeypatching it, rather than
+        ``resolve_compare_request`` itself, lets this prove the ordering
+        *inside* that function directly, which is the whole point of this
+        round's fix.
+        """
+        reached: list[bool] = []
 
-        def _fail_if_called(*args, **kwargs):
-            nonlocal reached_resolution
-            reached_resolution = True
+        def _fail_if_called(request):
+            reached.append(True)
             raise AssertionError(
-                "resolve_compare_request must not be reached when "
-                "env_matrix_path is malformed/missing"
+                "AnalysisPlanner.resolve (and everything after it) must not "
+                "be reached when env_matrix_path is malformed/missing"
             )
 
         monkeypatch.setattr(
-            "abicheck.service_compare_pipeline.resolve_compare_request",
-            _fail_if_called,
+            "abicheck.workflows.plan.AnalysisPlanner.resolve",
+            staticmethod(_fail_if_called),
         )
+        return reached
+
+    def test_missing_env_matrix_path_fails_before_side_resolution_via_resolve_compare_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Direct ``resolve_compare_request()`` caller -- this round's own
+        regression target -- gets the same early rejection as
+        ``run_compare_request``."""
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        reached = self._fail_if_planner_reached(monkeypatch)
+
+        request = self._request(
+            tmp_path, env_matrix_path=tmp_path / "does-not-exist.yaml"
+        )
+        with pytest.raises(ValidationError, match="Cannot read environment matrix"):
+            resolve_compare_request(request)
+        assert reached == []
+
+    def test_malformed_env_matrix_path_fails_before_side_resolution_via_resolve_compare_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        reached = self._fail_if_planner_reached(monkeypatch)
+
+        bad = tmp_path / "env.yaml"
+        bad.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+        request = self._request(tmp_path, env_matrix_path=bad)
+        with pytest.raises(ValidationError, match="Invalid environment matrix"):
+            resolve_compare_request(request)
+        assert reached == []
+
+    def test_missing_env_matrix_path_fails_via_run_compare_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """``run_compare_request`` composes the two phases unchanged: since
+        the fix now lives inside ``resolve_compare_request`` itself (not a
+        separate check ``run_compare_request`` performs before calling it),
+        the ordering proof lives in the ``..._via_resolve_compare_request``
+        tests above -- this asserts the composed entry point still surfaces
+        the same ``ValidationError`` end to end, and that side acquisition
+        (``AnalysisPlanner.resolve``) is still never reached."""
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        reached = self._fail_if_planner_reached(monkeypatch)
 
         request = self._request(
             tmp_path, env_matrix_path=tmp_path / "does-not-exist.yaml"
         )
         with pytest.raises(ValidationError, match="Cannot read environment matrix"):
             run_compare_request(request)
-        assert reached_resolution is False
+        assert reached == []
 
-    def test_malformed_env_matrix_path_fails_before_resolve_compare_request(
+    def test_malformed_env_matrix_path_fails_via_run_compare_request(
         self, tmp_path, monkeypatch
     ) -> None:
         from abicheck.errors import ValidationError
         from abicheck.service import run_compare_request
 
-        reached_resolution = False
-
-        def _fail_if_called(*args, **kwargs):
-            nonlocal reached_resolution
-            reached_resolution = True
-            raise AssertionError(
-                "resolve_compare_request must not be reached when "
-                "env_matrix_path is malformed/missing"
-            )
-
-        monkeypatch.setattr(
-            "abicheck.service_compare_pipeline.resolve_compare_request",
-            _fail_if_called,
-        )
+        reached = self._fail_if_planner_reached(monkeypatch)
 
         bad = tmp_path / "env.yaml"
         bad.write_text("runtime_floors: [unclosed\n  GLIBC: {")
         request = self._request(tmp_path, env_matrix_path=bad)
         with pytest.raises(ValidationError, match="Invalid environment matrix"):
             run_compare_request(request)
-        assert reached_resolution is False
+        assert reached == []
 
     def test_construction_alone_still_performs_no_file_io(self, tmp_path) -> None:
         """The original P1 bug this round must not regress: building a
@@ -523,20 +569,77 @@ class TestEnvMatrixPathValidatedBeforeExtraction:
         result = run_compare_request(request)
         assert result.diff is not None
 
+    def test_resolved_comparepair_carries_env_matrix_as_a_real_field(
+        self, tmp_path
+    ) -> None:
+        """``resolve_compare_request()``'s return value genuinely carries the
+        resolved matrix as a field on ``ResolvedComparePair`` -- not merely
+        validated and discarded, and not only reachable through a separate
+        out-of-band parameter."""
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        good = tmp_path / "env.yaml"
+        good.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        request = self._request(tmp_path, env_matrix_path=good)
+        pair = resolve_compare_request(request)
+        assert isinstance(pair.resolved_env_matrix, EnvironmentMatrix)
+        assert pair.resolved_env_matrix.runtime_floors == {"GLIBC": "2.28"}
+
+    def test_resolved_comparepair_env_matrix_is_none_when_unset(self, tmp_path) -> None:
+        from abicheck.service_compare_pipeline import resolve_compare_request
+
+        request = self._request(tmp_path, env_matrix_path=None)
+        pair = resolve_compare_request(request)
+        assert pair.resolved_env_matrix is None
+
+    def test_editing_matrix_after_resolution_does_not_change_classification(
+        self, tmp_path
+    ) -> None:
+        """The second half of this finding's own stated concern: "a matrix
+        edited between resolution and classification changes the result of
+        an already-resolved pair." Mutating the on-disk file *after*
+        ``resolve_compare_request()`` returns must not change what
+        ``classify_compare_pair()`` subsequently reads -- the resolved value
+        travels with the pair, immune to the request's own
+        ``env_matrix_path`` being edited later.
+        """
+        from abicheck.service_compare_pipeline import (
+            classify_compare_pair,
+            resolve_compare_request,
+        )
+
+        good = tmp_path / "env.yaml"
+        good.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        request = self._request(tmp_path, env_matrix_path=good)
+        pair = resolve_compare_request(request)
+        assert pair.resolved_env_matrix is not None
+        assert pair.resolved_env_matrix.runtime_floors == {"GLIBC": "2.28"}
+
+        # Mutate the file on disk after resolution -- a re-read here would
+        # pick this up; the pair's own frozen value must not.
+        good.write_text('runtime_floors:\n  GLIBC: "9.99"\n')
+
+        result = classify_compare_pair(request, pair)
+        assert result.diff is not None
+        assert pair.resolved_env_matrix.runtime_floors == {"GLIBC": "2.28"}
+
     def test_expired_deadline_fails_before_env_matrix_is_loaded(
         self, tmp_path, monkeypatch
     ) -> None:
-        """Codex review, fresh P2 finding on this round's own fix: moving
-        ``effective_env_matrix()`` ahead of ``resolve_compare_request`` (the
-        sibling test class above) must not itself run ahead of the deadline
+        """Codex review, fresh P2 finding on the previous round's own fix:
+        moving ``effective_env_matrix()`` ahead of side resolution (the
+        sibling tests above) must not itself run ahead of the deadline
         check. ``deadline.deadline_scope`` only records the deadline in a
         contextvar -- it never raises on entry, only ``deadline.check()``
         does -- so a ``budget_s=0`` request must raise ``DeadlineExceeded``
-        from ``run_compare_request`` itself, before ``load_env_matrix`` ever
-        reads the (here, deliberately large) YAML file from disk.
+        from ``resolve_compare_request`` itself, before ``load_env_matrix``
+        ever reads the (here, deliberately large) YAML file from disk. Tested
+        directly against ``resolve_compare_request`` (this round's own
+        regression target), not only through ``run_compare_request``.
         """
         from abicheck.deadline import DeadlineExceeded
-        from abicheck.service import run_compare_request
+        from abicheck.service_compare_pipeline import resolve_compare_request
         from abicheck.workflows.input_resolution import (
             load_env_matrix as real_load_env_matrix,
         )
@@ -555,6 +658,46 @@ class TestEnvMatrixPathValidatedBeforeExtraction:
         # Large enough that reading and parsing it would be real, measurable
         # I/O if the deadline check didn't preempt it -- not just a toy
         # one-line fixture that would pass even with the buggy ordering.
+        big = tmp_path / "env.yaml"
+        big.write_text(
+            "runtime_floors:\n"
+            + "".join(f'  GLIBC_{i}: "2.{i}"\n' for i in range(20000)),
+            encoding="utf-8",
+        )
+        import dataclasses
+
+        request = dataclasses.replace(
+            self._request(tmp_path, env_matrix_path=big), budget_s=0
+        )
+        from abicheck import deadline as deadline_mod
+
+        with deadline_mod.deadline_scope(request.budget_s):
+            with pytest.raises(DeadlineExceeded):
+                resolve_compare_request(request)
+        assert load_calls == []
+
+    def test_expired_deadline_fails_before_env_matrix_is_loaded_via_run_compare_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The composed ``run_compare_request`` entry point keeps the same
+        guarantee end to end."""
+        from abicheck.deadline import DeadlineExceeded
+        from abicheck.service import run_compare_request
+        from abicheck.workflows.input_resolution import (
+            load_env_matrix as real_load_env_matrix,
+        )
+
+        load_calls: list[Path] = []
+
+        def _tracking_load_env_matrix(path):
+            load_calls.append(path)
+            return real_load_env_matrix(path)
+
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_env_matrix",
+            _tracking_load_env_matrix,
+        )
+
         big = tmp_path / "env.yaml"
         big.write_text(
             "runtime_floors:\n"

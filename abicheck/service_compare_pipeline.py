@@ -81,10 +81,6 @@ if TYPE_CHECKING:
     from .workflows.artifact.execute import SideResolution
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
-#: "Not passed" marker for `classify_compare_pair`'s `resolved_env_matrix` --
-#: `None` is itself a legitimate resolved value, so it can't double as unset.
-_ENV_MATRIX_UNRESOLVED = object()
-
 __all__ = [
     "ResolvedComparePair",
     "classify_compare_pair",
@@ -111,6 +107,14 @@ class ResolvedComparePair:
     ResolvedExecutionContext` built from this request's own AnalysisPlan,
     plus each side's resolved ``CompileContext`` when ``compile_context_gate``
     judges it safe — still no ``evaluation_config`` (resolves one layer up).
+
+    ``resolved_env_matrix`` (Codex review, PR #1221 third round) is
+    ``request.effective_env_matrix()``'s answer, resolved by
+    :func:`resolve_compare_request` itself before side acquisition -- not
+    threaded in separately by ``run_compare_request`` -- so every caller of
+    :func:`resolve_compare_request` rejects a bad ``env_matrix_path`` before
+    extraction, and :func:`classify_compare_pair` reads an immutable value
+    that travels with this frozen pair.
     """
 
     old: AbiSnapshot
@@ -119,6 +123,7 @@ class ResolvedComparePair:
     new_fmt: str | None
     old_evidence: SideEvidence
     new_evidence: SideEvidence
+    resolved_env_matrix: EnvironmentMatrix | None = None
     resolved_execution_context: ResolvedExecutionContext | None = None
 
 
@@ -328,6 +333,11 @@ def resolve_compare_request(
     # silently resolve instead of raising here. `run_compare_request`'s
     # `deadline_scope` is already active by the time this runs.
     deadline.check()
+    # ADR-020b / ADR-068 D5 / Codex review (PR #1221, third round): resolve
+    # `env_matrix_path` here, before side acquisition, so *every* caller
+    # (not only `run_compare_request`) rejects a bad matrix before
+    # extraction, and the value travels on `ResolvedComparePair` below.
+    env_matrix = request.effective_env_matrix()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
     # combination can satisfy before any extraction runs (PlanningError),
     # rather than discovering the gap mid-run or not at all. See
@@ -470,6 +480,7 @@ def resolve_compare_request(
         new_fmt=new_fmt,
         old_evidence=old_evidence,
         new_evidence=new_evidence,
+        resolved_env_matrix=env_matrix,
         resolved_execution_context=ResolvedExecutionContext.from_plan(
             plan, compile_contexts=compile_contexts
         ),
@@ -479,8 +490,6 @@ def resolve_compare_request(
 def classify_compare_pair(
     request: CompareRequest,
     pair: ResolvedComparePair,
-    *,
-    resolved_env_matrix: EnvironmentMatrix | None | object = _ENV_MATRIX_UNRESOLVED,
 ) -> CompareResult:
     """Classify an already-resolved pair — the second half of ``run_compare_request``.
 
@@ -497,11 +506,11 @@ def classify_compare_pair(
     instead of calling this; everything else composes the two through
     :func:`abicheck.service.run_compare_request`.
 
-    *resolved_env_matrix* lets :func:`run_compare_request` thread through a
-    matrix it already resolved early, before :func:`resolve_compare_request`'s
-    extraction work, so a bad ``env_matrix_path`` fails fast without a second
-    file read here. Left unset, this resolves it itself (unchanged behaviour
-    for a caller classifying directly, without ``run_compare_request``).
+    The environment matrix is read from ``pair.resolved_env_matrix`` --
+    :func:`resolve_compare_request` already resolved ``env_matrix_path``,
+    before side acquisition, so this reads that immutable value instead of
+    re-reading a possibly-since-edited file (Codex review, PR #1221 third
+    round).
     """
     from . import deadline
     from .buildsource.evidence_report import (
@@ -519,17 +528,10 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # ADR-020b / ADR-068 D5: `effective_env_matrix()` resolves a lazy
-    # `env_matrix_path`, here unless `run_compare_request` already resolved
-    # it earlier and threaded the answer through (see docstring above).
-    env_matrix: EnvironmentMatrix | None
-    if resolved_env_matrix is _ENV_MATRIX_UNRESOLVED:
-        env_matrix = request.effective_env_matrix()
-    else:
-        assert resolved_env_matrix is None or isinstance(
-            resolved_env_matrix, EnvironmentMatrix
-        )
-        env_matrix = resolved_env_matrix
+    # ADR-020b / ADR-068 D5: the environment matrix was already resolved by
+    # `resolve_compare_request` (see its own and `ResolvedComparePair`'s
+    # docstrings) -- read it from the pair rather than re-resolving here.
+    env_matrix: EnvironmentMatrix | None = pair.resolved_env_matrix
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
     # narrowing what this classification may see to the requested rung. The
@@ -769,10 +771,11 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`,
             or if ``env_matrix_path`` names a missing/malformed environment
-            matrix -- resolved here, before :func:`resolve_compare_request`'s
-            extraction work starts (Codex review, PR #1221 follow-up:
-            previously resolved only inside :func:`classify_compare_pair`,
-            after resolution had already run).
+            matrix -- resolved by :func:`resolve_compare_request` itself,
+            before its own extraction work starts (Codex review, PR #1221
+            third round: previously resolved eagerly only by this function,
+            which left every *other* caller of ``resolve_compare_request``
+            unprotected; now every caller gets the same early failure).
         PlanningError: See :func:`resolve_compare_request` — raised from
             inside its own call here.
         SnapshotError: If either input cannot be loaded.
@@ -792,16 +795,12 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     from . import deadline
 
     with deadline.deadline_scope(request.budget_s):
-        # deadline_scope never raises on entry -- check() before the file I/O below.
+        # deadline_scope never raises on entry -- check() before the file I/O
+        # `resolve_compare_request` now performs at its own top (env_matrix
+        # resolution included).
         deadline.check()
-        # Resolve env_matrix_path before resolve_compare_request's own
-        # extraction work starts, so a bad path fails fast; threaded into
-        # classify_compare_pair so the file isn't read a second time.
-        resolved_env_matrix = request.effective_env_matrix()
         pair = resolve_compare_request(request)
-        return classify_compare_pair(
-            request, pair, resolved_env_matrix=resolved_env_matrix
-        )
+        return classify_compare_pair(request, pair)
 
 
 def run_compare(
