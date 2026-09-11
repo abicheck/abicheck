@@ -382,6 +382,74 @@ class TestDuplicateDisagreesFlagsPartial:
         assert rec.vtable_fact is not None
         assert rec.vtable_fact.status is FactStatus.PRESENT
 
+    def test_duplicate_base_bare_name_multiplicity_mismatch_flags_bases(
+        self,
+    ) -> None:
+        """Codex review finding on this PR: ``resolve_base_name_and_key``
+        deliberately returns only the bare base name (its own docstring),
+        so a legal class deriving from two distinct, differently-
+        namespaced bases sharing one bare spelling (``D : one::A,
+        two::A``) resolves both edges to the identical name ``"A"``. A
+        plain-set comparison would collapse that multiplicity: a
+        duplicate DIE genuinely missing one of the two occurrences would
+        still read as an identical ``{"A"}`` against the retained side's
+        own ``{"A"}``, silently swallowing a real completeness gap. The
+        fix compares multisets (``collections.Counter``), so a count
+        mismatch on an otherwise-identical name set is caught.
+        """
+        base_die = SimpleNamespace(
+            tag="DW_TAG_inheritance",
+            offset=99,
+            attributes={},
+            iter_children=lambda: iter(()),
+        )
+        builder = _builder()
+        builder._resolve_base_name_and_key = lambda child, CU: ("A", None)  # type: ignore[method-assign]
+        # Retained: two distinct DW_TAG_inheritance children, both
+        # resolving (by bare name) to "A" -- e.g. `D : one::A, two::A`.
+        first = _record_die(offset=1, children=[base_die, base_die])
+        builder._process_record_type_named(first, _cu(0), "A")
+
+        # Duplicate CU's own definition only captured one of the two --
+        # a genuine completeness gap this set-based comparison used to
+        # miss entirely (both sides' own *set* of names is identical:
+        # {"A"}).
+        duplicate = _record_die(offset=20, children=[base_die])
+        builder._process_record_type_named(duplicate, _cu(1), "A")
+
+        assert builder._vtable_evidence_conflicts == {"A": {"bases"}}
+        finalize_vtable_evidence_completeness(builder)
+        rec = builder._record_by_qualified_name["A"]
+        assert rec.bases_fact is not None
+        assert rec.bases_fact.status is FactStatus.PARTIAL
+        # The VALUE itself is untouched -- both entries survive, only the
+        # confidence changes.
+        assert rec.bases == ["A", "A"]
+
+    def test_duplicate_base_bare_name_multiplicity_match_stays_present(
+        self,
+    ) -> None:
+        """Negative control for the multiplicity fix above: when the
+        duplicate DIE genuinely carries the SAME count of the
+        identically-named base as the retained definition, this must NOT
+        flag -- the multiset comparison must agree, not merely differ
+        from the old set-based one in every direction."""
+        base_die = SimpleNamespace(
+            tag="DW_TAG_inheritance",
+            offset=99,
+            attributes={},
+            iter_children=lambda: iter(()),
+        )
+        builder = _builder()
+        builder._resolve_base_name_and_key = lambda child, CU: ("A", None)  # type: ignore[method-assign]
+        first = _record_die(offset=1, children=[base_die, base_die])
+        builder._process_record_type_named(first, _cu(0), "A")
+
+        duplicate = _record_die(offset=20, children=[base_die, base_die])
+        builder._process_record_type_named(duplicate, _cu(1), "A")
+
+        assert builder._vtable_evidence_conflicts == {}
+
     def test_two_unrelated_types_are_tracked_independently(self) -> None:
         """A conflict on one type must not spuriously flag an unrelated
         type that only ever agreed across its own CUs."""

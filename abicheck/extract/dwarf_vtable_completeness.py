@@ -112,6 +112,7 @@ completeness.py`` for the producer-side bug-class test suite.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
@@ -143,10 +144,25 @@ def duplicate_record_evidence_signature(
     children: list[Any] | None,
     *,
     resolve_base_name_and_key: BaseNameResolver,
-) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
-    """``(bases, virtual_bases, vtable)`` name sets read directly off a
+) -> tuple[Counter[str], Counter[str], frozenset[str]]:
+    """``(bases, virtual_bases, vtable)`` evidence read directly off a
     *non-retained* record DIE, for comparison-only use by
     :func:`note_duplicate_record_evidence`.
+
+    ``bases``/``virtual_bases`` are returned as ``Counter`` (a *multiset*),
+    not a plain set: a legal class can derive from two distinct,
+    differently-namespaced bases sharing one bare name (``resolve_base_
+    name_and_key`` intentionally returns only the bare name -- see its own
+    docstring -- so ``D : one::A, two::A`` resolves both edges to ``"A"``).
+    A plain-set comparison collapses that multiplicity, so a duplicate DIE
+    genuinely missing one of the two would still read as an identical
+    ``{"A"}`` against the retained side's own ``{"A"}`` -- silently
+    swallowing exactly the completeness gap this module exists to catch
+    (Codex review finding on this PR). ``Counter`` equality is still
+    order-independent (unaffected DWARF child-emission-order differences
+    stay unflagged, same as before), but now sensitive to count. ``vtable``
+    stays a plain set: a mangled linkage name is a unique identifier by
+    construction, so no class can legally emit two identical entries.
 
     Deliberately NOT ``_DwarfSnapshotBuilder._collect_record_type_children``:
     that method also extracts fields (irrelevant here) and registers
@@ -156,12 +172,12 @@ def duplicate_record_evidence_signature(
     that doesn't exist. This is a read-only subset: only the two child tags
     that feed the comparison (``DW_TAG_inheritance``, ``DW_TAG_subprogram``),
     same field-level logic as ``_process_inheritance_child``/
-    ``_process_virtual_method_child`` but collecting into sets (membership,
-    not order) rather than the ordered lists the retained definition's own
+    ``_process_virtual_method_child`` but collecting into a multiset/set
+    rather than the ordered lists the retained definition's own
     ``RecordType`` carries.
     """
-    bases: set[str] = set()
-    virtual_bases: set[str] = set()
+    bases: Counter[str] = Counter()
+    virtual_bases: Counter[str] = Counter()
     vtable: set[str] = set()
     kids = children if children is not None else die.iter_children()
     for child in kids:
@@ -170,9 +186,9 @@ def duplicate_record_evidence_signature(
             if not base_name:
                 continue
             if _attr_int(child, "DW_AT_virtuality") > 0:
-                virtual_bases.add(base_name)
+                virtual_bases[base_name] += 1
             else:
-                bases.add(base_name)
+                bases[base_name] += 1
         elif child.tag == "DW_TAG_subprogram":
             if _attr_int(child, "DW_AT_virtuality") > 0:
                 mangled = (
@@ -182,7 +198,7 @@ def duplicate_record_evidence_signature(
                 )
                 if mangled:
                     vtable.add(mangled)
-    return frozenset(bases), frozenset(virtual_bases), frozenset(vtable)
+    return bases, virtual_bases, frozenset(vtable)
 
 
 def note_duplicate_record_evidence(
@@ -232,10 +248,17 @@ def note_duplicate_record_evidence(
     # legacy field and `resolved_fact_value(rec.bases_fact, [])` are a
     # provable invariant per `bridge_legacy_and_fact`), so this is
     # representation-only, not a behavior change.
+    #
+    # `Counter(...)` here, not `frozenset(...)`, for bases/virtual_bases --
+    # see `duplicate_record_evidence_signature`'s own docstring: two
+    # distinct, differently-namespaced bases can share one bare spelling,
+    # and a plain-set comparison would collapse that multiplicity and miss
+    # a duplicate DIE genuinely short one occurrence (Codex review finding
+    # on this PR).
     disagreeing: set[str] = set()
-    if dup_bases != frozenset(retained.resolved_bases()):
+    if dup_bases != Counter(retained.resolved_bases()):
         disagreeing.add("bases")
-    if dup_virtual_bases != frozenset(retained.resolved_virtual_bases()):
+    if dup_virtual_bases != Counter(retained.resolved_virtual_bases()):
         disagreeing.add("virtual_bases")
     if dup_vtable != frozenset(_resolved_fact_value(retained.vtable_fact, [])):
         disagreeing.add("vtable")
