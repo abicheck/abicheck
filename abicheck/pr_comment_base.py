@@ -220,20 +220,31 @@ class CommentModel:
     # wording for a run that never compared two versions falsely implies a
     # before/after result. `_header` checks this flag first and renders a
     # dedicated audit headline instead, for every finding count including
-    # zero, driven by `no_baseline_audit_gate_blocking` below rather than
-    # bucket membership.
+    # zero, driven by `no_baseline_audit_blocking` below rather than bucket
+    # membership.
     no_baseline_audit: bool = False
-    # Whether `policy/audit_gate_exit.py`'s own orthogonal axis actually
-    # gated this run (read directly from the report's own
-    # `exit_axes.audit_gate`, never re-derived from severity-preset/bucket
-    # membership here -- "read, don't re-derive" per this repository's own
-    # known-gaps convention). A finding can land in the Review bucket
-    # (an api_break-severity finding, `_SEVERITY_BUCKET`) without this axis
-    # ever firing (no severity-preset given at all, or an explicit
-    # `info-only`) -- the PR comment must not imply the step failed when it
-    # didn't, and must not imply it merely reviewed a case when a real
-    # `AUDIT_GATE` exit actually failed the step.
-    no_baseline_audit_gate_blocking: bool = False
+    # Whether THIS run's overall CLI exit code was nonzero -- read directly
+    # from the report's own top-level `exit_code` (the already-max-folded
+    # result across every orthogonal axis: audit_gate, contract_coverage,
+    # analysis_assurance, evidence_contract, ...), never re-derived from one
+    # axis or from bucket/severity membership here (Codex review, PR #1210,
+    # round 4: an earlier revision checked only `exit_axes.audit_gate`,
+    # which missed a run blocked by, e.g., `contract_coverage` alone --
+    # "read, don't re-derive" per this repository's own known-gaps
+    # convention). A finding can land in the Review bucket (an
+    # api_break-severity finding, `_SEVERITY_BUCKET`) without this being
+    # `True` at all (no severity-preset given, or an explicit `info-only`)
+    # -- the PR comment must not imply the step failed when it didn't, and
+    # must not imply it merely reviewed a case when the run actually failed.
+    no_baseline_audit_blocking: bool = False
+    # Whether `policy/audit_gate_exit.py`'s own axis specifically is what
+    # fired (read from `exit_axes.audit_gate`) -- distinct from the general
+    # `no_baseline_audit_blocking` above, which can be `True` for a
+    # different reason (e.g. `--contract`'s coverage axis). Used only to
+    # pick the more specific "Audit gate: ..." wording when it applies;
+    # `no_baseline_audit_blocking` alone still governs whether the headline
+    # is blocking at all.
+    no_baseline_audit_gate_fired: bool = False
     # scan mode only: the exact (breaking, needs-review) totals from
     # `diff`'s own scalar `breaking`/`api_break`/`risk` counts (already
     # gate/severity-promotion-adjusted -- see `pr_comment_scan._scan_true_

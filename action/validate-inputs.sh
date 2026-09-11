@@ -148,6 +148,27 @@ case "$MODE" in
     if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
       _fail "mode: scan no longer supports crosscheck (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity; only the KEY=LEVEL syntax itself doesn't survive."
     fi
+    # No-baseline capability gap (Codex review, PR #1210, round 4): audit-
+    # only mode: scan (no against, or audit: true forcing it regardless of
+    # against) now routes to `compare --no-baseline`, which doesn't
+    # implement revision-range evidence scoping or the wall-clock guard
+    # (ADR-068 D2) -- rejected here, before Python setup and the toolchain
+    # install, the same fail-fast treatment as the four retired inputs
+    # above. A baseline scan (against set, audit not forced) still supports
+    # all three -- see action.yml's own since/changed-path/budget
+    # descriptions for the full account. run.sh keeps its own copy of this
+    # exact check for anyone invoking it directly (e.g. tests).
+    if [[ -z "${INPUT_AGAINST:-}" || "${INPUT_AUDIT:-false}" == "true" ]]; then
+      if [[ -n "${INPUT_SINCE:-}" ]]; then
+        _fail "mode: scan without a baseline (against) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports since identically to legacy scan --against, or drop since for this audit-only run."
+      fi
+      if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
+        _fail "mode: scan without a baseline (against) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports changed-path identically to legacy scan --against, or drop changed-path for this audit-only run."
+      fi
+      if [[ -n "${INPUT_BUDGET:-}" ]]; then
+        _fail "mode: scan without a baseline (against) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports budget identically to legacy scan --against, or drop budget for this audit-only run."
+      fi
+    fi
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, or use mode: compare against a directory/package for a multi-library binary comparison."
     fi

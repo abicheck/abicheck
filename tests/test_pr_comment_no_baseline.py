@@ -142,11 +142,11 @@ class TestHeadlineNeverClaimsATwoSidedComparison:
     headline wording ("ABI BREAKING", "Source API changed; binary ABI
     unchanged") for a no-baseline audit falsely implies a before/after
     result this run never produced, and derives blocking-ness from bucket
-    membership rather than the actual `exit_axes.audit_gate` outcome --
+    membership rather than the actual overall exit-code outcome --
     misrepresenting a gating run as merely advisory, or vice versa."""
 
     def _report_with_finding(
-        self, verdict: str, category: str, audit_gate_exit: int = 0
+        self, verdict: str, category: str, audit_gate_exit: int = 0, exit_code: int = 0
     ):
         report = _audit_report(
             findings=[
@@ -163,20 +163,23 @@ class TestHeadlineNeverClaimsATwoSidedComparison:
             ],
         )
         report["exit_axes"]["audit_gate"] = audit_gate_exit
+        report["exit_code"] = exit_code
         return report
 
     def test_gating_api_break_finding_gets_a_blocking_audit_headline(self) -> None:
         # The default Action shape: --severity-preset default injected,
         # policy/audit_gate_exit.py's axis actually fired (exit_axes.
-        # audit_gate == 3) -- the comment must say so plainly, not the
-        # generic two-sided "Source API changed; binary ABI unchanged".
+        # audit_gate == 3, folded into the overall exit_code == 3) -- the
+        # comment must say so plainly, not the generic two-sided "Source
+        # API changed; binary ABI unchanged".
         report = self._report_with_finding(
-            "API_BREAK", "potential_breaking", audit_gate_exit=3
+            "API_BREAK", "potential_breaking", audit_gate_exit=3, exit_code=3
         )
         model = build_model(report)
-        assert model.no_baseline_audit_gate_blocking is True
+        assert model.no_baseline_audit_blocking is True
+        assert model.no_baseline_audit_gate_fired is True
         body = render_comment(model, sha="deadbeef")
-        assert "blocks this step" in body
+        assert "Audit gate: candidate-side finding blocks this step" in body
         assert "Source API changed; binary ABI unchanged" not in body
         assert "ABI BREAKING" not in body
 
@@ -185,13 +188,11 @@ class TestHeadlineNeverClaimsATwoSidedComparison:
     ) -> None:
         # No severity-preset (or an explicit info-only) -- the same
         # api_break-severity finding lands in the Review bucket exactly as
-        # above, but this run's own exit never gated on it
-        # (exit_axes.audit_gate == 0). The headline must not claim blocking.
-        report = self._report_with_finding(
-            "API_BREAK", "potential_breaking", audit_gate_exit=0
-        )
+        # above, but this run's own exit never gated on it at all
+        # (exit_code == 0). The headline must not claim blocking.
+        report = self._report_with_finding("API_BREAK", "potential_breaking")
         model = build_model(report)
-        assert model.no_baseline_audit_gate_blocking is False
+        assert model.no_baseline_audit_blocking is False
         body = render_comment(model, sha="deadbeef")
         assert "blocks this step" not in body
         assert "Source API changed; binary ABI unchanged" not in body
@@ -200,12 +201,58 @@ class TestHeadlineNeverClaimsATwoSidedComparison:
         self,
     ) -> None:
         report = self._report_with_finding(
-            "BREAKING", "abi_breaking", audit_gate_exit=3
+            "BREAKING", "abi_breaking", audit_gate_exit=3, exit_code=3
         )
         model = build_model(report)
         body = render_comment(model, sha="deadbeef")
         assert "ABI BREAKING" not in body
-        assert "blocks this step" in body
+        assert "Audit gate: candidate-side finding blocks this step" in body
+
+    def test_blocked_by_a_different_axis_still_gets_a_blocking_headline(
+        self,
+    ) -> None:
+        # Codex review, PR #1210, round 4: a report blocked by
+        # --contract's coverage ledger alone (exit_axes.audit_gate stays 0,
+        # but the overall exit_code is nonzero from a different axis) must
+        # still render a blocking headline -- not the audit-gate-specific
+        # wording (that axis never fired), but blocking nonetheless.
+        report = self._report_with_finding(
+            "API_BREAK", "potential_breaking", audit_gate_exit=0, exit_code=1
+        )
+        model = build_model(report)
+        assert model.no_baseline_audit_blocking is True
+        assert model.no_baseline_audit_gate_fired is False
+        body = render_comment(model, sha="deadbeef")
+        assert "🛑" in body
+        assert "Audit gate:" not in body
+        assert "not gated" not in body
+
+
+class TestContextLineNeverClaimsAComparison:
+    """Codex review, PR #1210, round 4: `_header_block`'s context line
+    unconditionally rendered "vs `baseline`" even for a no-baseline audit
+    (`old_acquisition_state: declared_absent` in the report) -- fixed to
+    skip the "vs X" phrasing entirely for this shape."""
+
+    def test_context_line_does_not_say_vs_baseline(self) -> None:
+        report = _audit_report(
+            findings=[
+                {
+                    "kind": "header_build_context_mismatch",
+                    "symbol": "",
+                    "description": "irrelevant",
+                    "verdict": "API_BREAK",
+                    "category": "potential_breaking",
+                    "evolution": "persistent",
+                    "candidate_side_enrichment": False,
+                    "observed_value": "x",
+                }
+            ]
+        )
+        model = build_model(report)
+        body = render_comment(model, sha="deadbeef")
+        assert "vs `baseline`" not in body
+        assert "audit, no baseline" in body
 
 
 class TestCleanAuditRendersNoBaselineHeadline:

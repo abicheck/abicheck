@@ -516,19 +516,25 @@ def _from_no_baseline(
 
     Modeled as ``mode="scan"`` (bucket-derived counts, no scan-specific
     verdict/risk note) with the dedicated ``no_baseline_audit``/
-    ``no_baseline_audit_gate_blocking`` flags below driving ``_header``'s
-    own headline -- NOT ``scan_audit_only`` (Codex review, PR #1210, round
-    3): that flag's own headline special-case only fires when every bucket
-    is empty, so a real candidate-side finding here would otherwise fall
-    through to the ordinary two-sided "ABI BREAKING"/"Source API changed;
-    binary ABI unchanged" wording, which falsely implies a before/after
-    comparison this run never performed. ``no_baseline_audit_gate_blocking``
-    is read directly from the report's own ``exit_axes.audit_gate`` --
-    whether this specific run's `policy/audit_gate_exit.py` axis actually
-    fired -- rather than re-derived from severity/bucket membership here,
-    since a Review-bucket api_break-severity finding does not by itself
-    mean this run's exit gated on it (the axis is opt-in via
-    ``--severity-preset``).
+    ``no_baseline_audit_blocking``/``no_baseline_audit_gate_fired`` flags
+    below driving ``_header``'s own headline -- NOT ``scan_audit_only``
+    (Codex review, PR #1210, round 3): that flag's own headline
+    special-case only fires when every bucket is empty, so a real
+    candidate-side finding here would otherwise fall through to the
+    ordinary two-sided "ABI BREAKING"/"Source API changed; binary ABI
+    unchanged" wording, which falsely implies a before/after comparison
+    this run never performed. ``no_baseline_audit_blocking`` is read
+    directly from the report's own top-level ``exit_code`` -- already
+    max-folded across every orthogonal axis (round 4: an earlier revision
+    read only ``exit_axes.audit_gate``, which missed a run blocked by, say,
+    ``--contract``'s coverage axis alone) -- rather than re-derived from
+    severity/bucket membership here, since a Review-bucket api_break-
+    severity finding does not by itself mean this run's exit actually
+    failed (the audit_gate axis is opt-in via ``--severity-preset``, and
+    the other axes are independent of it). ``no_baseline_audit_gate_fired``
+    additionally records whether ``exit_axes.audit_gate`` specifically was
+    the (or a) contributor, purely to pick the more specific headline
+    wording.
 
     Without this branch, ``build_model`` fell through to ``_from_compare``,
     which reads ``report["changes"]`` -- always ``[]`` on a no-baseline
@@ -564,11 +570,17 @@ def _from_no_baseline(
     audit_gate_exit = (
         exit_axes.get("audit_gate") if isinstance(exit_axes, dict) else None
     )
-    audit_gate_blocking = isinstance(audit_gate_exit, int) and audit_gate_exit > 0
+    audit_gate_fired = isinstance(audit_gate_exit, int) and audit_gate_exit > 0
+    overall_exit_code = report.get("exit_code")
+    audit_blocking = isinstance(overall_exit_code, int) and overall_exit_code > 0
     return CommentModel(
         mode="scan",
         subject=str(report.get("library", "artifact")),
-        old_label="baseline",
+        # No comparison ran (old_acquisition_state: declared_absent) -- only
+        # used as a fallback value, since `_header_block` skips the
+        # "vs `old_label`" context line entirely for `no_baseline_audit`
+        # (Codex review, PR #1210, round 4).
+        old_label="(no baseline)",
         new_label=str(report.get("new_version", "candidate")),
         policy=str(report.get("policy", "strict_abi")),
         breaking=breaking,
@@ -580,7 +592,8 @@ def _from_no_baseline(
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         no_baseline_audit=True,
-        no_baseline_audit_gate_blocking=audit_gate_blocking,
+        no_baseline_audit_blocking=audit_blocking,
+        no_baseline_audit_gate_fired=audit_gate_fired,
         suppressed_count=suppressed_count if isinstance(suppressed_count, int) else 0,
     )
 

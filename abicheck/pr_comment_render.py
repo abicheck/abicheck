@@ -100,17 +100,26 @@ def _header(model: CommentModel) -> tuple[str, str]:
         # counts below would otherwise select it -- every one of those
         # phrasings implies a before/after result this run never produced
         # (Codex review, PR #1210, round 3). Blocking-ness for this
-        # dedicated headline comes from the report's own `exit_axes.
-        # audit_gate` (`no_baseline_audit_gate_blocking`), not from bucket
-        # membership -- an api_break-severity finding lands in Review the
-        # same way it would for a real comparison, but whether THIS run's
-        # exit code actually gated on it is a fact only the report itself
-        # states (severity-preset opt-in, case143/case148's own asymmetric
-        # gating).
+        # dedicated headline comes from the report's own overall
+        # `exit_code` (`no_baseline_audit_blocking` -- every orthogonal
+        # axis already max-folded into it, not just `audit_gate`; round 4
+        # fix: an earlier revision checked `audit_gate` alone, which missed
+        # a run blocked by `--contract`'s coverage axis instead), never from
+        # bucket membership -- an api_break-severity finding lands in
+        # Review the same way it would for a real comparison, but whether
+        # THIS run's exit code actually failed is a fact only the report
+        # itself states (severity-preset opt-in, case143/case148's own
+        # asymmetric gating).
         if not model.breaking and not model.review and not model.has_incomplete:
             return "✅", "Audit — no baseline to compare"
-        if model.no_baseline_audit_gate_blocking:
-            return "🛑", "Audit gate: candidate-side finding blocks this step"
+        if model.no_baseline_audit_blocking:
+            if model.no_baseline_audit_gate_fired:
+                return "🛑", "Audit gate: candidate-side finding blocks this step"
+            # Blocked by a different orthogonal axis (e.g. --contract's
+            # coverage ledger) -- still a real, blocking failure, just not
+            # the audit-gate axis specifically; the "🛑 Analysis incomplete"
+            # section below (has_incomplete) names which one.
+            return "🛑", "Audit: this run blocks the step"
         return "⚠️", "Audit — candidate-side finding(s), not gated"
     if (
         model.mode == "scan"
@@ -407,10 +416,16 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     # could terminate this code span and inject arbitrary Markdown into the
     # sticky comment otherwise. `_esc` (used everywhere else a value is
     # rendered inside a code span) neutralizes both.
-    context = (
-        f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
-        f"`{_esc(model.subject)}`"
-    )
+    if model.no_baseline_audit:
+        # No comparison ran at all (`old_acquisition_state: declared_absent`
+        # in the report) -- "vs `baseline`" would claim one did (Codex
+        # review, PR #1210, round 4).
+        context = f"{head_ref} — audit, no baseline · `{_esc(model.policy)}` · `{_esc(model.subject)}`"
+    else:
+        context = (
+            f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
+            f"`{_esc(model.subject)}`"
+        )
     counts_line = f"**{b} breaking** · {r} needs review · {s} safe"
     # The incomplete count is a distinct axis (analysis quality, not
     # compatibility — see module docstring) and only shown when non-zero, so

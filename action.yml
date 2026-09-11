@@ -1027,6 +1027,14 @@ runs:
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
+        # No-baseline capability-gap guard (Codex review, PR #1210, round
+        # 4): an audit-only mode: scan (no against, or audit: true forcing
+        # it) setting since/changed-path/budget fails here, before Python
+        # setup and the toolchain install -- run.sh keeps its own copy for
+        # anyone invoking it directly.
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_CHANGED_PATH: ${{ inputs.changed-path }}
+        INPUT_BUDGET: ${{ inputs.budget }}
         INPUT_USED_BY: ${{ inputs.used-by }}
         INPUT_USED_BY_MANIFEST: ${{ inputs.used-by-manifest }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
