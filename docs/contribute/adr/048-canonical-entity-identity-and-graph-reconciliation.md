@@ -151,12 +151,23 @@ comparable corpus size). The prose for `declaration_identity_reconciled`
 closure-coordinate case, and inflated `risk_changes` for entities that, from
 the model's own normalized-identity point of view, did not change at all.
 `declaration_coordinates_shifted` is `COMPATIBLE` (not RISK): it fires only
-on positive coordinate-churn evidence (the raw qualified name provably
-differed and normalized away) — an already-identical raw name/file is
-*not* sufficient (that stays `declaration_identity_reconciled`, since an
-identical qualified name/file proves nothing about whatever else, like a
-mangled name, might have changed). See `graph_reconcile._classify_outcome`
-and `tests/test_graph_reconcile_closure_rename.py`. This does narrow which
+when ALL of the following hold, none alone sufficient — the raw qualified
+name provably differed and normalized away (an already-identical raw
+name/file stays `declaration_identity_reconciled`, since that proves
+nothing about whatever else, like a mangled name, might have changed);
+`normalized_signature`'s kind/arity/param-types tail still agrees between
+old and new (catches a real signature change riding alongside an unrelated
+coordinate shift, when that evidence is tracked at all); and the node kind
+is type-shaped (`record_type`/`enum_type`/`typedef`) — a `source_decl`
+(function/variable) never qualifies, because the real
+`source_graph_build_source_abi.py` producer tracks neither `param_types`
+nor `mangled_name` in node attrs, so a function's signature tail is
+vacuously equal and "nothing else changed" can't be proven for one; a
+type's identity, by contrast, genuinely is its normalized name + declaring
+file + structural position, with no such hidden dimension to hide a change
+behind. See `graph_reconcile._classify_outcome`,
+`tests/test_graph_reconcile_coordinate_outcome.py`, and
+`tests/test_graph_reconcile_closure_rename.py`. This does narrow which
 comparisons emit `declaration_identity_reconciled` for the closure-shaped
 subset specifically — a consumer with a suppression/policy rule keyed to
 `declaration_identity_reconciled` for that subset now sees
