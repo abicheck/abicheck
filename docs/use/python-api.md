@@ -13,7 +13,7 @@ depends_on:
   - abicheck/model/header_ast_frontends.py
   - abicheck/service_dump_pipeline.py
   - abicheck/service_compare_pipeline.py
-  - abicheck/service_scan.py
+  - abicheck/dry_run_estimate.py
   - abicheck/deadline.py
   - abicheck/policy/depth_evidence_contract.py
 lifecycle: active
@@ -304,8 +304,9 @@ fixes recorded in `docs/contribute/known-gaps.md`'s
 findings" entry) it now reproduces `scan`'s own candidate-side findings and,
 opt-in via `--severity-preset`, its exit-code gating too. Until a typed
 `CompareRequest`/`CompareResult`-shaped entry point exists for it, call the
-CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers)
-rather than the `abicheck scan` CLI, which this migration is retiring.
+CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers) --
+the `abicheck scan` CLI this migration replaced no longer exists (ADR-068
+Phase 6).
 
 `estimate_scan` — the dry-run per-layer cost projection — survives, but takes
 an `InputSpec` plus the run-scoped level arguments rather than a request:

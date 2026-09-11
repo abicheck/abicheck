@@ -508,24 +508,23 @@ scheme-independent CI behaviour.
 
 ---
 
-## `abicheck scan` (being retired)
+## `abicheck scan` (retired)
 
-!!! danger "`scan` is retired by ADR-068 — hard removal, no deprecation window"
+!!! danger "`scan` was retired by ADR-068 Phase 6 — hard removal, no deprecation window"
     [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D1 reduces the root surface to six verbs and retires `scan` as a second
+    D1 reduced the root surface to six verbs and retired `scan` as a second
     analysis product. D8 is explicit that the removal is **hard**: no hidden
-    alias, no shim, no silent ignoring. Once the retirement PR lands,
-    `abicheck scan` exits `64` with `No such command`, and the error names
-    `compare --no-baseline`. **The whole table below stops existing at that
-    point** — exit `5`, `6` and `7` do not become `compare` codes by
-    inheritance; each moves onto `compare`'s own `ExitDecision` axes on its
-    own schedule, and the `compare` sections above are where a migrated axis
-    is documented.
+    alias, no shim, no silent ignoring. `abicheck scan` now exits `64` with
+    `No such command`, and the error names `compare --no-baseline`. **The
+    whole table below no longer describes any live command** — exit `5`, `6`
+    and `7` did not become `compare` codes by inheritance; each moved onto
+    `compare`'s own `ExitDecision` axes on its own schedule (where one exists
+    yet), and the `compare` sections above are where a migrated axis is
+    documented. The table is kept below purely as a historical record of
+    `scan`'s own exit-code contract while it existed.
 
-    Nothing is deleted before its capability has a proven home (D9), so this
-    table is accurate for the current build. But do not write new CI against
-    it: pin the equivalent `compare` invocation instead, and where none
-    exists yet, see
+    Do not write new CI against it: pin the equivalent `compare` invocation
+    instead, and where none exists yet, see
     [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
     for what is still open. GitHub Action users are insulated — `mode: scan`
     is translated inside the Action and retires on the Action's own input

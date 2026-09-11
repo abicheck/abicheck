@@ -13,23 +13,24 @@
 # limitations under the License.
 """ADR-050 D3/D5 (G32 Phase B/D) — ``frontend_context`` (host|device).
 
-Shared by `dump`/`compare`/`scan` via `cli_options.compile_context_options`
-and resolved through the single `cli_options.resolve_compile_context` choke
-point. Phase B shipped with "device" syntactically valid (click.Choice) but
-rejected at resolution time -- Phase D's `sycl_context` selector is what
-makes a "device" request meaningful, so it lifts that blanket rejection
-here. A "device" request the underlying compiler/invocation can't actually
-satisfy now fails from the real extraction pipeline
-(`AstContextMissingError`/`AstContextAmbiguousError`, see
-`test_sycl_context.py` and `test_dumper_clang.py`'s DPC++ wiring tests),
+Historically shared by `dump`/`compare`/`scan` via
+`cli_options.compile_context_options` and resolved through the single
+`cli_options.resolve_compile_context` choke point. Phase B shipped with
+"device" syntactically valid (click.Choice) but rejected at resolution time
+-- Phase D's `sycl_context` selector is what makes a "device" request
+meaningful, so it lifts that blanket rejection. A "device" request the
+underlying compiler/invocation can't actually satisfy now fails from the
+real extraction pipeline (`AstContextMissingError`/`AstContextAmbiguousError`,
+see `test_sycl_context.py` and `test_dumper_clang.py`'s DPC++ wiring tests),
 not from a blanket CLI-level reject.
 
 Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) removed the
-`--frontend-context` CLI flag from `dump`/`compare` entirely -- `scan` keeps
-it as a real flag, while `dump`/`compare` only take it via `.abicheck.yml`'s
-`compile.frontend_context`. Tests below that used to exercise the flag on
-`dump`/`compare` now write a config file instead; `scan`'s own flag-based
-tests are unchanged.
+`--frontend-context` CLI flag from `dump`/`compare` entirely -- `scan` kept
+it as a real flag until ADR-068 Phase 6 retired `scan` itself outright.
+`dump`/`compare` only take it via `.abicheck.yml`'s `compile.frontend_context`
+today, so there is no longer any live command carrying `--frontend-context`
+as a CLI flag at all. Tests below that used to exercise the flag on
+`dump`/`compare` write a config file instead.
 """
 
 from __future__ import annotations
@@ -54,19 +55,15 @@ def _elf_stub(path: Path) -> Path:
     return path
 
 
-def test_frontend_context_device_no_longer_blanket_rejected_scan(tmp_path, runner):
-    """ADR-050 D5 (G32 Phase D): Phase B's blanket "not supported yet"
-    rejection is lifted now that `sycl_context.py`'s selector exists. This
-    ELF stub has no headers, so the header AST frontend never runs and
-    "device" has nothing to select from; whatever failure results (e.g. an
-    invalid ELF file) must not be Phase B's old resolution-time reject --
-    proving the restriction is actually gone, not just given a new message.
-    `scan` is the only command that still takes `--frontend-context` as a
-    CLI flag (Phase 7 removed it from `dump`/`compare`)."""
-    so1 = _elf_stub(tmp_path / "a.so")
-    result = runner.invoke(main, ["scan", str(so1), "--frontend-context", "device"])
-    assert "not supported yet" not in result.output
-    assert "--frontend-context" not in result.output
+# `test_frontend_context_device_no_longer_blanket_rejected_scan` used to
+# live here: ADR-050 D5 (G32 Phase D) lifted Phase B's blanket "device" reject
+# via a real `scan --frontend-context device` invocation -- `scan` was the
+# only command that still took `--frontend-context` as a CLI flag (Phase 7
+# had already removed it from `dump`/`compare` in favor of config-only), and
+# ADR-068 Phase 6 retired `scan` itself outright. There is no longer any live
+# command carrying `--frontend-context` as a CLI flag at all -- see
+# `test_dump_frontend_context_invalid_config_value_rejected` below for the
+# config-only path's own equivalent coverage.
 
 
 @pytest.mark.parametrize("cmd", ["dump", "compare"])
@@ -84,8 +81,15 @@ def test_frontend_context_flag_removed_from_dump_and_compare(tmp_path, runner, c
 
 
 def test_frontend_context_invalid_value_rejected_by_click(tmp_path, runner):
+    """Historically exercised `scan --frontend-context bogus` -- `scan` was
+    the only command carrying `--frontend-context` as a real CLI flag
+    (Phase 7 removed it from `dump`/`compare` in favor of config-only), and
+    ADR-068 Phase 6 retired `scan` itself outright, so there is no longer any
+    live command carrying this specific flag as a click.Choice. `--depth` is
+    a still-live click.Choice option on `dump`, so it exercises the same
+    underlying Click validation machinery this test's name promises."""
     so = _elf_stub(tmp_path / "a.so")
-    result = runner.invoke(main, ["scan", str(so), "--frontend-context", "bogus"])
+    result = runner.invoke(main, ["dump", str(so), "--depth", "bogus"])
     assert result.exit_code != 0
     assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
 

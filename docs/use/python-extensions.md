@@ -48,19 +48,18 @@ the imported CPython C-API symbols plus whether the module is a stable-ABI
     the undefined-symbol table carries no per-symbol provider — those names don't
     appear as imports anyway.)
 
-### 1. Audit a single module — `scan --abi3`
+### 1. Audit a single module — `compare --abi3`
+
+`--abi3` is a candidate-side audit: pass the same module as both operands
+to isolate the audit's own finding from any ordinary two-sided diff.
 
 ```console
-$ abicheck scan --binary foo.abi3.so --abi3 3.9
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3 3.9
 …
-  abi3_audit         ran           118 CPython import(s) audited against
-                                   Py_LIMITED_API 3.9; 1 violation finding(s)
-
-Cross-source findings (advisory)
-  [warning] python_stable_abi_violation: 1
+  [risk] python_stable_abi_violation: 1
 ```
 
-`scan --abi3 <floor>` classifies every imported CPython symbol against the
+`--abi3 <floor>` classifies every imported CPython symbol against the
 vendored, authoritative Stable-ABI set (all `[function.*]`/`[data.*]` entries
 from CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
 
@@ -82,8 +81,9 @@ from CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
     by **membership** in the vendored set, not by the name prefix, so these
     clean Limited-API imports are correctly classified as stable.
 
-The `--binary` must be a CPython extension module (or a saved snapshot of one);
-`--abi3` on a plain library is a usage error. The floor is **required** — it is
+The candidate must be a CPython extension module (or a saved snapshot of one);
+`--abi3` on a plain library is an evidence-contract error (exit `7`). The floor
+is **required** — it is
 the target `Py_LIMITED_API` version you supply, so there is no ambiguity about
 what the module is certified against. If the artifact's own SOABI tag says it is
 **version-specific** (`foo.cpython-311-…so`, or a free-threaded `cpython-313t`),
@@ -101,19 +101,18 @@ build is a contradiction the audit surfaces rather than silently certifies.
     is missing on the 3.9 the tag still advertises. The finding names the floor
     it used so the lowering is explicit.
 
-**Gating.** Like every single-artifact `scan` check, stable-ABI violations are
-**advisory by default** (they appear in the report but do not fail the scan) —
-"adoption never starts by blocking merges". To gate CI on them, promote the
-finding to an error:
+**Gating.** Stable-ABI violations are `RISK`-severity findings and so
+**advisory by default** (they appear in the report but do not fail the run) —
+"adoption never starts by blocking merges". To gate CI on them, move the run
+onto the severity scheme:
 
 ```console
-$ abicheck scan --binary foo.abi3.so --abi3 3.9 \
-      --crosscheck python_stable_abi_violation=error
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3 3.9 --severity-preset strict
 ```
 
-Then a violation raises the exit code to the source-break tier (`2`), failing
-the build. Exit `0` = clean or advisory-only; a usage error (bad `--abi3`, or
-`--abi3` on a non-extension) exits non-zero.
+Then a violation raises the exit code to `2`, failing the build. Exit `0` =
+clean or advisory-only; a usage error (bad `--abi3`) exits `64`, and `--abi3`
+on a non-extension exits `7`.
 
 ### 2. Compare two versions — `compare`
 
@@ -133,10 +132,10 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
 !!! note "How these gate CI"
     These four are **compare-time** kinds. Like every `RISK` change they are
     advisory in `compare` by default; gate them through `compare`'s severity /
-    policy configuration (e.g. a policy profile that escalates the kind, or the
-    `--severity-*` flags). The `--crosscheck python_stable_abi_violation=error`
-    switch is specific to the single-artifact **`scan --abi3` audit** — it does
-    not gate the compare-time kinds, which ride the `compare` verdict instead.
+    policy configuration (e.g. a policy profile that escalates the kind, or
+    `--severity-preset`). The single-artifact `--abi3` audit's own
+    `python_stable_abi_violation` finding rides the identical severity
+    scheme (see "Gating" above) rather than a separate mechanism.
 
 !!! note "Free-threaded (no-GIL) builds are never `abi3`"
     A free-threaded build (PEP 703, `cpython-313t` / `cp314t`) uses a different
@@ -154,18 +153,19 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     interpreter minor and it will not load on another — no matter how stable its
     imported *symbol names* are. abicheck reads the PE import table's provider
     DLL, so an `abi3` `.pyd` that links a `pythonXY.dll` is flagged as a
-    `python_stable_abi_violation` (in both `scan --abi3` and `compare`), even
-    when every imported symbol is in the stable set.
+    `python_stable_abi_violation` (both via `--abi3` and via an ordinary
+    two-sided `compare`), even when every imported symbol is in the stable
+    set.
 
-!!! note "Floor drift: exact when declared, otherwise deferred to `scan --abi3`"
+!!! note "Floor drift: exact when declared, otherwise deferred to `--abi3`"
     `compare` flags `python_abi3_floor_raised` only from the **explicit
     `cpXY-abi3` tag** on *both* builds (e.g. `cp39-abi3` → `cp310-abi3`) — that is
     exact. It deliberately does **not** *infer* a floor from the imported-symbol
     versions: a bare `.abi3.so` carries no declared minor, and the min-of-imports
     heuristic false-positives (a `cp39-abi3` build adding a 3.5 symbol drops no
-    3.9+ user). When the floor isn't declared in the tag, use
-    `scan --abi3 <floor>` — where you supply the target floor — to catch stable
-    symbols newer than it.
+    3.9+ user). When the floor isn't declared in the tag, use the
+    single-artifact `--abi3 <floor>` audit above — where you supply the target
+    floor — to catch stable symbols newer than it.
 
 !!! note "Version-specific modules are not checked"
     A per-version module (`foo.cpython-311-…so`) legitimately uses private
@@ -190,7 +190,7 @@ def transform(data, codec): ...   # renamed kwarg, dropped default
 ```
 
 The export table is still one `PyInit_` symbol and the imported C-API is
-unchanged, so `compare`/`scan --abi3` see nothing. The break lives entirely in
+unchanged, so `compare` (with or without `--abi3`) sees nothing. The break lives entirely in
 the Python signatures, which are not in the binary's ABI surface at all.
 
 ### Where the surface comes from

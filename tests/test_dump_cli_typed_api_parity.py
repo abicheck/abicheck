@@ -593,147 +593,23 @@ def _dump_via_cli_to_file(
     assert dump_result.exit_code == 0, dump_result.output
 
 
-# **Closed** (CLI cleanup phase two, PR 3A): the "extra -I<dependency-dir>"
-# shape below used to reproduce `NOT_COMPARABLE` on `include_sequence`
-# between `dump`'s baseline and `scan`'s candidate resolution -- verified
-# both before (exit 6, `differing fields: include_sequence`) and after
-# (exit 0) against a real `g++` build and a real clang L2 parse. The cause
-# was not `scan`'s side at all: `dump`'s CLI ran the legacy
-# `-p`/`--compile-db` auto-match alongside the P0.3 L3->L2 fold, so its own
-# `-I<dep>` reached the parse as *explicit* context and never became a
-# `declared_includes` slot, while every other resolver (`scan`'s candidate,
-# `compare`'s implicit dump, the typed `DumpRequest` API) ran the fold alone
-# and seeded the identical directory. Now that the fold is the sole source
-# of compile-database-derived context when it resolves one, all four agree.
-# See `_CONTRACT_KNOWN_DIVERGENT_FIELDS` above for the same closure from the
-# contract-field side. The historical diagnosis is kept below because the
-# *mechanism* it describes is still the one to check first if a new shape
-# ever diverges here.
-#
-# Original note (the gap as it stood before the fix): the
-# `dump` baseline's own `contract.profile_fields.include_sequence` reads
-# `dump` baseline's own `contract.profile_fields.include_sequence` reads
-# `"[]"` even though its `ast_compile_args` correctly carries `-I <dep-dir>`,
-# because `dumper_contract._attach_extraction_contract` builds
-# `declared_includes` (the source of `include_sequence`) **exclusively**
-# from `extra_includes`, and this build shape routes the `-I` into
-# `gcc_option_tokens` only, never into `extra_includes` -- while
-# `scan_engine._build_new_snapshot`'s own candidate resolution (which calls
-# `service.resolve_input` directly, bypassing the shared
-# `resolve_side_snapshot` primitive the typed dump/compare API above already
-# uses -- see this module's own docstring) seeds `eff_includes`/
-# `declared_includes` for the identical directory instead. `compare`'s
-# implicit-dump path does **not** reproduce this for the same inputs
-# (verified directly), confirming the divergence is specifically between
-# `dump`'s CLI path and `scan`'s own candidate-resolution path, not a
-# `compare`-side issue. This is a live instance of the residual gap
-# AGENTS.md's own entry already documents as open (the "channel disagreement"
-# paragraphs under "The native ELF `abicheck dump` path never applies L3
-# build context...") -- not a new bug class, but the first *reproduced*,
-# non-Bazel-specific repro of it.
-#
-# Deliberately *not* a blanket `xfail(strict=True)` on the whole test
-# (Codex review, second round): that would treat *any* failure for this
-# shape as expected, including an unrelated regression -- compilation
-# breaking, `dump` crashing, or `scan` failing for a completely different
-# reason -- silently swallowing it as "known". Every setup step (the real
-# `g++` compile, the real `dump` CLI invocation) stays a hard,
-# unconditionally-checked requirement below, never inside any
-# expected-failure scope. Only the exact, already-diagnosed signature
-# (`NOT_COMPARABLE` naming `include_sequence`) is treated as expected via
-# an explicit, conditional `pytest.xfail()` call made *after* confirming
-# that signature -- so a different scan failure surfaces as a genuine,
-# uncaught test failure.
-#
-# A quiet PASS for a listed shape is *not* an acceptable third outcome
-# (Codex review, second round): if the diagnosed signature stops
-# reproducing -- because the gap closed, or because it changed shape --
-# this must still fail loudly, forcing `_SCAN_KNOWN_DIVERGENT_SHAPES` and
-# AGENTS.md's known-gap note to be updated deliberately, rather than
-# silently going stale behind an ordinary green test nobody has reason to
-# look at twice. So for a listed shape there are exactly two outcomes:
-# the exact known signature reproduces (expected `xfail`), or the test
-# fails outright -- covering both "the gap closed" and "a different
-# failure occurred" with one loud signal, matching the `strict`-xfail
-# spirit without pytest's own `strict=True` bookkeeping (which an
-# imperative, signature-gated `pytest.xfail()` call cannot combine with,
-# per the previous review round).
-_SCAN_KNOWN_DIVERGENT_SHAPES: frozenset[str] = frozenset()
-
-
-@pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
-@pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
-def test_scan_against_real_dump_baseline_is_comparable(
-    tmp_path: Path, shape_name: str
-) -> None:
-    """The end-to-end acceptance check from #810, generalized across build
-    shapes: a real ``dump`` baseline must be comparable via
-    ``scan --against`` -- never ``NOT_COMPARABLE`` -- for an unchanged
-    codebase."""
-    shape = _BUILD_SHAPES[shape_name]
-    so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
-    baseline = tmp_path / "baseline.json"
-    _dump_via_cli_to_file(so_path, header, tmp_path, compile_db, baseline)
-
-    scan_result = CliRunner().invoke(
-        main,
-        [
-            "scan",
-            str(so_path),
-            "-H",
-            str(header),
-            "--sources",
-            str(tmp_path),
-            "--build-info",
-            str(compile_db),
-            "--depth",
-            "source",
-            "--ast-frontend",
-            "clang",
-            "--against",
-            str(baseline),
-        ],
-    )
-
-    if shape_name in _SCAN_KNOWN_DIVERGENT_SHAPES:
-        is_known_signature = (
-            "NOT_COMPARABLE" in scan_result.output
-            and "include_sequence" in scan_result.output
-        )
-        if is_known_signature:
-            pytest.xfail(
-                f"{shape_name}: known-open dump-vs-scan include-dir "
-                "seeding divergence (see this module's own comment above "
-                "this test)"
-            )
-        pytest.fail(
-            f"{shape_name} is listed in _SCAN_KNOWN_DIVERGENT_SHAPES, but "
-            "the previously-diagnosed failure signature (NOT_COMPARABLE "
-            "naming include_sequence) did not reproduce. Either the "
-            "underlying gap has closed -- remove this shape from "
-            "_SCAN_KNOWN_DIVERGENT_SHAPES and update AGENTS.md's "
-            "known-gap note for it -- or a different failure occurred "
-            "and needs its own investigation. "
-            f"exit_code={scan_result.exit_code!r} output={scan_result.output!r}"
-        )
-
-    assert "NOT_COMPARABLE" not in scan_result.output, (shape_name, scan_result.output)
-    assert scan_result.exit_code == 0, (shape_name, scan_result.output)
-
-
 @pytest.mark.skipif(not (_HAVE_GXX and _HAVE_CLANG), reason=_SKIP_REASON)
 @pytest.mark.parametrize("shape_name", sorted(_BUILD_SHAPES))
 def test_compare_implicit_dump_against_real_dump_baseline_is_comparable(
     tmp_path: Path, shape_name: str
 ) -> None:
-    """Same acceptance check as above, against ``compare``'s implicit-dump
-    operand instead of ``scan --against`` -- kept as its own test (rather
-    than folded into the scan test above) precisely because the two paths
-    are independent and can disagree: see
-    ``_SCAN_KNOWN_DIVERGENT_SHAPES`` -- ``compare`` does not reproduce that
-    gap for the identical inputs, so this test has no xfail list, and a
-    future regression narrowing *this* path's coverage should fail loudly
-    rather than being masked by a scan-specific xfail."""
+    """The end-to-end acceptance check from #810: a real ``dump`` baseline
+    must be comparable via ``compare``'s implicit-dump operand -- never
+    ``NOT_COMPARABLE`` -- for an unchanged codebase, across build shapes.
+
+    This used to also exercise the identical check against
+    ``scan --against`` (kept as its own test, rather than folded into this
+    one, because the two paths were independent and could disagree -- see
+    the historical ``_SCAN_KNOWN_DIVERGENT_SHAPES`` note this module's own
+    git history carries: a real, since-closed `dump`-vs-`scan`
+    candidate-resolution divergence). ADR-068 Phase 6 retired `scan`
+    outright, so this is now the sole acceptance check for this shape
+    matrix."""
     shape = _BUILD_SHAPES[shape_name]
     so_path, header, compile_db = _build_library(tmp_path, **shape)  # type: ignore[arg-type]
     baseline = tmp_path / "baseline.json"

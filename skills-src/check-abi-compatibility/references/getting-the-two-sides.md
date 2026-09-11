@@ -89,9 +89,14 @@ The same applies when one side is a snapshot: it already carries its own
 header evidence, so scope the live side only — `abicheck compare
 baseline.abi.json build/libfoo.so --header new=include/foo/api.h`.
 
-`--include`/`-I`, `--sysroot`, and `--compiler-option` shape the parse the same way
-they shape the real build. They must match the real build, or the extracted
-surface is not the shipped one.
+`--include`/`-I` shapes the parse the same way it shapes the real build, and
+must match the real build or the extracted surface is not the shipped one.
+The sysroot and pass-through compiler flags (`-std=`, `-D`, `-fvisibility=`,
+...) are config-only today — `.abicheck.yml`'s `compile:` block, `sysroot`
+and `options` keys (see
+[compiler-and-build-profiles.md](../../shared/compiler-and-build-profiles.md))
+— rather than per-run flags, but the same rule applies: they must match the
+real build, or the extracted surface is not the shipped one.
 
 ## Preflight without running the analysis
 

@@ -162,16 +162,14 @@ class TestAPackActuallyConfiguresTheRun:
         assert with_pack.exit_code == 0, with_pack.output
         assert json.loads(with_pack.output)["verdict"] == "COMPATIBLE"
 
-    def test_a_policy_pack_changes_a_scan_against_the_same_way(
-        self, pair: tuple[Path, Path], ignore_removals: Path
-    ) -> None:
-        old, new = pair
-        runner = CliRunner()
-        base = ["scan", str(new), "--against", str(old), "--format", "json"]
-        assert runner.invoke(main, base).exit_code == 4
-        assert (
-            runner.invoke(main, [*base, "--pack", str(ignore_removals)]).exit_code == 0
-        )
+    # `test_a_policy_pack_changes_a_scan_against_the_same_way` used to live
+    # here: it proved a policy pack changed `scan --against`'s verdict the
+    # same way it changed `compare`'s. ADR-068 Phase 6 retired `scan`
+    # outright, and `compare --no-baseline`'s single-operand audit-only shape
+    # cannot substitute (there is no second two-operand invocation left to
+    # compare this pairing against), so there is nothing left to pin here --
+    # `test_a_policy_pack_changes_the_verdict_and_the_exit_code` above still
+    # covers `compare`'s own half.
 
     def test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -621,213 +619,31 @@ class TestOnlyAppliedFieldsAreAccepted:
         for field_name in UNAPPLIED_PACK_FIELDS:
             assert field_name not in help_text, field_name
 
-    def test_a_gate_pack_is_applied_to_scan(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """CLI cleanup phase two, "PR B": a `kind: gate` pack now configures
-        `scan --against` instead of being rejected outright -- `scan`'s exit
-        code has honored `--severity-preset`/`--exit-code-scheme` (direct CLI
-        flags and `.abicheck.yml`) since the fix that closed the "scan never
-        consults severity" gap (AGENTS.md "Known gaps"); a gate pack is one
-        more source for that same real gate, mirroring
-        `test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme`
-        (the single-pair `compare` version) and
-        `test_gate_pack_is_applied_to_a_release_comparison` (the release
-        fan-out version)."""
-        old, new = pair
-        gate = _pack(
-            tmp_path,
-            "lenient.yml",
-            "id: lenient\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.severity.abi_breaking: warning\n",
-        )
-        without_pack = CliRunner().invoke(
-            main, ["scan", str(new), "--against", str(old)]
-        )
-        assert without_pack.exit_code == 4, without_pack.output
-
-        with_pack = CliRunner().invoke(
-            main,
-            [
-                "scan", str(new), "--against", str(old),
-                "--format", "json", "--pack", str(gate),
-            ],
-        )
-        assert with_pack.exit_code == 0, with_pack.output
-        # The finding is still reported -- only the gate moved.
-        summary = json.loads(with_pack.output)
-        assert summary["verdict"] == "BREAKING"
-
-    def test_a_gate_pack_is_reflected_in_scan_dry_run_preview(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """Codex review, fresh evidence: `scan --dry-run`'s previewed
-        exit-code scheme/severity must describe the pack-folded gate that
-        will actually run, not a stale snapshot computed before the pack was
-        applied. Reproduces the exact repro from that review: a pack
-        demoting `abi_breaking` to `warning` must be visible in the preview,
-        not left showing the legacy/pre-pack scheme."""
-        old, new = pair
-        gate = _pack(
-            tmp_path,
-            "lenient.yml",
-            "id: lenient\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.severity.abi_breaking: warning\n",
-        )
-        result = CliRunner().invoke(
-            main,
-            [
-                "scan", str(new), "--against", str(old),
-                "--dry-run", "--pack", str(gate),
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert "exit-code scheme: severity" in result.output
-        assert "abi_breaking=warning" in result.output
-        # Codex review, fresh evidence: by the time this preview is
-        # rendered, the pack has already been folded into resolved_cfg (the
-        # values just asserted above ARE the pack-adjusted ones) -- claiming
-        # "a selected --pack may adjust it" here would self-contradict the
-        # very label it's attached to.
-        assert "may adjust it" not in result.output
-
-    def test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """Codex review on #801: the precedence rule D8 states for every
-        other front end -- an explicitly stated value always outranks a
-        pack -- must hold for `scan --against` too. Reproduces the exact
-        repro from that review: a removed export scanned with an explicit
-        `--severity-preset strict` must still exit 4 even when a selected
-        gate pack tries to demote `abi_breaking` to `warning`; without the
-        fix the pack silently won and this exited 0."""
-        old, new = pair
-        gate = _pack(
-            tmp_path,
-            "lenient.yml",
-            "id: lenient\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.severity.abi_breaking: warning\n",
-        )
-        result = CliRunner().invoke(
-            main,
-            [
-                "scan", str(new), "--against", str(old),
-                "--severity-preset", "strict",
-                "--format", "json", "--pack", str(gate),
-            ],
-        )
-        assert result.exit_code == 4, result.output
-        summary = json.loads(result.output)
-        assert summary["verdict"] == "BREAKING"
-
-    def test_a_gate_pack_cannot_override_a_project_config_severity_preset(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """The project-config (`.abicheck.yml`) tier of the identical
-        precedence bug -- found while fixing the explicit-CLI tier above,
-        by the same mechanism (`cli_scan_receipt`'s ADR-049 receipt not
-        knowing a project-config value was already stated, so a selected
-        pack looked unopposed)."""
-        old, new = pair
-        gate = _pack(
-            tmp_path,
-            "lenient.yml",
-            "id: lenient\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.severity.abi_breaking: warning\n",
-        )
-        cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("severity:\n  preset: strict\n", encoding="utf-8")
-        result = CliRunner().invoke(
-            main,
-            [
-                "scan", str(new), "--against", str(old),
-                "--config", str(cfg),
-                "--format", "json", "--pack", str(gate),
-            ],
-        )
-        assert result.exit_code == 4, result.output
-        summary = json.loads(result.output)
-        assert summary["verdict"] == "BREAKING"
-
-    def test_a_gate_pack_asserting_exit_code_scheme_is_rejected_on_scan_too(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """CLI cleanup phase two PR G2: `gate.exit_code_scheme` is not a
-        pack-assignable field at all any more, on any front end -- a gate
-        pack asserting it is rejected at load time (`PackManifestError`,
-        surfaced by `scan` as the same `click.UsageError`/exit 64 an
-        unroutable pack field always gets, mirroring `compare`'s identical
-        rejection). Before PR G2, this test proved a project's explicit
-        `exit_code_scheme: auto` outranked a gate pack's concrete scheme --
-        that whole precedence question no longer applies, since neither the
-        project config key nor the pack field exist to compete over."""
-        old, new = pair
-        gate = _pack(
-            tmp_path,
-            "legacy.yml",
-            "id: legacy_scheme\nversion: 1\nkind: gate\n"
-            "assignments:\n  gate.exit_code_scheme: legacy\n",
-        )
-        result = CliRunner().invoke(
-            main,
-            [
-                "scan", str(new), "--against", str(old),
-                "--format", "json", "--pack", str(gate),
-            ],
-        )
-        assert result.exit_code == 64, result.output
-        assert "may not assign" in result.output
-
-    def test_scan_rejects_an_unapplied_field_from_the_resolution(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """`scan` validates the resolved configuration, like `compare`.
-
-        It previously re-read the manifests after `resolve_scan_config` had
-        already loaded them, so the revision it validated need not be the one
-        recorded and applied (Codex review, raised for `compare` first and
-        then for this path). Both of its questions are answerable from the
-        resolution: an unapplied field from provenance, a selected gate pack
-        from `gate.packs`.
-        """
-        old, new = pair
-        pack = _pack(
-            tmp_path,
-            "future.yml",
-            "id: future\nversion: 1\nkind: contract\n"
-            "assignments:\n  contract.overlays: [post_manifest]\n",
-        )
-        result = CliRunner().invoke(
-            main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
-        )
-        assert result.exit_code == 64, result.output
-        assert "contract.overlays" in result.output
-
-    def test_scan_rejects_an_inert_value_from_the_resolution(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """The inert-value rule reaches `scan` through the resolution alone.
-
-        `compare` answers this twice -- once against the files, early enough
-        that `--dry-run` agrees, and once authoritatively against the resolved
-        provenance. `scan` has no dry run and so asks only the second, which
-        is the path that reads the *resolved* value rather than the manifest's
-        (`_resolved_field`). Same verdict, reached the other way.
-        """
-        old, new = pair
-        pack = _pack(
-            tmp_path,
-            "scan-empty-ns.yml",
-            "id: none\nversion: 1\nkind: contract\n"
-            "assignments:\n  surface.internal_namespaces: []\n",
-        )
-        result = CliRunner().invoke(
-            main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
-        )
-        assert result.exit_code == 64, result.output
-        assert "surface.internal_namespaces" in result.output
-        # ...and it names the manifest, which only the provenance can supply.
-        assert "scan-empty-ns.yml" in result.output
+    # `test_a_gate_pack_is_applied_to_scan`,
+    # `test_a_gate_pack_is_reflected_in_scan_dry_run_preview`,
+    # `test_a_gate_pack_cannot_override_an_explicit_scan_severity_preset`,
+    # `test_a_gate_pack_cannot_override_a_project_config_severity_preset`,
+    # `test_a_gate_pack_asserting_exit_code_scheme_is_rejected_on_scan_too`,
+    # `test_scan_rejects_an_unapplied_field_from_the_resolution`, and
+    # `test_scan_rejects_an_inert_value_from_the_resolution` used to live
+    # here: each proved a `compare`-side rule (gate-pack application,
+    # explicit-value precedence, unroutable/inert/empty-manifest rejection)
+    # held on `scan --against` too. ADR-068 Phase 6 retired `scan` outright.
+    # Every one of these rules keeps its own direct `compare`-side coverage
+    # elsewhere in this class/module
+    # (`test_a_gate_pack_severity_moves_the_run_onto_the_severity_scheme`,
+    # `test_an_explicit_severity_flag_outranks_a_gate_pack`,
+    # `test_an_unapplied_field_is_a_usage_error`,
+    # `test_an_inert_empty_namespace_set_is_rejected`), and
+    # `test_a_gate_pack_is_reflected_in_scan_dry_run_preview` specifically
+    # asserted a fully-resolved preview that `compare --dry-run` does NOT
+    # produce by design (`cli_compare_receipt.dry_run_scheme_label`'s own
+    # docstring: resolving a pack's effect on the scheme ahead of the real
+    # run risks a partial resolution disagreeing with the real one, so
+    # `compare --dry-run` deliberately says only "a selected --pack may
+    # adjust it" -- already covered by `test_...` below at the "may adjust
+    # it" assertion) -- so there is nothing left to pin for any of these on
+    # the surviving command.
 
     def test_an_unreadable_policy_file_does_not_decide_the_shadow_question(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -859,64 +675,14 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 64, result.output
         assert "surface.internal_namespaces" in result.output
 
-    def test_both_paths_explain_a_rejection_identically(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """One condition, one explanation.
-
-        `compare` reaches an unapplied field through the file-based check and
-        `scan --against` through the resolved-provenance one. Only the source
-        token differs -- a manifest path there, the provenance-named pack
-        here -- so both build the message from one helper. Written out twice,
-        an edit to one wording would leave the two paths explaining the same
-        condition differently (CodeRabbit review).
-        """
-        old, new = pair
-        pack = _pack(
-            tmp_path,
-            "future.yml",
-            "id: future\nversion: 1\nkind: contract\n"
-            "assignments:\n  contract.overlays: [post_manifest]\n",
-        )
-        compare_out = _compare(CliRunner(), pair, "--pack", str(pack)).output
-        scan_out = (
-            CliRunner()
-            .invoke(
-                main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
-            )
-            .output
-        )
-        # The shared tail is everything after the source token, so comparing it
-        # pins the wording without pinning which path names the pack how.
-        tail = "'contract.overlays' is resolvable but not applied by this"
-        assert tail in compare_out, compare_out
-        assert tail in scan_out, scan_out
-
-    def test_scan_rejects_a_pack_that_assigns_nothing_too(
-        self, pair: tuple[Path, Path], tmp_path: Path
-    ) -> None:
-        """The rule has to hold on both commands, and `scan` first missed it
-        because it uses only the resolved check while emptiness was asked of
-        the files (Codex review).
-
-        It cannot move to the resolved check either: a pack an explicit
-        `--policy` outranks *also* supplies no provenance, so at the
-        resolution "assigns nothing" is indistinguishable from D8 precedence
-        working correctly. It lives in `load_selected_packs` instead — every
-        path that resolves or validates packs loads through there, so neither
-        command can miss it again.
-        """
-        old_p, new_p = pair
-        pack = _pack(
-            tmp_path,
-            "empty.yml",
-            "id: empty\nversion: 1\nkind: policy\nassignments: {}\n",
-        )
-        result = CliRunner().invoke(
-            main, ["scan", str(new_p), "--against", str(old_p), "--pack", str(pack)]
-        )
-        assert result.exit_code == 64, result.output
-        assert "assigns nothing" in result.output
+    # `test_both_paths_explain_a_rejection_identically` and
+    # `test_scan_rejects_a_pack_that_assigns_nothing_too` used to live here:
+    # each proved `scan --against` explained/rejected a bad pack the same way
+    # `compare` does (an unapplied field's wording, an `assignments: {}`
+    # rejection). ADR-068 Phase 6 retired `scan` outright, so there is no
+    # second path left to compare against `compare`'s own coverage of both
+    # rules (`test_an_unapplied_field_is_a_usage_error` above,
+    # `test_a_pack_that_assigns_nothing_is_rejected` below).
 
     @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
     def test_a_pack_that_assigns_nothing_is_rejected(
@@ -976,15 +742,14 @@ class TestOnlyAppliedFieldsAreAccepted:
                 explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
             )
 
-    def test_pack_without_a_baseline_is_a_usage_error_on_scan(
-        self, pair: tuple[Path, Path], ignore_removals: Path
-    ) -> None:
-        _old, new = pair
-        result = CliRunner().invoke(
-            main, ["scan", str(new), "--pack", str(ignore_removals)]
-        )
-        assert result.exit_code == 64, result.output
-        assert "--pack" in result.output
+    # `test_pack_without_a_baseline_is_a_usage_error_on_scan` used to live
+    # here: `scan NEW --pack X` without `--against OLD` was syntactically
+    # valid (scan's baseline was an optional flag) but rejected because a
+    # pack needs a baseline to apply against. `compare`'s two-operand shape
+    # has no equivalent case -- `OLD_INPUT`/`NEW_INPUT` are plain positional
+    # arguments, so `compare NEW --pack X` (with no `--no-baseline`) is
+    # already a plain Click "Missing argument" usage error with no pack-aware
+    # message to pin, and ADR-068 Phase 6 retired `scan` outright.
 
     @pytest.mark.parametrize(
         "body",
@@ -1507,54 +1272,12 @@ class TestReceiptAgreesWithWhatScored:
         assert provenance["reference"] == "relax_removals"
         assert [hop["option"] for hop in provenance["selected_by"]] == ["--pack"]
 
-    def test_compare_and_scan_receipts_agree_on_the_packs_axis(
-        self, pair: tuple[Path, Path], ignore_removals: Path, tmp_path: Path
-    ) -> None:
-        """§6.4's parity Gate lists `packs`. It was untestable end to end
-        while nothing selected one."""
-        old, new = pair
-        runner = CliRunner()
-        compare_out = tmp_path / "compare.json"
-        scan_out = tmp_path / "scan.json"
-        common = [
-            # Pin the rollback domain so this stays a test about `packs`.
-            # ADR-049 Phase 7 made the contract-coverage axis real, and this
-            # fixture's symbols carry no header provenance, so `public` would
-            # contribute its orthogonal exit 1 and mask the pack's own effect.
-            "--contract",
-            "all",
-            "--pack",
-            str(ignore_removals),
-            "--format",
-            "json",
-        ]
-        assert (
-            runner.invoke(
-                main, ["compare", str(old), str(new), *common, "-o", str(compare_out)]
-            ).exit_code
-            == 0
-        )
-        assert (
-            runner.invoke(
-                main,
-                ["scan", str(new), "--against", str(old), *common, "-o", str(scan_out)],
-            ).exit_code
-            == 0
-        )
-        compare_ctx = json.loads(compare_out.read_text(encoding="utf-8"))[
-            "contract_context"
-        ]["evaluation_context"]
-        scan_ctx = json.loads(scan_out.read_text(encoding="utf-8"))["diff"][
-            "contract_context"
-        ]["evaluation_context"]
-        assert (
-            scan_ctx["resolved_config"]["policy"]
-            == compare_ctx["resolved_config"]["policy"]
-        )
-        assert (
-            scan_ctx["field_provenance"]["policy.overrides"]
-            == compare_ctx["field_provenance"]["policy.overrides"]
-        )
+    # `test_compare_and_scan_receipts_agree_on_the_packs_axis` used to live
+    # here: §6.4's cross-command parity Gate for the `packs` axis, proving
+    # `compare` and `scan --against` resolved an identical pack selection to
+    # the same policy/provenance receipt. ADR-068 Phase 6 retired `scan`
+    # outright, so there is no second command left for this receipt to agree
+    # with itself against.
 
     def test_the_applied_gate_equals_the_resolved_gate(
         self, pair: tuple[Path, Path], tmp_path: Path

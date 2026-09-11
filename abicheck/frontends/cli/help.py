@@ -28,13 +28,14 @@ abicheck compare``, or the ``main`` prog click uses under test. Unlisted options
 fall through to a default panel, and an unmatched command renders ungrouped — so
 this can never break a command, only prettify it.
 
-``compare``, ``dump``, and ``scan`` additionally get a second, orthogonal
-disclosure axis (M2): plain ``--help`` on each shows only a curated common
-subset (:data:`COMPARE_COMMON_OPTION_NAMES` / :data:`DUMP_COMMON_OPTION_NAMES`
-/ :data:`SCAN_COMMON_OPTION_NAMES`), folding the long tail behind
-``--help-all``. See :func:`curated_help_options` (the shared factory) and its
-three per-command instances, ``compare_help_options``/``dump_help_options``/
-``scan_help_options``.
+``compare`` and ``dump`` additionally get a second, orthogonal disclosure
+axis (M2): plain ``--help`` on each shows only a curated common subset
+(:data:`COMPARE_COMMON_OPTION_NAMES` / :data:`DUMP_COMMON_OPTION_NAMES`),
+folding the long tail behind ``--help-all``. See :func:`curated_help_options`
+(the shared factory) and its two per-command instances,
+``compare_help_options``/``dump_help_options``. ``scan`` used to be a third
+instance (``scan_help_options``/``SCAN_COMMON_OPTION_NAMES``) until ADR-068
+Phase 6 retired the command outright.
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ F = TypeVar("F", bound=Callable[..., object])
 # documented invocation. A verb not listed still shows (rich-click falls it back
 # into a default panel), so a new command never silently vanishes.
 _ROOT_COMMAND_PANELS: list[dict[str, object]] = [
-    {"name": "Core analysis", "commands": ["dump", "compare", "scan", "deps"]},
+    {"name": "Core analysis", "commands": ["dump", "compare", "deps"]},
     {
         "name": "Workflow composition",
         "commands": ["aggregate"],
@@ -201,76 +202,8 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--provenance"],
         },
     ],
-    "* scan": [
-        {
-            "name": "Inputs",
-            "options": [
-                "--binary",
-                "--header",
-                "--include",
-                "--sources",
-                "--build-info",
-                "--config",
-            ],
-        },
-        {
-            "name": "Baseline & scope",
-            "options": [
-                "--against",
-                "--depth",
-                "--since",
-                "--changed-path",
-                "--budget",
-            ],
-        },
-        {
-            # `--risk-rules` left this panel with the flag itself (ADR-068's
-            # second 2026-09-09 amendment, ruling (b)).
-            "name": "Modes",
-            "options": ["--crosscheck"],
-        },
-        {
-            "name": "Toolchain (header parsing)",
-            "options": [
-                "--lang",
-                "--ast-frontend",
-                "--compiler",
-                "--compiler-prefix",
-                "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
-            ],
-        },
-        {
-            # Mirrors `compare`'s own panel (CLI audit PR 4/5): these flags are
-            # demoted-to-config (hidden=True) the same way compare's already
-            # were, so listing them here is what keeps them visible in
-            # `scan --help-all` at all (rich-click's OPTION_GROUPS panels
-            # render a listed option regardless of `hidden` -- see
-            # cli_help.py's module docstring / _make_help_callback).
-            "name": "Policy & severity",
-            "options": [
-                "--policy",
-                "--suppress",
-                "--severity-preset",
-            ],
-        },
-        {
-            "name": "Public-surface scoping",
-            "options": [
-                "--scope-public-headers",
-            ],
-        },
-        {
-            "name": "Output",
-            "options": [
-                "--format",
-                "--output",
-                "--dry-run",
-                "--verbose",
-            ],
-        },
-    ],
+    # The "* scan" panel used to live here; ADR-068 Phase 6 retired the
+    # `scan` command outright.
     # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
     # plain Click help — its group is not under the rich-click `main`, so panel
     # config would be inert there. Its flags already carry help; the dialect's
@@ -425,10 +358,10 @@ def _make_help_callback(
     """Build the curated ``--help`` callback for one command.
 
     Factored out of the original ``compare``-only implementation so ``dump``
-    and ``scan`` (G21.8 follow-on) get the identical curated/full split
-    without a copy-pasted callback per command — the closure just captures
-    which command's name to print in the pointer message and which dest-name
-    set counts as "common" for it.
+    (G21.8 follow-on) gets the identical curated/full split without a
+    copy-pasted callback per command — the closure just captures which
+    command's name to print in the pointer message and which dest-name set
+    counts as "common" for it.
     """
 
     def _help_callback(
@@ -546,8 +479,8 @@ compare_help_options: Callable[[F], F] = curated_help_options(
 )
 
 
-# ── `dump --help-all` / `scan --help-all` (same disclosure, applied to the
-# other two big commands, G21.8 follow-on) ────────────────────────────────
+# ── `dump --help-all` (same disclosure, applied to a second big command,
+# G21.8 follow-on) ─────────────────────────────────────────────────────────
 #
 # Dest names, mirroring COMPARE_COMMON_OPTION_NAMES above.
 DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
@@ -582,43 +515,10 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
     }
 )
 
-SCAN_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
-    {
-        # Inputs
-        "header_pairs",
-        "include_pairs",
-        "sources",
-        "build_info",
-        "build_config",
-        # Baseline & scope
-        "against",
-        "depth",
-        "since",
-        "changed_paths_opt",
-        "budget",
-        # Modes
-        "crosschecks",
-        # Policy & contract
-        "policy",
-        "suppress",
-        # `--contract` is the whole request now -- naming a domain is what
-        # turns the ADR-049 evaluator on (cli_options.resolve_contract_evaluation),
-        # so there is one option here rather than a switch plus a selector.
-        "contract_mode",
-        # Output
-        "fmt",
-        "output",
-        "dry_run",
-        "verbose",
-        # The help options themselves always stay visible
-        "help",
-        "help_all",
-    }
-)
+# SCAN_COMMON_OPTION_NAMES/scan_help_options used to live here (the `scan
+# --help`/`scan --help-all` curated/full split); ADR-068 Phase 6 retired the
+# `scan` command outright.
 
 dump_help_options: Callable[[F], F] = curated_help_options(
     "dump", DUMP_COMMON_OPTION_NAMES
-)
-scan_help_options: Callable[[F], F] = curated_help_options(
-    "scan", SCAN_COMMON_OPTION_NAMES
 )

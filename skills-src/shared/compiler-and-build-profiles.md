@@ -29,19 +29,23 @@ directories, and translation units were in view.
 
 ## The dials
 
+`--include` / `-I` is the one profile dial that stays a per-run CLI flag; the
+rest are config-only (`.abicheck.yml`'s `compile:` block) — there is no
+per-run CLI spelling for them at all:
+
 | Dial | Use |
 |---|---|
-| `--lang c\|c++` | language of the surface |
-| `--compiler`, `--compiler-prefix` | select the compiler driver used for header extraction |
-| `--compiler-option` (repeatable) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
-| `--sysroot`, `--include` / `-I`, `--nostdinc` | header search context |
-| `--ast-frontend` | which header-AST backend parses the headers |
-| `--env-matrix` | compare across several environments in one run |
+| `--include` / `-I` | header search context (CLI flag) |
+| `compile:`'s `lang` key | language of the surface (`c` or `c++`) |
+| `compile:`'s `compiler` key | select the compiler driver used for header extraction |
+| `compile:`'s `options` key (list) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
+| `compile:`'s `sysroot`/`nostdinc` keys | header search context beyond `--include` |
+| `compile:`'s `frontend` key | which header-AST backend parses the headers |
+| `--env-matrix` (compare only) | compare across several environments in one run |
 
-Project-level defaults belong in `.abicheck.yml` rather than repeated on the
-command line; the exhaustive key reference is
-[the config file page](../../docs/reference/config-file.md), and
-`abicheck project validate` checks a project's own configuration.
+Project-level defaults belong in `.abicheck.yml`; the exhaustive key
+reference is [the config file page](../../docs/reference/config-file.md),
+and `abicheck project validate` checks a project's own configuration.
 
 ## Two distinct failure modes, do not conflate them
 
