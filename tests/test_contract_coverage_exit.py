@@ -326,33 +326,6 @@ class TestTheGatingConditionIsVisible:
         assert "floored" not in tie
         assert "below" not in tie
 
-    def test_scan_explains_its_coverage_gated_exit(self, tmp_path: Path) -> None:
-        """`scan`'s text renderer ignores the ledger keys, so without this the
-        command printed a clean verdict and then failed silently (Codex
-        review). Built from the summary it already has -- the diff never
-        reaches the scan CLI, which is why the announcement cannot live in
-        the service-shared `_run_baseline_compare`."""
-        old_p, new_p = _write(tmp_path, *_compatible_pair())
-        result = CliRunner().invoke(
-            main,
-            [
-                "scan",
-                str(new_p),
-                "--against",
-                str(old_p),
-                "--contract",
-                "exports",
-            ],
-        )
-        assert result.exit_code == 1, result.output
-        assert "Contract coverage incomplete" in result.output
-        assert "export_table" in result.output
-        # It must say coverage RAISED the exit. `outcome.exit_code` has
-        # already had the floor folded in, so passing that as the base made
-        # the notice claim the exit "was already 1" for the very case where
-        # coverage is what made it 1 (Codex review).
-        assert "floored to 1" in result.output
-        assert "already" not in result.output
 
     def test_a_non_json_secondary_report_still_gets_the_notice(
         self, tmp_path: Path
@@ -477,7 +450,7 @@ class TestTheExitCodeContractIsDocumented:
     undocumented failure -- or, under the severity scheme, as a severity error
     (Codex review)."""
 
-    @pytest.mark.parametrize("command", ["compare", "scan"])
+    @pytest.mark.parametrize("command", ["compare"])
     def test_the_command_help_documents_the_coverage_exit(self, command: str) -> None:
         help_text = CliRunner().invoke(main, [command, "--help"]).output
         assert "contract coverage" in help_text.lower(), help_text
@@ -495,7 +468,7 @@ class TestTheExitCodeContractIsDocumented:
 
 
 class TestTheProgrammaticApiStaysQuiet:
-    """`fold_coverage_exit` is on `service_scan.run_scan()`'s path, so it must
+    """`fold_coverage_exit` is on the programmatic API's path, so it must
     stay pure. A library call that writes to stderr is an unexpected side
     effect for a caller that already gets the coverage details back in its
     result (Codex review) -- and it was a real one, since the announcement
@@ -524,40 +497,6 @@ class TestTheProgrammaticApiStaysQuiet:
         assert module_level == [], module_level
 
 
-class TestCompareAndScanFoldTheAxisIdentically:
-    """§6.4's cross-command parity Gate, for the axis Phase 7 made real.
-
-    A ledger that gated one command and not the other would be exactly the
-    divergence that Gate exists to catch -- and it was the live risk here,
-    since `scan --against` builds its exit code in its own module.
-    """
-
-    @pytest.mark.parametrize(
-        ("pair", "mode", "expected"),
-        [
-            # Compatible + unresolvable domain: the coverage axis alone.
-            (_compatible_pair(), "exports", 1),
-            # A real break the selected domain resolves: the compatibility
-            # axis alone, and both commands must agree on that too -- parity
-            # is about the whole fold, not only its coverage half.
-            (_breaking_pair(), "public", 4),
-            # A break the selected domain cannot resolve: neither command may
-            # call uncertainty a break, and neither may call it clean.
-            (_breaking_pair(), "exports", 1),
-        ],
-    )
-    def test_both_commands_reach_the_same_exit(
-        self, tmp_path: Path, pair, mode: str, expected: int
-    ) -> None:
-        old_p, new_p = _write(tmp_path, *pair)
-        common = ["--contract", mode]
-        runner = CliRunner()
-        compare = runner.invoke(main, ["compare", str(old_p), str(new_p), *common])
-        scan = runner.invoke(
-            main, ["scan", str(new_p), "--against", str(old_p), *common]
-        )
-        assert compare.exit_code == expected, compare.output
-        assert scan.exit_code == expected, scan.output
 
 
 class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
@@ -616,7 +555,7 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         assert report["contract_coverage_failures"], report
         assert report["contract_coverage_exit_contribution"] == 0
 
-    @pytest.mark.parametrize("command", ["compare", "scan"])
+    @pytest.mark.parametrize("command", ["compare"])
     def test_it_is_rejected_without_contract_evaluation(
         self, tmp_path: Path, command: str
     ) -> None:
@@ -626,16 +565,11 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         coverage unless a domain was selected, so the value would be recorded
         as active configuration and read back as nothing (Codex review).
 
-        Rejected rather than silently accepted, and on both commands --
-        `scan --against` resolves packs through the same check.
+        Rejected rather than silently accepted.
         """
         old_p, new_p = _write(tmp_path, *_compatible_pair())
         pack = str(self._warn_pack(tmp_path))
-        argv = (
-            ["compare", str(old_p), str(new_p), "--pack", pack]
-            if command == "compare"
-            else ["scan", str(new_p), "--against", str(old_p), "--pack", pack]
-        )
+        argv = ["compare", str(old_p), str(new_p), "--pack", pack]
         result = CliRunner().invoke(main, argv)
         assert result.exit_code == 64, result.output
         assert "contract.unresolved" in result.output

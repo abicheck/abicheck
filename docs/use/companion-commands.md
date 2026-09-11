@@ -25,12 +25,13 @@ that's noted — none of these are documented as a public CLI path anymore.
 
 | Deleted command | Status |
 |---|---|
-| `baseline` (registry group: push/pull/list/delete) | No replacement command. Use `scan --against OLD` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md). |
+| `baseline` (registry group: push/pull/list/delete) | No replacement command. Pass the old dump/library straight to `compare OLD NEW` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md). |
 | `collect`, `merge`, `recommend-collect-mode` | Gone from the CLI. `dump --sources`/`--build-info` auto-collects build/source evidence inline; `compare` auto-ingests each side's embedded build-source pack, or an out-of-band pack via `--build-info old=PATH`/`--build-info new=PATH` (auto-detects `abicheck_inputs/` packs too). Library functions survive for internal/programmatic use only. |
 | `debian-symbols` | No CLI replacement. Library functions still exist in `abicheck/debian_symbols.py` (`generate_symbols_file`, `validate_symbols`, `diff_symbols_files`, `parse_symbols_file`, etc.) for programmatic/Python API use only. See [Debian Symbols](debian-symbols.md). |
 | `doctor` | No replacement command. |
 | `config` (scaffolding subcommand: `config validate`, `config show-effective`) | No replacement command. Config loading is strict now (unknown keys, wrong types, bad enum values are hard errors, exit `64`), so `validate` is less necessary; there is no `show-effective` equivalent. |
 | `init` | No replacement command — no more `.abicheck.yml` scaffolding generator. Write the file by hand; see [Config File Reference](../reference/config-file.md) for the schema/keys. |
+| `scan` (the source-intelligence root command, with `--against`, `--budget`, `--abi3`, `--crosscheck` and the one-build audit mode) | No single replacement. `--depth` moved to `dump`/`compare` unchanged, and comparing a build against a stored baseline is `compare OLD NEW` — see [Evidence depth](evidence-depth.md). The one-build audit is `dump` (structured facts you can read or keep as the next comparison's baseline; see [Your ABI Surface](../learn/abi-surface.md)). The intra-version cross-source hygiene checks, the compiler-free pattern pre-scan, the points-of-interest work-list, the `--budget` guard and the single-module `--abi3` floor audit have **no CLI replacement** — their engine code survives as library functions only. |
 | `surface-report` | No replacement command. |
 | `graph compare` / `graph explain` | No replacement command. |
 | `pr-comment` | Moved off the public CLI. Now invoked only as `python -m abicheck.cli_pr_comment`, used internally by the GitHub Action — not a documented end-user command. |

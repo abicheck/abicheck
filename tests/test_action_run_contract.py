@@ -49,6 +49,12 @@ _CMD_SUBCMD_RE = re.compile(r'CMD\+=\(([a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)\)')
 _KNOWN_SUBCOMMANDS = {
     "dump", "compare", "deps tree", "deps compare", "scan",
 }
+#: ``scan`` was removed from the CLI. It stays in `_KNOWN_SUBCOMMANDS` above
+#: purely so the parser keeps segmenting run.sh's branches correctly (its
+#: flags must not spill into the next branch's set), but there is no command
+#: left to validate them against, so it is excluded here. Drop both entries
+#: once run.sh's own scan branch goes.
+_VALIDATED_SUBCOMMANDS = _KNOWN_SUBCOMMANDS - {"scan"}
 
 
 def _flags_by_subcommand() -> dict[str, set[str]]:
@@ -87,7 +93,8 @@ def _valid_flags(subcommand: str) -> set[str]:
     # rather than wrapping it — the comment below about joining wrapped lines
     # only covers word-wrap inside the help *body* text, not this column
     # truncation, and an ellipsis-truncated flag can never match a real one
-    # (a false "action/run.sh passes an option scan doesn't accept" failure,
+    # (a false "action/run.sh passes an option the subcommand doesn't accept"
+    # failure,
     # reproduced deterministically at COLUMNS=80/unset).
     env = {
         **os.environ,
@@ -95,11 +102,11 @@ def _valid_flags(subcommand: str) -> set[str]:
         "PYTHONIOENCODING": "utf-8",
         "COLUMNS": "300",
     }
-    # `compare`/`dump`/`scan --help` only show a curated common subset (G21.8
+    # `compare`/`dump --help` only show a curated common subset (G21.8
     # collapse M2); `--help-all` is the full surface and is what this test
     # needs to validate action/run.sh's flags against. Other subcommands
     # don't have the curated/full split, so they keep plain --help.
-    help_flag = "--help-all" if subcommand in ("compare", "dump", "scan") else "--help"
+    help_flag = "--help-all" if subcommand in ("compare", "dump") else "--help"
     out = subprocess.run(
         [sys.executable, "-m", "abicheck", *parts, help_flag],
         capture_output=True, text=True, check=True,
@@ -117,16 +124,17 @@ def test_run_sh_parses_into_known_subcommands() -> None:
     # `merge`/`appcompat` modes are gone (ADR-043: folded into compare
     # --used-by / automatic dump/compare ingestion); `deps tree` covers the
     # dump mode's stack-check/deps dispatch.
-    assert {"dump", "compare", "scan", "deps tree"} <= set(by_sub)
-    assert by_sub["scan"], "no flags parsed for scan — parser drifted"
+    assert {"dump", "compare", "deps tree"} <= set(by_sub)
+    assert by_sub["compare"], "no flags parsed for compare — parser drifted"
 
 
-@pytest.mark.parametrize("subcommand", sorted(_KNOWN_SUBCOMMANDS))
+@pytest.mark.parametrize("subcommand", sorted(_VALIDATED_SUBCOMMANDS))
 def test_action_flags_are_real_cli_options(subcommand: str) -> None:
     """Every --flag the action passes for a mode is accepted by its subcommand.
 
-    This would have caught the ``scan --build-config`` regression (a flag scan
-    does not define) and fails on any future action↔CLI drift, per subcommand.
+    This would have caught the ``--build-config`` regression (a flag the
+    subcommand does not define) and fails on any future action↔CLI drift, per
+    subcommand.
     """
     by_sub = _flags_by_subcommand()
     used = by_sub.get(subcommand, set())

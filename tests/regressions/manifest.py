@@ -427,7 +427,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
             "tests/test_explicit_source_extractor_propagation.py",
-            "tests/test_dump_scan_l3_comparability.py",
         ),
         known_gaps=(
             KnownGap(

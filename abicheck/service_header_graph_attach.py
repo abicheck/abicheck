@@ -15,7 +15,7 @@
 
 """``_attach_header_graph``, split out of ``service.py`` purely to stay under
 the AI-readiness 2000-line hard cap -- the identical reason `service_render.py`/
-`service_scan.py`/`service_compare_pipeline.py`/`service_dump_pipeline.py`
+`service_compare_pipeline.py`/`service_dump_pipeline.py`
 already moved out of that file (see ``service.py``'s own tail-of-file re-export
 block for the established precedent this follows). No behavior change: same
 function body, same signature.
@@ -30,7 +30,7 @@ the module's own ``__dict__`` at call time, regardless of where the name was
 originally defined.
 
 No import-cycle risk: this module imports from ``.compile_context``,
-``.service_scan``, ``.header_utils``, ``.errors``, ``.model`` -- none of which
+``.workflows.header_inputs``, ``.header_utils``, ``.errors``, ``.model`` -- none of which
 import ``.service`` or this module back.
 """
 

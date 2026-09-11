@@ -38,11 +38,11 @@ from .model import AbiSnapshot
 
 # `_attach_header_graph` moved to `service_header_graph_attach.py`, purely to
 # stay under the AI-readiness 2000-line hard cap -- the identical reason
-# `service_render.py`/`service_scan.py`/`service_compare_pipeline.py`/
+# `service_render.py`/`service_compare_pipeline.py`/
 # `service_dump_pipeline.py` (re-exported further down this file) already
 # moved out. Imported here, eagerly, rather than down with those: unlike
 # them, this module has no import-cycle relationship with `service.py`
-# itself (it reaches `.compile_context`/`.service_scan`/`.header_utils`/
+# itself (it reaches `.compile_context`/`.workflows.header_inputs`/`.header_utils`/
 # `.errors` directly, none of which import `.service`), so there is no
 # ordering constraint forcing it to the tail. Re-exported under its original
 # private name so both `monkeypatch.setattr("abicheck.service.
@@ -85,8 +85,8 @@ from .workflows.input_resolution import (
 # PE/Mach-O header-scoped dump lives in the sibling module service_header_scoped
 # (service.py is at the file-size cap). Bound via importlib rather than a static
 # `from .service_header_scoped import ...` -- service_header_scoped reaches
-# service_scan, which reaches back to service through the pre-existing,
-# already-baselined cli_buildsource/scan_engine SCC (AGENTS.md "M1-3"/CLAUDE.md
+# back to service through the pre-existing, already-baselined cli_buildsource
+# SCC (AGENTS.md "M1-3"/CLAUDE.md
 # "What NOT to do"); a static import here would pull this new leaf module into
 # that same cycle, which the AI-readiness import-cycle-growth gate rejects. An
 # `importlib.import_module` call is a plain function call, not an
@@ -115,7 +115,7 @@ if TYPE_CHECKING:
 # ── Binary dumping (extracted to leaf module ``service_dump_native`` to stay
 # under the AI-readiness size cap, the same pattern
 # ``service_metadata_attach``/``service_header_graph_attach``/
-# ``service_header_scoped``/``service_render``/``service_scan``/
+# ``service_header_scoped``/``service_render``/
 # ``service_compare_pipeline``/``service_dump_pipeline`` already follow;
 # re-exported verbatim below so ``from abicheck.service import run_dump``
 # and the several ``_dump_elf``/``_dump_pe``/``_dump_macho``/

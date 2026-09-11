@@ -230,7 +230,7 @@ def _pair_wide_dialect_override(
     """Pin ``-std=gnu++20`` for BOTH compare sides at once, or neither (P0 fix).
 
     Thin wrapper around the shared core
-    (:func:`~abicheck.service_scan.pair_wide_cxx20_std_override`, also used by
+    (:func:`~abicheck.cxx20_pair_dialect.pair_wide_cxx20_std_override`, also used by
     ``service.run_compare_request``'s Python-API/MCP path, so the policy can't
     drift between the two front-ends) that applies the decision to this CLI
     path's two ``CompileContext`` objects: ``compile_context`` (used by the

@@ -689,7 +689,7 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
     drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
     real L2). Decorators apply bottom-up, so the options are listed in reverse of
     their displayed order. Dest names match the ``dumper.dump`` /
-    :class:`~abicheck.service_scan.CompileContext` kwargs exactly, except for the
+    :class:`~abicheck.compile_context.CompileContext` kwargs exactly, except for the
     ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
     :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
     """
@@ -1119,7 +1119,7 @@ def resolve_compile_context(
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
     The single entry point the ``@compile_context_options`` family resolves to
-    (ADR-037 D3): construct a :class:`~abicheck.service_scan.CompileContext` from
+    (ADR-037 D3): construct a :class:`~abicheck.compile_context.CompileContext` from
     the decorator's flags, then delegate to :func:`merge_compile_config` with the
     ``--ast-frontend`` / ``--nostdinc`` explicitness read from the Click parameter
     source (so an explicitly-typed value — even a default-looking ``auto`` — beats

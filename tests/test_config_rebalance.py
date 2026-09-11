@@ -356,7 +356,7 @@ class TestFlagBudget:
             for opt in (*p.opts, *p.secondary_opts)
         }
 
-    @pytest.mark.parametrize("command", ["compare", "scan"])
+    @pytest.mark.parametrize("command", ["compare", "dump"])
     def test_demoted_families_are_gone(self, command: str) -> None:
         spellings = self._option_spellings(main.commands[command])
         for flag in self.REMOVED_CONFIG_DUPLICATES:
@@ -392,7 +392,7 @@ class TestFlagBudget:
         for flag in ("--severity-preset", "--show-filtered", "--depth",
                      "--exit-code-scheme", "--scope-public-headers",
                      # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
-                     # the toolchain family (shared with dump/scan) stay visible.
+                     # the toolchain family (shared with dump) stay visible.
                      # --gcc-path, the former spelling, is removed outright;
                      # --compiler is its visible successor.
                      "--debug-root", "--compiler", "--sysroot"):

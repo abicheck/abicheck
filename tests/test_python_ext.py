@@ -18,7 +18,7 @@
 Covers: extension recognition (Cython/pybind11/C-ext, abi3 vs version-specific,
 free-threaded), the stable-ABI classifier, the compare-time detector (stable-ABI
 violations, abi3-dropped, GIL/free-threaded switch), snapshot serialization
-round-trip, and the ``abicheck scan --abi3`` single-artifact audit.
+round-trip, and the shared single-artifact Stable-ABI audit helper.
 """
 
 from __future__ import annotations
@@ -335,7 +335,7 @@ def test_added_stable_import_is_not_flagged_as_floor_raise() -> None:
     # Adding a newer *stable* symbol (PyType_GetName, 3.11) is NOT a finding:
     # without the module's declared floor we cannot prove any supported
     # interpreter was dropped, so the compare-time detector stays silent
-    # (floor conformance is the `scan --abi3` audit's job).
+    # (floor conformance is the single-artifact audit's job).
     old = _ext_snapshot("1.0", ["PyList_New", "PyLong_FromLong"])
     new = _ext_snapshot("2.0", ["PyList_New", "PyLong_FromLong", "PyType_GetName"])
     result = compare(old, new)
@@ -612,131 +612,24 @@ def _write_snapshot(tmp_path: object, snap: AbiSnapshot) -> str:
     return path
 
 
-def _scan_abi3(path: str, *args: str) -> object:
-    """Invoke ``scan <path> --depth binary`` with extra args."""
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    return CliRunner().invoke(main, ["scan", path, "--depth", "binary", *args])
 
 
-#: Promote the audit finding to a hard gate (scan's advisory→error path).
-_GATE = ("--crosscheck", "python_stable_abi_violation=error")
 
 
-def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:
-    # PyType_GetName entered the Stable ABI in 3.11; under a 3.9 floor it is a
-    # violation. Advisory by default (exit 0), and gated to exit 2 on promotion.
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9")
-    assert result.exit_code == 0, result.output
-    assert "python_stable_abi_violation" in result.output
-
-    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
-    assert gated.exit_code == 2, gated.output
 
 
-def test_scan_crosscheck_rejects_compare_time_python_kinds(tmp_path: object) -> None:
-    # Only the single-artifact audit finding is promotable via --crosscheck. The
-    # compare-time kinds gate through compare's own verdict, so promoting them
-    # here is rejected as an unknown cross-check (documented boundary).
-    snap = _ext_snapshot("2.0", ["PyList_New"])
-    path = _write_snapshot(tmp_path, snap)
-    result = _scan_abi3(
-        path, "--abi3", "3.9", "--crosscheck", "python_abi3_dropped=error"
-    )
-    assert result.exit_code != 0
-    assert "unknown cross-check" in result.output
 
 
-def test_scan_abi3_clean_passes(tmp_path: object) -> None:
-    # Floor 3.12 admits PyType_GetName (added 3.11) → no findings, even gated.
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
-    assert result.exit_code == 0, result.output
-    assert "python_stable_abi_violation" not in result.output
 
 
-def test_scan_abi3_rejects_non_extension(tmp_path: object) -> None:
-    # --abi3 on a plain C library is a usage error (nothing to audit).
-    elf = ElfMetadata()
-    elf.symbols = [
-        ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
-    ]
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", elf=elf)
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9")
-    assert result.exit_code != 0
-    assert "not a recognisable CPython extension" in result.output
 
 
-def test_scan_abi3_flags_private_import(tmp_path: object) -> None:
-    # A private _Py* import is a violation at any floor.
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9", *_GATE)
-    assert result.exit_code == 2, result.output
-    assert "python_stable_abi_violation" in result.output
 
 
-def test_scan_abi3_json_output_carries_finding(tmp_path: object) -> None:
-    import json as _json
-
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9", "--format", "json")
-    assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
-    # The abi3 audit coverage row records it ran AND names the offending symbol,
-    # so a CI artifact tells the user which import to fix (not just a count).
-    rows = {row.get("layer"): row for row in data.get("coverage", [])}
-    assert "abi3_audit" in rows
-    assert "_PyObject_LookupSpecial" in rows["abi3_audit"]["detail"]
 
 
-def test_scan_abi3_text_report_names_offending_symbol(tmp_path: object) -> None:
-    snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9")
-    assert result.exit_code == 0, result.output
-    # The specific non-stable import is visible in the human report, not hidden
-    # behind a bare `python_stable_abi_violation: 1` count.
-    assert "_PyObject_LookupSpecial" in result.output
 
 
-def test_scan_abi3_invalid_floor(tmp_path: object) -> None:
-    snap = _ext_snapshot("2.0", ["PyList_New"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "not-a-version")
-    assert result.exit_code != 0
-    assert "invalid --abi3" in result.output
-
-
-def test_scan_abi3_flags_version_specific_artifact(tmp_path: object) -> None:
-    # `scan --abi3 3.9` on a version-specific `foo.cpython-311.so` must not
-    # certify it clean: the SOABI tag itself pins it to 3.11, so it cannot
-    # satisfy the abi3 floor no matter how stable its imports are.
-    src = "foo.cpython-311-x86_64-linux-gnu.so"
-    snap = _ext_snapshot("1.0", ["PyList_New"], source_path=src, library=src)
-    assert snap.python_ext.is_version_specific is True
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9")
-    assert "python_stable_abi_violation" in result.output
-    assert "cpython-311" in result.output
-    # And it gates when promoted.
-    gated = _scan_abi3(path, "--abi3", "3.9", *_GATE)
-    assert gated.exit_code == 2, gated.output
 
 
 def test_audit_abi3_tagged_artifact_not_version_specific() -> None:
@@ -748,15 +641,6 @@ def test_audit_abi3_tagged_artifact_not_version_specific() -> None:
     assert audit_stable_abi_imports(snap.python_ext, (3, 9)) == []
 
 
-def test_scan_abi3_flags_unknown_public_symbol(tmp_path: object) -> None:
-    # A public Py* symbol absent from the authoritative Stable-ABI set
-    # (PyUnicode_AsUTF8 — public but never Limited API) is a violation.
-    snap = _ext_snapshot("2.0", ["PyList_New", "PyUnicode_AsUTF8"])
-    path = _write_snapshot(tmp_path, snap)
-
-    result = _scan_abi3(path, "--abi3", "3.9")
-    assert result.exit_code == 0, result.output
-    assert "python_stable_abi_violation" in result.output
 
 
 def test_unknown_public_import_flagged_in_compare() -> None:
@@ -827,18 +711,6 @@ def test_audit_supplied_floor_used_when_no_lower_declared() -> None:
     assert any("PyType_GetName" in str(f.new_value) for f in flagged)
 
 
-def test_scan_abi3_honors_lower_declared_floor_end_to_end(tmp_path: object) -> None:
-    # Codex P2 (a233b36): `scan --abi3 3.12 --crosscheck …=error` on a cp39-abi3
-    # artifact importing a 3.11-only symbol must FAIL (exit 2), not certify clean
-    # — the tag still advertises 3.9 where the symbol is missing.
-    src = "foo.cp39-abi3-win_amd64.pyd"
-    snap = _ext_snapshot(
-        "2.0", ["PyList_New", "PyType_GetName"], source_path=src, library=src
-    )
-    path = _write_snapshot(tmp_path, snap)
-    result = _scan_abi3(path, "--abi3", "3.12", *_GATE)
-    assert result.exit_code == 2, result.output
-    assert "python_stable_abi_violation" in result.output
 
 
 # ── Cross-platform detection (PE / Mach-O) ──────────────────────────────────

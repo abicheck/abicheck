@@ -387,7 +387,7 @@ class TestEvidenceReading:
 
         severity_options = {
             opt
-            for name in ("compare", "scan")
+            for name in ("compare", "dump")
             for p in main.commands[name].params
             if getattr(p, "param_type_name", None) == "option"
             for opt in p.opts

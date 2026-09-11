@@ -202,7 +202,6 @@ class TestCompareHelpAllDisclosure:
         for command, common_names in (
             ("compare", cli_help.COMPARE_COMMON_OPTION_NAMES),
             ("dump", cli_help.DUMP_COMMON_OPTION_NAMES),
-            ("scan", cli_help.SCAN_COMMON_OPTION_NAMES),
         ):
             cmd = main.commands[command]
             panel_flags: set[str] = set()
@@ -269,12 +268,11 @@ class TestCompareHelpAllDisclosure:
         assert result.exit_code == 0, result.output
 
 
-# ── `dump --help-all` / `scan --help-all` (G21.8 M2 follow-on) ───────────────
+# ── `dump --help-all` (G21.8 M2 follow-on) ──────────────────────────────────
 #
 # Same disclosure as `compare` above, generalized via `cli_help.curated_help_options`.
-# One parametrized class covers the presentational assertions shared by both
-# commands; each command additionally gets its own advanced-option-still-works
-# check, since the functional flag/args differ per command.
+# The parametrized class covers the presentational assertions; the command
+# additionally gets its own advanced-option-still-works check.
 
 _HELP_ALL_COMMANDS: list[
     tuple[str, frozenset[str], tuple[str, ...], tuple[str, ...]]
@@ -293,35 +291,10 @@ _HELP_ALL_COMMANDS: list[
             "--verbose",
         ),
     ),
-    (
-        "scan",
-        cli_help.SCAN_COMMON_OPTION_NAMES,
-        # the strict-suppressions/public-symbol family is gone (CLI audit
-        # PR 4/5) but genuinely render in --help-all via their new "Policy &
-        # severity"/"Public-surface scoping" panel membership (cli_help.py),
-        # so they stay valid examples here.
-        (
-            "--sysroot",
-            "--ast-frontend",
-            "--write",
-            "--pattern-verdicts",
-            "--risk-rules",
-        ),
-        (
-            "--header",
-            "--against",
-            "--depth",
-            "--sources",
-            "--policy",
-            "--contract",
-            "--format",
-            "--output",
-        ),
-    ),
 ]
 
 
-class TestDumpAndScanHelpAllDisclosure:
+class TestDumpHelpAllDisclosure:
     @pytest.mark.parametrize(
         "command,common_names,_advanced,_common", _HELP_ALL_COMMANDS
     )
@@ -430,14 +403,3 @@ class TestDumpAndScanHelpAllDisclosure:
         # rather than rejecting it as "no such option".
         assert "no such option" not in result.output.lower()
 
-    def test_scan_advanced_option_still_functional_after_curated_help_render(
-        self, tmp_path
-    ) -> None:
-        """--severity-preset is hidden from curated `scan --help` but must still work."""
-        CliRunner().invoke(main, ["scan", "--help"])
-        so_path = tmp_path / "lib.so"
-        so_path.write_bytes(b"")
-        result = CliRunner().invoke(
-            main, ["scan", str(so_path), "--severity-preset", "strict"]
-        )
-        assert "no such option" not in result.output.lower()

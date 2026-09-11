@@ -29,7 +29,7 @@ working unchanged.
 ``CompileContext``/``expand_header_inputs`` are imported locally inside
 :func:`_try_header_scoped_dump` rather than at module level, mirroring that
 function's own pre-existing local ``from .dumper import ...`` calls: they
-live in :mod:`service_scan`, which ``service.py`` itself only imports at the
+live in :mod:`compile_context`/:mod:`workflows.header_inputs`, which ``service.py`` itself only imports at the
 bottom of the file (after every function using them is already defined) to
 sidestep an import-cycle risk -- a local import here reaches the same
 already-loaded module without needing to reason about load order at all.

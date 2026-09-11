@@ -28,13 +28,12 @@ abicheck compare``, or the ``main`` prog click uses under test. Unlisted options
 fall through to a default panel, and an unmatched command renders ungrouped — so
 this can never break a command, only prettify it.
 
-``compare``, ``dump``, and ``scan`` additionally get a second, orthogonal
+``compare`` and ``dump`` additionally get a second, orthogonal
 disclosure axis (M2): plain ``--help`` on each shows only a curated common
-subset (:data:`COMPARE_COMMON_OPTION_NAMES` / :data:`DUMP_COMMON_OPTION_NAMES`
-/ :data:`SCAN_COMMON_OPTION_NAMES`), folding the long tail behind
-``--help-all``. See :func:`curated_help_options` (the shared factory) and its
-three per-command instances, ``compare_help_options``/``dump_help_options``/
-``scan_help_options``.
+subset (:data:`COMPARE_COMMON_OPTION_NAMES` / :data:`DUMP_COMMON_OPTION_NAMES`),
+folding the long tail behind ``--help-all``. See :func:`curated_help_options`
+(the shared factory) and its two per-command instances,
+``compare_help_options``/``dump_help_options``.
 """
 
 from __future__ import annotations
@@ -223,75 +222,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Provenance",
             "options": ["--git-tag", "--build-id", "--no-git"],
-        },
-    ],
-    "* scan": [
-        {
-            "name": "Inputs",
-            "options": [
-                "--binary",
-                "--header",
-                "--include",
-                "--sources",
-                "--build-info",
-                "--config",
-            ],
-        },
-        {
-            "name": "Baseline & scope",
-            "options": [
-                "--against",
-                "--depth",
-                "--since",
-                "--changed-path",
-                "--budget",
-            ],
-        },
-        {
-            "name": "Modes",
-            "options": ["--crosscheck", "--risk-rules"],
-        },
-        {
-            "name": "Toolchain (header parsing)",
-            "options": [
-                "--lang",
-                "--ast-frontend",
-                "--compiler",
-                "--compiler-prefix",
-                "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
-            ],
-        },
-        {
-            # Mirrors `compare`'s own panel (CLI audit PR 4/5): these flags are
-            # demoted-to-config (hidden=True) the same way compare's already
-            # were, so listing them here is what keeps them visible in
-            # `scan --help-all` at all (rich-click's OPTION_GROUPS panels
-            # render a listed option regardless of `hidden` -- see
-            # cli_help.py's module docstring / _make_help_callback).
-            "name": "Policy & severity",
-            "options": [
-                "--policy",
-                "--suppress",
-                "--severity-preset",
-            ],
-        },
-        {
-            "name": "Public-surface scoping",
-            "options": [
-                "--scope-public-headers",
-            ],
-        },
-        {
-            "name": "Output",
-            "options": [
-                "--format",
-                "--output",
-                "--dry-run",
-                "--verbose",
-                "--exit-code-scheme",
-            ],
         },
     ],
     # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
@@ -594,43 +524,6 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
     }
 )
 
-SCAN_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
-    {
-        # Inputs
-        "header_pairs",
-        "include_pairs",
-        "sources",
-        "build_info",
-        "build_config",
-        # Baseline & scope
-        "against",
-        "depth",
-        "since",
-        "changed_paths_opt",
-        "budget",
-        # Modes
-        "crosschecks",
-        # Policy & contract
-        "policy",
-        "suppress",
-        # `--contract` is the whole request now -- naming a domain is what
-        # turns the ADR-049 evaluator on (cli_options.resolve_contract_evaluation),
-        # so there is one option here rather than a switch plus a selector.
-        "contract_mode",
-        # Output
-        "fmt",
-        "output",
-        "dry_run",
-        "verbose",
-        # The help options themselves always stay visible
-        "help",
-        "help_all",
-    }
-)
-
 dump_help_options: Callable[[F], F] = curated_help_options(
     "dump", DUMP_COMMON_OPTION_NAMES
-)
-scan_help_options: Callable[[F], F] = curated_help_options(
-    "scan", SCAN_COMMON_OPTION_NAMES
 )

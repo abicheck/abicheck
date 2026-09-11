@@ -13,14 +13,14 @@
 # limitations under the License.
 
 """:class:`CompileContext` -- a leaf module (stdlib-only deps) so a module
-outside the ``cli``/``service``/``scan_engine`` import-cycle-allowlisted
+outside the ``cli``/``service`` import-cycle-allowlisted
 cluster (ADR-055 D1's ``api_types.InputSpec.compile`` field, in particular)
 can type-annotate against it without joining that cluster itself
 (AGENTS.md "What NOT to do": prefer moving shared logic to a leaf module
 both sides can depend on, over extending ``IMPORT_CYCLE_ALLOWLIST``).
 
-``service_scan.py`` re-exports this name (``from .compile_context import
-CompileContext``) so every pre-existing ``from .service_scan import
+``service.py`` re-exports this name (``from .compile_context import
+CompileContext``) so every pre-existing ``from abicheck.service import
 CompileContext`` import keeps working unchanged.
 """
 

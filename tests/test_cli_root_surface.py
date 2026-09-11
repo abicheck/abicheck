@@ -16,7 +16,7 @@
 """Root command-surface behavior tests (ADR-043, consolidated by ADR-054).
 
 The pre-1.0 CLI reset required the public root surface to show *exactly*
-``dump``, ``compare``, ``scan``, ``deps``, ``compat``, plus ``aggregate``
+``dump``, ``compare``, ``deps``, ``compat``, plus ``aggregate``
 (the multi-target CI fan-in gate) added afterward. G30/G32 then grew three
 more root groups (``build-output``, ``project-targets``, ``run-plan``) and a
 ``plan`` diagnostic command one artifact at a time — by the time all four
@@ -30,13 +30,17 @@ avoid. ADR-054 consolidates those four into one ``project`` group
 are dropped from the public CLI entirely (the former stays a library
 function, the latter is now `aggregate --run-plan`).
 
+``scan`` has since been removed outright: a one-build audit is ``dump`` and
+comparing a build against a stored baseline is ``compare``.
+
 The public root surface is therefore *exactly* ``dump``, ``compare``,
-``scan``, ``deps``, ``compat``, ``aggregate``, ``project`` — with no hidden
+``deps``, ``compat``, ``aggregate``, ``project`` — with no hidden
 aliases, and no deprecated shims for the deleted commands (``appcompat``,
 ``plugin-check``, ``baseline``, ``collect``, ``merge``,
 ``recommend-collect-mode``, ``debian-symbols``, ``doctor``, ``config``,
 ``init``, ``surface-report``, ``pr-comment``, ``suggest-suppressions``,
-``probe``, ``build-output``, ``project-targets``, ``run-plan``, ``plan``).
+``probe``, ``build-output``, ``project-targets``, ``run-plan``, ``plan``,
+``scan``).
 This module pins that contract as an executable behavior test, distinct
 from ``test_cli_surface_diff.py`` (which exercises the CLI-surface-dump
 scripts used by the CI gate) and ``test_cli_contract.py`` (the Tier-2
@@ -57,7 +61,6 @@ _PUBLIC_COMMANDS = frozenset(
     {
         "dump",
         "compare",
-        "scan",
         "deps",
         "compat",
         "aggregate",
@@ -84,6 +87,7 @@ _REMOVED_COMMANDS = (
     "project-targets",
     "run-plan",
     "plan",
+    "scan",
 )
 
 
