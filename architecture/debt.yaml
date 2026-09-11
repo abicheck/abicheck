@@ -471,7 +471,7 @@
       "disposition": "migrate",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Shrank 1995 -> ~1190 (ADR-061 gap D, closure package 4's next slice): compare_release_cmd's own pre-execution resolution (input discovery, ADR-065 scope/inventory evidence, the ReleaseScopePlan, the resolved GateOptions, each side's stored-degraded markers -- previously ~180 lines of locals threaded by hand through four separate calls) moved to a real Request -> ResolvedPlan pair, `frontends.cli.release_compare_request.ReleaseCompareRequest`/`ReleaseComparePlan`/`resolve_release_compare_plan`, callable directly from Python with no Click context -- this command now builds one request and unpacks one plan. Still `no_growth`/`migrate`: the command itself (execution dispatch, output rendering, bundle-facts writing) is unmoved, and the new module still depends on `_prepare_compare_release_inputs`/`_resolve_release_package_side` (still `frontends`/flat-`cli_*`-classified, one of which still raises a real `click.UsageError`) -- see `release_compare_request.py`'s own docstring and ADR-061's gap D section for the exact remaining scope.",
       "review_by": "2026-11-30"
     },
     {

@@ -1075,10 +1075,14 @@ paths (ELF under CLI cleanup phase two PR C, PE/Mach-O under ADR-063 Phase
 1) now execute through the one shared `execute_dump_request`.
 
 **What the label does not mean.** This is the typed-resolution foundation,
-not universal frontend convergence. The shared request/plan types still do
-not carry selection, inventory, or acquisition state (ADR-065's scope
-model), so a package or multi-member comparison still assembles that in
-command-level orchestration — gap D below, and the same gap
+not universal frontend convergence. `CompareRequest`/`DumpRequest`
+themselves still carry no selection, inventory, or acquisition state
+(ADR-065's scope model does not apply to a single-pair/single-artifact
+request at all); the release fan-out's own multi-member selection,
+inventory, and acquisition state now live on a sibling typed pair,
+`ReleaseCompareRequest`/`ReleaseComparePlan`, resolvable with one direct
+Python call — see gap D below for exactly what that closes and what is
+still command-level orchestration. The same gap
 [`vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 records against scope convergence. The PE/Mach-O migration is verified by
 mock-based CLI/unit tests only: the layering claim is proven, an end-to-end
@@ -1540,20 +1544,80 @@ projection).
 
 ### D. Typed request/plan and operand convergence
 
-The shared per-artifact contracts exist (Phase 3), but they carry no
-selection, inventory, or acquisition state, so ADR-065's scope model is
-still assembled by command-level orchestration and the release fan-out still
-has no `ResolvedCompareConfig`-shaped object of its own (`gate.py`'s two
-callers fold onto different shapes — see
-[ADR-064](064-canonical-gate-algorithm-and-exit-decision.md) and this plan's
-own `EffectiveGate`/`EffectiveEvaluationConfig` target). Equivalent CLI and
-API input must resolve to equivalent scope, configuration, acquisition
-records, and outcomes.
+**Re-measured, closure package 4 (this section was stale — it described a
+2026-09 snapshot of the tree that several PRs have since moved past; see
+this ADR's own "A blocker recorded once goes stale" lesson under Phase 3).**
+The gap's two original halves are now in different states:
+
+- **The gate-shape half is closed.** `gate.py`'s two callers (`compare`'s
+  `ResolvedCompareConfig` and the release fan-out's `GateOptions`) no
+  longer fold onto independent shapes: `policy/effective_gate.py`'s
+  `EffectiveGate`/`GateSeverityState`/`ScopedGateSelection` is the one
+  converged runtime object both resolve to (`ResolvedCompareConfig.
+  effective_gate`/`GateOptions.effective_gate`, and
+  `workflows.gate.effective_gate_for_resolved_compare_config` for the
+  former's own no-growth-capped module), covering severity, exit-code
+  scheme, `require_complete_analysis`, and ADR-043 scoped-gate selection —
+  see `tests/test_effective_gate.py`'s own characterization/completion
+  split. This is deliberately narrower than the plan's full
+  `EffectiveEvaluationConfig` (policy/contract/assurance/surface/evidence/
+  suppressions namespaces beyond gate) — see this ADR's link to
+  `docs/contribute/plans/duplication-and-convergence-assessment.md`'s P0
+  section, which still names that wider object as not yet attempted.
+- **The scope/inventory/acquisition-state half is landed for the release
+  fan-out's own resolution, but not yet reachable from a typed Python
+  entry point.** `workflows/release_scope.py`'s `ReleaseScopePlan`/
+  `ReleaseScopeResult` (a real `Request -> ResolvedPlan -> Result` pair for
+  ADR-065's scope model) replaced the four independent locals
+  (`old_map`/`new_map`/`matched_keys`/`inventory_evidence`)
+  `cli_compare_release.py` used to thread by hand, and is the actual
+  execution-authoritative input, not a DTO computed alongside it (see
+  `tests/test_release_scope_plan.py`'s completion tests, including
+  `TestScopePlanIsExecutionAuthoritative`). This closure package's own next
+  slice widened that to the *entire* pre-execution resolution — input
+  discovery, inventory evidence, the scope plan, the resolved `GateOptions`,
+  and each side's stored-degraded markers — as one typed request/plan pair,
+  `frontends.cli.release_compare_request.ReleaseCompareRequest`/
+  `ReleaseComparePlan`/`resolve_release_compare_plan`: selection, inventory,
+  and acquisition state are now fields on that shared plan, constructible
+  and resolvable with one ordinary Python function call, not frontend
+  locals (`tests/test_release_compare_request.py`'s
+  `TestReleaseCompareRequestParity` is the completion test: a CLI-shaped
+  invocation and a direct typed-request-shaped call resolve to the same
+  scope, gate configuration, and degraded-member markers).
+
+**What remains open, precisely** (see
+`abicheck/frontends/cli/release_compare_request.py`'s own docstring for the
+same account in code): `resolve_release_compare_plan` is reachable from
+Python with no Click context — but it is not yet reachable from
+`abicheck.service`'s typed API surface, because the functions it must call
+(`_prepare_compare_release_inputs`, `frontends.cli.
+release_variant_operand._resolve_release_package_side`, and their own
+siblings — input discovery, package extraction, stored-variant resolution)
+are still classified `frontends`/flat `cli_*`, not `workflows`/`extract`.
+The `engine-cli-boundary` AI-readiness gate forbids `abicheck.service` from
+importing them directly, and at least one of them
+(`_resolve_release_package_side`) still raises a real `click.UsageError` on
+a malformed stored-package variant rather than a typed `errors.py`
+exception — a caller with no Click context receives that as a plain,
+uncaught exception. Closing this fully needs a real migration slice: move
+that call chain (and its Click-exception raises, converted to the typed
+exception hierarchy the rest of the engine uses) into `workflows`/`extract`
+per this ADR's own migration rules, then give `abicheck.service` a real
+entry point built on it. Also still open: the wider `EffectiveEvaluationConfig`
+namespaces beyond gate (above), and the release fan-out's execution half
+(per-library dump/compare dispatch, matrix/probe expansion, bundle-facts
+writing, output rendering) — this closure package's slice covers only the
+*resolution* half, matching `workflows/artifact/contracts.py`'s own
+Milestone A/B precedent of resolving before executing.
 
 **Completion test:** equivalent CLI and typed-API inputs produce equal
 resolved scope, configuration, acquisition records, and outcomes across
 live and stored operands; selection, inventory, and acquisition state are
-fields on the shared request/plan, not frontend locals.
+fields on the shared request/plan, not frontend locals. Met for the
+release fan-out's own pre-execution resolution, reachable as one direct
+Python call; not yet met for a caller with no CLI-layer dependency at all
+(`abicheck.service`), which is the remaining scope above.
 
 ### E. Storage and model ownership, not file placement
 
