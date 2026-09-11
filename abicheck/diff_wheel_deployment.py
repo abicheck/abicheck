@@ -293,9 +293,17 @@ def check_wheel_tag_architecture_mismatch(
     same normalization as the other G10/G27 checks) — a
     :func:`abicheck.package.parse_wheel_architecture_claim` value (e.g.
     ``"x86_64"``, ``"aarch64"``, ``"arm64"``). Returns ``[]`` when no claim
-    is declared, the claim isn't a recognized architecture token, neither
-    *elf* nor *macho* carries a recorded machine/cpu_type, or the recorded
-    value satisfies the claim.
+    is declared, neither *elf* nor *macho* carries a recorded machine/
+    cpu_type, or the recorded value satisfies the claim. A claim that isn't
+    a recognized architecture token *at all* (outside
+    :data:`abicheck.model.wheel_arch_claims.WHEEL_ARCH_CLAIMS`) also
+    produces no finding here — but one that IS a recognized token for the
+    *other* binary format (e.g. a Mach-O-only ``arm64`` claim compared
+    against an ELF binary, or vice versa) is always flagged as a mismatch:
+    it's a real claim this detector understands, just not one either
+    recognized ELF or Mach-O spelling could ever satisfy for the format
+    actually under comparison (Codex review, PR #1221, Finding 1 — see
+    :func:`_elf_arch_mismatch`/:func:`_macho_arch_mismatch`).
 
     For a fat/universal Mach-O, :attr:`MachoMetadata.cpu_type` is only the
     *one* slice ``parse_macho_metadata`` selected for the host running
@@ -417,6 +425,19 @@ def _elf_arch_mismatch(elf: ElfMetadata, claimed: str) -> list[Change] | None:
     name = getattr(elf, "soname", "") or "<binary>"
     expected = _ARCH_CLAIM_TO_ELF_MACHINE.get(claimed)
     if expected is None:
+        if claimed in WHEEL_ARCH_CLAIMS:
+            # Codex review, PR #1221, Finding 1: `claimed` is a real,
+            # config-accepted architecture token (it's in the cross-format
+            # union `WHEEL_ARCH_CLAIMS`), but not one this ELF-specific dict
+            # recognizes -- e.g. a Mach-O-only `arm64` claim compared
+            # against an ELF binary. Silently returning `[]` here would let
+            # a token that's plausible for the *wrong* binary format disable
+            # this whole gate for whatever ELF binary is actually under
+            # comparison, no matter how obviously it mismatches. Treat it as
+            # a hard, unconditional mismatch instead: no ELF-recognized
+            # spelling can ever satisfy a claim this format's own dict has
+            # no entry for.
+            return _arch_mismatch(name, claimed, elf_machine)
         return []
     if elf_machine not in expected:
         return _arch_mismatch(name, claimed, elf_machine)
@@ -482,6 +503,15 @@ def _macho_arch_mismatch(macho: MachoMetadata, claimed: str) -> list[Change]:
         return []
     expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
     if expected is None:
+        if claimed in WHEEL_ARCH_CLAIMS:
+            # Codex review, PR #1221, Finding 1: the ELF-side symmetric
+            # case -- `claimed` is a real, config-accepted token (e.g. an
+            # ELF-only `aarch64` claim) that this Mach-O-specific dict has
+            # no entry for. See `_elf_arch_mismatch`'s matching branch for
+            # the full rationale; the fix is the same in both directions.
+            return _arch_mismatch(
+                macho.install_name or "<binary>", claimed, ", ".join(slices)
+            )
         return []
     if any(s.upper() in expected for s in slices):
         return []

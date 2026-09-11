@@ -651,10 +651,12 @@ class TestCompareRequestEnvMatrixPathCompat:
         )
         assert via_path.env_matrix is not None
         assert via_path.env_matrix == via_value.env_matrix
-        # The path is consumed -- never left set alongside the resolved
-        # value, which would make a later `.replace()` see both fields
-        # populated and spuriously raise the "not both" usage error below.
-        assert via_path.env_matrix_path is None
+        # Fresh Codex review, follow-up: `env_matrix_path` must keep
+        # reflecting what the caller actually passed -- a typed caller that
+        # wants to inspect or log the original path it gave must still be
+        # able to (see `TestCompareRequestEnvMatrixPathReplace` below for
+        # the `.replace()` half of this same contract).
+        assert via_path.env_matrix_path == p
 
     def test_env_matrix_path_missing_file_raises_validation_error(
         self, tmp_path
@@ -693,6 +695,63 @@ class TestCompareRequestEnvMatrixPathCompat:
                 env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"}),
                 env_matrix_path=p,
             )
+
+    def test_replace_with_a_new_env_matrix_path_re_resolves_from_it(
+        self, tmp_path
+    ) -> None:
+        """Codex review, fresh gap on this same shim (PR #1221): the earlier
+        fix reset `env_matrix_path` to `None` right after resolving it, so
+        (a) a caller could no longer inspect the path it originally gave,
+        and (b) `.replace(env_matrix_path=new_path)` on an already-resolved
+        request combined the *inherited* resolved `env_matrix` with the
+        *new* path and incorrectly raised the "not both" error -- even
+        though the caller's clear intent was "re-resolve from this new
+        path," not "give me both a path and a matrix at once." Both are
+        fixed by tracking, internally, whether the current `env_matrix` was
+        *derived* from a path here (and from which one) rather than given
+        explicitly.
+        """
+        p1 = tmp_path / "env1.yaml"
+        p1.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        p2 = tmp_path / "env2.yaml"
+        p2.write_text('runtime_floors:\n  GLIBC: "2.31"\n')
+
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix_path=p1,
+        )
+        assert req.env_matrix_path == p1
+        assert req.env_matrix is not None
+        assert req.env_matrix.runtime_floors == {"GLIBC": "2.28"}
+
+        replaced = req.replace(env_matrix_path=p2)
+        assert replaced.env_matrix_path == p2
+        assert replaced.env_matrix is not None
+        assert replaced.env_matrix.runtime_floors == {"GLIBC": "2.31"}
+
+    def test_replace_with_env_matrix_path_over_an_explicit_env_matrix_still_raises(
+        self, tmp_path
+    ) -> None:
+        """The finding's own third scenario: when `env_matrix` was given
+        *explicitly* by the original caller (never derived from a path
+        here), `.replace(env_matrix_path=...)` must still raise the "not
+        both" error -- that really is an ambiguous combination, unlike the
+        derived-value case in the test above."""
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.31"}),
+        )
+        assert req.env_matrix_path is None
+
+        with pytest.raises(ValidationError, match="not both"):
+            req.replace(env_matrix_path=p)
 
     def test_request_stays_hashable_after_env_matrix_path_resolution(
         self, tmp_path

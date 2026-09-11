@@ -199,26 +199,48 @@ class CompareRequest:
     #: between "here is the resolved value" and "load it from this file" the
     #: caller didn't ask for.
     env_matrix_path: Path | None = None
+    #: Internal bookkeeping (not public API): the ``Path`` ``env_matrix`` was
+    #: last *derived* from here, or ``None`` when ``env_matrix`` is absent or
+    #: was given explicitly rather than resolved from a path.
+    #: ``compare=False``/``repr=False`` so it never affects equality,
+    #: hashing, or ``repr()``.
+    #:
+    #: Fresh Codex review on this same shim: an earlier version *reset*
+    #: ``env_matrix_path`` to ``None`` right after resolving it, so a caller
+    #: could no longer inspect the path it gave, and
+    #: ``request.replace(env_matrix_path=new_path)`` on an already-resolved
+    #: request combined the *inherited* resolved ``env_matrix`` with the
+    #: *new* path and spuriously hit the "not both" error below -- even
+    #: though replacing the path is an unambiguous "re-resolve from here"
+    #: request. This field lets ``__post_init__`` tell "derived" (may be
+    #: silently re-resolved against a new path) apart from "explicit" (still
+    #: conflicts with any path) without erasing ``env_matrix_path`` itself.
+    _env_matrix_resolved_path: Path | None = field(
+        default=None, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.env_matrix_path is None:
             return
-        if self.env_matrix is not None:
+        requested_path = Path(self.env_matrix_path)
+        if self.env_matrix is not None and self._env_matrix_resolved_path is None:
+            # Never derived here (on this request or a `.replace()`
+            # ancestor) -- a genuinely explicit value, so pairing it with a
+            # path is the ambiguous combination this guard rejects.
             raise ValidationError(
                 "CompareRequest: pass either env_matrix or env_matrix_path, "
                 "not both (ambiguous which one should take effect)"
             )
+        if (
+            self._env_matrix_resolved_path == requested_path
+            and self.env_matrix is not None
+        ):
+            return  # already resolved from this exact path
+
         from .input_resolution import load_env_matrix
 
-        object.__setattr__(
-            self, "env_matrix", load_env_matrix(Path(self.env_matrix_path))
-        )
-        # Consume it: leaving `env_matrix_path` set would make a later
-        # `dataclasses.replace()` (this class's own `.replace()` included) on
-        # this already-resolved request re-run `__post_init__` with *both*
-        # fields non-`None` and spuriously raise the "not both" usage error
-        # above, even though the caller never passed `env_matrix` themselves.
-        object.__setattr__(self, "env_matrix_path", None)
+        object.__setattr__(self, "env_matrix", load_env_matrix(requested_path))
+        object.__setattr__(self, "_env_matrix_resolved_path", requested_path)
 
     # ADR-050 D2: force a tentative diff through a genuine comparability-
     # contract mismatch (scope/profile fingerprint drift) instead of the

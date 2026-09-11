@@ -293,3 +293,43 @@
   renders it as the identical `; deployment floor <digest>` clause the
   `--no-baseline` audit report's own oneline renderer already established
   — omitted, never a placeholder, when no matrix was declared.
+- **`deployment.runtime_floors.WHEEL_ARCH`'s architecture-mismatch gate no
+  longer silently disables itself for a claim that's real but belongs to
+  the *other* binary format.** The round-9 fix above (the "unrecognized
+  architecture token" `ValueError`) validated `WHEEL_ARCH` against the
+  cross-format *union* of every token either detector dict recognizes
+  (`WHEEL_ARCH_CLAIMS`) — but a token from that union can still be
+  meaningless for the artifact actually under comparison: `WHEEL_ARCH:
+  arm64` (a real, Mach-O-only token) passed config validation even when
+  comparing an ELF binary, and `_elf_arch_mismatch` has no
+  `_ARCH_CLAIM_TO_ELF_MACHINE` entry for `arm64` at all, so it returned `[]`
+  unconditionally — even against a genuinely x86_64 ELF binary. The
+  symmetric gap held for an ELF-only token (e.g. `aarch64`) declared
+  against a Mach-O artifact. Fixed at diff time, where the binary's actual
+  format is known: `_elf_arch_mismatch`/`_macho_arch_mismatch` now treat a
+  claim that's in `WHEEL_ARCH_CLAIMS` but absent from their own per-format
+  dict as an unconditional mismatch (naming the claim and the artifact's
+  actual recorded machine/cpu_type) rather than silently returning `[]`. A
+  claim outside `WHEEL_ARCH_CLAIMS` entirely (never reachable through
+  config validation, but still possible via a hand-built `runtime_floors`
+  mapping through the typed API) keeps the prior "nothing to check"
+  behavior, unchanged.
+- **`CompareRequest.env_matrix_path` now stays inspectable after
+  construction, and `.replace(env_matrix_path=...)` on an already-resolved
+  request re-resolves instead of raising.** The `env_matrix_path` restoration
+  fix above *consumed* the field (reset it to `None`) right after resolving
+  it into `env_matrix`, so `request.env_matrix_path` always read `None` even
+  when a caller explicitly supplied a path, and
+  `request.replace(env_matrix_path=new_path)` on that already-resolved
+  request combined the *inherited* resolved `env_matrix` with the *new*
+  path and spuriously raised the "not both" usage error — even though
+  replacing the path is an unambiguous "re-resolve from here" request, not
+  an attempt to supply both a path and a value at once.
+  `__post_init__` now tracks, via a private (non-equality, non-repr)
+  field, whether the current `env_matrix` was *derived* from a path here
+  (and from which one) rather than given explicitly: a derived value may
+  always be silently re-resolved against a new `env_matrix_path`, while a
+  genuinely explicit `env_matrix` still conflicts with any
+  `env_matrix_path`, exactly as before. `dataclasses.replace()`'s
+  well-known re-run of `__post_init__` on the new instance is what this
+  tracking is designed around.
