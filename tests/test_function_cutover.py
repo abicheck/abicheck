@@ -13,19 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The function detector family's cohort-3 read path (ADR-063 Phase 6B),
-plus the architecture gate that keeps it migrated.
+"""The function-family checker-cutover investigation (ADR-063 Phase 6B),
+plus the architecture gate this module deliberately does NOT register a
+``functions`` cohort with.
 
 Unlike ``tests/test_typedef_cutover.py``/``tests/test_constant_cutover.py``,
-this cohort does not migrate a payload fact -- see ``compare/functions.py``'s
-own module docstring for the full scoping account. So the property under
-test here is narrower, but just as load-bearing: ``function_identity_index``
-must be indistinguishable, from every caller's perspective, from the
-``SymbolIdentityIndex.for_functions`` it replaces -- for a snapshot with no
-``SemanticIR``, one whose ``SemanticIR`` does not cover ``FUNCTION``
+this investigation found no payload fact -- or anything else -- for a
+matching-time ``SemanticIR`` lookup to meaningfully consume; see
+``compare/functions.py``'s own module docstring for the full account of why
+and what landed instead. So the property under test here is narrower: since
+``function_identity_index`` currently performs no ``SemanticIR``/adapter
+read at all, it must be indistinguishable, from every caller's perspective,
+from the ``SymbolIdentityIndex.for_functions`` it replaces -- for a snapshot
+with no ``SemanticIR``, one whose ``SemanticIR`` does not cover ``FUNCTION``
 entities, and one whose real ``SemanticIR`` does cover them (fully or only
 partially). ``TestThroughCompare`` checks the same property one layer up,
 through the real ``diff_symbols._diff_functions`` entry point.
+``TestLegacyFunctionIr`` tests the one piece of real, tested-but-unconsumed
+infrastructure that did land: ``legacy_function_ir``.
 """
 
 from __future__ import annotations
@@ -277,7 +282,16 @@ class TestThroughCompare:
 
 
 class TestSemanticIrCutoverGate:
-    def test_the_migrated_module_reads_no_legacy_function_collection(self) -> None:
+    """``functions`` is deliberately NOT a closed ``MIGRATED_COHORTS`` entry
+    -- see ``compare/functions.py``'s own module docstring for why (a
+    matching-time lookup with nothing real to consume would have been
+    registered infrastructure theater, not a migration; Codex review,
+    PR #1224). These tests exercise the gate's own mechanics generically
+    (they never depended on a ``functions`` registration to do that), plus
+    confirm the whole-repo scan still passes and that ``functions`` stays
+    unregistered on purpose rather than by omission."""
+
+    def test_the_gate_passes_repo_wide(self) -> None:
         import sys
         from pathlib import Path
 
@@ -289,7 +303,7 @@ class TestSemanticIrCutoverGate:
         check_semantic_ir_cutover(findings)
         assert findings.errors == []
 
-    def test_the_functions_cohort_is_registered(self) -> None:
+    def test_the_functions_cohort_is_deliberately_not_registered(self) -> None:
         import sys
         from pathlib import Path
 
@@ -297,11 +311,8 @@ class TestSemanticIrCutoverGate:
         from semantic_ir_cutover import MIGRATED_COHORTS
 
         names = {c.name for c in MIGRATED_COHORTS}
-        assert "functions" in names
-        cohort = next(c for c in MIGRATED_COHORTS if c.name == "functions")
-        assert cohort.modules == ("abicheck/compare/functions.py",)
-        assert "functions" in cohort.forbidden_attributes
-        assert "function_map" in cohort.forbidden_attributes
+        assert "functions" not in names
+        assert {"typedefs", "constants"} <= names
 
     def test_the_gate_actually_fires_on_a_forbidden_read(self) -> None:
         import ast

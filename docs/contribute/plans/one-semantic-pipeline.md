@@ -11766,104 +11766,81 @@ scoped (a `size_bits`/`alignment_bits`-shaped `CanonicalEntity` addition
 for records; nothing further needed for functions, whose spelling is
 already modeled) is the concrete next step, not a redesign.
 
-**Landed (2026-09-11): Phase 6B's third checker cutover -- the function
-family, on a deliberately narrower basis than the "no bug, declined" note
-above rejected.** That note is still correct about what it evaluated: there
-is no cross-backend *spelling*/matching bug to fix for functions today. This
-cohort does not reopen that question -- it migrates something orthogonal
-the "declined for now" framing did not evaluate at all: the *architectural*
-invariant every other landed cohort already satisfies (a migrated module
-never reads the legacy flat collection directly, forcing a future change to
-go through the shared adapter/index instead of an ad hoc flat-field read).
+**Investigated (2026-09-11): a third checker cutover -- the function
+family. Groundwork landed; the cohort itself is NOT registered as closed.**
+This revisits, but does not contradict, the "declined for now" note above:
+that finding was about the SIGNATURE/matching-key problem specifically
+(`canonical_spelling`'s cross-backend agreement, bare-name-collision
+matching), which correctly found no bug there to close. This investigation
+targeted something else: the *architectural* invariant every other landed
+cohort already satisfies (a migrated module never reads the legacy flat
+collection directly), applied to the one part of `_diff_functions` that
+might migrate without inventing new normalizer output -- the old/new
+*matching index* itself (`SymbolIdentityIndex.for_functions`'s
+exact-mangled-name join plus its ambiguity-checked `extern "C"` name-alias
+fallback).
 
-*Why this is a real, safely-scoped slice and not a forced full cutover.*
-`diff_symbols._diff_functions` compares far more than typedefs/constants
-ever did -- parameter signatures, `ref_qualifier`/variadic status, member
-cv-qualification, virtual-method/vtable layout, ctor/dtor reconciliation,
-inline/hidden-friend transitions. None of that is touched by this cohort.
-What migrates is exactly the old/new *matching index* --
-`SymbolIdentityIndex.for_functions`'s exact-mangled-name join plus its
-ambiguity-checked `extern "C"` name-alias fallback -- replaced by
-`abicheck/compare/functions.py`'s `function_identity_index`, which reads
-only through `SemanticIRIndex`/`model.semantic_ir_legacy_adapter.
-legacy_function_ir` (a new sibling of `legacy_typedef_ir`/
-`legacy_constant_ir`, shaped differently from both -- see its own
-docstring), never `AbiSnapshot.functions`/`.function_map` directly. The
-richer per-parameter/return-type/cv/virtual-method/ctor-dtor/hidden-friend
-comparisons stay entirely on the legacy `Function` fields in
-`diff_symbols.py`, unmigrated, because `CanonicalEntity.canonical_spelling`
-combines a whole signature into one opaque `"<return>(<param>, ...)"`
-string with no way to recover which position changed, and the third
-slice's own normalizer does not carry `ref_qualifier`/variadic status at
-all (see `extract/semantic_normalizer.py`'s own "Deliberately excluded from
-this slice" list) -- rebuilding those detectors on that payload today would
-either lose per-position detail or require inventing new normalizer output
-with no detector ready to consume it, which is exactly what this phase's
-non-goal warns against forcing in one pass.
-
-*Why the resolved identity itself does not change.* Investigating whether
-`resolve_function_identity`'s mangled/`extern "C"`/normalized-signature
-tiers could be recomputed from a real `SemanticIR` occurrence instead of
-the flat `Function` object found no second, independently-derived
-representation to prefer -- unlike a typedef's alias map plus its
-*separately* resolved `typedef_entity_ids` sidecar (two computations of the
-same fact that really can disagree), `Function.entity_id` is resolved
-exactly once, at parse time, by every producer (DWARF, both header-AST
-backends, and the ELF-fallback exporter alike), and
+*Why it does not close.* A function's identity has no legacy-vs-IR duality
+to adjudicate the way a typedef's or constant's does: `Function.entity_id`
+is resolved exactly once, at parse time, by every producer (DWARF, both
+header-AST backends, and the ELF-fallback exporter alike), and
 `extract/semantic_normalizer.py`'s own third-slice docstring is explicit
 that it "computes nothing about identity, only reads the `entity_id` each
 backend already resolved" when building a real `SemanticIR` occurrence for
-a function. So `function_identity_index` still calls
-`resolve_function_identity` on the flat object for the actual identity
-computation, on both the real-`SemanticIR` and legacy-adapter-projected
-paths alike -- recomputing it from `EntityId.extra` instead would not add
-evidence, only the risk of a subtly-wrong reimplementation of logic that
-already exists, tested, in `finding_identity.py`.
+a function -- there is no second, independently-derived representation for
+`finding_identity.resolve_function_identity` to prefer over the flat
+`Function` object it already reads. A first draft of
+`abicheck/compare/functions.py`'s `function_identity_index` built a
+`SemanticIRIndex` per comparison (real IR when the snapshot carried one
+covering `FUNCTION`, else a new `legacy_function_ir` adapter projection)
+and looked up each function's `entity_id` in it -- but discarded the
+lookup's result, since the identity itself was still computed from the flat
+object regardless. Review (Codex, PR #1224) correctly flagged this as not a
+migration: a lookup whose result influences nothing cannot be
+distinguished, by any test or mutation run, from not existing at all, and
+registering it as a closed `MIGRATED_COHORTS` entry would have made the
+`semantic-ir-cutover` gate pass while `SemanticIR` content still cannot
+affect function matching -- false assurance for future work, exactly what
+that gate exists to prevent.
 
-*What this buys, given that this is provably behavior-preserving for a
-compliant producer.* (1) satisfies the architectural invariant
-`scripts/semantic_ir_cutover.py`'s `MIGRATED_COHORTS` enforces for every
-other cohort, now extended to a third `("abicheck/compare/functions.py",
-{"functions", "function_map"})` entry with no allowlist; (2) exercises
-`SemanticIRIndex` against a third entity kind whose identity lives in
-`EntityId.extra` rather than a payload `Fact` -- typedefs/constants both
-keyed their comparison on a rendered *display name* string, functions key
-on a raw `EntityId` lookup -- proving the shared abstraction generalizes
-past the "one payload fact" shape; (3) is the scaffold a future,
-better-scoped slice can build on once `CanonicalEntity` grows per-position
-facts that would let a real signature-level comparison move here safely.
+*What actually landed.* `function_identity_index` is now an intentionally
+thin wrapper -- behaviorally identical to `SymbolIdentityIndex.for_functions`
+-- with no `SemanticIR`/adapter consumption to gate on, so `functions` is
+**not** added to `scripts/semantic_ir_cutover.py`'s `MIGRATED_COHORTS`.
+What does land and stays, as tested groundwork with no live caller yet (the
+same precedent `SemanticIRIndex` itself was accepted under -- "landed and
+proven correct in isolation first"): `abicheck/model/
+semantic_ir_legacy_adapter.py`'s `legacy_function_ir`, a real `SemanticIR`
+projection of the flat function map shaped like `legacy_typedef_ir`/
+`legacy_constant_ir`, and the `compare/functions.py` module boundary itself
+as the one place a future consumer belongs.
 
-*Verification.* `tests/test_function_cutover.py`: `function_identity_index`
-resolves identically to `SymbolIdentityIndex.for_functions` with no
-`SemanticIR`, with a `SemanticIR` that exists but does not cover `FUNCTION`
-entities, with a real `FUNCTION`-covering `SemanticIR` (fully and only
-partially matching the given function map), and for a function carrying no
-`entity_id` at all; plus end-to-end equivalence through
-`diff_symbols._diff_functions` (via `checker.compare`) for a removed
-function, an added function, the `extern "C"` name-alias fallback (the one
-non-trivial matching tier this cohort touches), and an unchanged pair --
-each checked with and without a real, matching `SemanticIR` attached to the
-snapshots. Plus the gate-exercise tests proving `semantic_ir_cutover.py`'s
-scan fires on `snap.functions`/`old.function_map`/a `getattr` evasion for
-the new cohort and does not fire on a same-named local or an inbound
-keyword argument. Full fast unit lane green; `ruff check`/`ruff format
---check`/`mypy abicheck/` clean; `check_architecture.py`/
-`check_ai_readiness.py`/`semantic_ir_cutover.py`/`check_fp_rate.py`/
-`check_tier_accuracy.py` all pass with zero regressions on the function
-family.
+*What a real cohort 3 would still need.* `CanonicalEntity` growing
+per-position payload facts a signature-level comparison could actually read
+-- a separately-addressable return-type spelling, `ref_qualifier`, variadic
+status (`canonical_spelling` today combines a whole signature into one
+opaque `"<return>(<param>, ...)"` string, and the third slice's own
+normalizer does not carry `ref_qualifier`/variadic status at all -- see
+`extract/semantic_normalizer.py`'s own "Deliberately excluded from this
+slice" list). Only once such a fact exists does a consumer have something
+real to read through the IR instead of the flat `Function` object, at which
+point registering the cohort reflects an actual migration rather than an
+architectural gesture with nothing behind it. Not attempted speculatively
+here, per this phase's own non-goal against inventing normalizer output
+with no detector ready to consume it.
 
-*What remains open, explicitly.* Everything the "declined for now" note
-above already named stays open (bare-name-collision narrowing, the
-`entity:` alias promotion tier). New to this cohort: the richer
-per-parameter/return-type/cv/virtual-method/ctor-dtor/hidden-friend
-comparisons in `diff_symbols.py` are entirely unmigrated and still read
-`Function` fields directly (permitted -- `diff_symbols.py` itself is not
-one of `function`'s `MIGRATED_COHORTS.modules`, only
-`compare/functions.py` is); variables and full types remain untouched, per
-this PR's own explicit scope. A genuinely signature-level cutover needs
-`CanonicalEntity` to grow separately-addressable return-type/per-parameter
-facts plus `ref_qualifier`/variadic status first -- not attempted
-speculatively here.
+*Verification.* `tests/test_function_cutover.py` proves
+`function_identity_index` resolves identically to
+`SymbolIdentityIndex.for_functions` regardless of what the snapshot's
+`SemanticIR` looks like (absent, present-but-not-covering-`FUNCTION`,
+fully/partially covering, or the function itself having no `entity_id`),
+both directly and end-to-end through `diff_symbols._diff_functions` (via
+`checker.compare`) for a removed function, an added function, the `extern
+"C"` name-alias fallback, and an unchanged pair. `legacy_function_ir` is
+tested directly (`TestLegacyFunctionIr`). Full fast unit lane green; `ruff
+check`/`ruff format --check`/`mypy abicheck/` clean;
+`check_architecture.py`/`check_ai_readiness.py`/`semantic_ir_cutover.py`/
+`check_fp_rate.py`/`check_tier_accuracy.py` all pass with zero regressions.
 
 ---
 
