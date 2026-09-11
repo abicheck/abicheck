@@ -93,7 +93,7 @@ def _builder() -> _DwarfSnapshotBuilder:
     builder._die_key_to_qualified_name = {}
     builder._base_edges_by_record = {}
     builder._virtual_base_edges_by_record = {}
-    builder._vtable_evidence_conflicts = set()
+    builder._vtable_evidence_conflicts = {}
     return builder
 
 
@@ -113,7 +113,7 @@ class TestNoDuplicateNoConflict:
         )
         builder._process_record_type_named(die, _cu(0), "A")
 
-        assert builder._vtable_evidence_conflicts == set()
+        assert builder._vtable_evidence_conflicts == {}
         finalize_vtable_evidence_completeness(builder)
 
         rec = builder._record_by_qualified_name["A"]
@@ -135,7 +135,7 @@ class TestNoDuplicateNoConflict:
         stub = _record_die(offset=10, byte_size=0, declaration=True)
         builder._process_record_type_named(stub, _cu(1), "A")
 
-        assert builder._vtable_evidence_conflicts == set()
+        assert builder._vtable_evidence_conflicts == {}
 
 
 class TestDuplicateAgreesNoConflict:
@@ -156,7 +156,7 @@ class TestDuplicateAgreesNoConflict:
         )
         builder._process_record_type_named(duplicate, _cu(1), "A")
 
-        assert builder._vtable_evidence_conflicts == set()
+        assert builder._vtable_evidence_conflicts == {}
         finalize_vtable_evidence_completeness(builder)
         rec = builder._record_by_qualified_name["A"]
         assert rec.vtable_fact is not None
@@ -185,7 +185,7 @@ class TestDuplicateAgreesNoConflict:
         )
         builder._process_record_type_named(duplicate, _cu(1), "A")
 
-        assert builder._vtable_evidence_conflicts == set()
+        assert builder._vtable_evidence_conflicts == {}
 
 
 class TestDuplicateDisagreesFlagsPartial:
@@ -195,7 +195,15 @@ class TestDuplicateDisagreesFlagsPartial:
     info is not uniformly complete for this class.
     """
 
-    def test_vtable_disagreement_downgrades_all_three_sibling_facts(self) -> None:
+    def test_vtable_only_disagreement_downgrades_only_vtable_fact(self) -> None:
+        """Codex review finding on this PR: a duplicate that disagrees only
+        on ``vtable`` must mark only ``vtable_fact`` as ``PARTIAL``.
+        ``bases_fact``/``virtual_bases_fact`` (both empty on both DIEs here)
+        actually agreed and must stay ``PRESENT`` -- a blanket per-record
+        downgrade would let this one incomplete evidence family blind an
+        otherwise fully-evidenced ``bases``/``virtual_bases`` comparison
+        elsewhere on the same record.
+        """
         builder = _builder()
         # Retained (first-seen) definition: only `f`.
         first = _record_die(
@@ -214,7 +222,7 @@ class TestDuplicateDisagreesFlagsPartial:
         )
         builder._process_record_type_named(duplicate, _cu(1), "A")
 
-        assert builder._vtable_evidence_conflicts == {"A"}
+        assert builder._vtable_evidence_conflicts == {"A": {"vtable"}}
         finalize_vtable_evidence_completeness(builder)
 
         rec = builder._record_by_qualified_name["A"]
@@ -226,9 +234,58 @@ class TestDuplicateDisagreesFlagsPartial:
         assert rec.vtable_fact.status is FactStatus.PARTIAL
         assert rec.vtable_fact.producer == "dwarf"
         assert rec.bases_fact is not None
+        assert rec.bases_fact.status is FactStatus.PRESENT
+        assert rec.virtual_bases_fact is not None
+        assert rec.virtual_bases_fact.status is FactStatus.PRESENT
+
+    def test_all_three_fields_disagreeing_downgrades_all_three(self) -> None:
+        """The blanket case: when every one of bases/virtual_bases/vtable
+        actually disagrees, all three siblings become ``PARTIAL`` -- this
+        slice narrows the downgrade to disagreeing fields, it doesn't stop
+        downgrading a field that genuinely disagreed.
+        """
+        base_die = SimpleNamespace(
+            tag="DW_TAG_inheritance",
+            offset=99,
+            attributes={},
+            iter_children=lambda: iter(()),
+        )
+        virtual_base_die = SimpleNamespace(
+            tag="DW_TAG_inheritance",
+            offset=98,
+            attributes={"DW_AT_virtuality": _av(1)},
+            iter_children=lambda: iter(()),
+        )
+        builder = _builder()
+        builder._resolve_base_name_and_key = lambda child, CU: ("Base", None)  # type: ignore[method-assign]
+        first = _record_die(
+            offset=1, children=[_virtual_method_die("_ZN1A1fEv", offset=2)]
+        )
+        builder._process_record_type_named(first, _cu(0), "A")
+
+        duplicate = _record_die(
+            offset=20,
+            children=[
+                base_die,
+                virtual_base_die,
+                _virtual_method_die("_ZN1A1fEv", offset=21),
+                _virtual_method_die("_ZN1A1gEv", offset=22),
+            ],
+        )
+        builder._process_record_type_named(duplicate, _cu(1), "A")
+
+        assert builder._vtable_evidence_conflicts == {
+            "A": {"bases", "virtual_bases", "vtable"}
+        }
+        finalize_vtable_evidence_completeness(builder)
+
+        rec = builder._record_by_qualified_name["A"]
+        assert rec.bases_fact is not None
         assert rec.bases_fact.status is FactStatus.PARTIAL
         assert rec.virtual_bases_fact is not None
         assert rec.virtual_bases_fact.status is FactStatus.PARTIAL
+        assert rec.vtable_fact is not None
+        assert rec.vtable_fact.status is FactStatus.PARTIAL
 
     def test_vptr_offset_bits_fact_is_deliberately_untouched(self) -> None:
         """See ``compare/vtable_evidence.py``'s own "NOT consulted here"
@@ -276,19 +333,19 @@ class TestDuplicateDisagreesFlagsPartial:
             ],
         )
         builder._process_record_type_named(disagreeing, _cu(1), "A")
-        assert builder._vtable_evidence_conflicts == {"A"}
+        assert builder._vtable_evidence_conflicts == {"A": {"vtable"}}
 
         agreeing = _record_die(
             offset=30, children=[_virtual_method_die("_ZN1A1fEv", offset=31)]
         )
         builder._process_record_type_named(agreeing, _cu(2), "A")
-        assert builder._vtable_evidence_conflicts == {"A"}
+        assert builder._vtable_evidence_conflicts == {"A": {"vtable"}}
 
-    def test_bases_only_disagreement_also_flags(self) -> None:
-        """A conflict confined to ``bases`` (vtable identical) must also
-        flag -- the completeness gap is per-*record*, not per-field; any
-        one of the three siblings disagreeing casts doubt on all three,
-        since they would all have come from the same discarded DIE.
+    def test_bases_only_disagreement_flags_only_bases(self) -> None:
+        """A conflict confined to ``bases`` (vtable/virtual_bases both
+        empty on both DIEs, so they genuinely agree) must flag only
+        ``"bases"`` -- per-field scoping (Codex review finding on this PR),
+        not the whole record.
 
         ``_resolve_base_name_and_key`` is monkeypatched rather than faked
         via a real ``DW_AT_type`` reference: it resolves through
@@ -314,7 +371,16 @@ class TestDuplicateDisagreesFlagsPartial:
         duplicate = _record_die(offset=20, children=[base_die])
         builder._process_record_type_named(duplicate, _cu(1), "A")
 
-        assert builder._vtable_evidence_conflicts == {"A"}
+        assert builder._vtable_evidence_conflicts == {"A": {"bases"}}
+        finalize_vtable_evidence_completeness(builder)
+
+        rec = builder._record_by_qualified_name["A"]
+        assert rec.bases_fact is not None
+        assert rec.bases_fact.status is FactStatus.PARTIAL
+        assert rec.virtual_bases_fact is not None
+        assert rec.virtual_bases_fact.status is FactStatus.PRESENT
+        assert rec.vtable_fact is not None
+        assert rec.vtable_fact.status is FactStatus.PRESENT
 
     def test_two_unrelated_types_are_tracked_independently(self) -> None:
         """A conflict on one type must not spuriously flag an unrelated
@@ -342,7 +408,7 @@ class TestDuplicateDisagreesFlagsPartial:
         )
         builder._process_record_type_named(b2, _cu(1), "B")
 
-        assert builder._vtable_evidence_conflicts == {"A"}
+        assert builder._vtable_evidence_conflicts == {"A": {"vtable"}}
         finalize_vtable_evidence_completeness(builder)
         b_rec = builder._record_by_qualified_name["B"]
         assert b_rec.vtable_fact is not None

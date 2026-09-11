@@ -298,7 +298,8 @@ class _DwarfSnapshotBuilder:
         # ``_record_by_qualified_name`` is deferred to _finalize_vptr_offsets
         # time, once every CU is known, rather than attempted eagerly here.
         self._die_key_to_qualified_name: dict[tuple[int, int], str] = {}
-        self._vtable_evidence_conflicts: set[str] = set()  # ADR-063 T9, see _dvc
+        # ADR-063 T9, see _dvc: qualified name -> disagreeing field subset.
+        self._vtable_evidence_conflicts: dict[str, set[str]] = {}
         # id(derived RecordType) -> ordered list of (base bare name, this
         # edge's own bit offset or None, (CU offset, base DIE offset) or
         # None), ONE ENTRY PER DW_TAG_inheritance CHILD -- not a dict keyed

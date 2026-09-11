@@ -62,10 +62,23 @@ to confirmed-partial -- never resolves a genuine disagreement, never picks
 a winner between the two DIEs' own views, and never runs at all for a
 class DWARF only ever saw defined once (the overwhelming common case).
 
+Downgrades are scoped **per disagreeing field**, not per record (Codex
+review finding on this PR): a duplicate that disagrees only on ``vtable``
+marks only ``vtable_fact`` as ``PARTIAL`` -- ``bases_fact``/
+``virtual_bases_fact`` stay ``PRESENT`` if their own membership actually
+agreed. Downgrading all three whenever any one disagreed would let one
+incomplete evidence family (e.g. an omitted virtual method DIE) blind a
+completely-evidenced ``bases``/``virtual_bases`` comparison to a real
+``TYPE_BASE_CHANGED``/``BASE_CLASS_VIRTUAL_CHANGED`` finding elsewhere in
+the same record -- exactly the over-suppression this closure must not
+introduce while fixing the original under-suppression.
+
 Both take *builder* (an ``_DwarfSnapshotBuilder``, typed ``Any`` here --
 this module still imports nothing from ``dwarf_snapshot.py``, only reads
 four of its instance attributes by name: ``types``,
-``_vtable_evidence_conflicts``, ``_record_by_qualified_name``,
+``_vtable_evidence_conflicts`` (a ``dict[str, set[str]]``: qualified
+record name -> the subset of ``{"bases", "virtual_bases", "vtable"}`` that
+some discarded duplicate disagreed on), ``_record_by_qualified_name``,
 ``_resolve_base_name_and_key``) rather than each piece of state
 individually -- ``dwarf_snapshot.py`` is already at its own
 ``architecture/debt.yaml`` ``no_growth`` line-count ceiling, so the two
@@ -117,6 +130,11 @@ __all__ = [
 #: resolution machinery (``dwarf_utils.resolve_die_ref``), not a leaf-level
 #: concern.
 BaseNameResolver = Callable[[Any, Any], "tuple[str, tuple[int, int] | None]"]
+
+#: The three ``RecordType`` fields this closure can independently mark
+#: ``PARTIAL`` -- also the complete key set ``builder._vtable_evidence_
+#: conflicts``' per-record value may hold.
+_ALL_FIELDS: frozenset[str] = frozenset({"bases", "virtual_bases", "vtable"})
 
 
 def duplicate_record_evidence_signature(
@@ -170,26 +188,33 @@ def duplicate_record_evidence_signature(
 def note_duplicate_record_evidence(
     builder: Any, qualified: str, die: Any, CU: Any, children: list[Any] | None
 ) -> None:
-    """Flag *qualified* in ``builder._vtable_evidence_conflicts`` (in place)
-    if this non-retained ODR-duplicate DIE's own bases/virtual_bases/vtable
-    membership disagrees with the retained definition's (already built,
-    looked up in ``builder._record_by_qualified_name``).
+    """Record, in ``builder._vtable_evidence_conflicts`` (in place), which
+    of ``{"bases", "virtual_bases", "vtable"}`` this non-retained
+    ODR-duplicate DIE's own membership disagrees with the retained
+    definition's (already built, looked up in
+    ``builder._record_by_qualified_name``) -- **only** the fields that
+    actually disagree, not all three whenever any one does (Codex review
+    finding on this PR: see the module docstring's "Downgrades are scoped
+    per disagreeing field" note for why blanket-downgrading would let one
+    incomplete evidence family blind an otherwise fully-evidenced
+    comparison on a *different* field of the same record).
 
     Cheap by construction: only ever called for a DIE that has already
     failed ``_check_and_register_type_name`` -- i.e. only for genuine
     ODR-duplicates, not the common one-definition case -- and does nothing
-    once *qualified* is already flagged, so a third, fourth, ... duplicate
-    of an already-known-incomplete type costs one dict lookup, not another
-    full child scan.
+    once *qualified* already has all three fields flagged, so a third,
+    fourth, ... duplicate of an already-fully-known-incomplete type costs
+    one dict lookup, not another full child scan.
 
     Declaration-only stub DIEs (``byte_size == 0 and DW_AT_declaration``)
     never reach here -- ``_process_record_type_named`` returns for those
     before calling this, since a forward reference carries no member
     children to compare in the first place.
     """
-    conflicts: set[str] = builder._vtable_evidence_conflicts
-    if qualified in conflicts:
-        return  # already known incomplete -- nothing more to learn
+    conflicts: dict[str, set[str]] = builder._vtable_evidence_conflicts
+    already = conflicts.get(qualified)
+    if already is not None and already >= _ALL_FIELDS:
+        return  # every field already known incomplete -- nothing more to learn
     retained = builder._record_by_qualified_name.get(qualified)
     if retained is None:
         # Should not happen (a duplicate is only reachable once the first
@@ -207,20 +232,26 @@ def note_duplicate_record_evidence(
     # legacy field and `resolved_fact_value(rec.bases_fact, [])` are a
     # provable invariant per `bridge_legacy_and_fact`), so this is
     # representation-only, not a behavior change.
-    if (
-        dup_bases != frozenset(retained.resolved_bases())
-        or dup_virtual_bases != frozenset(retained.resolved_virtual_bases())
-        or dup_vtable != frozenset(_resolved_fact_value(retained.vtable_fact, []))
-    ):
-        conflicts.add(qualified)
+    disagreeing: set[str] = set()
+    if dup_bases != frozenset(retained.resolved_bases()):
+        disagreeing.add("bases")
+    if dup_virtual_bases != frozenset(retained.resolved_virtual_bases()):
+        disagreeing.add("virtual_bases")
+    if dup_vtable != frozenset(_resolved_fact_value(retained.vtable_fact, [])):
+        disagreeing.add("vtable")
+    if disagreeing:
+        conflicts.setdefault(qualified, set()).update(disagreeing)
 
 
 def finalize_vtable_evidence_completeness(builder: Any) -> None:
-    """Downgrade ``bases_fact``/``virtual_bases_fact``/``vtable_fact`` to
-    ``Fact.partial(...)`` for every record in ``builder.types`` whose
-    qualified name is in ``builder._vtable_evidence_conflicts`` (populated
-    by :func:`note_duplicate_record_evidence` over the course of a full CU
-    walk).
+    """Downgrade to ``Fact.partial(...)`` exactly the fields recorded in
+    ``builder._vtable_evidence_conflicts`` (populated by
+    :func:`note_duplicate_record_evidence` over the course of a full CU
+    walk) for each matching record in ``builder.types`` -- e.g. only
+    ``vtable_fact`` when only ``"vtable"`` was ever flagged for that
+    record, leaving ``bases_fact``/``virtual_bases_fact`` at ``PRESENT`` if
+    their own membership never disagreed (see the module docstring's
+    "Downgrades are scoped per disagreeing field" note).
 
     Mutates each matching ``RecordType`` in place -- the same plain
     post-construction-mutation pattern ``dwarf_snapshot.
@@ -230,18 +261,18 @@ def finalize_vtable_evidence_completeness(builder: Any) -> None:
     (a conflicting duplicate can appear in a CU processed *after* the
     retained definition, so this cannot be decided at construction time).
     """
-    conflicts: set[str] = builder._vtable_evidence_conflicts
+    conflicts: dict[str, set[str]] = builder._vtable_evidence_conflicts
     if not conflicts:
         return
     diagnostic = (
         "cross-translation-unit disagreement: another compilation unit's "
-        "own definition of this class disagreed on its bases/"
-        "virtual_bases/vtable membership, so this side's evidence may not "
-        "reflect the complete set (ADR-063 Phase 5B / T9 DWARF per-TU "
-        "completeness slice)"
+        "own definition of this class disagreed on this field's own "
+        "membership, so this side's evidence may not reflect the complete "
+        "set (ADR-063 Phase 5B / T9 DWARF per-TU completeness slice)"
     )
     for rec in builder.types:
-        if rec.name not in conflicts:
+        fields = conflicts.get(rec.name)
+        if not fields:
             continue
         # Fact[T]-bridged reads (ADR-063 Phase 0, `fact-field-readers`
         # gate): resolve the value to preserve through `resolved_fact_
@@ -249,13 +280,17 @@ def finalize_vtable_evidence_completeness(builder: Any) -> None:
         # see `note_duplicate_record_evidence`'s identical comment above
         # for why this is representation-only for these three fields.
         # `rec` was just built by its own (PRESENT) definition, so this is
-        # exactly value-preserving; only the status changes to PARTIAL.
-        rec.bases_fact = Fact.partial(
-            rec.resolved_bases(), diagnostic, producer="dwarf"
-        )
-        rec.virtual_bases_fact = Fact.partial(
-            rec.resolved_virtual_bases(), diagnostic, producer="dwarf"
-        )
-        rec.vtable_fact = Fact.partial(
-            _resolved_fact_value(rec.vtable_fact, []), diagnostic, producer="dwarf"
-        )
+        # exactly value-preserving; only the status of the flagged
+        # field(s) changes to PARTIAL.
+        if "bases" in fields:
+            rec.bases_fact = Fact.partial(
+                rec.resolved_bases(), diagnostic, producer="dwarf"
+            )
+        if "virtual_bases" in fields:
+            rec.virtual_bases_fact = Fact.partial(
+                rec.resolved_virtual_bases(), diagnostic, producer="dwarf"
+            )
+        if "vtable" in fields:
+            rec.vtable_fact = Fact.partial(
+                _resolved_fact_value(rec.vtable_fact, []), diagnostic, producer="dwarf"
+            )
