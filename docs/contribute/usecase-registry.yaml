@@ -945,10 +945,15 @@ use_cases:
       private_header_leak (RISK) — which diff ONE merged snapshot's evidence
       sources against each other, with per-check coverage rows and the §6.8
       provider-agreement matrix; each skips (never false-positives) when its
-      evidence is absent and is never BREAKING (authority rule). REMAINS:
-      odr_type_variant and public_to_internal_dependency; wiring the engine into
-      the Phase-3 `scan`/`audit` orchestrator and the `crosschecks:` severity
-      config; and FP-rate-gate corpus cases before any check is promoted to gate.
+      evidence is absent and is never BREAKING (authority rule). Also DONE
+      since: odr_type_variant and public_to_internal_dependency (real checks in
+      the same module's dispatch table), and the driver wiring -- ADR-068 Phase
+      2a/2b moved the engine into `compare()` itself, so the single-release
+      audit runs it through `compare --no-baseline` rather than the Phase-3
+      `scan`/`audit` orchestrator this line used to name (retired with `scan`,
+      ADR-068 Phase 6; see UC-WORKFLOW-single-release-audit). REMAINS: the
+      `crosschecks:` severity config, and FP-rate-gate corpus cases before any
+      check is promoted to gate.
 
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow
