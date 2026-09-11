@@ -124,7 +124,13 @@ __all__ = [
 #: (Codex review, PR #1210, round 5: the field was entirely absent before,
 #: so a JSON consumer had no way to tell which policy actually classified
 #: a run's findings).
-AUDIT_REPORT_SCHEMA_VERSION = "1.2"
+#:
+#: ``1.3`` -- mirrors ``REPORT_SCHEMA_VERSION``'s ``4.1``/``SCAN_SCHEMA_
+#: VERSION``'s ``1.33`` entries (Codex review, PR #1209): ``run_outcome``
+#: nests the same ``AnalysisAssurance.to_dict()`` compare's report does, so
+#: this always-present block also gains the additive ``schema_staleness_
+#: status`` key.
+AUDIT_REPORT_SCHEMA_VERSION = "1.3"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.

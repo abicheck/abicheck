@@ -128,6 +128,12 @@ from .checker_types import DiffResult
 from .evidence_depth import DEPTH_RANK, depth_label_for, weaker_depth
 from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
+from .policy.analysis_assurance_l0_context import (
+    l0_context_status as _l0_context_status,
+)
+from .policy.analysis_assurance_schema_staleness import (
+    schema_staleness_status as _schema_staleness_status,
+)
 from .policy.evidence_status import EvidenceTier
 
 if TYPE_CHECKING:
@@ -151,7 +157,9 @@ __all__ = [
 #: ``buildsource.model.BUILD_SOURCE_PACK_VERSION`` versions independently of
 #: the ABI-snapshot schema: this is a self-contained sub-object a consumer
 #: can version-check without caring about the report's own MAJOR.MINOR.
-ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.0"
+#: 1.0 -> 1.1: added ``schema_staleness_status`` (additive; a 1.0-only
+#: reader ignores the new key).
+ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.1"
 
 #: The required top-level status vocabulary.
 AssuranceStatus = Literal[
@@ -402,6 +410,25 @@ class AnalysisAssurance:
     #: Human-readable notes explaining any non-``complete`` status, folded
     #: from the same underlying signals rather than duplicating their wording.
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: ``"clean"`` (neither side carries a fact this abicheck's tool-upgrade
+    #: reliability machinery marks stale) or ``"degraded"`` (at least one
+    #: side does -- either its own ``schema_version`` predates this
+    #: abicheck's, or it was re-saved since without ever being regenerated;
+    #: see ``policy.analysis_assurance_degraded_facts.degraded_reliability_
+    #: facts``). Unlike the other context-status fields above, this one has
+    #: no ``"asymmetric"`` state: a single side's stale fact already means
+    #: the affected detector(s) declined to trust it for this comparison.
+    #: Appended at the END of the field list, after every pre-existing
+    #: field including ``notes`` -- not inserted among the other context-
+    #: status fields where it conceptually belongs -- specifically so this
+    #: dataclass's generated POSITIONAL constructor stays backward
+    #: compatible: an external caller passing the pre-existing trailing
+    #: fields (``fact_set_comparability``/``graph_completeness``/
+    #: ``layout_unverified_detectors``/``notes``) positionally would
+    #: otherwise have silently rebound them to the wrong fields the moment
+    #: this one was inserted earlier in the list (Codex review, PR #1209
+    #: round 10).
+    schema_staleness_status: str = "clean"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -417,6 +444,7 @@ class AnalysisAssurance:
             "header_context_status": self.header_context_status,
             "dwarf_context_status": self.dwarf_context_status,
             "l3_context_status": self.l3_context_status,
+            "schema_staleness_status": self.schema_staleness_status,
             "fact_set_comparability": self.fact_set_comparability,
             "graph_completeness": self.graph_completeness,
             "layout_unverified_detectors": list(self.layout_unverified_detectors),
@@ -549,46 +577,6 @@ def _fact_set_comparability(
         notes.extend(f"{i.rule}: {i.message}" for i in compat.issues)
         return "unknown", notes
     return "comparable", notes
-
-
-def _l0_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str]]:
-    """Per-side L0 binary/export-table presence status -- the L0 analogue of
-    :func:`_header_context_status`'s/:func:`_dwarf_context_status`'s/
-    :func:`_l3_context_status`'s presence-then-asymmetry shape.
-
-    Self-audit finding (P0.4 review): a ``AbiSnapshot`` need not carry any
-    binary at all -- ``cli_scan_helpers._intrinsic_coverage`` already
-    documents and reports this exact state as ``"no binary export table
-    (snapshot-only input)"`` (``has_binary = bool(snap.elf or snap.pe or
-    snap.macho)``), the same predicate this helper uses. A comparison where
-    only one side carries a real binary (the other a synthetic/
-    snapshot-only, headers-or-hand-built-only input) means every L0-derived
-    signal -- exported-symbol presence/removal, SONAME, binding/visibility --
-    was never even attempted for the binary-lacking side, the identical
-    shape of gap already closed for L1 (DWARF)/L2 (headers)/L3 (build
-    evidence) above. Fixed the same way: check each side's own binary
-    presence directly and report the asymmetric case distinctly from "both
-    sides have a binary" and "neither does" (a pure header/source-only
-    comparison, which is a legitimate, supported, symmetric shape and not
-    itself an asymmetry).
-    """
-
-    def _has_binary(snap: AbiSnapshot) -> bool:
-        return bool(snap.elf or snap.pe or snap.macho)
-
-    old_binary = _has_binary(old)
-    new_binary = _has_binary(new)
-    if not old_binary and not new_binary:
-        return "not_evaluated", []
-    if old_binary != new_binary:
-        missing = "new" if old_binary else "old"
-        return "asymmetric", [
-            f"L0 binary context asymmetric: the {missing} side carries no "
-            "binary export table at all (snapshot-only input) -- symbol-table "
-            "-level evidence (exports, SONAME, binding/visibility) was never "
-            "examined for that side"
-        ]
-    return "clean", []
 
 
 def _header_context_status(
@@ -1356,6 +1344,10 @@ def compute_analysis_assurance(
     l3_context_status, l3_notes = _l3_context_status(old_pack, new_pack)
     notes.extend(l3_notes)
 
+    # -- schema-staleness status -------------------------------------------
+    schema_staleness_status, staleness_notes = _schema_staleness_status(old, new)
+    notes.extend(staleness_notes)
+
     # -- target accounting (P0.2 root-target scoping rollup) --------------------
     target_accounting, target_unresolved, target_notes = _target_accounting(
         old_pack, new_pack
@@ -1424,6 +1416,7 @@ def compute_analysis_assurance(
         or header_context_status in ("drift_detected", "asymmetric")
         or dwarf_context_status == "asymmetric"
         or l3_context_status == "asymmetric"
+        or schema_staleness_status == "degraded"
         or graph_completeness in ("degraded", "narrowed", "unknown")
         or (tu_accounting.failed or 0) > 0
         or not result.scope_resolved
@@ -1452,6 +1445,7 @@ def compute_analysis_assurance(
         header_context_status=header_context_status,
         dwarf_context_status=dwarf_context_status,
         l3_context_status=l3_context_status,
+        schema_staleness_status=schema_staleness_status,
         fact_set_comparability=fact_set_comparability,
         graph_completeness=graph_completeness,
         layout_unverified_detectors=layout_unverified_detectors,
