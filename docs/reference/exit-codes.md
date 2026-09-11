@@ -14,7 +14,7 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` still has one too, but it is **being retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-being-retired) before depending on any of its codes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes.
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
