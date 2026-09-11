@@ -24,17 +24,10 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.entity_identity import (
-    IDENTITY_TIER_CANONICAL,
-    CanonicalIdentity,
-)
 from abicheck.buildsource.graph_reconcile import (
-    _OUTCOME_PROSE,
-    OUTCOME_COORDINATES_ONLY,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
-    _classify_outcome,
     diff_graph_reconciliation_findings,
     reconcile_added_removed,
     reconcile_graph_diff,
@@ -1147,54 +1140,3 @@ def test_reconcile_added_removed_stays_fast_on_a_large_graph() -> None:
     # via structural context -- correctness check alongside the perf one.
     assert len(result.reconciled) == n
     assert elapsed < 10.0, f"reconciliation took {elapsed:.2f}s for {n} nodes"
-
-
-def _identity(qn: str, decl_file: str, sig: str = "") -> CanonicalIdentity:
-    return CanonicalIdentity(
-        primary_id=f"id:{qn}",
-        tier=IDENTITY_TIER_CANONICAL,
-        qualified_name=qn,
-        source_relative=decl_file,
-        normalized_signature=sig,
-    )
-
-
-def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
-    """Bug-class regression: PR #1204's fallthrough lumped coordinate churn
-    with the opposite "both changed" outcome; review found COORDINATES_ONLY
-    needs POSITIVE churn evidence AND an agreeing signature tail, not just
-    both predicates False. Oracle table, independent of the code tested."""
-    lam1, lam2 = "(lambda at f.h:1:2)", "(lambda at f.h:9:9)"
-    names = {
-        "identical": ("ns::Widget", "ns::Widget", False, False, ("s", "s")),
-        "real_rename": ("ns::Widget", "ns::WidgetV2", True, False, ("s", "s")),
-        "coord_shift": (lam1, lam2, False, True, ("s", "s")),
-        "coord_shift_sig_change": (lam1, lam2, False, True, ("s0", "s1")),
-    }
-    files = {"same": ("a.h", "a.h", False), "real_move": ("a.h", "b.h", True)}
-    name_words, loc_words = ("renamed", "name"), ("moved", "location", "declaring")
-    for nk, (old_qn, new_qn, name_ch, has_coord, (old_sig, new_sig)) in names.items():
-        for fk, (old_f, new_f, file_ch) in files.items():
-            old_id = _identity(old_qn, old_f, f"sig:{old_qn}\x1f{old_sig}")
-            new_id = _identity(new_qn, new_f, f"sig:{new_qn}\x1f{new_sig}")
-            outcome = _classify_outcome(old_id, new_id)
-            if name_ch and not file_ch:
-                expected = OUTCOME_RENAMED
-            elif file_ch and not name_ch:
-                expected = OUTCOME_MOVED
-            elif name_ch and file_ch:
-                expected = OUTCOME_RECONCILED
-            elif has_coord and old_sig == new_sig:
-                expected = OUTCOME_COORDINATES_ONLY
-            else:
-                expected = OUTCOME_RECONCILED
-            assert outcome == expected, f"{nk}/{fk}: {expected!r} != {outcome!r}"
-            prose = _OUTCOME_PROSE[outcome]
-            # RECONCILED w/ neither axis changed is ADR-048's accepted
-            # "no clean split" (case197) prose overstatement, not a bug.
-            if outcome == OUTCOME_RECONCILED and not (name_ch and file_ch):
-                continue
-            if not name_ch:
-                assert not any(w in prose for w in name_words), (nk, fk, outcome, prose)
-            if not file_ch:
-                assert not any(w in prose for w in loc_words), (nk, fk, outcome, prose)

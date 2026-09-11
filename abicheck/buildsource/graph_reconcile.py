@@ -136,6 +136,13 @@ _RECONCILABLE_KINDS: frozenset[str] = frozenset(
     {"source_decl", "record_type", "enum_type", "typedef"}
 )
 
+#: OUTCOME_COORDINATES_ONLY-eligible kinds -- excludes "source_decl": a
+#: function's signature isn't exposed to resolve_identity_for_node in
+#: production, so "nothing else changed" can't be proven for one.
+_COORDINATE_ONLY_KINDS: frozenset[str] = frozenset(
+    {"record_type", "enum_type", "typedef"}
+)
+
 
 @dataclass(frozen=True)
 class ReconciledPair:
@@ -424,11 +431,15 @@ def _classify_outcome(
         return OUTCOME_MOVED
     if renamed and moved:
         return OUTCOME_RECONCILED
-    # Neither fired: coordinate-only needs BOTH the raw name to have
-    # differed (normalized equal) AND the signature tail to still agree --
-    # else a simultaneous real signature change would be missed too.
+    # Neither fired: coordinate-only needs the raw name differed (normalized
+    # equal), an agreeing signature tail, AND a type-shaped kind -- a real
+    # source_decl producer tracks no param_types/mangled_name (Codex
+    # review), so a function's tail is vacuously equal and can't prove
+    # nothing else changed; only a type has no such hidden dimension.
     same_sig = _signature_tail(old_identity) == _signature_tail(new_identity)
-    coordinate_only = old_qn != new_qn and same_sig
+    coordinate_only = (
+        old_qn != new_qn and same_sig and old_identity.kind in _COORDINATE_ONLY_KINDS
+    )
     return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
 
 
