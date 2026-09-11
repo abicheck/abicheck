@@ -311,25 +311,33 @@ def test_depth_label_for_out_of_band_pack_ignores_unrelated_surface_graph() -> N
 def test_load_source_graph_from_embedded_snapshot_unchanged_by_migration(
     tmp_path,
 ) -> None:
+    """A pre-Phase-3 **flat** document (``surface_graph`` absent, no
+    ``sections`` envelope, ``build_source.source_graph`` present) yields the
+    identical graph as a real, current **sectioned** document written by
+    ``serialization.snapshot_to_json`` for the same evidence (``surface_graph``
+    populated) -- proving ``_load_source_graph`` handles both wire shapes,
+    including the sectioned one this module's own reader didn't originally
+    account for (``sections.graph.payload.surface_graph``, schema v42+)."""
+    from abicheck import serialization
     from abicheck.cli_graph import _load_source_graph
 
-    graph_dict = {
-        "nodes": [{"id": "decl://a", "kind": "source_decl", "label": "a"}],
-        "edges": [],
-    }
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
 
     pre_path = tmp_path / "pre_phase3.abi.json"
-    pre_path.write_text(json.dumps({"build_source": {"source_graph": graph_dict}}))
-
-    post_path = tmp_path / "post_phase3.abi.json"
-    post_path.write_text(
+    pre_path.write_text(
         json.dumps(
             {
-                "surface_graph": graph_dict,
-                "build_source": {"source_graph": graph_dict},
+                "schema_version": 20,
+                "library": "libfoo.so",
+                "version": "1.0",
+                "build_source": {"source_graph": graph.to_dict()},
             }
         )
     )
+
+    post_path = tmp_path / "post_phase3.abi.json"
+    pre, post = _pre_and_post_phase3_snaps(graph)
+    post_path.write_text(serialization.snapshot_to_json(post))
 
     pre_graph = _load_source_graph(pre_path)
     post_graph = _load_source_graph(post_path)
@@ -341,10 +349,35 @@ def test_load_source_graph_from_embedded_snapshot_unchanged_by_migration(
 def test_load_source_graph_prefers_surface_graph_over_build_source() -> None:
     """When both are present, the top-level ``surface_graph`` key wins --
     the canonical location, per ADR-063 Phase 3/10."""
-    from abicheck.cli_graph import _embedded_source_graph_dict
+    from abicheck.cli_graph import _embedded_source_graph
 
-    surface = {"nodes": [{"id": "decl://surface", "kind": "source_decl"}], "edges": []}
-    legacy = {"nodes": [{"id": "decl://legacy", "kind": "source_decl"}], "edges": []}
-    data = {"surface_graph": surface, "build_source": {"source_graph": legacy}}
+    surface = SourceGraphSummary(
+        nodes=[_decl("decl://surface", "surface", "public_header")]
+    )
+    legacy = SourceGraphSummary(
+        nodes=[_decl("decl://legacy", "legacy", "public_header")]
+    )
+    data = {
+        "schema_version": 45,
+        "library": "libfoo.so",
+        "version": "1.0",
+        "surface_graph": surface.to_dict(),
+        "build_source": {"source_graph": legacy.to_dict()},
+    }
 
-    assert _embedded_source_graph_dict(data) == surface
+    result = _embedded_source_graph(data)
+    assert result is not None
+    assert [n.id for n in result.nodes] == ["decl://surface"]
+
+
+def test_embedded_source_graph_ignores_non_snapshot_documents() -> None:
+    """A bare graph JSON or an unrelated JSON object (no ``schema_version``,
+    no ``sections``) is not a snapshot document at all -- returns ``None``
+    so the caller falls through to its own bare-graph-JSON contract."""
+    from abicheck.cli_graph import _embedded_source_graph
+
+    bare_graph = {"nodes": [{"id": "decl://a", "kind": "source_decl"}], "edges": []}
+    assert _embedded_source_graph(bare_graph) is None
+
+    pack_manifest = {"build_source_pack_version": 1, "coverage": []}
+    assert _embedded_source_graph(pack_manifest) is None
