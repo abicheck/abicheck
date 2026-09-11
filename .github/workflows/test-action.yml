@@ -528,7 +528,7 @@ jobs:
           audit: 'true'
           install-deps: false
 
-      - name: Verify audit succeeds and is COMPATIBLE
+      - name: Verify audit succeeds and is AUDIT_CLEAN
         shell: bash
         run: |
           echo "Verdict: ${{ steps.abi.outputs.verdict }}"
@@ -536,8 +536,13 @@ jobs:
             echo "::error::Expected the audit step to succeed"
             exit 1
           fi
-          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
-            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.abi.outputs.verdict }}"
+          # ADR-068's 2026-09-10 amendment, round 6 (Codex review, PR #1210):
+          # an audit-only exit-0 run no longer reports the generic
+          # COMPATIBLE verdict, which falsely implied a two-sided
+          # comparison ran -- AUDIT_CLEAN (no candidate-side finding at
+          # all) replaces it for this fixture, which is genuinely clean.
+          if [[ "${{ steps.abi.outputs.verdict }}" != "AUDIT_CLEAN" ]]; then
+            echo "::error::Expected verdict AUDIT_CLEAN, got ${{ steps.abi.outputs.verdict }}"
             exit 1
           fi
 
