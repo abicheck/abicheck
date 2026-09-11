@@ -3750,6 +3750,16 @@ if query == "no_baseline_audit":
         print("findings" if has_findings else "clean")
 elif query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
+elif query == "assurance_contribution":
+    # P0.4's own axis, the exact sibling of `coverage_contribution` above:
+    # `analysis_assurance_exit_contribution` is already self-describing --
+    # `checker.compare`/`cli_compare_helpers` compute it as 0 unless the
+    # *resolved* `assurance.require_complete` (CLI flag or config-file value
+    # alike, since the dedicated Action input's retirement) was true AND
+    # the run's own evidence was incomplete -- so no separate "was gating
+    # requested" signal is needed here, unlike the retired
+    # `assurance_status`-only query below.
+    print(_either("analysis_assurance_exit_contribution", 0))
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
     # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
@@ -4060,87 +4070,53 @@ _coverage_gated() {
   [[ -n "$_contribution" && "$_contribution" == "1" ]]
 }
 
-# Did P0.4's orthogonal analysis-assurance axis (--require-complete-analysis,
-# analysis_assurance.py) contribute to this exit?
+# Did P0.4's orthogonal analysis-assurance axis
+# (`assurance.require_complete`, analysis_assurance.py) contribute to this
+# exit?
 #
-# Unlike `_coverage_gated` above, the JSON report's own `analysis_assurance`
-# block is NOT self-describing here: `checker.compare` always attaches it
-# (status included) regardless of whether `--require-complete-analysis` was
-# ever passed, so a present, non-"complete" status alone cannot tell "this
-# run asked to gate on it" apart from "this run's evidence happens to be
-# partial and nobody asked".
+# History, briefly (fuller account retained in git blame/PR history rather
+# than repeated here): this predicate used to gate on a dedicated
+# `require-complete-analysis` Action input first, since the JSON report's
+# `analysis_assurance` block used to attach unconditionally (status
+# included) regardless of whether gating was ever requested -- so a present,
+# non-"complete" status alone couldn't tell "this run asked to gate on it"
+# apart from "this run's evidence happens to be partial and nobody asked".
+# Three earlier revisions tried to infer that request from other signals
+# (an unanchored stderr grep, a `$CMD`-array token scan, an `extra-args`-
+# scoped token scan) and each was a real, Codex-found forgery/collision bug
+# before the dedicated input replaced all three.
 #
-# The FIRST, load-bearing check is therefore whether this Action's own
-# dedicated `require-complete-analysis` boolean input is `true`. This is the
-# third revision of this check, and the earlier two are worth recording
-# because each was a real, Codex-found bug in trying to infer the flag from
-# *other* signals, before a dedicated input existed to ask directly:
+# `require-complete-analysis` is now retired entirely (this PR): the CLI's
+# only remaining source for the setting is `.abicheck.yml`'s
+# `assurance.require_complete: true`, a config-only path
+# `validate-inputs.sh` cannot see or forward as a boolean the way it could a
+# real Action input. Re-deriving "was gating requested" from an Action-level
+# signal is therefore no longer possible in the way the retired input made
+# possible -- and it no longer needs to be: `analysis_assurance_exit_
+# contribution` (schema 2.40) is *already* self-describing the exact way
+# `contract_coverage_exit_contribution` is for `_coverage_gated` above --
+# `cli_compare_helpers`/`checker.compare` compute it as 0 unless the
+# *resolved* `assurance.require_complete` (wherever it came from -- CLI flag
+# while that existed, or the config file now) was true AND the run's own
+# evidence was incomplete, folding both "was this asked for" and "did it
+# fire" into the one number the CLI's own exit code was itself floored by.
+# Reading that field directly is therefore not a weaker substitute for the
+# retired input check -- it is the more general form the input check was
+# only ever approximating, and it is correct for every source `assurance.
+# require_complete` can be given from (CLI or config), not only the one the
+# retired input covered.
 #
-#   1. An unanchored stderr grep as the sole signal, which a hostile input
-#      (a header/symbol name, or any other value an `abicheck` diagnostic
-#      echoes back) could forge to spoof the whole match string and fail
-#      an otherwise clean, flag-less run through this axis's own
-#      unconditional gate.
-#   2. The fix for (1) scanned the fully-built `$CMD` array instead -- safe
-#      from (1)'s forgery, but `$CMD` also carries values a *different*,
-#      structured Action input supplied (e.g. `output-file:
-#      --require-complete-analysis` legitimately produces the adjacent
-#      tokens `-o --require-complete-analysis`, with Click consuming the
-#      second one as `-o`'s filename argument, never parsing it as a
-#      flag), so a bare token scan over the merged array could
-#      true-positive on a value that was never parsed as this flag at all.
-#   3. Scoping the scan to `extra-args`'s own split tokens closed (2)'s
-#      collision with *other* inputs, but not an identical collision
-#      *within* `extra-args` itself -- e.g. `--header
-#      --require-complete-analysis` (a real `--header old=|new=PATH` option
-#      consuming the next token as its own value) still false-positives,
-#      since no amount of scoping proves a token was parsed as *this* flag
-#      rather than as some other option's argument. No token-scan of any
-#      input can be sound against this class of collision in general.
-#
-# A dedicated `require-complete-analysis` Action input (mirroring
-# `fail-on-breaking`) eliminates the whole class: this Action's own
-# detection is a plain boolean read, never a guess at how `abicheck`'s CLI
-# parser will tokenize some other string. `extra-args` is no longer
-# consulted for this flag at all -- a caller who still passes
-# `--require-complete-analysis` via `extra-args` gets correct CLI exit-code
-# behavior from Python (the flag still works), just an un-relabeled
-# `ERROR`/`SEVERITY_ERROR` verdict from this wrapper rather than
-# `ANALYSIS_INCOMPLETE`; the dedicated input is the documented way to get
-# the labeled verdict.
-#
-# Once the input is confirmed set, the JSON report's own
-# `analysis_assurance.status` is the sole answer (mirroring
-# `_coverage_gated`'s JSON-only rule). ADR-063 Track T8 removed the
-# `assurance_floor_diagnostic` stderr grep that used to answer this when no
-# readable JSON report existed (a non-JSON-format run, or an unreadable
-# report file): re-deriving an axis contribution from rendered prose is the
-# textual reconstruction that track retires, and it is the same class of
-# forgeable inference revisions (1)-(3) above were already found to be.
-# No structured data therefore means "not gated by this axis" rather than a
-# guess -- the same "cannot claim it fired" contract `_coverage_gated` now
-# states.
-#
-# RETIRED (rulings.py deferred-option followup): the dedicated
-# `require-complete-analysis` Action input this whole history is about is
-# gone -- validate-inputs.sh now rejects any non-empty/false value
-# unconditionally before this step can ever run, so the guard below can
-# never observe `true` any more and this predicate is permanently `1`
-# (false). Left in place rather than deleted: a caller who sets
-# `assurance.require_complete: true` directly in `.abicheck.yml` (the CLI's
-# only remaining source) still gets the real exit-1 assurance floor from
-# `abicheck compare` itself -- this wrapper simply no longer re-labels that
-# exit `ANALYSIS_INCOMPLETE`, the one piece of behavior that lived only in
-# this Action layer and had no CLI-side config-key equivalent to fall back
-# to (unlike the exit code itself, which flows from the CLI regardless of
-# how the setting reached it).
+# Read from the structured report alone, the same "cannot claim it fired"
+# contract `_coverage_gated` states: an unreadable/absent report, or an
+# absent field on an older report, means "not gated by this axis" rather
+# than a guess reconstructed from rendered prose (ADR-063 Track T8 retired
+# exactly that class of stderr/diagnostic reconstruction for this axis's
+# sibling).
 _assurance_gated() {
-  [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
-
-  local _src _status
+  local _src _contribution
   _src=$(_json_report_src)
-  _status=$(_report_query "$_src" assurance_status)
-  [[ -n "$_status" && "$_status" != "complete" ]]
+  _contribution=$(_report_query "$_src" assurance_contribution)
+  [[ -n "$_contribution" && "$_contribution" == "1" ]]
 }
 
 # ADR-065 S2's completeness axis (D6 under --on-incomplete-scope block, D7

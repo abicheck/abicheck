@@ -15,7 +15,8 @@
 
 """The composite Action's now-retired ``require-complete-analysis`` input
 (rulings.py deferred-option followup -- hard removal, no deprecation
-window).
+window), plus the P1 fix that followup left behind (Codex review, fresh
+evidence on the retirement PR itself).
 
 This file used to exercise the Action's dedicated ``require-complete-
 analysis`` boolean input, which mapped P0.4's orthogonal analysis-assurance
@@ -36,6 +37,24 @@ hits); this file's remaining job is the ``action/run.sh``-level defense in
 depth for anyone invoking it directly, mirroring
 ``TestRemovedConfigDuplicates``-shaped retirement tests elsewhere in this
 suite rather than the removed feature's own behavior.
+
+**The P1 bug and its fix.** The retirement PR's first cut left
+``run.sh``'s own ``_assurance_gated()`` still keyed off
+``INPUT_REQUIRE_COMPLETE_ANALYSIS`` to decide whether the belt-and-suspenders
+unconditional exit-1 floor (the block right below "P0.4's analysis-assurance
+axis, unconditional exactly like the contract-coverage check immediately
+above") should fire at all -- but ``validate-inputs.sh`` now hard-rejects any
+non-``false`` value for that input before this step can ever run, so the
+env var can never again read ``true``, and the belt-and-suspenders check
+became permanently dead for exactly the case it exists to catch: a
+config-driven ``assurance.require_complete: true`` (the CLI's only
+remaining source) coinciding with a compatibility verdict the caller chose
+not to gate on (``fail-on-breaking: false``/default-false
+``fail-on-api-break``). The fix makes ``_assurance_gated()`` read the
+report's own self-describing ``analysis_assurance_exit_contribution`` field
+instead (mirroring ``_coverage_gated()``'s pre-existing JSON-only rule) --
+this class of test proves the gate now fires from that field alone, with
+``INPUT_REQUIRE_COMPLETE_ANALYSIS`` never set at all.
 
 Mirrors ``test_action_coverage_verdict.py``'s own harness style (real
 subprocess through ``run.sh``, a shebang-dispatched ``abicheck`` stub on
@@ -202,3 +221,123 @@ class TestRunShRejectsTheRetiredInputDirectly:
             bindir,
         )
         assert outputs["verdict"] == "COMPATIBLE", outputs
+
+
+class TestConfigDrivenAssuranceGateReadsTheReport:
+    """The P1 fix: ``_assurance_gated()`` reads
+    ``analysis_assurance_exit_contribution`` from the JSON report -- the
+    only way a config-only ``assurance.require_complete: true`` (no CLI
+    flag, no Action input) can be observed at all -- rather than the
+    permanently-``false`` ``INPUT_REQUIRE_COMPLETE_ANALYSIS`` env var.
+    ``INPUT_REQUIRE_COMPLETE_ANALYSIS`` is never set in any test below.
+    """
+
+    def _report(self, *, contribution: int, verdict: str) -> dict:
+        return {
+            "report_schema_version": "2.40",
+            "verdict": verdict,
+            "analysis_assurance": {
+                "status": "incomplete" if contribution else "complete"
+            },
+            "analysis_assurance_exit_contribution": contribution,
+        }
+
+    def test_gate_fires_independent_of_fail_on_breaking(self, tmp_path: Path) -> None:
+        """The exact P1 scenario: a config-driven assurance floor coincides
+        with an ABI break the caller chose not to gate on
+        (`fail-on-breaking: false`) -- before the fix, this silently passed
+        because `_assurance_gated()` could never observe `true` any more."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=4,
+            report=self._report(contribution=1, verdict="BREAKING"),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_FAIL_ON_BREAKING": "false",
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_gate_fires_with_fail_on_api_break_false_too(self, tmp_path: Path) -> None:
+        """`fail-on-api-break` already defaults to false -- proves the gate
+        does not depend on that default happening to be true either."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=2,
+            report=self._report(contribution=1, verdict="API_BREAK"),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
+
+    def test_a_zero_contribution_is_not_gated(self, tmp_path: Path) -> None:
+        """No false positive: complete assurance alongside a break the
+        caller chose not to gate on stays a clean step."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=4,
+            report=self._report(contribution=0, verdict="BREAKING"),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+                "INPUT_FAIL_ON_BREAKING": "false",
+            },
+            bindir,
+        )
+        assert outputs["_exit"] == 0, outputs
+
+    def test_scan_mode_reads_the_nested_contribution_too(self, tmp_path: Path) -> None:
+        """`scan --against` nests the field under `diff`, same as its
+        coverage sibling (`_either()` in `_report_query`). `scan` mode's own
+        assurance check is unconditional (mirrors `_coverage_gated()`
+        immediately above it) and reads `_assurance_gated()` directly rather
+        than the published VERDICT label -- a real BREAKING verdict outranks
+        ANALYSIS_INCOMPLETE in `_escalate_verdict_to_report`'s severity
+        ordering and wins the label, so this asserts the exit/message the
+        unconditional check itself produces, not the (by-design, escalated)
+        verdict label."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "diff": self._report(contribution=1, verdict="BREAKING"),
+            },
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["_exit"] != 0, outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs["_stdout"]
