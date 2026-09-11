@@ -298,10 +298,14 @@ result = run_compare_request(CompareRequest(
 ```
 
 The one-sided audit (`scan` with no `--against`) has **no** Python entry
-point yet: `compare --no-baseline` is the CLI replacement, and ADR-068 D2's
-own note records that it does not yet reproduce every audit finding. Until
-it does, run the `abicheck scan` CLI and read its `--format json` report —
-that command is unchanged and still emits the `scan_schema_version` envelope.
+point yet: `compare --no-baseline` is the CLI replacement, and (as of the
+fixes recorded in `docs/contribute/known-gaps.md`'s
+"`compare --no-baseline` does not yet reproduce `scan`'s audit-mode
+findings" entry) it now reproduces `scan`'s own candidate-side findings and,
+opt-in via `--severity-preset`, its exit-code gating too. Until a typed
+`CompareRequest`/`CompareResult`-shaped entry point exists for it, call the
+CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers)
+rather than the `abicheck scan` CLI, which this migration is retiring.
 
 `estimate_scan` — the dry-run per-layer cost projection — survives, but takes
 an `InputSpec` plus the run-scoped level arguments rather than a request:

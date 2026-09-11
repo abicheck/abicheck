@@ -466,4 +466,9 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "support_promise_component_introduced",
         "ADR-065 D1/S3: the symmetric rule -- a component only the NEW release ships, provable only against a PROVEN-complete OLD inventory → COMPATIBLE (an addition)",
     ),
+    (
+        "DECLARATION_COORDINATES_SHIFTED",
+        "declaration_coordinates_shifted",
+        "graph-reconciled: neither name nor declaring-file evidence changed after location-free normalization -- pure :line:col churn → COMPATIBLE",
+    ),
 )

@@ -386,8 +386,12 @@ def test_different_checkout_roots_not_misclassified_as_moved() -> None:
     new_g = _graph([new_node], [])
     result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
     assert len(result.reconciled) == 1
-    # Same qualified name, same project-relative file -- neither renamed nor
-    # moved once the checkout root is stripped.
+    # Same qualified name (raw-identical, nothing to normalize away), same
+    # project-relative file -- neither renamed nor moved once the checkout
+    # root is stripped. Not OUTCOME_COORDINATES_ONLY: that outcome requires
+    # the raw qualified name to have actually differed (positive evidence
+    # of coordinate churn) -- an already-identical name proves nothing
+    # about whatever else (e.g. a mangled-name change) might differ.
     assert result.reconciled[0].outcome == OUTCOME_RECONCILED
 
 
@@ -612,7 +616,9 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
     )
     outcomes = {p.old_node.id: p.outcome for p in result.reconciled}
     assert len(result.reconciled) == 2
-    # Same project-relative file across checkout roots -- not moved.
+    # Same project-relative file across checkout roots -- not moved, and the
+    # raw qualified name never differed either, so there's no positive
+    # coordinate-churn evidence: stays OUTCOME_RECONCILED.
     assert outcomes["type://old_stable"] == OUTCOME_RECONCILED
     # Genuinely moved to a different project subdirectory (detail/ -> public/).
     assert outcomes["type://old_moved"] == OUTCOME_MOVED
@@ -726,7 +732,9 @@ def test_diff_graph_reconciliation_findings_emits_each_change_kind() -> None:
     """Each of the three ChangeKinds is actually produced end-to-end from a
     real reconciled pair, not just referenced by name (mirrors
     tests/test_changekind_completeness.py's coverage requirement)."""
-    rename_parent = GraphNode(id="type://parent", kind="record_type", label="ns::Parent")
+    rename_parent = GraphNode(
+        id="type://parent", kind="record_type", label="ns::Parent"
+    )
     rename_old = GraphNode(
         id="type://old_rename",
         kind="record_type",
@@ -784,9 +792,13 @@ def test_diff_graph_reconciliation_findings_emits_each_change_kind() -> None:
     assert ChangeKind.DECLARATION_MOVED in kinds
     # recon_old/recon_new share every alias (same mangled/qualified name,
     # same file/scope: both empty) -- classified OUTCOME_RECONCILED since
-    # neither name nor file differs between the pair (a same-shape,
-    # non-rename/non-move alias match, e.g. an attribute-only change a
-    # future producer might reconcile on).
+    # neither name nor file differs between the pair, and the raw qualified
+    # name is already identical (nothing to normalize away), so there's no
+    # positive coordinate-churn evidence -- a same-shape, non-rename/
+    # non-move alias match (e.g. an attribute-only change a future producer
+    # might reconcile on) stays DECLARATION_IDENTITY_RECONCILED, ADR-048's
+    # original intent for "match came from alias evidence with no clean
+    # rename/move split."
     assert ChangeKind.DECLARATION_IDENTITY_RECONCILED in kinds
 
 
@@ -817,6 +829,7 @@ def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
             ChangeKind.DECLARATION_RENAMED,
             ChangeKind.DECLARATION_MOVED,
             ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+            ChangeKind.DECLARATION_COORDINATES_SHIFTED,
         )
 
 
@@ -1002,8 +1015,11 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     )
     new_snap = AbiSnapshot(library="test", version="2.0")
 
-    # A rename in the L5 graph, independent of the artifact-level change
-    # above -- exercises the exact production merge path (extra_changes).
+    # A reconciled pair in the L5 graph, independent of the artifact-level
+    # change above -- exercises the exact production merge path
+    # (extra_changes). Same qualified name/declaring file on both sides, so
+    # it classifies OUTCOME_RECONCILED -- the specific outcome doesn't
+    # matter for this test, only that reconciliation findings are additive.
     old_type = GraphNode(
         id="type://old",
         kind="record_type",
@@ -1051,6 +1067,7 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
             ChangeKind.DECLARATION_RENAMED,
             ChangeKind.DECLARATION_MOVED,
             ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+            ChangeKind.DECLARATION_COORDINATES_SHIFTED,
         )
     ]
     assert len(reconciled_in_result) == len(graph_findings)

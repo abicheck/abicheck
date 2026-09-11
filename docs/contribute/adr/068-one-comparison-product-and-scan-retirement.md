@@ -582,19 +582,31 @@ the resolved `--severity-preset` value. The typed Python API does not carry
 consumer to extend today; this stays true to "read, don't re-derive" by
 having exactly one axis owner (`policy/audit_gate_exit.py`) ready for that
 front end the day it exists, rather than duplicating the rule into a second
-module now. The composite GitHub Action does not invoke
-`compare --no-baseline` for `mode: scan`'s audit-only path either — the
-2026-09-09 amendment above records that audit-only `mode: scan` still
-routes to the legacy `scan` CLI unconditionally, pending a separate,
-already-tracked gap (`compare --no-baseline` gaining parity on
-`--sources`/`--build-info`/`--depth`/cross-toolchain flags and `--dry-run`
-honored there). There is therefore no live `action/run.sh` call site to
-translate `mode: scan`'s existing gating behavior onto today; when that
-migration lands, translating a gating `mode: scan` job means passing
-`--severity-preset` through to the `compare --no-baseline` invocation it
-assembles, and labelling exit `3` in the Action's own verdict vocabulary
-(a new `AUDIT_GATE` verdict, alongside `COVERAGE_INCOMPLETE`/
-`SEVERITY_ERROR`) rather than folding it into the generic `ERROR` arm.
+module now.
+
+**Update (2026-09-10, same day): the composite Action's own translation has
+landed.** At the time this amendment was first written, the composite
+GitHub Action did not invoke `compare --no-baseline` for `mode: scan`'s
+audit-only path at all — audit-only requests stayed on the legacy `scan`
+CLI unconditionally, pending the separate `compare --no-baseline`
+parity gap named above (`--sources`/`--build-info`/`--depth`/cross-toolchain
+flags and `--dry-run`). That gap closed the same day, and
+`action/run.sh` was updated to match: every `mode: scan` request (audit-only
+or baseline) now assembles `compare`/`compare --no-baseline` through one
+shared command-assembly branch, with no legacy-CLI fallback branch left at
+all. `--severity-preset default` is injected on the audit-only shape
+whenever the caller stated no preset of its own (neither the dedicated
+`severity-preset` input nor an explicit `extra-args --severity-preset ...`),
+which is what keeps `mode: scan`'s own documented default-gating behavior
+intact across the migration — a caller who already asked for a preset
+(`info-only` included) keeps exactly the preset it asked for. Exit `3` is
+published as a new `AUDIT_GATE` Action verdict output, alongside
+`COVERAGE_INCOMPLETE`/`SEVERITY_ERROR`, and fails the step unconditionally
+(no `fail-on-*` input governs it, matching the coverage/assurance axes'
+own treatment). See `tests/test_action_run_sh_audit_gate.py` for the
+end-to-end coverage (real `run.sh`, real `abicheck`, the G20 corpus
+fixtures this amendment's own verification already used) and
+`action.yml`'s `verdict` output description for the user-facing contract.
 
 **Verification.** `tests/parity/test_no_baseline_audit_corpus_parity.py`
 extends the G20 corpus with `test_audit_gate_axis_matches_legacy_scan_
@@ -609,8 +621,8 @@ measured against, on the same committed snapshots). Unit tests
 (`tests/test_audit_gate_exit_properties.py`, generated combinations of this
 axis alongside the other `max`-folded axes) cover the module directly.
 
-**Status.** Implemented. `docs/contribute/known-gaps.md`'s matching entry
-is updated to record this as closed.
+**Status.** Implemented, axis and Action translation both. `docs/contribute/known-gaps.md`'s matching entry
+is updated to record both as closed.
 
 ### Correction (2026-09-10, same day): the gating rule reads the effective verdict, not the raw kind
 

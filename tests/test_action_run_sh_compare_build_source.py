@@ -217,60 +217,27 @@ class TestCompareModeForwardsChangeFocusInputs:
         assert "--changed-path" not in cmd
 
 
-def _run_scan(env_extra: dict[str, str], tmp_path: Path) -> str:
-    """Like _run_compare, but drives run.sh's scan-mode branch instead."""
-    fake_bin = tmp_path / "fakebin"
-    fake_bin.mkdir()
-    captured = tmp_path / "captured_argv.txt"
-    abicheck_stub = fake_bin / "abicheck"
-    abicheck_stub.write_text(
-        "#!/usr/bin/env bash\n"
-        f'printf \'%s\\n\' "$*" >> "{captured}"\n'
-        'echo \'{"scan_schema_version":"1.2","verdict":"COMPATIBLE","exit_code":0}\'\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    abicheck_stub.chmod(0o755)
-
-    artifact = tmp_path / "new.json"
-    artifact.write_text("{}", encoding="utf-8")
-
-    github_output = tmp_path / "github_output"
-    github_output.write_text("")
-    github_step_summary = tmp_path / "github_step_summary"
-    github_step_summary.write_text("")
-
-    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
-    env = {
-        **base_env,
-        "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
-        "INPUT_MODE": "scan",
-        "INPUT_NEW_LIBRARY": str(artifact),
-        "INPUT_ADD_JOB_SUMMARY": "false",
-        "GITHUB_OUTPUT": str(github_output),
-        "GITHUB_STEP_SUMMARY": str(github_step_summary),
-        **env_extra,
-    }
-    result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=tmp_path,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert captured.is_file(), "abicheck stub was never invoked"
-    return captured.read_text(encoding="utf-8").strip()
-
-
 class TestScanModeForwardsCrossCompilerFlags:
     """Same gap as compare mode above, in scan mode's branch (Codex
-    review, PR #625)."""
+    review, PR #625) -- for the audit-only (no baseline) shape.
+
+    Unlike the pre-migration `scan` CLI, which took these as raw
+    `--compiler`/`--compiler-prefix`/`--compiler-option`/`--sysroot`
+    flags, `mode: scan` now routes unconditionally through
+    `compare`/`compare --no-baseline` (ADR-068's second 2026-09-09
+    amendment and its 2026-09-10 amendment closed the audit-only shape's
+    own last remaining gap), which has no such flags at all -- they are
+    merged into a synthesized `compile:` overlay and forwarded as one
+    `--config` (`add_compile_context_flags`), same as the baseline-scan
+    and native-compare shapes below. Uses `_run_scan_against_raw` (defined
+    below) with `against` cleared, since it already captures that overlay
+    file's content while `run.sh` is still running.
+    """
 
     def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
-        cmd = _run_scan(
+        result, captured, captured_config = _run_scan_against_raw(
             {
+                "INPUT_AGAINST": "",
                 "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
                 "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
                 "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
@@ -278,10 +245,53 @@ class TestScanModeForwardsCrossCompilerFlags:
             },
             tmp_path,
         )
-        assert "--compiler /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
-        assert "--compiler-prefix aarch64-linux-gnu-" in cmd
-        assert "--compiler-option -D__ARM_NEON" in cmd
-        assert "--sysroot /opt/sysroots/aarch64" in cmd
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert captured.is_file(), "abicheck stub was never invoked"
+        cmd = captured.read_text(encoding="utf-8").strip()
+        assert "compare" in cmd.split()
+        assert "--no-baseline" in cmd.split()
+        assert captured_config.is_file(), (
+            "the fake abicheck stub never captured a --config file's content"
+        )
+        with open(captured_config, encoding="utf-8") as f:
+            overlay = json.load(f)
+        # gcc_path wins over gcc_prefix when both are given (the merged
+        # compile.compiler field can only hold one) -- same rule
+        # TestCompareModeForwardsCrossCompilerFlags asserts below.
+        assert overlay["compile"]["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        assert overlay["compile"]["options"] == ["-D__ARM_NEON"]
+        assert overlay["compile"]["sysroot"] == "/opt/sysroots/aarch64"
+
+    def test_quoted_whitespace_atom_matches_compare_mode_synthesis(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1210: legacy `scan`'s own removed
+        `--compiler-option` CLI flag forwarded a whitespace-containing atom
+        (e.g. `-DMSG="hello world"`) verbatim as one real CLI arg, never
+        subject to `compile.options`' own one-atom-per-entry, whitespace-
+        free contract (that check only ever applied to a config *file*
+        value). Since `scan` has no CLI of its own left to take advantage
+        of that any more (ADR-068), it now synthesizes the identical
+        single-item, whitespace-containing `compile.options` entry
+        `TestCompareModeForwardsCrossCompilerFlags.
+        test_quoted_whitespace_atom_stays_one_atom` below proves compare
+        mode already produces -- same synthesis helper, same accepted
+        outcome (`BuildConfig._safe_compile_atom` rejects it at parse time
+        with a clear error; this test only proves what reaches that
+        parser, not the parser's own behavior, which is exercised
+        elsewhere against `abicheck/buildsource/build_config.py` directly).
+        """
+        result, _captured, captured_config = _run_scan_against_raw(
+            {
+                "INPUT_AGAINST": "",
+                "INPUT_GCC_OPTIONS": '-DMSG="hello world"',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        with open(captured_config, encoding="utf-8") as f:
+            overlay = json.load(f)
+        assert overlay["compile"]["options"] == ["-DMSG=hello world"]
 
 
 class TestCompareModeForwardsCrossCompilerFlags:
@@ -316,6 +326,22 @@ class TestCompareModeForwardsCrossCompilerFlags:
         assert "--compiler-prefix" not in cmd
         assert "--compiler-option" not in cmd
         assert "--sysroot" not in cmd
+
+    def test_quoted_whitespace_atom_stays_one_atom(self, tmp_path: Path) -> None:
+        """A single-line `gcc-options` value is shell-quoting-aware split
+        (`shlex.split`), so a quoted segment stays one flag -- but that one
+        flag can still contain an embedded space once its quotes are
+        stripped (`-DMSG="hello world"` -> one atom, `-DMSG=hello world`,
+        with a literal space inside it). `add_compile_context_flags` never
+        re-splits on that internal space -- it is `BuildConfig.
+        _safe_compile_atom` (a separate module, exercised directly
+        elsewhere) that then rejects a `compile.options` entry containing
+        one at parse time. `TestScanModeForwardsCrossCompilerFlags.
+        test_quoted_whitespace_atom_matches_compare_mode_synthesis` above
+        proves `scan` now produces the identical overlay."""
+        cmd = _run_compare({"INPUT_GCC_OPTIONS": '-DMSG="hello world"'}, tmp_path)
+        compile_blk = _compile_overlay_from_cmd(cmd, tmp_path)
+        assert compile_blk["options"] == ["-DMSG=hello world"]
 
 
 class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:

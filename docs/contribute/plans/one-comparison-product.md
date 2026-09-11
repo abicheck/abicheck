@@ -627,7 +627,7 @@ same or a strictly richer finding set than `scan`, with no finding lost and
 no finding manufactured (the `not_evaluated` cases in F-7/F-8). This phase
 lands **no** feature; it lands the proof and the fixtures.
 
-### Phase 4 — Migrate the consumers — commit 1 landed, rest not started
+### Phase 4 — Migrate the consumers — commits 1-3 landed (Action deletion done 2026-09-10)
 
 **Status note (2026-09-09):** an earlier revision of this section described
 the Action/typed-API bullets below as already landed. They were not: a
@@ -685,8 +685,19 @@ section's *actual* state, not the target it originally described:
   2026-09-10**: all four options are read, and the supported format set is
   `json`/`markdown`/`sarif`/`junit`/`oneline` (`html`/`review` remain a
   usage error — an audit has no two-sided document for either to render).
-  `_SCAN_NEEDS_LEGACY_CLI`'s own deletion is the remaining mechanical step;
-  see the known-gaps entry.
+  **`_SCAN_NEEDS_LEGACY_CLI`'s own successor predicate
+  (`_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`) and every `MODE == "scan"` branch
+  that existed only to serve its legacy-CLI fallback are now deleted
+  (2026-09-10)** — the mechanical step this paragraph used to describe as
+  remaining. `action/run.sh` carries no `CMD+=(scan)` site at all any more:
+  every `mode: scan` request (audit-only or baseline) assembles
+  `compare`/`compare --no-baseline` through one shared branch, with
+  `--severity-preset default` injected on the audit-only shape whenever the
+  caller stated no preset of its own (preserving `mode: scan`'s own
+  documented default-gating behavior via ADR-068's 2026-09-10 amendment's
+  audit-gate exit axis, exit `3`, published as a new `AUDIT_GATE` verdict).
+  See the known-gaps entry and `tests/test_action_run_sh_audit_gate.py` for
+  the end-to-end coverage.
 - **Typed API — landed (2026-09-09, its own PR).** `abicheck/service_scan.py`
   defines no request or result type any more. `ScanRequest`, `ScanResult`,
   `ScanArtifactResult`, `ScanSetResult`, `Budget` and `LayerResult` are

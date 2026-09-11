@@ -301,6 +301,7 @@ def compute_no_baseline_document(
         exit_axes=_no_baseline_exit_axes(
             result, require_complete_analysis, audit_gate_enabled
         ),
+        policy=diff.policy,
     )
 
 
@@ -485,6 +486,7 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         ),
         "exit_axes": dict(doc.exit_axes),
         "exit_code": doc.exit_code,
+        "policy": doc.policy,
     }
 
 

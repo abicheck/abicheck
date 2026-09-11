@@ -61,28 +61,18 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
-# ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
-# routings -- the legacy `scan` CLI branch (gated on
-# `_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`, unchanged code, unconditionally
-# forwarding these six flags exactly as before) and a `compare`-translated
-# branch (which only forwards them once a baseline is present). Since
-# ADR-068's second 2026-09-09 amendment collapsed the routing predicate to
-# one condition, the legacy branch is reached *only* for an audit-only
-# request (no baseline) now. This file's parity assertions are about the
-# legacy branch's unconditional forwarding, so the marker is anchored there
-# specifically rather than to the (now ambiguous) bare `'elif [[ "$MODE" ==
-# "scan" ]]; then'`, which the new translated branch's header also matches.
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" && "$_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI" == "true" ]]; then'
+# ADR-068's 2026-09-10 amendment deleted the legacy raw-flag `scan` branch
+# -- one `mode: scan` branch is left, calling `add_compile_context_flags`.
+_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
-# scan has no release fan-out, so its region ends at the nostdinc if-block;
-# anchor past its closing "fi" so the extracted fragment is syntactically
-# complete.
+# No longer used for `mode: scan` itself; kept for `_run_add_flag_shlex_split`.
 _COMPILE_CONTEXT_END = (
     'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n    CMD+=(--nostdinc)\n  fi'
 )
 
-# dump's region (Phase 7) is now the single call to the shared helper.
+# dump's region (Phase 7) is the single call to the shared helper; scan's
+# region (2026-09-10 amendment) is identical, and reuses this pair.
 _DUMP_COMPILE_CONTEXT_START = "add_compile_context_flags true"
 _DUMP_COMPILE_CONTEXT_END = "add_compile_context_flags true"
 
@@ -461,6 +451,28 @@ def _run_region_raw(
         return _run_bash_script(script, env, check=False, cwd=Path(isolated_cwd))
 
 
+def _run_add_flag_shlex_split(
+    value: str, *, env_extra: dict[str, str] | None = None, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Call ``add_flag_shlex_split "--compiler-option" *value*`` directly --
+    ADR-068's 2026-09-10 amendment removed its only call site (legacy
+    `scan`); the function is unchanged, still worth testing standalone."""
+    harness = (
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
+        + _add_flag_source()
+        + "\nCMD=()\n"
+    )
+    script = (
+        harness
+        + 'add_flag_shlex_split "--compiler-option" "$INPUT_GCC_OPTIONS"\n'
+        + "printf '%s\\n' \"${CMD[@]}\"\n"
+    )
+    env = {**os.environ, **(env_extra or {}), "INPUT_GCC_OPTIONS": value}
+    return _run_bash_script(script, env, check=check)
+
+
 def _read_compile_config_overlay(cmd: list[str]) -> dict[str, Any]:
     """Read back the synthesized ``compile:`` block a ``--config <path>``
     entry in *cmd* points at (Phase 7's replacement for individually
@@ -705,26 +717,16 @@ class TestCompileContextForwardingParity:
         assert compile_blk["options"] == ["-DMSG=hello world", "-DOK=1"]
 
     def test_scan_forwards_all_six_flags(self) -> None:
-        """Regression: scan forwarded none of these, even though
-        `cli_scan.py` shares the identical `compile_context_options`
-        decorator with dump (ADR-037 D3 / ADR-035 amendment)."""
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV)
-        assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
-        assert "--sysroot" in cmd and "/opt/sysroot" in cmd
-        assert "--nostdinc" in cmd
-        # Regression (Codex review, PR #757): scan's cross-compiler block used
-        # to appear twice in run.sh -- harmless duplication for the old
-        # scalar --gcc-options (last-of-two-identical-values wins), but
-        # --compiler-option is `multiple=True` and genuinely accumulates every
-        # occurrence, so the duplicate silently doubled every forwarded
-        # --compiler/--compiler-prefix/--compiler-option/--sysroot token.
-        assert cmd.count("--compiler") == 1
-        assert cmd.count("--compiler-prefix") == 1
-        assert cmd.count("--compiler-option") == 1
-        assert cmd.count("--sysroot") == 1
+        """`mode: scan` now forwards these via a synthesized `--config`
+        overlay too (ADR-068's 2026-09-10 amendment removed the legacy
+        raw-flag branch) -- mirrors the dump/compare tests above exactly."""
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV, _DUMP_COMPILE_CONTEXT_START)
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["frontend"] == "clang"
+        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
+        assert compile_blk["options"] == ["-DFOO=1"]
+        assert compile_blk["sysroot"] == "/opt/sysroot"
+        assert compile_blk["nostdinc"] is True
 
     def test_gcc_options_quoted_value_stays_one_token(self) -> None:
         """Regression (Codex review, PR #757): routing gcc-options through
@@ -734,8 +736,8 @@ class TestCompileContextForwardingParity:
         abicheck's own server-side shlex.split() used to produce for the old
         --gcc-options flag. add_flag_shlex_split() must reproduce that
         shlex-aware splitting, not add_flag()'s own naive one."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1'}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split('-DMSG="hello world" -DOK=1')
+        cmd = result.stdout.splitlines()
         assert cmd.count("--compiler-option") == 2
         assert "-DMSG=hello world" in cmd
         assert "-DOK=1" in cmd
@@ -752,8 +754,8 @@ class TestCompileContextForwardingParity:
         truncated any token containing `#`, dropping every flag after it.
         Mirrors abicheck._compiler_options.split_gcc_options's own
         regression test for the identical Python-side fix."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-I/build/#generated -DOK=1"}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split("-I/build/#generated -DOK=1")
+        cmd = result.stdout.splitlines()
         assert cmd.count("--compiler-option") == 2
         assert "-I/build/#generated" in cmd
         assert "-DOK=1" in cmd
@@ -773,8 +775,8 @@ class TestCompileContextForwardingParity:
         Python helper instead of one hardcoded platform's answer."""
         value = r"-DMSG=hello\ world"
         expected_tokens = split_gcc_options(value)
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split(value)
+        cmd = result.stdout.splitlines()
         assert cmd.count("--compiler-option") == len(expected_tokens)
         for token in expected_tokens:
             assert token in cmd
@@ -799,8 +801,8 @@ class TestCompileContextForwardingParity:
         ``tests/test_compiler_options.py::TestSplitGccOptionsWindows``."""
         value = r"-IC:\mypath\include -DFOO=bar"
         expected_tokens = split_gcc_options(value)
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split(value)
+        cmd = result.stdout.splitlines()
         assert cmd.count("--compiler-option") == len(expected_tokens)
         for token in expected_tokens:
             assert token in cmd
@@ -826,12 +828,11 @@ class TestCompileContextForwardingParity:
         (``-DMSG="hello world"``) into malformed tokens under a wrong
         compile context instead of failing. A value that actually needs
         real quote-aware parsing must fail the Action loud."""
-        env = {
-            **_FULL_ENV,
-            **self._env_with_unusable_python(tmp_path),
-            "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1',
-        }
-        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split(
+            '-DMSG="hello world" -DOK=1',
+            env_extra=self._env_with_unusable_python(tmp_path),
+            check=False,
+        )
         assert result.returncode == 1
         assert "::error::" in result.stdout
         assert "quoting/escaping" in result.stdout
@@ -843,12 +844,11 @@ class TestCompileContextForwardingParity:
         all is provably identical whether split by the real parser or by
         add_flag()'s naive whitespace split, so this must still succeed via
         the plain-whitespace-split fallback rather than fail unnecessarily."""
-        env = {
-            **_FULL_ENV,
-            **self._env_with_unusable_python(tmp_path),
-            "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
-        }
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split(
+            "-DFOO=1 -DBAR=2",
+            env_extra=self._env_with_unusable_python(tmp_path),
+        )
+        cmd = result.stdout.splitlines()
         assert cmd.count("--compiler-option") == 2
         assert "-DFOO=1" in cmd
         assert "-DBAR=2" in cmd
@@ -874,12 +874,11 @@ class TestCompileContextForwardingParity:
         parser exists), so refusing to guess here remains the conservative,
         correct choice independent of whether the specific glob-expansion
         vector is also closed one layer down."""
-        env = {
-            **_FULL_ENV,
-            **self._env_with_unusable_python(tmp_path),
-            "INPUT_GCC_OPTIONS": "-DPATTERN=*",
-        }
-        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split(
+            "-DPATTERN=*",
+            env_extra=self._env_with_unusable_python(tmp_path),
+            check=False,
+        )
         assert result.returncode == 1
         assert "::error::" in result.stdout
         assert "glob metacharacters" in result.stdout
@@ -921,8 +920,7 @@ class TestCompileContextForwardingParity:
         script deliberately has no `set -e`), execution silently continued
         with an empty $split, dropping every requested compiler option
         instead of failing on the invalid input."""
-        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="unterminated'}
-        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        result = _run_add_flag_shlex_split('-DMSG="unterminated', check=False)
         assert result.returncode == 1
         assert "::error::" in result.stdout
         assert "could not be parsed" in result.stdout
@@ -979,22 +977,19 @@ class TestCompileContextForwardingParity:
         )
         fake_python3.chmod(0o755)
         harness = (
-            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
             '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
             + _py_safe_dir_source()
             + _py_bin_has_abicheck_source()
             + _add_flag_source()
-            + _is_release_style_operand_source()
             + "\nCMD=()\n"
         )
         script = (
             harness
-            + _compile_context_region(_SCAN_MODE_MARKER)
-            + "\nprintf '%s\\0' \"${CMD[@]}\"\n"
+            + 'add_flag_shlex_split "--compiler-option" "$INPUT_GCC_OPTIONS"\n'
+            + "printf '%s\\0' \"${CMD[@]}\"\n"
         )
         env = {
             **os.environ,
-            **_FULL_ENV,
             "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
             "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
         }
@@ -1020,7 +1015,8 @@ class TestCompileContextForwardingParity:
         assert "--nostdinc" not in cmd
 
     def test_scan_omits_unset_flags(self) -> None:
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, {})
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, {}, _DUMP_COMPILE_CONTEXT_START)
+        assert "--config" not in cmd
         assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd

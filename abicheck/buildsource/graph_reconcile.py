@@ -122,6 +122,7 @@ if TYPE_CHECKING:
 OUTCOME_RENAMED = "declaration_renamed"
 OUTCOME_MOVED = "declaration_moved"
 OUTCOME_RECONCILED = "declaration_identity_reconciled"
+OUTCOME_COORDINATES_ONLY = "declaration_coordinates_shifted"  # neither predicate fired -- distinct from OUTCOME_RECONCILED, where both did
 
 _MATCH_KIND_CANONICAL_ID = "canonical_id"
 _MATCH_KIND_ALIAS = "alias"
@@ -135,6 +136,13 @@ _RECONCILABLE_KINDS: frozenset[str] = frozenset(
     {"source_decl", "record_type", "enum_type", "typedef"}
 )
 
+#: OUTCOME_COORDINATES_ONLY-eligible kinds -- excludes "source_decl": a
+#: function's signature isn't exposed to resolve_identity_for_node in
+#: production, so "nothing else changed" can't be proven for one.
+_COORDINATE_ONLY_KINDS: frozenset[str] = frozenset(
+    {"record_type", "enum_type", "typedef"}
+)
+
 
 @dataclass(frozen=True)
 class ReconciledPair:
@@ -143,7 +151,7 @@ class ReconciledPair:
     old_node: GraphNode
     new_node: GraphNode
     match_kind: str  # canonical_id | alias | structural_context
-    outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED
+    outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED | OUTCOME_COORDINATES_ONLY
     old_identity: CanonicalIdentity
     new_identity: CanonicalIdentity
 
@@ -386,6 +394,13 @@ def _declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
     return result
 
 
+def _signature_tail(identity: CanonicalIdentity) -> str:
+    # normalized_signature's kind/arity/param-types tail, qn field stripped
+    # off (that field alone carries coordinate churn) -- comparable across
+    # a coordinate shift. Format: "sig:" + qn + "\x1f" + kind + "\x1f" + ...
+    return identity.normalized_signature.split("\x1f", 1)[-1]
+
+
 def _classify_outcome(
     old_identity: CanonicalIdentity,
     new_identity: CanonicalIdentity,
@@ -414,7 +429,29 @@ def _classify_outcome(
         return OUTCOME_RENAMED
     if moved and not renamed:
         return OUTCOME_MOVED
-    return OUTCOME_RECONCILED
+    if renamed and moved:
+        return OUTCOME_RECONCILED
+    # Neither fired: coordinate-only needs the raw name differed (normalized
+    # equal), an agreeing signature tail, AND a type-shaped kind -- a real
+    # source_decl producer tracks no param_types/mangled_name (Codex
+    # review), so a function's tail is vacuously equal and can't prove
+    # nothing else changed; only a type has no such hidden dimension.
+    same_sig = _signature_tail(old_identity) == _signature_tail(new_identity)
+    # bool(old_qn)/bool(new_qn)/bool(*_file) mirror renamed/moved's own
+    # guards above -- an absent name is a name gain/loss, and absent file
+    # evidence on either side is missing evidence, never proof the
+    # declaring file didn't change (AGENTS.md: weaker evidence narrows
+    # conclusions, it never upgrades to a clean/compatible claim).
+    coordinate_only = (
+        bool(old_qn)
+        and bool(new_qn)
+        and bool(old_file)
+        and bool(new_file)
+        and old_qn != new_qn
+        and same_sig
+        and old_identity.kind in _COORDINATE_ONLY_KINDS
+    )
+    return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
 
 
 #: One node kind's structural-context index: context -> the new-side node ids
@@ -742,6 +779,7 @@ _OUTCOME_PROSE: dict[str, str] = {
     OUTCOME_RENAMED: "renamed",
     OUTCOME_MOVED: "moved to a different declaring file",
     OUTCOME_RECONCILED: "identity-reconciled (both name and location evidence changed)",
+    OUTCOME_COORDINATES_ONLY: "no material identity change (coordinate-only shift)",
 }
 
 
@@ -823,6 +861,7 @@ def diff_graph_reconciliation_findings(
         OUTCOME_RENAMED: ChangeKind.DECLARATION_RENAMED,
         OUTCOME_MOVED: ChangeKind.DECLARATION_MOVED,
         OUTCOME_RECONCILED: ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+        OUTCOME_COORDINATES_ONLY: ChangeKind.DECLARATION_COORDINATES_SHIFTED,
     }
     boundary = f"[{EVIDENCE_TIER_L5}]"
     old_reachable = _public_reachable_ids(old_graph) if old_graph is not None else None

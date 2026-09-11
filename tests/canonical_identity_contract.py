@@ -158,6 +158,7 @@ UNVERIFIED = frozenset(
         "ctor_explicit_removed",
         "ctor_overload_ambiguity_risk",
         "cxx_standard_floor_raised",
+        "declaration_coordinates_shifted",
         "declaration_identity_reconciled",
         "declaration_moved",
         "declaration_renamed",

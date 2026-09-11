@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 401,
+  "count": 402,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -486,6 +486,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "cxx_standard_floor_raised",
+      "examples": ""
+    },
+    {
+      "kind": "declaration_coordinates_shifted",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L5",
+      "doc_slug": "declaration_coordinates_shifted",
       "examples": ""
     },
     {

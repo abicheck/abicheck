@@ -134,6 +134,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.DECLARATION_RENAMED,
     ChangeKind.DECLARATION_MOVED,
     ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+    ChangeKind.DECLARATION_COORDINATES_SHIFTED,
     # Intra-version cross-source validation (tests/test_cross_source_checks.py).
     ChangeKind.EXPORTED_NOT_PUBLIC,
     ChangeKind.PUBLIC_NOT_EXPORTED,

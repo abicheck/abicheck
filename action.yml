@@ -228,52 +228,58 @@ inputs:
     required: false
   gcc-path:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary. On scan, maps to the
-      CLI's --compiler; on dump and single-pair compare, Phase 7 removed
-      that flag from the CLI entirely, so this Action folds it (together
-      with gcc-prefix, gcc-options, sysroot, and nostdinc, when any of
-      those are also set) into a synthesized .abicheck.yml compile: block
-      forwarded via --config instead. Applies to dump, scan, and compare
-      mode with a single-pair (non-directory, non-package) operand — a
-      directory/package compare rejects it with an error (same
-      restriction as ast-frontend above). Combining any of this group with
-      build-config is supported: the synthesized compile: block is merged
-      into a copy of the named build-config, and this Action's input wins
-      on a key conflict.
+      Path to GCC/G++ (or clang) cross-compiler binary. `scan` has no CLI
+      of its own left at all (this Action always translates it to
+      `compare`/`compare --no-baseline`, ADR-068) — like dump and
+      single-pair compare, it folds into a synthesized .abicheck.yml
+      compile: block forwarded via --config (together with gcc-prefix,
+      gcc-options, sysroot, and nostdinc, when any of those are also set).
+      Applies to dump, scan, and compare mode with a single-pair (non-
+      directory, non-package) operand — a directory/package compare
+      rejects it with an error (same restriction as ast-frontend above).
+      Combining any of this group with build-config is supported: the
+      synthesized compile: block is merged into a copy of the named
+      build-config, and this Action's input wins on a key conflict.
     required: false
   gcc-prefix:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. On scan, maps to the
-      CLI's --compiler-prefix; on dump and single-pair compare, it folds
-      into the same synthesized compile: block gcc-path describes above
-      (a full gcc-path wins if both are set, since the merged compile.compiler
-      config key can only hold one). Applies to dump, scan, and compare mode
-      with a single-pair (non-directory, non-package) operand — a
-      directory/package compare rejects it with an error (same restriction
-      as ast-frontend above).
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Folds into the same
+      synthesized compile: block gcc-path describes above, on every mode
+      that accepts it (a full gcc-path wins if both are set, since the
+      merged compile.compiler config key can only hold one). Applies to
+      dump, scan, and compare mode with a single-pair (non-directory,
+      non-package) operand — a directory/package compare rejects it with
+      an error (same restriction as ast-frontend above).
     required: false
   gcc-options:
     description: >
-      Extra compiler flags passed through to the header frontend. On scan,
-      maps to the CLI's --compiler-option; on dump and single-pair compare,
-      it folds into a synthesized compile.options list in the same
-      synthesized compile: block gcc-path describes above. A single-line
+      Extra compiler flags passed through to the header frontend. Folds
+      into a synthesized compile.options list in the same synthesized
+      compile: block gcc-path describes above, on every mode that accepts
+      it -- including scan, which has no CLI of its own left to forward a
+      raw --compiler-option flag to any more (ADR-068: this Action always
+      translates it to compare/compare --no-baseline). A single-line
       value is shell-quoting-aware split on whitespace into separate flags
-      (a quoted segment such as -DMSG="hello world" stays one flag); a
-      multi-line (YAML block scalar) value treats each line as one already-
-      complete flag, not split further. On scan, that per-line flag is
-      forwarded verbatim as one --compiler-option occurrence even if it
-      contains a space; on dump and single-pair compare, each synthesized
-      compile.options entry must be a single whitespace-free flag, so a
-      line containing a space is rejected with a clear error rather than
-      silently accepted — put each word needing its own flag on its own
-      line instead. Applies to dump, scan, and compare mode with a
+      (a quoted segment such as -DMSG="hello world" stays one flag, but
+      that one flag still contains a space internally); a multi-line
+      (YAML block scalar) value treats each line as one already-complete
+      flag, not split further. Either way, each resulting compile.options
+      entry must be a single whitespace-free flag -- a flag containing a
+      space (whether from a quoted single-line segment or a spaced
+      multi-line entry) is rejected with a clear error rather than
+      silently accepted or silently split further; put each word needing
+      its own flag on its own line instead. This is a real, accepted
+      narrowing from an earlier Action version, where scan's own removed
+      --compiler-option CLI flag forwarded such a flag verbatim (a raw CLI
+      arg is not subject to compile.options' own whitespace-free-atom
+      contract) -- scan has no such CLI path left to take advantage of
+      that any more. Applies to dump, scan, and compare mode with a
       single-pair (non-directory, non-package) operand — a directory/
       package compare rejects it with an error (same restriction as
       ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (scan and deps-tree keep their own direct --sysroot/CLI forwarding). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump, scan, and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --sysroot CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
     required: false
   nostdinc:
     description: >
@@ -464,6 +470,11 @@ inputs:
       origin/main). Maps to compare --since / scan --since. Not forwarded
       for a compare directory/package operand (the per-library release
       fan-out collects no build/source evidence for either side to scope).
+      Rejected outright (step fails before any dependency install) for an
+      audit-only scan (new-library with no against/abi-baseline):
+      compare --no-baseline, which that shape now routes through, does not
+      implement revision-range evidence scoping (ADR-068 D2) -- set
+      against: to use since with scan.
     required: false
   changed-path:
     description: >
@@ -471,13 +482,18 @@ inputs:
       focus the run's source-evidence scope on (space-separated; alternative
       to since). Maps to repeated compare --changed-path / scan
       --changed-path. Not forwarded for a compare directory/package operand,
-      same as since above.
+      same as since above. Rejected outright for an audit-only scan, same
+      as since above and for the same reason.
     required: false
   budget:
     description: >
       scan mode only. Time guard (e.g. 15m, 900s, 1h). The step FAILS on
       overflow (exit 5) — a budget never silently shrinks scope.
-      Maps to scan --budget.
+      Maps to scan --budget. Rejected outright (step fails before any
+      dependency install) for an audit-only scan (new-library with no
+      against/abi-baseline): compare --no-baseline, which that shape now
+      routes through, does not wire the wall-clock guard to this path yet
+      (ADR-068 D2) -- set against: to use budget with scan.
     required: false
   dry-run:
     description: >
@@ -610,7 +626,11 @@ inputs:
       — a directory/package compare rejects it with an error. html is
       supported by compare (same single-pair restriction as sarif) and by
       deps-tree/deps-compare (a dependency-stack report). scan supports
-      text (its default) and json only. dump ignores this input; it always
+      text (its default) and json only -- text is rendered through
+      compare's own markdown renderer (scan has no CLI of its own left at
+      all, ADR-068), for both a baseline scan and an audit-only one; it is
+      NOT a separate plain-text report format (Codex review, PR #1210,
+      round 7). dump ignores this input; it always
       writes a JSON snapshot. Requesting an
       unsupported format for the mode is a hard error raised before any
       dependency install (it used to silently fall back to a supported
@@ -713,7 +733,14 @@ inputs:
   severity-preset:
     description: >
       Severity preset: 'default', 'strict', or 'info-only'.
-      Controls exit codes and report labels. Only applies to compare mode.
+      Controls exit codes and report labels. Applies to compare mode and
+      to scan mode (both the baseline shape and the audit-only shape,
+      where it is also this Action's own documented opt-out from the
+      injected `severity-preset: default` gating -- see the AUDIT_GATE
+      verdict entry below). Does not apply to dump, deps-tree, or
+      deps-compare (Codex review, PR #1210, round 9 -- this description
+      previously said "Only applies to compare mode", which predates
+      `scan`'s own migration onto `compare`).
     required: false
   require-complete-analysis:
     description: >
@@ -835,8 +862,16 @@ outputs:
       assurance axis, which likewise leaves the compatibility verdict
       unchanged; rejected outright for a directory/package operand, so
       this verdict never applies there), API_BREAK,
-      BREAKING, REMOVED_LIBRARY (directory/package operands with
-      fail-on-removed-library set), or ERROR.
+      BREAKING, REMOVED_LIBRARY (directory/package
+      operands with fail-on-removed-library set), or ERROR.
+      AUDIT_GATE/AUDIT_CLEAN/AUDIT_RISK (see mode: scan's own entries below)
+      are NOT reachable for a native mode: compare request through this
+      Action (Codex review, PR #1210, round 7): this Action's own compare
+      branch always supplies both old-library and new-library as positional
+      operands, and --no-baseline itself takes exactly one -- combining it
+      via extra-args with a native compare request fails with a CLI usage
+      error (exit 64), never one of the three audit verdicts. Those three
+      are reachable only through mode: scan's own audit-only translation.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, COMPATIBLE_WITH_RISK (same exit-0 risk tier as
       compare's, above), SEVERITY_ERROR (with --against and a
@@ -844,6 +879,34 @@ outputs:
       category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
       (with --against and the require-complete-analysis input, same
       axis as compare's), API_BREAK, BREAKING,
+      AUDIT_GATE (audit-only, no baseline -- i.e. no against/abi-baseline
+      resolved, ADR-068's 2026-09-10 amendment: a real, BREAKING/
+      API_BREAK-classified finding was detected against the candidate's
+      own public surface while a severity preset other than `info-only`
+      was in effect -- either because the severity-preset input was set,
+      or because this Action injected `severity-preset: default` for you,
+      which it does automatically whenever an audit-only scan states no
+      preset of its own, so an audit-only step gates by default the same
+      way `mode: scan` always documented, unless you explicitly opt out
+      with `severity-preset: info-only`. This is NOT a two-sided
+      compatibility verdict -- an audit reports no additions, removals, or
+      compatibility verdict at all; only the candidate-side findings
+      themselves. Exit code 3, fails the step unconditionally, since no
+      fail-on-* input governs an axis with no compatibility verdict to
+      follow),
+      AUDIT_CLEAN (audit-only, no baseline, exit 0: the same shape as
+      AUDIT_GATE, but no candidate-side finding at all was detected against
+      the candidate's own public surface -- not a two-sided compatibility
+      verdict either, since no baseline was compared),
+      AUDIT_RISK (audit-only, no baseline, exit 0: a real candidate-side
+      finding WAS detected, but this run did not gate on it -- no
+      severity-preset opt-in reached a BREAKING/API_BREAK-classified
+      finding, or the only finding present is RISK-classified, which
+      policy/audit_gate_exit.py never gates regardless of preset. Distinct
+      from AUDIT_CLEAN so a reviewer can tell "nothing found" apart from
+      "something found, not gating" -- both exit 0, neither fails the step,
+      but only one has something worth reading in the JSON report's
+      findings[]),
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
       D2 -- so no comparison could run at all; this verdict fails the step
@@ -917,7 +980,9 @@ outputs:
       the require-complete-analysis input -- as on compare, the three
       share the code and are told apart the same way, one level down
       under diff),
-      2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
+      2 (API break), 3 (AUDIT_GATE -- audit-only only, the audit-gate axis;
+      see the verdict output's own description above), 4 (ABI break),
+      5 (budget overflow), 6 (not comparable --
       candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE),
       7 (evidence-contract error, ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR
       -- either a pinned --depth/--source-method whose required source
@@ -992,6 +1057,14 @@ runs:
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
+        # No-baseline capability-gap guard (Codex review, PR #1210, round
+        # 4): an audit-only mode: scan (no against, or audit: true forcing
+        # it) setting since/changed-path/budget fails here, before Python
+        # setup and the toolchain install -- run.sh keeps its own copy for
+        # anyone invoking it directly.
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_CHANGED_PATH: ${{ inputs.changed-path }}
+        INPUT_BUDGET: ${{ inputs.budget }}
         INPUT_USED_BY: ${{ inputs.used-by }}
         INPUT_USED_BY_MANIFEST: ${{ inputs.used-by-manifest }}
         INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}

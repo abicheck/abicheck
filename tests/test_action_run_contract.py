@@ -125,9 +125,18 @@ def test_run_sh_parses_into_known_subcommands() -> None:
     # Sanity: we actually found the command branches (not a broken parse).
     # `merge`/`appcompat` modes are gone (ADR-043: folded into compare
     # --used-by / automatic dump/compare ingestion); `deps tree` covers the
-    # dump mode's stack-check/deps dispatch.
-    assert {"dump", "compare", "scan", "deps tree"} <= set(by_sub)
-    assert by_sub["scan"], "no flags parsed for scan — parser drifted"
+    # dump mode's stack-check/deps dispatch. `scan` is gone too, since
+    # ADR-068's 2026-09-10 amendment removed the last `CMD+=(scan)` site --
+    # every `mode: scan` request now assembles `CMD+=(compare)` (this
+    # parser is line-based, not block-scoped, so `mode: scan`'s own flags
+    # fold into the same "compare" bucket `mode: compare` populates,
+    # which is exactly right: they must be valid `compare` options now).
+    assert {"dump", "compare", "deps tree"} <= set(by_sub)
+    assert "scan" not in by_sub, (
+        "no `CMD+=(scan)` site should remain in run.sh -- every mode: scan "
+        "request routes through compare/compare --no-baseline"
+    )
+    assert by_sub["compare"], "no flags parsed for compare — parser drifted"
 
 
 @pytest.mark.parametrize("subcommand", sorted(_KNOWN_SUBCOMMANDS))
@@ -330,8 +339,18 @@ class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
     )
 
     def test_each_rejection_precedes_the_route_decision(self) -> None:
+        # ADR-068's 2026-09-10 amendment removed the last routing predicate
+        # (`_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`) entirely -- `mode: scan` now
+        # has exactly one command-assembly branch, which itself decides
+        # between `compare AGAINST ARTIFACT` and `compare --no-baseline
+        # ARTIFACT` (`_SCAN_HAS_BASELINE`). That branch's own header is the
+        # "route decision" this test's contract is really about: a retired
+        # input's rejection must still precede it, so a scan reaching either
+        # shape of that one branch never silently ignores the retired input.
         text = RUN_SH.read_text(encoding="utf-8")
-        route = text.index("_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI=true")
+        route = text.index(
+            'elif [[ "$MODE" == "scan" ]]; then\n  # ── Scan mode, routed through'
+        )
         for name in self._RETIRED:
             guard = text.find(f'if [[ -n "${{{name}:-}}" ]]; then\n  echo "::error::')
             assert guard != -1, f"{name} has no ::error:: rejection in run.sh at all"
@@ -349,4 +368,9 @@ class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
         the real one, so pin that it appears exactly once.
         """
         text = RUN_SH.read_text(encoding="utf-8")
-        assert text.count("_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI=true") == 1
+        assert (
+            text.count(
+                'elif [[ "$MODE" == "scan" ]]; then\n  # ── Scan mode, routed through'
+            )
+            == 1
+        )

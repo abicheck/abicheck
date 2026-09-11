@@ -61,6 +61,20 @@ ruling (b)), so this axis has one shape again. The set-level cases that
 lived here -- and the exit-1 JSON-report ``compat_verdict`` check the set's
 own pre-2026-09-04 generic-1 floor had needed -- went with the mode; see
 this file's own git history for both.
+
+**2026-09-10: the legacy `scan` CLI's own dedicated exit-code dispatch is
+gone.** `mode: scan` now routes unconditionally through
+`compare`/`compare --no-baseline` (ADR-068's second 2026-09-09 amendment
+and its 2026-09-10 amendment), so there is no longer a separate
+`elif [[ "$_CLI_MODE" == "scan" ]]` dispatch in ``run.sh`` -- the shared
+`compare` exit-code `case` block gained its own `7) VERDICT=
+"EVIDENCE_CONTRACT_ERROR"` arm instead (the axis is real on this path too:
+`report/no_baseline.py`'s own `evidence_contract` axis, and the two-sided
+`compare --depth build/source` floor `EVIDENCE_CONTRACT_ERROR`'s own
+docstring already documented as live-verified). This module's extraction
+markers were updated to the shared block; the assertions themselves are
+unchanged, since the mapping's *behavior* did not change -- only which
+`case` block in ``run.sh`` now hosts it.
 """
 
 from __future__ import annotations
@@ -74,7 +88,9 @@ from pathlib import Path
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
-_FINAL_EXIT_SCAN_START = 'elif [[ "$MODE" == "scan" ]]; then\n  # Keyed on the raw `$MODE` input, not `$_CLI_MODE`'
+_FINAL_EXIT_SCAN_START = (
+    'elif [[ "$MODE" == "scan" ]]; then\n  # Keyed on the raw `$MODE` input'
+)
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
 
@@ -92,11 +108,14 @@ def _bash_executable() -> str:
 
 
 def _exit_case_fragment() -> str:
-    """The ``case $ABICHECK_EXIT in ... esac`` block from the scan branch,
-    extracted verbatim (the second ``elif [[ "$MODE" == "scan" ]]`` region,
-    which maps ``ABICHECK_EXIT`` to ``VERDICT``)."""
+    """The ``case $ABICHECK_EXIT in ... esac`` block from the shared
+    `compare` exit-code dispatch, extracted verbatim -- since ADR-068's
+    2026-09-10 amendment, `mode: scan` has no dedicated exit-code dispatch
+    of its own any more: every `mode: scan` request (audit-only or
+    baseline) is served by `compare`'s own shared block, including this
+    module's exit-7 arm."""
     text = RUN_SH.read_text(encoding="utf-8")
-    marker = 'elif [[ "$_CLI_MODE" == "scan" ]]; then\n  # Keyed on `$_CLI_MODE`'
+    marker = "else\n  # compare exit codes:"
     start = text.index(marker)
     case_start = text.index(_CASE_START, start)
     case_end = text.index(_CASE_END, case_start) + len(_CASE_END)
@@ -166,13 +185,17 @@ def _run_exit_mapping(
     # used to read, before that check moved to exit 7 (2026-09-04,
     # `service_scan._aggregate_scan_set_verdict`'s own "Design decision"
     # note) -- no longer stubbed here since exit 1's dispatch no longer
-    # reads them at all.
+    # reads them at all. `_scope_gated` is new here since ADR-068's
+    # 2026-09-10 amendment folded `mode: scan` onto `compare`'s own shared
+    # exit-1 disambiguation, which checks a third axis (ADR-065 S2's
+    # completeness) the old scan-only dispatch never had.
     stubs = f"""
 _resolve_clean_exit_verdict() {{ VERDICT="COMPATIBLE"; }}
 _severity_gate_exit() {{ echo "{severity_exit}"; }}
 _is_cli_error() {{ return {0 if is_cli_error else 1}; }}
 _coverage_gated() {{ return 1; }}
 _assurance_gated() {{ return 1; }}
+_scope_gated() {{ return 1; }}
 _escalate_verdict_to_report() {{ :; }}
 """
     script = (
@@ -309,6 +332,7 @@ _severity_gate_exit() { echo "0"; }
 _is_cli_error() { return 1; }
 _coverage_gated() { return 1; }
 _assurance_gated() { return 1; }
+_scope_gated() { return 1; }
 _escalate_verdict_to_report() { :; }
 """
     script = (

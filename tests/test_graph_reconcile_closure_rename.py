@@ -45,6 +45,7 @@ from __future__ import annotations
 from hypothesis import given, strategies as st
 
 from abicheck.buildsource.graph_reconcile import (
+    OUTCOME_COORDINATES_ONLY,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
@@ -116,9 +117,11 @@ class TestClosureCoordinateShiftIsNotARename:
         )
         pair = _reconcile_one_pair(old_node, new_node)
         assert pair.match_kind == "structural_context"
-        assert pair.outcome == OUTCOME_RECONCILED, (
+        assert pair.outcome == OUTCOME_COORDINATES_ONLY, (
             "a pure coordinate shift on an otherwise-identical closure must "
-            "not read as declaration_renamed"
+            "not read as declaration_renamed, nor as declaration_identity_"
+            "reconciled (that outcome's own prose asserts both name and "
+            "location evidence changed, which is false here -- neither did)"
         )
 
     def test_bare_anonymous_marker_coordinate_shift_reconciles_not_renamed(
@@ -146,7 +149,42 @@ class TestClosureCoordinateShiftIsNotARename:
             },
         )
         pair = _reconcile_one_pair(old_node, new_node)
-        assert pair.outcome == OUTCOME_RECONCILED
+        assert pair.outcome == OUTCOME_COORDINATES_ONLY
+
+    def test_coordinate_shift_with_simultaneous_signature_change_stays_reconciled(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: a real signature change (not just a
+        # coordinate shift) alongside the coordinate shift must NOT read as
+        # COORDINATES_ONLY -- old_qn != new_qn alone is not sufficient
+        # evidence that coordinates are the *only* difference. Only the
+        # kind/arity/param-types tail of normalized_signature differs here
+        # (int -> long), independent of the coordinate embedded in the name.
+        old_node = GraphNode(
+            id="type://old",
+            kind="record_type",
+            label="raii_guard<(lambda:task_group.h:522:26)>",
+            attrs={
+                "qualified_name": "raii_guard<(lambda:task_group.h:522:26)>",
+                "def_file": "task_group.h",
+                "param_types": ["int"],
+            },
+        )
+        new_node = GraphNode(
+            id="type://new",
+            kind="record_type",
+            label="raii_guard<(lambda:task_group.h:525:12)>",
+            attrs={
+                "qualified_name": "raii_guard<(lambda:task_group.h:525:12)>",
+                "def_file": "task_group.h",
+                "param_types": ["long"],
+            },
+        )
+        pair = _reconcile_one_pair(old_node, new_node)
+        assert pair.outcome == OUTCOME_RECONCILED, (
+            "a coordinate shift accompanying a real signature change must "
+            "not be reported as a no-op coordinate-only shift"
+        )
 
     def test_closure_owning_template_genuinely_renamed_still_detected(self) -> None:
         # A REAL rename (the owning template's own name changed, not just

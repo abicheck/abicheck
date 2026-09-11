@@ -82,6 +82,26 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
               "recompilation involved.",
        description_template="Consumer '{name}' requires symbol '{symbol}', which the new library no longer exports"),
     _E(
+        "declaration_coordinates_shifted",
+        _C,
+        impact="The L5 source graph matched an old and a new declaration/type "
+        "node as the same real-world entity where, after "
+        "closure_location_free_identity normalization, NEITHER the "
+        "qualified name NOR the declaring-file evidence changed -- the "
+        "structurally opposite case from declaration_identity_reconciled "
+        "(which requires both to have changed together). What matched "
+        "them is pure :line:col-coordinate churn (or an equivalent "
+        "no-op attribute difference), never a rename or a move. "
+        "Deliberately COMPATIBLE, not RISK: from the model's own "
+        "normalized-identity point of view the declaration did not "
+        "change at all, so scoring it as risk would inflate "
+        "risk_changes for entities the reconciliation itself proves are "
+        "unchanged. Still recorded (never dropped) per this repo's "
+        "record-before-disposing rule -- it explains what would "
+        "otherwise look like an unrelated remove-then-add pair in the "
+        "graph diff, the same way its RISK-tier siblings do.",
+    ),
+    _E(
         "declaration_identity_reconciled",
         _R,
         impact="The L5 source graph reconciled an old and a new declaration/type "

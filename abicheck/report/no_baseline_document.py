@@ -118,12 +118,19 @@ __all__ = [
 #: accurately. Once a release ships an audit document, the rule above
 #: applies with no such escape.
 #:
-#: ``1.2`` -- mirrors ``REPORT_SCHEMA_VERSION``'s ``4.1``/``SCAN_SCHEMA_
+#: ``1.2`` adds the top-level ``policy`` key (the resolved policy name that
+#: classified this audit's findings, read off ``diff.policy``) -- purely
+#: additive, a straightforward MINOR bump under the policy stated above
+#: (Codex review, PR #1210, round 5: the field was entirely absent before,
+#: so a JSON consumer had no way to tell which policy actually classified
+#: a run's findings).
+#:
+#: ``1.3`` -- mirrors ``REPORT_SCHEMA_VERSION``'s ``4.1``/``SCAN_SCHEMA_
 #: VERSION``'s ``1.33`` entries (Codex review, PR #1209): ``run_outcome``
 #: nests the same ``AnalysisAssurance.to_dict()`` compare's report does, so
 #: this always-present block also gains the additive ``schema_staleness_
 #: status`` key.
-AUDIT_REPORT_SCHEMA_VERSION = "1.2"
+AUDIT_REPORT_SCHEMA_VERSION = "1.3"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.
@@ -407,3 +414,16 @@ class NoBaselineDocument:
     #: it (Codex review, P2). Default ``()``-equivalent empty mapping keeps
     #: a hand-constructed document (tests) valid.
     exit_axes: Mapping[str, int] = field(default_factory=dict)
+    #: The resolved policy name (``--policy``'s own value, or the
+    #: ``"strict_abi"`` default) that classified every finding above --
+    #: read straight off ``diff.policy`` (`DiffResult.policy`), the same
+    #: attribute `_finding_resolver` already reads to build those findings,
+    #: rather than re-derived or left for a renderer to guess (Codex
+    #: review, PR #1210, round 5: the JSON projection previously carried no
+    #: ``policy`` key at all, so a consumer building a ``CommentModel`` off
+    #: it fell back to a hard-coded ``"strict_abi"`` default even when a
+    #: non-default policy actually classified the run). ADR-049's own
+    #: contract/pack-resolved policy name lives here unchanged -- this
+    #: field states what *did* classify the findings, not what a caller
+    #: asked for.
+    policy: str = "strict_abi"
