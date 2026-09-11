@@ -179,7 +179,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             # nests the abort's preserved exit decision under `diff.exit`,
             # not the top-level `exit` key `scan_report_abort_compatibility_
             # contribution` reads -- that top-level shape is only
-            # `service_scan.ScanResult.report`'s own, typed-API-only
+            # `dry_run_estimate.ScanResult.report`'s own, typed-API-only
             # envelope (Codex review, fresh evidence: without this, a
             # legacy BUDGET_OVERFLOW/EVIDENCE_CONTRACT_ERROR report's
             # already-found ABI break was silently lost on backfill, since

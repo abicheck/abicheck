@@ -1010,68 +1010,6 @@ class TestReportIdentityEnvelope:
             reporter.to_json(result)
 
 
-class TestScanReportIdentityEnvelope:
-    """Same ADR-047 §7 fields (G30 P0.3), mirrored on the scan side --
-    ScanOutcome.to_dict() rather than a compare_report.schema.json (scan's
-    JSON output has no packaged JSON Schema to validate against)."""
-
-    def _outcome(self, **identity: str) -> object:
-        from abicheck.buildsource.risk import RiskScore
-        from abicheck.scan_engine import ScanOutcome
-
-        return ScanOutcome(
-            mode="scan",
-            resolved_method="auto",
-            depth="headers",
-            collect_mode="off",
-            risk=RiskScore(total=0),
-            auto=True,
-            changed_path_count=0,
-            changed_path_source="none",
-            **identity,
-        )
-
-    def test_unset_by_default(self):
-        payload = self._outcome().to_dict()
-        for key in (
-            "check_id",
-            "profile_id",
-            "requested_depth",
-            "effective_depth",
-            "baseline_channel",
-        ):
-            assert key not in payload
-
-    def test_set_fields_round_trip(self):
-        payload = self._outcome(
-            check_id="libfoo@profile#channel@source",
-            profile_id="linux-x86_64-gcc13",
-            requested_depth="source",
-            effective_depth="build",
-            baseline_channel="accepted-main",
-        ).to_dict()
-        assert payload["check_id"] == "libfoo@profile#channel@source"
-        assert payload["profile_id"] == "linux-x86_64-gcc13"
-        assert payload["requested_depth"] == "source"
-        assert payload["effective_depth"] == "build"
-        assert payload["baseline_channel"] == "accepted-main"
-
-    def test_scan_schema_version_bumped_for_the_new_fields(self):
-        from abicheck.schemas import SCAN_SCHEMA_VERSION
-
-        payload = self._outcome().to_dict()
-        assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
-        assert SCAN_SCHEMA_VERSION != "1.0"
-
-    def test_invalid_requested_depth_rejected_before_dict_is_built(self):
-        with pytest.raises(ValueError, match="requested_depth"):
-            self._outcome(requested_depth="not-a-real-depth").to_dict()
-
-    def test_invalid_effective_depth_rejected_before_dict_is_built(self):
-        with pytest.raises(ValueError, match="effective_depth"):
-            self._outcome(effective_depth="not-a-real-depth").to_dict()
-
-
 class TestSchemaVersion:
     def test_emitted_version_matches_constant(self):
         f = _fn("api", "_Z3apiv")

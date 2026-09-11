@@ -110,7 +110,7 @@ def test_resolve_expands_directory_header_input_before_matching(
 ) -> None:
     # A `-H`/InputSpec.headers entry may name a whole directory rather than a
     # single file (the normal L2 path expands it via
-    # `service_scan.expand_header_inputs` before parsing). Passing the raw,
+    # `dry_run_estimate.expand_header_inputs` before parsing). Passing the raw,
     # unexpanded directory here must not silently no-op: it should be
     # expanded to its real header files first, so a compile unit that
     # `#include`s one of those files is still matched and the derived context

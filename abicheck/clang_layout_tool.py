@@ -151,7 +151,7 @@ def run_layout_tool(
     directory entry expanded, inferred include roots folded in) — the same
     caller-side responsibility ``service._attach_header_graph`` already has
     for its own second clang pass, kept here rather than re-imported from
-    ``service_scan`` to avoid a service.py <-> clang_layout_tool.py import
+    ``dry_run_estimate`` to avoid a service.py <-> clang_layout_tool.py import
     cycle (this module is imported FROM service.py).
 
     Returns the tool's per-record layout facts (a list of dicts, one per
@@ -443,10 +443,10 @@ def apply_layout_facts(
 def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
     """Expand a header directory entry into its recognised header files.
 
-    A third copy of the same small expander ``service_scan.expand_header_inputs``
+    A third copy of the same small expander ``dry_run_estimate.expand_header_inputs``
     / ``cli_resolve._expand_header_inputs`` already provide (see
     ``header_utils.iter_directory_headers``'s own docstring) — deliberately
-    NOT imported from ``service_scan`` here: that module sits in an import
+    NOT imported from ``dry_run_estimate`` here: that module sits in an import
     chain that eventually reaches back to ``service.py``, which imports THIS
     module, so importing it would form a real cycle (this module's whole
     reason for existing is to be importable FROM ``service.py``).
@@ -518,10 +518,10 @@ def attach_clang_layout(
     tail, so a second call there would just re-invoke the external tool for
     nothing left to fill (general-purpose review finding).
 
-    *compile* is typed ``Any`` rather than ``service_scan.CompileContext``
+    *compile* is typed ``Any`` rather than ``dry_run_estimate.CompileContext``
     (duck-typed: only ``.gcc_path``/``.gcc_prefix``/``.gcc_options``/
     ``.gcc_option_tokens``/``.sysroot``/``.nostdinc`` are read) purely to
-    avoid importing ``service_scan`` here — the same import-cycle reason
+    avoid importing ``dry_run_estimate`` here — the same import-cycle reason
     :func:`_expand_header_inputs` is a local copy instead of a reuse.
     """
     if snap.ast_producer not in ("clang", "hybrid") or not headers:

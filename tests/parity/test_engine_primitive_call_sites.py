@@ -71,14 +71,17 @@ from .gaps import EXPECTED_GAPS
 _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 
 #: function name -> (defining module, expected caller module(s), gap key).
-#: `expected_callers` is usually a single module; `run_crosschecks` also
-#: allows `workflows/cross_source_evolution.py`, the documented ADR-068 D3
-#: exception above -- its gap key is `None` since every crosscheck-backed
-#: gap is closed (nothing left in `EXPECTED_GAPS` for it to name).
+#: `run_crosschecks`' own caller set used to also include `scan_engine.py`
+#: (the "one production caller" this module's own docstring describes) --
+#: deleted with the `scan` command itself (ADR-068 Phase 6), leaving
+#: `workflows/cross_source_evolution.py` (the documented ADR-068 D3
+#: `compare`-side caller) as the sole remaining one. Its gap key stays
+#: `None` since every crosscheck-backed gap is closed (nothing left in
+#: `EXPECTED_GAPS` for it to name).
 _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "run_crosschecks": (
         "buildsource/cross_source_checks.py",
-        ("scan_engine.py", "workflows/cross_source_evolution.py"),
+        ("workflows/cross_source_evolution.py",),
         None,  # fully migrated -- no scan-only crosscheck gap remains
     ),
 }
@@ -225,21 +228,22 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
 _CLOSED_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...]]] = {
     "find_pattern_facts": (
         "buildsource/pattern_facts.py",
-        ("scan_engine.py", "workflows/pattern_preprocessor_scan.py"),
+        ("workflows/pattern_preprocessor_scan.py",),
     ),
     "collect_preprocessor_facts": (
         "buildsource/preprocessor_facts.py",
-        ("scan_engine.py", "workflows/pattern_preprocessor_scan.py"),
+        ("workflows/pattern_preprocessor_scan.py",),
     ),
 }
 
 
 @pytest.mark.parametrize("function_name", sorted(_CLOSED_ENGINE_PRIMITIVES))
 def test_closed_primitive_has_exactly_the_expected_callers(function_name: str) -> None:
-    """Phase 2b (plan §3 #6/#8): `compare()` now reaches both primitives
-    via `workflows/pattern_preprocessor_scan.py`, alongside `scan_engine.py`
-    -- pins the exact set so a regression (losing either caller) or a
-    surprise third caller both fail loudly."""
+    """Phase 2b (plan §3 #6/#8): `compare()` reaches both primitives via
+    `workflows/pattern_preprocessor_scan.py` -- pins the exact set so a
+    regression (losing that caller) or a surprise second caller both fail
+    loudly. Used to also allow `scan_engine.py` as a caller; deleted with
+    the `scan` command itself (ADR-068 Phase 6)."""
     defining_module, expected_callers = _CLOSED_ENGINE_PRIMITIVES[function_name]
     expected = {f"abicheck/{m}" for m in expected_callers}
 

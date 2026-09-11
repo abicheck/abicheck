@@ -3,10 +3,15 @@
 
 ADR-035 cases assert on different *surfaces* than the classic ``v1``/``v2``
 verdict: the cross-check findings + provider-agreement matrix
-(:func:`crosscheck_surface`) and the D7 points-of-interest work-list
-(:func:`poi_surface`). These helpers expose those surfaces from a snapshot
-fixture so the catalog (``test_g20_catalog``) and the scenario suites share one
-loader instead of re-deriving it each time.
+(:func:`crosscheck_surface`). These helpers expose that surface from a
+snapshot fixture so the catalog (``test_g20_catalog``) and the scenario
+suites share one loader instead of re-deriving it each time.
+
+The D7 points-of-interest work-list (formerly ``poi_surface``, a thin
+pass-through to ``buildsource.poi.build_points_of_interest``) was dropped
+here when ``buildsource/poi.py`` was deleted with the ``scan`` command
+(ADR-068 Phase 6) -- a call-site audit found no ``compare``-pipeline caller
+for it, and this helper itself had no caller left in the suite either.
 
 Non-``test_`` module (a helper, not a suite) so the test collector ignores it.
 """
@@ -26,10 +31,6 @@ import example_catalog  # noqa: E402
 from abicheck.buildsource.cross_source_checks import (  # noqa: E402
     CrosscheckConfig,
     run_crosschecks,
-)
-from abicheck.buildsource.poi import (  # noqa: E402
-    PointsOfInterest,
-    build_points_of_interest,
 )
 from abicheck.model import AbiSnapshot  # noqa: E402
 from abicheck.serialization import load_snapshot  # noqa: E402
@@ -69,8 +70,3 @@ def crosscheck_surface(
         providers={k: list(v) for k, v in res.providers.items()},
         coverage=coverage,
     )
-
-
-def poi_surface(**kwargs) -> PointsOfInterest:
-    """Thin pass-through to :func:`build_points_of_interest` (the D7 work-list)."""
-    return build_points_of_interest(**kwargs)

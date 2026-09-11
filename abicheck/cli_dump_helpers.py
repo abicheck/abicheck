@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
     from .service_dump_pipeline import ResolvedDumpRequest
-    from .service_scan import CompileContext
+    from .dry_run_estimate import CompileContext
 
 
 # ── Back-compat re-export shim ───────────────────────────────────────────────

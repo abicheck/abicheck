@@ -45,7 +45,7 @@ def test_resolve_side_snapshot_folds_compiler_option_include_dirs(
     from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_scan import CompileContext
+    from abicheck.dry_run_estimate import CompileContext
 
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -94,7 +94,7 @@ def test_resolve_side_snapshot_suppresses_public_include_search_dirs_for_manifes
     from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_scan import CompileContext
+    from abicheck.dry_run_estimate import CompileContext
 
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)

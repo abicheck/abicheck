@@ -38,7 +38,7 @@ checks that had already begun to drift. The natural home for the shared
 half is ``cli_options.py`` (every other cross-command Click option group
 lives there) -- but ``scan``'s own validator lives in ``cli_scan_helpers.py``,
 which sits on an existing import path back into ``cli_options.py``
-(``cli_options -> cli_resolve -> service_scan -> scan_engine ->
+(``cli_options -> cli_resolve -> dry_run_estimate -> scan_engine ->
 cli_scan_helpers``), so a ``cli_scan_helpers -> cli_options`` edge closes a
 real cycle the AI-readiness ``import-cycle-growth`` gate rejects. This module
 is the leaf both sides can depend on without ever depending on each other:

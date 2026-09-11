@@ -469,7 +469,7 @@ def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
     """Resolve a :class:`~abicheck.api_types.DumpRequest`'s single input.
 
     No pair-wide compile context: the C++20 dialect override
-    (``service_scan.pair_wide_cxx20_std_override``) exists so two *sides* of a
+    (``dry_run_estimate.pair_wide_cxx20_std_override``) exists so two *sides* of a
     comparison cannot silently disagree on a language standard. A lone dump has
     nothing to disagree with, and ``dumper.py``'s own per-input C++20 heuristic
     already runs — so forcing a pair-wide decision here would change what a
@@ -502,7 +502,7 @@ def resolve_compare_request_evidence(
     for ``resolve_input``/``embed_build_source``.
 
     *pair_compile* is the pre-existing pair-wide C++20 dialect override
-    (``service_scan.pair_wide_cxx20_std_override``); each side's own
+    (``dry_run_estimate.pair_wide_cxx20_std_override``); each side's own
     ``InputSpec.compile`` takes precedence over it.
     """
     # ADR-043 D7 (plan §3 #12): a changed-path seed narrows the L4/L5 replay

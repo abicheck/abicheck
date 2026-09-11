@@ -990,7 +990,7 @@ class TestFinalizeEvidenceDegradation:
 )
 class TestFinalizeScanGuardSentinel:
     """A baseline-channel: none scan run that hits a guard (--budget
-    exceeded, service_scan.py's BUDGET_OVERFLOW) is not a compatibility
+    exceeded, dry_run_estimate.py's BUDGET_OVERFLOW) is not a compatibility
     finding -- the scan never completed its comparison. gate-mode: deferred/
     advisory must not turn that into a quiet pass the way they do for a real
     BREAKING/API_BREAK compatibility verdict (Codex review)."""

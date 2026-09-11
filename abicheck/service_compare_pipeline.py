@@ -184,7 +184,7 @@ def _manifest_forced_includes(dump_manifest: object) -> list[Path]:
 def _pair_compile_context(request: CompareRequest, lang: str) -> CompileContext | None:
     """The pair-wide C++20 dialect override, if the header sets imply one."""
     from .compile_context import CompileContext
-    from .service_scan import pair_wide_cxx20_std_override
+    from .dry_run_estimate import pair_wide_cxx20_std_override
 
     override = pair_wide_cxx20_std_override(
         lang,

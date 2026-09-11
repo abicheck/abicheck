@@ -29,7 +29,7 @@ working unchanged.
 ``CompileContext``/``expand_header_inputs`` are imported locally inside
 :func:`_try_header_scoped_dump` rather than at module level, mirroring that
 function's own pre-existing local ``from .dumper import ...`` calls: they
-live in :mod:`service_scan`, which ``service.py`` itself only imports at the
+live in :mod:`dry_run_estimate`, which ``service.py`` itself only imports at the
 bottom of the file (after every function using them is already defined) to
 sidestep an import-cycle risk -- a local import here reaches the same
 already-loaded module without needing to reason about load order at all.
@@ -52,7 +52,7 @@ from .header_utils import (
 from .model import AbiSnapshot, Visibility
 
 if TYPE_CHECKING:
-    from .service_scan import CompileContext
+    from .dry_run_estimate import CompileContext
 
 
 def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
@@ -102,7 +102,7 @@ def _try_header_scoped_dump(
     "force only bare ``'c'``" behavior.
     """
     from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
-    from .service_scan import CompileContext, expand_header_inputs
+    from .dry_run_estimate import CompileContext, expand_header_inputs
 
     # Expand header directories into individual files (same as the ELF path),
     # so `--header <dir>` scopes correctly instead of feeding a directory to

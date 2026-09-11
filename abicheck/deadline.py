@@ -41,7 +41,7 @@ Two independent pieces close that gap:
   session (POSIX) and, on timeout, kills the *whole* process group
   (SIGTERM, then SIGKILL after a short grace period) instead of just the one
   process ``subprocess.run`` would kill. Mirrors the escalation shape of the
-  MCP-path watchdog (``service_scan._kill_process_tree``, retired with
+  MCP-path watchdog (``dry_run_estimate._kill_process_tree``, retired with
   ``run_scan_subprocess`` in ADR-068 Phase 4), which already got this right
   for that outer boundary — this module gives the *inner* per-subprocess call
   sites (dumper.py's clang/castxml invocations) the same no-orphans
@@ -327,7 +327,7 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
     """Terminate *proc* and, on POSIX, its entire process group.
 
     Escalates SIGTERM -> (short grace) -> SIGKILL, mirroring the existing
-    MCP-path watchdog (``service_scan._kill_process_tree``) so the CLI header-
+    MCP-path watchdog (``dry_run_estimate._kill_process_tree``) so the CLI header-
     scan path gets the same no-orphans guarantee. Best-effort: a process that
     already exited between the timeout firing and this call is not an error.
 
@@ -442,7 +442,7 @@ def install_sigterm_cleanup() -> None:
 
     Call once from the CLI entry point (``cli.main``) — the plain CLI/CI path
     has no outer watchdog analogous to the MCP path's
-    ``service_scan._kill_process_tree`` (Codex review, PR #591). A no-op on
+    ``dry_run_estimate._kill_process_tree`` (Codex review, PR #591). A no-op on
     non-POSIX platforms (no process groups) or off the main thread (Python
     only allows installing signal handlers there) — best-effort by design,
     same as the rest of this module's process cleanup.

@@ -519,19 +519,22 @@ reclassify:
     assert "COMDAT-inline demotions" in text
 
 
-# --- cli_scan_baseline._blocking_compatible_changes / classify_change_object ----
+# --- severity.classify_change_object ----
 
 
-def test_reclassified_finding_is_identified_as_the_scan_blocker(tmp_path: Path) -> None:
+def test_reclassified_finding_is_identified_via_classify_change_object(
+    tmp_path: Path,
+) -> None:
     """A `reclassify:`-demoted BREAKING finding that lands in `diff.compatible`
     (as QUALITY_ISSUES, since func_removed isn't an ADDITION_KINDS member)
-    must still be nameable as the scan's own blocking finding -- not just
-    correctly gated (that already worked; `_build_severity_json` passes
-    `policy_file`) but correctly *reported*, via
-    `cli_scan_baseline._blocking_compatible_changes` /
-    `severity.classify_change_object` (Codex review)."""
+    must still be nameable as a gate-relevant finding -- not just correctly
+    gated (that already worked; `_build_severity_json` passes `policy_file`)
+    but correctly *classified*, via `severity.classify_change_object` (Codex
+    review). This test used to also check `cli_scan_baseline.
+    _blocking_compatible_changes` reached the identical conclusion --
+    deleted with the `scan` command, ADR-068 Phase 6; `classify_change_object`
+    itself has no `scan`-specific behavior and is unaffected."""
     from abicheck.checker_types import DiffResult
-    from abicheck.cli_scan_baseline import _blocking_compatible_changes
     from abicheck.severity import IssueCategory, classify_change_object
 
     p = tmp_path / "policy.yaml"
@@ -569,14 +572,10 @@ reclassify:
         == IssueCategory.QUALITY_ISSUES
     )
 
-    blocked = _blocking_compatible_changes(diff, {"quality_issues"})
-    assert blocked == [reclassified]
-
 
 def _override_adjusted_kind_sets(pf: PolicyFile, *changes):
     """The real, override-adjusted kind sets a production caller
-    (sarif.py's ``_severity()``, cli_scan_baseline.py's
-    ``_blocking_compatible_changes``) actually passes as *kind_sets* --
+    (sarif.py's ``_severity()``) actually passes as *kind_sets* --
     ``DiffResult._effective_kind_sets()``. A bare
     ``classify_effective_change(change, policy_file=pf)`` call with no
     explicit *kind_sets* falls back to the canonical, override-*unaware*

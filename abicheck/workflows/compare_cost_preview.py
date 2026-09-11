@@ -17,9 +17,9 @@
 (one-comparison-product.md #3, plan item #35, Phase 2f).
 
 ``scan --dry-run`` already projects L0-L5 evidence-collection cost via
-:func:`abicheck.service_scan.estimate_scan` (see ``cli_scan.py``'s own
+:func:`abicheck.dry_run_estimate.estimate_scan` (see ``cli_scan.py``'s own
 ``--dry-run`` branch); ``compare --dry-run`` had no equivalent preview. This
-module reuses :func:`~abicheck.service_scan.estimate_scan` directly -- no
+module reuses :func:`~abicheck.dry_run_estimate.estimate_scan` directly -- no
 new cost model -- and adds only the compare-specific glue: resolving
 compare's own ``--depth``/``.abicheck.yml`` ``source.method``/
 ``--sources``/``--build-info`` precedence into the
@@ -30,7 +30,7 @@ a real ``compare`` run with live source/build evidence extracts *both*
 operands, so the preview sums each side's own projection.
 
 A new, dedicated leaf module rather than an addition to
-:mod:`abicheck.cli_compare_helpers` or :mod:`abicheck.service_scan`: both
+:mod:`abicheck.cli_compare_helpers` or :mod:`abicheck.dry_run_estimate`: both
 already sit at their own ``architecture/debt.yaml`` ``no_growth`` baseline
 with no room for a new function -- the same "prefer extending a split-out
 module over growing the parent toward the cap" guidance in the root
@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..model.evidence_depth_levels import EvidenceDepth, SourceMethod
-    from ..service_scan import CostEstimate
+    from ..dry_run_estimate import CostEstimate
 
 
 def _resolve_compare_estimate_level(
@@ -63,7 +63,7 @@ def _resolve_compare_estimate_level(
     inferred from ``--sources``/``--build-info`` > off), but returns the
     resolved ``(SourceMethod, EvidenceDepth)`` pair rather than a
     collect-mode string -- the shape
-    :func:`~abicheck.service_scan.estimate_scan`'s ``resolved_level`` takes,
+    :func:`~abicheck.dry_run_estimate.estimate_scan`'s ``resolved_level`` takes,
     mirroring how ``cli_scan.py`` pre-resolves its own ``(resolved,
     eff_depth_enum)`` before calling it rather than letting the callee
     re-derive a level from ``estimate_scan``'s own mode-preset default, which
@@ -97,14 +97,14 @@ def _resolve_compare_estimate_level(
 def _merge_layer_estimates(
     estimate_lists: tuple[list[CostEstimate], list[CostEstimate]],
 ) -> list[CostEstimate]:
-    """Sum two :func:`~abicheck.service_scan.estimate_scan` results layer-by-
+    """Sum two :func:`~abicheck.dry_run_estimate.estimate_scan` results layer-by-
     layer -- a real ``compare`` run with live source/build evidence extracts
     *both* operands, so the projected cost is each side's own row summed,
     the same per-operand aggregation
-    :func:`~abicheck.service_scan.estimate_scan` already produces per
+    :func:`~abicheck.dry_run_estimate.estimate_scan` already produces per
     operand, applied here across a compare's two operands instead. Introduces no separate cost model -- every row still
-    comes straight out of :func:`~abicheck.service_scan.estimate_scan`."""
-    from ..service_scan import CostEstimate
+    comes straight out of :func:`~abicheck.dry_run_estimate.estimate_scan`."""
+    from ..dry_run_estimate import CostEstimate
 
     totals: dict[str, tuple[str | None, int, float]] = {}
     order: list[str] = []
@@ -147,7 +147,7 @@ def estimate_compare_dry_run_cost(
     probe itself raised -- mirroring ``cli_scan.py``'s own best-effort
     ``estimate_scan`` call, which the dry run must never let a probe failure
     turn into a hard crash."""
-    from ..service_scan import estimate_scan
+    from ..dry_run_estimate import estimate_scan
     from .request_inputs import InputSpec
 
     try:

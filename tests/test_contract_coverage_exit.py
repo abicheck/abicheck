@@ -496,7 +496,7 @@ class TestTheExitCodeContractIsDocumented:
 
 
 class TestTheProgrammaticApiStaysQuiet:
-    """`fold_coverage_exit` is on `service_scan.run_scan()`'s path, so it must
+    """`fold_coverage_exit` is on `dry_run_estimate.run_scan()`'s path, so it must
     stay pure. A library call that writes to stderr is an unexpected side
     effect for a caller that already gets the coverage details back in its
     result (Codex review) -- and it was a real one, since the announcement

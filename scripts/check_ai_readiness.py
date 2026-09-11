@@ -187,7 +187,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "scripts/check_ai_readiness.py",
         "tests/test_type_graph.py",
         "tests/test_l3l4l5_new_kinds.py",
-        "tests/test_cli_scan.py",
         "tests/test_appcompat.py",
         "tests/test_dumper_clang.py",
         "tests/test_source_abi.py",
@@ -1289,12 +1288,15 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
     {
         # cli.py imports cli_compare_release / cli_baseline / cli_debian_symbols /
         # cli_appcompat / cli_plugin / cli_pr_comment / cli_probe / cli_stack /
-        # cli_suggest / cli_surface / cli_scan / cli_buildsource at module-load
+        # cli_suggest / cli_surface / cli_buildsource at module-load
         # tail to register their @main.command(...) decorators; those
         # sub-modules import `main` and shared helpers back from cli. Each of
         # these once had its own standalone `{"cli", "cli_X"}` (or, for
-        # cli_scan/cli_buildsource, three-item) entry here; all twelve were
+        # cli_buildsource, three-item) entry here; all twelve were
         # removed (2026-08-31 IMPORT_CYCLE_ALLOWLIST audit) once confirmed
+        # (`cli_scan`/`scan_engine` were later removed outright, ADR-068
+        # Phase 6 -- see the `IMPORT_CYCLE_ALLOWLIST` shrinkage note in that
+        # PR)
         # redundant — every module they name is already a member of the one
         # big cluster below, so `short <= allowed` already matches any
         # detected cycle naming a subset of them via that cluster entry alone,
@@ -1304,12 +1306,12 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # produces zero new `check_import_cycles` findings.
         # ADR-035 D10 typed scan engine cluster: the typed engine
         # (`ScanRequest`/`run_scan`/`estimate_scan`) lives in the leaf module
-        # `service_scan`, which `service` re-exports for the public Python API.
-        # `service_scan.run_scan` drives the shared orchestration core in `cli_scan`
+        # `dry_run_estimate`, which `service` re-exports for the public Python API.
+        # `dry_run_estimate.run_scan` drives the shared orchestration core in `cli_scan`
         # (function-local import) and `estimate_scan` reuses `service.expand_header_inputs`
         # (function-local); `cli_scan` reuses `service`/`cli_buildsource` collectors;
         # `cli`/`cli_surface` register and reuse those, and `cli` resolves inputs via
-        # `cli_resolve` → `service`. `service_scan` imports nothing from `service` at
+        # `cli_resolve` → `service`. `dry_run_estimate` imports nothing from `service` at
         # module-load time (it is a leaf), so the SCC closes only through function-local
         # imports (not an init cycle). One SCC, so this cluster covers its many
         # representative simple cycles by subset match. `cli_helpers_compare` and
@@ -1335,8 +1337,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         #
         # ADR-037 D3 adds `cli_options`: the shared `@compile_context_options`
         # decorator's one resolver (`merge_compile_config`/`resolve_compile_context`,
-        # shared by compare/dump/scan) reaches `CompileContext` in `service_scan` via
-        # a *function-local* `from .service_scan import CompileContext`; `service_scan`
+        # shared by compare/dump/scan) reaches `CompileContext` in `dry_run_estimate` via
+        # a *function-local* `from .dry_run_estimate import CompileContext`; `dry_run_estimate`
         # reaches `cli_scan` function-locally and `cli_scan` imports `cli_options` at
         # module load. `cli_options` itself imports only `cli_params` at module load
         # (it is a leaf), so this too closes only through function-local imports.
@@ -1344,16 +1346,16 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # The `compare`/`dump` command bodies are size-split out of `cli.py` into
         # `cli_compare_helpers.run_compare` / `cli_dump_helpers` (thin click wrappers
         # in `cli` delegate to them); those helpers reach the shared
-        # `service`/`service_scan`/`cli_buildsource`/`cli_resolve` collectors
+        # `service`/`dry_run_estimate`/`cli_buildsource`/`cli_resolve` collectors
         # (function-local) and are imported back by `cli`, so they join the same SCC
         # — the package still imports cleanly (no init deadlock).
         #
         # `cli_scan_baseline` is the extracted `scan --baseline`/`--estimate`
         # sub-flow (size-split per CLAUDE.md): `cli_scan` imports it at module load
         # and it reaches `_safe_write_output` in `cli` plus the
-        # `service`/`service_scan`/`cli_buildsource` collectors function-locally,
+        # `service`/`dry_run_estimate`/`cli_buildsource` collectors function-locally,
         # exactly as `cli_scan` did before the split — so it joins the same SCC and
-        # introduces no new *runtime* edge (`service_scan` re-imports
+        # introduces no new *runtime* edge (`dry_run_estimate` re-imports
         # `_public_provenance_set` from it function-locally).
         #
         # `cli_inputs` joins the same SCC (ADR-038 C.8): its `inputs validate`
@@ -1366,15 +1368,15 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # `scan_engine` joins the same SCC (ADR-037 D1 dependency-direction fix):
         # the scan engine core (classify → always-on tier → level → compare,
         # `run_scan_core`) was split out of `cli_scan.py` into `scan_engine.py` so
-        # the CLI (`cli_scan.py`) and the typed service API (`service_scan.py`)
-        # both depend on one engine module instead of `service_scan.run_scan`
+        # the CLI (`cli_scan.py`) and the typed service API (`dry_run_estimate.py`)
+        # both depend on one engine module instead of `dry_run_estimate.run_scan`
         # reaching into a front-end module — that inversion is exactly what this
         # split removes. What remains is a lateral engine-to-engine reference, not
-        # a frontend dependency: `service_scan.run_scan` imports `run_scan_core`/
+        # a frontend dependency: `dry_run_estimate.run_scan` imports `run_scan_core`/
         # `_BudgetOverflow`/`_EvidenceContractError` from `scan_engine` (function-
         # local, avoiding an init-order issue); `scan_engine` type-annotates
         # `compile_context: CompileContext | None` with the type defined in
-        # `service_scan` (under `if TYPE_CHECKING`, so it never executes) and
+        # `dry_run_estimate` (under `if TYPE_CHECKING`, so it never executes) and
         # reaches `cli_buildsource.embed_build_source` / `cli_scan_baseline`
         # helpers function-locally, exactly as `cli_scan.py` did before the
         # split — so it closes the same cluster of cycles through already-member
@@ -1488,13 +1490,10 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_pr_comment",
                 "cli_probe",
                 "cli_resolve",
-                "cli_scan",
-                "cli_scan_baseline",
                 "cli_stack",
                 "cli_suggest",
                 "cli_surface",
                 "l0_export_delta",
-                "scan_engine",
                 "service",
                 "service_compare_pipeline",
                 "service_dump_pipeline",
@@ -1504,19 +1503,19 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # member, not a new dependency direction. `_attach_header_
                 # graph` was previously defined directly in `service.py`
                 # (purely for the file-size cap, mirroring the earlier splits
-                # of `service_render`/`service_scan` out of the same file); it
-                # imports `service_scan.expand_header_inputs` at module load
+                # of `service_render`/`dry_run_estimate` out of the same file); it
+                # imports `dry_run_estimate.expand_header_inputs` at module load
                 # (the identical edge `service.py` itself already carried via
-                # its own tail-of-file `from .service_scan import (...)`
+                # its own tail-of-file `from .dry_run_estimate import (...)`
                 # re-export block), and `service` imports it back eagerly at
-                # its own top. `service_scan` itself imports nothing from
+                # its own top. `dry_run_estimate` itself imports nothing from
                 # `service` at module load (it is a leaf) -- the SCC closes
                 # only through function-local imports elsewhere in this same
                 # cluster, so this adds no new *runtime* edge and no init
                 # deadlock; the package still imports cleanly.
                 "service_header_graph_attach",
                 "service_input_resolution",
-                "service_scan",
+                "dry_run_estimate",
                 # `service_dump_native` joins the same SCC on exactly the terms
                 # `service_header_graph_attach` above was signed off under -- a
                 # *split* of an existing member (ADR-061 "make service.py a
@@ -1524,9 +1523,9 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # `run_dump`/`_run_dump_uncached`/`_dump_elf` and siblings were
                 # previously defined directly in `service.py` (the same
                 # file-size-cap reason the earlier splits give); this module
-                # imports `service_scan.expand_header_inputs` at its own tail
+                # imports `dry_run_estimate.expand_header_inputs` at its own tail
                 # (the identical edge `service.py` itself already carried via
-                # its own tail-of-file `from .service_scan import (...)`
+                # its own tail-of-file `from .dry_run_estimate import (...)`
                 # re-export block, now moved rather than added) and
                 # `service_header_graph_attach._attach_header_graph` eagerly
                 # at its top (an edge `service.py` already carried too). Both
@@ -1547,7 +1546,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # member, two entries up) into `workflows.artifact.resolve` and
                 # `workflows.artifact.execute`, leaving the old path as a
                 # delegating facade. `execute` inherits the member's edges
-                # verbatim -- `service`/`service_scan` reached function-locally,
+                # verbatim -- `service`/`dry_run_estimate` reached function-locally,
                 # imported back at those modules' tails -- so this is the same
                 # rename-follows-member case the sign-off above already covers,
                 # not a new dependency direction. `resolve` is deliberately
@@ -1618,11 +1617,11 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # one-comparison-product.md #35 Phase 2f: `compare --dry-run`'s
                 # new "Cost preview" section is a same-session size-split out
                 # of `cli_compare_helpers` (already a member, above) -- both
-                # `cli_compare_helpers.py` and `service_scan.py` (also already
+                # `cli_compare_helpers.py` and `dry_run_estimate.py` (also already
                 # members) were already at their own `architecture/debt.yaml`
                 # `no_growth` baseline with no room for the new function, so
                 # the compute half (`workflows.compare_cost_preview`, reaching
-                # `service_scan.ScanRequest`/`estimate_scan` function-locally
+                # `dry_run_estimate.ScanRequest`/`estimate_scan` function-locally
                 # -- an edge `cli_scan.py`, already a member, already carries)
                 # and the render half (`frontends.cli.compare_dry_run`,
                 # reaching nothing outside `TYPE_CHECKING`) landed as two new

@@ -19,8 +19,8 @@ can type-annotate against it without joining that cluster itself
 (AGENTS.md "What NOT to do": prefer moving shared logic to a leaf module
 both sides can depend on, over extending ``IMPORT_CYCLE_ALLOWLIST``).
 
-``service_scan.py`` re-exports this name (``from .compile_context import
-CompileContext``) so every pre-existing ``from .service_scan import
+``dry_run_estimate.py`` re-exports this name (``from .compile_context import
+CompileContext``) so every pre-existing ``from .dry_run_estimate import
 CompileContext`` import keeps working unchanged.
 """
 

@@ -59,7 +59,7 @@ _logger = logging.getLogger("abicheck.service")
 # Bound lazily rather than imported statically to avoid re-creating the
 # import-cycle hazard ``service_dump_native.py``'s own
 # ``_try_header_scoped_dump`` binding documents (``service_header_scoped``
-# reaches ``service_scan``, which reaches back through the pre-existing,
+# reaches ``dry_run_estimate``, which reaches back through the pre-existing,
 # already-baselined cli_buildsource/scan_engine SCC).
 _service_header_scoped = _importlib.import_module(".service_header_scoped", __package__)
 # Explicitly typed (not left as the `Any` importlib.import_module's attribute

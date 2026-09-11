@@ -930,7 +930,7 @@ class TestAugmentReport:
         "guard_verdict", ["BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR"]
     )
     def test_scan_guard_sentinel_verdicts_are_operational_errors(self, guard_verdict):
-        """A scan guard sentinel (service_scan.py's BUDGET_OVERFLOW/
+        """A scan guard sentinel (dry_run_estimate.py's BUDGET_OVERFLOW/
         EVIDENCE_CONTRACT_ERROR) is not a compatibility finding -- the scan
         never completed its comparison at all. Must be classified
         operational (populating operational_errors) so gate-mode: deferred/

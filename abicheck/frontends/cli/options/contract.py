@@ -170,7 +170,7 @@ def contract_options(f: F) -> F:
 # (`frontends/cli/commands/compare_no_baseline.py`) must reach them to activate
 # the evaluator the same way `cli_compare_helpers.run_compare` does, and an
 # import edge from that module to `cli_options` pulls the whole
-# `cli_options -> service_scan -> scan_engine -> cli_scan_baseline ->
+# `cli_options -> dry_run_estimate -> scan_engine -> cli_scan_baseline ->
 # cli_compare_helpers` CLI-registration SCC in with it -- new members of that
 # cluster are exactly what the AI-readiness `import-cycle-growth` gate rejects
 # (`AGENTS.md` "What NOT to do": fix the direction or move the shared logic to

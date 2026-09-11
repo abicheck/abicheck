@@ -3,26 +3,26 @@
 
 ``docs/contribute/known-gaps.md``'s "``compare --no-baseline`` does not yet
 reproduce ``scan``'s audit-mode findings" entry named this corpus as the
-gate for its own fix, and this module is that gate: for every one of the
-eleven committed G20 audit/cross-source fixtures,
-``compare --no-baseline FIXTURE`` must report **the same or a strictly
-richer** candidate-side finding set than ``scan FIXTURE`` reports today,
-with nothing manufactured.
+gate for its own fix; that fix landed (verified live against a real
+``scan`` invocation, before ``scan`` was deleted outright with ADR-068
+Phase 6), and this module is now the standing regression corpus proving
+``compare --no-baseline`` keeps reporting every audit/cross-source finding
+it reported then, with nothing manufactured -- a compare-only consistency
+check, not a live scan/compare comparison any more (the tests that ran a
+real ``scan`` invocation to establish the baseline -- ``test_no_baseline_
+reports_at_least_what_scan_reports``, ``test_scan_and_no_baseline_agree_
+on_the_whole_corpus``, ``test_scan_baseline_exit_codes_documented_for_the_
+gated_fixtures`` -- were deleted with ``scan`` itself; the fixed-fixture
+expectations they established (``_AUDIT_GATE_SHOULD_FIRE``, the historical
+per-check counts already reflected in each fixture's own audit report)
+live on in the surviving compare-only assertions below).
 
-The two halves of that sentence are separate assertions, because only
-checking one is how the gap got in:
-
-* **No capability loss.** Every check ``scan``'s ``crosscheck.
-  counts_by_check`` reports must appear in ``compare --no-baseline``'s
-  ``findings[]`` at least as many times. This is the half the gap failed --
-  before the fix, all eleven fixtures aborted with an ``AssertionError``
-  from ``workflows/no_baseline_compare.py``'s blanket ``assert not
-  diff.changes``, so the audit reported nothing at all.
-* **Nothing manufactured.** Every reported finding must be genuinely
-  candidate-side (``policy.no_baseline_findings.is_one_sided_finding``) and
-  must carry an ADR-068 D3-permitted evolution state. "Richer" may only
-  ever mean "``compare`` runs a check ``scan``'s audit mode does not", never
-  "``compare`` invented a comparison finding out of a self-diff".
+**Nothing manufactured**, still checked here: every reported finding must
+be genuinely candidate-side
+(``policy.no_baseline_findings.is_one_sided_finding``) and must carry an
+ADR-068 D3-permitted evolution state -- an audit report may only ever
+surface a real self-diff-derived fact, never an invented comparison
+finding.
 
 The corpus is read through ``scripts/example_catalog`` (the same accessor
 ``tests/test_g20_catalog.py`` and this package's sibling parity modules
@@ -44,7 +44,7 @@ if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
 
-from .runner import invoke_cli, scan_json  # noqa: E402
+from .runner import invoke_cli  # noqa: E402
 
 #: Every G20 audit/cross-source fixture, as ``(case name, file name)``.
 #: ``case151`` contributes two: its full snapshot and the deliberately
@@ -88,19 +88,6 @@ def _no_baseline_report(path: Path, *extra: str) -> dict:
     return json.loads(result.stdout)
 
 
-def _scan_check_counts(path: Path) -> Counter:
-    """``scan``'s audit-mode per-check finding counts for *path*.
-
-    ``scan``'s audit mode (no ``--against``) has no ``diff.findings`` to
-    read -- there is no baseline to diff -- so its cross-source findings are
-    published as ``crosscheck.counts_by_check``. That is the comparable unit
-    against ``compare --no-baseline``'s own per-kind ``findings[]``, and the
-    check names are the same ``ChangeKind`` values on both sides.
-    """
-    report = scan_json(path)
-    return Counter(report.get("crosscheck", {}).get("counts_by_check") or {})
-
-
 def _no_baseline_kind_counts(report: dict) -> Counter:
     return Counter(finding["kind"] for finding in report["findings"])
 
@@ -110,31 +97,6 @@ def test_corpus_covers_every_committed_g20_audit_case() -> None:
     assert len({case for case, _ in G20_AUDIT_FIXTURES}) == _EXPECTED_CASE_COUNT
     for case_name, filename in G20_AUDIT_FIXTURES:
         _fixture_path(case_name, filename)
-
-
-@pytest.mark.parametrize(("case_name", "filename"), G20_AUDIT_FIXTURES)
-def test_no_baseline_reports_at_least_what_scan_reports(
-    case_name: str, filename: str
-) -> None:
-    """No capability loss: every check ``scan`` fires, ``compare
-    --no-baseline`` fires at least as often."""
-    path = _fixture_path(case_name, filename)
-    scan_counts = _scan_check_counts(path)
-    assert scan_counts, (
-        f"{case_name}/{filename} is in the acceptance corpus but scan reports no "
-        "cross-source finding on it -- the fixture, not the audit path, has "
-        "regressed"
-    )
-    audit_counts = _no_baseline_kind_counts(_no_baseline_report(path))
-    missing = {
-        kind: (count, audit_counts[kind])
-        for kind, count in scan_counts.items()
-        if audit_counts[kind] < count
-    }
-    assert not missing, (
-        f"compare --no-baseline lost findings scan reports on {case_name}/"
-        f"{filename}: {missing} (kind -> (scan count, audit count))"
-    )
 
 
 @pytest.mark.parametrize(("case_name", "filename"), G20_AUDIT_FIXTURES)
@@ -199,16 +161,20 @@ _AUDIT_GATE_SHOULD_FIRE = frozenset(
 
 
 @pytest.mark.parametrize(("case_name", "filename"), G20_AUDIT_FIXTURES)
-def test_audit_gate_axis_matches_legacy_scan_gating(
+def test_audit_gate_axis_fires_only_for_api_break_fixtures(
     case_name: str, filename: str
 ) -> None:
     """ADR-068's 2026-09-10 amendment: with ``--severity-preset default``
-    (the opt-in), the audit-gate axis must reproduce exactly which fixtures
-    legacy ``scan`` gated on -- case148/case149 (``API_BREAK``-classified),
-    never case143 (``RISK``-classified) or any other fixture in the corpus.
-    The gated exit code is always ``3`` (never ``2``/``4``, which stay
-    reserved for a real compatibility verdict an audit cannot produce, per
-    ADR-068 D2).
+    (the opt-in), the audit-gate axis fires exactly on the fixtures
+    ``_AUDIT_GATE_SHOULD_FIRE`` names -- case148/case149
+    (``API_BREAK``-classified), never case143 (``RISK``-classified) or any
+    other fixture in the corpus. The gated exit code is always ``3`` (never
+    ``2``/``4``, which stay reserved for a real compatibility verdict an
+    audit cannot produce, per ADR-068 D2). This used to also be checked
+    directly against a live legacy ``scan`` invocation
+    (``test_scan_baseline_exit_codes_documented_for_the_gated_fixtures``,
+    deleted with the ``scan`` command itself, ADR-068 Phase 6); the
+    fixed-fixture-set assertion here is the surviving, compare-only half.
     """
     path = _fixture_path(case_name, filename)
     result = invoke_cli(
@@ -277,27 +243,6 @@ def test_audit_gate_axis_disabled_by_info_only_preset() -> None:
         )
 
 
-def test_scan_baseline_exit_codes_documented_for_the_gated_fixtures() -> None:
-    """Pins the legacy ``scan`` exit codes this whole corpus is measured
-    against, on the committed snapshots, so a drift in the fixtures (not
-    just in ``compare --no-baseline``) is caught here rather than only in
-    prose. Verified live per the module docstring and ADR-068's amendments.
-    """
-    for case_name in _AUDIT_GATE_SHOULD_FIRE:
-        path = _fixture_path(case_name, "snapshot.abi.json")
-        result = invoke_cli("scan", str(path), "--format", "json")
-        assert result.exit_code == 2, (
-            f"{case_name}: expected legacy `scan` to gate at exit 2 on its "
-            f"committed snapshot, got {result.exit_code}:\n{result.output}"
-        )
-    path = _fixture_path("case143_audit_accidental_export", "snapshot.abi.json")
-    result = invoke_cli("scan", str(path), "--format", "json")
-    assert result.exit_code == 0, (
-        "case143: expected legacy `scan` to stay exit 0 (RISK-classified "
-        f"finding), got {result.exit_code}:\n{result.output}"
-    )
-
-
 def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> None:
     """Regression for a Codex security review finding (P1) on this axis's
     first revision: it read a finding's *raw* ``ChangeKind`` category
@@ -352,24 +297,3 @@ def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> Non
     )
 
 
-def test_scan_and_no_baseline_agree_on_the_whole_corpus() -> None:
-    """The corpus-wide statement, asserted once rather than per fixture.
-
-    A per-fixture parametrization can pass while the corpus as a whole has
-    silently shrunk (every remaining case agrees, because the disagreeing
-    ones stopped being collected). This aggregates the same comparison over
-    every fixture in one assertion, so the totals have to move together.
-    """
-    scan_total: Counter = Counter()
-    audit_total: Counter = Counter()
-    for case_name, filename in G20_AUDIT_FIXTURES:
-        path = _fixture_path(case_name, filename)
-        scan_total += _scan_check_counts(path)
-        audit_total += _no_baseline_kind_counts(_no_baseline_report(path))
-    assert sum(scan_total.values()) > 0
-    deficits = {
-        kind: (count, audit_total[kind])
-        for kind, count in scan_total.items()
-        if audit_total[kind] < count
-    }
-    assert not deficits, f"corpus-wide capability loss: {deficits}"

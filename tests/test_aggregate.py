@@ -1927,7 +1927,7 @@ class TestContractCoverageAxis:
     def test_a_service_scan_envelope_is_read_from_report_diff(
         self, tmp_path: Path
     ) -> None:
-        # `service_scan.run_scan` returns a typed `ScanResult` whose `report`
+        # `dry_run_estimate.run_scan` returns a typed `ScanResult` whose `report`
         # field is populated from `ScanOutcome.to_dict()` -- so serializing that
         # public result nests the ledger one level deeper than `scan --against`
         # writes it. Reading only a root `diff` reported a 0 contribution and no

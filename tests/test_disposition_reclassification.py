@@ -225,11 +225,8 @@ def test_every_finding_dict_builder_agrees_on_reclassified_by(
     )
     assert full_entry["reclassified_by"] == expected
 
-    # 2. `scan --against`'s baseline finding dict.
-    from abicheck.cli_scan_baseline import _baseline_finding_dicts
-
-    scan_dicts = _baseline_finding_dicts([change], "compatible", policy_file=pf)
-    assert scan_dicts[0]["reclassified_by"] == expected
+    # 2. (`scan --against`'s baseline finding dict, formerly checked here
+    #    too, was deleted with the `scan` command -- ADR-068 Phase 6.)
 
     # 3. The release fan-out's own capped per-library finding dict -- the
     # one builder that regressed.

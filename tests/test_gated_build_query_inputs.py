@@ -28,9 +28,13 @@ common case -- silently lost the entire config once this migration started
 routing scan through this gate too.
 
 These are primitive-level tests on the gate itself (this repo's own
-"Primitive-level property tests" convention) plus one end-to-end test
-proving ``scan_engine._build_new_snapshot`` forwards ``build_config``
-through ungated even when ``allow_build_query`` is falsy."""
+"Primitive-level property tests" convention). The suite used to also carry
+one end-to-end test proving ``scan_engine._build_new_snapshot`` forwarded
+``build_config`` through ungated even when ``allow_build_query`` was falsy --
+dropped when ``scan_engine.py`` was deleted with the ``scan`` command
+(ADR-068 Phase 6); the primitive-level coverage of ``_gated_build_query_
+inputs`` itself (below) is unaffected, since this shared gate has no other
+production caller passing ``build_config_locally_trusted=True`` today."""
 
 from __future__ import annotations
 
@@ -121,67 +125,3 @@ class TestGatedBuildQueryInputsLocallyTrustedConfig:
         )
         assert got_config is None
         assert got_query is None
-
-
-def test_scan_build_new_snapshot_forwards_build_config_ungated(monkeypatch, tmp_path):
-    """End-to-end: scan_engine._build_new_snapshot must not lose an ordinary
-    --config file's passive settings merely because allow_build_query is
-    falsy (the common case — cli_scan_helpers.resolve_effective_allow_query
-    only ever authorizes a config that itself declares build.query AND an
-    explicitly-pinned deep level)."""
-    import abicheck.scan_engine as scan_engine
-    from abicheck.compile_context import CompileContext
-    from abicheck.model import AbiSnapshot
-
-    binary = tmp_path / "lib.so"
-    binary.write_bytes(b"")
-    config = tmp_path / ".abicheck.yml"
-    config.write_text("build:\n  compile_db: compile_commands.json\n")
-
-    captured: dict = {}
-
-    def fake_impl(side, evidence, **kwargs):
-        captured.update(kwargs)
-        captured["side"] = side
-        from abicheck.service_input_resolution import SideResolution
-
-        return SideResolution(
-            snapshot=AbiSnapshot(library="lib.so", version="1.0"),
-            effective_includes=[],
-            effective_compile_context=None,
-            baseline_compile_context=None,
-        )
-
-    # ADR-061 Phase 3: `scan_engine` imports this from its owner
-    # (`workflows.artifact.execute`), so the patch has to land there --
-    # patching the `service_input_resolution` facade rebinds a name nothing
-    # reads and leaves the real resolver running.
-    monkeypatch.setattr(
-        "abicheck.workflows.artifact.execute._resolve_side_snapshot_impl", fake_impl
-    )
-
-    scan_engine._build_new_snapshot(
-        binary,
-        headers=(),
-        includes=(),
-        sources=None,
-        build_info=None,
-        build_config=config,
-        build_targets=(),
-        collect_mode="off",
-        compile_context=CompileContext(),
-        lang="c++",
-        public_headers=None,
-        public_header_dirs=None,
-        symbols_only=False,
-        debug_presence_only=False,
-        changed_paths=(),
-        allow_build_query=False,
-        baseline_reuse_hint=None,
-        defer_cleanup=None,
-        include_dependencies=True,
-    )
-
-    assert captured["build_config"] == config
-    assert captured["allow_build_query"] is False
-    assert captured["build_config_locally_trusted"] is True

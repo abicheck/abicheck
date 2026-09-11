@@ -486,20 +486,6 @@ def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     assert "-Iinclude" in captured["context"]
 
 
-def test_expand_public_headers_expands_directories(tmp_path) -> None:
-    # cli_scan must hand the S2 leak pass the individual header *files*, not a
-    # directory (which clang would preprocess as one bogus TU) (Codex review).
-    from pathlib import Path
-
-    from abicheck.cli_scan import _expand_public_headers
-
-    inc = tmp_path / "include"
-    inc.mkdir()
-    (inc / "a.h").write_text("// a\n", encoding="utf-8")
-    (inc / "b.hpp").write_text("// b\n", encoding="utf-8")
-    expanded = _expand_public_headers([Path(inc)])
-    assert {Path(p).name for p in expanded} == {"a.h", "b.hpp"}
-
 
 def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
     # The `clang -E -dM` macro pass must route the recorded compile argv through
@@ -548,97 +534,6 @@ def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
     assert "-save-temps" not in cmd
     assert not any(a.startswith("-ftime-trace") for a in cmd)
     assert out["cu://a"] == {"NDEBUG": "1"}
-
-
-# ── scan_engine's clang-binary resolution for collect_preprocessor_facts ────────────
-
-
-def test_scan_engine_clang_bin_defaults_to_clang_plusplus() -> None:
-    from abicheck.scan_engine import _preprocessor_scan_clang_bin
-
-    assert _preprocessor_scan_clang_bin(None) == "clang++"
-
-
-def test_scan_engine_clang_bin_honors_clang_family_gcc_path() -> None:
-    """A ``--compiler`` pointing at a clang-family binary (icx/icpx/dpcpp/…)
-    must be threaded through to the S2 pre-scan's own ``clang -E`` invocation
-    instead of a hardcoded ``clang++`` — otherwise every preprocessor pass
-    fails on an Intel-only flag like ``-no-intel-lib`` that a real ``clang++``
-    on PATH rejects (the bug this test guards against)."""
-    from abicheck.scan_engine import _preprocessor_scan_clang_bin
-    from abicheck.service_scan import CompileContext
-
-    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="icpx")) == "icpx"
-    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="/opt/bin/icx")) == (
-        "/opt/bin/icx"
-    )
-
-
-def test_scan_engine_clang_bin_ignores_non_clang_gcc_path() -> None:
-    """A ``--compiler`` pointing at a real GCC binary (castxml's compiler
-    emulation target) is never dereferenced for the clang-only ``-E -dM``/``-M``
-    pre-scan — same "clang-family only" rule as
-    :func:`abicheck.dumper_clang._resolve_clang_bin`."""
-    from abicheck.scan_engine import _preprocessor_scan_clang_bin
-    from abicheck.service_scan import CompileContext
-
-    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="g++")) == "clang++"
-
-
-def test_scan_engine_clang_bin_honors_gcc_prefix_when_available(monkeypatch) -> None:
-    """A ``--gcc-prefix`` composes a prefixed clang driver name, but only wins
-    when that specific binary is actually resolvable on PATH."""
-    import abicheck.scan_engine as se
-    from abicheck import dumper_clang
-    from abicheck.service_scan import CompileContext
-
-    monkeypatch.setattr(
-        dumper_clang.shutil,
-        "which",
-        lambda name: name if name.endswith("clang++") else None,
-    )
-    ctx = CompileContext(gcc_prefix="/opt/x86_64-linux-gnu-")
-    assert se._preprocessor_scan_clang_bin(ctx) == "/opt/x86_64-linux-gnu-clang++"
-
-
-def test_scan_engine_clang_bin_falls_back_when_prefixed_clang_missing(
-    monkeypatch,
-) -> None:
-    """A documented GCC cross-toolchain prefix (e.g. ``aarch64-linux-gnu-``)
-    is not evidence a same-prefixed Clang driver exists — a system providing
-    only ``aarch64-linux-gnu-g++`` must fall back to the plain ``clang++``
-    that worked before this resolver existed, not silently downgrade S2 to
-    ``not_collected`` by guessing a nonexistent binary name (Codex review)."""
-    import abicheck.scan_engine as se
-    from abicheck import dumper_clang
-    from abicheck.service_scan import CompileContext
-
-    monkeypatch.setattr(dumper_clang.shutil, "which", lambda name: None)
-    ctx = CompileContext(gcc_prefix="aarch64-linux-gnu-")
-    assert se._preprocessor_scan_clang_bin(ctx) == "clang++"
-
-
-def test_scan_engine_clang_bin_excludes_cl_style_drivers() -> None:
-    """A CL-compatible-mode driver (``clang-cl``, Intel's ``dpcpp-cl``) must
-    never be selected here: :class:`ClangPreprocessorExtractor` always shells
-    out with fixed GNU-mode flags (``-E -dM``, ``-M``), which a CL-mode
-    driver either rejects or silently misinterprets as ordinary compile
-    input (``/E``/``/d1PP`` are the CL-mode spellings) — Codex review."""
-    from abicheck.scan_engine import _preprocessor_scan_clang_bin
-    from abicheck.service_scan import CompileContext
-
-    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="dpcpp-cl")) == (
-        "clang++"
-    )
-    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="clang-cl")) == (
-        "clang++"
-    )
-    assert (
-        _preprocessor_scan_clang_bin(
-            CompileContext(gcc_path=r"C:\llvm\bin\clang-cl.exe")
-        )
-        == "clang++"
-    )
 
 
 # ── perf controls: dedup / parallel jobs / probe cap / disable knob ──────────
@@ -1062,14 +957,15 @@ def test_capture_macros_diagnostics_deterministic_under_real_thread_pool(
 
 
 def test_preprocessor_scan_version_bumped_for_probes_truncated() -> None:
-    # Codex review: the additive probes_truncated field needs its schema
+    # Codex review: the additive probes_truncated field needs its own schema
     # version bumped so a consumer negotiating either version can detect
-    # the changed shape.
+    # the changed shape. (The mirrored `scan_schema_version` assertion this
+    # test used to carry was retired with the `scan` command itself --
+    # ADR-068 Phase 6 -- `preprocessor_facts` no longer has a second,
+    # scan-specific envelope version to stay in lockstep with.)
     from abicheck.buildsource.preprocessor_facts import PREPROCESSOR_FACTS_VERSION
-    from abicheck.schemas import SCAN_SCHEMA_VERSION
 
     assert PREPROCESSOR_FACTS_VERSION >= 2
-    assert SCAN_SCHEMA_VERSION != "1.10"
 
 
 def test_run_preprocessor_scan_disabled_via_env(monkeypatch) -> None:

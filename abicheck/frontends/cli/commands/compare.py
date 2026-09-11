@@ -348,7 +348,7 @@ def _embed_inline_source_side(
     can't be re-dumped, so a tree on it is reported ignored.
 
     *compile_context* is compare's already-resolved
-    :class:`~abicheck.service_scan.CompileContext` (the merged per-side context).
+    :class:`~abicheck.dry_run_estimate.CompileContext` (the merged per-side context).
     The caller passes the *resolved* values plus the toolchain/dependency/native
     knobs (``follow_deps``/``--gcc-*``/``--dwarf-only``/…) so the inline dump
     parses this side exactly as a native ``compare``/``dump`` would.

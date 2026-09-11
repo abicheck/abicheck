@@ -45,7 +45,7 @@ database (Codex review, fresh evidence) -- reusing that module's own
 ``_compile_db_at`` (a pure stat/glob, read-only, no I/O beyond that) rather
 than re-deriving the same resolution a second, potentially-diverging way;
 other modules already reach into this same private helper across the module
-boundary (e.g. ``service_scan.py``'s ``_find_compile_db_in_dir``).
+boundary (e.g. ``dry_run_estimate.py``'s ``_find_compile_db_in_dir``).
 
 The no-collection-requested check (Codex review, fresh evidence) mirrors the
 precondition that must hold before *either* real call site can even reach

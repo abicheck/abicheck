@@ -17,7 +17,7 @@
 """gen_python_api_reference.py — exhaustive Python API reference, generated
 from `abicheck.service.__all__` instead of hand-copied.
 
-`abicheck/service.py`'s `__all__` (re-exporting names from `service_scan.py`,
+`abicheck/service.py`'s `__all__` (re-exporting names from `dry_run_estimate.py`,
 `service_render.py`, and `api_types.py`) is the Tier-2 public surface — the
 same one the CLI calls through (ADR-037). `docs/use/
 python-api.md` deliberately documents only `run_compare`'s "common subset" of

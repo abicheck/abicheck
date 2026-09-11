@@ -1045,7 +1045,7 @@ def test_unrelated_third_party_package_named_abicheck_is_not_flagged(
     [
         ("abicheck/scan_engine.py", True),
         ("abicheck/service.py", True),
-        ("abicheck/service_scan.py", True),
+        ("abicheck/dry_run_estimate.py", True),
         ("abicheck/buildsource/inline.py", True),
         ("abicheck/buildsource/source_extractors/clang.py", True),
         ("abicheck/artifact_plan.py", True),

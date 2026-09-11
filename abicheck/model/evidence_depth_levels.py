@@ -344,7 +344,7 @@ def resolve_source_method(
 #: source-level assurance pins ``--depth source`` explicitly.
 #:
 #: Deliberately a named constant shared by every unpinned-depth resolution
-#: (the ``scan`` CLI and :func:`~abicheck.service_scan.estimate_scan`'s own
+#: (the ``scan`` CLI and :func:`~abicheck.dry_run_estimate.estimate_scan`'s own
 #: dry-run projection) rather than a literal at each, so the cost preview can
 #: never price a different rung than the run executes.
 UNPINNED_DEPTH: EvidenceDepth = EvidenceDepth.HEADERS

@@ -31,15 +31,19 @@ from abicheck.frontends.cli.options.params import DEPTH_PARAM
 
 
 def _registered() -> dict:
-    """Register every depth-bearing command on ``main`` and return its map."""
-    import abicheck.cli_scan  # noqa: F401  — registers scan
+    """Every depth-bearing command's registration on ``main``.
 
+    ``scan`` used to be a third depth-bearing command registered here
+    (``import abicheck.cli_scan``) -- deleted with the ``scan`` command
+    itself (ADR-068 Phase 6); ``compare``/``dump`` are already registered
+    by ``abicheck.cli``'s own module-load side effects.
+    """
     return main.commands
 
 
 # ── One dial: every depth-bearing command shows the same user-facing ladder ──
 
-_DEPTH_COMMANDS = ("compare", "dump", "scan")
+_DEPTH_COMMANDS = ("compare", "dump")
 
 
 @pytest.mark.parametrize("cmd_name", _DEPTH_COMMANDS)

@@ -154,7 +154,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # entirely (no scan-shaped scenario ran under this workflow at all for a
     # change to any of these).
     "abicheck/service_input_resolution.py",
-    "abicheck/service_scan.py",
+    "abicheck/dry_run_estimate.py",
     "abicheck/service_dump_pipeline.py",
     "abicheck/service_compare_pipeline.py",
     "abicheck/service_dump_cache.py",

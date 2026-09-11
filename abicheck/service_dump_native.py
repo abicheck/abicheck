@@ -18,7 +18,7 @@
 Split out of ``service.py`` (ADR-061 "make service.py a thin facade" pass)
 as a leaf module, the pattern ``service_metadata_attach``/
 ``service_header_graph_attach``/``service_header_scoped``/``service_render``/
-``service_scan``/``service_compare_pipeline``/``service_dump_pipeline``
+``dry_run_estimate``/``service_compare_pipeline``/``service_dump_pipeline``
 already follow. The PE/Mach-O half of the same original block
 (``_dump_pe``/``_dump_macho``/``_extract_pdb_debug``) lives one file
 further out, in ``service_dump_native_pe`` (imported/re-exported below) —
@@ -793,8 +793,8 @@ from .service_dump_native_pe import (  # noqa: E402
 )
 
 # expand_header_inputs is the scan-engine's own header expansion helper,
-# re-exported through ``service_scan`` -- imported lazily below to avoid a
-# module-load-time cycle (``service_scan`` -> ... -> this module's own
+# re-exported through ``dry_run_estimate`` -- imported lazily below to avoid a
+# module-load-time cycle (``dry_run_estimate`` -> ... -> this module's own
 # siblings), matching how ``service.py`` itself deferred this before the
 # split.
-from .service_scan import expand_header_inputs  # noqa: E402
+from .dry_run_estimate import expand_header_inputs  # noqa: E402

@@ -24,7 +24,7 @@ kept out of that module for two independent reasons:
   print the candidate twice under two labels, exactly the "a baseline was
   consulted" misreading ADR-068 D2 forbids.
 * **Imports.** ``compare_dry_run`` reaches ``workflows.compare_cost_preview``
-  and ``service_scan``, which close the ``cli_options -> service_scan ->
+  and ``dry_run_estimate``, which close the ``cli_options -> dry_run_estimate ->
   scan_engine -> cli_scan_baseline -> cli_compare_helpers`` CLI-registration
   SCC. A ``--no-baseline`` dispatch importing that module -- even
   function-locally, which the AI-readiness scan counts too -- would join that

@@ -1328,15 +1328,15 @@ def test_run_compare_request_normalizes_lang(
     assert seen_langs == ["c", "c"]
 
 
-# ── D1: service_scan must not depend on the CLI frontend ────────────────────
+# ── D1: dry_run_estimate must not depend on the CLI frontend ────────────────────
 #
-# service_scan.run_scan historically imported its shared scan-engine core
+# dry_run_estimate.run_scan historically imported its shared scan-engine core
 # (run_scan_core / _BudgetOverflow / _EvidenceContractError) from cli_scan.py —
 # a Click command module — the reverse of the intended frontend → service →
 # engine dependency direction (ADR-037 D1). That engine core now lives in
 # scan_engine.py (no @click.option decorators, not registered as a command);
-# cli_scan.py (the CLI) and service_scan.py (the typed service API) both
-# import from it instead of service_scan reaching into the CLI module.
+# cli_scan.py (the CLI) and dry_run_estimate.py (the typed service API) both
+# import from it instead of dry_run_estimate reaching into the CLI module.
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -1361,15 +1361,15 @@ def _imported_modules(path: Path) -> set[str]:
 
 
 def test_service_scan_does_not_import_cli_scan() -> None:
-    """service_scan.py must never import from cli_scan.py (the Click ``scan``
+    """dry_run_estimate.py must never import from cli_scan.py (the Click ``scan``
     command module) — the shared engine core lives in scan_engine.py, which
-    both cli_scan.py and service_scan.py depend on independently."""
-    import abicheck.service_scan as service_scan_mod
+    both cli_scan.py and dry_run_estimate.py depend on independently."""
+    import abicheck.dry_run_estimate as service_scan_mod
 
     path = Path(service_scan_mod.__file__)
     imported = _imported_modules(path)
     assert not {"cli_scan", "abicheck.cli_scan"} & imported, (
-        "service_scan.py imports from cli_scan.py — this reintroduces the "
+        "dry_run_estimate.py imports from cli_scan.py — this reintroduces the "
         "service→CLI dependency inversion ADR-037 D1 / the scan_engine split "
         "fixed. Import the needed symbols from abicheck.scan_engine instead."
     )

@@ -15,13 +15,13 @@
 
 """Pair-wide C++20 dialect override, shared by every compare front-end.
 
-Split out of :mod:`abicheck.service_scan` purely for that module's own
+Split out of :mod:`abicheck.dry_run_estimate` purely for that module's own
 ``no_growth`` line budget: unlike the rest of that file,
 :func:`pair_wide_cxx20_std_override` has zero dependency on anything else
-there (or on anything ``service_scan``-specific at all), so it moves
-cleanly with no import-direction consequence -- :mod:`abicheck.service_scan`
+there (or on anything ``dry_run_estimate``-specific at all), so it moves
+cleanly with no import-direction consequence -- :mod:`abicheck.dry_run_estimate`
 imports it back for re-export, a genuine one-directional edge, not the
-mutual-dependency shape a real split of ``service_scan``'s own request/
+mutual-dependency shape a real split of ``dry_run_estimate``'s own request/
 estimate machinery would create.
 """
 

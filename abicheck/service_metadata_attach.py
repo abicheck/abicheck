@@ -23,7 +23,7 @@ own failures -- an enrichment step must never fail a dump.
 
 Split out of ``service.py`` (which sits at the AI-readiness file-size hard
 cap -- see ``AGENTS.md``) as a leaf module, the same pattern
-``service_render``/``service_scan`` already follow. ``service.py``
+``service_render``/``dry_run_estimate`` already follow. ``service.py``
 re-exports all four names, so ``from abicheck.service import
 _try_attach_python_api_surface`` keeps working.
 """

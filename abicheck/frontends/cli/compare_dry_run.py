@@ -18,15 +18,15 @@
 
 Takes the caller's already-computed
 :func:`~abicheck.workflows.compare_cost_preview.estimate_compare_dry_run_cost`
-result (a list of :class:`~abicheck.service_scan.CostEstimate` rows, or an
+result (a list of :class:`~abicheck.dry_run_estimate.CostEstimate` rows, or an
 error string) and turns it into ``DryRunResult`` section lines -- the same
 split :mod:`abicheck.frontends.cli.scan_dry_run` already applies between a
 workflow's computed estimate and its CLI rendering, and for the identical
 reason: this module lives under ``frontends/cli`` (may import ``model``/
 ``workflows``/``report`` only, per ``architecture/modules.yaml``), so the
-*computation* -- which needs ``service_scan`` -- stays in
+*computation* -- which needs ``dry_run_estimate`` -- stays in
 :mod:`abicheck.workflows.compare_cost_preview` (the ``workflows`` layer,
-where ``service_scan.py`` itself is classified).
+where ``dry_run_estimate.py`` itself is classified).
 
 PR #1154 merge-conflict follow-up (file-size hard cap): also hosts
 :func:`build_compare_dry_run_result`, the whole-report builder that used to
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
     from ...dry_run import DryRunResult
     from ...model.consumer_spec import ConsumerAppInput
-    from ...service_scan import CostEstimate
+    from ...dry_run_estimate import CostEstimate
 
 
 def add_compare_cost_preview_section(

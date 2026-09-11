@@ -2,6 +2,13 @@
 """``tests/parity/runner.py``'s :class:`~.runner.Finding`/:class:`~.runner.RunOutcome`
 own multiplicity contract (Codex review, PR #1172, round 16, fresh evidence).
 
+``_outcome_from_findings``/``RunOutcome`` have no remaining CLI-invoking
+production caller in this package after ``scan``'s deletion (ADR-068
+Phase 6, which removed this module's own former ``assert_full_parity``/
+``scan_outcome``/``compare_outcome`` callers) -- they stay as a tested,
+reusable primitive, per this repo's "Primitive-level property tests"
+convention, and this module is that primitive-level coverage.
+
 Before this fix, ``Finding`` dropped every finding down to
 ``(kind, identity, severity, evidence_refs)`` and ``RunOutcome.severities``/
 ``.gate_contributions`` keyed on the bare ``(kind, identity)`` pair. A
@@ -10,15 +17,15 @@ several findings for one function -- one per leaked type, same ``kind`` and
 same ``symbol`` -- so two *distinct* findings collapsed onto the identical
 :class:`~.runner.Finding` value and the identical dict key. A partial
 capability loss (one of the two rows missing on one side, the other
-present) then hashed the same on both sides and ``assert_full_parity()``
-read it as full parity instead of catching the loss.
+present) then hashed the same on both sides and a caller comparing two
+``RunOutcome``s would have read it as full parity instead of catching the
+loss.
 
 These are primitive-level tests directly against ``runner.py``'s own
-building blocks (no real ``compare``/``scan`` CLI invocation needed to
-prove the identity primitive itself is right), per this repo's
-"Primitive-level property tests" convention (root ``AGENTS.md``): a
-reusable identity/dedup primitive earns its own standalone tests stating
-its contract, decoupled from any one caller's fixture.
+building blocks (no CLI invocation needed to prove the identity primitive
+itself is right): a reusable identity/dedup primitive earns its own
+standalone tests stating its contract, decoupled from any one caller's
+fixture.
 """
 
 from __future__ import annotations

@@ -47,7 +47,7 @@ from ._compiler_options import split_gcc_options
 _INCLUDE_ROOT_NAMES = frozenset({"include", "inc"})
 
 #: Recognised C/C++ header file suffixes for directory ``-H`` *expansion*
-#: (``service_scan``). Deliberately conservative — these become standalone
+#: (``dry_run_estimate``). Deliberately conservative — these become standalone
 #: translation units, so it must not sweep in files meant only to be ``#include``d
 #: (``.inl``/``.tcc`` template bodies). Lives in this leaf module so the consumers
 #: can share it without an import cycle.
@@ -147,7 +147,7 @@ def iter_directory_headers(
     """Recognised header files under *directory*, never descending pruned dirs.
 
     Shared by both ``-H <dir>`` expanders — the ``scan``/service path
-    (:func:`abicheck.service_scan.expand_header_inputs`) and the ``dump``/``compare``
+    (:func:`abicheck.dry_run_estimate.expand_header_inputs`) and the ``dump``/``compare``
     CLI path (``abicheck.cli_resolve._expand_header_inputs``) — so the two
     front-ends can never disagree on what counts as a header (they previously kept
     divergent suffix literals; one was missing ``.h++``). Filters by

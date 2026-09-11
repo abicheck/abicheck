@@ -160,7 +160,7 @@ def test_seeded_includes_and_compile_context_forwards_input_spec_build_targets(
     from abicheck.service_input_resolution import (
         _seeded_includes_and_compile_context,
     )
-    from abicheck.service_scan import CompileContext
+    from abicheck.dry_run_estimate import CompileContext
 
     captured: dict = {}
 

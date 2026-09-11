@@ -23,11 +23,16 @@ boundary. :func:`render_comment` takes an already-built
 so the two halves split along a real seam rather than an arbitrary line
 range -- confirmed directly: nothing here calls back into
 ``pr_comment.py``'s own functions, only into ``pr_comment_base.py`` (the
-``CommentModel``/``Finding`` types and shared formatting helpers already
-factored out for ``pr_comment_scan.py``) and ``pr_comment_scan.py`` itself
-(``scan_note``). ``pr_comment.py`` re-exports :func:`render_comment` and this
-module's other externally-referenced names for its existing callers
-(``cli_pr_comment.py``, several ``tests/test_pr_comment*.py`` modules).
+``CommentModel``/``Finding`` types and shared formatting helpers). The
+``scan``-report adapter this module used to call into
+(``pr_comment_scan.scan_note``) was deleted with the ``scan`` command
+(ADR-068 Phase 6) -- its dead ``model.mode == "scan"`` branch below went with
+it too, since the one surviving producer of ``mode="scan"``
+(``pr_comment._from_no_baseline``, the ``compare --no-baseline`` audit
+report) never sets any of the ``scan_*`` fields that branch read.
+``pr_comment.py`` re-exports :func:`render_comment` and this module's other
+externally-referenced names for its existing callers (``cli_pr_comment.py``,
+several ``tests/test_pr_comment*.py`` modules).
 """
 
 from __future__ import annotations
@@ -36,7 +41,6 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 
 from .pr_comment_base import CommentModel, Finding, _esc
-from .pr_comment_scan import scan_note
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
@@ -682,8 +686,6 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
         else "⛔ Blocked by policy (compatible)"
     )
     out: list[str] = []
-    if model.mode == "scan":
-        out += scan_note(model)
     out += _findings_table(
         breaking_title, model.breaking, detail, open_default=bool(model.breaking)
     )

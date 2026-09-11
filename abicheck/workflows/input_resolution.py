@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from ..environment_matrix import EnvironmentMatrix
 
 # `service_dump_native` reaches `service_header_graph_attach` ->
-# `service_scan` -> `service`, the pre-existing, already-baselined CLI-
+# `dry_run_estimate` -> `service`, the pre-existing, already-baselined CLI-
 # registration SCC (AGENTS.md "M1-3"/CLAUDE.md "What NOT to do"). This
 # module is imported *by* `service` itself, so a static `from
 # ..service_dump_native import ...` here would pull this new module into

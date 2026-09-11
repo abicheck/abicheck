@@ -31,7 +31,11 @@ class TestSchemasCurrent:
         [
             ("snapshot", SCHEMA_VERSION),
             ("compare", schemas.REPORT_SCHEMA_VERSION),
-            ("scan", schemas.SCAN_SCHEMA_VERSION),
+            # ("scan", ...) was retired with the `scan` command itself
+            # (ADR-068 Phase 6) -- `schemas.current("scan")` now raises
+            # ValueError, covered by test_unknown_artifact_name_is_a_value_error
+            # below in spirit (that test uses a made-up name; "scan" is a
+            # real former one exercising the identical code path).
             ("aggregate", AGGREGATE_SCHEMA_VERSION),
             ("build-output", BUILD_OUTPUT_SCHEMA),
             # The highest version abicheck can emit (gate-bearing), not the
@@ -59,7 +63,7 @@ class TestSchemasCurrent:
         assert isinstance(schemas.current("snapshot"), int)
 
     @pytest.mark.parametrize(
-        "name", ["compare", "scan", "build-output", "run-plan", "release"]
+        "name", ["compare", "build-output", "run-plan", "release"]
     )
     def test_other_versions_are_strings(self, name):
         assert isinstance(schemas.current(name), str)

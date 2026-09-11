@@ -13,15 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""compare↔dump↔scan L2 compile-context parity + threading (ADR-037 D3 / ADR-035).
+"""compare↔dump L2 compile-context parity + threading (ADR-037 D3 / ADR-035).
 
 The cross-toolchain + frontend family is defined once in
-``cli_options.compile_context_options`` and shared by ``compare`` / ``dump`` /
-``scan``; the project ``compile:`` block is folded in by the one shared resolver
-(``cli_options.merge_compile_config`` / ``resolve_compile_context``). This guards
-that the three commands never drift, that ``scan`` threads the context down to the
-header dump, and that ``compare`` now threads its both-sides context to *both*
-sides while the per-side ``--old/new-ast-frontend`` override still wins.ADR-061 Phase 4, throughout: patch the owner, not ``abicheck.cli`` -- its lazy ``__getattr__`` means a ``setattr`` there rebinds nothing the caller reads.
+``cli_options.compile_context_options``; the project ``compile:`` block is
+folded in by the one shared resolver (``cli_options.merge_compile_config`` /
+``resolve_compile_context``). This guards that ``compare``/``dump`` never
+drift in their shared *absence* of the family as real CLI flags (Phase 7b,
+ADR-037 D8.1 -- ``compile.*`` config keys are the only spelling now on
+either command), and that ``compare`` threads its both-sides ``compile:``
+config context to *both* sides while the per-side
+``--old/new-ast-frontend`` override still wins. ``scan`` used to be this
+suite's third leg -- the one command that still carried the family as real
+CLI flags, and the one caller of ``cli_scan``'s own
+``_merge_compile_config`` (a plain re-export of
+``cli_options.merge_compile_config``, the same shared resolver every
+surviving test below still exercises through its live import path) -- and
+was deleted outright with the ``scan`` command (ADR-068 Phase 6); only its
+own scan-CLI-specific parity tests went with it.
+ADR-061 Phase 4, throughout: patch the owner, not ``abicheck.cli`` -- its lazy ``__getattr__`` means a ``setattr`` there rebinds nothing the caller reads.
 """
 
 from __future__ import annotations
@@ -36,9 +46,8 @@ from click.testing import CliRunner
 
 from abicheck.cli import compare_cmd, dump_cmd, main
 from abicheck.cli_options import compile_context_options, sided_frontend_explicit
-from abicheck.cli_scan import scan_cmd
 from abicheck.model import AbiSnapshot
-from abicheck.service_scan import CompileContext
+from abicheck.dry_run_estimate import CompileContext
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
 #: The ``gcc_*`` dests are deliberately absent: --gcc-options was removed as a
@@ -69,24 +78,20 @@ def test_dump_exposes_full_compile_context_family() -> None:
     assert not (_COMPILE_CONTEXT_DESTS & _param_dests(dump_cmd))
 
 
-def test_scan_exposes_full_compile_context_family() -> None:
-    assert _COMPILE_CONTEXT_DESTS <= _param_dests(scan_cmd)
-
-
 def test_compare_exposes_full_compile_context_family() -> None:
     # Phase 7: compare lost the shared L2 family too (ADR-037 D8.1 -- no
     # drift between compare/dump), the same way dump did above.
     assert not (_COMPILE_CONTEXT_DESTS & _param_dests(compare_cmd))
 
 
-def test_compare_dump_scan_compile_context_does_not_drift() -> None:
+def test_compare_dump_compile_context_does_not_drift() -> None:
     # Phase 7: compare/dump share the *absence* of this family (both are
-    # config-only now); scan alone still carries it as real CLI flags.
+    # config-only now). `scan`, which used to be the third leg of this
+    # parity check (it alone still carried the family as real CLI flags),
+    # was deleted outright with the `scan` command (ADR-068 Phase 6).
     compare_ctx = _param_dests(compare_cmd) & _COMPILE_CONTEXT_DESTS
     dump_ctx = _param_dests(dump_cmd) & _COMPILE_CONTEXT_DESTS
-    scan_ctx = _param_dests(scan_cmd) & _COMPILE_CONTEXT_DESTS
     assert compare_ctx == dump_ctx == set()
-    assert scan_ctx == _COMPILE_CONTEXT_DESTS
 
 
 def test_compile_context_default_is_empty() -> None:
@@ -255,7 +260,7 @@ def test_buildconfig_accepts_hybrid_compile_frontend() -> None:
 
 
 def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text(
@@ -284,7 +289,7 @@ def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_
     root, not against `.github/` itself (Codex review on PR #828 —
     `merge_compile_config` used to resolve against `cfg.parent`, which is
     wrong once a config can live somewhere other than the project root)."""
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     github_dir = tmp_path / ".github"
     github_dir.mkdir()
@@ -299,7 +304,7 @@ def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_
 def test_merge_compile_config_include_dirs_resolve_against_project_root_for_dot_github_abicheck_config(
     tmp_path: Path,
 ) -> None:
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     subdir = tmp_path / ".github" / "abicheck"
     subdir.mkdir(parents=True)
@@ -318,7 +323,7 @@ def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> 
     explicit CLI -std= once --gcc-options (which used to suppress config
     synthesis entirely) was removed. Config tokens must come first so a
     compiler's own last-flag-wins semantics still resolve to the CLI value."""
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  std: c++20\n  defines: [CFG=1]\n")
@@ -331,7 +336,7 @@ def test_merge_compile_config_cli_token_wins_over_config_std(tmp_path: Path) -> 
 
 
 def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None:
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  std: c++20\n  defines: [A, B=2]\n  frontend: clang\n")
@@ -344,7 +349,7 @@ def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None
 
 
 def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> None:
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     # Each compile config scalar reaches gcc_option_tokens as ONE literal token
     # (`-std=<v>` / `-D<v>`), not shell-split. The define carries embedded quotes
@@ -370,7 +375,7 @@ def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> Non
 
 
 def test_merge_compile_config_noop_without_path() -> None:
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cli = CompileContext(gcc_options="-DX")
     merged, includes = _merge_compile_config(cli, (Path("a"),), None)
@@ -386,7 +391,7 @@ def test_merge_compile_config_autodiscovers_from_sources(tmp_path: Path) -> None
     (src / ".abicheck.yml").write_text(
         "compile:\n  std: c++20\n  include_dirs: [include]\n", encoding="utf-8"
     )
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     merged, includes = _merge_compile_config(CompileContext(), (), None, sources=src)
     assert merged.gcc_options is None
@@ -402,7 +407,7 @@ def test_merge_compile_config_explicit_config_beats_autodiscovery(
     (src / ".abicheck.yml").write_text("compile:\n  std: c++11\n", encoding="utf-8")
     explicit = tmp_path / "explicit.yml"
     explicit.write_text("compile:\n  std: c++23\n", encoding="utf-8")
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     merged, _ = _merge_compile_config(CompileContext(), (), explicit, sources=src)
     assert merged.gcc_options is None
@@ -937,7 +942,7 @@ def test_merge_compile_config_explicit_auto_beats_config(tmp_path: Path) -> None
     # config frontend (Codex review).
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     # Default 'auto' (not explicit) inherits config 'clang'.
     inherit, _ = _merge_compile_config(CompileContext(), (), cfg)
@@ -954,7 +959,7 @@ def test_merge_compile_config_explicit_malformed_fails_loud(tmp_path) -> None:
     # loudly, not silently drop the compile: settings (Codex review).
     import click
 
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     bad = tmp_path / ".abicheck.yml"
     bad.write_text("compile: [unterminated\n", encoding="utf-8")
@@ -977,7 +982,7 @@ def test_merge_compile_config_autodiscovered_malformed_warns(tmp_path, capsys) -
 def _merge_compile_config_autodiscover(
     cli: CompileContext, src: Path
 ) -> tuple[CompileContext, tuple[Path, ...]]:
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     return _merge_compile_config(cli, (), None, sources=src)
 
@@ -1040,7 +1045,7 @@ def test_merge_compile_config_nostdinc_precedence(tmp_path: Path) -> None:
     # --no-nostdinc (nostdinc_explicit, value False) overrides it (Codex review).
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  nostdinc: true\n", encoding="utf-8")
-    from abicheck.cli_scan import _merge_compile_config
+    from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     # Default (not explicit) inherits config True.
     inherit, _ = _merge_compile_config(CompileContext(), (), cfg)

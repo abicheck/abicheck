@@ -693,7 +693,7 @@ class TestNoFailOnAdditionsFlag:
 
 def test_main_installs_sigterm_cleanup(monkeypatch) -> None:
     """Codex review (PR #591): the plain CLI/CI path has no outer watchdog
-    (unlike the MCP path's service_scan._kill_process_tree) that would
+    (unlike the MCP path's dry_run_estimate._kill_process_tree) that would
     otherwise clean up a run_bounded()-detached compiler process group on an
     external SIGTERM. Every CLI invocation must install that cleanup via
     deadline.install_sigterm_cleanup() before any subcommand runs."""

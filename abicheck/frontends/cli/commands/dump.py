@@ -78,7 +78,7 @@ from ..options.params import (
 )
 
 if TYPE_CHECKING:
-    from ....service_scan import CompileContext
+    from ....dry_run_estimate import CompileContext
 
 
 # `main` is the Click group this command registers on; importing it here and

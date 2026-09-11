@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .model import AbiSnapshot
-    from .service_scan import CompileContext
+    from .dry_run_estimate import CompileContext
     from .workflows.extraction import DumpManifest
 
 

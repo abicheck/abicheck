@@ -869,7 +869,7 @@ def test_artifact_set_completed_member_exit_code_counts_without_a_report_exit(
 ) -> None:
     """A set-level abort that fires *after* every member already finished
     normally (e.g. the shared budget expires during the post-member bundle
-    audit, `service_scan.run_scan_set`) preserves `per_artifact` with real,
+    audit, `dry_run_estimate.run_scan_set`) preserves `per_artifact` with real,
     completed member results -- but a completed member's own `ScanResult.
     report` is `{}` (no nested `exit` block at all, since it never
     aborted): the real result lives only in that member's bare top-level
@@ -927,7 +927,7 @@ def test_artifact_set_completed_member_exit_code_counts_without_a_report_exit(
 def test_artifact_set_evidence_contract_error_member_alongside_a_real_break_still_gates_its_own_category(
     tmp_path: Path,
 ) -> None:
-    """`_aggregate_scan_set_verdict` (ADR-056 D3, service_scan.py) deliberately
+    """`_aggregate_scan_set_verdict` (ADR-056 D3, dry_run_estimate.py) deliberately
     keeps a stronger real `API_BREAK`/`BREAKING` verdict at a `scan
     --artifact-set` set's own root even when one member aborted with
     `EVIDENCE_CONTRACT_ERROR` alongside it -- a real break must not be

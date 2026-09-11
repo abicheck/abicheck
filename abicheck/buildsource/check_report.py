@@ -63,7 +63,7 @@ from typing import Any
 from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
-from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
+from ..schemas import REPORT_SCHEMA_VERSION
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
 from .check_report_run_outcome import backfill_run_outcome, synthetic_run_outcome
@@ -457,9 +457,7 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
     falsely claiming the single-pair compare schema (same rationale). ADR-047
     §7's identity/policy-gate fields still apply regardless of report shape.
     """
-    if "scan_schema_version" in report:
-        out["scan_schema_version"] = SCAN_SCHEMA_VERSION
-    elif not ("libraries" in report and "old_dir" in report):
+    if not ("libraries" in report and "old_dir" in report):
         out["report_schema_version"] = REPORT_SCHEMA_VERSION
 
 
