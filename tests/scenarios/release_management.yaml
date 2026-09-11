@@ -46,17 +46,16 @@ scenarios:
     test: test_sc_offline_snapshot
 
   - id: SC-BASELINE-PIN
-    title: Pin a release ABI as a baseline file, then gate future builds with scan
+    title: Pin a release ABI as a baseline file, then gate future builds against it
     persona: Release engineer
     narrative: >
       A team keeps each release's ABI snapshot on disk as its pinned baseline —
       there is no separate registry to push/pull from (pre-1.0 CLI reset): a
-      baseline is simply an old dump/library passed directly to `compare` or
-      `scan --against`. `scan --against` folds the always-on tier and the
-      gating comparison into one command for CI.
+      baseline is simply an old dump/library passed directly to `compare` as
+      its OLD operand.
     flow:
       - abicheck dump libfoo.so -H include/ -o v1.json    # at release time, kept as the baseline
-      - abicheck scan v2.json --against v1.json --format json
+      - abicheck compare v1.json v2.json --format json
     expected:
       exit_code: 4
       verdict: BREAKING
