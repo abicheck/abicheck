@@ -990,20 +990,25 @@ class TestPatternVerdictsStaysOptInAtTier2:
     def test_default_request_leaves_pattern_verdicts_off(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
         from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.service import run_compare_request
 
         old, new = _write(tmp_path, *_breaking_pair())
 
-        real_compare_snapshots = service_mod.compare_snapshots
+        # classify_compare_pair imports compare_snapshots from its real owner
+        # (workflows.compare_policy, ADR-061 gap A) rather than the flat
+        # abicheck.service facade, so the patch target follows it.
+        real_compare_snapshots = compare_policy_mod.compare_snapshots
         seen_pattern_verdicts: list[object] = []
 
         def _spy_compare_snapshots(old_snap, new_snap, *args, **kwargs):
             seen_pattern_verdicts.append(kwargs.get("pattern_verdicts"))
             return real_compare_snapshots(old_snap, new_snap, *args, **kwargs)
 
-        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+        monkeypatch.setattr(
+            compare_policy_mod, "compare_snapshots", _spy_compare_snapshots
+        )
 
         request = CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
         assert request.pattern_verdicts is False
@@ -1014,20 +1019,25 @@ class TestPatternVerdictsStaysOptInAtTier2:
     def test_request_can_still_opt_in(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.service as service_mod
+        import abicheck.workflows.compare_policy as compare_policy_mod
         from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.service import run_compare_request
 
         old, new = _write(tmp_path, *_breaking_pair())
 
-        real_compare_snapshots = service_mod.compare_snapshots
+        # classify_compare_pair imports compare_snapshots from its real owner
+        # (workflows.compare_policy, ADR-061 gap A) rather than the flat
+        # abicheck.service facade, so the patch target follows it.
+        real_compare_snapshots = compare_policy_mod.compare_snapshots
         seen_pattern_verdicts: list[object] = []
 
         def _spy_compare_snapshots(old_snap, new_snap, *args, **kwargs):
             seen_pattern_verdicts.append(kwargs.get("pattern_verdicts"))
             return real_compare_snapshots(old_snap, new_snap, *args, **kwargs)
 
-        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+        monkeypatch.setattr(
+            compare_policy_mod, "compare_snapshots", _spy_compare_snapshots
+        )
 
         request = CompareRequest(
             old=InputSpec(path=old), new=InputSpec(path=new), pattern_verdicts=True
