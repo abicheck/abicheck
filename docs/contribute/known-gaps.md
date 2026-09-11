@@ -7970,14 +7970,22 @@ already threaded through to other consumers (`cli_compare_helpers.py`'s
 is always reported at the lower "reaches something internal" confidence
 under `compare` today, regardless of `--since`/`--changed-path`.
 
-Tractable when picked up: thread `changed_paths` from `checker.compare()`'s
-existing parameter down through `compute_cross_source_evolution` into the
-`CrosscheckConfig` it builds, mirroring how the scan-only orchestrator once
-did it. Needs a regression test asserting the confidence *does* change under
-`--since`/`--changed-path` on a real (not just internal-API) `compare`
-invocation, not only an internal `run_crosschecks(...)` call — the gap here
-was invisible to internal tests precisely because nothing exercises the
-public `--since` flag's effect on this specific check's confidence.
+Tractable when picked up, but **`checker.compare()` has no `changed_paths`
+parameter to thread today** (verified against its real signature,
+`abicheck/checker.py`'s `def compare(old, new, suppression=None, *,
+policy=..., ...)` — no `changed_paths` anywhere in it) — an earlier version
+of this entry wrongly described the value as already existing on
+`compare()` and needing only to be threaded further down. Adding a
+`changed_paths` parameter to `checker.compare()` (and updating every
+caller that already resolves a changed-path set — `cli_compare_helpers.py`
+already has one — to actually pass it through) is itself the first piece
+of required wiring work, not a step that can skip straight to modifying
+`compute_cross_source_evolution`/`CrosscheckConfig`. Needs a regression
+test asserting the confidence *does* change under `--since`/
+`--changed-path` on a real (not just internal-API) `compare` invocation,
+not only an internal `run_crosschecks(...)` call — the gap here was
+invisible to internal tests precisely because nothing exercises the public
+`--since` flag's effect on this specific check's confidence.
 
 ## `compare --dry-run`'s cost preview does not reflect `--since`'s changed-path seeding
 

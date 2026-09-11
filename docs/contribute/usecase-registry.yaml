@@ -935,10 +935,15 @@ use_cases:
       evidence-directed focusing (`buildsource/poi.py`) had no `compare`-side
       equivalent added and were deleted with no replacement — `--depth` is
       now always an explicit pin (see `docs/contribute/known-gaps.md`'s
-      closed "`scan --depth binary` and `compare --depth binary` see
-      different evidence" entry for the related
-      `evidence.tier_shortcut_without_substitute` regression-class
-      retirement note). Depth semantics (the binary rung staying
+      "`compare --depth binary` still performs a deep DWARF type walk the
+      public evidence-depth contract says that rung skips" entry for the
+      related `evidence.tier_shortcut_without_substitute` regression-class
+      retirement note — that entry was briefly marked CLOSED earlier in
+      this same PR's history on the mistaken theory that retiring `scan`
+      resolved it, then reopened once verified live that `compare --depth
+      binary` still performs the deep DWARF walk on its own, independent
+      of `scan`; it remains an open, `compare`-only defect). Depth
+      semantics (the binary rung staying
       artifact-only even with matrix-wide headers/sources/compile-DB flags
       present) are **no longer covered**: `tests/test_scenarios.py`'s own
       `SC-SCAN-BINARY-DEPTH-MATRIX-ARGS` scenario was retired (marked
