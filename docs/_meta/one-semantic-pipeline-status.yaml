@@ -1202,8 +1202,24 @@ concepts:
       tests/test_surface_graph_reader_migration.py pins output parity
       between the pre/post-Phase-3 shapes per reader, a dedicated "prefers
       the richer build_source.source_graph" regression test per reader, and
-      a depth-projection-exclusion regression test. **Not closed by this
-      row:**
+      a depth-projection-exclusion regression test. A fourth review round
+      found the depth-projection guard had only been applied to two of the
+      five readers (internal_leak.py and cross_source_checks.py's two
+      checks still used the unguarded fallback) and a deeper root cause:
+      depth_projection._mark_layers_not_collected only rewrote an existing
+      L5 coverage row, never inserted one for a pack that started with
+      none at all, defeating the "no row at all" signal the guard relies
+      on. Fixed _mark_layers_not_collected itself (inserts a missing row
+      now) rather than special-casing every caller again, and consolidated
+      all five readers onto one shared evidence_depth.
+      resolve_l5_source_graph(snap, pack) resolver so the fallback rule
+      cannot independently drift per call site as it already had three
+      times. That consolidation also fixed a third finding: the third
+      round's cast(...) for _side_source_graph was unsound there
+      specifically (diff_source_graph_findings reads concrete-only
+      SourceGraphSummary attributes the SurfaceGraphLike protocol doesn't
+      declare) -- the shared resolver now requires isinstance(...,
+      SourceGraphSummary) uniformly. **Not closed by this row:**
       deleting the L5 builder's own in-memory identity-aliasing
       (service_header_graph_attach.py's _attach_header_graph, which
       threads one shared SourceGraphSummary instance into both

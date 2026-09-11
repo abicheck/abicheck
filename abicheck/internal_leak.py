@@ -41,7 +41,7 @@ import collections
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from .buildsource.call_graph import (
     CALL_KIND_FUNCTION_POINTER,
@@ -978,12 +978,11 @@ def compute_call_graph_leak_paths(
     never an error, mirroring :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
     degrade contract, so a project with no build-source evidence sees no behavior change at all.
     """
-    # Phase 10 security correction: build_source.source_graph first (richer).
-    build_source = getattr(snap, "build_source", None)
-    graph = (build_source.source_graph if build_source else None) or snap.surface_graph
-    if graph is None or not getattr(graph, "nodes", None):
+    from .evidence_depth import resolve_l5_source_graph
+
+    graph = resolve_l5_source_graph(snap, getattr(snap, "build_source", None))
+    if graph is None or not graph.nodes:
         return {}
-    graph = cast("SourceGraphSummary", graph)
 
     from .buildsource.source_graph_findings import _format_dependency_path
     from .buildsource.source_graph_query import is_consumer_compiled_public_entry

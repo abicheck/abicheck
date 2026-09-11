@@ -451,12 +451,28 @@ def _mark_layers_not_collected(
     branches), so a reader can't distinguish "genuinely never collected"
     from "collected, then projected away below the requested depth" — which
     is exactly the honest claim at this depth.
+
+    Inserts a fresh ``NOT_COLLECTED`` row for a layer in *layer_values* that
+    had **no** row at all (e.g. a hand-built/typed-API-constructed pack that
+    carries a payload but never tracked coverage), not just rewriting rows
+    that already exist -- a projection that silently no-ops for a
+    coverage-free pack would leave ``coverage_for(layer)`` reading ``None``
+    exactly as it would for a pack that genuinely never attempted this
+    layer, defeating this function's own "make the two indistinguishable
+    honestly" contract (Codex review, PR #1216, fourth round: a downstream
+    reader relying on "a coverage row exists at all" to detect a deliberate
+    depth exclusion needs this guarantee to hold unconditionally).
     """
+    present = {row.layer for row in pack.manifest.coverage}
     pack.manifest.coverage = [
         LayerCoverage(layer=row.layer, status=CoverageStatus.NOT_COLLECTED)
         if row.layer in layer_values
         else row
         for row in pack.manifest.coverage
+    ] + [
+        LayerCoverage(layer=layer, status=CoverageStatus.NOT_COLLECTED)
+        for layer in layer_values
+        if layer not in present
     ]
 
 

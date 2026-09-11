@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from .evidence_policy import (
     apply_evidence_policy,
@@ -175,49 +175,19 @@ def resolve_side_pack(
 def _side_source_graph(
     snap: AbiSnapshot | None, pack: BuildSourcePack | None
 ) -> SourceGraphSummary | None:
-    """The L5 evidence graph for one compare side (ADR-063 Phase 10).
-
-    Prefers *pack*'s own ``source_graph``, falling back to
-    ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's own
-    embedded ``build_source``, carries no graph of its own, AND its manifest
-    records no L5 coverage row at all -- a real ``--sources``/
-    ``--build-info`` embed can leave ``build_source.source_graph`` a
-    strictly richer, real L3-L5 evidence graph than the always-on,
-    header-only-only ``surface_graph`` (security review, PR #1216: the
-    reverse preference silently dropped real graph edges, letting a
-    reachable internal removal be misjudged unreachable). The coverage-row
-    check is a second, separate correction from the same review round:
-    ``policy/depth_projection.py`` deliberately clears ``build_source.
-    source_graph`` to ``None`` for a ``--depth build`` (or shallower)
-    comparison while *stamping an explicit L5 ``NOT_COLLECTED`` coverage
-    row* and retaining ``surface_graph`` untouched (it is an L2 fact,
-    cleared at a lower floor) -- falling back to ``surface_graph`` there
-    would silently emit L5-labeled graph-diff findings, and claim source-tier
-    evidence, for a comparison whose own report says L5 was excluded. A
-    truly graph-empty pack (never collected anything, no coverage row
-    recorded for L5 at all -- e.g. a bare typed-API-constructed snapshot)
-    is the only case this still falls back for. When ``resolve_side_pack``
-    instead resolved an explicit out-of-band ``--old/new-build-info``/
-    ``--old/new-sources`` pack, that pack has no relationship to
-    ``snap.surface_graph`` at all, so its own ``source_graph`` is read
-    directly, unchanged.
+    """The L5 evidence graph for one compare side (ADR-063 Phase 10) --
+    a thin wrapper over the shared :func:`~abicheck.evidence_depth.
+    resolve_l5_source_graph` resolver (see its own docstring for the full
+    fallback contract), needed only because *snap* is optional here (a
+    caller with no snapshot for this side at all has no ``surface_graph``
+    to consult, but *pack* may still carry a real ``source_graph`` on its
+    own, e.g. an out-of-band pack resolved with no matching embedded side).
     """
-    if pack is not None and pack.source_graph is not None:
-        return pack.source_graph
-    if (
-        snap is not None
-        and pack is not None
-        and pack is snap.build_source
-        and pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH) is None
-    ):
-        # Type-only narrow: `surface_graph` is typed `SurfaceGraphLike`
-        # (`model/graph_facts.py`), a deliberately structural Protocol, for
-        # `model/snapshot.py`'s own dependency-free layer -- only .nodes/
-        # .edges (protocol members) are ever read from the result, so a
-        # typed-API caller's own conforming implementation must not be
-        # rejected at runtime.
-        return cast("SourceGraphSummary | None", snap.surface_graph)
-    return None
+    if snap is None:
+        return pack.source_graph if pack is not None else None
+    from ..evidence_depth import resolve_l5_source_graph
+
+    return resolve_l5_source_graph(snap, pack)
 
 
 def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:

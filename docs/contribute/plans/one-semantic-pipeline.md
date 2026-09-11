@@ -17053,6 +17053,51 @@ not new design.
   depth-projected pack (explicit `NOT_COLLECTED` row) must not fall back,
   while a pack with no coverage row recorded still does.
 
+  **Fourth review round: two more corrections, plus a real root-cause fix
+  this time rather than another per-call-site patch.** (1) The
+  coverage-row-aware guard above had only been applied to
+  `_side_source_graph`/`_l5_payload_empty` -- `internal_leak.py`'s
+  `compute_call_graph_leak_paths` and `cross_source_checks.py`'s two checks
+  (`_check_private_header_leak`, `_check_public_to_internal_dependency`)
+  still used the unguarded `build_source.source_graph or surface_graph`
+  fallback, so the identical depth-exclusion leak this phase already fixed
+  once was still open in three more places. (2) A deeper bug in the guard
+  itself: `policy/depth_projection.py`'s `_mark_layers_not_collected` only
+  ever *rewrote* an L5 coverage row that already existed -- for a pack that
+  started with **no** coverage rows tracked at all (a hand-built/
+  typed-API-constructed `BuildSourcePack`), a `--depth build` projection
+  cleared `source_graph` but left `coverage_for(L5)` reading `None`
+  regardless, defeating the "no row at all" signal the guard relies on to
+  tell "genuinely never collected" apart from "collected, then projected
+  away." Fixed at the root (`_mark_layers_not_collected` now inserts a
+  fresh `NOT_COLLECTED` row for a layer with no existing row, not only
+  rewriting rows that already exist) rather than special-cased in each
+  reader again, closing the gap for every current and future caller of that
+  function at once. This round also consolidated the fallback logic itself:
+  four independently-maintained near-duplicates had already drifted three
+  times across four review rounds, so all five readers now go through one
+  shared `evidence_depth.resolve_l5_source_graph(snap, pack)` resolver
+  (`_side_source_graph`/`_l5_payload_empty` are now thin wrappers over it).
+  That consolidation also fixed a third finding from this round: the
+  `SurfaceGraphLike`-vs-`SourceGraphSummary` cast the previous round
+  introduced for `_side_source_graph` was actually unsound at *that*
+  specific call site (unlike `cross_source_checks.py`'s own narrows) --
+  `diff_source_graph_findings` downstream reads concrete-only attributes
+  (`narrowed_scope`/`extractor_passes`/`degraded_passes`) the
+  `SurfaceGraphLike` protocol doesn't declare, so a merely-structural
+  implementation would reach it and crash. The shared resolver now requires
+  a genuine `SourceGraphSummary` for the fallback uniformly (an
+  `isinstance` check, not a blind cast), accepting a small, deliberate loss
+  of typed-API flexibility for `cross_source_checks.py`'s/
+  `internal_leak.py`'s own narrower needs (protocol members only) in
+  exchange for one call-site-independent, uniformly-safe contract.
+  Regression tests added: `internal_leak.py`/`cross_source_checks.py` both
+  now have a depth-exclusion test alongside their existing
+  "prefers-the-richer-graph" one, `_mark_layers_not_collected` has a direct
+  unit test for the missing-row-insertion fix, and
+  `resolve_l5_source_graph` has a direct test pinning the non-concrete
+  rejection.
+
   **The in-memory alias-assignment deletion is NOT done, and is being left
   open rather than forced through unverified.** The one place that builds
   the alias — `service_header_graph_attach.py`'s `_attach_header_graph` —

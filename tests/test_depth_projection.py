@@ -1094,3 +1094,59 @@ class TestAllowDwarfName:
 
     def test_no_match(self) -> None:
         assert _allow_dwarf_name("ns::S", frozenset({"Other"})) is False
+
+
+class TestMarkLayersNotCollectedInsertsAMissingRow:
+    """Codex review, PR #1216, fourth round: ``_mark_layers_not_collected``
+    must stamp an explicit ``NOT_COLLECTED`` row for a layer even when the
+    pack started with **no** coverage row for it at all -- not just rewrite
+    rows that already exist. A hand-built/typed-API-constructed
+    ``BuildSourcePack`` can carry a real ``source_graph`` payload with an
+    empty ``manifest.coverage`` list (no L3/L4/L5 rows tracked at all); this
+    function's own docstring promises a reader can't tell "genuinely never
+    collected" from "collected, then projected away below the requested
+    depth" apart -- a promise that only holds if projecting such a pack
+    still leaves an explicit row behind."""
+
+    def test_build_depth_projection_stamps_l5_not_collected_with_no_prior_row(
+        self,
+    ) -> None:
+        graph = SourceGraphSummary(nodes=[])
+        pack = BuildSourcePack(root="", source_graph=graph)
+        assert pack.manifest.coverage == []  # no rows tracked at all
+
+        projected = project_build_source_pack_to_depth(pack, "build")
+
+        assert projected is not None
+        assert projected.source_graph is None
+        row = projected.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
+        assert row is not None
+        assert row.status == CoverageStatus.NOT_COLLECTED
+
+    def test_build_depth_projection_overwrites_an_existing_l5_row_too(self) -> None:
+        """The pre-existing rewrite path (a row that already exists) still
+        works unchanged, alongside the new insert-if-missing path."""
+        graph = SourceGraphSummary(nodes=[])
+        pack = BuildSourcePack(root="", source_graph=graph)
+        pack.manifest.coverage = [
+            LayerCoverage(
+                layer=DataLayer.L5_SOURCE_GRAPH.value,
+                status=CoverageStatus.PRESENT,
+            )
+        ]
+
+        projected = project_build_source_pack_to_depth(pack, "build")
+
+        assert projected is not None
+        row = projected.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
+        assert row is not None
+        assert row.status == CoverageStatus.NOT_COLLECTED
+        # Exactly one L5 row -- not appended alongside the rewritten one.
+        assert (
+            sum(
+                1
+                for c in projected.manifest.coverage
+                if c.layer == DataLayer.L5_SOURCE_GRAPH.value
+            )
+            == 1
+        )

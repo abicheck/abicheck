@@ -100,6 +100,72 @@ def _diverged_snap(
     )
 
 
+def _depth_excluded_snap(retained_surface_graph: SourceGraphSummary) -> AbiSnapshot:
+    """The shape ``policy/depth_projection.py`` leaves behind for a
+    ``--depth build`` (or shallower) comparison: ``build_source.
+    source_graph`` cleared to ``None`` with an explicit L5 "not collected"
+    coverage row stamped (``_mark_layers_not_collected``), while
+    ``surface_graph`` (an L2 fact, cleared at a lower depth floor) is
+    retained untouched."""
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=retained_surface_graph,
+    )
+    snap.build_source.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
+    ]
+    return snap
+
+
+# --------------------------------------------------------------------------- #
+# evidence_depth.resolve_l5_source_graph -- the shared resolver every reader
+# above goes through (fourth review round: consolidated so the fallback rule
+# can't independently drift per call site again)
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_l5_source_graph_rejects_a_non_concrete_surface_graph() -> None:
+    """Third review-round regression: a merely structurally-conforming
+    ``SurfaceGraphLike`` implementation (not a real ``SourceGraphSummary``)
+    must not be returned as a fallback -- every caller of this function
+    eventually reads concrete-only attributes downstream (e.g.
+    ``diff_source_graph_findings`` reads ``narrowed_scope``/
+    ``extractor_passes``/``degraded_passes``, none of which the protocol
+    declares)."""
+    from abicheck.evidence_depth import resolve_l5_source_graph
+
+    class _FakeGraph:
+        nodes: list = []
+        edges: list = []
+
+        def has_node(self, node_id: str) -> bool:
+            return False
+
+        def add_node(self, node: object) -> None:
+            pass
+
+        def add_edge(self, edge: object) -> None:
+            pass
+
+        def to_dict(self) -> dict:
+            return {}
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=_FakeGraph(),
+    )
+
+    assert resolve_l5_source_graph(snap, snap.build_source) is None
+
+
 # --------------------------------------------------------------------------- #
 # internal_leak.compute_call_graph_leak_paths
 # --------------------------------------------------------------------------- #
@@ -145,6 +211,26 @@ def test_internal_leak_prefers_the_richer_build_source_graph() -> None:
     result = compute_call_graph_leak_paths(snap)
 
     assert "ns::detail::helper" in result
+
+
+def test_internal_leak_honors_a_depth_projected_l5_exclusion() -> None:
+    """Fourth review-round regression: this reader must go through the same
+    projection-aware coverage guard as ``_side_source_graph``/
+    ``_l5_payload_empty`` -- a ``--depth build`` comparison's retained,
+    header-only ``surface_graph`` must not resurrect a leak path the
+    excluded, richer L5 graph would have shown."""
+    from abicheck.internal_leak import compute_call_graph_leak_paths
+
+    retained = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "ns::detail::helper", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    snap = _depth_excluded_snap(retained)
+
+    assert compute_call_graph_leak_paths(snap) == {}
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +299,34 @@ def test_public_to_internal_dependency_prefers_the_richer_build_source_graph() -
     ]
 
     assert hits == ["pubFn"]
+
+
+def test_public_to_internal_dependency_honors_a_depth_projected_l5_exclusion() -> None:
+    """Fourth review-round regression: a ``--depth build`` comparison's
+    retained, header-only ``surface_graph`` must not resurrect a
+    ``PUBLIC_TO_INTERNAL_DEPENDENCY`` finding the excluded, richer L5 graph
+    would have produced."""
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
+    from abicheck.checker_policy import ChangeKind
+
+    retained = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    snap = _depth_excluded_snap(retained)
+    snap.from_headers = True
+
+    res = run_crosschecks(snap)
+    hits = [
+        c.symbol
+        for c in res.findings
+        if c.kind == ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY
+    ]
+
+    assert hits == []
 
 
 # --------------------------------------------------------------------------- #

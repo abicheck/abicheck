@@ -46,6 +46,7 @@ from .model.evidence_depth_levels import USER_DEPTHS
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
+    from .model.source_graph import SourceGraphSummary
 
 #: The public evidence ladder as a rank map, derived from ``USER_DEPTHS`` so
 #: the ordering has exactly one definition. Each rung is a strict superset of
@@ -92,41 +93,72 @@ def layer_payload_empty(pack: BuildSourcePack, key: str) -> bool:
     return False
 
 
-def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
-    """:func:`layer_payload_empty`'s ``"L5"`` case, ADR-063 Phase 10-aware.
+def resolve_l5_source_graph(
+    snap: AbiSnapshot, pack: BuildSourcePack | None
+) -> SourceGraphSummary | None:
+    """The L5 evidence graph for *snap*/*pack* (ADR-063 Phase 10), the one
+    shared resolver every migrated reader (``internal_leak.py``,
+    ``buildsource/cross_source_checks.py``, ``buildsource/evidence_report.py``,
+    this module's own :func:`_l5_payload_empty`) goes through, so the same
+    fallback rule can't independently drift per call site the way it did
+    across three earlier review rounds on this migration.
 
     Prefers *pack*'s own ``source_graph``, falling back to
-    ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's own
-    embedded ``build_source``, carries no graph of its own, AND its manifest
-    records no L5 coverage row at all -- a real ``--sources``/
-    ``--build-info`` embed can leave ``build_source.source_graph`` a
-    strictly richer, real L3-L5 evidence graph than the always-on,
-    header-only-only ``surface_graph``, so the reverse preference would
-    misjudge such a pack empty (security review, PR #1216). The coverage-row
-    check is a second, separate correction from the same review round:
-    ``policy/depth_projection.py`` deliberately clears ``build_source.
-    source_graph`` to ``None`` for a ``--depth build`` (or shallower)
-    comparison while *stamping an explicit L5 "not collected" coverage row*
-    and retaining ``surface_graph`` untouched (it is an L2 fact, cleared at a
-    lower floor) -- falling back to ``surface_graph`` there would report
-    ``"source"`` depth for a comparison whose own report says L5 was
-    excluded. *pack* deliberately never defaults to ``snap.build_source``
-    elsewhere in this module (see the module docstring): when a caller
-    resolved an out-of-band pack instead, that pack has no relationship to
-    ``snap.surface_graph`` at all, so its own ``source_graph`` is read
-    directly, unchanged.
+    ``AbiSnapshot.surface_graph`` only when ALL of:
+
+    - *pack* is the snapshot's own embedded ``build_source`` (never an
+      unrelated out-of-band ``--old/new-build-info``/``--old/new-sources``
+      pack a caller resolved independently -- that pack has no relationship
+      to ``snap.surface_graph`` at all, so its own ``source_graph`` is read
+      directly, unchanged, regardless of this fallback);
+    - *pack* carries no graph of its own -- a real ``--sources``/
+      ``--build-info`` embed can leave ``build_source.source_graph`` a
+      strictly richer, real L3-L5 evidence graph than the always-on,
+      header-only-only ``surface_graph``, so preferring the latter would
+      silently drop real graph edges (security review, PR #1216);
+    - *pack*'s manifest records no L5 coverage row at all --
+      ``policy/depth_projection.py`` deliberately clears ``build_source.
+      source_graph`` for a ``--depth build`` (or shallower) comparison
+      *while stamping an explicit L5 "not collected" row* and retaining
+      ``surface_graph`` untouched (it is an L2 fact, cleared at a lower
+      floor); falling back there would resurrect L5-labeled findings/depth
+      claims for a comparison whose own report says L5 was excluded
+      (`_mark_layers_not_collected` guarantees this row exists even for a
+      pack that started with none at all, so "no row" reliably means
+      "never went through any collection/projection pipeline", not merely
+      "this specific projection pass didn't touch it");
+    - ``surface_graph`` is a genuine ``SourceGraphSummary``, not merely a
+      structurally-conforming ``SurfaceGraphLike`` (`model/graph_facts.py`)
+      implementation -- every one of this function's callers eventually
+      feeds the result into code that reads concrete-only attributes
+      (e.g. ``buildsource/evidence_report.py``'s
+      ``diff_source_graph_findings`` reads ``narrowed_scope``/
+      ``extractor_passes``/``degraded_passes``, none of which the protocol
+      declares), so a merely-structural implementation must be treated the
+      same as "no graph" here rather than passed through and crashing
+      downstream.
     """
-    if pack is None:
-        return True
-    if pack.source_graph is not None:
-        return not pack.source_graph.nodes
+    if pack is not None and pack.source_graph is not None:
+        return pack.source_graph
     if (
-        pack is snap.build_source
-        and snap.surface_graph is not None
+        pack is not None
+        and pack is snap.build_source
         and pack.manifest.coverage_for("L5_source_graph") is None
     ):
-        return not snap.surface_graph.nodes
-    return True
+        from .model.source_graph import SourceGraphSummary as _SourceGraphSummary
+
+        if isinstance(snap.surface_graph, _SourceGraphSummary):
+            return snap.surface_graph
+    return None
+
+
+def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
+    """:func:`layer_payload_empty`'s ``"L5"`` case, via
+    :func:`resolve_l5_source_graph` (ADR-063 Phase 10)."""
+    if pack is None:
+        return True
+    graph = resolve_l5_source_graph(snap, pack)
+    return graph is None or not graph.nodes
 
 
 def depth_label_for(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:

@@ -62,9 +62,10 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from ..checker_types import Change
+from ..evidence_depth import resolve_l5_source_graph
 from ..model import (
     AbiSnapshot,
     AccessLevel,
@@ -626,11 +627,7 @@ def _check_private_header_leak(
     # so checking presence alone would record a provider with no fact behind it and
     # mask regressions in real source-graph extraction (ADR-035 D4 coverage honesty
     # — Codex review).
-    sg = (
-        snapshot.build_source.source_graph
-        if snapshot.build_source is not None
-        else None
-    ) or snapshot.surface_graph
+    sg = resolve_l5_source_graph(snapshot, snapshot.build_source)
     if sg is not None and sg.nodes:
         providers.append(PROVIDER_SOURCE_INDEX)
     if not _origin_resolvable(snapshot):
@@ -1002,11 +999,7 @@ def _check_public_to_internal_dependency(
     advisory naming what to enable — it is never counted clean.
     """
     providers = [PROVIDER_SOURCE_INDEX]
-    graph = (
-        snapshot.build_source.source_graph
-        if snapshot.build_source is not None
-        else None
-    ) or snapshot.surface_graph
+    graph = resolve_l5_source_graph(snapshot, snapshot.build_source)
     if graph is None:
         return _CheckOutput(
             [],
@@ -1014,8 +1007,6 @@ def _check_public_to_internal_dependency(
             "no L5 source graph on the snapshot (run --depth source)",
             providers,
         )
-    # Type-only narrow (SurfaceGraphLike is a structural Protocol, model/graph_facts.py).
-    graph = cast("SourceGraphSummary", graph)
     if not any(e.kind in _DEPENDENCY_EDGE_KINDS for e in graph.edges):
         return _CheckOutput(
             [],
