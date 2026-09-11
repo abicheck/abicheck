@@ -122,6 +122,19 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     closure-identity renumbering) runs last, via
     :func:`abicheck.storage.snapshot_codec.finalize_snapshot`.
     """
+    # ADR-062/063 Phase 8 (Codex review, PR #1214): unwrap the single-file
+    # sectioned envelope *here*, once, before either step below -- not just
+    # inside `decode_snapshot`. That function's own unwrap is local to its
+    # own `d` parameter and never propagates back to this caller, so without
+    # this the `backfill_python_ext_from_evidence` call further down would
+    # keep receiving the still-sectioned outer envelope for every snapshot
+    # written since Phase 8 made the sectioned shape the on-disk default --
+    # `"python_ext" not in d`/`d.get("macho")` would then look at the wrong
+    # (nested-under-"sections") shape, so an explicit `python_ext: null`
+    # would read as absent and the Mach-O missing-imports safeguard could
+    # never see the real `macho` block.
+    if is_sectioned_document(d):
+        d = from_sectioned_document(d)
     # `SCHEMA_VERSION` here is *this module's own* (patchable) global -- see
     # `storage.snapshot_codec.decode_snapshot`'s own `max_known_schema_version`
     # docstring note for why it must be threaded through explicitly rather
