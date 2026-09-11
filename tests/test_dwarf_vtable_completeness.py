@@ -59,6 +59,22 @@ def _virtual_method_die(mangled: str, *, offset: int) -> SimpleNamespace:
     )
 
 
+def _virtual_method_die_bare_name(name: str, *, offset: int) -> SimpleNamespace:
+    """A virtual ``DW_TAG_subprogram`` with NEITHER linkage-name attribute
+    -- the fallback path (``DW_AT_name`` only), which is NOT a unique
+    identifier the way the primary mangled spelling is (two overloads can
+    share one bare name)."""
+    return SimpleNamespace(
+        tag="DW_TAG_subprogram",
+        offset=offset,
+        attributes={
+            "DW_AT_virtuality": _av(1),
+            "DW_AT_name": _av(name),
+        },
+        iter_children=lambda: iter(()),
+    )
+
+
 def _record_die(
     *,
     offset: int,
@@ -446,6 +462,73 @@ class TestDuplicateDisagreesFlagsPartial:
         builder._process_record_type_named(first, _cu(0), "A")
 
         duplicate = _record_die(offset=20, children=[base_die, base_die])
+        builder._process_record_type_named(duplicate, _cu(1), "A")
+
+        assert builder._vtable_evidence_conflicts == {}
+
+    def test_duplicate_vtable_fallback_name_multiplicity_mismatch_flags_vtable(
+        self,
+    ) -> None:
+        """Codex review finding on this PR (one round after the identical
+        bases/virtual_bases fix): when neither ``DW_AT_linkage_name`` nor
+        ``DW_AT_MIPS_linkage_name`` is present, ``duplicate_record_
+        evidence_signature`` falls back to the bare ``DW_AT_name`` -- which,
+        unlike the primary mangled spelling, is NOT a unique identifier
+        (two overloaded virtual methods can share one bare name). A
+        plain-set comparison would collapse that multiplicity exactly the
+        same way the bases/virtual_bases one did; the fix is the identical
+        ``Counter`` treatment.
+        """
+        builder = _builder()
+        # Retained: two overloads of "f", both falling back to the bare
+        # name (no linkage-name attribute on either).
+        first = _record_die(
+            offset=1,
+            children=[
+                _virtual_method_die_bare_name("f", offset=2),
+                _virtual_method_die_bare_name("f", offset=3),
+            ],
+        )
+        builder._process_record_type_named(first, _cu(0), "A")
+
+        # Duplicate CU's own definition only captured one overload -- a
+        # genuine completeness gap a plain-set comparison would miss
+        # entirely (both sides' own *set* of names is identical: {"f"}).
+        duplicate = _record_die(
+            offset=20, children=[_virtual_method_die_bare_name("f", offset=21)]
+        )
+        builder._process_record_type_named(duplicate, _cu(1), "A")
+
+        assert builder._vtable_evidence_conflicts == {"A": {"vtable"}}
+        finalize_vtable_evidence_completeness(builder)
+        rec = builder._record_by_qualified_name["A"]
+        assert rec.vtable_fact is not None
+        assert rec.vtable_fact.status is FactStatus.PARTIAL
+        # The VALUE itself is untouched -- both entries survive.
+        assert rec.vtable == ["f", "f"]
+
+    def test_duplicate_vtable_fallback_name_multiplicity_match_stays_present(
+        self,
+    ) -> None:
+        """Negative control: the SAME count of the identically-spelled
+        fallback name on both sides must not flag."""
+        builder = _builder()
+        first = _record_die(
+            offset=1,
+            children=[
+                _virtual_method_die_bare_name("f", offset=2),
+                _virtual_method_die_bare_name("f", offset=3),
+            ],
+        )
+        builder._process_record_type_named(first, _cu(0), "A")
+
+        duplicate = _record_die(
+            offset=20,
+            children=[
+                _virtual_method_die_bare_name("f", offset=21),
+                _virtual_method_die_bare_name("f", offset=22),
+            ],
+        )
         builder._process_record_type_named(duplicate, _cu(1), "A")
 
         assert builder._vtable_evidence_conflicts == {}

@@ -189,25 +189,29 @@ def duplicate_record_evidence_signature(
     children: list[Any] | None,
     *,
     resolve_base_name_and_key: BaseNameResolver,
-) -> tuple[Counter[str], Counter[str], frozenset[str]]:
+) -> tuple[Counter[str], Counter[str], Counter[str]]:
     """``(bases, virtual_bases, vtable)`` evidence read directly off a
     *non-retained* record DIE, for comparison-only use by
     :func:`note_duplicate_record_evidence`.
 
-    ``bases``/``virtual_bases`` are returned as ``Counter`` (a *multiset*),
-    not a plain set: a legal class can derive from two distinct,
+    All three are returned as ``Counter`` (a *multiset*), not a plain set.
+    For bases/virtual_bases: a legal class can derive from two distinct,
     differently-namespaced bases sharing one bare name (``resolve_base_
     name_and_key`` intentionally returns only the bare name -- see its own
     docstring -- so ``D : one::A, two::A`` resolves both edges to ``"A"``).
-    A plain-set comparison collapses that multiplicity, so a duplicate DIE
-    genuinely missing one of the two would still read as an identical
-    ``{"A"}`` against the retained side's own ``{"A"}`` -- silently
-    swallowing exactly the completeness gap this module exists to catch
-    (Codex review finding on this PR). ``Counter`` equality is still
-    order-independent (unaffected DWARF child-emission-order differences
-    stay unflagged, same as before), but now sensitive to count. ``vtable``
-    stays a plain set: a mangled linkage name is a unique identifier by
-    construction, so no class can legally emit two identical entries.
+    For vtable: while the primary ``DW_AT_linkage_name``/``DW_AT_MIPS_
+    linkage_name`` spelling is a unique identifier by construction, the
+    fallback spelling (bare ``DW_AT_name``, used when neither linkage-name
+    attribute is present) is NOT -- two overloaded virtual methods can both
+    fall back to the identical bare name (Codex review finding on this
+    PR, found one round after the identical bases/virtual_bases fix
+    below). A plain-set comparison collapses any of this multiplicity, so
+    a duplicate DIE genuinely missing one occurrence would still read as
+    an identical membership set against the retained side's own -- silently
+    swallowing exactly the completeness gap this module exists to catch.
+    ``Counter`` equality is still order-independent (unaffected DWARF
+    child-emission-order differences stay unflagged, same as before), but
+    now sensitive to count.
 
     Deliberately NOT ``_DwarfSnapshotBuilder._collect_record_type_children``:
     that method also extracts fields (irrelevant here) and registers
@@ -217,13 +221,13 @@ def duplicate_record_evidence_signature(
     that doesn't exist. This is a read-only subset: only the two child tags
     that feed the comparison (``DW_TAG_inheritance``, ``DW_TAG_subprogram``),
     same field-level logic as ``_process_inheritance_child``/
-    ``_process_virtual_method_child`` but collecting into a multiset/set
-    rather than the ordered lists the retained definition's own
-    ``RecordType`` carries.
+    ``_process_virtual_method_child`` but collecting into multisets rather
+    than the ordered lists the retained definition's own ``RecordType``
+    carries.
     """
     bases: Counter[str] = Counter()
     virtual_bases: Counter[str] = Counter()
-    vtable: set[str] = set()
+    vtable: Counter[str] = Counter()
     kids = children if children is not None else die.iter_children()
     for child in kids:
         if child.tag == "DW_TAG_inheritance":
@@ -242,8 +246,8 @@ def duplicate_record_evidence_signature(
                     or _attr_str(child, "DW_AT_name")
                 )
                 if mangled:
-                    vtable.add(mangled)
-    return bases, virtual_bases, frozenset(vtable)
+                    vtable[mangled] += 1
+    return bases, virtual_bases, vtable
 
 
 def note_duplicate_record_evidence(
@@ -299,13 +303,18 @@ def note_duplicate_record_evidence(
     # distinct, differently-namespaced bases can share one bare spelling,
     # and a plain-set comparison would collapse that multiplicity and miss
     # a duplicate DIE genuinely short one occurrence (Codex review finding
-    # on this PR).
+    # on this PR). `vtable` gets the identical `Counter(...)` treatment for
+    # the identical reason, one review round later: its fallback spelling
+    # (bare `DW_AT_name`, used when no linkage-name attribute is present)
+    # is not a unique identifier the way the primary mangled spelling is --
+    # two overloaded virtual methods can both fall back to the same bare
+    # name.
     disagreeing: set[str] = set()
     if dup_bases != Counter(retained.resolved_bases()):
         disagreeing.add("bases")
     if dup_virtual_bases != Counter(retained.resolved_virtual_bases()):
         disagreeing.add("virtual_bases")
-    if dup_vtable != frozenset(_resolved_fact_value(retained.vtable_fact, [])):
+    if dup_vtable != Counter(_resolved_fact_value(retained.vtable_fact, [])):
         disagreeing.add("vtable")
     if disagreeing:
         conflicts.setdefault(qualified, set()).update(disagreeing)
