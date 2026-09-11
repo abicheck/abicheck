@@ -1308,3 +1308,64 @@ class TestMemberPointerFollowsTemplatedOwners:
         change = _struct_size_change("Handle", entity_id=_STABLE_ID)
         out = _downgrade_opaque_struct_changes([change], old, new)
         assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+
+# -- Primitive-level property tests: _resolve_struct_change_entity_id ------
+
+
+_bridge_ids = st.one_of(st.none(), st.just(_STABLE_ID), st.just(_OTHER_STABLE_ID))
+
+
+@st.composite
+def _struct_change_bridge_scenario(draw):
+    """A change genuinely about "ns::Handle" (record_name), whose bare form
+    is "Handle" -- with 0-2 declarations under each of the two names,
+    each independently carrying an id (or none), spread arbitrarily across
+    old/new (the function scans both combined, so the split doesn't matter
+    to its own logic)."""
+    exact_decls = [
+        _record("ns::Handle", entity_id=draw(_bridge_ids))
+        for _ in range(draw(st.integers(min_value=0, max_value=2)))
+    ]
+    bare_decls = [
+        _record("Handle", entity_id=draw(_bridge_ids))
+        for _ in range(draw(st.integers(min_value=0, max_value=2)))
+    ]
+    all_decls = exact_decls + bare_decls
+    split = draw(st.integers(min_value=0, max_value=len(all_decls)))
+    return all_decls[:split], all_decls[split:]
+
+
+class TestResolveStructChangeEntityIdSoundness:
+    """Codex review round 8 on PR #1218 found the exact-name and bare-name
+    candidate pools were merged into one set, letting an exact-name
+    declaration's own missing identity be silently papered over by an
+    unrelated bare-name namesake's id. This property audits the bridge's
+    output directly against the precedence rule that closed it: an
+    exact-name match, when one exists at all, is authoritative -- its own
+    resolved id(s) decide the outcome, and the bare-name pool is never
+    consulted, regardless of what it contains."""
+
+    @given(_struct_change_bridge_scenario())
+    def test_exact_name_precedence_and_soundness(self, scenario) -> None:
+        old_decls, new_decls = scenario
+        old = _snap(old_decls)
+        new = _snap(new_decls)
+        change = _struct_size_change("ns::Handle")
+        resolved = _resolve_struct_change_entity_id(change, old, new)
+
+        all_decls = old_decls + new_decls
+        exact_ids = {
+            d.entity_id for d in all_decls if d.name == "ns::Handle" and d.entity_id
+        }
+        exact_exists = any(d.name == "ns::Handle" for d in all_decls)
+
+        if exact_exists:
+            expected = next(iter(exact_ids)) if len(exact_ids) == 1 else None
+        else:
+            bare_ids = {
+                d.entity_id for d in all_decls if d.name == "Handle" and d.entity_id
+            }
+            expected = next(iter(bare_ids)) if len(bare_ids) == 1 else None
+
+        assert resolved.entity_id == expected
