@@ -103,7 +103,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..dwarf_utils import attr_int as _attr_int, attr_str as _attr_str
-from ..model import Fact
+from ..model import Fact, resolved_fact_value as _resolved_fact_value
 
 __all__ = [
     "duplicate_record_evidence_signature",
@@ -199,10 +199,18 @@ def note_duplicate_record_evidence(
     dup_bases, dup_virtual_bases, dup_vtable = duplicate_record_evidence_signature(
         die, CU, children, resolve_base_name_and_key=builder._resolve_base_name_and_key
     )
+    # Fact[T]-bridged reads (ADR-063 Phase 0, `fact-field-readers` gate):
+    # resolve through `resolved_fact_value`/`resolved_bases()` rather than
+    # the raw legacy field -- for these exact three fields that function's
+    # own docstring guarantees it is a pure re-spelling of what a direct
+    # `retained.bases`/etc. read would already have returned (the retained
+    # legacy field and `resolved_fact_value(rec.bases_fact, [])` are a
+    # provable invariant per `bridge_legacy_and_fact`), so this is
+    # representation-only, not a behavior change.
     if (
-        dup_bases != frozenset(retained.bases)
-        or dup_virtual_bases != frozenset(retained.virtual_bases)
-        or dup_vtable != frozenset(retained.vtable)
+        dup_bases != frozenset(retained.resolved_bases())
+        or dup_virtual_bases != frozenset(retained.resolved_virtual_bases())
+        or dup_vtable != frozenset(_resolved_fact_value(retained.vtable_fact, []))
     ):
         conflicts.add(qualified)
 
@@ -235,8 +243,19 @@ def finalize_vtable_evidence_completeness(builder: Any) -> None:
     for rec in builder.types:
         if rec.name not in conflicts:
             continue
-        rec.bases_fact = Fact.partial(rec.bases, diagnostic, producer="dwarf")
-        rec.virtual_bases_fact = Fact.partial(
-            rec.virtual_bases, diagnostic, producer="dwarf"
+        # Fact[T]-bridged reads (ADR-063 Phase 0, `fact-field-readers`
+        # gate): resolve the value to preserve through `resolved_fact_
+        # value`/`resolved_bases()` rather than the raw legacy field --
+        # see `note_duplicate_record_evidence`'s identical comment above
+        # for why this is representation-only for these three fields.
+        # `rec` was just built by its own (PRESENT) definition, so this is
+        # exactly value-preserving; only the status changes to PARTIAL.
+        rec.bases_fact = Fact.partial(
+            rec.resolved_bases(), diagnostic, producer="dwarf"
         )
-        rec.vtable_fact = Fact.partial(rec.vtable, diagnostic, producer="dwarf")
+        rec.virtual_bases_fact = Fact.partial(
+            rec.resolved_virtual_bases(), diagnostic, producer="dwarf"
+        )
+        rec.vtable_fact = Fact.partial(
+            _resolved_fact_value(rec.vtable_fact, []), diagnostic, producer="dwarf"
+        )
