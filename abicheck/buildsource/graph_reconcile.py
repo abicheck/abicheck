@@ -437,8 +437,14 @@ def _classify_outcome(
     # review), so a function's tail is vacuously equal and can't prove
     # nothing else changed; only a type has no such hidden dimension.
     same_sig = _signature_tail(old_identity) == _signature_tail(new_identity)
+    # bool(old_qn)/bool(new_qn) mirrors `renamed`'s own guard above -- an
+    # absent name on either side is a name gain/loss, never churn evidence.
     coordinate_only = (
-        old_qn != new_qn and same_sig and old_identity.kind in _COORDINATE_ONLY_KINDS
+        bool(old_qn)
+        and bool(new_qn)
+        and old_qn != new_qn
+        and same_sig
+        and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
     return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
 

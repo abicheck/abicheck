@@ -131,3 +131,14 @@ def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
                 assert not any(w in prose for w in name_words), (nk, fk, outcome, prose)
             if not file_ch:
                 assert not any(w in prose for w in loc_words), (nk, fk, outcome, prose)
+
+
+def test_coordinate_only_requires_both_names_present() -> None:
+    """Codex review, fresh evidence: `bool(old_qn)/bool(new_qn)` mirrors
+    `renamed`'s own guard -- an absent qualified name on either side (a real
+    ``GraphNode.from_dict()`` shape, per its own permissive label default)
+    is a name gain/loss, not coordinate-churn evidence, even though
+    `old_qn != new_qn` is trivially true against an empty string."""
+    old_id = _identity("", "a.h", kind="record_type")
+    new_id = _identity("(lambda at f.h:1:2)", "a.h", kind="record_type")
+    assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED
