@@ -570,3 +570,42 @@ class TestSurfaceMetricsReachesStoredStoredPair:
 
         kinds = {c.kind for c in result.per_library[0].changes}
         assert ChangeKind.PUBLIC_SURFACE_GREW in kinds
+
+
+class TestCompareStoredBundleFactsPairEnvMatrix:
+    """Codex review finding 3: the stored/stored driver (both OLD_INPUT and
+    NEW_INPUT are stored ``BundleFacts`` documents) also had no channel for
+    a declared ``deployment.runtime_floors`` config, so this operand
+    cardinality silently ignored it too."""
+
+    def _facts_path(self, tmp_path: Path, name: str, required: str) -> Path:
+        elf = ElfMetadata(
+            soname="libcore.so",
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": [f"GLIBC_{required}"]},
+            symbols=[ElfSymbol(name="core_fn", visibility="default")],
+        )
+        snapshot = AbiSnapshot(library="libcore.so", version=name, elf=elf)
+        facts = capture_bundle_facts({"libcore.so": snapshot})
+        path = tmp_path / f"{name}.bundlefacts.json"
+        save_bundle_facts(facts, path)
+        return path
+
+    def test_env_matrix_raises_runtime_floor_finding_to_breaking(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        old_path = self._facts_path(tmp_path, "old", "2.28")
+        new_path = self._facts_path(tmp_path, "new", "2.34")
+
+        result_default = compare_stored_bundle_facts_pair(old_path, new_path)
+        assert len(result_default.per_library) == 1
+        assert result_default.per_library[0].verdict is not Verdict.BREAKING
+
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        result_declared = compare_stored_bundle_facts_pair(
+            old_path, new_path, env_matrix=matrix
+        )
+        assert len(result_declared.per_library) == 1
+        assert result_declared.per_library[0].verdict is Verdict.BREAKING

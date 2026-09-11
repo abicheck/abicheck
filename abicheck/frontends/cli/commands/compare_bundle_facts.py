@@ -444,6 +444,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
                 old_max_json_object_nodes=max_json_object_nodes_cfg,
                 new_max_json_object_nodes=max_json_object_nodes_cfg,
                 depth=kwargs.get("depth"),
+                env_matrix=_early_cfg.deployment if _early_cfg else None,  # ADR-020b
             )
         # Same translation the stored/live branch below applies (its own
         # comments explain each of these four exception types).
@@ -575,6 +576,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
                     suppress=suppression,
                     include_dependencies=bool(kwargs.get("include_dependencies", False)),
                     max_json_object_nodes=max_json_object_nodes_cfg,
+                    env_matrix=_early_cfg.deployment if _early_cfg else None,  # ADR-020b
                 )
             except BundleFactsLibraryOverridesError as exc:
                 # Codex review, fresh evidence: compare_release_against_bundle_
