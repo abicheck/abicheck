@@ -45,7 +45,7 @@ from .model import (
     Visibility,
 )
 from .model.semantic_ir_legacy_adapter import assert_snapshot_semantic_ir_consistent
-from .model.snapshot_reliability import degraded_reliability_facts
+from .policy.analysis_assurance_degraded_facts import degraded_reliability_facts
 from .snapshot_platform_blocks import (
     dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
     dwarf_from_dict as _dwarf_from_dict,
@@ -1356,7 +1356,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # snapshot carrying the underlying fact, header-confirmed or not.
     # The table itself (which flag, whether it's actually consulted given
     # this snapshot's own ast_producer/header-confirmation shape) lives in
-    # `model.snapshot_reliability` -- by construction time every one of
+    # `policy.analysis_assurance_degraded_facts` -- by construction time
+    # every one of
     # `snap`'s `*_facts_reliable` fields, plus `from_headers`/
     # `from_headers_inferred`/`ast_producer`, already carries the exact
     # `*_value` this function computed above, so reading it back off `snap`

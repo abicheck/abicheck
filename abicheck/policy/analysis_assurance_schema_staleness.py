@@ -14,7 +14,8 @@
 # limitations under the License.
 
 """Whether either side of a comparison carries a ``*_facts_reliable`` flag
-``model.snapshot_reliability.degraded_reliability_facts`` marks stale.
+``policy.analysis_assurance_degraded_facts.degraded_reliability_facts``
+marks stale.
 
 Split out of ``analysis_assurance.py`` (which sits at this repo's
 ``architecture/debt.yaml`` no-growth baseline) rather than added there, and
@@ -22,8 +23,11 @@ placed under the real ``policy`` package -- not a new flat-root legacy
 sibling -- per this repo's "valid extraction" rule (``abicheck/AGENTS.md``
 "Working with legacy large modules": name a responsibility and its
 destination package, add no new legacy/debt-ledger entry). This module
-depends only on ``model.AbiSnapshot`` plus ``model.snapshot_reliability``,
-within ``policy``'s own ``may_import`` (Codex review, PR #1209).
+depends only on ``model.AbiSnapshot`` plus its own sibling ``policy.
+analysis_assurance_degraded_facts`` (itself ``model.snapshot_reliability``
+plus the detector-consultation table -- moved into ``policy`` in round 7,
+see that module's own docstring), within ``policy``'s own ``may_import``
+(Codex review, PR #1209).
 
 **The gap this closes:** loading a snapshot whose own ``schema_version``
 predates this abicheck's, or one re-saved since without ever being
@@ -81,7 +85,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..model.snapshot_reliability import degraded_reliability_facts
+from .analysis_assurance_degraded_facts import degraded_reliability_facts
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -110,6 +114,41 @@ _PAIR_PRODUCER_GATED_FLAGS: dict[str, str] = {
     "castxml_var_access_facts_reliable": "castxml",
 }
 
+#: The three flags whose one real consumer requires BOTH sides confirmed
+#: (non-inferred) header-aware -- ``_both_header_aware`` -- but, unlike
+#: :data:`_PAIR_PRODUCER_GATED_FLAGS`, places no further requirement on the
+#: *other* side's producer (Codex review, PR #1209 round 7, fresh evidence):
+#: ``diff_symbols._diff_param_restrict`` exits at ``_both_header_aware``
+#: before ever reading ``clang_restrict_facts_reliable``;
+#: ``diff_types_field_facts._diff_field_default_initializer`` does the same
+#: for ``clang_field_initializer_facts_reliable``; and ``diff_symbols.
+#: _diff_func_deprecated`` calls ``fact_provenance.fact_producer`` on BOTH
+#: sides independently and skips the pair entirely if either returns
+#: ``None`` -- which it does whenever that side isn't confirmed header-aware
+#: -- for ``clang_deprecation_facts_reliable``. So a degraded, confirmed-
+#: header side paired with an ``other`` that is only ever inferred-header
+#: (``from_headers_inferred=True``) or not header-derived at all means the
+#: affected detector never runs for this pair, the identical shape
+#: :data:`_PAIR_PRODUCER_GATED_FLAGS` already covers minus the producer
+#: match (each of these three detectors is documented as cross-producer-safe
+#: once both sides are confirmed header-aware -- see each named function's
+#: own docstring).
+_PAIR_HEADER_ONLY_GATED_FLAGS: frozenset[str] = frozenset(
+    {
+        "clang_deprecation_facts_reliable",
+        "clang_field_initializer_facts_reliable",
+        "clang_restrict_facts_reliable",
+    }
+)
+
+
+def _other_side_is_header_confirmed(other: AbiSnapshot) -> bool:
+    """Whether *other* alone clears ``_both_header_aware``'s own half of the
+    gate -- confirmed (non-inferred) header awareness, no producer
+    requirement.
+    """
+    return other.from_headers and not other.from_headers_inferred
+
 
 def _other_side_confirms_pair_gate(other: AbiSnapshot, producer: str) -> bool:
     """Whether *other* alone would satisfy ``_diff_param_va_list``'s/
@@ -117,25 +156,30 @@ def _other_side_confirms_pair_gate(other: AbiSnapshot, producer: str) -> bool:
     -- confirmed (non-inferred) header awareness AND the exact matching
     *producer*, mirroring ``diff_symbols.py``'s own two checks.
     """
-    return (
-        other.from_headers
-        and not other.from_headers_inferred
-        and other.ast_producer == producer
-    )
+    return _other_side_is_header_confirmed(other) and other.ast_producer == producer
 
 
 def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[str]:
     """*snap*'s own :func:`degraded_reliability_facts`, narrowed to drop a
-    :data:`_PAIR_PRODUCER_GATED_FLAGS` entry whose one real consumer never
-    ran for this pair because *other* doesn't also clear the detector's own
-    both-sides gate (see :func:`_other_side_confirms_pair_gate`).
+    :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`
+    entry whose one real consumer never ran for this pair because *other*
+    doesn't also clear the detector's own both-sides gate (see
+    :func:`_other_side_confirms_pair_gate`/
+    :func:`_other_side_is_header_confirmed`).
     """
-    return [
-        name
-        for name in degraded_reliability_facts(snap)
-        if (producer := _PAIR_PRODUCER_GATED_FLAGS.get(name)) is None
-        or _other_side_confirms_pair_gate(other, producer)
-    ]
+    kept = []
+    for name in degraded_reliability_facts(snap):
+        producer = _PAIR_PRODUCER_GATED_FLAGS.get(name)
+        if producer is not None:
+            if _other_side_confirms_pair_gate(other, producer):
+                kept.append(name)
+            continue
+        if name in _PAIR_HEADER_ONLY_GATED_FLAGS:
+            if _other_side_is_header_confirmed(other):
+                kept.append(name)
+            continue
+        kept.append(name)
+    return kept
 
 
 def schema_staleness_status(
@@ -151,8 +195,8 @@ def schema_staleness_status(
     gated on BOTH sides carrying the same channel), a *single* side's stale
     fact already means the affected detector(s) declined to trust it for
     THIS comparison, whether or not the other side is current -- except the
-    two :data:`_PAIR_PRODUCER_GATED_FLAGS` flags, which :func:`_pair_aware_
-    degraded_facts` narrows first.
+    :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`
+    flags, which :func:`_pair_aware_degraded_facts` narrows first.
 
     ``old is new`` (real Python object identity, not merely equal content)
     is a self-diff -- the exact shape ``workflows.no_baseline_compare``'s

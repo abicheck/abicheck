@@ -386,7 +386,8 @@ class AnalysisAssurance:
     #: reliability machinery marks stale) or ``"degraded"`` (at least one
     #: side does -- either its own ``schema_version`` predates this
     #: abicheck's, or it was re-saved since without ever being regenerated;
-    #: see ``model.snapshot_reliability.degraded_reliability_facts``). Unlike
+    #: see ``policy.analysis_assurance_degraded_facts.degraded_reliability_
+    #: facts``). Unlike
     #: the other context-status fields above, this one has no
     #: ``"asymmetric"`` state: a single side's stale fact already means the
     #: affected detector(s) declined to trust it for this comparison.

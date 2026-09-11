@@ -13,8 +13,8 @@
   same way every other evidence-completeness axis does, naming the exact
   degraded field(s) in `notes`. The load-time warning and this new status
   now share one implementation
-  (`model.snapshot_reliability.degraded_reliability_facts`) so they can
-  never independently drift on what counts as degraded. This changes only
+  (`policy.analysis_assurance_degraded_facts.degraded_reliability_facts`) so
+  they can never independently drift on what counts as degraded. This changes only
   `analysis_assurance.status`/`notes` — never a compatibility verdict or
   finding; a run under `--require-complete-analysis` can now correctly exit
   non-zero for a schema-stale snapshot that previously read as complete,

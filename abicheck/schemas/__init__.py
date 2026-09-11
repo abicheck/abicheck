@@ -881,8 +881,8 @@ _ARTIFACT_NAMES = frozenset(
 #: 4.1 -- additive ``analysis_assurance.schema_staleness_status``
 #:       (``"clean"``/``"degraded"``, mirroring the block's other
 #:       ``*_context_status`` fields): whether either snapshot carries a
-#:       ``*_facts_reliable`` flag ``model.snapshot_reliability.
-#:       degraded_reliability_facts`` marks stale. Folds into the existing
+#:       ``*_facts_reliable`` flag ``policy.analysis_assurance_degraded_
+#:       facts.degraded_reliability_facts`` marks stale. Folds into the existing
 #:       ``status``/``notes`` the same way every context-status field
 #:       already does; unaffected for a run with no stale fact.
 REPORT_SCHEMA_VERSION = "4.1"  #: 4.1 -- see the comment immediately above.

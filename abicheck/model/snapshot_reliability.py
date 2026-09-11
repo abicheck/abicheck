@@ -13,30 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The one place that decides which of an :class:`AbiSnapshot`'s
-``*_facts_reliable`` flags are both (a) False and (b) actually consulted by
-some detector for this snapshot's own AST producer / header-confirmation
-shape.
+"""The fixed list of :class:`AbiSnapshot`'s ``*_facts_reliable`` flag names,
+plus the raw accessor for which of them are currently ``False`` on a given
+snapshot.
 
-Split out of ``serialization.decode_snapshot`` (which used to compute this
-list purely to build its own load-time ``UserWarning`` text) so that a
-*second* consumer -- ``analysis_assurance.compute_analysis_assurance`` --
-can answer "is this snapshot carrying stale, tool-upgrade-degraded facts"
-without re-deriving the same seven-flag consultation table a third time. By
-the time ``serialization.decode_snapshot`` has fully constructed an
-``AbiSnapshot``, every one of these flags, plus ``from_headers``/
-``from_headers_inferred``/``ast_producer``, already carries its final,
-resolved value (explicit dict key if present, else the schema-version +
-producer derivation) -- so this function needs nothing but the snapshot
-itself, not the raw decode-time locals ``decode_snapshot`` computed them
-from.
-
-Both call sites read *this* function's result rather than keeping their own
-copy of the table, so the load-time warning and the reported
-``analysis_assurance`` status can never independently drift on what counts
-as "degraded" (the exact failure mode this module exists to close -- see
-``analysis_assurance.py``'s module docstring and ``AGENTS.md``'s "Record
-before disposing" / weaker-evidence-narrows-conclusions principles).
+**Scope, deliberately narrow (Codex review, PR #1209 round 7):** this module
+answers only "what is this fact" (ADR-061 D1, ``model/AGENTS.md``'s Purpose
+section) -- which flags exist on ``AbiSnapshot`` and their current boolean
+value. It does NOT decide whether a flag is "actually consulted" by any
+detector for a snapshot's own ``ast_producer``/header-awareness shape --
+that is an algorithm over outer, detector-layer behavior (``diff_symbols.py``
+and siblings), which is exactly the "does it matter" question this
+package's own Purpose section says the model layer must never answer. An
+earlier revision of this module *did* encode that consultation table
+directly here; moved to ``policy.analysis_assurance_degraded_facts`` instead,
+which builds on :func:`raw_unreliable_facts` for the single-snapshot half of
+the same computation ``policy.analysis_assurance_schema_staleness`` narrows
+further, pair-aware, for its own cross-side gates.
 """
 
 from __future__ import annotations
@@ -46,63 +39,29 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
 
-__all__ = ["degraded_reliability_facts"]
+__all__ = ["RELIABILITY_FLAG_NAMES", "raw_unreliable_facts"]
+
+#: Every ``AbiSnapshot`` field of the ``*_facts_reliable`` shape. Declarative
+#: data (a fixed field-name list), not an algorithm -- the same D1-sanctioned
+#: kind of "what is this fact" fact ``change_catalog/`` and ``fact_registry.py``
+#: hold for their own closed vocabularies (``model/AGENTS.md``).
+RELIABILITY_FLAG_NAMES: tuple[str, ...] = (
+    "header_cv_facts_reliable",
+    "clang_deprecation_facts_reliable",
+    "clang_field_initializer_facts_reliable",
+    "clang_vtable_facts_reliable",
+    "clang_restrict_facts_reliable",
+    "clang_va_list_facts_reliable",
+    "castxml_var_access_facts_reliable",
+    "param_kind_facts_reliable",
+)
 
 
-def degraded_reliability_facts(snap: AbiSnapshot) -> list[str]:
-    """The sorted names of *snap*'s ``*_facts_reliable`` flags that are both
-    False and actually consulted by their one real detector, given *snap*'s
-    own ``ast_producer``/``from_headers``/``from_headers_inferred``.
-
-    Mirrors ``serialization.decode_snapshot``'s own ``_degraded_facts``
-    construction exactly (see that call site's long comment for the full
-    per-flag rationale, including why ``clang_va_list_facts_reliable``/
-    ``castxml_var_access_facts_reliable`` are gated on this side's exact
-    producer rather than "hybrid too", and why five of the seven flags also
-    require CONFIRMED, non-inferred header awareness before their one real
-    consumer ever reads them at all) -- deliberately kept as one function
-    both call sites import, rather than two hand-synced copies.
+def raw_unreliable_facts(snap: AbiSnapshot) -> list[str]:
+    """The sorted names of *snap*'s :data:`RELIABILITY_FLAG_NAMES` fields that
+    are currently ``False`` -- with no judgment about whether any detector
+    actually reads that flag for *this* snapshot's producer/header-awareness
+    shape. That narrowing is ``policy.analysis_assurance_degraded_facts.
+    degraded_reliability_facts``'s job, not this module's.
     """
-    header_confirmed = snap.from_headers and not snap.from_headers_inferred
-    return sorted(
-        name
-        for name, reliable, consulted in (
-            ("header_cv_facts_reliable", snap.header_cv_facts_reliable, True),
-            (
-                "clang_deprecation_facts_reliable",
-                snap.clang_deprecation_facts_reliable,
-                header_confirmed,
-            ),
-            (
-                "clang_field_initializer_facts_reliable",
-                snap.clang_field_initializer_facts_reliable,
-                header_confirmed,
-            ),
-            (
-                "clang_vtable_facts_reliable",
-                snap.clang_vtable_facts_reliable,
-                True,
-            ),
-            (
-                "clang_restrict_facts_reliable",
-                snap.clang_restrict_facts_reliable,
-                header_confirmed,
-            ),
-            (
-                "clang_va_list_facts_reliable",
-                snap.clang_va_list_facts_reliable,
-                header_confirmed and snap.ast_producer == "clang",
-            ),
-            (
-                "castxml_var_access_facts_reliable",
-                snap.castxml_var_access_facts_reliable,
-                header_confirmed and snap.ast_producer == "castxml",
-            ),
-            (
-                "param_kind_facts_reliable",
-                snap.param_kind_facts_reliable,
-                True,
-            ),
-        )
-        if not reliable and consulted
-    )
+    return sorted(name for name in RELIABILITY_FLAG_NAMES if not getattr(snap, name))

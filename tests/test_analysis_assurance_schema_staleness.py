@@ -18,12 +18,12 @@
 see root ``AGENTS.md``'s "Files that are large" / "add a sibling module"
 guidance) rather than folded into it.
 
-A snapshot carrying facts ``model.snapshot_reliability.
+A snapshot carrying facts ``policy.analysis_assurance_degraded_facts.
 degraded_reliability_facts`` marks stale used to load with only a
 stderr-only ``UserWarning`` -- invisible to any JSON consumer of
 ``run_outcome.analysis_assurance``, which still read ``status="complete"``
 for a comparison some detector had just declined to fully trust. See
-``model/snapshot_reliability.py``'s and ``analysis_assurance.
+``policy/analysis_assurance_degraded_facts.py``'s and ``analysis_assurance.
 _schema_staleness_status``'s own docstrings for the full account.
 """
 
@@ -35,7 +35,9 @@ from pathlib import Path
 from abicheck import checker
 from abicheck.analysis_assurance import AnalysisAssurance
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.model.snapshot_reliability import degraded_reliability_facts
+from abicheck.policy.analysis_assurance_degraded_facts import (
+    degraded_reliability_facts,
+)
 from abicheck.serialization import snapshot_from_dict
 
 
@@ -59,9 +61,9 @@ def _header_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
 class TestSchemaStalenessStatus:
     #: Which extra ``AbiSnapshot`` kwargs make each flag's one real consumer
     #: actually *consult* it, mirroring ``degraded_reliability_facts``'s own
-    #: consultation table (``model/snapshot_reliability.py``) -- three flags
-    #: are consulted unconditionally, the rest need confirmed header
-    #: awareness (and, for two of them, one exact ``ast_producer``).
+    #: consultation table (``policy/analysis_assurance_degraded_facts.py``)
+    #: -- three flags are consulted unconditionally, the rest need confirmed
+    #: header awareness (and, for two of them, one exact ``ast_producer``).
     _CONSULTED_KWARGS: dict[str, dict[str, object]] = {
         "header_cv_facts_reliable": {},
         "clang_deprecation_facts_reliable": {"from_headers": True},
@@ -315,6 +317,86 @@ class TestSchemaStalenessStatus:
         aa = result.analysis_assurance
         assert aa.schema_staleness_status == "clean"
         assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    #: ``clang_restrict_facts_reliable``/``clang_deprecation_facts_
+    #: reliable``/``clang_field_initializer_facts_reliable`` -- unlike
+    #: :data:`_PAIR_PRODUCER_GATED_FLAGS`'s two members, each one's real
+    #: consumer (``diff_symbols._diff_param_restrict``/``_diff_func_
+    #: deprecated``, ``diff_types_field_facts._diff_field_default_
+    #: initializer``) requires BOTH sides confirmed header-aware but places
+    #: no further requirement on the OTHER side's producer -- documented as
+    #: cross-producer-safe once both sides are header-confirmed.
+    _HEADER_ONLY_GATED_FLAGS: tuple[str, ...] = (
+        "clang_restrict_facts_reliable",
+        "clang_deprecation_facts_reliable",
+        "clang_field_initializer_facts_reliable",
+    )
+
+    def test_other_side_confirmed_header_aware_taints_header_only_gated_flags(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 7: the mirror of the producer-gated
+        flags' own "same producer still taints" case, generalized to all
+        three header-only-gated flags. When ``other`` is confirmed header-
+        aware (any producer -- these three detectors are cross-producer-safe
+        once both sides clear ``_both_header_aware``), a degraded flag on
+        the OTHER side must still taint the reported status."""
+        for flag_name in self._HEADER_ONLY_GATED_FLAGS:
+            old = AbiSnapshot(
+                version="1.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="clang",
+                **{flag_name: False},
+            )
+            new = AbiSnapshot(
+                version="2.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="castxml",  # deliberately mismatched producer
+            )
+            assert degraded_reliability_facts(old) == [flag_name], flag_name
+
+            result = checker.compare(old, new)
+            aa = result.analysis_assurance
+            assert aa.schema_staleness_status == "degraded", flag_name
+            assert any(flag_name in n for n in aa.notes), (flag_name, aa.notes)
+
+    def test_other_side_only_inferred_header_awareness_never_taints_header_only_gated_flags(
+        self,
+    ) -> None:
+        """The other half of round 7's fresh evidence: an ``other`` side
+        that is confirmed header-aware on paper but only ever had its
+        ``from_headers`` *inferred* still fails ``_both_header_aware``, so
+        each of these three detectors never runs for this pair -- the
+        degraded flag must not taint the reported status, the identical
+        shape :func:`test_other_side_only_inferred_header_awareness_never_
+        taints` already covers for the producer-gated flags."""
+        for flag_name in self._HEADER_ONLY_GATED_FLAGS:
+            old = AbiSnapshot(
+                version="1.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="clang",
+                **{flag_name: False},
+            )
+            new = AbiSnapshot(
+                version="2.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="clang",
+            )
+            new.from_headers_inferred = True
+            assert degraded_reliability_facts(old) == [flag_name], flag_name
+
+            result = checker.compare(old, new)
+            aa = result.analysis_assurance
+            assert aa.schema_staleness_status == "clean", flag_name
+            assert not any(flag_name in n for n in aa.notes), (flag_name, aa.notes)
 
     def test_self_diff_never_taints_the_no_baseline_audit(self) -> None:
         """Codex review, PR #1209 round 6: ``workflows.no_baseline_compare``
