@@ -144,13 +144,162 @@ def test_coordinate_only_requires_both_names_present() -> None:
     assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED
 
 
-def test_coordinate_only_requires_declaring_file_evidence() -> None:
-    """Codex review, fresh evidence: missing def_file/SOURCE_DECLARES
-    evidence on either side (an older, stored, or partially populated L5
-    graph) is missing evidence, never proof the declaring file didn't
-    change -- `bool(old_file)/bool(new_file)` mirrors `moved`'s own guard,
-    so a pair with no file evidence at all can't be waved through as
-    coordinate-only just because the location-free names happen to agree."""
+def test_coordinate_only_does_not_require_declaring_file_evidence() -> None:
+    """Bug-class regression (inverts an earlier guard): absent
+    ``def_file``/``SOURCE_DECLARES`` evidence must NOT push a pair with
+    positive, name-embedded coordinate-churn evidence into the strictly
+    stronger ``OUTCOME_RECONCILED`` ("both name and location evidence
+    changed"). ``moved`` is already False from that same absent evidence,
+    so the old guard declined the weak claim only to make the strong one --
+    and it made ``OUTCOME_COORDINATES_ONLY`` unreachable in production (0
+    occurrences repo-wide; 15 of 15 otherwise-eligible oneTBB header-graph
+    pairs blocked solely by ``old_file == new_file == ""``)."""
     old_id = _identity("(lambda at f.h:1:2)", "", kind="record_type")
     new_id = _identity("(lambda at f.h:9:9)", "", kind="record_type")
-    assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED
+    assert _classify_outcome(old_id, new_id) == OUTCOME_COORDINATES_ONLY
+
+
+#: Name pairs, each tagged with the two *independent* dimensions an oracle
+#: needs: did the location-free name change (a real rename), and is there
+#: positive coordinate-churn evidence (raw names differ, both present,
+#: normalized equal)?
+_NAME_CASES: dict[str, tuple[str, str, bool, bool]] = {
+    "identical": ("ns::Widget", "ns::Widget", False, False),
+    "real_rename": ("ns::Widget", "ns::WidgetV2", True, False),
+    "coord_shift": ("(lambda at f.h:1:2)", "(lambda at f.h:9:9)", False, True),
+    "old_name_absent": ("", "(lambda at f.h:9:9)", False, False),
+    "new_name_absent": ("(lambda at f.h:1:2)", "", False, False),
+}
+
+#: Declaring-file pairs, tagged with whether a *move* is shown (both sides
+#: present and differing) and whether file evidence is present at all.
+_FILE_CASES: dict[str, tuple[str, str, bool, bool]] = {
+    "same_file": ("a.h", "a.h", False, True),
+    "real_move": ("a.h", "b.h", True, True),
+    "old_file_absent": ("", "b.h", False, False),
+    "new_file_absent": ("a.h", "", False, False),
+    "no_file_evidence": ("", "", False, False),
+}
+
+_SIG_CASES: dict[str, tuple[str, str]] = {"same_sig": ("s", "s"), "sig_change": ("s0", "s1")}
+_KIND_CASES = ("record_type", "enum_type", "typedef", "source_decl")
+
+
+def _expected_outcome(
+    *, name_changed: bool, has_coord: bool, file_changed: bool, same_sig: bool, kind: str
+) -> str:
+    """Oracle stated from the four input DIMENSIONS, not from the
+    implementation's own predicate expressions."""
+    if name_changed and not file_changed:
+        return OUTCOME_RENAMED
+    if file_changed and not name_changed:
+        return OUTCOME_MOVED
+    if name_changed and file_changed:
+        return OUTCOME_RECONCILED
+    if has_coord and same_sig and kind in ("record_type", "enum_type", "typedef"):
+        return OUTCOME_COORDINATES_ONLY
+    return OUTCOME_RECONCILED
+
+
+def _generated_cases() -> list[tuple[str, CanonicalIdentity, CanonicalIdentity, str]]:
+    cases = []
+    for nk, (old_qn, new_qn, name_ch, has_coord) in _NAME_CASES.items():
+        for fk, (old_f, new_f, file_ch, _has_file) in _FILE_CASES.items():
+            for sk, (old_sig, new_sig) in _SIG_CASES.items():
+                for kind in _KIND_CASES:
+                    old_id = _identity(
+                        old_qn, old_f, f"sig:{old_qn}\x1f{old_sig}", kind
+                    )
+                    new_id = _identity(
+                        new_qn, new_f, f"sig:{new_qn}\x1f{new_sig}", kind
+                    )
+                    expected = _expected_outcome(
+                        name_changed=name_ch,
+                        has_coord=has_coord,
+                        file_changed=file_ch,
+                        same_sig=old_sig == new_sig,
+                        kind=kind,
+                    )
+                    cases.append((f"{nk}/{fk}/{sk}/{kind}", old_id, new_id, expected))
+    return cases
+
+
+class TestClassifyOutcomeProperties:
+    """``_classify_outcome`` is a reusable classification primitive, so it
+    gets the standalone property-test treatment AGENTS.md's
+    "Primitive-level property tests" bullet prescribes (the same treatment
+    ``TestPairedStableIndicesProperties`` gives ``_paired_stable_indices``)
+    -- invariants over an exhaustively enumerated small input domain (200
+    pairs across four independent dimensions), not a fixture pinned to the
+    one observed oneTBB input. Reachability is itself one of the
+    invariants: the defect this class was written for was an outcome no
+    production input could ever produce."""
+
+    def test_every_pair_gets_exactly_one_of_the_four_outcomes(self) -> None:
+        outcomes = {
+            OUTCOME_RENAMED,
+            OUTCOME_MOVED,
+            OUTCOME_RECONCILED,
+            OUTCOME_COORDINATES_ONLY,
+        }
+        for label, old_id, new_id, _ in _generated_cases():
+            assert _classify_outcome(old_id, new_id) in outcomes, label
+
+    def test_all_four_outcomes_are_reachable(self) -> None:
+        """The reachability half -- exactly what this defect was: the
+        declaring-file guard made ``OUTCOME_COORDINATES_ONLY`` producible
+        by no real input at all, and nothing failed anywhere."""
+        seen = {_classify_outcome(o, n) for _, o, n, _ in _generated_cases()}
+        assert seen == {
+            OUTCOME_RENAMED,
+            OUTCOME_MOVED,
+            OUTCOME_RECONCILED,
+            OUTCOME_COORDINATES_ONLY,
+        }
+
+    def test_outcome_matches_dimension_oracle(self) -> None:
+        for label, old_id, new_id, expected in _generated_cases():
+            assert _classify_outcome(old_id, new_id) == expected, label
+
+    def test_never_claims_a_move_without_two_sided_file_evidence(self) -> None:
+        """No label may claim a dimension the inputs do not show changed.
+        ``OUTCOME_MOVED`` and ``OUTCOME_RECONCILED`` both assert the
+        declaring location changed, which absent file evidence cannot
+        show -- so neither may be returned for a pair that carries
+        positive coordinate-churn evidence and is kind/signature
+        eligible. (A pair with NO positive evidence on either axis still
+        falls through to ``OUTCOME_RECONCILED``: ADR-048's accepted
+        "no clean split" prose overstatement, see
+        ``test_classify_outcome_prose_is_truthful_about_what_changed``.)"""
+        for nk, (old_qn, new_qn, name_ch, has_coord) in _NAME_CASES.items():
+            for fk, (old_f, new_f, _file_ch, has_file) in _FILE_CASES.items():
+                if has_file:
+                    continue
+                for kind in _KIND_CASES:
+                    old_id = _identity(old_qn, old_f, f"sig:{old_qn}\x1fs", kind)
+                    new_id = _identity(new_qn, new_f, f"sig:{new_qn}\x1fs", kind)
+                    outcome = _classify_outcome(old_id, new_id)
+                    assert outcome != OUTCOME_MOVED, (nk, fk, kind)
+                    if has_coord and kind != "source_decl":
+                        assert outcome == OUTCOME_COORDINATES_ONLY, (nk, fk, kind)
+                    assert not name_ch or outcome == OUTCOME_RENAMED, (nk, fk, kind)
+
+    def test_side_swap_symmetry(self) -> None:
+        """Every one of the four outcomes is a symmetric relation over the
+        pair: swapping old and new must not change the label (the kind
+        restriction reads ``old_identity.kind``, so a swap keeps it equal
+        only because both sides share a kind -- which is the only shape a
+        real reconciled pair has, since matching is per kind group)."""
+        for label, old_id, new_id, _ in _generated_cases():
+            assert _classify_outcome(old_id, new_id) == _classify_outcome(
+                new_id, old_id
+            ), label
+
+    def test_source_decl_never_returns_coordinates_only(self) -> None:
+        """Kind restriction holds regardless of every other dimension: a
+        ``source_decl``'s signature isn't tracked by the production
+        producer, so "nothing else changed" is unprovable for one."""
+        for label, old_id, new_id, _ in _generated_cases():
+            if old_id.kind != "source_decl":
+                continue
+            assert _classify_outcome(old_id, new_id) != OUTCOME_COORDINATES_ONLY, label

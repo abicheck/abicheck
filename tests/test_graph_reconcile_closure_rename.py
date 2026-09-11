@@ -124,6 +124,34 @@ class TestClosureCoordinateShiftIsNotARename:
             "location evidence changed, which is false here -- neither did)"
         )
 
+    def test_coordinate_shift_without_any_declaring_file_evidence(self) -> None:
+        """The measured oneTBB shape, through the real reconciliation entry
+        point: a header-graph node carrying NO ``def_file`` attr and no
+        ``SOURCE_DECLARES`` edge (15 of 15 otherwise-eligible pairs in that
+        comparison). The coordinate shift is embedded in the qualified name
+        itself, and ``closure_location_free_identity`` stripping it is what
+        proved the rest identical -- so the absent declaring file must not
+        push the pair into ``OUTCOME_RECONCILED``'s strictly stronger "both
+        name and location evidence changed" claim."""
+        old_node = GraphNode(
+            id="type://old",
+            kind="record_type",
+            label="__type_identity<(lambda:global_control.h:172:22)>",
+            attrs={
+                "qualified_name": "__type_identity<(lambda:global_control.h:172:22)>"
+            },
+        )
+        new_node = GraphNode(
+            id="type://new",
+            kind="record_type",
+            label="__type_identity<(lambda:global_control.h:181:22)>",
+            attrs={
+                "qualified_name": "__type_identity<(lambda:global_control.h:181:22)>"
+            },
+        )
+        pair = _reconcile_one_pair(old_node, new_node)
+        assert pair.outcome == OUTCOME_COORDINATES_ONLY
+
     def test_bare_anonymous_marker_coordinate_shift_reconciles_not_renamed(
         self,
     ) -> None:
