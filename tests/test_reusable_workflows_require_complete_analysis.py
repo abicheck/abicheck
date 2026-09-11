@@ -313,3 +313,84 @@ class TestAssuranceOverlayGenerationIsIsolated:
             )
         )
         assert written == {"assurance": {"require_complete": True}}
+
+
+class TestAssuranceOverlayDiscoversProjectConfig:
+    """Finding 2 (P1, PR #1222 Codex review): with
+    ``analysis-assurance-complete: true`` and no explicit ``build-config``,
+    the overlay used to start from an EMPTY mapping and pass the generated
+    overlay as an explicit ``--config``/``build-config`` to the nested root
+    Action -- which DISABLES that Action's/CLI's normal ``.abicheck.yml``
+    auto-discovery, silently dropping every other auto-discovered project
+    setting (scope/severity/policy/compile/...) the moment the assurance
+    gate is enabled. Fixed by discovering the project's real
+    ``.abicheck.yml`` (the same way ``discover_project_config()`` does) and
+    merging the overlay into THAT document instead of an empty one."""
+
+    def test_no_explicit_build_config_still_preserves_auto_discovered_settings(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "severity:\n  preset: strict\n"
+            "policy:\n  overrides:\n    FUNCTION_REMOVED: error\n",
+            encoding="utf-8",
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        # Not just the bare assurance block: every auto-discovered setting
+        # must survive the merge.
+        assert written["severity"] == {"preset": "strict"}
+        assert written["policy"] == {"overrides": {"FUNCTION_REMOVED": "error"}}
+        assert written["assurance"] == {"require_complete": True}
+
+    def test_no_discoverable_config_still_produces_a_clean_overlay(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: no ``.abicheck.yml`` anywhere above the
+        workspace must behave exactly as before (an empty base)."""
+        result = self._run_no_config(tmp_path)
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (result.workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written == {"assurance": {"require_complete": True}}
+
+    def _run_no_config(self, tmp_path: Path) -> Any:
+        workspace = make_workspace(tmp_path)
+        return run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+
+    def test_explicit_build_config_still_wins_over_discovery(
+        self, tmp_path: Path
+    ) -> None:
+        """An explicit build-config is unaffected by discovery -- it stays
+        the base document, matching pre-existing behavior exactly."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "severity:\n  preset: strict\n", encoding="utf-8"
+        )
+        explicit_config = workspace / "explicit.yml"
+        explicit_config.write_text("targets: {}\n", encoding="utf-8")
+        result = run_step(
+            _overlay_step(),
+            workspace=workspace,
+            env={"BASE_CONFIG": str(explicit_config)},
+        )
+        assert result.returncode == 0, result.stderr
+        written = yaml.safe_load(
+            (workspace / "check-target-assurance-config.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written == {
+            "targets": {},
+            "assurance": {"require_complete": True},
+        }
+        assert "severity" not in written

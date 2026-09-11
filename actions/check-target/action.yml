@@ -695,25 +695,54 @@ runs:
         fi
         (cd "$_py_safe_dir" \
          && ABICHECK_BASE_CONFIG="$_base_config_abs" \
+            ABICHECK_DISCOVER_START="$_real_pwd" \
             ABICHECK_OUT_PATH="$_real_pwd/check-target-assurance-config.yml" \
             PYTHONPATH= "$PY" - <<'PYSCRIPT'
         import os
+        from pathlib import Path
 
         import yaml
 
-        base_path = os.environ.get("ABICHECK_BASE_CONFIG", "")
+        from abicheck.cli_helpers_compare import discover_project_config
+
+        base_path_env = os.environ.get("ABICHECK_BASE_CONFIG", "")
         data: dict = {}
-        if base_path:
+        source_desc = "<build-config>"
+        if base_path_env:
+            # An explicit build-config was given: use it as the base,
+            # unchanged from before.
+            base_path = Path(base_path_env)
+            source_desc = str(base_path)
             with open(base_path, encoding="utf-8") as fh:
                 loaded = yaml.safe_load(fh)
             if loaded is not None:
                 if not isinstance(loaded, dict):
                     raise SystemExit(
-                        f"::error::{base_path} does not parse to a YAML mapping "
+                        f"::error::{source_desc} does not parse to a YAML mapping "
                         "-- cannot merge an assurance.require_complete overlay "
                         "into it."
                     )
                 data = loaded
+        else:
+            # No explicit build-config: discover the project's real
+            # .abicheck.yml the same way the nested root Action's own CLI
+            # would (Codex review). Without this, passing the bare overlay
+            # as an explicit --config/build-config would DISABLE the root
+            # Action's/CLI's normal auto-discovery, silently dropping every
+            # other project setting (scope/severity/policy/compile/...) the
+            # moment analysis.assurance: complete is enabled.
+            discovered = discover_project_config(Path(os.environ["ABICHECK_DISCOVER_START"]))
+            if discovered is not None:
+                source_desc = str(discovered)
+                loaded = yaml.safe_load(discovered.read_text(encoding="utf-8"))
+                if loaded is not None:
+                    if not isinstance(loaded, dict):
+                        raise SystemExit(
+                            f"::error::{source_desc} does not parse to a YAML "
+                            "mapping -- cannot merge an assurance.require_complete "
+                            "overlay into it."
+                        )
+                    data = loaded
         assurance = data.get("assurance")
         # Only a missing key or an explicit null/empty value is safe to
         # treat as "no assurance block yet" and overlay onto. Normal
@@ -728,7 +757,7 @@ runs:
             assurance = {}
         elif not isinstance(assurance, dict):
             raise SystemExit(
-                f"::error::{base_path or '<build-config>'}: assurance: must be "
+                f"::error::{source_desc}: assurance: must be "
                 "a mapping (or omitted/null), got "
                 f"{type(assurance).__name__} ({assurance!r}) -- cannot merge "
                 "an assurance.require_complete overlay into it."
