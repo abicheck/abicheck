@@ -69,7 +69,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
 from .cli_compare_release_matrix import (
     _collect_matrix_result,
     _finalize_release_output,
-    _prepare_compare_release_inputs,
+    _prepare_compare_release_inputs as _prepare_compare_release_inputs,  # re-exported, direct tests still call it
     _release_finding_dicts as _release_finding_dicts,
     _release_gating_buckets as _release_gating_buckets,
     _strip_diff_results_and_adjust_verdict,
@@ -113,18 +113,11 @@ from .workflows.release_scope import (
     StrandedLibraryResolution,
     build_release_scope_record,
     out_of_scope_provider_names,
-    release_inventory_evidence,
-    resolve_release_scope_plan,
     resolve_release_scope_result,
     scoped_bundle_maps,
 )
-from .workflows.release_stored_inventory import (
-    stored_degraded_members,
-    stored_side_degraded_members,
-    stored_side_inventory_complete,
-)
+from .workflows.release_stored_inventory import stored_side_degraded_members
 from .workflows.release_support_promise import support_promise_results
-from .workflows.storage import is_project_snapshot_package_dir
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -510,10 +503,6 @@ def compare_release_cmd(
     """
 
     from .workflows.extraction import (
-        _is_elf_shared_object,
-        detect_extractor,
-        discover_shared_libraries,
-        is_package,
         resolve_package_debug_info as resolve_debug_info,
     )
 
@@ -567,18 +556,6 @@ def compare_release_cmd(
         _temp_dir_paths.append(path)
         return Path(path)
 
-    def _do_extract(
-        input_path: Path, debug_pkg: Path | None, devel_pkg: Path | None
-    ) -> tuple[Path, Path | None, Path | None, Path | None, bool]:
-        return _extract_if_package(
-            input_path,
-            debug_pkg,
-            devel_pkg,
-            _make_temp_dir,
-            is_package,
-            detect_extractor,
-        )
-
     # dedup_validate_overrides_warnings(): this whole release run reloads
     # the same --policy-file several times over -- the early strict-
     # suppression validation just below, the per-library fan-out (including
@@ -600,123 +577,70 @@ def compare_release_cmd(
             require_justification,
         )
 
+        # ADR-061 gap D / DoD item 8, closure package 4: the release fan-out's
+        # entire pre-execution resolution (input discovery, ADR-065 scope/
+        # inventory evidence, the ReleaseScopePlan, the resolved GateOptions,
+        # and each side's stored-degraded markers) as one typed request/plan
+        # pair -- ``ReleaseCompareRequest``/``ReleaseComparePlan`` -- rather
+        # than the dozen independent locals this block used to thread by
+        # hand across four separate calls. See that module's own docstring
+        # for exactly what this closes and what remains open.
         try:
-            (
-                old_debug_dir,
-                new_debug_dir,
-                old_h,
-                new_h,
-                old_inc,
-                new_inc,
-                old_map,
-                new_map,
-                warning_msgs,
-                matched_keys,
-                old_unclassified,
-                new_unclassified,
-                old_inventory,
-                new_inventory,
-            ) = _prepare_compare_release_inputs(
-                old_dir,
-                new_dir,
-                debug_info1,
-                debug_info2,
-                devel_pkg1,
-                devel_pkg2,
-                include_private_dso,
-                dso_only,
-                headers,
-                old_headers_only,
-                new_headers_only,
-                includes,
-                old_includes_only,
-                new_includes_only,
-                config_includes,
-                _do_extract,
-                discover_shared_libraries,
-                is_package,
-                _is_elf_shared_object,
+            from .frontends.cli.release_compare_request import (
+                ReleaseCompareRequest,
+                resolve_release_compare_plan,
+            )
+
+            request = ReleaseCompareRequest(
+                old_dir=old_dir,
+                new_dir=new_dir,
+                debug_info1=debug_info1,
+                debug_info2=debug_info2,
+                devel_pkg1=devel_pkg1,
+                devel_pkg2=devel_pkg2,
+                include_private_dso=include_private_dso,
+                dso_only=dso_only,
+                headers=headers,
+                old_headers_only=old_headers_only,
+                new_headers_only=new_headers_only,
+                includes=includes,
+                old_includes_only=old_includes_only,
+                new_includes_only=new_includes_only,
+                config_includes=config_includes,
                 old_variant=old_variant,
                 new_variant=new_variant,
-                make_temp_dir=_make_temp_dir,
+                release_selection=release_selection,
+                pack_application=pack_application,
+                severity_preset=severity_preset,
+                severity_abi_breaking=severity_abi_breaking,
+                severity_potential_breaking=severity_potential_breaking,
+                severity_quality_issues=severity_quality_issues,
+                severity_addition=severity_addition,
+                on_incomplete_scope=on_incomplete_scope,
+                fail_on_removed_library=fail_on_removed,
             )
-            # ADR-065 D2's inventory proof for this release (S2): a stored
-            # ProjectSnapshot package whose capture asserted a complete
-            # inventory (`inventory_complete`, persisted with its
-            # composition); the package type alone, a live directory, an
-            # extracted archive, or a direct file pair never proves it.
-            old_stored = old_dir.is_dir() and is_project_snapshot_package_dir(old_dir)
-            new_stored = new_dir.is_dir() and is_project_snapshot_package_dir(new_dir)
             try:
-                old_complete = old_stored and stored_side_inventory_complete(
-                    old_dir, variant_id=old_variant
+                plan = resolve_release_compare_plan(
+                    request, make_temp_dir=_make_temp_dir
                 )
-                new_complete = new_stored and stored_side_inventory_complete(
-                    new_dir, variant_id=new_variant
-                )
-            except SnapshotError as exc:  # a damaged composition (fail closed)
+            except SnapshotError as exc:  # a damaged composition/marker (fail closed)
                 raise click.UsageError(str(exc)) from exc
-            inventory_evidence = release_inventory_evidence(
-                old_stored=old_stored,
-                new_stored=new_stored,
-                old_complete=old_complete,
-                new_complete=new_complete,
-                direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
-                # D9 reads intent from the operand shape: a single-file NEW
-                # (not a directory/archive that discovered one member).
-                new_single_artifact=new_dir.is_file() and not is_package(new_dir),
-                # ADR-065 D2 (Codex review): a stored member --dso-only
-                # could not classify withholds that side's proof.
-                old_unclassified=old_unclassified,
-                new_unclassified=new_unclassified,
-                # ADR-065 S3: a package archive's own declared component
-                # inventory, complete because the container was unpacked in
-                # full -- the live-operand counterpart of a stored package's
-                # persisted `inventory_complete` assertion.
-                old_inventory=old_inventory,
-                new_inventory=new_inventory,
-            )
-            # ADR-061 gap D / DoD item 8, closure package 4: the pre-
-            # execution half of ADR-065's scope model (which members are
-            # paired, and each side's own completeness evidence) as one
-            # resolved plan object rather than four independent locals
-            # threaded by hand -- see `ReleaseScopePlan`'s own docstring.
-            #
-            # Codex review (PR #1192, follow-up finding): rebinding
-            # `old_map`/`new_map`/`matched_keys` to the plan's own copies
-            # here -- rather than only reading `scope_plan.*` at the record
-            # builder after execution -- is what makes `scope_plan` the
-            # actual input execution consumes, not a DTO wrapper computed
-            # alongside it. `stored_degraded_members`, `compare_keys`, and
-            # `_compare_release_libraries` below (and every other reader in
-            # this function) now see exactly what the plan resolved, so a
-            # future normalization/selection rule added to
-            # `resolve_release_scope_plan` changes which pairs actually run,
-            # not merely how the post-execution record describes them.
-            #
-            # Codex review (PR #1192, second follow-up finding): an explicit
-            # `--select`/`--select-required` selection is folded into
-            # `matched_keys` *before* `resolve_release_scope_plan` runs, not
-            # as a separate filter applied to `compare_keys` afterward (see
-            # the now-removed second filter below) -- so `scope_plan` itself,
-            # not a step downstream of it, is what narrows what executes.
-            # The direct-pair sentinel is exempt: `DIRECT_PAIR_KEY` names no
-            # real declared library for a selection to match against.
-            plan_matched_keys = matched_keys
-            if release_selection is not None and list(matched_keys) != [
-                DIRECT_PAIR_KEY
-            ]:
-                plan_matched_keys = [
-                    k for k in matched_keys if k in release_selection
-                ]
-            scope_plan = resolve_release_scope_plan(
-                old_map, new_map, plan_matched_keys, inventory_evidence
-            )
+
+            scope_plan = plan.scope
             old_map, new_map, matched_keys = (
                 dict(scope_plan.old_map),
                 dict(scope_plan.new_map),
                 list(scope_plan.matched_keys),
             )
+            old_debug_dir, new_debug_dir = plan.old_debug_dir, plan.new_debug_dir
+            old_h, new_h = list(plan.old_headers), list(plan.new_headers)
+            old_inc, new_inc = list(plan.old_includes), list(plan.new_includes)
+            warning_msgs = list(plan.warnings)
+            old_unclassified, new_unclassified = (
+                plan.old_unclassified,
+                plan.new_unclassified,
+            )
+            old_inventory, new_inventory = plan.old_inventory, plan.new_inventory
 
             if fmt != "json":
                 for msg in warning_msgs:
@@ -726,45 +650,13 @@ def compare_release_cmd(
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
-            # CLI cleanup phase two, ADR-064 "GateOptions" rewrite: one
-            # resolution replaces the release fan-out's previous three
-            # independent re-derivations of the same SeverityConfig from
-            # five raw preset/category strings. `resolve_release_gate_
-            # options` folds a selected `kind: gate` pack's gate.severity.
-            # <category> contribution (`apply_release_gate_pack`), then
-            # resolves the severity config -- since PR G2 removed the
-            # manual algorithm selector, `gate.exit_code_scheme` is purely
-            # derived from whether `gate.severity` ended up non-`None`, not
-            # a fourth independent input any more. Every downstream
-            # consumer (this function's own `severity_config`, the
-            # per-library JSON write inside `_compare_release_libraries`,
-            # `_compute_release_severity_exit_code`,
-            # `_fold_release_global_severity`) now reads the resulting
-            # `GateOptions` instead of independently re-deriving it.
-            # Codex review, PR #1192, third follow-up round: `on_incomplete_
-            # scope`/`fail_on_removed` are this run's own already-resolved
-            # ADR-065 release-scope axes (the identical locals `compare_
-            # keys`'s scope-decision resolution and `_exit_compare_release`
-            # read below) -- passed straight through so `GateOptions`/
-            # `EffectiveGate`'s own digest-facing fields cannot silently
-            # disagree with the values that actually govern this run's exit
-            # code.
-            gate = resolve_release_gate_options(
-                pack_application,
-                severity_preset=severity_preset,
-                severity_abi_breaking=severity_abi_breaking,
-                severity_potential_breaking=severity_potential_breaking,
-                severity_quality_issues=severity_quality_issues,
-                severity_addition=severity_addition,
-                on_incomplete_scope=on_incomplete_scope,
-                fail_on_removed_library=fail_on_removed,
-            )
             # Resolved before the compare pass (its inputs are plain CLI values, no
             # dependency on compare results) so persisted per-library annotations
             # (schema 2.43/2.44, computed inside _compare_release_libraries's
             # primary pass and read by the Action, not the CLI) reflect the same
             # severity-aware gate as the exit code below, instead of the legacy
             # kind-set mapping. `None` when no severity setting was in effect.
+            gate = plan.gate
             severity_config = gate.severity
             severity_preset = gate.severity_preset
 
@@ -783,17 +675,10 @@ def compare_release_cmd(
             # An unmatched one is `failed` on the record too (below), so a
             # proven inventory on the other side never turns a degraded
             # capture into a removal or an addition (twenty-seventh round).
-            try:
-                degraded = stored_degraded_members(
-                    old_dir,
-                    new_dir,
-                    old_map,
-                    new_map,
-                    old_variant=old_variant,
-                    new_variant=new_variant,
-                )
-            except SnapshotError as exc:  # a damaged marker section (Codex review)
-                raise click.UsageError(str(exc)) from exc
+            degraded = plan.degraded
+            assert (
+                degraded is not None
+            )  # always resolved by resolve_release_compare_plan
             degraded_matched = degraded.matched
             # ADR-065 S1: with an explicit selection, a matched key the
             # caller did not declare is never run through the (expensive)
@@ -802,7 +687,7 @@ def compare_release_cmd(
             # compared anyway. `matched_keys` is already selection-narrowed
             # (folded into `scope_plan` above), so no second filter is
             # needed here.
-            compare_keys = [k for k in matched_keys if k not in degraded_matched]
+            compare_keys = plan.compare_keys
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 compare_keys,
                 old_map,
@@ -888,7 +773,7 @@ def compare_release_cmd(
                 else {},
             }
             if release_selection is not None and not (
-                inventory_evidence.direct_pair
+                scope_plan.evidence.direct_pair
                 or list(matched_keys) == [DIRECT_PAIR_KEY]
             ):
                 # ADR-065 S1: an explicit selection overrides D9's inference

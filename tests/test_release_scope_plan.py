@@ -279,7 +279,8 @@ class TestScopePlanIsExecutionAuthoritative:
     how the reported `ReleaseScopeResult` describes them.
 
     Proven here by patching `resolve_release_scope_plan` (where
-    `cli_compare_release.py` resolves it) to return a plan whose
+    `frontends.cli.release_compare_request.resolve_release_compare_plan`
+    resolves it, on `cli_compare_release.py`'s behalf) to return a plan whose
     `matched_keys` *narrows out* one of the two real, on-disk members, and
     asserting the real execution never compares it -- if execution still
     read the original locals instead of the plan, this member would still
@@ -311,7 +312,7 @@ class TestScopePlanIsExecutionAuthoritative:
             )
 
         with patch(
-            "abicheck.cli_compare_release.resolve_release_scope_plan",
+            "abicheck.frontends.cli.release_compare_request.resolve_release_scope_plan",
             side_effect=_narrow_to_libfoo_only,
         ):
             code, out = _invoke(
@@ -358,7 +359,7 @@ class TestExplicitSelectionFoldedIntoScopePlan:
             return plan
 
         with patch(
-            "abicheck.cli_compare_release.resolve_release_scope_plan",
+            "abicheck.frontends.cli.release_compare_request.resolve_release_scope_plan",
             side_effect=_spy,
         ):
             code, out = _invoke(

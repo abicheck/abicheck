@@ -99,6 +99,11 @@ jobs:
               - 'abicheck/policy/selectors_namespace_glob.py'
               - 'abicheck/snapshot_io.py'
               - 'abicheck/serialization.py'
+              - 'abicheck/storage/snapshot_codec.py'
+              - 'abicheck/storage/snapshot_schema_versions.py'
+              - 'abicheck/storage/snapshot_encode.py'
+              - 'abicheck/storage/snapshot_decode_declarations.py'
+              - 'abicheck/storage/snapshot_reliability_flags.py'
               # The lane's own infrastructure. Without these a change to
               # the parser, its config, or this workflow does not start
               # the lane — and the real-mutmut test is `slow`, excluded
@@ -143,6 +148,11 @@ jobs:
               - 'tests/test_selectors_namespace_glob*.py'
               - 'tests/test_snapshot_io*.py'
               - 'tests/test_serialization*.py'
+              - 'tests/test_snapshot_codec*.py'
+              - 'tests/test_snapshot_schema_versions*.py'
+              - 'tests/test_snapshot_encode*.py'
+              - 'tests/test_snapshot_decode_declarations*.py'
+              - 'tests/test_snapshot_reliability_flags*.py'
       - name: Decide whether to run
         id: decide
         env:

@@ -26,3 +26,8 @@ from ..model.entity_resolver import (
     EntityConflict as EntityConflict,
     EntityResolver as EntityResolver,
 )
+
+__all__ = [
+    "EntityConflict",
+    "EntityResolver",
+]
