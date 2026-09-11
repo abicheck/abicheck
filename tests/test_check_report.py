@@ -168,6 +168,43 @@ class TestDeriveEffectiveDepth:
         with pytest.raises(ValueError):
             derive_effective_depth({}, "bogus")
 
+    def test_no_baseline_audit_reads_depth_from_run_outcome_assurance(self):
+        """Codex review, fresh evidence: `compare --no-baseline`'s own audit
+        document has neither `old_evidence_depth`/`new_evidence_depth` (no
+        OLD side) nor a `level` block (legacy scan's own shape) -- its
+        achieved depth lives only in `run_outcome.assurance.
+        effective_depth`, the same `AnalysisAssurance.to_dict()` block a
+        two-sided compare report nests there too."""
+        report = {
+            "no_baseline": True,
+            "run_outcome": {"assurance": {"effective_depth": "source"}},
+        }
+        effective, coverage = derive_effective_depth(report, "source")
+        assert effective == "source"
+        assert coverage == {"state": "complete", "reasons": []}
+
+    def test_no_baseline_audit_shallower_than_requested_degrades_honestly(self):
+        """The sharper bug: without this signal, a pinned depth: source
+        audit that only reached headers fell through to the "no signal"
+        branch, which reports the *requested* depth verbatim -- silently
+        claiming the depth it asked for, not the one it got."""
+        report = {
+            "no_baseline": True,
+            "run_outcome": {"assurance": {"effective_depth": "headers"}},
+        }
+        effective, coverage = derive_effective_depth(report, "source")
+        assert effective == "headers"
+        assert coverage == {
+            "state": "degraded",
+            "reasons": ["audit_achieved_headers"],
+        }
+
+    def test_no_baseline_audit_with_malformed_assurance_is_no_signal(self):
+        report = {"no_baseline": True, "run_outcome": {"assurance": "not-a-dict"}}
+        effective, coverage = derive_effective_depth(report, "headers")
+        assert coverage["state"] == "unknown"
+        assert effective == "headers"
+
 
 class TestAugmentReport:
     def _base_compare_report(

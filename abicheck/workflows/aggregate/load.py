@@ -628,6 +628,94 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 effective_config_digest if compat_verdict is not None else None
             ),
         )
+    # `compare --no-baseline`'s own audit document (ADR-068 D2) always
+    # carries `verdict: null` too, but for a wholly different reason than
+    # every null-verdict branch above and below: it isn't unresolved or
+    # refused, it *completed*, and by design reports no compatibility
+    # verdict at all -- there is no baseline to compare against. Checked
+    # here, before the native ADR-050 D2 `reason.kind` branch below (an
+    # audit document carries no `reason` key at all, so that branch's own
+    # `isinstance(reason_obj, dict)` guard silently falls through) and
+    # before the generic `parse_report_verdict` fallback further down --
+    # without this branch a completed, gating audit (`--severity-preset`
+    # opted it into the AUDIT_GATE axis, exit 3) loaded as `gate=None`, the
+    # same "report carried no ABI verdict" shape an unavailable/missing
+    # report gets. That silently discarded a real gating finding for an
+    # optional/`on_missing_required: warn` target, and misclassified a
+    # required one as EMPTY coverage rather than a completed, gate-worthy
+    # result (Codex review, fresh evidence).
+    #
+    # `exit_axes` (`report/no_baseline_document.py`) is the one place this
+    # shape publishes each orthogonal axis's own raw contribution
+    # separately from the already-folded top-level `exit_code` -- read
+    # from there rather than the top-level `exit_code`, whose 0/1/3/7 audit
+    # scheme is not `GateInfo`'s documented 0/1/2/4 compare scheme (the
+    # same reason the scan-abort branch above floors onto
+    # `COVERAGE_INCOMPLETE_EXIT` rather than passing through scan's own raw
+    # exit code). `audit_gate`/`evidence_contract` are the two axes that
+    # represent *this report's own* gate-worthy result (a real
+    # BREAKING/API_BREAK-classified candidate-side finding, or an
+    # unsatisfiable evidence contract); `contract_coverage`/
+    # `analysis_assurance`/`incomplete_scope`/`no_comparison_completed` are
+    # already folded through this function's own generic, shape-agnostic
+    # readers below (`_contract_coverage_exit` etc., which already read
+    # this shape's identically-named root fields correctly) and must not
+    # be double-counted here.
+    if data.get("no_baseline") is True:
+        raw_exit_axes = data.get("exit_axes")
+        exit_axes = raw_exit_axes if isinstance(raw_exit_axes, Mapping) else {}
+
+        def _axis(name: str) -> int:
+            raw = exit_axes.get(name)
+            return raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+        audit_gate_axis = _axis("audit_gate")
+        evidence_contract_axis = _axis("evidence_contract")
+        audit_blocking_categories: set[str] = set()
+        if audit_gate_axis:
+            audit_blocking_categories.add("audit_gate")
+        if evidence_contract_axis:
+            audit_blocking_categories.add("evidence_contract_error")
+        gate_exit_code = COVERAGE_INCOMPLETE_EXIT if audit_blocking_categories else 0
+        # `analysis_assurance_exit_contribution`, the dedicated root key
+        # `_analysis_assurance_exit()` reads, is a two-sided-report-only
+        # field this shape never emits (its own assurance contribution
+        # lives only in `exit_axes.analysis_assurance` and inside the full
+        # `run_outcome.assurance` block) -- read both and take the max
+        # rather than silently under-reporting whichever this report
+        # doesn't carry.
+        return _LoadedReport(
+            target_id=target_id,
+            verdict=None,
+            gate=GateInfo(
+                exit_code=gate_exit_code,
+                blocking=gate_exit_code != 0,
+                blocking_categories=tuple(sorted(audit_blocking_categories)),
+                from_report=True,
+            ),
+            library=data.get("library"),
+            head_sha=head_sha,
+            # A completed run, not an unavailable/unresolved one -- no
+            # "reason" a coverage report should surface as a gap.
+            reason=None,
+            path=path,
+            contract_coverage_exit=_contract_coverage_exit(data),
+            contract_coverage_incomplete=_contract_coverage_incomplete(data),
+            contract_coverage_declared=_contract_coverage_declared(data),
+            analysis_assurance_exit=max(
+                _analysis_assurance_exit(data), _axis("analysis_assurance")
+            ),
+            scope_completeness_exit=scope_completeness_exit(data),
+            scope_completeness_incomplete=scope_completeness_incomplete(data),
+            disposition_audit=disposition_audit_block(data),
+            # `changes` is always `[]` for this shape (ADR-068 D2) --
+            # `parse_report_findings` reads that as a real, complete, empty
+            # compatibility change set (correctly: an audit has none, as a
+            # known fact, not an unknown), so it is safe to call unchanged
+            # rather than special-cased to `None`.
+            findings=parse_report_findings(data),
+            effective_config_digest=effective_config_digest,
+        )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a
     # structured ``reason: {kind, message}`` (schema 2.17) -- distinct from

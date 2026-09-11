@@ -220,6 +220,34 @@ def derive_effective_depth(
         if isinstance(scan_depth, str) and scan_depth in _DEPTH_RANK:
             achieved = scan_depth
             source = "scan"
+        else:
+            # `compare --no-baseline`'s own audit document (ADR-068 D2)
+            # carries neither `old_evidence_depth`/`new_evidence_depth`
+            # (there is no OLD side) nor a `level` block (that's legacy
+            # scan's own shape) -- its achieved depth is recorded only in
+            # `run_outcome.assurance.effective_depth`, the same
+            # `AnalysisAssurance.to_dict()` block a two-sided compare
+            # report nests there too (Codex review, fresh evidence). Without
+            # this branch every completed audit fell through to the
+            # "neither signal present" case below: reported `state:
+            # unknown` unconditionally (even a perfectly on-depth audit),
+            # and -- because that branch trusts the *request* verbatim as
+            # the reported `effective_depth` -- a pinned `depth: source`
+            # audit that only actually reached `headers` was stamped
+            # `effective_depth: source`, silently claiming the depth it
+            # asked for rather than the one it got.
+            run_outcome = report.get("run_outcome")
+            assurance = (
+                run_outcome.get("assurance") if isinstance(run_outcome, dict) else None
+            )
+            audit_depth = (
+                assurance.get("effective_depth")
+                if isinstance(assurance, dict)
+                else None
+            )
+            if isinstance(audit_depth, str) and audit_depth in _DEPTH_RANK:
+                achieved = audit_depth
+                source = "audit"
     if achieved is None:
         # Neither signal is present -- shouldn't happen for real compare/scan
         # --format json output, but trust the request rather than silently
