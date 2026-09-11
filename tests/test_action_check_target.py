@@ -463,6 +463,50 @@ class TestValidateInputs:
         )
         assert result.returncode == 0
 
+    def test_bundle_kind_rejects_analysis_assurance_complete(
+        self, tmp_path: Path
+    ) -> None:
+        # A caller invoking check-target directly (bypassing
+        # check-project.yml/project_targets.py's own run-plan validation)
+        # could otherwise pair kind: bundle with
+        # analysis-assurance-complete: true and reach a late, confusing
+        # operational failure deep inside cli_compare_options.py's
+        # _reject_set_input_flags instead of an immediate, clear
+        # input-validation error (Codex review).
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "binary",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+        assert "analysis-assurance-complete is not supported for kind: bundle" in (
+            result.stdout + result.stderr
+        )
+
+    def test_bundle_kind_allows_analysis_assurance_complete_false(
+        self, tmp_path: Path
+    ) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "binary",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"

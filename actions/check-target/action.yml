@@ -418,6 +418,7 @@ runs:
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
         INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
     # ── Capture this Action's own identity before any nested `uses:` step ──
