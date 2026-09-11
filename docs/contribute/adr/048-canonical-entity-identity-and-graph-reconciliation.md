@@ -151,7 +151,12 @@ comparable corpus size). The prose for `declaration_identity_reconciled`
 closure-coordinate case, and inflated `risk_changes` for entities that, from
 the model's own normalized-identity point of view, did not change at all.
 `declaration_coordinates_shifted` is `COMPATIBLE` (not RISK): it fires only
-when ALL of the following hold, none alone sufficient — the raw qualified
+when ALL of the following hold, none alone sufficient — both sides carry a
+real, non-empty qualified name AND non-empty declaring-file evidence (a
+missing name is a name gain/loss, and missing file evidence is missing
+evidence, never proof the file didn't change — mirrors the `renamed`/
+`moved` predicates' own identical guards, and ADR-028 D3's "weaker evidence
+narrows conclusions, never upgrades to a clean claim"); the raw qualified
 name provably differed and normalized away (an already-identical raw
 name/file stays `declaration_identity_reconciled`, since that proves
 nothing about whatever else, like a mangled name, might have changed);

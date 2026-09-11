@@ -437,11 +437,16 @@ def _classify_outcome(
     # review), so a function's tail is vacuously equal and can't prove
     # nothing else changed; only a type has no such hidden dimension.
     same_sig = _signature_tail(old_identity) == _signature_tail(new_identity)
-    # bool(old_qn)/bool(new_qn) mirrors `renamed`'s own guard above -- an
-    # absent name on either side is a name gain/loss, never churn evidence.
+    # bool(old_qn)/bool(new_qn)/bool(*_file) mirror renamed/moved's own
+    # guards above -- an absent name is a name gain/loss, and absent file
+    # evidence on either side is missing evidence, never proof the
+    # declaring file didn't change (AGENTS.md: weaker evidence narrows
+    # conclusions, it never upgrades to a clean/compatible claim).
     coordinate_only = (
         bool(old_qn)
         and bool(new_qn)
+        and bool(old_file)
+        and bool(new_file)
         and old_qn != new_qn
         and same_sig
         and old_identity.kind in _COORDINATE_ONLY_KINDS

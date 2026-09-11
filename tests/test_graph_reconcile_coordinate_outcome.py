@@ -142,3 +142,15 @@ def test_coordinate_only_requires_both_names_present() -> None:
     old_id = _identity("", "a.h", kind="record_type")
     new_id = _identity("(lambda at f.h:1:2)", "a.h", kind="record_type")
     assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED
+
+
+def test_coordinate_only_requires_declaring_file_evidence() -> None:
+    """Codex review, fresh evidence: missing def_file/SOURCE_DECLARES
+    evidence on either side (an older, stored, or partially populated L5
+    graph) is missing evidence, never proof the declaring file didn't
+    change -- `bool(old_file)/bool(new_file)` mirrors `moved`'s own guard,
+    so a pair with no file evidence at all can't be waved through as
+    coordinate-only just because the location-free names happen to agree."""
+    old_id = _identity("(lambda at f.h:1:2)", "", kind="record_type")
+    new_id = _identity("(lambda at f.h:9:9)", "", kind="record_type")
+    assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED
