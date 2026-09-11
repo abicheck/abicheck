@@ -17028,6 +17028,31 @@ not new design.
   `build_source.source_graph`" regression test per reader proving the two
   graphs are read correctly when they are genuinely different objects.
 
+  **Two further corrections from the same review round.** (1) The
+  `SurfaceGraphLike` narrow in `cross_source_checks.py`/
+  `evidence_report.py` used `assert isinstance(graph, SourceGraphSummary)`
+  to satisfy mypy — but `SurfaceGraphLike` (`model/graph_facts.py`) is
+  deliberately structural so a typed-API caller may supply a conforming,
+  non-`SourceGraphSummary` implementation, and both call sites only ever
+  read `.nodes`/`.edges` (protocol members) afterward; a runtime assert
+  would reject such a caller for no reason. Switched to a type-only
+  `cast(...)`. (2) `_side_source_graph`/`_l5_payload_empty`'s
+  `surface_graph` fallback did not check whether the pack's own manifest
+  already recorded an explicit (even `NOT_COLLECTED`) L5 coverage row.
+  `policy/depth_projection.py` deliberately clears `build_source.
+  source_graph` to `None` for a `--depth build` (or shallower) comparison
+  *while stamping that exact row* and leaving `surface_graph` untouched (an
+  L2 fact, cleared at a lower floor) -- so the fallback, unguarded, silently
+  resurrected L5-labeled graph-diff findings and a `"source"` depth label
+  for a comparison whose own report said L5 was excluded. Both functions
+  now only fall back when the pack's manifest records **no** L5 coverage
+  row at all (`pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH) is
+  None`) -- the one case left needing the fallback is a pack that never
+  went through any collection/projection pipeline at all (e.g. a bare
+  typed-API-constructed snapshot). Regression tests added for both: a
+  depth-projected pack (explicit `NOT_COLLECTED` row) must not fall back,
+  while a pack with no coverage row recorded still does.
+
   **The in-memory alias-assignment deletion is NOT done, and is being left
   open rather than forced through unverified.** The one place that builds
   the alias — `service_header_graph_attach.py`'s `_attach_header_graph` —

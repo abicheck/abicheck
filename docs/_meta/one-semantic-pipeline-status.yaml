@@ -1188,10 +1188,22 @@ concepts:
       the current single-file sectioned wire format (schema v42+) every
       real dump --sources -o snapshot actually uses; fixed by decoding
       through serialization.snapshot_from_dict rather than hand-walking a
-      third JSON shape. tests/test_surface_graph_reader_migration.py pins
-      output parity between the pre/post-Phase-3 shapes per reader plus a
-      dedicated "prefers the richer build_source.source_graph" regression
-      test per reader. **Not closed by this row:**
+      third JSON shape. A third review round found two more issues: an
+      isinstance-based narrow of the deliberately-structural
+      SurfaceGraphLike protocol would reject a valid typed-API
+      implementation for no reason (switched to a type-only cast), and the
+      surface_graph fallback did not check the pack's own L5 coverage row
+      -- policy/depth_projection.py deliberately clears build_source.
+      source_graph while stamping an explicit NOT_COLLECTED row for a
+      --depth build comparison, and falling back to the retained
+      surface_graph there resurrected L5-labeled findings/depth claims for
+      a comparison whose own report said L5 was excluded. Both readers now
+      only fall back when the pack records no L5 coverage row at all.
+      tests/test_surface_graph_reader_migration.py pins output parity
+      between the pre/post-Phase-3 shapes per reader, a dedicated "prefers
+      the richer build_source.source_graph" regression test per reader, and
+      a depth-projection-exclusion regression test. **Not closed by this
+      row:**
       deleting the L5 builder's own in-memory identity-aliasing
       (service_header_graph_attach.py's _attach_header_graph, which
       threads one shared SourceGraphSummary instance into both

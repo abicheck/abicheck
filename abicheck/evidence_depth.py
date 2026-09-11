@@ -97,21 +97,34 @@ def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
 
     Prefers *pack*'s own ``source_graph``, falling back to
     ``AbiSnapshot.surface_graph`` only when *pack* is the snapshot's own
-    embedded ``build_source`` and carries no graph of its own -- a real
-    ``--sources``/``--build-info`` embed can leave ``build_source.
-    source_graph`` a strictly richer, real L3-L5 evidence graph than the
-    always-on, header-only-only ``surface_graph``, so the reverse preference
-    would misjudge such a pack empty (security review, PR #1216). *pack*
-    deliberately never defaults to ``snap.build_source`` elsewhere in this
-    module (see the module docstring): when a caller resolved an out-of-band
-    pack instead, that pack has no relationship to ``snap.surface_graph`` at
-    all, so its own ``source_graph`` is read directly, unchanged.
+    embedded ``build_source``, carries no graph of its own, AND its manifest
+    records no L5 coverage row at all -- a real ``--sources``/
+    ``--build-info`` embed can leave ``build_source.source_graph`` a
+    strictly richer, real L3-L5 evidence graph than the always-on,
+    header-only-only ``surface_graph``, so the reverse preference would
+    misjudge such a pack empty (security review, PR #1216). The coverage-row
+    check is a second, separate correction from the same review round:
+    ``policy/depth_projection.py`` deliberately clears ``build_source.
+    source_graph`` to ``None`` for a ``--depth build`` (or shallower)
+    comparison while *stamping an explicit L5 "not collected" coverage row*
+    and retaining ``surface_graph`` untouched (it is an L2 fact, cleared at a
+    lower floor) -- falling back to ``surface_graph`` there would report
+    ``"source"`` depth for a comparison whose own report says L5 was
+    excluded. *pack* deliberately never defaults to ``snap.build_source``
+    elsewhere in this module (see the module docstring): when a caller
+    resolved an out-of-band pack instead, that pack has no relationship to
+    ``snap.surface_graph`` at all, so its own ``source_graph`` is read
+    directly, unchanged.
     """
     if pack is None:
         return True
     if pack.source_graph is not None:
         return not pack.source_graph.nodes
-    if pack is snap.build_source and snap.surface_graph is not None:
+    if (
+        pack is snap.build_source
+        and snap.surface_graph is not None
+        and pack.manifest.coverage_for("L5_source_graph") is None
+    ):
         return not snap.surface_graph.nodes
     return True
 

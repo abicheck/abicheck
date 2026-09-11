@@ -62,7 +62,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from ..checker_types import Change
 from ..model import (
@@ -994,9 +994,8 @@ def _check_public_to_internal_dependency(
     (public-header visibility, or one mapped to an exported binary symbol) points
     at an *internal* declaration/type (private-header or source-file visibility;
     ``generated`` is a public generated header and excluded), the public surface
-    depends on something consumers cannot see —
-    a behavioral risk, elevated when the internal entity is among the revision's
-    changed files (``cfg.changed_paths``).
+    depends on something consumers cannot see — a behavioral risk, elevated
+    when the internal entity is among the revision's changed files (``cfg.changed_paths``).
 
     The dependency edges only exist after an S4/S5 semantic pass. With a
     structural-only graph (or no graph at all) the check skips with a soft
@@ -1015,7 +1014,8 @@ def _check_public_to_internal_dependency(
             "no L5 source graph on the snapshot (run --depth source)",
             providers,
         )
-    assert isinstance(graph, SourceGraphSummary)  # narrow SurfaceGraphLike
+    # Type-only narrow (SurfaceGraphLike is a structural Protocol, model/graph_facts.py).
+    graph = cast("SourceGraphSummary", graph)
     if not any(e.kind in _DEPENDENCY_EDGE_KINDS for e in graph.edges):
         return _CheckOutput(
             [],

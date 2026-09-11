@@ -299,6 +299,33 @@ def test_side_source_graph_prefers_the_richer_build_source_graph() -> None:
     assert _side_source_graph(snap, snap.build_source) is richer
 
 
+def test_side_source_graph_honors_a_depth_projected_l5_exclusion() -> None:
+    """Second review-round regression: ``policy/depth_projection.py`` clears
+    ``build_source.source_graph`` to ``None`` for a ``--depth build``
+    comparison while stamping an explicit L5 "not collected" coverage row
+    and *retaining* ``surface_graph`` untouched (an L2 fact). The fallback
+    must not resurrect L5-labeled findings from that retained graph -- a
+    pack whose manifest already recorded an L5 coverage row (regardless of
+    status) is never treated as "never collected"."""
+    from abicheck.buildsource.evidence_report import _side_source_graph
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+
+    weaker = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=weaker,
+    )
+    snap.build_source.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
+    ]
+
+    assert _side_source_graph(snap, snap.build_source) is None
+
+
 def test_evidence_report_graph_diff_unchanged_by_migration() -> None:
     from abicheck.buildsource.evidence_report import diff_embedded_build_source
 
@@ -411,13 +438,11 @@ def test_depth_label_for_prefers_the_richer_build_source_graph() -> None:
     assert depth_label_for(snap, snap.build_source) == "source"
 
 
-def test_depth_label_for_falls_back_to_surface_graph_when_build_source_graph_absent() -> (
-    None
-):
-    """A depth-projected snapshot (``policy/depth_projection.py``) can clear
-    ``build_source.source_graph`` while retaining ``surface_graph`` (an L2
-    fact, cleared at a lower depth floor) -- the fallback this migration
-    exists for still applies in that direction."""
+def test_depth_label_for_falls_back_to_surface_graph_when_never_collected() -> None:
+    """A pack that simply never recorded any L5 coverage at all (e.g. a bare
+    typed-API-constructed snapshot) -- as opposed to one a depth projection
+    deliberately excluded L5 from, see the test below -- still falls back to
+    ``surface_graph``."""
     from abicheck.evidence_depth import depth_label_for
 
     graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
@@ -429,6 +454,31 @@ def test_depth_label_for_falls_back_to_surface_graph_when_build_source_graph_abs
     )
 
     assert depth_label_for(snap, snap.build_source) == "source"
+
+
+def test_depth_label_for_honors_a_depth_projected_l5_exclusion() -> None:
+    """Second review-round regression: a ``--depth build`` projection clears
+    ``build_source.source_graph`` while stamping an explicit L5 "not
+    collected" coverage row and retaining ``surface_graph`` (an L2 fact) --
+    the fallback must not then report ``"source"`` depth for a comparison
+    whose own report says L5 was excluded."""
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.evidence_depth import depth_label_for
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=graph,
+    )
+    snap.build_source.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
+    ]
+
+    assert depth_label_for(snap, snap.build_source) != "source"
 
 
 # --------------------------------------------------------------------------- #
