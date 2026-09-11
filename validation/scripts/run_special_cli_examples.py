@@ -7,7 +7,8 @@ The GCC/Clang lanes intentionally own only compilable single-library pairs and
 the remaining committed fixture shapes through ``python -m abicheck``:
 
 * BTF, reconcile, environment, and Linux kABI comparisons;
-* G20 single-release ``scan`` (no ``--against``) audit cross-checks;
+* G20 single-release ``compare --no-baseline`` audit cross-checks (ADR-068
+  D2; the retired ``scan``'s no-``--against`` mode);
 * L3/L4/L5 evidence packs attached to ``compare``;
 * a CPython-extension comparison with sibling ``.pyi`` stubs.
 
@@ -78,7 +79,7 @@ COMPARE_CASES: dict[str, CompareSpec] = {
     ),
 }
 
-SCAN_CASES = {
+AUDIT_CASES = {
     "case143_audit_accidental_export",
     "case144_audit_private_header_leak",
     "case145_audit_unversioned_export",
@@ -136,7 +137,7 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"
-CASE_IDS = set(COMPARE_CASES) | SCAN_CASES | set(EVIDENCE_CASES) | {PYTHON_CASE}
+CASE_IDS = set(COMPARE_CASES) | AUDIT_CASES | set(EVIDENCE_CASES) | {PYTHON_CASE}
 
 
 def _ground_truth() -> dict[str, dict[str, Any]]:
@@ -311,13 +312,42 @@ def _run_compare_case(
     )
 
 
-def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[str, Any]:
+def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[str, Any]:
+    """Single-release audit, no baseline -- ``compare --no-baseline``'s
+    replacement for legacy ``scan``'s no-``--against`` mode (ADR-068 D2/D3,
+    Phase 6 hard removal).
+
+    The report shape differs from legacy ``scan`` in ways that change what
+    this validates, not just the invocation:
+
+    * No top-level verdict: ADR-068 D2 -- an audit never produces a
+      compatibility verdict, so ``verdict`` is always JSON ``null`` and the
+      process exit is always ``0`` by *default*, regardless of the finding
+      kinds' own severity classification (hygiene findings never gate on
+      their own without an explicit ``--severity-preset`` opt-in, ADR-028
+      D3/ADR-035 D1) -- unlike legacy ``scan``, whose exit code followed
+      ``expected`` (``API_BREAK``/``BREAKING`` -> 2/4). Verified against
+      ``tests/parity/test_no_baseline_audit_corpus_parity.py``'s own
+      ``test_no_baseline_exit_code_is_clean_without_a_contract``.
+    * Findings live in the flat ``findings`` list (``kind`` per row), not a
+      ``crosscheck.counts_by_check`` map.
+    * Legacy ``scan``'s per-check ``crosscheck.providers`` coverage rows
+      (ground truth's ``provider_assertions``) have no ``compare``-report
+      equivalent yet -- ADR-068 Phase 6 retired the whole-audit orchestrator
+      (``scan_engine.py``) that built them, and no replacement per-check
+      coverage projection has landed in ``report/no_baseline.py``. Not
+      checked here; the underlying provider/coverage facts are still
+      exercised directly by
+      ``abicheck/buildsource/cross_source_checks.py``'s own unit tests
+      (``tests/test_cross_source_checks.py``).
+    """
     snapshot = example_catalog.case_dir(case_id) / "snapshot.abi.json"
     command = [
         sys.executable,
         "-m",
         "abicheck",
-        "scan",
+        "compare",
+        "--no-baseline",
         str(snapshot),
         "--format",
         "json",
@@ -327,33 +357,25 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
     if execution["message"]:
         errors.append(str(execution["message"]))
     payload = execution["payload"] or {}
-    expected = str(entry.get("expected"))
-    expected_rc = _expected_returncode(expected)
     got = payload.get("verdict")
-    crosscheck = payload.get("crosscheck") or {}
-    got_kinds = set((crosscheck.get("counts_by_check") or {}).keys())
+    got_kinds = {
+        str(finding["kind"])
+        for finding in (payload.get("findings") or [])
+        if isinstance(finding, dict) and finding.get("kind")
+    }
     expected_kinds = set(entry.get("expected_kinds") or [])
-    if execution["returncode"] != expected_rc:
+    if execution["returncode"] != 0:
         errors.append(
-            f"exit code {execution['returncode']}, expected {expected_rc} for {expected}"
+            f"exit code {execution['returncode']}, expected 0 (audit-only, no --severity-preset)"
         )
-    if payload.get("exit_code") != expected_rc:
-        errors.append(
-            f"JSON exit_code {payload.get('exit_code')!r}, expected {expected_rc}"
-        )
-    if got != expected:
-        errors.append(f"scan verdict {got!r}, expected {expected!r}")
+    if payload.get("exit_code") not in (0, None):
+        errors.append(f"JSON exit_code {payload.get('exit_code')!r}, expected 0")
+    if got is not None:
+        errors.append(f"audit verdict {got!r}, expected null (ADR-068 D2)")
     if got_kinds != expected_kinds:
         errors.append(
-            f"cross-check kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
+            f"finding kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
         )
-    providers = crosscheck.get("providers") or {}
-    for kind, provider_assertions in (entry.get("provider_assertions") or {}).items():
-        if providers.get(kind) != provider_assertions:
-            errors.append(
-                f"providers for {kind}: {providers.get(kind)!r}, "
-                f"expected {provider_assertions!r}"
-            )
     result = _result(
         case_id,
         command,
@@ -365,6 +387,7 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
         input_sha256={"snapshot.abi.json": _sha256(snapshot)},
     )
     result["expected_kinds"] = sorted(expected_kinds)
+    result["expected_returncode"] = 0
     return result
 
 
@@ -533,8 +556,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = _run_compare_case(
                     case_id, COMPARE_CASES[case_id], entry, args.timeout
                 )
-            elif case_id in SCAN_CASES:
-                result = _run_scan_case(case_id, entry, args.timeout)
+            elif case_id in AUDIT_CASES:
+                result = _run_audit_case(case_id, entry, args.timeout)
             elif case_id in EVIDENCE_CASES:
                 result = _run_evidence_case(
                     case_id,

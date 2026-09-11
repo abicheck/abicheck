@@ -29,9 +29,11 @@ directories, and translation units were in view.
 
 ## The dials
 
-`--include` / `-I` is the one profile dial that stays a per-run CLI flag; the
-rest are config-only (`.abicheck.yml`'s `compile:` block) — there is no
-per-run CLI spelling for them at all:
+`--include` / `-I` is the one *compile-context* dial that stays a per-run CLI
+flag; every other compile-context dial is config-only (`.abicheck.yml`'s
+`compile:` block) — there is no per-run CLI spelling for those at all.
+`--env-matrix` is not a compile-context dial (it selects which environments to
+compare, not how headers are parsed) and remains a per-run `compare` flag:
 
 | Dial | Use |
 |---|---|
