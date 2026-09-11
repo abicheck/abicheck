@@ -32,6 +32,19 @@ from __future__ import annotations
 from ..model.graph_identity import closure_location_free_identity
 from .entity_identity import CanonicalIdentity
 
+#: Which provider carried the *location* half of an
+#: :data:`OUTCOME_COORDINATES_ONLY` classification. ``declaring_file`` is a
+#: second, independent provider agreeing the declaring file did not change;
+#: ``qualified_name`` means the coordinate shift was read out of the
+#: qualified name itself and NO declaring-file evidence existed on either
+#: side -- the weaker of the two, and the one a reader should see stated
+#: rather than inferred (Codex review, PR #1228: a same-basename
+#: cross-directory move is indistinguishable from a pure coordinate shift
+#: on name evidence alone).
+COORDINATE_EVIDENCE_DECLARING_FILE = "declaring_file"
+COORDINATE_EVIDENCE_QUALIFIED_NAME = "qualified_name"
+
+
 #: Reconciliation outcomes (ADR-048 D2) — distinct from plain
 #: node-add/node-remove, so a consumer can tell "the same entity, under a
 #: new name/location" from "an unrelated add and an unrelated remove that
@@ -182,6 +195,49 @@ def _classify_outcome(
         and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
     return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
+
+
+def coordinate_evidence(
+    old_identity: CanonicalIdentity,
+    new_identity: CanonicalIdentity,
+    *,
+    old_declaring_file: str = "",
+    new_declaring_file: str = "",
+) -> str | None:
+    """Which provider carried the location half of this pair's
+    :data:`OUTCOME_COORDINATES_ONLY` classification, or ``None`` when the
+    pair is not classified that way.
+
+    Recorded rather than acted on. Declining to classify a pair as
+    coordinate-only for want of a declaring file makes the strictly
+    stronger :data:`OUTCOME_RECONCILED` claim instead (see
+    :func:`_classify_outcome`), so the honest narrowing is to state which
+    evidence the classification rests on and let a reader weigh it -- a
+    :data:`COORDINATE_EVIDENCE_QUALIFIED_NAME` pair cannot rule out a
+    same-basename cross-directory move, and says so in the emitted
+    finding's own description.
+    """
+    if (
+        _classify_outcome(
+            old_identity,
+            new_identity,
+            old_declaring_file=old_declaring_file,
+            new_declaring_file=new_declaring_file,
+        )
+        != OUTCOME_COORDINATES_ONLY
+    ):
+        return None
+    old_file = (
+        _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
+        or old_declaring_file
+    )
+    new_file = (
+        _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
+        or new_declaring_file
+    )
+    if old_file and new_file:
+        return COORDINATE_EVIDENCE_DECLARING_FILE
+    return COORDINATE_EVIDENCE_QUALIFIED_NAME
 
 
 #: Human-readable outcome descriptions, keyed by :data:`OUTCOME_RENAMED`

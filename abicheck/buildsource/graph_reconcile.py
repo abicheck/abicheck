@@ -111,12 +111,14 @@ from .entity_identity import (
 )
 from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabulary has always been importable from this module
     _OUTCOME_PROSE,
+    COORDINATE_EVIDENCE_QUALIFIED_NAME,
     OUTCOME_COORDINATES_ONLY,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
     _classify_outcome,
     _project_relative_path,
+    coordinate_evidence,
 )
 
 if TYPE_CHECKING:
@@ -145,9 +147,14 @@ class ReconciledPair:
     outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED | OUTCOME_COORDINATES_ONLY
     old_identity: CanonicalIdentity
     new_identity: CanonicalIdentity
+    #: For an OUTCOME_COORDINATES_ONLY pair, which provider carried the
+    #: location evidence (``declaring_file`` | ``qualified_name``); None for
+    #: every other outcome. See ``graph_reconcile_outcome.
+    #: coordinate_evidence`` for why this is recorded rather than gated on.
+    coordinate_evidence: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "old_node_id": self.old_node.id,
             "new_node_id": self.new_node.id,
             "old_label": self.old_node.label,
@@ -155,6 +162,9 @@ class ReconciledPair:
             "match_kind": self.match_kind,
             "outcome": self.outcome,
         }
+        if self.coordinate_evidence is not None:
+            d["coordinate_evidence"] = self.coordinate_evidence
+        return d
 
 
 @dataclass
@@ -384,11 +394,19 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
+        old_declaring = self.old_declaring_files.get(oid, "")
+        new_declaring = self.new_declaring_files.get(new_id, "")
         outcome = _classify_outcome(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],
-            old_declaring_file=self.old_declaring_files.get(oid, ""),
-            new_declaring_file=self.new_declaring_files.get(new_id, ""),
+            old_declaring_file=old_declaring,
+            new_declaring_file=new_declaring,
+        )
+        evidence = coordinate_evidence(
+            kind_pass.old_ident[oid],
+            kind_pass.new_ident[new_id],
+            old_declaring_file=old_declaring,
+            new_declaring_file=new_declaring,
         )
         self.result.reconciled.append(
             ReconciledPair(
@@ -398,6 +416,7 @@ class _Reconciler:
                 outcome,
                 kind_pass.old_ident[oid],
                 kind_pass.new_ident[new_id],
+                evidence,
             )
         )
         self.matched_old.add(oid)
@@ -735,6 +754,21 @@ def diff_graph_reconciliation_findings(
         old_label = pair.old_node.label or pair.old_node.id
         new_label = pair.new_node.label or pair.new_node.id
         prose = _OUTCOME_PROSE.get(pair.outcome, "identity-reconciled")
+        # State the weaker evidence rather than hiding it (Codex review, PR
+        # #1228): a coordinate-only pair with no declaring-file evidence on
+        # either side read its coordinate shift out of the qualified name,
+        # which cannot rule out a same-basename cross-directory move. The
+        # classification stays -- declining it makes OUTCOME_RECONCILED's
+        # strictly stronger "both name and location evidence changed" claim
+        # on the very same absent evidence -- but a reader sees what it
+        # rests on.
+        evidence_note = (
+            "; location evidence: the qualified name's own coordinates only "
+            "-- no declaring file was recorded on either side, so a move "
+            "that kept the same file basename would look identical to this"
+            if pair.coordinate_evidence == COORDINATE_EVIDENCE_QUALIFIED_NAME
+            else ""
+        )
         # Prefer the new side's declaring file (matches the rest of the L5
         # findings' [L5_SOURCE_GRAPH]-boundary convention in
         # source_graph_findings.py); fall back to the old side, then to the
@@ -754,7 +788,7 @@ def diff_graph_reconciliation_findings(
                 description=(
                     f"Graph evidence reconciles {old_label!r} (old) with "
                     f"{new_label!r} (new) as the same declaration, {prose} "
-                    f"(match evidence: {pair.match_kind}). This does not by "
+                    f"(match evidence: {pair.match_kind}{evidence_note}). This does not by "
                     "itself indicate a break — it explains what would "
                     "otherwise look like an unrelated add+remove pair in the "
                     "L5 graph diff; any artifact-level finding for either "

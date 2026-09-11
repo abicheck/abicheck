@@ -51,6 +51,10 @@ from abicheck.buildsource.graph_reconcile import (
     OUTCOME_RENAMED,
     reconcile_added_removed,
 )
+from abicheck.buildsource.graph_reconcile_outcome import (
+    COORDINATE_EVIDENCE_DECLARING_FILE,
+    COORDINATE_EVIDENCE_QUALIFIED_NAME,
+)
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.model.graph_identity import closure_location_free_identity
 
@@ -489,3 +493,110 @@ class TestClosureLocationFreeIdentityProperties:
     def test_no_op_on_text_with_neither_at_nor_colon(self) -> None:
         # Exercises the cheap fast-path guard directly.
         assert closure_location_free_identity("PlainName") == "PlainName"
+
+
+class TestCoordinateEvidenceIsStated:
+    """Codex review (PR #1228, P2): a coordinate-only pair with no
+    declaring-file evidence on either side read its coordinate shift out of
+    the qualified name alone, which cannot rule out a same-basename
+    cross-directory move. The classification stays -- declining it asserts
+    OUTCOME_RECONCILED's strictly stronger "both name and location evidence
+    changed" on that same absent evidence -- so the narrowing is to record
+    WHICH provider carried it and say so in the finding a reader sees.
+    """
+
+    def test_fileless_pair_records_qualified_name_evidence(self) -> None:
+        old_node = GraphNode(
+            id="type://old",
+            kind="record_type",
+            label="w<(lambda:g.h:172:22)>",
+            attrs={"qualified_name": "w<(lambda:g.h:172:22)>"},
+        )
+        new_node = GraphNode(
+            id="type://new",
+            kind="record_type",
+            label="w<(lambda:g.h:181:22)>",
+            attrs={"qualified_name": "w<(lambda:g.h:181:22)>"},
+        )
+        pair = _reconcile_one_pair(old_node, new_node)
+        assert pair.outcome == OUTCOME_COORDINATES_ONLY
+        assert pair.coordinate_evidence == COORDINATE_EVIDENCE_QUALIFIED_NAME
+        assert pair.to_dict()["coordinate_evidence"] == (
+            COORDINATE_EVIDENCE_QUALIFIED_NAME
+        )
+
+    def test_two_sided_file_evidence_records_the_stronger_provider(self) -> None:
+        attrs_old = {"qualified_name": "w<(lambda:g.h:172:22)>", "def_file": "g.h"}
+        attrs_new = {"qualified_name": "w<(lambda:g.h:181:22)>", "def_file": "g.h"}
+        pair = _reconcile_one_pair(
+            GraphNode(
+                id="type://old",
+                kind="record_type",
+                label="w<(lambda:g.h:172:22)>",
+                attrs=attrs_old,
+            ),
+            GraphNode(
+                id="type://new",
+                kind="record_type",
+                label="w<(lambda:g.h:181:22)>",
+                attrs=attrs_new,
+            ),
+        )
+        assert pair.outcome == OUTCOME_COORDINATES_ONLY
+        assert pair.coordinate_evidence == COORDINATE_EVIDENCE_DECLARING_FILE
+
+    def test_non_coordinate_outcomes_record_no_evidence(self) -> None:
+        """The field is about one outcome only: a rename or a move must not
+        acquire a coordinate-evidence label it says nothing about."""
+        pair = _reconcile_one_pair(
+            GraphNode(
+                id="type://old",
+                kind="record_type",
+                label="ns::Widget",
+                attrs={"qualified_name": "ns::Widget", "def_file": "a.h"},
+            ),
+            GraphNode(
+                id="type://new",
+                kind="record_type",
+                label="ns::WidgetV2",
+                attrs={"qualified_name": "ns::WidgetV2", "def_file": "a.h"},
+            ),
+        )
+        assert pair.outcome == OUTCOME_RENAMED
+        assert pair.coordinate_evidence is None
+        assert "coordinate_evidence" not in pair.to_dict()
+
+    def test_finding_description_discloses_the_weaker_evidence(self) -> None:
+        """The field has a real consumer: the emitted finding's own text.
+        A `qualified_name`-evidence pair must say a same-basename move
+        would be indistinguishable; a `declaring_file` pair must not."""
+        from abicheck.buildsource.graph_reconcile import (
+            GraphReconciliation,
+            diff_graph_reconciliation_findings,
+        )
+
+        def _finding(attrs_old, attrs_new):
+            old_node = GraphNode(
+                id="type://old", kind="record_type", label="w<a>", attrs=attrs_old
+            )
+            new_node = GraphNode(
+                id="type://new", kind="record_type", label="w<b>", attrs=attrs_new
+            )
+            pair = _reconcile_one_pair(old_node, new_node)
+            rec = GraphReconciliation(reconciled=[pair])
+            findings = diff_graph_reconciliation_findings(rec)
+            assert len(findings) == 1, findings
+            return findings[0]
+
+        fileless = _finding(
+            {"qualified_name": "w<(lambda:g.h:1:2)>"},
+            {"qualified_name": "w<(lambda:g.h:9:9)>"},
+        )
+        assert "no declaring file was recorded on either side" in fileless.description
+        assert "same file basename" in fileless.description
+
+        filed = _finding(
+            {"qualified_name": "w<(lambda:g.h:1:2)>", "def_file": "g.h"},
+            {"qualified_name": "w<(lambda:g.h:9:9)>", "def_file": "g.h"},
+        )
+        assert "no declaring file was recorded" not in filed.description

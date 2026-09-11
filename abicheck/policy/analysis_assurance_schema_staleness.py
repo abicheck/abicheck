@@ -461,6 +461,26 @@ def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     pairwise finding is possible. The converse is neither claimed nor
     needed: any inequality falls through to the ordinary degraded report,
     which is the safe direction.
+
+    **The one residual, and where it is reported instead** (Codex review,
+    PR #1228): an ``AbiSnapshot`` is a lossy capture, so equal content
+    proves the two sides' *recorded evidence* is equal, not that the two
+    underlying artifacts are. Two genuinely different binaries whose stale
+    snapshots decode equal (the stale schema failed to record the one field
+    that differs) therefore read ``"clean"`` here. That case is not
+    silent, and deliberately is not this field's job: it is exactly the
+    population ``confidence.note_if_same_binary_compared`` already fires
+    on, from the identical signal (equal canonical serialization), with the
+    stronger claim -- "this comparison cannot detect a change even if one
+    was intended -- verify the correct snapshot files were provided" -- on
+    ``DiffResult.coverage_warnings``, which no suppression rule can remove.
+    Reporting the same residual a second time as schema staleness would
+    label it as a *vintage* problem, which it is not: the comparison is
+    equally blind at any vintage once both sides decode to the same
+    evidence. ``tests/test_analysis_assurance_content_identity.py``'s
+    ``test_content_identical_compare_still_warns_it_can_detect_nothing``
+    pins the pairing, so the disclosure cannot quietly disappear and leave
+    this return claiming completeness alone.
     """
     return old == new
 

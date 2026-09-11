@@ -163,3 +163,34 @@ def test_two_distinct_stored_snapshots_still_taint_end_to_end(tmp_path: Path) ->
     assurance = payload["analysis_assurance"]
     assert assurance["schema_staleness_status"] == "degraded", assurance
     assert assurance["status"] != "complete", assurance
+
+
+def test_content_identical_compare_still_warns_it_can_detect_nothing(
+    tmp_path: Path,
+) -> None:
+    """The load-bearing pairing behind `_same_content`'s one residual
+    (Codex review, PR #1228): an `AbiSnapshot` is a lossy capture, so equal
+    content proves the recorded evidence is equal, not that the two
+    artifacts are. That residual is disclosed by
+    `confidence.note_if_same_binary_compared`, which fires from the very
+    same signal and makes the stronger claim. If that warning ever stops
+    firing, `schema_staleness_status`'s "clean" would be the run's only
+    word on a comparison that cannot detect anything — so this test pins
+    the two together rather than leaving the coupling implicit."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    d = json.loads((_FIXTURES / "v4.json").read_text())
+    d.update(schema_version=25, from_headers=True, ast_producer="clang")
+    path = tmp_path / "baseline.abi.json"
+    path.write_text(json.dumps(d))
+
+    result = CliRunner().invoke(
+        main, ["compare", str(path), str(path), "--format", "json"]
+    )
+    payload = json.loads(result.output)
+    assert payload["analysis_assurance"]["status"] == "complete"
+    warnings_out = payload.get("coverage_warnings", [])
+    assert any("byte-identical" in w for w in warnings_out), warnings_out
+    assert any("cannot detect a change" in w for w in warnings_out), warnings_out

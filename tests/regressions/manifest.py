@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
@@ -1301,61 +1302,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    BugClass(
-        id="guard.proxy_predicate_overshoots_justification",
-        invariant=(
-            "A guard's predicate must test the property its own "
-            "justification names, and must be checked against the "
-            "population it targets. Two failures follow when it does not: "
-            "a narrowing guard can eliminate the entire population it was "
-            "meant to discriminate within (the outcome becomes reachable "
-            "from no real input, and nothing fails anywhere), and the "
-            "fallback it hands those inputs to can assert a STRICTLY "
-            "STRONGER claim than the one the guard declined — declining a "
-            "weak claim for lack of evidence, then making a strong one on "
-            "the same absent evidence. An early return justified by a "
-            "semantic property (content identity) but implemented via a "
-            "proxy (object identity) is the same defect from the other "
-            "side: the claim the return exists to reject is made anyway, "
-            "on the shape users actually hit."
-        ),
-        # #1228: `graph_reconcile._classify_outcome`'s declaring-file guard
-        # made OUTCOME_COORDINATES_ONLY unreachable (0 occurrences
-        # repo-wide) and sent every eligible pair to OUTCOME_RECONCILED's
-        # "both name and location evidence changed" — on absent location
-        # evidence. Same PR: `schema_staleness_status`'s `old is new`
-        # self-diff return, whose own argument ("comparing a value against
-        # itself can never produce a false pairwise finding") never
-        # depended on object identity, reported one stored snapshot loaded
-        # twice as `degraded` and flipped `assurance.status` to `partial`.
-        fixed_by=(1228,),
-        seed_tests=(
-            "tests/test_graph_reconcile_coordinate_outcome.py",
-            "tests/test_analysis_assurance_content_identity.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "evidence_presence": ("both_sides", "one_side", "absent"),
-            "claim_strength": ("declined", "weak_claim", "strong_claim"),
-            "identity_test": ("object", "content", "differing"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Reachability is asserted per-classifier in the seed "
-                    "tests, not swept mechanically: another outcome "
-                    "elsewhere in the codebase that a later guard made "
-                    "unproducible would still be found by hand. The "
-                    "residual on the first instance is narrower: a pair "
-                    "with no positive evidence on EITHER axis still falls "
-                    "through to OUTCOME_RECONCILED's overstated prose "
-                    "(ADR-048's accepted case197 'no clean split'), which "
-                    "a fifth outcome, not this fix, would close."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md",
-            ),
-        ),
-    ),
 )
 
 
@@ -1364,7 +1310,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: change_registry.py` already uses -- adding a class to a sibling needs no
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
-    _ANALYSIS_BUG_CLASSES + REPORT_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
+    _ANALYSIS_BUG_CLASSES
+    + GUARD_BUG_CLASSES
+    + REPORT_BUG_CLASSES
+    + TOOL_SURFACE_BUG_CLASSES
 )
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}
