@@ -7893,7 +7893,7 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
 
-### ADR-061 gap F: eleven nested `buildsource`/`compat`/`impact` modules still carry no disposition
+### ADR-061 gap F: twelve nested `buildsource`/`compat`/`impact` modules still carry no disposition
 
 [ADR-061](adr/061-responsibility-package-architecture.md)'s gap F requires
 every unclassified first-party module under `abicheck/` to carry one of
@@ -7908,12 +7908,12 @@ this gap (enumerating every `.py` file under `abicheck/` not already
 covered by a canonical layer directory, a layer's `legacy_paths`, or an
 existing `debt.yaml` entry) found 44 such nested modules, all under
 `abicheck/buildsource/`, `abicheck/compat/`, `abicheck/impact/`, and
-`abicheck/schemas/`. 33 of them were classified by adding them to the
+`abicheck/schemas/`. 32 of them were classified by adding them to the
 appropriate layer's `legacy_paths` in `architecture/modules.yaml` (the
 "migrate through a named responsibility slice" disposition — verified,
 not merely asserted, by a full `scripts/check_architecture.py` run showing
 no new `dependency-direction`/`dependency-cycle`/`unclassified-import`
-findings after the change). The remaining eleven could not be classified
+findings after the change). The remaining twelve could not be classified
 the same way without breaking that verification, and are recorded here
 instead, following the same "trial classification measured N new
 violations, blocked" pattern this ADR's other gaps already use for
@@ -7931,11 +7931,11 @@ violations, blocked" pattern this ADR's other gaps already use for
   before the target classification is safe — not attempted here, per this
   ADR's "not the same-PR fix" bar for migrations that already have
   caller-side test/behavior surface to preserve.
-- *Self-dependency* (`build_evidence.py`, the one exception below): the
-  module's *own* outgoing import, not a caller, is what blocks its target
-  classification. The caller-side remedy above (wrap or decouple the
-  caller) does not apply here — the fix is to move or decouple the
-  blocking dependency inside the module itself.
+- *Self-dependency* (`build_evidence.py` and `graph_impact.py`, the two
+  exceptions below): the module's *own* outgoing import, not a caller, is
+  what blocks its target classification. The caller-side remedy above
+  (wrap or decouple the caller) does not apply here — the fix is to move
+  or decouple the blocking dependency inside the module itself.
 
 - `abicheck/buildsource/build_evidence.py` (target: `model` — its own
   docstring is literally "Build-system-neutral build evidence model", and
@@ -7944,6 +7944,19 @@ violations, blocked" pattern this ADR's other gaps already use for
   imports `.comdat_groups` (`extract`-classified), which `model`'s empty
   `may_import` forbids. Unlike every other entry below, no caller needs to
   change — `comdat_groups` (or the piece of it this module actually uses)
+  would need to move or be decoupled from this module directly.
+- `abicheck/buildsource/graph_impact.py` (target: `compare` — its own
+  docstring: "Structured graph impact/proof-path data attached to
+  findings"; it deliberately *enriches an existing `Change` finding*
+  rather than extracting a fact, the same shape as its
+  `compare`-classified `source_graph_findings.py`/`graph_reconcile.py`
+  siblings — not `extract`, which its previous classification in this
+  change wrongly assigned it, laundering a real boundary issue instead of
+  recording it) — a *self-dependency* block, verified empirically by trial
+  classification: it itself imports `.call_graph` (`extract`-classified),
+  producing four new `compare -> extract` findings the moment it is
+  classified `compare`, since `compare`'s `may_import` is `model` only.
+  `call_graph` (or the specific pieces this module actually uses from it)
   would need to move or be decoupled from this module directly.
 - `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
   sibling adapters) — blocked because `abicheck/cli_project.py`
