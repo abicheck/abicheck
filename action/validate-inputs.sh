@@ -180,6 +180,10 @@ case "$MODE" in
       if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support follow-deps -- compare --no-baseline's DT_NEEDED dependency walk is not wired to this path yet (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports follow-deps, or drop follow-deps for this audit-only run."
       fi
+      if [[ -n "${INPUT_USED_BY:-}" || -n "${INPUT_USED_BY_MANIFEST:-}" \
+            || -n "${INPUT_REQUIRED_SYMBOL:-}" || -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support used-by/used-by-manifest/required-symbol/required-symbols -- these scope a two-sided comparison to what a real consumer uses, and compare --no-baseline has no old/new pair to scope (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports consumer scoping, or drop these inputs for this audit-only run."
+      fi
     fi
     # compare's full --format choice set is json|markdown|sarif|html|junit|
     # review (`abicheck compare --help-all`); a directory/package operand

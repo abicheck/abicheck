@@ -1089,7 +1089,11 @@ class TestModeScopedInputWarnings:
 class TestScopedComparisonInputs:
     """ADR-043 --used-by/--required-symbol(s) contracts (G30 P1.3: resolves
     the ADR-047 S22/S23 gap -- these were previously not forwarded by the
-    root Action at all)."""
+    root Action at all). Exercised on a genuine two-sided request
+    (old-library set) -- consumer/entrypoint scoping needs two versions to
+    compare (ADR-043); see TestScopedComparisonInputsRejectedOnAuditOnly
+    below for the audit-only (no-baseline) shape, which rejects all four of
+    these inputs outright."""
 
     def test_used_by_and_required_symbol_together_is_hard_error(self) -> None:
         # The CLI itself rejects this combination, but only after Python
@@ -1099,6 +1103,7 @@ class TestScopedComparisonInputs:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_USED_BY": "app1",
                 "INPUT_REQUIRED_SYMBOL": "abi_do_thing",
             }
@@ -1110,6 +1115,7 @@ class TestScopedComparisonInputs:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_USED_BY": "app1",
                 "INPUT_REQUIRED_SYMBOLS": "symbols.txt",
             }
@@ -1118,12 +1124,59 @@ class TestScopedComparisonInputs:
         assert "mutually exclusive" in result.stdout
 
     def test_used_by_alone_passes(self) -> None:
-        result = _run_validate({"INPUT_MODE": "compare", "INPUT_USED_BY": "app1"})
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_USED_BY": "app1",
+            }
+        )
         assert result.returncode == 0, result.stdout + result.stderr
 
     def test_required_symbol_alone_passes(self) -> None:
         result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_REQUIRED_SYMBOL": "abi_do_thing"}
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_REQUIRED_SYMBOL": "abi_do_thing",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+class TestScopedComparisonInputsRejectedOnAuditOnly:
+    """The audit-only shape (old-library/abi-baseline both omitted) rejects
+    used-by/used-by-manifest/required-symbol/required-symbols outright --
+    consumer/entrypoint scoping needs two versions to compare, and
+    compare --no-baseline has no old/new pair (abicheck/frontends/cli/
+    commands/no_baseline_rulings.py). Codex review, PR #1223, round 5:
+    action/run.sh forwarded these four unconditionally, reaching the CLI's
+    own late rejection only after Python setup and toolchain install."""
+
+    @pytest.mark.parametrize(
+        "env_name,value",
+        [
+            ("INPUT_USED_BY", "app1"),
+            ("INPUT_USED_BY_MANIFEST", "manifest.json"),
+            ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
+            ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
+        ],
+    )
+    def test_each_input_alone_is_rejected_without_a_baseline(
+        self, env_name: str, value: str
+    ) -> None:
+        result = _run_validate({"INPUT_MODE": "compare", env_name: value})
+        assert result.returncode == 1
+        assert "used-by" in result.stdout
+        assert "required-symbol" in result.stdout
+
+    def test_passes_once_old_library_is_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_USED_BY": "app1",
+            }
         )
         assert result.returncode == 0, result.stdout + result.stderr
 

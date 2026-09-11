@@ -33,6 +33,10 @@ ADR-068's Action-input-lifecycle amendment retired ``mode: scan`` outright:
   candidate-side finding fails the step), so this Action forwards it
   unconditionally for every single-pair shape, two-sided and audit-only
   alike.
+- ``used-by``/``used-by-manifest``/``required-symbol``/``required-symbols``
+  (ADR-043 consumer/entrypoint scoping) work for a two-sided compare, but
+  ``compare --no-baseline`` hard-rejects all four -- scoping a comparison
+  to a real consumer needs two versions to compare, and an audit has none.
 
 This module locks down the fix: the audit-only shape (old-library and
 abi-baseline both omitted) setting since/changed-path/budget is rejected
@@ -177,6 +181,36 @@ class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
         )
         assert outputs["_returncode"] == 1, outputs
         assert "does not support follow-deps" in outputs["_stdout"], outputs
+
+    @pytest.mark.parametrize(
+        "env_name,value",
+        [
+            ("INPUT_USED_BY", "app1"),
+            ("INPUT_USED_BY_MANIFEST", "manifest.json"),
+            ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
+            ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
+        ],
+    )
+    def test_consumer_scoping_inputs_are_rejected(
+        self, tmp_path: Path, env_name: str, value: str
+    ) -> None:
+        # Codex review, PR #1223, round 5: used-by/used-by-manifest/
+        # required-symbol/required-symbols were still reaching the CLI on
+        # the audit-only shape even though `compare --no-baseline` rejects
+        # all four outright (consumer/entrypoint scoping needs two versions
+        # to compare, abicheck/frontends/cli/commands/no_baseline_
+        # rulings.py) -- caught here, upfront, same as since/changed-path/
+        # budget/follow-deps above.
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
+                env_name: value,
+            },
+        )
+        assert outputs["_returncode"] == 1, outputs
+        assert "used-by" in outputs["_stdout"], outputs
+        assert "required-symbol" in outputs["_stdout"], outputs
 
 
 class TestAuditOnlyCompareUnaffectedWhenTheseInputsAreUnset:
