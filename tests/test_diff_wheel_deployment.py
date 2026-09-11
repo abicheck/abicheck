@@ -983,15 +983,16 @@ class TestWheelClosureDependencyViolationUnit:
 
 
 class TestWheelRpathAndClosureCliEndToEnd:
-    def test_absolute_rpath_surfaces_as_breaking(self) -> None:
-        # WHEEL_RPATH_NOT_PORTABLE's catalog default verdict is RISK, but
-        # check_wheel_rpath_not_portable only ever fires on an actual
-        # violation (it returns [] when every RPATH/RUNPATH entry is
-        # $ORIGIN-relative), so
-        # diff_versioning.promote_baseline_violation_findings
-        # unconditionally promotes any occurrence to BREAKING (Codex
-        # review, P1) -- the search path resolves nothing on a clean
-        # install.
+    def test_absolute_rpath_stays_at_risk(self) -> None:
+        # WHEEL_RPATH_NOT_PORTABLE's catalog default verdict is RISK and
+        # stays there (Codex review, P1 follow-up): check_wheel_rpath_
+        # not_portable's own docstring says a non-$ORIGIN-relative entry is
+        # "almost always" a build artifact, not proof the dependency it
+        # names is actually unresolvable -- a separate closure/reachability
+        # check is what proves that. diff_versioning.
+        # promote_baseline_violation_findings deliberately does NOT promote
+        # this kind, unlike its two genuinely-unambiguous
+        # declared-floor-violation siblings.
         old = _elf_snap(_elf(rpath="/usr/local/lib"))
         new = _elf_snap(_elf(rpath="/usr/local/lib"))
         result = compare(
@@ -1002,7 +1003,7 @@ class TestWheelRpathAndClosureCliEndToEnd:
             ),
         )
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(result.changes)
-        assert result.verdict is Verdict.BREAKING
+        assert result.verdict is not Verdict.BREAKING
 
     def test_unresolvable_vendored_dependency_surfaces_as_breaking(self) -> None:
         old = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))

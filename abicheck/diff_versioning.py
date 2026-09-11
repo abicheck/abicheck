@@ -297,27 +297,34 @@ def apply_runtime_floor_contract(
     return changes
 
 
-#: Change kinds produced by the *standalone* declared-runtime-floor /
-#: wheel-packaging checks (:func:`check_platform_baseline_floor`,
-#: ``diff_wheel_deployment.check_macos_deployment_target_floor``,
-#: ``diff_wheel_deployment.check_wheel_rpath_not_portable``) whose catalog
-#: default verdict is RISK even though each of these three checks -- unlike
-#: :func:`apply_runtime_floor_contract`'s delta reclassification, which can
-#: land on either COMPATIBLE or BREAKING depending on direction -- only ever
-#: emits a finding when the candidate's own requirement already *exceeds*
-#: the declared floor (each returns ``[]``/``None`` in every within-floor
-#: case; see each function's own docstring). A finding of one of these kinds
-#: existing at all is therefore unconditionally a floor violation: a
-#: declared deployment target cannot load this artifact. The other three
-#: standalone checks (``check_musllinux_glibc_dependency``,
+#: Change kinds produced by the *standalone* declared-runtime-floor checks
+#: (:func:`check_platform_baseline_floor`,
+#: ``diff_wheel_deployment.check_macos_deployment_target_floor``) whose
+#: catalog default verdict is RISK even though each of these two checks --
+#: unlike :func:`apply_runtime_floor_contract`'s delta reclassification,
+#: which can land on either COMPATIBLE or BREAKING depending on direction --
+#: only ever emits a finding when the candidate's own requirement already
+#: *exceeds* the declared floor (each returns ``[]``/``None`` in every
+#: within-floor case; see each function's own docstring). A finding of one
+#: of these kinds existing at all is therefore unconditionally a floor
+#: violation: a declared deployment target cannot load this artifact.
+#:
+#: ``diff_wheel_deployment.check_wheel_rpath_not_portable`` (which also
+#: only ever fires past its own gate) is deliberately *not* included here:
+#: its own docstring says a non-``$ORIGIN``-relative RPATH entry is "almost
+#: always" a build-machine artifact, not proof the dependency it names is
+#: actually unresolvable -- a *separate* closure/reachability check would be
+#: needed to prove that. Promoting this heuristic finding unconditionally to
+#: BREAKING would manufacture a hard break from what is genuinely only
+#: portability-RISK evidence (Codex review). The other three standalone
+#: checks (``check_musllinux_glibc_dependency``,
 #: ``check_wheel_tag_architecture_mismatch``,
 #: ``check_wheel_closure_dependency_violation``) already default to
-#: BREAKING in the catalog and need no promotion.
+#: BREAKING in the catalog and need no promotion either.
 _BASELINE_VIOLATION_ONLY_KINDS = frozenset(
     {
         ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
         ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
-        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
     }
 )
 
@@ -763,9 +770,14 @@ def detect_version_script_missing(
 #: :data:`_BASELINE_VIOLATION_ONLY_KINDS` once
 #: :func:`promote_baseline_violation_findings` gives one of them
 #: ``effective_verdict=BREAKING``: "the binary requires a newer GLIBC/macOS
-#: SDK than the declared deployment floor promises" or "RPATH isn't
-#: $ORIGIN-relative" are fixed by rebuilding against the older sysroot or
-#: repairing the RPATH, never by a SONAME bump.
+#: SDK than the declared deployment floor promises" is fixed by rebuilding
+#: against the older sysroot, never by a SONAME bump.
+#: ``WHEEL_RPATH_NOT_PORTABLE`` is deliberately *not* included here: it is
+#: no longer promoted to BREAKING at all (see
+#: :data:`_BASELINE_VIOLATION_ONLY_KINDS`'s own docstring), and at its
+#: catalog-default RISK severity it can never satisfy
+#: :func:`check_soname_bump_policy`'s own breaking-kind check anyway, so
+#: including it here would be inert.
 _SONAME_BUMP_CANNOT_FIX_KINDS = frozenset(
     {
         ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
@@ -773,7 +785,6 @@ _SONAME_BUMP_CANNOT_FIX_KINDS = frozenset(
         ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
         ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
         ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
-        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
     }
 )
 

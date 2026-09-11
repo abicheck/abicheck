@@ -596,21 +596,22 @@ class TestPlatformBaselineFloorRaised:
 
 
 class TestPromoteBaselineViolationFindings:
-    """``promote_baseline_violation_findings`` (Codex review, P1): the three
+    """``promote_baseline_violation_findings`` (Codex review, P1): the two
     standalone checks whose catalog default verdict is RISK
-    (``PLATFORM_BASELINE_FLOOR_RAISED``/``MACOS_DEPLOYMENT_TARGET_RAISED``/
-    ``WHEEL_RPATH_NOT_PORTABLE``) each only ever emit a finding when the
-    candidate's own requirement already exceeds the declared floor -- so any
-    occurrence of one of these three kinds must be unconditionally promoted
-    to BREAKING, regardless of which check produced it, while every other
-    kind (including the three standalone checks that already default to
-    BREAKING) is left untouched. States the invariant generally, over every
-    member of the promoted set, rather than pinning one example kind."""
+    (``PLATFORM_BASELINE_FLOOR_RAISED``/``MACOS_DEPLOYMENT_TARGET_RAISED``)
+    each only ever emit a finding when the candidate's own requirement
+    already exceeds the declared floor -- so any occurrence of one of these
+    two kinds must be unconditionally promoted to BREAKING, regardless of
+    which check produced it, while every other kind (including the three
+    standalone checks that already default to BREAKING, and
+    ``WHEEL_RPATH_NOT_PORTABLE``, whose own heuristic nature keeps it at
+    RISK -- see the class below) is left untouched. States the invariant
+    generally, over every member of the promoted set, rather than pinning
+    one example kind."""
 
     _PROMOTED_KINDS = (
         ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
         ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
-        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
     )
 
     #: Sibling standalone-check kinds that already default to BREAKING in
@@ -621,6 +622,16 @@ class TestPromoteBaselineViolationFindings:
         ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
         ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
         ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+        # WHEEL_RPATH_NOT_PORTABLE deliberately stays at its catalog-default
+        # RISK severity (see TestWheelRpathNotPortableStaysAtRisk below): a
+        # non-$ORIGIN-relative RPATH entry is, per
+        # check_wheel_rpath_not_portable's own docstring, "almost always" a
+        # build artifact, not proof the dependency it names is actually
+        # unresolvable -- a separate closure/reachability check would be
+        # needed to prove that. Unconditionally promoting this heuristic
+        # finding to BREAKING would manufacture a hard break from what is
+        # genuinely only portability-RISK evidence.
+        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
     )
 
     def _change(self, kind: ChangeKind) -> Change:
@@ -679,10 +690,14 @@ class TestPromoteBaselineViolationFindings:
     ) -> None:
         """The generalized sibling of ``TestRunNoBaselineCompareEnvMatrix``
         in ``tests/test_no_baseline_compare.py`` (which pins one example,
-        GLIBC/PLATFORM_BASELINE_FLOOR_RAISED): for every one of the three
+        GLIBC/PLATFORM_BASELINE_FLOOR_RAISED): for every one of the two
         promoted kinds, a two-sided ``compare()`` of a floor-violating
         candidate against itself and a ``--no-baseline`` audit of the
-        identical candidate must reach the identical BREAKING verdict."""
+        identical candidate must reach the identical BREAKING verdict.
+        ``WHEEL_RPATH_NOT_PORTABLE`` is deliberately not a case here any
+        more -- it is no longer promoted at all, see
+        ``TestWheelRpathNotPortableStaysAtRisk`` below for its own
+        two-sided/no-baseline parity coverage at RISK severity."""
         from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
 
         cases = {
@@ -696,10 +711,6 @@ class TestPromoteBaselineViolationFindings:
             ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED: (
                 None,
                 {"MACOS_DEPLOYMENT_TARGET": "10.14"},
-            ),
-            ChangeKind.WHEEL_RPATH_NOT_PORTABLE: (
-                _elf(rpath="/usr/local/lib"),
-                {"WHEEL_CONTEXT": "1"},
             ),
         }
         for kind, (elf, floors) in cases.items():
@@ -716,6 +727,116 @@ class TestPromoteBaselineViolationFindings:
             assert kind in {c.kind for c in no_baseline.findings}, kind
             assert two_sided.verdict is Verdict.BREAKING, kind
             assert no_baseline.diff.verdict == two_sided.verdict, kind
+
+
+class TestWheelRpathNotPortableStaysAtRisk:
+    """Codex review (P1): unlike ``PLATFORM_BASELINE_FLOOR_RAISED``/
+    ``MACOS_DEPLOYMENT_TARGET_RAISED``, ``WHEEL_RPATH_NOT_PORTABLE`` is not
+    promoted to BREAKING by ``promote_baseline_violation_findings`` and must
+    keep its catalog-default RISK (``COMPATIBLE_WITH_RISK``) verdict on both
+    the two-sided ``compare()`` path and the ``--no-baseline`` audit path --
+    ``check_wheel_rpath_not_portable``'s own docstring states this is a
+    heuristic ("almost always" a build artifact), not proof the named
+    dependency is actually unresolvable, so unconditionally hardening it to
+    BREAKING would manufacture a break from portability-RISK evidence
+    alone."""
+
+    def test_not_in_promoted_kinds(self) -> None:
+        assert (
+            ChangeKind.WHEEL_RPATH_NOT_PORTABLE
+            not in TestPromoteBaselineViolationFindings._PROMOTED_KINDS
+        )
+
+    def test_promote_baseline_violation_findings_leaves_it_alone(self) -> None:
+        change = make_change(
+            ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
+            symbol="<platform-baseline>",
+            name="libfoo.so",
+        )
+        promote_baseline_violation_findings([change])
+        assert change.effective_verdict is None
+        assert change.modulation_rule is None
+
+    def test_two_sided_and_no_baseline_paths_both_stay_at_risk(self) -> None:
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        elf = _elf(rpath="/usr/local/lib")
+        matrix = EnvironmentMatrix(runtime_floors={"WHEEL_CONTEXT": "1"})
+        candidate = _snap(elf)
+        two_sided = compare(candidate, candidate, env_matrix=matrix)
+        no_baseline = run_no_baseline_compare(candidate, env_matrix=matrix)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(two_sided.changes)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in {
+            c.kind for c in no_baseline.findings
+        }
+        assert two_sided.verdict is not Verdict.BREAKING
+        assert no_baseline.diff.verdict == two_sided.verdict
+
+
+class TestPromotionRunsBeforeSuppressionRecording:
+    """Codex review (P2): ``promote_baseline_violation_findings`` must run
+    over each check's full ``check_changes`` list *before*
+    ``_filter_suppressed_changes`` disposes of a match into ``suppressed``
+    -- not only over the already-filtered ``visible`` subset. Otherwise a
+    suppression rule that happens to match a genuine
+    ``PLATFORM_BASELINE_FLOOR_RAISED``/``MACOS_DEPLOYMENT_TARGET_RAISED``
+    floor violation records that occurrence at the catalog's unpromoted
+    RISK default rather than the correctly-promoted BREAKING verdict a
+    *visible* (unsuppressed) occurrence of the identical violation gets --
+    a direct violation of root ``AGENTS.md``'s "Record before disposing"
+    principle: a suppressed finding's own record must still show what it
+    actually was, with disposition (rule + reason) recorded separately, not
+    manifested as a silently different severity."""
+
+    def test_suppressed_floor_violation_still_records_breaking(self) -> None:
+        from abicheck.suppression import Suppression, SuppressionList
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        candidate = _snap(elf)
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    symbol="<platform-baseline>",
+                    change_kind="platform_baseline_floor_raised",
+                    reason="acknowledged, tracked separately",
+                )
+            ]
+        )
+
+        # Unsuppressed control: the same violation, no suppression rule.
+        unsuppressed = compare(candidate, candidate, env_matrix=matrix)
+        control = [
+            c
+            for c in unsuppressed.changes
+            if c.kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        ]
+        assert len(control) == 1
+        assert control[0].effective_verdict is Verdict.BREAKING
+
+        # Suppressed case: the identical violation, now matched by the rule
+        # above. It must be recorded in `suppressed_changes` at the SAME
+        # promoted BREAKING verdict as the control -- not the unpromoted
+        # catalog-default RISK.
+        result = compare(
+            candidate, candidate, suppression=suppression, env_matrix=matrix
+        )
+        assert (
+            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+            not in _kinds(result.changes)
+        )
+        suppressed = [
+            c
+            for c in result.suppressed_changes
+            if c.kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        ]
+        assert len(suppressed) == 1
+        assert suppressed[0].effective_verdict is Verdict.BREAKING
+        assert suppressed[0].modulation_rule == "baseline_violation_always_breaking"
+        assert suppressed[0].suppression_rule is not None
 
 
 class TestMusllinuxGlibcDependency:
