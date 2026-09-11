@@ -110,6 +110,25 @@ _warn() {
   printf '%s\n' "::warning::$(_sanitize_annotation "$1")"
 }
 
+# against, estimate, audit: retired outright -- each existed only for the
+# now-removed mode: scan, so none of them can ever do anything on any mode
+# any more. Failing rather than warning names the replacement, matching the
+# "hard removal, no deprecation window" treatment new-library-set/crosscheck/
+# risk-rules get below (ADR-068 D8). Checked here, before the mode-specific
+# case block below, so a workflow that still sets a retired input alongside
+# an audit-only-shape-specific input (since/budget/...) is told about the
+# retired input first -- matching action/run.sh's own ordering (CodeRabbit
+# review, PR #1223).
+if [[ -n "${INPUT_AGAINST:-}" ]]; then
+  _fail "against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
+fi
+if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  _fail "estimate is no longer supported (it applied only to the now-removed mode: scan, as a dry-run alias). Set dry-run: 'true' instead, which applies to every mode."
+fi
+if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
+  _fail "audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
+fi
+
 case "$MODE" in
   scan)
     # ADR-068's Action-input-lifecycle amendment: `mode: scan` is removed
@@ -465,21 +484,6 @@ if [[ -n "${INPUT_JOBS:-}" ]]; then
 fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
-fi
-
-# against, estimate, audit: retired outright -- each existed only for the
-# now-removed mode: scan, so none of them can ever do anything on any mode
-# any more. Failing rather than warning names the replacement, matching the
-# "hard removal, no deprecation window" treatment new-library-set/crosscheck/
-# risk-rules got above (ADR-068 D8).
-if [[ -n "${INPUT_AGAINST:-}" ]]; then
-  _fail "against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
-fi
-if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
-  _fail "estimate is no longer supported (it applied only to the now-removed mode: scan, as a dry-run alias). Set dry-run: 'true' instead, which applies to every mode."
-fi
-if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
-  _fail "audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
 fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$MODE" != "compare" ]]; then

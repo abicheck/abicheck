@@ -286,7 +286,10 @@ inputs:
   follow-deps:
     description: >
       Include transitive dependency graph and symbol binding info in dump or
-      compare output. ELF only. Applies to dump and compare modes.
+      compare output. ELF only. Applies to dump and compare modes. For
+      compare, requires a baseline (old-library or abi-baseline) -- rejected
+      outright for the audit-only shape (compare --no-baseline's own
+      DT_NEEDED dependency walk is not wired to that path yet).
     required: false
     default: 'false'
   old-root:
@@ -320,6 +323,9 @@ inputs:
       confirmed/potential/unresolved impact is reported alongside it
       (informational), never in place of it. Mutually exclusive with
       required-symbol/required-symbols (the CLI rejects both being set).
+      Requires a baseline (old-library or abi-baseline) -- rejected
+      outright for the audit-only shape (consumer scoping needs two
+      versions to compare, and an audit has none).
       compare mode only.
     required: false
   used-by-manifest:
@@ -333,7 +339,9 @@ inputs:
       scoping pipeline as used-by; every listed consumer counts toward the
       reported "N of M consumers affected" summary
       (consumer_impact_summary in --format json). Mutually exclusive with
-      required-symbol/required-symbols. compare mode only.
+      required-symbol/required-symbols. compare mode only. Requires a
+      baseline (old-library or abi-baseline) -- rejected outright for the
+      audit-only shape, same reason as used-by above.
     required: false
   required-symbol:
     description: >
@@ -343,13 +351,16 @@ inputs:
       this run's own verdict/exit code; this contract's own confirmed/
       potential/unresolved impact is reported alongside it (informational),
       never in place of it. Mutually exclusive with used-by. compare mode
-      only.
+      only. Requires a baseline (old-library or abi-baseline) -- rejected
+      outright for the audit-only shape, same reason as used-by above.
     required: false
   required-symbols:
     description: >
       Path to a file of required symbols, one per line (blank lines and
       '#' comments ignored) -- combined with any required-symbol values.
-      compare mode only.
+      compare mode only. Requires a baseline (old-library or abi-baseline)
+      -- rejected outright for the audit-only shape, same reason as
+      used-by above.
     required: false
 
   # ── Source-scan & build-source evidence (dump / compare modes) ────────────────────────
@@ -886,7 +897,7 @@ outputs:
       here since require-complete-analysis applies to both compare shapes;
       not a two-sided compatibility verdict either, since no baseline was
       compared -- fails the step unconditionally),
-      NOT_COMPARABLE (two-sided shape only, with the against/old-library or
+      NOT_COMPARABLE (two-sided shape only, with the old-library or
       abi-baseline input: when the candidate and baseline were not
       extracted under a comparable profile/scope contract -- ADR-050 D2 --
       so no comparison could run at all; this verdict fails the step

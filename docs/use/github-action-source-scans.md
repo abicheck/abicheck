@@ -213,8 +213,14 @@ replacement for legacy `mode: scan` with no baseline (see
 ### Estimate cost before committing to a depth
 
 `dry-run: 'true'` prints the resolved depth/scope — without comparing
-anything, always exiting 0. Applies to `mode: compare` equally for both the
-two-sided and audit-only shapes. Handy when sizing a job for a large repo:
+anything. A resolvable preview exits 0, but an invalid input combination or
+an unsatisfiable requested depth/evidence contract still exits nonzero (a
+live-candidate request pinning `depth: build`/`source` via `extra-args`
+with no `sources`/`build-info` given previews the same blocker the real run
+would hit, at exit 1) — a dry run validates what it can see, it does not
+turn every outcome into success. Applies to `mode: compare` equally for
+both the two-sided and audit-only shapes. Handy when sizing a job for a
+large repo:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
