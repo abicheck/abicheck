@@ -44,12 +44,16 @@ finding this module's checks were first written to close).
 shared byte-for-byte by both call sites -- stripping ``build.query``/
 ``compile.compiler`` outright and capping (never raising)
 ``resource_limits.max_bundle_facts_decode_nodes``. It deliberately does NOT
-also handle ``build.compile_db``: ``action/run.sh``'s own merge keeps a
-discovered ``build.compile_db`` when it demonstrably resolves against a
-known ``--sources`` root (stripping a perfectly usable path is its own real
-cost -- see that function's own docstring), a check neither this module nor
-the assurance-overlay call site (which has no ``--sources`` root context at
-all) can perform generically; each caller handles that field itself.
+also handle ``build.compile_db``: a discovered ``build.compile_db`` is kept
+when it demonstrably resolves against a known ``--sources`` root (stripping
+a perfectly usable path is its own real cost -- see
+:func:`discovered_compile_db_resolves`'s own docstring) and stripped
+otherwise; each caller decides what its own effective ``--sources`` root is
+(if any) and calls that function with it, so the resolution check itself
+can't independently drift between the two call sites the way it briefly did
+(one call site used to strip unconditionally because it believed it had no
+``--sources`` context, when in fact its own ``sources`` Action input already
+supplies one).
 
 Must be called for a base document that is NOT itself an operator-supplied,
 explicit ``--config`` (an auto-discovered ``.abicheck.yml``, in both call
@@ -276,3 +280,65 @@ def rebase_relative_config_paths(
     )
     base["compile"] = compile_blk
     return base
+
+
+def discovered_compile_db_resolves(compile_db: str, sources_root: str) -> bool:
+    """Return whether an auto-discovered ``build.compile_db`` glob
+    demonstrably resolves to at least one real file *contained within*
+    *sources_root*.
+
+    Mirrors ``buildsource/inline.py``'s own resolution (``sorted(sources.
+    glob(cfg.compile_db))``, matched via ``match.is_file()`` -- a glob that
+    matches only a directory is not usable evidence there either, so
+    treating it as "resolves" here would still promote a dead-end path to
+    explicit, must-not-be-missing status) plus one containment check that
+    function does not itself perform: ``Path.glob`` happily matches a
+    pattern containing ``..`` components, or one that walks through a
+    symlink, and neither is rejected by ``match.is_file()`` alone (Codex
+    review, fresh evidence -- confirmed empirically: ``Path("sources").
+    glob("../outside/secret.json")`` both matches and reports
+    ``is_file()``). ``build.compile_db`` is untrusted, auto-discovered
+    content by construction (see the module docstring); accepting a match
+    that resolves OUTSIDE *sources_root* would launder a path-traversal or
+    symlink-escape read into the explicit, always-authorized status this
+    whole module exists to withhold from a discovered document. So a
+    candidate match only counts as "resolves" when its own real path
+    (``Path.resolve()``, which dereferences any symlink component) stays
+    within *sources_root*'s own real path -- checked with
+    :meth:`pathlib.PurePath.is_relative_to` (Python 3.9+), never by
+    comparing the un-resolved strings, which a symlink would defeat.
+
+    ``build.compile_db`` is documented as a glob relative to the
+    ``--sources`` root -- never the config file's own location -- so it can
+    only be validated once that root is known.
+
+    A blank *sources_root* (the caller's own effective ``--sources`` value
+    is empty, or not applicable to this call site at all -- e.g. the
+    release-topology overlay, which never reads ``build.compile_db``)
+    always returns ``False``: with no root to validate the glob against,
+    the field cannot be trusted to resolve, so both callers strip it
+    (see each caller's own comment on which of those two cases applies).
+
+    Both call sites (``action/run.sh``'s compile-context overlay and
+    ``actions/check-target/action.yml``'s assurance overlay) call this
+    identical function rather than each re-implementing the resolution
+    check, so they cannot independently drift on what counts as
+    "resolves" -- exactly the shared-implementation discipline
+    :func:`strip_untrusted_execution_keys` already gives the trust-driven
+    fields above. Swallows ``OSError``/``ValueError`` from a malformed glob
+    pattern, an unreadable directory, or an unresolvable path the same way
+    a real caller would want: a glob (or path) that cannot even be
+    evaluated has not "resolved".
+    """
+    if not sources_root:
+        return False
+    try:
+        root = Path(sources_root).resolve()
+        for match in Path(sources_root).glob(compile_db):
+            if not match.is_file():
+                continue
+            if match.resolve().is_relative_to(root):
+                return True
+        return False
+    except (OSError, ValueError):
+        return False

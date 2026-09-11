@@ -664,6 +664,19 @@ runs:
       shell: bash
       env:
         BASE_CONFIG: ${{ inputs.build-config }}
+        # The effective --sources root this run's own "Run analysis" step
+        # below will actually pass (mirrors that step's own `sources:`
+        # input formula exactly, see its comment there): a successful
+        # `consumer_context` step means "Run analysis" forwards no
+        # --sources at all (the synthesized consumer snapshot replaces it),
+        # otherwise it's inputs.sources, defaulting to '.' only for a
+        # replay evidence-producer. Needed so the discovered-config branch
+        # below can validate build.compile_db against the SAME root the
+        # nested compare/scan will resolve it against, instead of
+        # unconditionally stripping it for want of any --sources context
+        # (Codex review, fresh evidence: this step DOES have inputs.sources
+        # available, unlike what a previous round assumed).
+        SOURCES_ROOT: ${{ steps.consumer_context.outcome == 'success' && '' || (inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '')) }}
       run: |
         set -euo pipefail
         PY="$(command -v python3 || command -v python)"
@@ -746,10 +759,17 @@ runs:
         # way `_mktemp_canonical` does, in case a self-hosted runner ever
         # configures `TMPDIR`/`RUNNER_TEMP` as a relative value.
         _assurance_out_path="$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-check-target-assurance-config.XXXXXX")"
-        case "$_assurance_out_path" in
-          /*) : ;;
-          *) _assurance_out_path="$PWD/$_assurance_out_path" ;;
-        esac
+        # Windows path qualification (Codex review, P1, second call site):
+        # on a Windows/Git-Bash runner `mktemp` can return a path inherited
+        # from `$RUNNER_TEMP` that is already Windows-drive-qualified (e.g.
+        # `D:/a/_temp/tmp.XXXXXX`), which the POSIX-only `/*` case below
+        # would misclassify as RELATIVE and prefix with `$PWD`, producing a
+        # malformed doubled path. Reuse `_is_path_already_qualified` (see
+        # its own definition/docstring above) rather than duplicating the
+        # qualification check a second time in this same step.
+        if ! _is_path_already_qualified "$_assurance_out_path"; then
+          _assurance_out_path="$PWD/$_assurance_out_path"
+        fi
         _base_config_abs=""
         if [[ -n "${BASE_CONFIG:-}" ]]; then
           if _is_path_already_qualified "$BASE_CONFIG"; then
@@ -758,10 +778,26 @@ runs:
             _base_config_abs="$_real_pwd/$BASE_CONFIG"
           fi
         fi
+        # Same relative-path-vs-$_py_safe_dir bug class as $BASE_CONFIG
+        # above: $SOURCES_ROOT (this step's own effective --sources value,
+        # see the env: block's comment) is very often a checkout-relative
+        # path (e.g. `sources: src`) too -- absolutize it against
+        # $_real_pwd, mirroring action/run.sh's own
+        # add_compile_context_flags identically, before it crosses into the
+        # $_py_safe_dir-scoped Python subprocess below.
+        _sources_root_abs=""
+        if [[ -n "${SOURCES_ROOT:-}" ]]; then
+          if _is_path_already_qualified "$SOURCES_ROOT"; then
+            _sources_root_abs="$SOURCES_ROOT"
+          else
+            _sources_root_abs="$_real_pwd/$SOURCES_ROOT"
+          fi
+        fi
         (cd "$_py_safe_dir" \
          && ABICHECK_BASE_CONFIG="$_base_config_abs" \
             ABICHECK_DISCOVER_START="$_real_pwd" \
             ABICHECK_OUT_PATH="$_assurance_out_path" \
+            ABICHECK_SOURCES_ROOT="$_sources_root_abs" \
             PYTHONPATH= "$PY" - <<'PYSCRIPT'
         import os
         import sys
@@ -770,6 +806,7 @@ runs:
         import yaml
 
         from abicheck.action_config_overlay import (
+            discovered_compile_db_resolves,
             rebase_relative_config_paths,
             strip_untrusted_execution_keys,
             validate_base_config,
@@ -889,23 +926,35 @@ runs:
             data = strip_untrusted_execution_keys(data)
             build_blk = data.get("build")
             if isinstance(build_blk, dict) and "compile_db" in build_blk:
-                # Unlike action/run.sh's own equivalent handling, this step
-                # has no --sources root to validate the glob against (the
-                # nested "Run analysis" step resolves --sources separately,
-                # after this one has already run), so it always strips
-                # rather than keeping a demonstrably-resolving path.
-                build_blk = dict(build_blk)
-                del build_blk["compile_db"]
-                data["build"] = build_blk
-                print(
-                    "::warning::the discovered .abicheck.yml's "
-                    "build.compile_db was dropped from this synthesized "
-                    "--config overlay -- forwarding it would silently "
-                    "promote it to an explicit, must-not-be-missing "
-                    "compile-DB path; set build-config explicitly (naming a "
-                    "config you reviewed) to opt in.",
-                    file=sys.stderr,
-                )
+                # Codex review, fresh evidence: a previous round always
+                # stripped here, believing this step had no --sources root
+                # to validate the glob against -- but this step's own
+                # `sources` Action input (mirrored into ABICHECK_SOURCES_ROOT
+                # by the env: block above, identically to how "Run analysis"
+                # below will itself resolve --sources) IS that root. Keep a
+                # demonstrably-resolving discovered build.compile_db instead
+                # of unconditionally discarding valid L3-L5 compiler-flag
+                # evidence, via the identical shared resolution
+                # action/run.sh's own compile-context overlay uses
+                # (discovered_compile_db_resolves -- see its own docstring)
+                # so the two callers can't independently drift on what
+                # counts as "resolves".
+                _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
+                if not discovered_compile_db_resolves(
+                    build_blk["compile_db"], _sources_root
+                ):
+                    build_blk = dict(build_blk)
+                    del build_blk["compile_db"]
+                    data["build"] = build_blk
+                    print(
+                        "::warning::the discovered .abicheck.yml's "
+                        "build.compile_db was dropped from this synthesized "
+                        "--config overlay -- forwarding it would silently "
+                        "promote it to an explicit, must-not-be-missing "
+                        "compile-DB path; set build-config explicitly (naming a "
+                        "config you reviewed) to opt in.",
+                        file=sys.stderr,
+                    )
         if found_path is not None:
             # Correctness (Codex review, fresh evidence): `data` is about to
             # be written to a FRESH path (this step's own $RUNNER_TEMP-

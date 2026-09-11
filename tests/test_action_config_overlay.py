@@ -30,11 +30,13 @@ function level, independent of either shell harness.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from abicheck.action_config_overlay import (
+    discovered_compile_db_resolves,
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
     validate_base_config,
@@ -314,3 +316,110 @@ class TestValidateBaseConfig:
         assert "query" not in stripped.get("build", {})
         with pytest.raises(ValueError):
             validate_base_config(doc)
+
+
+class TestDiscoveredCompileDbResolves:
+    """Direct unit tests for the shared resolution primitive PR #1222
+    Finding 2 (fresh Codex review evidence) extracted so ``action/run.sh``'s
+    compile-context overlay and ``actions/check-target/action.yml``'s
+    assurance overlay can't independently drift on what counts as
+    "resolves" -- see the function's own docstring for the full account,
+    including why a plain ``match.is_file()`` check (mirroring
+    ``buildsource/inline.py``'s own resolution) is not enough on its own.
+    """
+
+    def test_a_real_file_under_the_root_resolves(self, tmp_path: Path) -> None:
+        (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+        assert discovered_compile_db_resolves("compile_commands.json", str(tmp_path))
+
+    def test_a_glob_matching_a_real_file_resolves(self, tmp_path: Path) -> None:
+        (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+        assert discovered_compile_db_resolves("*.json", str(tmp_path))
+
+    def test_a_missing_file_does_not_resolve(self, tmp_path: Path) -> None:
+        assert not discovered_compile_db_resolves(
+            "nonexistent_compile_commands.json", str(tmp_path)
+        )
+
+    def test_a_glob_matching_only_a_directory_does_not_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        """Mirrors buildsource/inline.py's own ``match.is_file()`` check --
+        a glob that matches only a directory is not usable evidence."""
+        (tmp_path / "build_dir").mkdir()
+        assert not discovered_compile_db_resolves("build_dir", str(tmp_path))
+
+    def test_a_blank_sources_root_never_resolves(self, tmp_path: Path) -> None:
+        (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+        assert not discovered_compile_db_resolves("compile_commands.json", "")
+
+    def test_a_malformed_glob_pattern_does_not_raise(self, tmp_path: Path) -> None:
+        assert not discovered_compile_db_resolves("[", str(tmp_path))
+
+    def test_a_nonexistent_sources_root_does_not_raise(self, tmp_path: Path) -> None:
+        assert not discovered_compile_db_resolves(
+            "compile_commands.json", str(tmp_path / "does-not-exist")
+        )
+
+    def test_path_traversal_outside_the_root_does_not_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: ``Path.glob`` happily matches a
+        pattern with ``..`` components, and ``match.is_file()`` alone does
+        not reject it -- confirmed empirically before this containment
+        check was added. A discovered ``build.compile_db`` naming a path
+        that escapes ``sources_root`` via ``..`` must never be treated as
+        "resolves", or a path-traversal read would be laundered into
+        explicit, must-not-be-missing status."""
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.json").write_text("[]", encoding="utf-8")
+        assert not discovered_compile_db_resolves(
+            "../outside/secret.json", str(sources)
+        )
+
+    def test_symlink_escaping_the_root_does_not_resolve(self, tmp_path: Path) -> None:
+        """A symlink INSIDE sources_root whose target lives outside it must
+        not resolve either -- the un-resolved path is nominally contained,
+        but ``Path.resolve()`` (which dereferences symlinks) reveals the
+        real target escapes the root, exactly the kind of trust-boundary
+        bypass a discovered, untrusted config must not get credit for."""
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        real_secret = outside / "secret.json"
+        real_secret.write_text("[]", encoding="utf-8")
+        link = sources / "compile_commands.json"
+        try:
+            link.symlink_to(real_secret)
+        except OSError:
+            pytest.skip("symlinks not supported on this filesystem")
+        assert not discovered_compile_db_resolves("compile_commands.json", str(sources))
+
+    def test_a_symlink_that_stays_within_the_root_still_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: the containment check must not reject every
+        symlink -- only one whose real target escapes sources_root."""
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        real_file = sources / "real_compile_commands.json"
+        real_file.write_text("[]", encoding="utf-8")
+        link = sources / "compile_commands.json"
+        try:
+            link.symlink_to(real_file)
+        except OSError:
+            pytest.skip("symlinks not supported on this filesystem")
+        assert discovered_compile_db_resolves("compile_commands.json", str(sources))
+
+    def test_relative_sources_root_still_resolves(self, tmp_path: Path) -> None:
+        (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cwd = Path.cwd()
+        try:
+            os.chdir(tmp_path)
+            assert discovered_compile_db_resolves("compile_commands.json", ".")
+        finally:
+            os.chdir(cwd)

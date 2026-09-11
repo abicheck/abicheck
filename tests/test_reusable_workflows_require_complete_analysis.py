@@ -66,6 +66,24 @@ def _overlay_step() -> dict[str, Any]:
     return next(s for s in data["runs"]["steps"] if s.get("id") == "assurance_overlay")
 
 
+def _run_overlay(workspace: Path, env: dict[str, str]) -> Any:
+    """``run_step`` against the overlay step, defaulting ``SOURCES_ROOT`` to
+    empty for every test that isn't specifically exercising PR #1222
+    Finding 2's ``build.compile_db``-resolution behavior.
+
+    ``_workflow_exec.run_step`` leaves any step ``env:`` key the caller
+    doesn't override at its literal, un-evaluated ``${{ ... }}`` GitHub
+    Actions expression text (see its own docstring) -- without this
+    default, every pre-existing test in this module (none of which name
+    ``SOURCES_ROOT`` at all) would suddenly see that literal expression
+    string as the shell's actual ``$SOURCES_ROOT`` value the moment the
+    step gained that env key, rather than the empty string these tests
+    intend.
+    """
+    merged = {"SOURCES_ROOT": "", **env}
+    return run_step(_overlay_step(), workspace=workspace, env=merged)
+
+
 def _written_overlay(result: Any) -> Any:
     """Load the YAML the overlay step actually wrote.
 
@@ -215,7 +233,7 @@ class TestAssuranceOverlayGenerationExecuted:
             env["BASE_CONFIG"] = str(config_path)
         else:
             env["BASE_CONFIG"] = ""
-        return run_step(_overlay_step(), workspace=workspace, env=env)
+        return _run_overlay(workspace, env)
 
     def test_no_base_config_produces_a_clean_overlay(self, tmp_path: Path) -> None:
         result = self._run(tmp_path, None)
@@ -312,7 +330,7 @@ class TestAssuranceOverlayGenerationIsIsolated:
             "pathlib.Path(__file__).with_name('PWNED').write_text('pwned')\n",
             encoding="utf-8",
         )
-        return run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        return _run_overlay(workspace, {"BASE_CONFIG": ""})
 
     def test_a_checkout_planted_sitecustomize_does_not_execute(
         self, tmp_path: Path
@@ -364,7 +382,7 @@ class TestAssuranceOverlayOutputPathIsPrivate:
             (workspace / "check-target-assurance-config.yml").symlink_to(victim)
         except OSError as exc:  # Windows without the symlink privilege
             pytest.skip(f"cannot create a symlink here: {exc}")
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         return result, victim
 
     def test_a_symlink_at_the_legacy_path_is_never_followed(
@@ -419,7 +437,7 @@ class TestAssuranceOverlayDiscoversProjectConfig:
             "policy:\n  overrides:\n    FUNCTION_REMOVED: error\n",
             encoding="utf-8",
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         # Not just the bare assurance block: every auto-discovered setting
@@ -440,7 +458,7 @@ class TestAssuranceOverlayDiscoversProjectConfig:
 
     def _run_no_config(self, tmp_path: Path) -> Any:
         workspace = make_workspace(tmp_path)
-        return run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        return _run_overlay(workspace, {"BASE_CONFIG": ""})
 
     def test_explicit_build_config_still_wins_over_discovery(
         self, tmp_path: Path
@@ -453,11 +471,7 @@ class TestAssuranceOverlayDiscoversProjectConfig:
         )
         explicit_config = workspace / "explicit.yml"
         explicit_config.write_text("targets: {}\n", encoding="utf-8")
-        result = run_step(
-            _overlay_step(),
-            workspace=workspace,
-            env={"BASE_CONFIG": str(explicit_config)},
-        )
+        result = _run_overlay(workspace, {"BASE_CONFIG": str(explicit_config)})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written == {
@@ -500,7 +514,7 @@ class TestAssuranceOverlayStripsExecutableKeysFromDiscoveredConfig:
             "build:\n  query: cmake --build . --target print-abi-flags\n",
             encoding="utf-8",
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         # The bug this finding names: build.query must never survive into
@@ -515,7 +529,7 @@ class TestAssuranceOverlayStripsExecutableKeysFromDiscoveredConfig:
             "compile:\n  compiler: /tmp/evil-compiler.sh\n",
             encoding="utf-8",
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert "compiler" not in written.get("compile", {})
@@ -529,22 +543,27 @@ class TestAssuranceOverlayStripsExecutableKeysFromDiscoveredConfig:
             "resource_limits:\n  max_bundle_facts_decode_nodes: 999999999\n",
             encoding="utf-8",
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["resource_limits"]["max_bundle_facts_decode_nodes"] < 999999999
 
     def test_discovered_build_compile_db_is_stripped(self, tmp_path: Path) -> None:
-        """This call site has no ``--sources`` root to validate the glob
-        against at all (unlike ``action/run.sh``'s own equivalent handling,
-        which keeps a demonstrably-resolving discovered ``compile_db``), so
-        it always strips."""
+        """No ``SOURCES_ROOT`` given (this class's default, via
+        ``_run_overlay``) means this call site has no ``--sources`` root to
+        validate the glob against -- it strips, same as ``action/run.sh``'s
+        own equivalent handling does when it has no known ``--sources``
+        root either. See ``TestAssuranceOverlayPreservesUsableDiscoveredCompileDb``
+        below for the PR #1222 Finding 2 fix: when this step's own
+        effective ``--sources`` root IS known (mirroring its ``sources``
+        Action input), a demonstrably-resolving discovered ``compile_db``
+        now survives instead of always being stripped."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
             "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
         )
         (workspace / "compile_commands.json").write_text("[]", encoding="utf-8")
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert "compile_db" not in written.get("build", {})
@@ -565,7 +584,7 @@ class TestAssuranceOverlayStripsExecutableKeysFromDiscoveredConfig:
             "  std: c++17\n",
             encoding="utf-8",
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["build"] == {"system": "cmake"}
@@ -586,17 +605,134 @@ class TestAssuranceOverlayStripsExecutableKeysFromDiscoveredConfig:
             "compile:\n  compiler: /usr/bin/g++-custom\n",
             encoding="utf-8",
         )
-        result = run_step(
-            _overlay_step(),
-            workspace=workspace,
-            env={"BASE_CONFIG": str(explicit_config)},
-        )
+        result = _run_overlay(workspace, {"BASE_CONFIG": str(explicit_config)})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["build"]["query"] == "cmake --build . --target print-abi-flags"
         assert written["compile"]["compiler"] == "/usr/bin/g++-custom"
         assert "build.query" not in result.stderr
         assert "compile.compiler" not in result.stderr
+
+
+class TestAssuranceOverlayPreservesUsableDiscoveredCompileDb:
+    """Finding 2 (P1, PR #1222 Codex review, commit d332fffa8, fresh
+    evidence): this step used to strip a discovered ``build.compile_db``
+    UNCONDITIONALLY, believing it had no ``--sources`` root to validate the
+    glob against -- but this step's own ``sources`` Action input (mirrored
+    into ``SOURCES_ROOT``/``ABICHECK_SOURCES_ROOT`` by the overlay step's
+    ``env:`` block, see ``actions/check-target/action.yml``'s own comment
+    there) IS that root, exactly the same evidence ``action/run.sh``'s own
+    compile-context overlay already uses to keep a demonstrably-resolving
+    discovered ``compile_db`` (``TestCompileContextPreservesUsableDiscoveredCompileDb``
+    in ``tests/test_action_compile_context_parity.py``, which this class
+    mirrors). Both callers now share the identical resolution primitive
+    (``abicheck.action_config_overlay.discovered_compile_db_resolves``) so
+    they cannot independently drift on what counts as "resolves".
+    """
+
+    def test_resolving_compile_db_survives_the_merge(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (workspace / "compile_commands.json").write_text("[]", encoding="utf-8")
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(workspace)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
+        assert "build.compile_db" not in result.stderr
+
+    def test_nonresolving_compile_db_is_still_stripped(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  compile_db: nonexistent_compile_commands.json\n"
+            "  system: cmake\n",
+            encoding="utf-8",
+        )
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(workspace)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "compile_db" not in written.get("build", {})
+        assert written["build"] == {"system": "cmake"}
+        assert "build.compile_db" in result.stderr
+
+    def test_relative_sources_root_still_resolves(self, tmp_path: Path) -> None:
+        """``sources`` is normally a checkout-relative path too (e.g.
+        ``sources: src``) -- the overlay step absolutizes ``SOURCES_ROOT``
+        against ``$_real_pwd`` the same way it already does for
+        ``BASE_CONFIG`` (and the same way ``action/run.sh``'s own
+        ``add_compile_context_flags`` absolutizes its own ``sources_root``)."""
+        workspace = make_workspace(tmp_path)
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        result = _run_overlay(workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": "src"})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"compile_db": "compile_commands.json"}
+
+    def test_path_traversal_outside_sources_root_is_still_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: a discovered ``build.compile_db``
+        naming a path that escapes ``SOURCES_ROOT`` via ``..`` (or a
+        symlink -- see ``TestDiscoveredCompileDbResolves`` in
+        ``tests/test_action_config_overlay.py`` for the symlink-escape
+        case, tested at the primitive level) must never be treated as
+        "resolves", matching the containment check
+        ``discovered_compile_db_resolves`` performs."""
+        workspace = make_workspace(tmp_path)
+        sources_dir = workspace / "sources"
+        sources_dir.mkdir()
+        outside_dir = workspace / "outside"
+        outside_dir.mkdir()
+        (outside_dir / "secret_compile_commands.json").write_text(
+            "[]", encoding="utf-8"
+        )
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n"
+            "  compile_db: ../outside/secret_compile_commands.json\n"
+            "  system: cmake\n",
+            encoding="utf-8",
+        )
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(sources_dir)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "compile_db" not in written.get("build", {})
+        assert written["build"] == {"system": "cmake"}
+        assert "build.compile_db" in result.stderr
+
+    def test_consumer_context_success_means_no_sources_root_still_strips(
+        self, tmp_path: Path
+    ) -> None:
+        """A blank ``SOURCES_ROOT`` (the app-consumer path's own effective
+        --sources -- see the overlay step's ``env:`` comment: a successful
+        ``consumer_context`` step means "Run analysis" forwards no
+        --sources at all) must still strip, exactly like the no-``sources``-
+        input case above -- it must never be confused with "any root is
+        fine"."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
+        )
+        (workspace / "compile_commands.json").write_text("[]", encoding="utf-8")
+        result = _run_overlay(workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "compile_db" not in written.get("build", {})
 
 
 class TestAssuranceOverlayRebasesRelativeIncludeDirs:
@@ -633,7 +769,7 @@ class TestAssuranceOverlayRebasesRelativeIncludeDirs:
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  include_dirs: [include]\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         resolved = written["compile"]["include_dirs"]
@@ -652,7 +788,7 @@ class TestAssuranceOverlayRebasesRelativeIncludeDirs:
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  include_dirs: [a, b]\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["compile"]["include_dirs"] == [
@@ -668,7 +804,7 @@ class TestAssuranceOverlayRebasesRelativeIncludeDirs:
         (workspace / ".abicheck.yml").write_text(
             f"compile:\n  include_dirs: [{abs_dir}]\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["compile"]["include_dirs"] == [abs_dir]
@@ -687,11 +823,7 @@ class TestAssuranceOverlayRebasesRelativeIncludeDirs:
         explicit_config.write_text(
             "compile:\n  include_dirs: [include]\n", encoding="utf-8"
         )
-        result = run_step(
-            _overlay_step(),
-            workspace=workspace,
-            env={"BASE_CONFIG": str(explicit_config)},
-        )
+        result = _run_overlay(workspace, {"BASE_CONFIG": str(explicit_config)})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["compile"]["include_dirs"] == [
@@ -733,7 +865,7 @@ class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
         (workspace / ".abicheck.yml").write_text(
             "build:\n  query: 7\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode != 0
         assert "::error::" in result.stderr
         assert "build.query" in result.stderr
@@ -748,7 +880,7 @@ class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
         (workspace / ".abicheck.yml").write_text(
             "compile:\n  compiler: []\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode != 0
         assert "::error::" in result.stderr
         assert "compile.compiler" in result.stderr
@@ -764,7 +896,7 @@ class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
         (workspace / ".abicheck.yml").write_text(
             "build:\n  compile_db: false\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode != 0
         assert "::error::" in result.stderr
         assert "compile_db" in result.stderr
@@ -781,11 +913,7 @@ class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
         workspace = make_workspace(tmp_path)
         explicit_config = workspace / "explicit.yml"
         explicit_config.write_text("build:\n  query: 7\n", encoding="utf-8")
-        result = run_step(
-            _overlay_step(),
-            workspace=workspace,
-            env={"BASE_CONFIG": str(explicit_config)},
-        )
+        result = _run_overlay(workspace, {"BASE_CONFIG": str(explicit_config)})
         assert result.returncode != 0
         assert "::error::" in result.stderr
         assert "config-path" not in result.outputs
@@ -798,7 +926,7 @@ class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
         (workspace / ".abicheck.yml").write_text(
             "build:\n  system: cmake\ncompile:\n  std: c++17\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["build"] == {"system": "cmake"}
@@ -834,7 +962,7 @@ class TestAssuranceOverlayCopiesAliasedAssuranceMapping:
         (workspace / ".abicheck.yml").write_text(
             "assurance: &shared {}\ngate: *shared\n", encoding="utf-8"
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["assurance"] == {"require_complete": True}
@@ -861,7 +989,7 @@ class TestAssuranceOverlayCopiesAliasedAssuranceMapping:
             "assurance: &shared\n  require_complete: false\nbaseline: *shared\n",
             encoding="utf-8",
         )
-        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        result = _run_overlay(workspace, {"BASE_CONFIG": ""})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["assurance"] == {"require_complete": True}
@@ -881,11 +1009,7 @@ class TestAssuranceOverlayCopiesAliasedAssuranceMapping:
         explicit_config.write_text(
             "assurance: &shared {}\ngate: *shared\n", encoding="utf-8"
         )
-        result = run_step(
-            _overlay_step(),
-            workspace=workspace,
-            env={"BASE_CONFIG": str(explicit_config)},
-        )
+        result = _run_overlay(workspace, {"BASE_CONFIG": str(explicit_config)})
         assert result.returncode == 0, result.stderr
         written = _written_overlay(result)
         assert written["assurance"] == {"require_complete": True}

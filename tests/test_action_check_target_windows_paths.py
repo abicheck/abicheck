@@ -96,6 +96,24 @@ def _base_config_abs_source() -> str:
     return text[start:end]
 
 
+# The second call site (P1 finding, fresh evidence): just the
+# `_assurance_out_path` re-qualification if-block that runs on whatever
+# `mktemp` itself returned, extracted the same way `_base_config_abs_source`
+# is above so a test can drive it directly with a synthetic (real bash
+# doesn't need to actually create) mktemp-shaped path.
+_ASSURANCE_OUT_PATH_IF_START = 'if ! _is_path_already_qualified "$_assurance_out_path"'
+_ASSURANCE_OUT_PATH_IF_END = "\nfi\n"
+
+
+def _assurance_out_path_if_source() -> str:
+    text = _overlay_step_run_source()
+    start = text.index(_ASSURANCE_OUT_PATH_IF_START)
+    end = text.index(_ASSURANCE_OUT_PATH_IF_END, start) + len(
+        _ASSURANCE_OUT_PATH_IF_END
+    )
+    return text[start:end]
+
+
 def _bash_executable() -> str:
     if os.name != "nt":
         return "bash"
@@ -229,4 +247,83 @@ class TestAssuranceOverlayPreservesWindowsQualifiedBuildConfigPath:
         Windows-qualified forms."""
         relative = ".abicheck.yml"
         result = self._absolutize(relative, tmp_path, windows=True)
+        assert result == f"{_bash_pwd(tmp_path)}/{relative}"
+
+
+class TestAssuranceOverlayPreservesWindowsQualifiedOutputPath:
+    """Codex review, PR #1222 (P1, fresh evidence, second call site): the
+    same step's OWN output-path (``_assurance_out_path``, the freshly
+    ``mktemp``-created overlay file under ``$RUNNER_TEMP``) re-qualification
+    used the identical POSIX-only ``case "$_assurance_out_path" in /*) ...
+    ;; *) ... ;; esac`` -- so a Windows/Git-Bash runner whose ``mktemp``
+    returns a drive-qualified path inherited from ``$RUNNER_TEMP`` (e.g.
+    ``D:/a/_temp/tmp.XXXXXX``) got a spurious ``$PWD/`` prefix prepended,
+    producing a malformed doubled path and breaking EVERY assurance-enabled
+    ``check-target`` invocation on Windows. The fix reuses the identical
+    ``_is_path_already_qualified`` helper (already fixed/pinned for the
+    ``BASE_CONFIG`` call site above) instead of a second copy of the
+    qualification logic.
+    """
+
+    def _requalify(self, mktemp_output: str, cwd: Path, *, windows: bool) -> str:
+        script = (
+            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            + _path_qualified_helper_source()
+            + '\n_assurance_out_path="$TEST_MKTEMP_OUTPUT"\n'
+            + _assurance_out_path_if_source()
+            + 'printf "%s" "$_assurance_out_path"\n'
+        )
+        result = _run_bash_script(
+            script,
+            {
+                "OSTYPE": "msys" if windows else "linux-gnu",
+                "TEST_MKTEMP_OUTPUT": mktemp_output,
+            },
+            cwd=cwd,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    def test_windows_drive_forward_slash_mktemp_output_is_not_prefixed(
+        self, tmp_path: Path
+    ) -> None:
+        windows_path = "D:/a/_temp/abicheck-check-target-assurance-config.abc123"
+        result = self._requalify(windows_path, tmp_path, windows=True)
+        assert result == windows_path
+
+    def test_windows_drive_backslash_mktemp_output_is_not_prefixed(
+        self, tmp_path: Path
+    ) -> None:
+        windows_path = r"D:\a\_temp\abicheck-check-target-assurance-config.abc123"
+        result = self._requalify(windows_path, tmp_path, windows=True)
+        assert result == windows_path
+
+    def test_windows_unc_mktemp_output_is_not_prefixed(self, tmp_path: Path) -> None:
+        unc_path = r"\\server\share\abicheck-check-target-assurance-config.abc123"
+        result = self._requalify(unc_path, tmp_path, windows=True)
+        assert result == unc_path
+
+    def test_posix_absolute_mktemp_output_is_not_prefixed_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        posix_path = "/tmp/abicheck-check-target-assurance-config.abc123"
+        result = self._requalify(posix_path, tmp_path, windows=True)
+        assert result == posix_path
+
+    def test_same_drive_letter_shaped_output_is_prefixed_on_non_windows(
+        self, tmp_path: Path
+    ) -> None:
+        posix_like = "D:/a/_temp/abicheck-check-target-assurance-config.abc123"
+        result = self._requalify(posix_like, tmp_path, windows=False)
+        assert result == f"{_bash_pwd(tmp_path)}/{posix_like}"
+
+    def test_ordinary_relative_mktemp_output_still_gets_prefix_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuinely relative mktemp output (should never actually happen
+        -- `mktemp` documents an absolute result -- but the fix must not
+        accidentally widen "already qualified" beyond the real
+        Windows-qualified forms) must still be absolutized."""
+        relative = "abicheck-check-target-assurance-config.abc123"
+        result = self._requalify(relative, tmp_path, windows=True)
         assert result == f"{_bash_pwd(tmp_path)}/{relative}"

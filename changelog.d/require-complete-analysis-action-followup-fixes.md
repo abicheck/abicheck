@@ -70,3 +70,31 @@
   the nested CLI then rejected the overlay outright for the unrelated key
   even though the original config was valid. Fixed by copying the
   `assurance` mapping before adding `require_complete` to it.
+- **The assurance-overlay step no longer mangles its own Windows-style
+  temporary output path either.** The same POSIX-only leading-slash
+  qualification bug fixed above for `BASE_CONFIG` also affected the
+  step's own freshly-`mktemp`-created overlay file path: on a Windows/
+  Git-Bash runner, `mktemp` can return a path already inherited from
+  `$RUNNER_TEMP` in drive-qualified form (e.g. `D:/a/_temp/tmp.XXXXXX`),
+  which the same POSIX-only test misclassified as relative and prefixed
+  with `$PWD`, breaking every assurance-enabled `check-target` invocation
+  on Windows while generating the overlay. Fixed by reusing the same
+  `_is_path_already_qualified()` helper for this second call site instead
+  of a second copy of the qualification logic.
+- **The assurance-overlay step no longer unconditionally discards a
+  discovered `build.compile_db` that would have resolved to a real
+  file.** Unlike `action/run.sh`'s own equivalent compile-context overlay
+  merge (which keeps a demonstrably-resolving discovered `compile_db`),
+  this step used to strip the field outright whenever `build-config` was
+  omitted, believing it had no `--sources` root to validate the glob
+  against — but the step's own `sources` Action input already supplies
+  exactly that root. The resolution check (now shared between both
+  callers as `abicheck.action_config_overlay.
+  discovered_compile_db_resolves`, so they cannot independently drift) was
+  also hardened while unifying it: it now requires the matched path's own
+  *resolved* location to stay contained within the sources root, closing
+  a path-traversal/symlink-escape gap a plain `match.is_file()` check
+  alone did not catch (confirmed empirically: `Path.glob()` happily
+  matches — and `is_file()` happily confirms — a pattern containing `..`
+  components or one that walks through a symlink to a target outside the
+  root).

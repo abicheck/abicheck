@@ -597,6 +597,7 @@ from pathlib import Path
 import yaml
 
 from abicheck.action_config_overlay import (
+    discovered_compile_db_resolves,
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
     validate_base_config,
@@ -853,10 +854,10 @@ if merge_mode != "explicit":
     # document into a synthesized, always-explicit overlay, and both must
     # withhold the same executable-authorized status from it. Shared via
     # abicheck.action_config_overlay (see its own module docstring) so the
-    # two can't silently drift; build.compile_db stays this function's own
-    # responsibility below (see that module's docstring for why -- this
-    # merge keeps a demonstrably-resolving discovered compile_db instead of
-    # always stripping it).
+    # two can't silently drift; build.compile_db stays each caller's own
+    # responsibility to resolve (via the shared
+    # discovered_compile_db_resolves() -- see its own docstring) since only
+    # the caller knows its own effective --sources root.
     base = strip_untrusted_execution_keys(base)
     if isinstance(base.get("build"), dict) and "compile_db" in base["build"]:
         # A different concern from build.query above (that one is a trust/
@@ -887,24 +888,9 @@ if merge_mode != "explicit":
         # compile_db at all) leaves it empty, always stripping, matching
         # this field's own irrelevance there.
         _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
-        _compile_db_resolves = False
-        if _sources_root:
-            try:
-                # match.is_file() (not just "any match at all"): mirrors
-                # inline.py's own `for match in sorted(sources.glob(cfg.
-                # compile_db)): if match.is_file():` exactly -- a glob that
-                # only matches a directory is not usable evidence there
-                # either, and treating it as "resolves" here would still
-                # promote a dead-end path to explicit, must-not-be-missing
-                # status (Codex review, fresh evidence).
-                _compile_db_resolves = any(
-                    match.is_file()
-                    for match in Path(_sources_root).glob(
-                        base["build"]["compile_db"]
-                    )
-                )
-            except (OSError, ValueError):
-                _compile_db_resolves = False
+        _compile_db_resolves = discovered_compile_db_resolves(
+            base["build"]["compile_db"], _sources_root
+        )
         if not _compile_db_resolves:
             stripped_build = dict(base["build"])
             del stripped_build["compile_db"]
