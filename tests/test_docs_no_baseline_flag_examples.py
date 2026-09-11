@@ -48,6 +48,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from abicheck.frontends.cli.commands.no_baseline_rulings import _UNSUPPORTED_OPTIONS
 
@@ -83,6 +84,46 @@ def _candidate_files() -> list[Path]:
     return files
 
 
+def _yaml_flow_commands(text: str) -> list[tuple[int, str]]:
+    """Every scalar value under a ``flow:`` key, real YAML parsed.
+
+    A ``flow:`` list entry is not always one physical line -- a folded
+    (``- >``) or literal (``- |``) block scalar spreads the actual command
+    text across several indented lines, and a naive line-based scan (the
+    first version of this function) only ever saw the bare ``- >`` marker
+    line itself, silently missing any flag co-occurring on a continuation
+    line (CodeRabbit review, fresh evidence: a deliberately-injected
+    multiline violation slipped past undetected). ``yaml.compose`` resolves
+    block-scalar folding for us and keeps each scalar node's source line via
+    ``start_mark`` -- real YAML semantics, not a second hand-rolled parser
+    that could itself drift from PyYAML's own folding rules.
+    """
+    try:
+        root = yaml.compose(text)
+    except yaml.YAMLError:
+        return []
+    if root is None:
+        return []
+    hits: list[tuple[int, str]] = []
+
+    def walk(node: yaml.Node, under_flow: bool) -> None:
+        if isinstance(node, yaml.MappingNode):
+            for key_node, value_node in node.value:
+                key_is_flow = (
+                    isinstance(key_node, yaml.ScalarNode)
+                    and key_node.value == "flow"
+                )
+                walk(value_node, under_flow or key_is_flow)
+        elif isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                walk(item, under_flow)
+        elif isinstance(node, yaml.ScalarNode) and under_flow:
+            hits.append((node.start_mark.line + 1, node.value))
+
+    walk(root, False)
+    return hits
+
+
 def _command_blocks(text: str, *, is_yaml: bool) -> list[tuple[int, str]]:
     """(start_line, joined_text) for each real, copyable ``abicheck``
     invocation.
@@ -98,13 +139,13 @@ def _command_blocks(text: str, *, is_yaml: bool) -> list[tuple[int, str]]:
     invocation is checked as one command, not two independently-innocent
     halves.
     """
-    lines = text.splitlines()
     if is_yaml:
         return [
-            (i, line)
-            for i, line in enumerate(lines, start=1)
-            if "abicheck " in line and line.lstrip().startswith("- ")
+            (line_no, value)
+            for line_no, value in _yaml_flow_commands(text)
+            if "abicheck " in value
         ]
+    lines = text.splitlines()
     out: list[tuple[int, str]] = []
     in_shell_fence = False
     i = 0
@@ -165,6 +206,41 @@ def test_no_documented_no_baseline_example_uses_an_unsupported_flag() -> None:
     pytest.fail(
         "compare --no-baseline example(s) use a flag that path rejects:\n"
         + "\n".join(lines)
+    )
+
+
+def test_yaml_folded_block_scalar_flow_entry_is_caught() -> None:
+    """A deliberately-injected multiline violation, proving the YAML-aware
+    parser (not a per-physical-line scan) is what actually runs.
+
+    The violation sits entirely on a *continuation* line of a folded
+    (``- >``) block scalar -- the exact shape a naive line-based scan (this
+    file's first version) missed, since the ``- >`` marker line itself
+    never contains ``abicheck`` or the offending flag at all. Written
+    in-process against the same helpers ``_violations()`` uses, rather than
+    a committed fixture file, so this test cannot itself go stale by
+    quietly matching a real doc fix later.
+    """
+    text = (
+        "scenarios:\n"
+        "  - id: SC-INJECTED-MULTILINE-VIOLATION\n"
+        "    flow:\n"
+        "      - >\n"
+        "        abicheck compare --no-baseline snapshot.abi.json\n"
+        "        --since origin/main\n"
+    )
+    commands = _command_blocks(text, is_yaml=True)
+    assert commands, "the folded block scalar itself was not even parsed"
+    joined = commands[0][1]
+    assert "--no-baseline" in joined
+    assert "--since" in joined
+    assert any(
+        "--since" in command
+        for _line_no, command in commands
+        if "--no-baseline" in command
+    ), (
+        "the injected --since violation must be visible on the same "
+        "resolved command text the real scan checks"
     )
 
 

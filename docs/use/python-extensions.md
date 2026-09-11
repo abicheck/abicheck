@@ -144,9 +144,12 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     These four are **compare-time** kinds. Like every `RISK` change they are
     advisory in `compare` by default; gate them through `compare`'s severity /
     policy configuration (e.g. a policy profile that escalates the kind, or the
-    `--severity-*` flags). The `--crosscheck python_stable_abi_violation=error`
-    switch is specific to the single-artifact **`scan --abi3` audit** — it does
-    not gate the compare-time kinds, which ride the `compare` verdict instead.
+    `--severity-*` flags). `python_stable_abi_violation` from the single-module
+    `--abi3` audit gates the same way, through a [policy file](policies.md)'s
+    `overrides:` block — see [Gating](#1-audit-a-single-module-compare-abi3)
+    above. The retired `scan`'s separate `--crosscheck KEY=LEVEL` switch had no
+    replacement flag; both the audit finding and these four compare-time kinds
+    are gated through the one `--policy`/severity mechanism now.
 
 !!! note "Free-threaded (no-GIL) builds are never `abi3`"
     A free-threaded build (PEP 703, `cpython-313t` / `cp314t`) uses a different
@@ -164,18 +167,22 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     interpreter minor and it will not load on another — no matter how stable its
     imported *symbol names* are. abicheck reads the PE import table's provider
     DLL, so an `abi3` `.pyd` that links a `pythonXY.dll` is flagged as a
-    `python_stable_abi_violation` (in both `scan --abi3` and `compare`), even
-    when every imported symbol is in the stable set.
+    `python_stable_abi_violation`, whether from `compare --abi3`'s single-module
+    audit or a normal two-sided `compare`, even when every imported symbol is
+    in the stable set.
 
-!!! note "Floor drift: exact when declared, otherwise deferred to `scan --abi3`"
+!!! note "Floor drift: exact when declared, otherwise deferred to `compare --abi3`"
     `compare` flags `python_abi3_floor_raised` only from the **explicit
     `cpXY-abi3` tag** on *both* builds (e.g. `cp39-abi3` → `cp310-abi3`) — that is
     exact. It deliberately does **not** *infer* a floor from the imported-symbol
     versions: a bare `.abi3.so` carries no declared minor, and the min-of-imports
     heuristic false-positives (a `cp39-abi3` build adding a 3.5 symbol drops no
-    3.9+ user). When the floor isn't declared in the tag, use
-    `scan --abi3 <floor>` — where you supply the target floor — to catch stable
-    symbols newer than it.
+    3.9+ user). When the floor isn't declared in the tag, self-compare with
+    `compare <module> <module> --abi3 <floor>` — where you supply the target
+    floor — to catch stable symbols newer than it (see
+    [Audit a single module](#1-audit-a-single-module-compare-abi3) above; the
+    retired `scan --abi3 <floor>` was this workflow's spelling before `scan`
+    was deleted outright in ADR-068 Phase 6).
 
 !!! note "Version-specific modules are not checked"
     A per-version module (`foo.cpython-311-…so`) legitimately uses private
@@ -200,8 +207,9 @@ def transform(data, codec): ...   # renamed kwarg, dropped default
 ```
 
 The export table is still one `PyInit_` symbol and the imported C-API is
-unchanged, so `compare`/`scan --abi3` see nothing. The break lives entirely in
-the Python signatures, which are not in the binary's ABI surface at all.
+unchanged, so `compare` (with or without `--abi3`) sees nothing. The break
+lives entirely in the Python signatures, which are not in the binary's ABI
+surface at all.
 
 ### Where the surface comes from
 
