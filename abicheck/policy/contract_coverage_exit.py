@@ -148,7 +148,7 @@ def coverage_diagnostic_from_summary(
     """The same notice, built from a rendered ``scan`` summary dict.
 
     ``scan``'s CLI never holds the ``DiffResult`` -- ``_run_baseline_compare``
-    is shared with ``service_scan.run_scan()`` and returns a summary, which is
+    is shared with ``dry_run_estimate.run_scan()`` and returns a summary, which is
     exactly why the announcement cannot live there. But that summary already
     carries the ledger, so the command can explain its own exit without any
     of the result plumbing (Codex review).
@@ -257,7 +257,7 @@ def announce_coverage_floor(
     """Print the coverage notice to stderr, unless the report already says it.
 
     The front end's half of the split: :func:`fold_coverage_exit` stays pure
-    for ``service_scan.run_scan()``, and this is the only thing that writes.
+    for ``dry_run_estimate.run_scan()``, and this is the only thing that writes.
     It lives beside the message rather than in each command so the decision
     "does this invocation need telling?" has one answer, and so a second CLI
     exit path cannot acquire the floor without the explanation.
@@ -281,7 +281,7 @@ def fold_coverage_exit(base: int, result: Any) -> int:
     than "1 when the ledger fails", because the two axes are independent and
     the compatibility one is strictly more severe when it speaks at all.
 
-    **Pure**, deliberately: this is on the path ``service_scan.run_scan()``
+    **Pure**, deliberately: this is on the path ``dry_run_estimate.run_scan()``
     takes, and a library call that writes to stderr is an unexpected side
     effect for a caller that already gets the coverage details back in its
     result (Codex review). Announcing belongs to the front end, which is

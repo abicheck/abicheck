@@ -724,6 +724,45 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "the `scan` command and its scan-only modules (ADR-068 Phase 6 --"
+        " duplicated `compare`/`compare --no-baseline`; hard removal, no"
+        " alias, no deprecation window -- `abicheck scan` now exits 64"
+        " naming `compare`/`compare --no-baseline` as the replacement)",
+        (
+            "abicheck scan",
+            "cli_scan.py",
+            "cli_scan_baseline.py",
+            "cli_scan_helpers.py",
+            "cli_scan_receipt.py",
+            "scan_engine.py",
+            "service_scan.py",
+            "scan_abi3_resolve.py",
+            "pr_comment_scan.py",
+            "pr_comment_scan_abort.py",
+            "scan_against.py",
+            "scan_dry_run.py",
+            "scan_abi3_dry_run.py",
+            "scan_abort_result.py",
+            "scan_config.py",
+            "SCAN_SCHEMA_VERSION",
+            "buildsource/poi.py",
+            "buildsource/risk.py",
+        ),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "contribute/adr/index.md",
+                "use/evidence-depth.md",
+                "use/github-action-source-scans.md",
+                "reference/exit-codes.md",
+                "start/scanning-conda-packages.md",
+            }
+        ),
+    ),
 )
 
 

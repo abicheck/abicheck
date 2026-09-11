@@ -110,22 +110,31 @@ def pr_comment_cmd(
 
     REPORT is a JSON file from 'abicheck compare --format json' (directory/
     package fan-out and --used-by/--required-symbol(s) scoped reports all
-    produce a compatible shape), 'abicheck scan --against ... --format
-    json' (recognised by its own 'scan_schema_version' key), or 'abicheck
-    compare --no-baseline ... --format json' (recognised by its own
-    'audit_report_schema_version' key -- the Action's own audit-only
-    mode: scan translation, ADR-068, produces this shape). When
-    --on=never, or --on=changes and the report has no changes, nothing is
-    written (an empty --output file is produced) so the caller can skip
-    posting. Action/library-only: invoke as `python -m abicheck.cli_pr_comment`,
-    not `abicheck pr-comment` (this is not a public abicheck subcommand).
+    produce a compatible shape) or 'abicheck compare --no-baseline ...
+    --format json' (recognised by its own 'audit_report_schema_version' key
+    -- the Action's own audit-only mode: scan translation, ADR-068,
+    produces this shape). A *stored* report from the retired `scan` command
+    (recognised by its own 'scan_schema_version' key) is no longer a
+    supported input -- `scan` was deleted outright (ADR-068 Phase 6, no
+    deprecation window) along with this tool's own scan-shaped adapter, and
+    feeding one in now is a clear, loud error rather than a silently
+    misrendered "no changes" comment. When --on=never, or --on=changes and
+    the report has no changes, nothing is written (an empty --output file
+    is produced) so the caller can skip posting. Action/library-only:
+    invoke as `python -m abicheck.cli_pr_comment`, not `abicheck
+    pr-comment` (this is not a public abicheck subcommand).
 
     \b
     Example:
       abicheck compare old.json new.so -H include/ --format json -o report.json
       python -m abicheck.cli_pr_comment report.json --sha "$GITHUB_SHA" -o comment.md
     """
-    from .pr_comment import build_model, render_comment, should_post
+    from .pr_comment import (
+        UnsupportedReportShapeError,
+        build_model,
+        render_comment,
+        should_post,
+    )
 
     try:
         data = json.loads(report.read_text(encoding="utf-8"))
@@ -136,14 +145,23 @@ def pr_comment_cmd(
         raise click.ClickException("JSON report must be an object")
 
     if subject and "subject" not in data:
-        # Only `scan`'s report shape reads this (see `pr_comment_scan.from_scan`)
-        # -- a compare/appcompat/release report already names its own
-        # subject from the report itself and never looks at this key.
+        # No surviving report shape reads this key today -- it was only
+        # `scan`'s own report shape (see `pr_comment.build_model`'s
+        # UnsupportedReportShapeError for a stored scan report, and
+        # `docs/contribute/known-gaps.md`'s closed gate_contribution entry
+        # for the wider context); a compare/appcompat/release/no-baseline
+        # report already names its own subject from the report itself.
+        # Kept as a harmless no-op assignment rather than removed outright,
+        # since --subject itself is unaffected front-end surface this PR's
+        # scope does not touch.
         data["subject"] = subject
 
-    model = build_model(
-        data, gate_api_break=gate_api_break, gate_breaking=gate_breaking
-    )
+    try:
+        model = build_model(
+            data, gate_api_break=gate_api_break, gate_breaking=gate_breaking
+        )
+    except UnsupportedReportShapeError as e:
+        raise click.ClickException(str(e)) from e
     if not should_post(model, post_on):
         # Nothing to post — leave an empty file so a `-s` check skips posting.
         if output is not None:

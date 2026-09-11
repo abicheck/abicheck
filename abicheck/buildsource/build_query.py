@@ -78,7 +78,7 @@ ABICHECK_BUILD_DIR = ".abicheck-build"
 #: in-tree build dir — but pruning the name is kept as cheap defence against a
 #: stray ``.abicheck-build`` from an older abicheck version or a user convention,
 #: whose generated headers (config.h / version.h) would otherwise inflate the L2
-#: surface. Single source of truth shared by ``service_scan.expand_header_inputs``,
+#: surface. Single source of truth shared by ``dry_run_estimate.expand_header_inputs``,
 #: ``cli_resolve._expand_header_inputs``, and ``pattern_scan``.
 PRUNED_HEADER_DIR_SEGMENTS: frozenset[str] = frozenset(
     {".git", ".hg", ".svn", ABICHECK_BUILD_DIR}
@@ -263,7 +263,7 @@ def drain_build_dir_cleanups(cleanups: Iterable[Callable[[], None]]) -> None:
     ``suppress`` — one failing thunk must not abort the remaining cleanups (which
     would leak the other dirs/locks) nor, when run from a caller's ``finally``,
     replace an in-flight exception with a stray ``OSError``. The single drain site
-    shared by ``inline.collect_inline_pack``, ``cli_scan`` and ``service_scan``.
+    shared by ``inline.collect_inline_pack``, ``cli_scan`` and ``dry_run_estimate``.
     """
     for cleanup in cleanups:
         with contextlib.suppress(Exception):

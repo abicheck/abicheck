@@ -41,7 +41,15 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
-    from .poi import PointsOfInterest
+
+# `buildsource.poi` (the D7 points-of-interest work-list this Protocol's
+# `run()` used to type against) was deleted with the scan engine (ADR-068
+# Phase 6) -- its own call-site audit found no `compare`-pipeline caller for
+# it. This `LayerProvider` contract has no real caller either (the scan
+# ladder it described is gone), but is kept as-is per that same audit's own
+# scope decision; `Any` replaces the now-gone `PointsOfInterest` annotation
+# rather than reintroducing a dead type.
+PointsOfInterest = Any
 
 
 @dataclass(frozen=True)

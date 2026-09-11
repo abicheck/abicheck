@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Test-local operand description for :func:`abicheck.service_scan.estimate_scan`.
+"""Test-local operand description for :func:`abicheck.dry_run_estimate.estimate_scan`.
 
 ADR-068 Phase 4's typed-API slice retired ``ScanRequest``: a dry-run cost
 projection is a projection over an *input*, so ``estimate_scan`` now takes the
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from abicheck.api_types import InputSpec
-from abicheck.service_scan import CostEstimate, estimate_scan
+from abicheck.dry_run_estimate import CostEstimate, estimate_scan
 
 
 @dataclass

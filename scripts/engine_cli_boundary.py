@@ -53,12 +53,18 @@ def _read(p: Path) -> str:
 # ``workflows/artifact/``), and the build-source evidence package. None of
 # these may import ``click`` or a
 # ``cli_*`` sibling module — that's a CLI concept leaking into a layer both
-# the CLI and the typed Python API depend on, which is exactly the
-# inversion `scan_engine.py` importing `click` and raising
-# `click.ClickException` already demonstrates. A frontend (`cli*.py`,
+# the CLI and the typed Python API depend on, an inversion the now-deleted
+# `scan_engine.py` (importing `click` and raising `click.ClickException`,
+# ADR-068 Phase 6) used to demonstrate. A frontend (`cli*.py`,
 # `compat/cli.py`) is on the *other* side of this boundary and is
 # deliberately not covered here — it may import engine modules freely.
-_ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset({"scan_engine.py"})
+# `dry_run_estimate.py` (the dry-run cost model / header-expansion module
+# `service_scan.py` was renamed to when its own scan half was deleted,
+# ADR-068 Phase 6) doesn't match the `service*`/`artifact_*` prefix rules
+# below under its new name, so it needs the same explicit basename
+# inclusion `scan_engine.py` used to have -- it is still a Tier-2-adjacent
+# engine-layer module (called from `workflows`/`frontends`), not a CLI one.
+_ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset({"dry_run_estimate.py"})
 
 #: Package-rooted engine-layer trees, matched as a ``tail.startswith(...)``
 #: prefix. ``workflows/artifact/`` is ADR-061 Phase 3's migrated home for
@@ -74,7 +80,7 @@ _ENGINE_PACKAGE_PREFIXES: tuple[str, ...] = ("buildsource/", "workflows/artifact
 def _is_engine_module(rel: str) -> bool:
     """True if *rel* (posix, relative to repo root) is in the engine layer.
 
-    ``abicheck/scan_engine.py``, every ``abicheck/service*.py``, every
+    Every ``abicheck/service*.py``, every
     ``abicheck/artifact_*.py`` (the artifact-application service Phase 1 of
     the convergence plan introduces -- doesn't exist yet, covered pre-
     emptively so this predicate doesn't need a second edit the day it
@@ -115,18 +121,17 @@ def _is_engine_module(rel: str) -> bool:
 # violation's 1-based rank among identically-described violations in the
 # same file, in top-to-bottom (line) order — stable unless a new,
 # identically-shaped import is inserted earlier in the same file, which is
-# the one case where re-numbering is actually correct (`service_scan.py`
+# the one case where re-numbering is actually correct (`dry_run_estimate.py`
 # used to hold three identically-described `from .cli_scan_baseline import
 # ...` entries, the real case this format was shaped to disambiguate; they
 # went with `run_scan` in ADR-068 Phase 4's typed-API slice, and that file
 # no longer appears here at all).
-ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "abicheck/scan_engine.py::import click::1",
-        "abicheck/scan_engine.py::from .cli_scan_baseline import ...::1",
-        "abicheck/scan_engine.py::from .cli_scan_helpers import ...::1",
-    }
-)
+# Empty since ADR-068 Phase 6: `scan_engine.py`, the only module that ever
+# populated this allowlist (its `click`/`cli_scan_baseline`/`cli_scan_helpers`
+# inversions), was deleted with the `scan` command itself. Kept as a real
+# frozenset (not removed outright) so a future genuine inversion has
+# somewhere to register, per this file's own allowlist-and-shrink design.
+ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset()
 
 
 def _is_cli_component(name: str) -> bool:

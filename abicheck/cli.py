@@ -66,7 +66,7 @@ cli_help.configure_rich_help()  # register --help option-group panels (G21.8 / M
 def main() -> None:
     """abicheck — ABI compatibility checker for C/C++ shared libraries."""
     # The plain CLI/CI path has no outer watchdog analogous to the MCP path's
-    # service_scan._kill_process_tree; without this, an external SIGTERM
+    # dry_run_estimate._kill_process_tree; without this, an external SIGTERM
     # (job-scheduler cancellation, a CI step's own timeout) can orphan a
     # detached clang/castxml process group started by deadline.run_bounded
     # (Codex review, PR #591).
@@ -119,7 +119,6 @@ from . import (  # noqa: E402  — must run after `main` is defined
     cli_aggregate,  # noqa: F401  — registers aggregate
     cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
     cli_project,  # noqa: F401  — registers project (validate, validate-build, plan)
-    cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
 )
 from .cli_options import variant_options  # noqa: E402

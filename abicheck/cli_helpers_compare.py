@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .config_paths import find_config_in_dir
-from .service_scan import pair_wide_cxx20_std_override
+from .dry_run_estimate import pair_wide_cxx20_std_override
 from .workflows.extraction import (
     has_explicit_std,
     strip_vendor_hash as strip_vendor_hash,
@@ -44,9 +44,9 @@ from .workflows.extraction import (
 if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .compatibility_evaluation_frontend import PublicSymbolsList
+    from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .model.consumer_spec import ConsumerAppInput
-    from .service_scan import CompileContext
     from .workflows.extraction import BuildConfig
     from .workflows.gate import SeverityConfig
     from .workflows.policy_file import PolicyFile
@@ -240,7 +240,7 @@ def _pair_wide_dialect_override(
     """Pin ``-std=gnu++20`` for BOTH compare sides at once, or neither (P0 fix).
 
     Thin wrapper around the shared core
-    (:func:`~abicheck.service_scan.pair_wide_cxx20_std_override`, also used by
+    (:func:`~abicheck.dry_run_estimate.pair_wide_cxx20_std_override`, also used by
     ``service.run_compare_request``'s Python-API/MCP path, so the policy can't
     drift between the two front-ends) that applies the decision to this CLI
     path's two ``CompileContext`` objects: ``compile_context`` (used by the
@@ -391,7 +391,7 @@ def _collect_additions(result: DiffResult) -> list[object]:
 
 
 #: Owned by ``binary_utils.py`` (a true leaf) to break the ADR-056 cycle
-#: `bundle -> cli_helpers_compare -> service -> service_scan -> bundle`; reached
+#: `bundle -> cli_helpers_compare -> service -> dry_run_estimate -> bundle`; reached
 #: via ``workflows.extraction`` since ADR-061 P4. Re-exported for every caller.
 from .workflows.extraction import (  # noqa: E402,I001
     _canonical_library_key as _canonical_library_key,

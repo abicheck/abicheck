@@ -25,14 +25,16 @@ gives a caller with real chain context (a longitudinal history, or a CI job
 diffing today's findings against a stored prior run) exactly this
 vocabulary.
 
-What remains a **real, separate** gap -- unrelated to whether the generic
-vocabulary exists -- is that ``scan --against``'s own crosscheck pass still
-runs single-sided (Phase 2a: "cross-source checks ... per side,
-evolution-stated" is what wires this primitive *into* crosscheck itself).
-``test_f9_scan_against_has_no_per_side_crosscheck_at_all`` keeps documenting
-that narrower, still-open gap; it is intentionally not registered in
-``gaps.py`` any more, since ``NOT_YET_IMPLEMENTED_ANYWHERE`` is specifically
-for "neither tool has this vocabulary at all", which is no longer true.
+This module used to also keep a third test,
+``test_f9_scan_against_has_no_per_side_crosscheck_at_all``, documenting a
+narrower, still-open half of F-9: ``scan --against``'s own crosscheck pass
+ran single-sided (an AST-level pin on ``scan_engine.py``'s single
+``run_crosschecks(new_snap, ...)`` call). That gap was specific to
+``scan_engine.py``, deleted outright with the ``scan`` command itself
+(ADR-068 Phase 6) -- there is no ``compare``-side equivalent single-sided
+crosscheck limitation to pin (``compare``'s own cross-source-checks wiring
+already runs per side via ``workflows.cross_source_evolution``, see that
+module's own coverage), so the test went with it rather than being ported.
 """
 
 from __future__ import annotations
@@ -110,45 +112,3 @@ def test_f9_resolved_is_expressible_via_the_generic_primitive() -> None:
     # only inferable by absence -- exactly F-9's "must be visible" half.
     resolved_symbols = {c.symbol for c in current.resolved_findings}
     assert "_ZN3foo4goneEv" in resolved_symbols
-
-
-def test_f9_scan_against_has_no_per_side_crosscheck_at_all() -> None:
-    """F-9's narrower, still-open half: `resolved` needs crosscheck itself
-    to run over BOTH sides and diff the two outcomes -- unrelated to
-    whether the generic vocabulary exists (it does, see the test above).
-    `scan --against` runs the always-on crosscheck tier over the
-    **candidate** snapshot only (scan_engine.py's single
-    `run_crosschecks(new_snap, ...)` call): there is no second, OLD-side
-    crosscheck pass for scan's own report to diff against. Phase 2a
-    ("cross-source checks ... per side, evolution-stated") is what closes
-    this; it is not part of Phase 1 item 2."""
-    import ast
-    import inspect
-
-    from abicheck import scan_engine
-
-    tree = ast.parse(inspect.getsource(scan_engine))
-    calls = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "run_crosschecks"
-    ]
-    # A real AST match, not a textual count that a comment or docstring
-    # mentioning "run_crosschecks(" could inflate (Codex review): exactly
-    # one call expression, over the *candidate* snapshot (new_snap) --
-    # never a second, OLD-side pass, which a baseline-diffed crosscheck
-    # would require to express "resolved".
-    assert len(calls) == 1, (
-        f"scan_engine.py calls run_crosschecks() {len(calls)} time(s), not 1 -- "
-        "if this is a baseline-side crosscheck pass landing, Phase 2a may be "
-        "closing; update this test to demonstrate crosscheck itself is now "
-        "evolution-stated per side."
-    )
-    (call,) = calls
-    assert call.args and isinstance(call.args[0], ast.Name)
-    assert call.args[0].id == "new_snap", (
-        f"run_crosschecks() is now called with {call.args[0].id!r}, not "
-        "new_snap -- re-examine whether it now runs over the baseline side too"
-    )

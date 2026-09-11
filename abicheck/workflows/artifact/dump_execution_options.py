@@ -24,7 +24,7 @@ problem, so moving them (rather than the execution logic that *constructs*
 :class:`~abicheck.service_dump_pipeline.DumpResult`, which cannot move here
 without ``workflows`` importing back up into the flat ``service_`` family)
 is the safe half of this split. Mirrors the precedent set when
-``service_scan.py`` split ``_descendant_pgids``/``_kill_process_tree`` out
+``dry_run_estimate.py`` split ``_descendant_pgids``/``_kill_process_tree`` out
 to a ``workflows/scan_subprocess.py`` for the identical reason (that module
 went with ``run_scan_subprocess`` in ADR-068 Phase 4; see
 ``docs/contribute/plans/one-semantic-pipeline.md``'s "Closed in a later

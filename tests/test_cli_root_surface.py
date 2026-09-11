@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Root command-surface behavior tests (ADR-043, consolidated by ADR-054).
+"""Root command-surface behavior tests (ADR-043, consolidated by ADR-054;
+``scan`` retired by ADR-068 Phase 6).
 
 The pre-1.0 CLI reset required the public root surface to show *exactly*
 ``dump``, ``compare``, ``scan``, ``deps``, ``compat``, plus ``aggregate``
@@ -28,19 +29,21 @@ avoid. ADR-054 consolidates those four into one ``project`` group
 ``plan --dump-manifest`` diagnostic into ``dump --dump-manifest --dry-run``;
 ``build-output baseline-libraries`` and ``run-plan to-aggregate-manifest``
 are dropped from the public CLI entirely (the former stays a library
-function, the latter is now `aggregate --run-plan`).
+function, the latter is now `aggregate --run-plan`). ADR-068 Phase 6 then
+removed ``scan`` itself outright — it duplicated ``compare``
+(with/without a stored baseline) — with no alias and no deprecation period.
 
 The public root surface is therefore *exactly* ``dump``, ``compare``,
-``scan``, ``deps``, ``compat``, ``aggregate``, ``project`` — with no hidden
+``deps``, ``compat``, ``aggregate``, ``project`` — with no hidden
 aliases, and no deprecated shims for the deleted commands (``appcompat``,
 ``plugin-check``, ``baseline``, ``collect``, ``merge``,
 ``recommend-collect-mode``, ``debian-symbols``, ``doctor``, ``config``,
 ``init``, ``surface-report``, ``pr-comment``, ``suggest-suppressions``,
-``probe``, ``build-output``, ``project-targets``, ``run-plan``, ``plan``).
-This module pins that contract as an executable behavior test, distinct
-from ``test_cli_surface_diff.py`` (which exercises the CLI-surface-dump
-scripts used by the CI gate) and ``test_cli_contract.py`` (the Tier-2
-chokepoint gate).
+``probe``, ``build-output``, ``project-targets``, ``run-plan``, ``plan``,
+``scan``). This module pins that contract as an executable behavior test,
+distinct from ``test_cli_surface_diff.py`` (which exercises the
+CLI-surface-dump scripts used by the CI gate) and ``test_cli_contract.py``
+(the Tier-2 chokepoint gate).
 """
 
 from __future__ import annotations
@@ -57,7 +60,6 @@ _PUBLIC_COMMANDS = frozenset(
     {
         "dump",
         "compare",
-        "scan",
         "deps",
         "compat",
         "aggregate",
@@ -66,6 +68,7 @@ _PUBLIC_COMMANDS = frozenset(
 )
 
 _REMOVED_COMMANDS = (
+    "scan",
     "appcompat",
     "plugin-check",
     "baseline",

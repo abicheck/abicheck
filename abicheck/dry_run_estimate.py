@@ -45,7 +45,7 @@ from .compile_context import CompileContext as CompileContext  # re-exported, AD
 
 # pair_wide_cxx20_std_override lives in the leaf `cxx20_pair_dialect` module
 # (moved for line-budget room, see that module's own docstring), re-exported
-# here so every existing `from .service_scan import pair_wide_cxx20_std_override`
+# here so every existing `from .dry_run_estimate import pair_wide_cxx20_std_override`
 # call site is unaffected.
 from .cxx20_pair_dialect import (
     pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,

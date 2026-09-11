@@ -408,7 +408,7 @@ def scan_bazel_scoping_failure(
 ) -> PlanningFailure | None:
     """The shared ``scan`` pre-flight guard for :func:`bazel_target_scoping_failure`.
 
-    Used by ``scan_engine.run_scan_core`` (per-member), ``service_scan.
+    Used by ``scan_engine.run_scan_core`` (per-member), ``dry_run_estimate.
     run_scan_set`` (once, before discovery), and both of ``cli_scan.py``'s
     own CLI-reachable pre-flight checks (``scan_cmd``'s single-binary path,
     ``_run_artifact_set``'s own) so every caller shares one exemption rule,

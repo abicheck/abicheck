@@ -74,7 +74,7 @@ computed and heavily pinned exit code (`tests/test_exit_code_integrity.py`'s
 `TestReleaseExitDecisionForReportAgreesWithRealExit`) without changing that
 function itself. `scan`'s `_BudgetOverflow`/`_EvidenceContractError` abort
 points (`scan_engine.py`), which raise before any report exists, have since
-landed too: the typed `service_scan.ScanResult` API persists a real
+landed too: the typed `dry_run_estimate.ScanResult` API persists a real
 `ExitDecision` into `report["exit"]` for both
 (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`, prior
 gate/coverage/assurance contributions preserved across a *late*

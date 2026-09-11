@@ -22,16 +22,15 @@ takes the `--depth`/`--since`/`--changed-path`/`--sources`/`--build-info`
 inputs directly. `abicheck dump INPUT --depth …` pins the same dial when you
 are capturing a reusable snapshot instead of comparing.
 
-!!! warning "`scan` is being retired — don't build new workflows on it"
-    The legacy `abicheck scan` command still exists and still accepts
-    `--depth`, but
+!!! warning "`scan` has been retired"
     [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    retires it as a second analysis product. Its removal is a **hard
-    removal with no deprecation window** (ADR-068 D8): once the retirement
-    PR lands, `abicheck scan` exits `64` with `No such command`, naming
-    `compare --no-baseline` in the error. This page shows a `scan`
-    invocation only where `compare` has **no equivalent today** — each such
-    place says so explicitly and links to the tracking gap.
+    retired `scan` as a second analysis product — it duplicated `compare`
+    (with/without a stored baseline). Its removal was a **hard removal with
+    no deprecation window** (ADR-068 D8): `abicheck scan` now exits `64`
+    with `No such command`, naming `compare`/`compare --no-baseline` in the
+    error. This page describes `compare` (and `dump`) only; a handful of
+    passages below still explain `scan`'s own historical behavior for
+    context, clearly marked as such.
 
 **One capability on this page is still `scan`-only** (verified live against
 the current build, not read off `--help`), and it is an open migration item
@@ -68,16 +67,16 @@ ruling (b)): omitting `--depth` on `scan` now resolves to the fixed
 unchanged). `--crosscheck KEY=error` promotion syntax is the one item
 left with no `compare` equivalent.
 
-`abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
-**positional** argument (not a flag); `--against OLD` is the previous
-dump/library/directory/package to compare against, and omitting it means a
-one-build audit. `scan` is no longer required for that: as of 2026-09-09
-`compare --no-baseline CANDIDATE` reproduces the audit's findings in full
-(both the stored-snapshot crash and the live-binary empty-`changes` result
-are fixed), takes `--depth`/`--sources`/`--build-info`/`--contract`/
-`--dry-run`, and is pinned against `scan` — at least every check `scan`
-reports, counted per finding kind — on all eleven G20 audit fixtures by
-`tests/parity/test_no_baseline_audit_corpus_parity.py`.
+The retired `scan ARTIFACT [OPTIONS]` command used to take the scanned
+binary/snapshot as a **positional** argument (not a flag), with `--against
+OLD` naming the previous dump/library/directory/package to compare against
+and omitting it meaning a one-build audit. `compare --no-baseline
+CANDIDATE` is that audit's replacement: it reproduces the audit's findings
+in full, takes `--depth`/`--sources`/`--build-info`/`--contract`/
+`--dry-run`, and was pinned against `scan` — at least every check `scan`
+reported, counted per finding kind — on all eleven G20 audit fixtures by
+`tests/parity/test_no_baseline_audit_corpus_parity.py` before `scan` was
+deleted.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -642,7 +641,7 @@ profile that configured it.
 > diff.
 
 ```bash
-abicheck scan new.so -H include/ --depth source --since origin/main
+abicheck compare old.so new.so -H include/ --depth source --since origin/main
 ```
 
 Omitting `--depth` is likewise never a risk-based choice on `compare`: with

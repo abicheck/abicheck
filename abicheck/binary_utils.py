@@ -255,7 +255,7 @@ def _canonical_library_key(path: Path) -> str:
     Lives in this leaf module (not ``cli_helpers_compare.py``, which re-exports
     it for back-compat) so ``bundle.py``'s ``discover_artifact_set`` (ADR-056)
     can use it without a ``bundle -> cli_helpers_compare -> service ->
-    service_scan -> bundle`` import cycle (`service_scan.py` imports `bundle`
+    dry_run_estimate -> bundle`` import cycle (`dry_run_estimate.py` imports `bundle`
     for the ``--artifact-set`` audit path).
 
     A compressed snapshot's storage suffix (``.json.gz``/``.json.zst``, ADR-059)

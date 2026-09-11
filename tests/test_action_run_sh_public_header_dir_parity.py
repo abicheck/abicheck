@@ -31,7 +31,7 @@ baseline of the same project spuriously read ``NOT_COMPARABLE`` (a
 ``profile_fingerprint`` mismatch on ``include_sequence``) with no real recipe
 difference. Fixed by also forwarding ``public-header-dir`` as a bare ``-H``
 root for ``scan`` -- ``scan``'s own ``-H <dir>`` expansion
-(``service_scan.expand_header_inputs``) recursively extracts every header
+(``dry_run_estimate.expand_header_inputs``) recursively extracts every header
 under a directory identically to ``dump``'s (``header_utils.
 iter_directory_headers``), so this closes the gap with no CLI change needed.
 

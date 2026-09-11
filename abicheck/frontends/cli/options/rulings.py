@@ -432,8 +432,12 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "--env-matrix is *not* in `_extra_args_has_scan_only_flag`, so "
         "removing it from compare alone would silently break that "
         "translation, and widening the predicate is a change to scan's own "
-        "routing.",
-        blocker="Phase 6 (`scan` retirement) -- same PR, not before",
+        "routing. `scan` itself is now gone (ADR-068 Phase 6), which "
+        "resolves the routing hazard this blocker named -- but the CONFIG "
+        "demotion (a new `deployment:` config key + resolver wiring, no "
+        "config key exists today) is real, unimplemented feature work, "
+        "not landed in the Phase 6 PR itself; tracked as a followup.",
+        blocker="A `deployment:` config key + resolver -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
     ),
     "--require-complete-analysis": _deferred(
         "P0.4's orthogonal assurance floor. §4.1 rules it CONFIG "
@@ -441,8 +445,12 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "scan-routing blocker as --env-matrix, verified the same way, and "
         "it additionally has a dedicated Action input "
         "(`require-complete-analysis`) that must retire in the same PR for "
-        "front-end parity.",
-        blocker="Phase 6 (`scan` retirement) -- same PR, not before",
+        "front-end parity. `scan` itself is now gone (ADR-068 Phase 6), "
+        "which resolves the routing hazard this blocker named -- but the "
+        "CONFIG demotion (`assurance.require_complete` resolver wiring + "
+        "the Action input retirement) is real, unimplemented feature work, "
+        "not landed in the Phase 6 PR itself; tracked as a followup.",
+        blocker="`assurance.require_complete` resolver wiring + Action-input retirement -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
     ),
     "--scope-public-headers": _deferred(
         "Phase 9 collapses this into `--contract public`/`--contract all` "
@@ -582,9 +590,14 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "a live `scan` option *and* is listed in action/run.sh's "
         "`_extra_args_has_scan_only_flag`, so the shared `build-target` "
         "input still drives a real flag on a command this workstream may "
-        "not touch yet. It is scan's lifetime that blocks this, not "
-        "ADR-047's.",
-        blocker="Phase 6 (`scan` retirement) -- the shared Action input still drives `scan --build-target`",
+        "not touch yet. It was scan's lifetime that blocked this, not "
+        "ADR-047's -- `scan` itself is now gone (ADR-068 Phase 6), which "
+        "resolves that hazard, but actually removing `dump --build-target` "
+        "and rewiring its callers (`service_dump_pipeline.py`, "
+        "`cli_dump_request.py`, `errors.py`) onto `build.targets` alone is "
+        "real, unimplemented feature work, not landed in the Phase 6 PR "
+        "itself; tracked as a followup.",
+        blocker="Removing the flag and rewiring its dump-pipeline callers onto `build.targets` -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
     ),
 }
 

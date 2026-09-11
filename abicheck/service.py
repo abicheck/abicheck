@@ -31,11 +31,11 @@ from .model import AbiSnapshot
 
 # `_attach_header_graph` moved to `service_header_graph_attach.py`, purely to
 # stay under the AI-readiness 2000-line hard cap -- the identical reason
-# `service_render.py`/`service_scan.py`/`service_compare_pipeline.py`/
+# `service_render.py`/`dry_run_estimate.py`/`service_compare_pipeline.py`/
 # `service_dump_pipeline.py` (re-exported further down this file) already
 # moved out. Imported here, eagerly, rather than down with those: unlike
 # them, this module has no import-cycle relationship with `service.py`
-# itself (it reaches `.compile_context`/`.service_scan`/`.header_utils`/
+# itself (it reaches `.compile_context`/`.dry_run_estimate`/`.header_utils`/
 # `.errors` directly, none of which import `.service`), so there is no
 # ordering constraint forcing it to the tail. Re-exported under its original
 # private name so both `monkeypatch.setattr("abicheck.service.
@@ -85,7 +85,7 @@ from .workflows.request_inputs import InputSpec
 # PE/Mach-O header-scoped dump lives in the sibling module service_header_scoped
 # (service.py is at the file-size cap). Bound via importlib rather than a static
 # `from .service_header_scoped import ...` -- service_header_scoped reaches
-# service_scan, which reaches back to service through the pre-existing,
+# dry_run_estimate, which reaches back to service through the pre-existing,
 # already-baselined cli_buildsource/scan_engine SCC (AGENTS.md "M1-3"/CLAUDE.md
 # "What NOT to do"); a static import here would pull this new leaf module into
 # that same cycle, which the AI-readiness import-cycle-growth gate rejects. An
@@ -115,7 +115,7 @@ if TYPE_CHECKING:
 # ── Binary dumping (extracted to leaf module ``service_dump_native`` to stay
 # under the AI-readiness size cap, the same pattern
 # ``service_metadata_attach``/``service_header_graph_attach``/
-# ``service_header_scoped``/``service_render``/``service_scan``/
+# ``service_header_scoped``/``service_render``/``dry_run_estimate``/
 # ``service_compare_pipeline``/``service_dump_pipeline`` already follow;
 # re-exported verbatim below so ``from abicheck.service import run_dump``
 # and the several ``_dump_elf``/``_dump_pe``/``_dump_macho``/
@@ -139,6 +139,27 @@ if TYPE_CHECKING:
 # so ``from abicheck.service import resolve_compare_request`` works.
 # ``run_compare_request``/``run_compare`` (their composition and its
 # keyword-argument shim) live there too now, for the same file-size reason. ──
+# ── Dry-run cost model (ADR-035 D10's `[CostEstimate]`) extracted to the leaf
+# module dry_run_estimate, same size-cap/re-export/non-circular-import rationale
+# as service_render above. ADR-068's Phase 4 typed-API slice retired that
+# module's own `ScanRequest`/`ScanResult` (and their `--artifact-set`
+# siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
+# `CompareResult` is the one typed contract now. ────────────────────────────
+from .dry_run_estimate import (  # noqa: E402,F401
+    _HEADER_EXTS,
+    CompileContext,
+    CostEstimate,
+    _count_compile_db_tus,
+    _count_pack_tus,
+    _count_source_tus,
+    _discover_compile_db,
+    _is_header_path,
+    _is_source_tu_path,
+    _scan_imports,
+    estimate_scan,
+    expand_header_inputs,
+    pair_wide_cxx20_std_override,
+)
 from .service_compare_pipeline import (  # noqa: E402,F401
     ResolvedComparePair,
     classify_compare_pair,
@@ -202,28 +223,6 @@ from .service_render import (  # noqa: E402,F401
     render_output,
 )
 
-# ── Dry-run cost model (ADR-035 D10's `[CostEstimate]`) extracted to the leaf
-# module service_scan, same size-cap/re-export/non-circular-import rationale
-# as service_render above. ADR-068's Phase 4 typed-API slice retired that
-# module's own `ScanRequest`/`ScanResult` (and their `--artifact-set`
-# siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
-# `CompareResult` is the one typed contract now. ────────────────────────────
-from .service_scan import (  # noqa: E402,F401
-    _HEADER_EXTS,
-    CompileContext,
-    CostEstimate,
-    _count_compile_db_tus,
-    _count_pack_tus,
-    _count_source_tus,
-    _discover_compile_db,
-    _is_header_path,
-    _is_source_tu_path,
-    _scan_imports,
-    estimate_scan,
-    expand_header_inputs,
-    pair_wide_cxx20_std_override,
-)
-
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/
 # `load_suppression_and_policy`/`_validate_contract_mode`/
 # `dedup_policy_override_warnings` moved into the leaf module
@@ -245,7 +244,7 @@ from .workflows.compare_policy import (  # noqa: E402,F401
 )
 
 # Explicit re-export (mypy strict / no_implicit_reexport): the scan engine moved
-# to the leaf module ``service_scan`` but its public names must still resolve as
+# to the leaf module ``dry_run_estimate`` but its public names must still resolve as
 # ``from abicheck.service import ...``.
 __all__ = [
     "CompareRequest",

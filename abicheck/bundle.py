@@ -47,7 +47,7 @@ to build snapshots or run the per-library compares themselves, see
 matches, and diffs for you, then calls :func:`compare_bundle`. Kept in
 ``product_baseline`` rather than here: it needs the per-pair compare engine
 (``service_compare_pipeline.run_compare``), and that module's own import
-graph already reaches back into this one (``service_scan`` calls
+graph already reaches back into this one (``dry_run_estimate`` calls
 :func:`audit_bundle`), so importing it from this module would create an
 import cycle.
 
@@ -157,7 +157,7 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     metadata: dict[str, ElfMetadata] = {}
     for name, path in libraries.items():
         # Cooperative checkpoint (no-op unless a deadline.deadline_scope()
-        # is active, e.g. service_scan.run_scan_set's audit-mode call) --
+        # is active, e.g. dry_run_estimate.run_scan_set's audit-mode call) --
         # lets a large/pathological set's parsing loop abort between
         # members instead of only being caught by an elapsed-time check
         # after the whole snapshot finishes building (Codex review).
@@ -172,7 +172,7 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
         # beyond this one audit-mode caller) is out of scope for this
         # narrow fix. The one place this call path *is* genuinely bounded
         # by an OS-level killable timeout end to end is
-        # service_scan.run_scan_set_subprocess (what MCP's abi_scan uses);
+        # dry_run_estimate.run_scan_set_subprocess (what MCP's abi_scan uses);
         # the CLI path (cli_scan._run_artifact_set) calls run_scan_set()
         # directly, the same architecture the single-binary scan command
         # already uses for run_scan_core, so this is a pre-existing CLI-
@@ -859,7 +859,7 @@ def check_artifact_set_soname_collisions(libraries: dict[str, Path]) -> None:
     P2 regression (Codex review): :func:`audit_bundle` only discovers this
     ambiguity *after* building the full resolution graph — for
     ``scan --artifact-set``, that means only after every member has already
-    been individually scanned (:func:`~abicheck.service_scan.run_scan_set`
+    been individually scanned (:func:`~abicheck.dry_run_estimate.run_scan_set`
     runs :func:`discover_artifact_set` → per-member scans →
     :func:`audit_bundle`, in that order). If an earlier member scan then
     exhausted ``--budget``, this genuine usage error was masked as an
@@ -913,7 +913,7 @@ def artifact_set_member_exports(
     Deliberately narrow and cheap: an ELF header/dynsym-only parse
     (:func:`~abicheck.elf_metadata.parse_elf_metadata`, never raises — an
     unparseable member just contributes an empty set) with no DWARF/header-AST
-    work, run once by :func:`~abicheck.service_scan.run_scan_set` before any
+    work, run once by :func:`~abicheck.dry_run_estimate.run_scan_set` before any
     member's full scan so each member's own ``public_not_exported``
     cross-check can be told the union of what its *siblings* export (a shared
     umbrella header commonly declares more than one member's own public API —

@@ -13,8 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Contract tests for ``explicit_source_extractor`` and the one
-call site that consumes it (``scan_engine._build_new_snapshot``).
+"""Contract tests for ``explicit_source_extractor``.
+
+Its one production call site, ``scan_engine._build_new_snapshot``, was
+deleted with the ``scan`` command (ADR-068 Phase 6) -- no ``compare``-side
+caller passes an explicit ``--ast-frontend`` through to L4 source-ABI
+replay selection today, so this primitive is currently unreachable from any
+production code path (a real, acknowledged capability gap the deletion
+carries, not silently dropped: recorded in the ADR-068 Phase 6 PR). Its own
+contract below stays covered regardless, since the primitive itself is
+still exported and still the one place this decision would be made if/when
+a ``compare``-side caller needs it again -- the ``TestScanEngineCallSitePropagation``
+class this module used to carry (proving ``scan_engine``'s own call site
+propagated the value) is gone with that call site.
 
 **Bug class**: ``config.propagation_completeness`` in
 ``tests/regressions/manifest.py`` — "an accepted configuration value either
@@ -50,15 +61,16 @@ helper it visibly calls, which is exactly the self-consistent, tautological
 check ADR-059 §12's storage incident is the standing example of.
 
 The two end-to-end halves (a real castxml ``dump`` baseline vs. a real
-``scan --against`` candidate) live in
-``tests/test_dump_scan_l3_comparability.py``, where they used to be two
-pinned xfails.
+``scan --against`` candidate) used to live in
+``tests/test_dump_scan_l3_comparability.py``, deleted with the ``scan``
+command itself (ADR-068 Phase 6) -- there is currently no ``compare``-side
+equivalent end-to-end coverage (see the module docstring's note on the now
+orphaned production call site).
 """
 
 from __future__ import annotations
 
 import itertools
-from pathlib import Path
 
 import pytest
 
@@ -129,10 +141,6 @@ _EXPECTED_BY_FRONTEND: dict[str, str | None] = {
     "nonsense": None,
     "": None,
 }
-
-
-class _StopResolution(Exception):
-    """Abort the real resolution once the spy has captured what it needs."""
 
 
 def _ctx(frontend: str) -> CompileContext:
@@ -249,67 +257,6 @@ class TestExplicitlyRequestedSourceExtractorContract:
         assert explicit_source_extractor(_ctx(frontend)) is None
         _impl, tool_name = _make_source_extractor("auto", "clang")
         assert tool_name == "clang"
-
-
-class TestScanEngineCallSitePropagation:
-    """The call site actually consumes the primitive.
-
-    ``tests/test_dump_scan_l3_comparability.py`` proves this end to end with a
-    real compiler, but that module is ``integration``-marked and so excluded
-    from the default fast lane. A hardcoded ``source_extractor="auto"``
-    reappearing in ``scan_engine`` is exactly the regression that started
-    here, and it must not be able to reach a PR whose author ran only the
-    fast command.
-    """
-
-    @staticmethod
-    def _captured_source_extractor(
-        monkeypatch: pytest.MonkeyPatch, frontend: str
-    ) -> object:
-        """The ``source_extractor`` a real ``_build_new_snapshot`` passes on.
-
-        Spies on the shared resolver and aborts as soon as the argument is
-        captured, so this stays a fast-lane test with no compiler, no binary
-        and no snapshot work behind it.
-        """
-        import abicheck.scan_engine as scan_engine
-        import abicheck.workflows.artifact.execute as execute
-
-        captured: dict[str, object] = {}
-
-        def _spy(*_args: object, **kwargs: object) -> object:
-            """Capture the kwarg under test, then abort the resolution."""
-            captured["source_extractor"] = kwargs.get("source_extractor")
-            raise _StopResolution
-
-        monkeypatch.setattr(execute, "_resolve_side_snapshot_impl", _spy)
-        with pytest.raises(_StopResolution):
-            scan_engine._build_new_snapshot(
-                binary=Path("libfoo.so"),
-                headers=[],
-                includes=[],
-                sources=None,
-                collect_mode="source-target",
-                lang="c++",
-                allow_build_query=False,
-                compile_context=CompileContext(frontend=frontend),
-            )
-        return captured["source_extractor"]
-
-    def test_an_explicit_frontend_reaches_the_l4_extractor(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Both concrete backends reach L4 replay when explicitly requested."""
-        assert self._captured_source_extractor(monkeypatch, "castxml") == "castxml"
-        assert self._captured_source_extractor(monkeypatch, "clang") == "clang"
-
-    @pytest.mark.parametrize("frontend", ("auto", "hybrid", "android", "nonsense"))
-    def test_an_unstated_frontend_keeps_scans_own_default(
-        self, frontend: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Unchanged behaviour, pinned so a future "just use effective_frontend"
-        simplification cannot silently flip ``scan``'s default to castxml."""
-        assert self._captured_source_extractor(monkeypatch, frontend) == "auto"
 
 
 class TestNeverRaises:

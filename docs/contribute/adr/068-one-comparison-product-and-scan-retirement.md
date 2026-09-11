@@ -1,7 +1,15 @@
 # ADR-068: One Comparison Product — Retiring `scan` and Consolidating the CLI Conceptual Model
 
 **Date:** 2026-09-06
-**Status:** Proposed — not implemented. Supersedes
+**Status:** Accepted — Phase 6 (`scan` retirement) has landed: the `scan`
+root command is deleted outright (`abicheck scan` exits 64, naming
+`compare`/`compare --no-baseline` as the replacement), its scan-only
+modules and tests are deleted, and `tests/parity/` is now a compare-only
+regression corpus. Three flag demotions Phase 6 unblocked
+(`compare --env-matrix`, `compare --require-complete-analysis`,
+`dump --build-target`) remain open, unimplemented followups — see
+`docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
+exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends
 [ADR-037](037-cli-interface-contract.md) D5/D7/D12,
 [ADR-040](040-compare-surface-reduction.md) Lever 3,

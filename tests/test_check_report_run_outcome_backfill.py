@@ -136,7 +136,7 @@ def test_old_scan_abort_report_reads_the_nested_diff_exit_shape() -> None:
     """Codex review (P2), fresh evidence: cli_scan._emit_scan_abort_report's
     own persisted JSON (pre-1.24, before that writer carried run_outcome
     itself) nests the abort's preserved exit decision under diff.exit, not
-    the top-level exit key service_scan.ScanResult.report uses -- without
+    the top-level exit key dry_run_estimate.ScanResult.report uses -- without
     reading that legacy shape too, a pre-existing BUDGET_OVERFLOW report's
     already-found ABI break was silently lost on backfill (gate: none
     instead of abi_breaking)."""

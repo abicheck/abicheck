@@ -105,7 +105,6 @@ from ..buildsource.pack_io import (
 from ..buildsource.pack_load import load_inputs_pack_or_raise, load_pack_or_raise
 from ..buildsource.pack_shape import purge_external_outputs
 from ..buildsource.pattern_facts import find_pattern_facts
-from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
 from ..buildsource.preprocessor_facts import collect_preprocessor_facts
 from ..buildsource.raw_evidence import any_raw_evidence_input, is_raw_evidence_input
 from ..buildsource.redaction import DEFAULT_REDACTION
@@ -198,7 +197,6 @@ __all__ = [
     "attach_clang_layout",
     "build_inline_coverage",
     "build_match_map",
-    "build_points_of_interest",
     "build_source_graph",
     "check_profile_bindings_resolve",
     "check_profile_toolchain_identity",
@@ -268,7 +266,6 @@ __all__ = [
     "resolve_linker_script_chain",
     "resolve_package_debug_info",
     "resolve_source_frontend_clang_bin",
-    "resolve_symbol_tus",
     "run_external_extractor",
     "collect_preprocessor_facts",
     "find_pattern_facts",

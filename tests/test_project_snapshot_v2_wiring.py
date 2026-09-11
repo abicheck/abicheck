@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import click
 import pytest
 
 from abicheck.errors import SnapshotError
@@ -246,45 +245,6 @@ class TestClassifyCompareOperand:
         libdir.mkdir()
         assert classify_compare_operand(libdir) == "directory"
 
-
-class TestRejectUnsupportedAgainstOperand:
-    def test_none_is_a_no_op(self) -> None:
-        from abicheck.frontends.cli.scan_against import (
-            reject_unsupported_against_operand,
-        )
-
-        result = reject_unsupported_against_operand(None)  # must not raise
-        assert result is None
-
-    def test_a_project_snapshot_package_is_accepted(self, tmp_path: Path) -> None:
-        from abicheck.frontends.cli.scan_against import (
-            reject_unsupported_against_operand,
-        )
-
-        snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
-        root = _write_package(tmp_path, snap)
-        result = reject_unsupported_against_operand(root)  # must not raise
-        assert result is None
-
-    def test_a_plain_directory_is_rejected(self, tmp_path: Path) -> None:
-        from abicheck.frontends.cli.scan_against import (
-            reject_unsupported_against_operand,
-        )
-
-        libdir = tmp_path / "libs"
-        libdir.mkdir()
-        with pytest.raises(click.UsageError, match="plain directory"):
-            reject_unsupported_against_operand(libdir)
-
-    def test_a_single_file_is_accepted(self, tmp_path: Path) -> None:
-        from abicheck.frontends.cli.scan_against import (
-            reject_unsupported_against_operand,
-        )
-
-        f = tmp_path / "snap.json"
-        f.write_text("{}", encoding="utf-8")
-        result = reject_unsupported_against_operand(f)  # must not raise
-        assert result is None
 
 
 class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:

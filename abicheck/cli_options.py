@@ -43,7 +43,7 @@ from .frontends.cli.options.params import (
 
 if TYPE_CHECKING:
     from .buildsource.build_config import BuildConfig
-    from .service_scan import CompileContext
+    from .dry_run_estimate import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -713,7 +713,7 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
     drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
     real L2). Decorators apply bottom-up, so the options are listed in reverse of
     their displayed order. Dest names match the ``dumper.dump`` /
-    :class:`~abicheck.service_scan.CompileContext` kwargs exactly, except for the
+    :class:`~abicheck.dry_run_estimate.CompileContext` kwargs exactly, except for the
     ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
     :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
     """
@@ -918,7 +918,7 @@ def merge_compile_config(
     ``build_config is not None`` inference is exactly right there.
     """
     from .config_paths import project_root_for_config
-    from .service_scan import CompileContext
+    from .dry_run_estimate import CompileContext
     from .workflows.extraction import discover_build_config, load_build_config
 
     explicit_config = build_config is not None
@@ -1172,7 +1172,7 @@ def resolve_compile_context(
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
     The single entry point the ``@compile_context_options`` family resolves to
-    (ADR-037 D3): construct a :class:`~abicheck.service_scan.CompileContext` from
+    (ADR-037 D3): construct a :class:`~abicheck.dry_run_estimate.CompileContext` from
     the decorator's flags, then delegate to :func:`merge_compile_config` with the
     ``--ast-frontend`` / ``--nostdinc`` explicitness read from the Click parameter
     source (so an explicitly-typed value — even a default-looking ``auto`` — beats
@@ -1194,7 +1194,7 @@ def resolve_compile_context(
     ``AstContextAmbiguousError`` in ``sycl_context``), not from a blanket
     reject here.
     """
-    from .service_scan import CompileContext
+    from .dry_run_estimate import CompileContext
 
     cli_ctx = CompileContext(
         gcc_path=compiler_path,
@@ -1274,7 +1274,7 @@ def output_options(
 #: ``reject_incoherent_*`` validation logic) lives in the dependency-free
 #: ``frontends.cli.options.secondary_output`` leaf module, not here --
 #: ``cli_scan_helpers.py`` needs its validator half and sits on an existing import path back into
-#: this module (``cli_options -> cli_resolve -> service_scan -> scan_engine
+#: this module (``cli_options -> cli_resolve -> dry_run_estimate -> scan_engine
 #: -> cli_scan_helpers``), so a ``cli_scan_helpers -> cli_options`` edge
 #: would close a real import cycle. Re-exported here only for the two CLI
 #: modules (``cli.py``/``cli_scan.py``) that apply it as a decorator

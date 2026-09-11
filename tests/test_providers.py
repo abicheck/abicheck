@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.buildsource.poi import build_points_of_interest
 from abicheck.buildsource.providers import (
     LayerFacts,
     LayerProvider,
@@ -26,7 +25,6 @@ from abicheck.buildsource.providers import (
     ProviderCostEstimate,
     ScanContext,
 )
-from abicheck.buildsource.risk import RiskRules, score_changed_paths
 from abicheck.model import AbiSnapshot
 
 
@@ -54,9 +52,12 @@ def test_fake_provider_satisfies_runtime_protocol():
 def test_provider_estimate_and_run_roundtrip():
     prov = _FakeProvider()
     ctx = _ctx()
-    poi = build_points_of_interest(
-        changed_paths=[], risk=score_changed_paths([], RiskRules.default())
-    )
+    # `build_points_of_interest`/`RiskRules` (`buildsource.poi`/`buildsource.risk`)
+    # were deleted with the scan engine (ADR-068 Phase 6) -- this contract
+    # test's own `_FakeProvider.run` never reads `poi`, so a plain opaque
+    # sentinel exercises the `LayerProvider.run(ctx, poi)` protocol shape
+    # identically without needing a real points-of-interest work-list.
+    poi = object()
     est = prov.estimate(ctx)
     assert est.method == "s5" and est.tus == 3
     facts = prov.run(ctx, poi)

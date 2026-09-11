@@ -7441,7 +7441,20 @@ include union fix, delete the legacy scan-CLI assembly branch and the now-
 dead `_CLI_MODE == "scan"` downstream branches, once `compare --no-baseline`
 closes the audit-only gap above.
 
-### `scan`'s JSON `diff.findings[]` entries never carry `gate_contribution`
+### ~~`scan`'s JSON `diff.findings[]` entries never carry `gate_contribution`~~ — CLOSED (no longer applies)
+
+**Closed (2026-09-11, ADR-068 Phase 6).** `scan` — and with it
+`cli_scan_baseline.py`, `_baseline_finding_dicts`, and every `diff.
+findings[]` JSON shape this gap described — was deleted outright when the
+`scan` command was retired. There is no longer a second JSON envelope for
+this field to be missing from: `compare`'s own `changes[]` entries already
+stamp `gate_contribution` unconditionally (the half of this gap that was
+never broken). Kept here, struck through, as the historical record; the
+`tests/parity/runner.py` harness this entry describes (`RunOutcome.
+gate_contributions`, the `None`-skip in what was `assert_full_parity()`)
+was itself deleted in the same PR along with every other scan-vs-compare
+comparison it existed to support — see `tests/parity/runner.py`'s own
+module docstring for what `tests/parity/` is now.
 
 Found in CodeRabbit review round 12 on PR #1172, while building
 `tests/parity/runner.py`'s scan-vs-compare parity harness (ADR-068 plan

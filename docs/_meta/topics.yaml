@@ -87,9 +87,6 @@ topics:
       - abicheck/policy/classification.py
       - abicheck/policy/evidence_status.py
       - abicheck/severity.py
-      - abicheck/cli_scan.py
-      - abicheck/cli_scan_baseline.py
-      - abicheck/scan_engine.py
       - abicheck/exit_decision.py
     reference_page: reference/exit-codes.md
     task_pages:
@@ -245,7 +242,6 @@ topics:
     canonical_page: use/cli-usage.md
     fact_sources:
       - abicheck/cli.py
-      - abicheck/cli_scan.py
       - abicheck/frontends/cli/options/secondary_output.py
       - abicheck/cli_options.py
       - abicheck/frontends/cli/help.py
@@ -273,7 +269,7 @@ topics:
       - abicheck/model/header_ast_frontends.py
       - abicheck/service_dump_pipeline.py
       - abicheck/service_compare_pipeline.py
-      - abicheck/service_scan.py
+      - abicheck/dry_run_estimate.py
       # ADR-068 §3 #19: CompareRequest.budget_s, same absorbed surface as
       # cli-surface's own entry above.
       - abicheck/deadline.py
@@ -510,9 +506,6 @@ topics:
       - abicheck/sarif.py
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py
-      - abicheck/cli_scan.py
-      - abicheck/cli_scan_baseline.py
-      - abicheck/scan_engine.py
       - abicheck/frontends/cli/options/secondary_output.py
       - abicheck/finding_identity.py
       - abicheck/cli_compare_fold.py
@@ -829,10 +822,8 @@ topics:
       - abicheck/buildsource/l2_seed.py
       - abicheck/buildsource/adapters/bazel.py
       - abicheck/buildsource/build_evidence.py
-      - abicheck/cli_scan.py
       - abicheck/cli_dump_helpers.py
-      - abicheck/scan_engine.py
-      - abicheck/service_scan.py
+      - abicheck/dry_run_estimate.py
       - action.yml
       - action/run.sh
       - action/validate-inputs.sh

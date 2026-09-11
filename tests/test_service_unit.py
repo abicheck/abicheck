@@ -1123,8 +1123,8 @@ class TestDumpElf:
         primary parse's cache key let the two passes disagree on staleness
         -- reusing a stale cached AST here while the header-graph pass
         correctly reparsed."""
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.service import _dump_elf
-        from abicheck.service_scan import CompileContext
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1197,8 +1197,8 @@ class TestDumpElf:
         # the inferred -H root must defer — emitted as its own -isystem token
         # *after* the build's (build's is emitted first, so it wins), not jumping
         # ahead as -I. -isystem also keeps it above the standard system dirs.
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.service import _dump_elf
-        from abicheck.service_scan import CompileContext
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1373,8 +1373,8 @@ class TestHeaderScopedInferredRoots:
         assert captured["extra_hash_dirs"] == ()
 
     def test_macho_build_context_defers_and_hashes(self, tmp_path):
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.service import _try_header_scoped_dump
-        from abicheck.service_scan import CompileContext
 
         root, umb = self._umbrella(tmp_path)
         captured = {}
@@ -1519,9 +1519,9 @@ class TestHeaderScopedInferredRoots:
         # must not also swallow this and silently succeed with --header/
         # --include ignored, exactly the same reasoning as the
         # DeadlineExceeded test above.
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.errors import AstContextMissingError
         from abicheck.service import _try_header_scoped_dump
-        from abicheck.service_scan import CompileContext
 
         _root, umb = self._umbrella(tmp_path)
 
@@ -2823,7 +2823,7 @@ class TestCompareRequestAdr055Evidence:
         signal goes undetected, letting the pair disagree on dialect."""
         from types import SimpleNamespace
 
-        from abicheck import service_scan
+        from abicheck import dry_run_estimate
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
@@ -2840,9 +2840,9 @@ class TestCompareRequestAdr055Evidence:
         # ADR-055 D1: the pair-wide scan runs in the shared
         # `service_compare_pipeline`, which imports this helper from the module
         # that defines it rather than through `service`'s re-export -- so the
-        # spy belongs on `service_scan`, where it lives.
+        # spy belongs on `dry_run_estimate`, where it lives.
         monkeypatch.setattr(
-            service_scan, "pair_wide_cxx20_std_override", _fake_override
+            dry_run_estimate, "pair_wide_cxx20_std_override", _fake_override
         )
 
         request = CompareRequest(
@@ -2932,17 +2932,17 @@ class TestCompareRequestAdr055Evidence:
         dialect (e.g. only a sysroot) must not silently discard the pair-wide
         C++20 heuristic's override for that side -- it should be merged in
         unless the side already pins its own explicit standard."""
-        from abicheck import service_scan
+        from abicheck import dry_run_estimate
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
 
-        # ADR-055 D1: spied on `service_scan` (where it is defined) rather than
+        # ADR-055 D1: spied on `dry_run_estimate` (where it is defined) rather than
         # `service` (which only re-exports it) -- the shared compare pipeline
         # imports it from the defining module.
         monkeypatch.setattr(
-            service_scan,
+            dry_run_estimate,
             "pair_wide_cxx20_std_override",
             lambda *a, **k: ("-std=gnu++20",),
         )
@@ -4160,7 +4160,7 @@ class TestRunDumpHeaderGraph:
         from an unrequested host parse would combine device declarations
         with host-only call/type/include edges, feeding crosschecks a graph
         incoherent with what it's describing."""
-        from abicheck.service_scan import CompileContext
+        from abicheck.dry_run_estimate import CompileContext
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4612,8 +4612,8 @@ class TestAttachHeaderGraphDeviceContext:
     confidently wrong."""
 
     def test_device_context_skips_include_extractor(self, tmp_path):
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.service import _attach_header_graph
-        from abicheck.service_scan import CompileContext
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4635,8 +4635,8 @@ class TestAttachHeaderGraphDeviceContext:
         mock_extractor.assert_not_called()
 
     def test_host_context_still_uses_include_extractor(self, tmp_path):
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.service import _attach_header_graph
-        from abicheck.service_scan import CompileContext
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4834,8 +4834,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
     re-parsed correctly."""
 
     def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path: Path):
+        from abicheck.dry_run_estimate import CompileContext
         from abicheck.service import _attach_header_graph
-        from abicheck.service_scan import CompileContext
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")

@@ -1546,7 +1546,7 @@ def compare_product_directories(
     :func:`~abicheck.bundle.compare_bundle`: it needs the per-pair compare
     engine (:mod:`abicheck.service_compare_pipeline`), and that module's
     own import graph already reaches back into :mod:`abicheck.bundle`
-    (``service_scan`` calls :func:`~abicheck.bundle.audit_bundle`) — living
+    (``dry_run_estimate`` calls :func:`~abicheck.bundle.audit_bundle`) — living
     here instead of there avoids that import cycle.
 
     *header_roots* names header directories relative to *old_dir*/*new_dir*

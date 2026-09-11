@@ -48,6 +48,25 @@ from scripts.engine_cli_boundary import (  # noqa: E402
 )
 
 
+def _patch_scan_engine_fixture(
+    monkeypatch: pytest.MonkeyPatch, gate: object, pkg: Path, root: Path
+) -> None:
+    """Point *gate* at a synthetic ``<pkg>`` tree for one test, with a
+    ``scan_engine.py`` basename fixture recognised as an engine module.
+
+    ``scan_engine.py`` (the real module this fixture filename used to name)
+    was deleted with the ``scan`` command (ADR-068 Phase 6), which emptied
+    the real ``_ENGINE_MODULE_BASENAMES`` of its one entry -- most tests in
+    this module exercise the basename-exact-match mechanism itself, not
+    that specific former module, so they supply their own basename fixture
+    rather than relying on the real allowlist.
+    """
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", root)
+    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    monkeypatch.setattr(gate, "_ENGINE_MODULE_BASENAMES", frozenset({"scan_engine.py"}))
+
+
 def test_no_unlisted_violation_in_real_repo() -> None:
     """The real repository has zero *unlisted* engine/CLI-boundary violations.
 
@@ -207,9 +226,7 @@ def test_gate_flags_violation(
         path = pkg / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(contents)
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -232,9 +249,7 @@ def test_symbol_named_like_cli_module_is_not_flagged(
     pkg.mkdir()
     (pkg / "model.py").write_text("cli_default = 1\n")
     (pkg / "scan_engine.py").write_text("from .model import cli_default\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -260,9 +275,7 @@ def test_package_attribute_shadowing_same_named_submodule_is_not_flagged(
     (engine_pkg / "__init__.py").write_text("def cli() -> None:\n    pass\n")
     (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -287,9 +300,7 @@ def test_reexport_of_real_submodule_through_alias_still_flagged(
     (engine_pkg / "__init__.py").write_text("from . import cli as _cli\ncli = _cli\n")
     (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg3 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -315,9 +326,7 @@ def test_plain_import_binding_alias_name_shadows_real_submodule(
     (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
     (engine_pkg / "__init__.py").write_text("import math as cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg11 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -340,9 +349,7 @@ def test_absolute_importfrom_bare_self_reference_still_flagged(
     (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
     (engine_pkg / "__init__.py").write_text("from abicheck.engine_pkg12 import cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg12 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -370,9 +377,7 @@ def test_absolute_importfrom_direct_from_submodule_still_flagged(
         "from abicheck.engine_pkg13.cli import main as cli\n"
     )
     (pkg / "scan_engine.py").write_text("from .engine_pkg13 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -406,9 +411,7 @@ def test_unaliased_dotted_import_binds_only_first_component(
     (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
     (engine_pkg / "__init__.py").write_text("import cli.helpers\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg14 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -438,9 +441,7 @@ def test_importfrom_reexport_through_sibling_package_still_flagged(
     (frontend_pkg / "__init__.py").write_text("from .. import cli\n")
     (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg15 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -466,9 +467,7 @@ def test_absolute_import_alias_of_the_real_submodule_still_flagged(
     (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
     (engine_pkg / "__init__.py").write_text("import abicheck.engine_pkg16.cli as cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg16 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -496,9 +495,7 @@ def test_absolute_import_alias_of_an_unrelated_module_not_flagged(
         "import abicheck.engine_pkg17.other as cli\n"
     )
     (pkg / "scan_engine.py").write_text("from .engine_pkg17 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -525,9 +522,7 @@ def test_importfrom_reexport_through_sibling_direct_from_submodule_still_flagged
     (engine_pkg / "frontend.py").write_text("from .cli import main as cli\n")
     (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg18 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -558,9 +553,7 @@ def test_absolute_reexport_of_a_different_real_cli_module_still_flagged(
     (engine_pkg / "cli.py").write_text("# unrelated, never actually reached\n")
     (engine_pkg / "__init__.py").write_text("from abicheck.cli import main as cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg19 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -587,9 +580,7 @@ def test_destructuring_assignment_shadows_real_submodule(
     (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
     (engine_pkg / "__init__.py").write_text("cli, other = get_two_things()\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg20 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -615,9 +606,7 @@ def test_importfrom_directly_from_the_real_submodule_still_flagged(
     (engine_pkg / "cli.py").write_text("def main() -> None:\n    pass\n")
     (engine_pkg / "__init__.py").write_text("from .cli import main as cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg10 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -646,9 +635,7 @@ def test_importfrom_reexport_of_ordinary_symbol_shadows_real_submodule(
     (engine_pkg / "__init__.py").write_text("from .api import cli\n")
     (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg4 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -673,9 +660,7 @@ def test_importfrom_reexport_through_sibling_module_still_flagged(
     (engine_pkg / "frontend.py").write_text("from . import cli\n")
     (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg6 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -704,9 +689,7 @@ def test_importfrom_reexport_through_sibling_under_a_renamed_local_name_still_fl
     (engine_pkg / "frontend.py").write_text("from . import cli as _cli\n")
     (engine_pkg / "__init__.py").write_text("from .frontend import _cli as cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg7 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -734,9 +717,7 @@ def test_importfrom_sibling_reexporting_a_different_submodule_not_flagged(
     (engine_pkg / "frontend.py").write_text("from . import othername as cli\n")
     (engine_pkg / "__init__.py").write_text("from .frontend import cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg8 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -767,9 +748,7 @@ def test_importfrom_reexport_chain_beyond_max_hops_not_flagged(
         (engine_pkg / f"{cur}.py").write_text(f"from .{prev} import cli\n")
     (engine_pkg / "__init__.py").write_text(f"from .{hops[-1]} import cli\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg9 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -793,9 +772,7 @@ def test_importfrom_aliasing_a_different_submodule_shadows_real_submodule(
     (engine_pkg / "__init__.py").write_text("from . import othername as cli\n")
     (engine_pkg / "cli.py").write_text("# unrelated CLI-shaped submodule\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg5 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -819,9 +796,7 @@ def test_annotation_only_init_declaration_does_not_suppress_real_submodule(
     (engine_pkg / "__init__.py").write_text("cli: object\n")
     (engine_pkg / "cli.py").write_text("# real CLI adapter\n")
     (pkg / "scan_engine.py").write_text("from .engine_pkg2 import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -846,9 +821,7 @@ def test_genuine_nested_cli_adapter_alias_still_flagged_with_init_present(
     (compat / "__init__.py").write_text("")
     (compat / "cli.py").write_text("# real CLI adapter\n")
     (pkg / "scan_engine.py").write_text("from .compat import cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -873,6 +846,7 @@ def test_allowlisted_site_is_not_flagged(
         "ENGINE_CLI_BOUNDARY_ALLOWLIST",
         frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
+    monkeypatch.setattr(gate, "_ENGINE_MODULE_BASENAMES", frozenset({"scan_engine.py"}))
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -897,6 +871,7 @@ def test_new_violation_in_an_allowlisted_file_is_still_flagged(
         "ENGINE_CLI_BOUNDARY_ALLOWLIST",
         frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
+    monkeypatch.setattr(gate, "_ENGINE_MODULE_BASENAMES", frozenset({"scan_engine.py"}))
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -925,6 +900,7 @@ def test_multi_alias_import_flags_every_prohibited_alias(
         "ENGINE_CLI_BOUNDARY_ALLOWLIST",
         frozenset({"abicheck/scan_engine.py::import click::1"}),
     )
+    monkeypatch.setattr(gate, "_ENGINE_MODULE_BASENAMES", frozenset({"scan_engine.py"}))
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -982,9 +958,7 @@ def test_cli_module_importing_click_is_not_flagged(
     (pkg / "cli_dump_helpers.py").write_text(
         "import click\nfrom .cli_scan_helpers import foo\n"
     )
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -1004,9 +978,7 @@ def test_engine_module_importing_service_is_not_flagged(
         "from .service_input_resolution import resolve_side_snapshot\n"
         "from .checker_types import DiffResult\n"
     )
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -1028,9 +1000,7 @@ def test_unrelated_third_party_package_named_abicheck_is_not_flagged(
     pkg.mkdir()
     (pkg / "scan_engine.py").write_text("from vendor.abicheck.cli import helper\n")
     (pkg / "service_widget.py").write_text("import vendor.abicheck.cli\n")
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-    monkeypatch.setattr(gate, "ENGINE_CLI_BOUNDARY_ALLOWLIST", frozenset())
+    _patch_scan_engine_fixture(monkeypatch, gate, pkg, tmp_path)
 
     findings = Findings()
     gate.check_engine_cli_boundary(findings)
@@ -1043,9 +1013,12 @@ def test_unrelated_third_party_package_named_abicheck_is_not_flagged(
 @pytest.mark.parametrize(
     "rel, expected",
     [
-        ("abicheck/scan_engine.py", True),
+        # scan_engine.py was deleted with the `scan` command (ADR-068
+        # Phase 6); it used to be the one real basename-matched engine
+        # module here, now replaced by dry_run_estimate.py below.
+        ("abicheck/scan_engine.py", False),
         ("abicheck/service.py", True),
-        ("abicheck/service_scan.py", True),
+        ("abicheck/dry_run_estimate.py", True),
         ("abicheck/buildsource/inline.py", True),
         ("abicheck/buildsource/source_extractors/clang.py", True),
         ("abicheck/artifact_plan.py", True),

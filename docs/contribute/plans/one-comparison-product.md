@@ -934,6 +934,49 @@ section's *actual* state, not the target it originally described:
 
 ### Phase 6 — Remove `scan`
 
+**Status: complete (2026-09-11).** The root `scan` command is deleted
+(`abicheck scan` exits `64`, naming `compare`/`compare --no-baseline`), all
+16 scan-only `abicheck/` modules and both `eval`/`validation` scripts named
+in list A below are deleted, `service_scan.py` was split into
+`dry_run_estimate.py` (the surviving dry-run cost model, already the state
+of that file when this phase started — its own scan half had already been
+retired in an earlier PR), `buildsource/poi.py`/`risk.py` are deleted per
+the call-site audit's own reclassification, `SCAN_SCHEMA_VERSION` and its
+`schemas.py`/`check_report.py` call sites are gone, and `tests/parity/` is
+rewritten as a compare-only regression corpus (its `scan`-invoking harness
+half -- `scan_json`/`scan_finding_set`/`scan_outcome`/`compare_outcome`/
+`assert_full_parity` in `runner.py`, and every test that called them --
+deleted; `RunOutcome`/`_outcome_from_findings` kept as a tested,
+CLI-independent primitive). Real drift found against this section's own
+pre-staged lists, beyond what the checklist below already recorded:
+`workflows/scan_gate_options.py`/`workflows/scan_subprocess.py` (named in
+list A) no longer existed on disk (already removed by an earlier PR); eight
+more test files imported scan-only internals without "scan" in their own
+filename (`test_reclassify.py`, `test_exit_decision.py`,
+`test_compile_context_parity.py`/`test_compile_context_security.py`
+(initially miscategorized as scan-only during this phase -- both actually
+exercise the still-live, shared `cli_options.merge_compile_config`, reached
+through `cli_scan.py`'s own `_merge_compile_config = merge_compile_config`
+re-export; both files were restored and only their genuinely-dead
+`scan_cmd`-referencing tests removed, not gutted), `test_gated_build_query_
+inputs.py`, `test_docs_cli_flags.py`, `test_project_snapshot_v2_wiring.py`,
+`test_depth_vocabulary.py`, `test_explicit_source_extractor_propagation.py`,
+`test_schemas_registry.py`, `test_providers.py`) and five more under
+`tests/parity/` (`test_evolution_state_gap.py`,
+`test_no_baseline_audit_corpus_parity.py`, `test_no_baseline_parity.py`,
+`test_source_depth_parity.py`, and the wholly-deleted
+`test_baseline_gate_parity.py`, whose entire purpose -- pinning a scan/
+compare divergence pending a fix -- no longer has a second tool to diverge
+from). Three flag demotions this phase unblocked
+(`compare --env-matrix`, `compare --require-complete-analysis`,
+`dump --build-target`) were **not** implemented in this PR -- each needs
+real, unimplemented feature work (a new `deployment:` config key,
+`assurance.require_complete` resolver wiring plus Action-input retirement,
+and rewiring `dump --build-target`'s own callers onto `build.targets`
+respectively) beyond a ruling-table edit; `frontends/cli/options/
+rulings.py`'s own entries record this explicitly as a tracked followup, not
+a silent gap.
+
 The command, `cli_scan*.py`, `scan_engine.py`, `service_scan.py`,
 `workflows/scan_*.py`, `frontends/cli/scan_*.py`, `pr_comment_scan*.py`,
 `SCAN_SCHEMA_VERSION`, the Action's `scan` mode branches, and the `scan`

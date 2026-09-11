@@ -160,18 +160,18 @@ def _expand_header_directories(headers: Sequence[Path]) -> list[Path]:
 
     ``InputSpec.headers``/``-H`` may name a whole directory rather than an
     individual header file, and the normal L2 path already expands such an
-    entry (``service_scan.expand_header_inputs``) into its actual header
+    entry (``dry_run_estimate.expand_header_inputs``) into its actual header
     files before parsing -- without this, matching against the raw directory
     path itself finds no ``#include "<dirname>"``-shaped text in any TU
     source, so no compile unit is ever matched and this whole seam silently
     no-ops for a directory input.
 
-    Deliberately *not* a call to ``service_scan.expand_header_inputs``
+    Deliberately *not* a call to ``dry_run_estimate.expand_header_inputs``
     itself: that function lives in the CLI/service import-cycle-allowlisted
     cluster, and (transitively, via ``scan_engine`` -> ``buildsource.
     l2_seed``) importing it from here -- a `buildsource/` leaf module
     `l2_seed.py` itself calls into -- closes a real import cycle
-    (``header_compile_context`` -> ``service_scan`` -> ``scan_engine`` ->
+    (``header_compile_context`` -> ``dry_run_estimate`` -> ``scan_engine`` ->
     ``buildsource.l2_seed`` -> ``header_compile_context``), exactly what
     AGENTS.md's "What NOT to do" asks a change to avoid rather than
     resolve by extending ``IMPORT_CYCLE_ALLOWLIST``. Reusing
