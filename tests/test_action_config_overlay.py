@@ -622,19 +622,35 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         )
         assert out["compile"] == {"std": "c++20", "sysroot": "/opt/sysroot"}
 
-    def test_checkout_scalar_value_wins_a_genuine_conflict(self) -> None:
-        """``frontend``/``sysroot``/``compiler``/``std`` all resolve like
+    def test_checkout_scalar_value_wins_a_genuine_conflict(
+        self, tmp_path: Path
+    ) -> None:
+        """``frontend``/``sysroot``/``compiler`` resolve like
         ``merge_compile_config``'s own ``cli_ctx.<field> if cli_ctx.<field>
         is not None else bc.<field>`` -- the checkout document's own value
         (folded first, in the real two-stage pipeline) blocks a
-        sources-root value for the SAME key from applying at all."""
+        sources-root value for the SAME key from applying at all.
+
+        ``std`` is NOT checked via the merged document's own ``std`` key
+        here: once BOTH documents set ``std`` (a genuine same-field
+        conflict), ``merge_compile_std_fields`` folds it into the joint
+        ``options`` argv sequence instead of a plain scalar override
+        (PR #1222 tenth round) -- so this asserts the FUNCTIONAL result
+        (checkout's ``-std=`` ends up last and wins, matching the real
+        two-stage pipeline exactly) rather than a literal ``compile.std``
+        key that no longer exists post-fold."""
         base = {"compile": {"std": "c++17", "sysroot": "/checkout/sysroot"}}
         sources_doc = {"compile": {"std": "c++20", "sysroot": "/sources/sysroot"}}
         out = apply_sources_root_config_blocks(
             base, sources_doc, blocks=("compile",), merge_compile=True
         )
-        assert out["compile"]["std"] == "c++17"
         assert out["compile"]["sysroot"] == "/checkout/sysroot"
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, base["compile"], sources_doc["compile"]
+        )
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", out["compile"])
+        assert actual == expected
+        assert actual[-1] == "-std=c++17"
 
     def test_include_dirs_concatenates_checkout_first(self) -> None:
         base = {"compile": {"include_dirs": ["a"]}}
@@ -644,18 +660,29 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         )
         assert out["compile"]["include_dirs"] == ["a", "b"]
 
-    def test_defines_concatenates_sources_first(self) -> None:
+    def test_defines_concatenates_sources_first(self, tmp_path: Path) -> None:
         """``defines``/``options`` synthesize argv tokens in
         ``merge_compile_config``, prepending the current (sources-root)
         stage's own tokens ahead of the prior (checkout) stage's already-
-        resolved ones -- reproduced here as data, sources-root entries
-        first, checkout entries appended after."""
+        resolved ones.
+
+        Once BOTH documents set ``defines`` (a genuine same-field
+        contribution from each side), ``merge_compile_std_fields`` folds
+        it into the joint ``options`` argv sequence rather than a plain
+        ``compile.defines`` list (PR #1222 tenth round) -- checked here via
+        the real two-stage oracle rather than a literal ``compile.defines``
+        key, which the fold intentionally replaces."""
         base = {"compile": {"defines": ["CHECKOUT=1"]}}
         sources_doc = {"compile": {"defines": ["SOURCES=1"]}}
         out = apply_sources_root_config_blocks(
             base, sources_doc, blocks=("compile",), merge_compile=True
         )
-        assert out["compile"]["defines"] == ["SOURCES=1", "CHECKOUT=1"]
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, base["compile"], sources_doc["compile"]
+        )
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", out["compile"])
+        assert actual == expected
+        assert actual == ("-DSOURCES=1", "-DCHECKOUT=1")
 
     @pytest.mark.parametrize(
         ("checkout_nostdinc", "sources_nostdinc", "expected"),
@@ -1025,6 +1052,113 @@ class TestApplySourcesRootConfigBlocksCompileStdOptionsOrdering:
         checkout_compile = {"sysroot": "/opt/sysroot"}
         sources_compile = {"std": "c++23"}
 
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+
+    def test_reported_scenario_checkout_defines_vs_sources_options(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 tenth round):
+        neither document sets ``std`` at all -- checkout sets
+        ``defines: [A]``, the sources-root document redefines the same
+        macro via ``options: [-DA=2]``. The old fix only widened the
+        trigger to a ``std`` co-occurrence, so this cross-key
+        defines-vs-options conflict still fell through to independent
+        per-key folding and produced ``-DA`` before ``-DA=2`` -- sources
+        winning the compiler's last-flag-wins rule, the reverse of the
+        documented checkout-wins precedence. The real two-stage pipeline
+        folds checkout's own ``-DA`` in LAST."""
+        checkout_compile = {"defines": ["A"]}
+        sources_compile = {"options": ["-DA=2"]}
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+        assert expected == ("-DA=2", "-DA")  # pin the real oracle itself
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+        assert actual[-1] == "-DA"  # checkout's own token wins
+
+    def test_reported_scenario_mirror_checkout_options_vs_sources_defines(
+        self, tmp_path: Path
+    ) -> None:
+        """The mirror image of the reported scenario: checkout expresses
+        its define via ``options``, sources-root uses the structured
+        ``defines`` key. Checkout's token must still be folded in last."""
+        checkout_compile = {"options": ["-DB=2"]}
+        sources_compile = {"defines": ["B"]}
+
+        expected = _real_two_stage_gcc_option_tokens(
+            tmp_path, checkout_compile, sources_compile
+        )
+
+        merged = apply_sources_root_config_blocks(
+            {"compile": checkout_compile},
+            {"compile": sources_compile},
+            blocks=("compile",),
+            merge_compile=True,
+        )["compile"]
+        actual = _single_stage_gcc_option_tokens(tmp_path, "merged", merged)
+        assert actual == expected
+        assert actual[-1] == "-DB=2"  # checkout's own token wins
+
+    @pytest.mark.parametrize(
+        ("checkout_compile", "sources_compile"),
+        [
+            # Same field on both sides (defines vs defines).
+            ({"defines": ["A"]}, {"defines": ["A=2"]}),
+            # Same field on both sides (options vs options).
+            ({"options": ["-DA"]}, {"options": ["-DA=2"]}),
+            # std vs defines (no options anywhere).
+            ({"std": "c++17"}, {"defines": ["A"]}),
+            # defines vs std (mirror).
+            ({"defines": ["A"]}, {"std": "c++17"}),
+            # All three set on one side only, nothing relevant on the other.
+            (
+                {"std": "c++17", "defines": ["A"], "options": ["-fno-exceptions"]},
+                {"sysroot": "/opt/sysroot"},
+            ),
+        ],
+        ids=[
+            "defines-vs-defines",
+            "options-vs-options",
+            "std-vs-defines",
+            "defines-vs-std",
+            "one-side-all-three-fields",
+        ],
+    )
+    def test_general_std_defines_options_trigger_condition(
+        self,
+        tmp_path: Path,
+        checkout_compile: dict[str, object],
+        sources_compile: dict[str, object],
+    ) -> None:
+        """General invariant behind the fix: the joint fold must trigger
+        (and match the real two-stage pipeline exactly) whenever EITHER
+        document sets ANY of ``std``/``defines``/``options`` -- regardless
+        of which of the three fields each side happens to use. This is the
+        bug-class regression per this repo's AGENTS.md: a fix scoped to the
+        one reported field pair (``defines`` vs ``options``) would still
+        miss e.g. ``std`` vs ``defines``, so this enumerates several
+        independent field combinations against the same real-pipeline
+        oracle used by the reported-scenario tests above."""
         expected = _real_two_stage_gcc_option_tokens(
             tmp_path, checkout_compile, sources_compile
         )

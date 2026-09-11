@@ -880,19 +880,65 @@ def merge_compile_std_fields(
     checkout_blk: dict[str, object], sources_blk: dict[str, object]
 ) -> dict[str, object] | None:
     """The cross-key half of ``action_config_overlay._merge_compile_block``:
-    when a ``compile.std`` value on either raw ``compile:`` mapping
-    co-occurs with a ``compile.defines``/``compile.options`` value on
-    either mapping, all three share ONE effective argv sequence (see
-    :func:`compile_config_argv_tokens`) and must be resolved together,
-    sources-root's own tokens folded before checkout's (checkout's own
-    token ends up LAST and wins a same-flag conflict) -- exactly
-    ``merge_compile_config``'s real two-stage precedence, verified
+    ``compile.std``/``compile.defines``/``compile.options`` are never three
+    independent fields once EITHER document sets any of them -- the real
+    ``merge_compile_config`` always synthesizes one document's worth of
+    ``[-std=...] + [-D... ] + <options>`` argv tokens (see
+    :func:`compile_config_argv_tokens`) atomically for a single ``compile:``
+    document, then concatenates the sources-root document's own tokens
+    ahead of the checkout document's (checkout's own token ends up LAST and
+    wins a same-flag conflict, matching a compiler's "last flag wins"
+    behavior) -- exactly ``merge_compile_config``'s real two-stage
+    precedence.
+
+    A same-flag conflict is decided by a token's position in that combined
+    sequence, not by which ``compile.*`` field produced it, so folding
+    ``defines``/``options`` independently per key (each key's own
+    sources-then-checkout concatenation, done separately for ``defines``
+    and separately for ``options``) is only an accident-free shortcut when
+    both documents' contributions land in the SAME field, or when only ONE
+    of the two documents contributes anything among ``std``/``defines``/
+    ``options`` at all (then there is no second document's token to
+    mis-order against). It silently picks the wrong winner whenever the two
+    documents disagree via DIFFERENT fields -- checkout ``defines: [A]`` +
+    sources ``options: [-DA=2]``, with neither setting ``std``, resolves
+    via independent per-key folding to ``options: [-DA=2]`` `then`
+    ``defines: [A]`` (rendered as ``-DA=2`` before checkout's own ``-DA``,
+    so sources's redefinition wins the compiler's last-flag-wins rule) --
+    the reverse of the documented precedence. The original fix here only
+    widened the trigger to "a ``compile.std`` value co-occurs with a
+    ``defines``/``options`` value **on either document**", which happened
+    to also cover every ``std``-involving cross-field combination (``std``
+    vs ``defines``, ``std`` vs ``options``) but still missed the
+    defines-vs-options cross-key case entirely, since neither document sets
+    ``std`` there (fresh Codex review evidence, PR #1222 tenth round). The
+    general invariant this function now enforces: whenever BOTH documents
+    each contribute at least one of ``std``/``defines``/``options`` (in any
+    combination of which field each uses), all three are folded together as
+    one atomic per-document token sequence -- there is no narrower,
+    field-combination-specific condition that independent per-key folding
+    can get right in general once both sides are contributing. Verified
     directly: checkout ``std: c++17`` + sources ``options: [-std=c++23]``
-    resolves to ``('-std=c++23', '-std=c++17')`` (checkout wins). Returns
-    ``None`` when the two documents don't actually interact this way (each
-    of ``std``/``defines``/``options`` is then still correctly resolved by
-    its own independent per-key rule), else the replacement ``options``
-    field (possibly empty)."""
+    resolves to ``('-std=c++23', '-std=c++17')`` (checkout wins); checkout
+    ``defines: [A]`` + sources ``options: [-DA=2]`` resolves to
+    ``('-DA=2', '-DA')`` (checkout wins); checkout ``std: c++17`` + sources
+    ``defines: [A]`` (no ``options`` anywhere) resolves to
+    ``('-DA', '-std=c++17')`` (checkout wins) -- a combination the
+    ``std``-co-occurrence trigger already covered, kept here as a
+    regression case for the general condition.
+
+    Returns ``None`` when at most ONE document sets any of ``std``/
+    ``defines``/``options`` -- either both are empty (a pure no-op, the
+    joint fold would compute an empty token list regardless), or only one
+    side contributes anything, in which case that side's own value is
+    already correctly resolved by its own independent per-key rule and
+    folding it into ``options`` would needlessly lose its legible
+    structured-key representation (e.g. a lone checkout ``compile.std``
+    would otherwise be rewritten into an ``options: ["-std=..."]`` entry
+    for no ordering benefit). Otherwise returns the replacement ``options``
+    field (possibly empty, when both sides set only an equal, redundant
+    ``std`` whose tokens fully overlap -- callers still treat a present but
+    empty ``options`` list as "nothing to apply")."""
 
     def _tokens(blk: dict[str, object]) -> list[str]:
         std = blk.get("std")
@@ -902,13 +948,14 @@ def merge_compile_std_fields(
             _as_compile_field_list(blk.get("options")),
         )
 
-    std_present = bool(checkout_blk.get("std")) or bool(sources_blk.get("std"))
-    lists_present = any(
-        _as_compile_field_list(blk.get(key))
-        for blk in (checkout_blk, sources_blk)
-        for key in ("defines", "options")
-    )
-    if not (std_present and lists_present):
+    def _any_compile_field(blk: dict[str, object]) -> bool:
+        return (
+            bool(blk.get("std"))
+            or bool(_as_compile_field_list(blk.get("defines")))
+            or bool(_as_compile_field_list(blk.get("options")))
+        )
+
+    if not (_any_compile_field(checkout_blk) and _any_compile_field(sources_blk)):
         return None
     return {"options": _tokens(sources_blk) + _tokens(checkout_blk)}
 

@@ -556,9 +556,9 @@ def _lower_config_str(value: object) -> object:
 #: compiler honors a repeated flag's final occurrence) -- reproduced here
 #: as data (sources-root entries first, checkout appended after) rather
 #: than raw argv tokens, so these stay legible document keys instead of
-#: ``compile.options`` token soup. Correct in isolation from ``compile.std``
-#: only -- see :func:`cli_options.merge_compile_std_fields` (PR #1222
-#: ninth round).
+#: ``compile.options`` token soup. Correct only when at most one document
+#: sets any of ``std``/``defines``/``options`` -- see
+#: :func:`cli_options.merge_compile_std_fields` (PR #1222).
 _COMPILE_SOURCES_FIRST_LIST_KEYS = frozenset({"defines", "options"})
 _COMPILE_CHECKOUT_FIRST_LIST_KEYS = frozenset({"include_dirs"})
 
