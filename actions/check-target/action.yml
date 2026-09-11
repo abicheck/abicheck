@@ -806,12 +806,14 @@ runs:
         import yaml
 
         from abicheck.action_config_overlay import (
+            apply_sources_root_config_blocks,
             discovered_compile_db_resolves,
             rebase_relative_config_paths,
             strip_untrusted_execution_keys,
             validate_base_config,
         )
         from abicheck.cli_helpers_compare import discover_project_config
+        from abicheck.config_paths import discover_build_config
 
         def _validate_or_exit(doc: dict, source_desc: str) -> None:
             # Codex review (P2): a base document loaded below via a bare
@@ -904,6 +906,77 @@ runs:
                         )
                     _validate_or_exit(loaded, source_desc)
                     data = loaded
+            # Sources-root promotion (Codex review, P1, fresh evidence, PR
+            # #1222 third round): `discover_project_config` above walks UP
+            # from ABICHECK_DISCOVER_START (this Action's own checkout root)
+            # -- it can never find a config that lives AT `inputs.sources`
+            # itself when that tree sits below the checkout root, since an
+            # upward walk never descends into a subdirectory. But the nested
+            # "Run analysis" step below forwards this step's own overlay as
+            # an EXPLICIT --build-config, which -- per cli_options.py's
+            # `explicit_config = build_config is not None` -- permanently
+            # short-circuits the nested compare/scan's own single-sided
+            # `build_config or discover_build_config(sources)` resolution
+            # (`abicheck/buildsource/embed.py`'s `embed_build_source()`,
+            # `cli_options.py`'s compile-context resolution): without this
+            # step performing the identical sources-root lookup itself and
+            # folding it in, a sources-root `.abicheck.yml`'s own build:/
+            # sources: settings (compile-DB selection, build-system targets,
+            # graph-detail settings) would be silently shadowed the moment
+            # `analysis-assurance-complete` synthesizes this overlay --
+            # purely an artifact of how the overlay is generated, not
+            # anything the caller asked for. `discover_build_config` (never
+            # `discover_project_config`) is the correct lookup here --
+            # non-recursive, anchored at the sources root itself, exactly
+            # matching `embed_build_source()`'s own selection -- and, when it
+            # finds a config DISTINCT from the checkout-root one just above,
+            # that document's own build:/sources: blocks REPLACE (not merge
+            # into) the checkout-root document's own such blocks, via the
+            # identical shared primitive (abicheck.action_config_overlay.
+            # apply_sources_root_config_blocks) action/run.sh's own
+            # equivalent compile-context overlay merge uses, so the two
+            # callers cannot independently drift on this selection.
+            #
+            # Scoped to build:/sources: only, deliberately narrower than
+            # run.sh's own five-block promotion (which also carries
+            # compile:/source:(singular)/debug: for a genuinely single-sided
+            # caller): this step has no reliable way to determine here
+            # whether the nested "Run analysis" invocation's own compare/scan
+            # resolves those three blocks single-sidedly or pair-wide for
+            # this particular old-library/mode combination (run.sh's own
+            # `_compile_context_sources_pairwise` additionally depends on
+            # whether the live OLD operand is a stored snapshot, which this
+            # step cannot inspect) -- build:/sources: are unconditionally
+            # single-sided in every mode (`embed_build_source()`'s own
+            # selection never varies with pairing), so only those two are
+            # safe to promote without guessing.
+            _sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
+            if _sources_root_env:
+                _sources_found = discover_build_config(Path(_sources_root_env))
+                if _sources_found is not None and _sources_found != found_path:
+                    try:
+                        _sources_loaded = yaml.safe_load(
+                            _sources_found.read_text(encoding="utf-8")
+                        )
+                    except Exception as exc:
+                        raise SystemExit(
+                            "::error::failed to parse the discovered "
+                            f"sources-root config {_sources_found}: {exc}. "
+                            "Refusing to silently proceed as if it were "
+                            "unconfigured."
+                        ) from exc
+                    # An empty (or non-mapping) sources-root .abicheck.yml is
+                    # not "no config found" -- the file still EXISTS, so
+                    # discover_build_config() still selects it exclusively;
+                    # apply_sources_root_config_blocks() itself treats that
+                    # as an empty document and clears both blocks, matching
+                    # load_build_config()'s own empty-BuildConfig outcome
+                    # (see that function's own docstring).
+                    if isinstance(_sources_loaded, dict):
+                        _validate_or_exit(_sources_loaded, str(_sources_found))
+                    data = apply_sources_root_config_blocks(
+                        data, _sources_loaded, blocks=("build", "sources")
+                    )
             # Security (Codex review, third round): this discovered document
             # is PR-controlled, untrusted content -- exactly what
             # cli_options.py's compile.compiler gate and ADR-032 D5's

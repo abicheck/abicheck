@@ -735,6 +735,186 @@ class TestAssuranceOverlayPreservesUsableDiscoveredCompileDb:
         assert "compile_db" not in written.get("build", {})
 
 
+class TestAssuranceOverlayPromotesSourcesRootBuildAndSourcesBlocks:
+    """P1 finding (Codex review, fresh evidence, PR #1222 third round,
+    commit 04afc779c): with ``analysis-assurance-complete: true``, no
+    explicit ``build-config``, and ``inputs.sources`` naming a tree that
+    carries its OWN ``.abicheck.yml``, this step used to forward its
+    synthesized overlay as an explicit ``--build-config`` without ever
+    consulting that sources-root document at all -- ``discover_project_config``
+    (used for the CHECKOUT-root document) only walks UP from
+    ``ABICHECK_DISCOVER_START``, so it can never find a config that lives
+    below it, at ``inputs.sources`` itself. Since every downstream
+    ``--build-config`` from this step is explicit (``cli_options.py``'s
+    ``explicit_config = build_config is not None``), that permanently
+    short-circuited the nested compare/scan's own single-sided
+    ``build_config or discover_build_config(sources)`` resolution
+    (``embed_build_source()``, ``cli_options.py``'s compile-context
+    resolution) -- silently dropping the sources root's own ``build:``/
+    ``sources:`` settings (compile-DB selection, build-system targets,
+    graph-detail settings) purely because this overlay-generation step
+    shadowed them, not because the caller asked for that.
+
+    Fixed by looking up ``inputs.sources``' own ``.abicheck.yml`` via the
+    identical ``config_paths.discover_build_config`` (non-recursive,
+    anchored at the sources root) ``embed_build_source()`` itself uses, and
+    -- when it names a document distinct from whatever the checkout-root
+    walk found -- REPLACING (never merging) ``build:``/``sources:`` from
+    that document, via the same shared primitive
+    (``abicheck.action_config_overlay.apply_sources_root_config_blocks``)
+    ``action/run.sh``'s own compile-context overlay already uses for the
+    identical promotion, so the two callers cannot independently drift.
+    """
+
+    def test_sources_root_build_and_sources_blocks_are_promoted_with_no_checkout_root_config(
+        self, tmp_path: Path
+    ) -> None:
+        """No checkout-root ``.abicheck.yml`` at all -- the sources-root
+        document alone supplies ``build:``/``sources:``, merged with the
+        synthesized ``assurance.require_complete: true``."""
+        workspace = make_workspace(tmp_path)
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  system: cmake\n  targets: [mylib]\nsources:\n  graph: full\n",
+            encoding="utf-8",
+        )
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"system": "cmake", "targets": ["mylib"]}
+        assert written["sources"] == {"graph": "full"}
+        assert written["assurance"] == {"require_complete": True}
+
+    def test_sources_root_blocks_replace_a_conflicting_checkout_root_document(
+        self, tmp_path: Path
+    ) -> None:
+        """Both a checkout-root AND a distinct sources-root config exist --
+        the sources-root's own ``build:``/``sources:`` REPLACE (not merge
+        into) the checkout-root document's, exactly as the native CLI's own
+        single-sided ``build_config or discover_build_config(sources)``
+        selection would have picked when no explicit ``--config`` was
+        given; every OTHER checkout-root setting (severity, here) survives
+        untouched."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "severity:\n  preset: strict\n"
+            "build:\n  system: bazel\n"
+            "sources:\n  graph: summary\n",
+            encoding="utf-8",
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  system: cmake\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"system": "cmake"}
+        # The sources-root document defines no "sources" block at all --
+        # REPLACE-or-remove semantics clear the checkout-root's own one
+        # rather than leaving it in place (apply_sources_root_config_blocks'
+        # own documented behavior).
+        assert "sources" not in written
+        assert written["severity"] == {"preset": "strict"}
+
+    def test_sources_root_promotion_is_still_subject_to_execution_key_stripping(
+        self, tmp_path: Path
+    ) -> None:
+        """The promoted ``build:`` block is untrusted, auto-discovered
+        content exactly like the checkout-root one -- ``build.query`` must
+        still be stripped from it (Codex review's own trust-boundary
+        concern applies uniformly, regardless of which document
+        ``build:`` actually came from)."""
+        workspace = make_workspace(tmp_path)
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  query: cmake --build .\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"system": "cmake"}
+        assert "build.query" in result.stderr
+
+    def test_same_config_at_both_roots_is_not_double_loaded(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: when the sources root resolves to the SAME
+        file the checkout-root walk already found (e.g. ``sources: .``),
+        promotion must be a no-op -- it must never re-read/re-validate the
+        same document a second time under a different label."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  system: cmake\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(workspace)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["build"] == {"system": "cmake"}
+
+    def test_empty_sources_root_config_clears_the_checkout_root_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        """An existing-but-empty sources-root ``.abicheck.yml`` is not "no
+        config found" -- ``discover_build_config``'s selection is
+        exclusive, so it must CLEAR the checkout-root's own ``build:``/
+        ``sources:`` rather than leaving them in place, matching
+        ``load_build_config``'s own empty-``BuildConfig`` outcome."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "build:\n  system: bazel\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert "build" not in written
+
+    def test_malformed_sources_root_config_fails_loud(self, tmp_path: Path) -> None:
+        """A schema-invalid sources-root document must fail the same loud
+        way an invalid checkout-root/explicit one already does -- not be
+        silently stripped/replaced before the nested CLI ever sees it."""
+        workspace = make_workspace(tmp_path)
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text("build:\n  query: 7\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+
+    def test_malformed_sources_root_yaml_fails_loud(self, tmp_path: Path) -> None:
+        """Unparsable YAML at the sources root must fail loud too, not
+        raise an unhandled traceback."""
+        workspace = make_workspace(tmp_path)
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text("build: [unterminated", encoding="utf-8")
+        result = _run_overlay(
+            workspace, {"BASE_CONFIG": "", "SOURCES_ROOT": str(src_dir)}
+        )
+        assert result.returncode != 0
+        assert "::error::" in result.stderr
+        assert "failed to parse the discovered sources-root config" in result.stderr
+
+
 class TestAssuranceOverlayRebasesRelativeIncludeDirs:
     """Finding 2 (P1, SECURITY-ADJACENT CORRECTNESS, PR #1222 Codex review,
     commit 148c624be):

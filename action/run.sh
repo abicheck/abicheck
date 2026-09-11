@@ -597,6 +597,7 @@ from pathlib import Path
 import yaml
 
 from abicheck.action_config_overlay import (
+    apply_sources_root_config_blocks,
     discovered_compile_db_resolves,
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
@@ -819,16 +820,19 @@ else:
             # `load_build_config`'s own empty-BuildConfig outcome exactly.
             if isinstance(sources_loaded, dict):
                 _validate_or_exit(sources_loaded, sources_found)
-            _sources_doc = sources_loaded if isinstance(sources_loaded, dict) else {}
             # "sources" (plural -- public_headers/exclude/graph) is a
             # DISTINCT top-level block from "source" (singular). Which
             # blocks get replaced depends on sources_pairwise, computed
-            # above.
-            for _blk_key in _sources_root_blocks:
-                if _blk_key in _sources_doc:
-                    base[_blk_key] = _sources_doc[_blk_key]
-                else:
-                    base.pop(_blk_key, None)
+            # above. Shared with actions/check-target/action.yml's own
+            # "Generate assurance-overlay config" step via
+            # abicheck.action_config_overlay.apply_sources_root_config_blocks
+            # (Codex review, fresh evidence, PR #1222 third round) so the two
+            # call sites' block-selection/empty-document semantics can't
+            # independently drift the way the assurance-overlay step's own
+            # entirely-missing promotion once did.
+            base = apply_sources_root_config_blocks(
+                base, sources_loaded, blocks=_sources_root_blocks
+            )
             # found_path is reassigned to sources_found ONLY when compile:
             # was actually sourced from it (single-sided callers) -- it
             # anchors compile.include_dirs resolution below, and a pairwise

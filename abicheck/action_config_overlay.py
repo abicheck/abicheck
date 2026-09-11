@@ -98,6 +98,23 @@ by grepping every ``buildsource/build_config.py`` field for a
 ``project_root_for_config`` consumer); left unrebased, a relative entry
 silently resolves against the overlay's own scratch location instead of the
 real project, dropping headers from extraction with no diagnostic.
+
+:func:`apply_sources_root_config_blocks` is the fourth shared primitive,
+covering the "sources-root promotion" step both call sites perform when no
+explicit ``--config`` is given: a ``--sources`` tree carrying its own
+``.abicheck.yml`` (found via ``config_paths.discover_build_config`` --
+non-recursive, anchored at the sources root, never walking up) supplies
+``build:``/``sources:`` (and, for a genuinely single-sided caller,
+``compile:``/``source:``/``debug:`` too) EXCLUSIVELY, mirroring
+``embed_build_source()``'s own ``build_config or
+discover_build_config(raw_sources)`` selection -- see that function's own
+docstring for why a checkout-root-discovered document must never supply
+those blocks once a distinct sources-root document exists. Before PR #1222's
+own third round this promotion existed only in ``action/run.sh``'s inline
+merge; the assurance-overlay step never performed it at all, silently
+letting its synthesized overlay shadow a sources-root ``.abicheck.yml``'s
+own ``build:``/``sources:`` settings (compile-DB selection, build-system
+targets, graph-detail settings) the moment ``build-config`` was omitted.
 """
 
 from __future__ import annotations
@@ -342,3 +359,60 @@ def discovered_compile_db_resolves(compile_db: str, sources_root: str) -> bool:
         return False
     except (OSError, ValueError):
         return False
+
+
+def apply_sources_root_config_blocks(
+    base: dict[str, object],
+    sources_doc: object,
+    *,
+    blocks: tuple[str, ...],
+) -> dict[str, object]:
+    """Return a COPY of *base* with each key in *blocks* REPLACED by
+    whatever *sources_doc* defines for that same top-level key -- or
+    removed from the copy entirely when *sources_doc* doesn't define it.
+
+    This is the block-selection half of ``action/run.sh``'s own
+    ``_merge_config_overlay_with_discovered_project_config`` (its
+    "sources-root promotion" section, added to mirror
+    ``embed_build_source()``'s own ``build_config or
+    discover_build_config(raw_sources)`` selection -- see that shell
+    function's own extensive docstring for the full reasoning). When no
+    explicit ``--config`` is given, a ``--sources`` directory carrying its
+    own ``.abicheck.yml`` (found via :func:`abicheck.config_paths.
+    discover_build_config` -- non-recursive, anchored at the sources root
+    itself, never walking up to parents, unlike a checkout-root discovery
+    that walks up from a starting directory) is used EXCLUSIVELY for the
+    blocks it defines; a checkout-root document found by a separate,
+    upward-walking discovery is never even consulted for them. This
+    function only performs the REPLACE-per-block step -- the caller
+    discovers *sources_doc*'s own file (typically via
+    ``discover_build_config``), reads and schema-validates it
+    (:func:`validate_base_config`), and decides *blocks* (``("build",
+    "sources")`` at minimum -- ``embed_build_source()``'s own scope --
+    plus ``"compile"``/``"source"``/``"debug"`` for a caller whose
+    ``compile:``/``source:``(singular)/``debug:`` resolution is genuinely
+    single-sided for this operand, see ``run.sh``'s own
+    ``_compile_context_sources_pairwise`` for that distinction).
+
+    A non-``dict`` *sources_doc* (``None`` for an empty file, or any other
+    non-mapping value) is treated as an empty document -- every block in
+    *blocks* is REMOVED from the copy rather than left untouched, matching
+    ``load_build_config``'s own empty-``BuildConfig`` outcome for the
+    identical case: an existing-but-empty/malformed-shape sources-root
+    config file is not "no config found" (``discover_build_config``'s own
+    selection is exclusive), so it must clear whatever the checkout-root
+    document happened to declare under the same key, not silently leave it
+    in place.
+
+    *base* is never mutated -- the caller's own reference is left
+    untouched, matching :func:`strip_untrusted_execution_keys`'s and
+    :func:`rebase_relative_config_paths`'s own copy-on-write convention.
+    """
+    base = dict(base)
+    doc = sources_doc if isinstance(sources_doc, dict) else {}
+    for key in blocks:
+        if key in doc:
+            base[key] = doc[key]
+        else:
+            base.pop(key, None)
+    return base

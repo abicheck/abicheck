@@ -36,6 +36,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.action_config_overlay import (
+    apply_sources_root_config_blocks,
     discovered_compile_db_resolves,
     rebase_relative_config_paths,
     strip_untrusted_execution_keys,
@@ -423,3 +424,80 @@ class TestDiscoveredCompileDbResolves:
             assert discovered_compile_db_resolves("compile_commands.json", ".")
         finally:
             os.chdir(cwd)
+
+
+class TestApplySourcesRootConfigBlocks:
+    """Direct unit tests for the shared block-selection primitive PR #1222
+    (fresh Codex review evidence, third round) extracted so ``action/run.sh``'s
+    compile-context overlay and ``actions/check-target/action.yml``'s
+    assurance overlay can't independently drift on how a sources-root
+    ``.abicheck.yml``'s own ``build:``/``sources:`` (and, for a genuinely
+    single-sided caller, ``compile:``/``source:``/``debug:``) blocks are
+    promoted over a checkout-root document's own such blocks. See the
+    function's own docstring for the full account.
+    """
+
+    def test_present_block_replaces_the_base_ones(self) -> None:
+        base = {"build": {"system": "bazel"}, "severity": {"preset": "strict"}}
+        sources_doc = {"build": {"system": "cmake"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("build", "sources")
+        )
+        assert out["build"] == {"system": "cmake"}
+        assert out["severity"] == {"preset": "strict"}
+
+    def test_absent_block_is_removed_not_left_in_place(self) -> None:
+        """REPLACE-or-remove, never "merge or leave untouched" -- a
+        sources-root document that doesn't mention a block must clear the
+        base's own one, matching ``discover_build_config()``'s exclusive
+        selection (the native CLI never falls back to a DIFFERENT
+        document's ``sources:`` just because the selected one omits it)."""
+        base = {"build": {"system": "bazel"}, "sources": {"graph_detail": "full"}}
+        sources_doc = {"build": {"system": "cmake"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("build", "sources")
+        )
+        assert "sources" not in out
+
+    def test_only_named_blocks_are_touched(self) -> None:
+        """A block outside *blocks* is untouched even if *sources_doc*
+        defines it -- e.g. a pairwise caller excluding compile:/source:/
+        debug: from promotion."""
+        base = {"compile": {"std": "c++17"}}
+        sources_doc = {"build": {"system": "cmake"}, "compile": {"std": "c++20"}}
+        out = apply_sources_root_config_blocks(base, sources_doc, blocks=("build",))
+        assert out["compile"] == {"std": "c++17"}
+        assert out["build"] == {"system": "cmake"}
+
+    def test_none_sources_doc_clears_every_named_block(self) -> None:
+        """An empty sources-root file (``yaml.safe_load`` -> ``None``) is
+        NOT "no config found" -- ``discover_build_config()``'s selection is
+        exclusive, so every named block must be cleared, matching
+        ``load_build_config()``'s own empty-``BuildConfig`` outcome."""
+        base = {"build": {"system": "bazel"}, "sources": {"graph_detail": "full"}}
+        out = apply_sources_root_config_blocks(base, None, blocks=("build", "sources"))
+        assert "build" not in out
+        assert "sources" not in out
+
+    def test_non_mapping_sources_doc_also_clears_every_named_block(self) -> None:
+        """A malformed-shape file (e.g. a bare YAML list) parses to a
+        non-``dict`` -- treated identically to ``None`` (see the ``None``
+        case above), not left untouched."""
+        base = {"build": {"system": "bazel"}}
+        out = apply_sources_root_config_blocks(base, [1, 2, 3], blocks=("build",))
+        assert "build" not in out
+
+    def test_does_not_mutate_the_input(self) -> None:
+        base = {"build": {"system": "bazel"}}
+        original = {"build": {"system": "bazel"}}
+        apply_sources_root_config_blocks(
+            base, {"build": {"system": "cmake"}}, blocks=("build",)
+        )
+        assert base == original
+
+    def test_empty_blocks_tuple_is_a_no_op(self) -> None:
+        base = {"build": {"system": "bazel"}, "severity": {"preset": "strict"}}
+        out = apply_sources_root_config_blocks(
+            base, {"build": {"system": "cmake"}}, blocks=()
+        )
+        assert out == base

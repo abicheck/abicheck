@@ -98,3 +98,25 @@
   matches — and `is_file()` happily confirms — a pattern containing `..`
   components or one that walks through a symlink to a target outside the
   root).
+- **The assurance-overlay step no longer shadows a `--sources` tree's own
+  `.abicheck.yml` when `build-config` is omitted.** With
+  `analysis-assurance-complete: true`, no explicit `build-config`, and
+  `inputs.sources` naming a tree that carries its own `.abicheck.yml`, the
+  step's checkout-root discovery (`discover_project_config`, which only
+  walks *up* from the checkout root) could never find that document —
+  yet the step's own synthesized overlay is always forwarded as an
+  EXPLICIT `--build-config`, which permanently short-circuits the nested
+  compare/scan's normal single-sided `build_config or
+  discover_build_config(sources)` resolution
+  (`embed_build_source()`/`cli_options.py`'s compile-context resolution).
+  The sources tree's own `build:`/`sources:` settings (compile-DB
+  selection, build-system targets, graph-detail settings) were silently
+  dropped purely because of how the overlay was generated, not because
+  the caller asked for that. Fixed by looking up the sources root's own
+  `.abicheck.yml` via `config_paths.discover_build_config` (the same,
+  non-recursive lookup `embed_build_source()` itself uses) and, when it
+  names a document distinct from the checkout-root one, REPLACING (never
+  merging) `build:`/`sources:` from it — via a new shared primitive
+  (`abicheck.action_config_overlay.apply_sources_root_config_blocks`)
+  `action/run.sh`'s own equivalent compile-context overlay merge now uses
+  too, so the two callers cannot independently drift on this promotion.
