@@ -493,7 +493,13 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1225,),
         seed_tests=("tests/test_snapshot_envelope_out_of_band_readers.py",),
-        public_surfaces=("cli", "github-action"),
+        # `()` deliberately: the seed test calls the reader helpers directly
+        # (importlib-loaded modules, no CliRunner, no Action step), so it
+        # reaches neither surface. This field documents what a seed test
+        # actually exercises -- a claimed surface it does not reach conceals
+        # the very cross-surface gap a contributor should find here
+        # (CodeRabbit review; the rule is this schema's own, from PR #885).
+        public_surfaces=(),
         axes={
             "encoding": ("flat", "sectioned"),
             "embedded_layers": ("none", "L3", "L4", "L5", "combinations"),

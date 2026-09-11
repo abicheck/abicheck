@@ -271,16 +271,27 @@ _UNWRAP_NAMES = frozenset(
 )
 
 
-def _reads_moved_key(node: ast.AST) -> set[str]:
-    """Formerly-top-level keys *node* indexes, by subscript or ``.get()``."""
-    found: set[str] = set()
+def _moved_key_receivers(node: ast.AST) -> set[tuple[str, str]]:
+    """``(receiver, key)`` for each formerly-top-level key *node* indexes.
+
+    The *receiver* is what is being indexed, which is the half that matters:
+    the question is not whether an unwrap happens somewhere in the function
+    but whether *this* access reads an unwrapped document. A receiver that
+    is not a plain name is reported as ``"<expr>"`` so it can never be
+    matched against the set of unwrapped names — conservative by design.
+    """
+    found: set[tuple[str, str]] = set()
+
+    def receiver(value: ast.expr) -> str:
+        return value.id if isinstance(value, ast.Name) else "<expr>"
+
     for child in ast.walk(node):
         if (
             isinstance(child, ast.Subscript)
             and isinstance(child.slice, ast.Constant)
             and child.slice.value in _MOVED_KEYS
         ):
-            found.add(str(child.slice.value))
+            found.add((receiver(child.value), str(child.slice.value)))
         if (
             isinstance(child, ast.Call)
             and isinstance(child.func, ast.Attribute)
@@ -289,17 +300,55 @@ def _reads_moved_key(node: ast.AST) -> set[str]:
             and isinstance(child.args[0], ast.Constant)
             and child.args[0].value in _MOVED_KEYS
         ):
-            found.add(str(child.args[0].value))
+            found.add((receiver(child.func.value), str(child.args[0].value)))
     return found
 
 
-def _mentions_unwrap(node: ast.AST) -> bool:
+def _calls_unwrap(node: ast.AST) -> bool:
+    """Whether evaluating *node* runs an unwrap."""
     for child in ast.walk(node):
-        if isinstance(child, ast.Name) and child.id in _UNWRAP_NAMES:
-            return True
-        if isinstance(child, ast.Attribute) and child.attr in _UNWRAP_NAMES:
-            return True
+        if isinstance(child, ast.Call):
+            func = child.func
+            if isinstance(func, ast.Name) and func.id in _UNWRAP_NAMES:
+                return True
+            if isinstance(func, ast.Attribute) and func.attr in _UNWRAP_NAMES:
+                return True
     return False
+
+
+def _unwrapped_names(node: ast.AST) -> set[str]:
+    """Names within *node* bound to the *result* of an unwrap.
+
+    Merely naming an unwrap somewhere in the function is not enough, and
+    treating it as enough is what CodeRabbit caught: a reader can call
+    ``_unwrap_snapshot_envelope(raw)`` and then still index ``raw``, and the
+    scan would wave it through while sectioned snapshots kept reading as
+    missing data.
+
+    Both real shapes bind the result: ``x = unwrap(raw)`` (as
+    ``scan_flow.py`` does) and the in-place ``raw = from_sectioned_document(
+    raw)`` rebind under an ``is_sectioned_document`` guard (as
+    ``actions/baseline/build_manifest.py`` does), which makes ``raw`` itself
+    safe from that point. A conditional expression
+    (``from_sectioned_document(d) if is_sectioned_document(d) else d``)
+    counts too, since every branch yields an unwrapped document.
+    """
+    bound: set[str] = set()
+    for child in ast.walk(node):
+        targets: list[ast.expr] = []
+        value: ast.expr | None = None
+        if isinstance(child, ast.Assign):
+            targets, value = list(child.targets), child.value
+        elif isinstance(child, (ast.AnnAssign, ast.AugAssign)):
+            targets, value = [child.target], child.value
+        elif isinstance(child, ast.NamedExpr):
+            targets, value = [child.target], child.value
+        if value is None or not _calls_unwrap(value):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                bound.add(target.id)
+    return bound
 
 
 def _reads_a_file(node: ast.AST) -> bool:
@@ -334,18 +383,24 @@ class TestNoUnguardedOutOfBandReader:
                 for func in ast.walk(tree):
                     if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         continue
-                    if not _reads_moved_key(func):
+                    accesses = _moved_key_receivers(func)
+                    if not accesses:
                         continue
                     if not _reads_a_file(func):
                         # Operating on an already-unwrapped/in-memory dict
                         # handed in by a caller; not this class.
                         continue
-                    if _mentions_unwrap(func):
-                        continue
                     site = f"{seen_in_file}::{func.name}"
                     if site in _NOT_SNAPSHOT_DOCUMENT_READERS:
                         continue
-                    offenders.append(site)
+                    unwrapped = _unwrapped_names(func)
+                    unguarded = sorted(
+                        f"{recv}[{key!r}]"
+                        for recv, key in accesses
+                        if recv not in unwrapped
+                    )
+                    if unguarded:
+                        offenders.append(f"{site} -> {', '.join(unguarded)}")
 
         assert not offenders, (
             "these functions parse a snapshot document off disk and index a "

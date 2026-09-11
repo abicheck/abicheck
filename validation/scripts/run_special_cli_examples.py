@@ -312,7 +312,9 @@ def _run_compare_case(
     )
 
 
-def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[str, Any]:
+def _run_audit_case(
+    case_id: str, entry: dict[str, Any], timeout: int
+) -> dict[str, Any]:
     """Single-release audit, no baseline -- ``compare --no-baseline``'s
     replacement for legacy ``scan``'s no-``--against`` mode (ADR-068 D2/D3,
     Phase 6 hard removal).
@@ -392,14 +394,18 @@ def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[s
         errors.append(
             f"finding kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
         )
-    finding_verdicts = sorted(
-        {
-            str(finding["verdict"])
-            for finding in (payload.get("findings") or [])
-            if isinstance(finding, dict) and finding.get("verdict")
-        }
-    )
-    errors.extend(_audit_verdict_errors(entry, finding_verdicts))
+    # Keyed by kind, and *every* row kept -- including one whose `verdict` is
+    # missing or empty. Collapsing to a set of the non-empty verdicts let a
+    # report drop the verdict from one of case150's two findings and still
+    # pass on the other's (both reviewers, independently). A missing verdict
+    # is now its own error, named by the kind that lost it.
+    verdicts_by_kind = [
+        (str(finding.get("kind") or "<no kind>"), finding.get("verdict"))
+        for finding in (payload.get("findings") or [])
+        if isinstance(finding, dict)
+    ]
+    finding_verdicts = sorted({str(v) for _, v in verdicts_by_kind if v})
+    errors.extend(_audit_verdict_errors(entry, verdicts_by_kind))
     result = _result(
         case_id,
         command,
@@ -424,57 +430,104 @@ def _run_audit_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[s
     return result
 
 
-#: Finding-level verdicts acceptable for each ground-truth classification
-#: flag. The catalog's flags are the oracle; this table is the only place
-#: they are mapped onto the report's own verdict vocabulary.
-_AUDIT_BREAK_VERDICTS = {
-    "abi_break": {"BREAKING"},
-    "api_break": {"API_BREAK"},
+#: The report's verdict vocabulary as ordered severity bands. Ordering is
+#: what lets one comparison catch a regression in *both* directions -- a
+#: break case demoted to hygiene, and a hygiene case escalated to a break --
+#: rather than only the direction a membership test happens to look for.
+_AUDIT_VERDICT_BAND = {
+    "NO_CHANGE": 0,
+    "COMPATIBLE": 0,
+    "COMPATIBLE_WITH_RISK": 0,
+    "API_BREAK": 1,
+    "BREAKING": 2,
 }
-#: What a purely-hygiene case (`bad_practice`, no break flag) may emit. A
-#: break verdict here means the classification regressed in the *other*
-#: direction, which asserting only on kinds also missed.
-_AUDIT_HYGIENE_VERDICTS = {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}
+_AUDIT_BAND_NAMES = {0: "hygiene", 1: "API_BREAK", 2: "BREAKING"}
+
+
+def _expected_audit_band(entry: dict[str, Any]) -> int:
+    """The highest severity band *entry*'s ground truth claims.
+
+    The catalog's own hand-curated ``abi_break``/``api_break``/
+    ``bad_practice`` flags are the oracle; this is the only place they are
+    mapped onto the report's verdict vocabulary.
+    """
+    if entry.get("abi_break"):
+        return 2
+    if entry.get("api_break"):
+        return 1
+    return 0
 
 
 def _expected_audit_verdicts(entry: dict[str, Any]) -> set[str]:
-    """The finding-level verdicts *entry*'s ground truth allows."""
-    required: set[str] = set()
-    for flag, verdicts in _AUDIT_BREAK_VERDICTS.items():
-        if entry.get(flag):
-            required |= verdicts
-    return required or set(_AUDIT_HYGIENE_VERDICTS)
+    """The finding-level verdicts *entry*'s ground truth allows at all."""
+    expected = _expected_audit_band(entry)
+    return {v for v, band in _AUDIT_VERDICT_BAND.items() if band <= expected}
 
 
-def _audit_verdict_errors(entry: dict[str, Any], got: list[str]) -> list[str]:
+def _audit_verdict_errors(
+    entry: dict[str, Any], verdicts_by_kind: list[tuple[str, Any]]
+) -> list[str]:
     """Compare an audit's per-finding verdicts against the catalog's flags.
 
-    A case flagged ``abi_break``/``api_break`` must actually carry a finding
-    at that severity -- the top-level verdict is ``null`` for every audit, so
-    without this the classification is unasserted. A hygiene-only case must
-    carry *no* break-severity finding, which catches the same regression in
-    the opposite direction.
+    Three separate failures, because collapsing them loses one:
+
+    1. **A finding with no verdict at all.** Reported per kind. Silently
+       skipping such a row is what let a report keep every expected kind,
+       lose a verdict, and still pass on a sibling finding's verdict.
+    2. **A verdict outside the vocabulary.** Not silently treated as
+       hygiene, which would read an unknown value as the safest one.
+    3. **The highest band observed is not the band the ground truth
+       claims.** Equality, not membership: a case flagged ``api_break``
+       whose findings are all hygiene has been demoted, and a hygiene-only
+       case carrying an ``API_BREAK`` finding has been escalated. The
+       top-level verdict is ``null`` for every audit, so without this the
+       classification is unasserted in both directions.
+
+    An audit with no findings at all is already reported by the kinds check
+    above; adding a second error for it would only duplicate that message.
     """
-    allowed = _expected_audit_verdicts(entry)
-    if not got:
-        # No findings at all is already reported by the kinds check; adding a
-        # second error for it would just duplicate that message.
+    if not verdicts_by_kind:
         return []
-    breaking_expected = allowed != _AUDIT_HYGIENE_VERDICTS
-    if breaking_expected and not (set(got) & allowed):
-        return [
-            f"finding verdicts {got!r} carry none of {sorted(allowed)!r}, "
-            f"which this case's ground truth requires "
-            f"(abi_break={bool(entry.get('abi_break'))}, "
-            f"api_break={bool(entry.get('api_break'))})"
-        ]
-    if not breaking_expected and (unexpected := set(got) - allowed):
-        return [
-            f"finding verdicts {sorted(unexpected)!r} are break-severity, but "
-            f"this case's ground truth is hygiene-only "
-            f"(bad_practice={bool(entry.get('bad_practice'))})"
-        ]
-    return []
+
+    errors: list[str] = []
+    missing = sorted(kind for kind, verdict in verdicts_by_kind if not verdict)
+    if missing:
+        errors.append(
+            f"finding(s) with no verdict: {missing!r} -- every audit finding "
+            "must carry its own verdict, since the top-level one is null"
+        )
+    unknown = sorted(
+        {
+            str(verdict)
+            for _, verdict in verdicts_by_kind
+            if verdict and str(verdict) not in _AUDIT_VERDICT_BAND
+        }
+    )
+    if unknown:
+        errors.append(
+            f"finding verdict(s) outside the known vocabulary: {unknown!r} "
+            f"(known: {sorted(_AUDIT_VERDICT_BAND)!r})"
+        )
+    if errors:
+        # The band comparison below would be computed from an incomplete or
+        # unrecognized set; report the concrete defect instead of a derived
+        # one that would only confuse the reader.
+        return errors
+
+    expected = _expected_audit_band(entry)
+    observed = max(_AUDIT_VERDICT_BAND[str(v)] for _, v in verdicts_by_kind)
+    if observed != expected:
+        direction = "demoted" if observed < expected else "escalated"
+        errors.append(
+            f"highest finding verdict band is {_AUDIT_BAND_NAMES[observed]!r} "
+            f"but this case's ground truth claims "
+            f"{_AUDIT_BAND_NAMES[expected]!r} ({direction}; "
+            f"abi_break={bool(entry.get('abi_break'))}, "
+            f"api_break={bool(entry.get('api_break'))}, "
+            f"bad_practice={bool(entry.get('bad_practice'))}); "
+            f"per-kind verdicts: {sorted(verdicts_by_kind)!r}"
+        )
+    return errors
 
 
 def _make_pack(
