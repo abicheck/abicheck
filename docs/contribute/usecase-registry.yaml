@@ -496,10 +496,19 @@ use_cases:
         abicheck/stable_abi.py,
         abicheck/stable_abi_data.py,
         abicheck/diff_python.py,
-        abicheck/cli_compare_helpers.py,
+        abicheck/workflows/abi3_audit.py,
       ]
       tests: [tests/test_python_ext.py]
     notes: >
+      Capability is real and working (verified live: `compare foo.abi3.so
+      foo.abi3.so --abi3 3.9` against a snapshot carrying a stable-ABI
+      violation exits 0 and reports it as a `COMPATIBLE_WITH_RISK`
+      deployment-risk finding). The `tests` evidence above is real, current
+      proof of this, not stale: `test_python_ext.py`'s own `_compare_abi3()`
+      helper invokes `compare <path> <path> --abi3 ...` (self-compare), not
+      the deleted `scan` command, and all 108 tests in the file pass
+      (verified live, `pytest tests/test_python_ext.py -q`).
+
       An abi3 module's compatibility surface is the set of CPython C-API symbols
       it IMPORTS, not what it exports. python_ext recognises extension modules
       (Cython/pybind11/nanobind/C) from the PyInit_* export and Py* import
@@ -507,11 +516,13 @@ use_cases:
       for a target Py_LIMITED_API floor; diff_python raises
       PYTHON_STABLE_ABI_VIOLATION (a new private _Py* import in an abi3 module) at
       compare time. Interpreter-floor conformance is checked by the
-      `abicheck compare --abi3` audit (diff_python.audit_stable_abi_imports; the
-      user supplies the target floor, which a bare .abi3.so does not carry),
-      which audits a single module and surfaces a violation the export-table view
-      would call COMPATIBLE (advisory, or gated by moving the run onto the
-      severity scheme, e.g. --severity-preset strict).
+      `compare --abi3` audit (diff_python.audit_stable_abi_imports, run as a
+      candidate-side enrichment stage by workflows/abi3_audit.py since
+      ADR-068 D3; the former `scan --abi3` was deleted outright in Phase 6 --
+      the user supplies the target floor, which a bare .abi3.so does not
+      carry), which audits a single module and surfaces a violation the
+      export-table view would call COMPATIBLE (advisory RISK kind, gated via
+      a `--policy` file's `overrides: {python_stable_abi_violation: warn}`).
 
   - id: UC-WF-audit
     axis: workflow
@@ -910,28 +921,48 @@ use_cases:
         - abicheck/workflows/pattern_preprocessor_scan.py
       tests:
         - tests/test_pattern_facts.py
+        - tests/test_pattern_preprocessor_scan_coverage.py
         - tests/test_preprocessor_facts.py
         - tests/test_evidence_depth_levels.py
         - tests/test_scenarios.py
     next_steps: >
       ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
       (`buildsource/pattern_facts.py`) and the S2 preprocessor pre-scan
-      (`buildsource/preprocessor_facts.py` — per-TU ABI macro-value capture +
+      (`buildsource/preprocessor_facts.py` -- per-TU ABI macro-value capture +
       divergence and public-header private/generated-header leak detection,
       conditional on a compile DB + `clang -E`) both run unconditionally at
       `compare`'s own pipeline chokepoint (`workflows/pattern_preprocessor_scan.py`,
       surfaced as the JSON report's `pattern_preprocessor_scan` field), with
       the pinned evidence level resolved by `model/evidence_depth_levels.py`.
       ADR-068 Phase 6 retired the deterministic `scan` orchestrator
-      (`cli_scan.py`) that used to sit in front of these — including its
+      (`cli_scan.py`) that used to sit in front of these -- including its
       `--mode`/`--source-method auto` depth-selection heuristic and the
       numeric risk score that drove it (`buildsource/risk.py`, deleted with
       no compare-pipeline caller) and the D7 POI work-list that focused the
-      expensive scan (`buildsource/poi.py`, deleted for the same reason) —
+      expensive scan (`buildsource/poi.py`, deleted for the same reason) --
       with no migration path for either, since `compare` always evaluates at
       its resolved `--depth` rather than auto-escalating from a risk score.
       REMAINS as a known gap: no live equivalent of `scan`'s own
-      risk-directed depth escalation or POI-focused source replay.
+      risk-directed depth escalation or POI-focused source replay. Depth
+      semantics themselves (the binary rung staying artifact-only even with
+      matrix-wide headers/sources/compile-DB flags present) are still
+      UNTESTED, not covered: `tests/test_scenarios.py`'s
+      `SC-SCAN-BINARY-DEPTH-MATRIX-ARGS` scenario now runs `compare --depth
+      binary` directly and asserts on the report's own
+      `pattern_preprocessor_scan`/`preprocessor` fields
+      (`test_sc_scan_binary_depth_matrix_args`) rather than the retired
+      `scan`-only report shape, but its `OLD`/`NEW` operands are stored JSON
+      snapshots, not live binaries -- `-H`/`--sources`/`--build-info` are
+      ignored for a snapshot input regardless of `--depth` (the CLI's own
+      documented behavior), so the test's zero-file assertions cannot
+      distinguish "binary depth skipped deeper collection" from "the inputs
+      were snapshots, which always skip it." See
+      `docs/contribute/known-gaps.md`'s "`compare --depth binary` ignoring
+      matrix-wide `--sources`/`--build-info` is untested" entry (the real
+      gap this scenario leaves open) and its separate "`compare --depth
+      binary` still performs a deep DWARF type walk the public
+      evidence-depth contract says that rung skips" entry for the
+      unrelated, still-open `compare`-only DWARF-type-walk defect.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
@@ -991,6 +1022,16 @@ use_cases:
       candidate-side findings those checks produce. `UC-CHANGE-crosscheck-hygiene`
       above tracks the underlying cross-source engine itself; this entry is
       the no-baseline single-release audit driver around it, and it is live.
+      Severity *reclassification* is via a `--policy` file's `overrides:`
+      block, but `--policy` alone does not *gate*: verified live,
+      `compare --no-baseline snapshot.abi.json --policy policy.yml`
+      reclassifying a finding to `break` still exits `0` unless
+      `--severity-preset` (e.g. `default`) is also given, per
+      `policy/audit_gate_exit.py`'s `audit_gate_enabled_for_severity_preset`
+      -- a no-baseline audit only gates when a severity preset opted it in;
+      `--policy`'s `overrides:` block only decides *what* a reclassified
+      finding gates as, once gating is already on. Both flags are required
+      together for CI gating, not `--policy` alone.
 
   - id: UC-WORKFLOW-evidence-directed-scope
     axis: workflow
@@ -999,13 +1040,27 @@ use_cases:
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     note: >
-      ADR-068 Phase 6 deleted `buildsource/poi.py` outright, per the plan's own
-      call-site audit finding no compare-pipeline caller for it: `compare`
-      always evaluates at its resolved `--depth` rather than narrowing an
-      expensive source replay to a points-of-interest work-list derived from
-      changed paths, pattern-scan escalation, L0-L2 export deltas, and a risk
-      score. There is no live equivalent of this evidence-directed focusing
-      behavior today -- a real, tracked gap, not a silent regression.
+      ADR-035 D7. DONE (originally): `buildsource/poi.py`
+      (`build_points_of_interest`) computed a points-of-interest work-list
+      from the changed-path floor + pattern-scan escalation triggers +
+      L0/L1/L2 export deltas + risk score (reverse of the explain-finding
+      localization walk); the floor was unconditional (risk/deltas only add,
+      never drop a changed TU). `scan` ran the pattern pre-scan first and fed
+      `poi.changed_paths()` into the source-replay scope. The
+      `scan --baseline` path read a cheap, header-free L0 view of both sides
+      (`_load_exports_for_poi`) so the export-delta walk ran live, and
+      `resolve_symbol_tus` turned the resulting symbol POIs into declaring
+      TUs (via the baseline's cached L5 graph) that joined the replay seed
+      *and* the `crosscheck` changed-path work-list.
+      ADR-068 Phase 6 update: `buildsource/poi.py`, `tests/test_poi.py`, and
+      `scan` itself were all deleted outright (no alias, no deprecation
+      window), after a repo-wide audit confirmed `poi.py` had no
+      `compare`-pipeline caller. This capability has **no current
+      replacement** — `compare`'s own source-replay scope is not
+      evidence-directed the way this was. REMAINS (now open again rather
+      than a residual): reintroducing evidence-directed source-replay
+      focusing, if a concrete need reappears, as a `compare`-native
+      mechanism rather than reviving the deleted `scan`-only one verbatim.
 
   - id: UC-TC-build-emitted-facts
     axis: toolchain
@@ -1034,10 +1089,10 @@ use_cases:
       fallbacks documented. Lets vendor/closed builds contribute exact-build-context
       facts without shipping sources; replay stays the portable default.
 
-  - id: UC-REPORTING-scan-coverage-estimate
+  - id: UC-REPORTING-dry-run-cost-preview
     axis: reporting
-    name: Scan coverage/confidence report + per-project cost estimate
-    status: partial
+    name: Per-project dry-run cost estimate
+    status: complete
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     evidence:
@@ -1045,18 +1100,44 @@ use_cases:
         - abicheck/dry_run_estimate.py
         - abicheck/service.py
       tests:
+        - tests/test_compare_cost_preview.py
         - tests/test_dry_run_contract.py
     next_steps: >
-      ADR-035 D9/D10. DONE (retired-and-partially-migrated, ADR-068 Phase 6):
-      `scan`'s own coverage table (intrinsic L0-L2 + pattern-scan S3 + L3/L4/L5
-      pack coverage + per-crosscheck rows + the POI focus summary) and its
-      `--estimate` dry-run flag are gone along with `cli_scan.py`. The
-      per-project cost-estimate half survives, migrated to
-      `abicheck/dry_run_estimate.py` (renamed from `service_scan.py`'s own
-      cost-model half, per the ADR-068 Phase 6 commit) and reachable today
-      through `compare --dry-run`'s cost preview. REMAINS: no live equivalent
-      of the coverage/confidence report half (per-tier coverage table,
-      provider-agreement/confidence matrix) that `scan` used to render.
+      ADR-035 D9/D10. DONE: the typed `ScanRequest`/`CostEstimate`/
+      `LayerResult`/`Budget` API + `service.estimate_scan()` (probes TU count
+      from the compile DB / source tree + header fan-out) survives the
+      ADR-068 Phase 6 `scan` deletion — `service_scan.py` was renamed to
+      `dry_run_estimate.py` and now holds only this dry-run cost model and
+      header-expansion helpers, unrelated to any CLI orchestration, surfaced
+      today as `compare`'s own `--dry-run` cost preview
+      (`tests/test_compare_cost_preview.py`, plus the cross-command
+      `--dry-run` contract pinned by `tests/test_dry_run_contract.py`).
+      Split out of the former `UC-REPORTING-scan-coverage-estimate` entry,
+      whose other half (the per-run coverage/confidence report) is
+      `by_design_excluded` below.
+
+  - id: UC-REPORTING-scan-coverage-report
+    axis: reporting
+    name: Per-run coverage/confidence report (retired)
+    status: by_design_excluded
+    gap: G19
+    note: >
+      ADR-035 D9/D10. DONE (originally): `scan` emitted one report
+      (text/JSON) carrying the per-tier coverage table (intrinsic L0-L2 +
+      pattern-scan S3 + L3/L4/L5 pack coverage + per-crosscheck rows + the
+      POI focus summary), the resolved level, and the risk score, so a
+      partial scan was legible (never a bare "source scan failed").
+      ADR-068 Phase 6 update: `scan`, `cli_scan.py`, and this per-run
+      coverage/POI/risk report were all deleted outright (no alias, no
+      deprecation window) — **there is no current replacement**: no
+      `compare` invocation emits an equivalent per-tier coverage table.
+      Split out of the former `UC-REPORTING-scan-coverage-estimate` entry
+      so this capability's absence is not masked by its surviving sibling
+      (`UC-REPORTING-dry-run-cost-preview` above) staying `status: complete`.
+      The "full `ScanResult`/`run_scan` refactor" REMAINS item the original
+      entry tracked is now moot, since there is no `scan` command left for
+      it to serve; reintroducing this report would mean designing a
+      `compare`-native equivalent from scratch, not reviving `ScanResult`.
 
   # ── Source-scan & cross-source example corpus (ADR-035 / G20) ──────────────
   - id: UC-WORKFLOW-audit-example-corpus
@@ -1124,15 +1205,32 @@ use_cases:
     status: by_design_excluded
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
+    evidence:
+      modules: [abicheck/buildsource/source_link.py]
+      tests: [tests/test_source_evidence_integrity.py]
     note: >
-      ADR-068 Phase 6 deleted `buildsource/poi.py` outright (no
-      compare-pipeline caller survived it) along with its D7 focus-scenario
-      suite (`tests/test_poi_scenarios.py`) — an export delta targeting the
-      changed symbol, an exported template instantiation seed, the changed-path
-      floor. `UC-WORKFLOW-evidence-directed-scope` tracks the same loss for
-      the underlying `poi.py` mechanism itself; this entry tracked only its
-      example-scenario coverage. The D4 unlinked-source-evidence integrity
-      half (`buildsource/source_link.py`, `tests/test_source_evidence_
-      integrity.py`) survives independently and is not affected by this
-      retirement, but on its own no longer constitutes "focusing scenarios"
-      as this use case originally described them.
+      ADR-035 D7 (G20.3). DONE (originally): test-only scenario suites
+      (`tests/test_poi_scenarios.py`, `tests/test_source_evidence_integrity.py`)
+      asserted on the scan plan, not just the verdict — an export delta
+      targeting the changed symbol, an exported template instantiation seed,
+      the D7 changed-path floor (a mis-weighted `risk_rules` could not drop a
+      changed TU), and the D4 unlinked-source-evidence integrity guard (the
+      oneDAL shape: many exports, TUs parsed, zero matched symbols reported
+      as degraded, never clean). ALSO DONE: the §3.3 `_layers_from_coverage`
+      plumbing — the L4 source-link boundary integrity counters
+      (`exported_symbols`/`matched_symbols`/`unmatched_symbols` + `facts`)
+      rode the crosscheck coverage row (`crosscheck._coverage_row`/
+      `_CheckOutput`) onto the rendered `ScanResult` layer
+      (`service_scan.LayerResult.counters`), so a degraded link was named on
+      the report even when ODR ran clean. ADR-068 Phase 6 update:
+      `buildsource/poi.py` and `tests/test_poi_scenarios.py` (the
+      POI-work-list half) were deleted outright, no replacement -- see
+      `UC-WORKFLOW-evidence-directed-scope` above. The §3.3 integrity-counter
+      half survives and no longer depends on the retired typed
+      `ScanResult`/`LayerResult` pair at all (that pair was already retired
+      in ADR-068 **Phase 4**, ahead of Phase 6's command deletion):
+      `test_source_evidence_integrity.py::
+      test_integrity_counters_surface_on_rendered_scan_layers` now asserts
+      directly against `buildsource.cross_source_checks.run_crosschecks`'s
+      own coverage rows, one layer closer to the shipped shape. REMAINING:
+      nothing in the surviving §3.3 half. See plan Phase 3.

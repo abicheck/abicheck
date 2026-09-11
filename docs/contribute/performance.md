@@ -181,9 +181,11 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
   `classify` job always runs, diffs the PR's changed files against
   `PERF_SENSITIVE_PATTERNS` — the detector core (`abicheck/diff_*.py`,
   `checker.py`, `post_processing.py`, `demangle.py`, `binary_fingerprint.py`,
-  `surface.py`, ...), all of `abicheck/buildsource/**`, scan/compare/dump
-  orchestration (`service_scan.py`/`service_input_resolution.py`/
-  `scan_engine.py` and the other `service_*`/cache modules), the benchmark
+  `surface.py`, ...), all of `abicheck/buildsource/**`, compare/dump
+  orchestration (`dry_run_estimate.py`/`service_input_resolution.py`
+  and the other `service_*`/cache modules — `service_scan.py` was renamed
+  to `dry_run_estimate.py` and `scan_engine.py` was deleted outright,
+  along with the rest of `scan`, in ADR-068 Phase 6), the benchmark
   scripts, and the perf tests — and reports a `run` output the four
   downstream jobs each gate on (`if: needs.classify.outputs.run == 'true'`).
   Adding the **`performance`** label force-runs the lane regardless of

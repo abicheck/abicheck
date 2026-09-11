@@ -127,8 +127,11 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
 
 The `private-header` / `system-header` reasons are provenance-derived: they
 only appear when the snapshots were produced with a `-H`/`--header`
-public-header set (ADR-015) -- `dump` derives provenance from it directly, and
-`scan` additionally accepts `--public-header-dir`. Provenance is supported for
+public-header set (ADR-015) -- both `dump` and `compare` derive provenance
+from it directly (a file entry tags that header public, a directory entry
+tags everything under it); the separate `--public-header-dir` spelling this
+paragraph once named was consolidated into the same `-H`/`--header` option
+and is gone. Provenance is supported for
 ELF, PE (provenance from PDB `LF_UDT_SRC_LINE`), and Mach-O inputs. Without a
 public-header set, every declaration's origin is `unknown` and only the
 linkage/reachability reasons above are emitted.
@@ -688,16 +691,33 @@ Every JSON report carries a top-level `report_schema_version` field
 > carry different version numbers at the same time; consumers should read
 > whichever field belongs to the file they loaded.
 >
-> `scan --format json` used to be a **third, separate shape** here: it
-> emitted a `ScanOutcome` object with its own top-level `scan_schema_version`
-> field (`SCAN_SCHEMA_VERSION`), independent of `report_schema_version`.
-> ADR-068 Phase 6 retired the `scan` command outright (and
-> `SCAN_SCHEMA_VERSION` with it). `compare` has two report-schema version
-> markers today, one per report shape: `report_schema_version` above for a
-> two-sided `compare` report, and **`audit_report_schema_version`** for
-> `compare --no-baseline --format json`'s single-build audit document
-> (`AUDIT_REPORT_SCHEMA_VERSION`, `abicheck/report/no_baseline_document.py`).
-> The audit document deliberately carries *only* its own marker and never
+> **Retired third shape (historical).** Before ADR-068 Phase 6 deleted the
+> `scan` command outright (no alias, no deprecation window), `scan --format
+> json` emitted a **third, separate shape**: a `ScanOutcome` object (`mode`,
+> `level`, `risk`, `verdict`, `exit_code`, …) carrying its own top-level
+> `scan_schema_version` field (`MAJOR.MINOR`) — independent of, and not
+> interchangeable with, `report_schema_version`. Through `1.30` the typed
+> Python `ScanResult.to_dict()` envelope stamped the same value and nested
+> the `ScanOutcome` dict under its `report` key; that type was removed in
+> ADR-068 Phase 4, ahead of the command itself. Nothing produces a new
+> `scan_schema_version` report any more, and `abicheck.schemas.
+> SCAN_SCHEMA_VERSION` no longer exists. Tooling that reads a **stored,
+> previously-generated** scan-shaped report (recognized structurally by its
+> own `scan_schema_version` key) still recognizes it as retired input rather
+> than silently misreading it as a `compare` report — `pr_comment.py`'s
+> `build_model()` raises a clear error naming the replacement, and
+> `buildsource/check_report.py`'s schema-stamping leaves a stored
+> `scan_schema_version` untouched rather than stamping the current
+> `report_schema_version` onto it. There was never a packaged
+> `.schema.json` for scan output (unlike `compare`'s
+> `compare_report.schema.json`).
+>
+> `compare` has two report-schema version markers today, one per report
+> shape: `report_schema_version` above for a two-sided `compare` report, and
+> **`audit_report_schema_version`** for `compare --no-baseline --format
+> json`'s single-build audit document (`AUDIT_REPORT_SCHEMA_VERSION`,
+> `abicheck/report/no_baseline_document.py`). The audit document
+> deliberately carries *only* its own marker and never
 > `report_schema_version`: the compare report's schema tells consumers to
 > accept any matching MAJOR, so stamping an audit there would be a
 > different document wearing the compare report's identity. A consumer
@@ -722,9 +742,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 > **`effective_config_digest`/`effective_config_fields` (schema 2.45; the
 > field set itself grew again in 2.46 -- see below).**
-> Every `compare`/`compare-release` JSON report, and every `scan --against`
-> report's `diff` block (`scan_schema_version` 1.19, field-set update 1.20),
-> carries a
+> Every `compare`/`compare-release` JSON report carries a
 > `sha256:...` fingerprint of the resolved gate/policy/surface/contract
 > configuration the comparison actually ran under, alongside the named
 > field dict it was hashed from — so two reports (or a report replayed
@@ -739,17 +757,25 @@ Every JSON report carries a top-level `report_schema_version` field
 > `abicheck.effective_config_digest`'s own module docstring for the full
 > field set and precedence.
 
-#### `scan --against`: the report cap and truncation (`--max-findings`)
+#### Historical: `scan --against`'s report cap and truncation
 
-`scan --against`'s `diff` block itemizes the comparison's gating findings
+`scan` was deleted outright in ADR-068 Phase 6 (no alias, no deprecation
+window); the rest of this subsection is a historical record of a stored,
+`scan_schema_version`-keyed report's shape, kept for anyone reading an old
+report rather than as a live command reference.
+
+`scan --against`'s `diff` block itemized the comparison's gating findings
 (`findings`) and any `--suppress`-silenced ones (`suppressed`), each capped at
-20 entries by default so a large diff can't blow up the always-on scan output
-— `compare --format json` remains the way to see every finding
-unconditionally. Raise or lower the cap per run with `scan --max-findings N`
-or globally via the
-`ABICHECK_MAX_BASELINE_FINDINGS` environment variable when neither passes an
-explicit value; either configures the same cap, and it only changes how much
-of the diff a run itemizes — never the verdict or exit code.
+20 entries by default so a large diff could not blow up the always-on scan
+output — `compare --format json` remains the way to see every finding
+unconditionally. The cap was raised or lowered per run with `scan
+--max-findings N`, or globally via the (now-removed) `ABICHECK_MAX_BASELINE_
+FINDINGS` environment variable. **There is no current scalar-`compare`
+equivalent of this per-run finding cap** — a plain `compare`/`compare
+--no-baseline` invocation itemizes every finding uncapped. The nearest live
+relative is `compare`'s own `--max-findings-per-library`, but that caps each
+*library*'s finding list only in the multi-library/release fan-out path
+(`compare release-1.0/ release-2.0/`), not a single-pair comparison.
 
 When either list is actually truncated, the block sets the existing
 `findings_truncated`/`suppressed_truncated` booleans (schema 1.8+) and, since
@@ -763,16 +789,17 @@ Each entry in `suppressed` also carries `suppression_rule` (which
 `breaking`/`api_break`/`risk`/`compatible` bucket the finding would have
 counted as had `--suppress` not withheld it) — a suppressed finding's report
 entry always says more than "suppressed", so a reader can tell a suppressed
-ABI break apart from a suppressed cosmetic note. `scan --against --format
-text` prints the same information: an always-present `suppressed=N` count in
-the "Baseline comparison" line, and `--show-suppressed` itemizes each one.
+ABI break apart from a suppressed cosmetic note. The retired `scan --against
+--format text` printed the same information: an always-present
+`suppressed=N` count in the "Baseline comparison" line, and
+`--show-suppressed` itemized each one.
 
 Since schema 1.11, any `findings`/`suppressed` entry for a removal whose ELF
 symbol linkage was captured also carries `symbol_binding`
 (`global`/`weak`/`local`/`unique`/`other`) — the same field
 `compare --format json`/SARIF emit (see `binding:` under
 [Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
-match/no-match is auditable from `scan --against` too.
+match/no-match was auditable from the retired `scan --against` too.
 
 Since schema 3.5, every `compare --format json` report carries an
 unconditional top-level `finding_evolution` object: `counts` (one entry per
@@ -789,9 +816,10 @@ below), never guessed. Authority is unaffected either way: a finding's
 `docs/contribute/plans/one-comparison-product.md`) is the first cross-source
 check (`abicheck/buildsource/cross_source_checks.py`) migrated onto this model: run
 per side inside `compare`'s own pipeline rather than only under the
-now-retiring `scan --against`
+now-retired `scan --against`
 (`docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md`
-D3), its own findings now carry a real, non-default `evolution` value
+D3, which went on to delete the command outright in Phase 6), its own
+findings now carry a real, non-default `evolution` value
 (reflected in `finding_evolution.counts` above) — `introduced` (absent on
 OLD with sufficient evidence, present on NEW), `resolved` (present on OLD,
 absent on NEW with sufficient evidence), `persistent` (present on both), or
@@ -806,15 +834,16 @@ Since schema 1.13, the block also carries an always-on `additions` array —
 the addition-shaped subset of the `compatible` bucket (new public-API
 surface, `ChangeKind`'s `ADDITION_KINDS`), itemized the same shape as
 `findings` (`"bucket": "compatible"`) regardless of whether severity policy
-made any of them the run's blocking cause. Capped independently of
-`findings`' own budget (the same `--max-findings`/
-`ABICHECK_MAX_BASELINE_FINDINGS` cap), with `additions_truncated` set when
-that cap was hit, alongside `additions_total` (the exact, untruncated
-addition count — `compatible`'s own scalar mixes additions and quality
-findings, so it can't answer "how many additions, exactly" on its own). All
-three keys are omitted when `compatible` has no addition-shaped entry. This
-is what lets a `scan --against` PR comment (see the Action's own
-`pr-comment`/`pr-comment-on` inputs, [GitHub Action usage](github-action.md))
+made any of them the run's blocking cause. On the retired `scan --against`
+shape this was capped independently of `findings`' own budget (the same
+`--max-findings`/`ABICHECK_MAX_BASELINE_FINDINGS` cap), with
+`additions_truncated` set when that cap was hit, alongside `additions_total`
+(the exact, untruncated addition count — `compatible`'s own scalar mixes
+additions and quality findings, so it can't answer "how many additions,
+exactly" on its own). All three keys were omitted when `compatible` had no
+addition-shaped entry. This is what let a `scan --against` PR comment (see
+the Action's own `pr-comment`/`pr-comment-on` inputs,
+[GitHub Action usage](github-action.md))
 render a green "public API additions" section the same way `compare`'s own
 JSON report already does via its full `changes` list.
 

@@ -641,57 +641,74 @@ driven through one uniform, cost-estimable interface. In the current code:
   repo is `tests/test_providers.py`'s single `_FakeProvider` fixture, which
   exists purely to assert the `Protocol`'s structural typing works in
   isolation — it is not exercised by any real scan path.
-- **The real orchestrator bypasses it.** `scan_engine.run_scan_core()` (the
-  shared engine core PR #536 extracted from `cli_scan.py`) imports and calls
-  the concrete collector functions directly —
+- **The real orchestrator bypassed it.** `scan_engine.run_scan_core()` (the
+  shared engine core PR #536 extracted from `cli_scan.py`) imported and
+  called the concrete collector functions directly —
   `buildsource.cross_source_checks.run_crosschecks`, `buildsource.pattern_facts.
   find_pattern_facts`, `buildsource.preprocessor_facts.collect_preprocessor_facts`, etc.
   (`scan_engine.py:53-57`) — never touching `providers.py`.
 - **The typed half of the same ADR section shipped, the protocol half
   didn't.** `service_scan.py`'s `ScanRequest`/`ScanResult`/`run_scan()`/
-  `run_audit()` (ADR-035 D10's *other* deliverable) are real and wired up, but
-  never import `providers.py` either.
-- **Documentation has drifted from code.** `abicheck/buildsource/CLAUDE.md`'s
-  module map still describes `providers.py` as live and "driven by
-  `service.run_scan`" (ADR-035 D10, G19.7) — `service.run_scan` does not
-  exist; the real entry point (`service_scan.run_scan`) never touches this
-  module. ADR-035 D10 itself is still marked "Accepted — implemented" with no
-  note that this half diverged.
+  `run_audit()` (ADR-035 D10's *other* deliverable) were real and wired up,
+  but never imported `providers.py` either.
+- **Documentation had drifted from code.** `abicheck/buildsource/CLAUDE.md`'s
+  module map still described `providers.py` as live and "driven by
+  `service.run_scan`" (ADR-035 D10, G19.7) — `service.run_scan` never
+  existed; the real entry point (`service_scan.run_scan`) never touched this
+  module. ADR-035 D10 itself was still marked "Accepted — implemented" with
+  no note that this half diverged.
 
-This is the textbook shape of orphaned/partial-migration scaffolding: a typed
-contract with no implementers, no real callers, bypassed by the very
+This was the textbook shape of orphaned/partial-migration scaffolding: a
+typed contract with no implementers, no real callers, bypassed by the very
 orchestrator built to fulfill the ADR describing it, and misdocumented as
 load-bearing in the module map a contributor would read first.
 
-**Goal.** Close the gap between what ADR-035 D10 says and what
-`scan_engine.py`/`service_scan.py` actually do, and stop
-`buildsource/CLAUDE.md` asserting a wiring that isn't real — via whichever of
-the two paths below the maintainer picks.
+**ADR-068 Phase 6 update.** `scan_engine.py`, `cli_scan.py`, and
+`service_scan.py`'s scan half (renamed `dry_run_estimate.py`, keeping only
+the dry-run cost model) were all deleted outright along with the rest of
+`scan` (no alias, no deprecation window) — so the *specific* orchestrator
+this section names as bypassing `providers.py` no longer exists either.
+`providers.py` itself was **not** deleted in that PR (deleting it is the
+C12 decision below, which stayed a maintainer call, not a mechanical
+side-effect of the scan retirement); a repo-wide audit at that time found no
+remaining `providers.py` caller of any kind, so the module is now orphaned
+even more completely than this section originally described — there is no
+orchestrator left to bypass it, scan or otherwise. `buildsource/CLAUDE.md`'s
+module map has been corrected to say so (no longer claims a live
+`service.run_scan` driver).
+
+**Goal.** Close the gap between what ADR-035 D10 says and what the code
+actually does, and keep `buildsource/CLAUDE.md` accurate — via whichever of
+the two paths below the maintainer picks. Both options below now apply to a
+strictly simpler situation than when this section was written: there is no
+`scan_engine.run_scan_core()` left to either bypass (Option 1) or refactor
+(Option 2).
 
 **Approach — this is a decision, not a mechanical refactor:**
 
 - **Option 1: Delete** `providers.py` + `tests/test_providers.py`; add an
   ADR-035 addendum (or short new ADR) recording that D10's "Provider
-  protocol" sub-design was superseded by `scan_engine.run_scan_core()`'s
-  direct-call orchestration plus `service_scan`'s typed API, and why: every
-  level added so far (L3/L4/L5) has needed enough level-specific wiring in
-  `run_scan_core` that a shared 3-method `Protocol` wouldn't have saved
-  orchestration code, only added an indirection with no implementers. Correct
-  `buildsource/CLAUDE.md`'s module map in the same change. Lowest risk —
-  deletes code nothing depends on; the fast lane + ai-readiness gate confirm
-  no fallout.
-- **Option 2: Retrofit** — refactor `scan_engine.run_scan_core()`'s direct
-  collector calls into real `LayerProvider` implementations, registered and
-  dispatched uniformly, realizing ADR-035 D10's original design. Only
-  justified by a concrete near-term need for pluggable/external providers
-  (e.g. an ADR-032 manifest-driven external extractor reaching this level on
-  the actual roadmap) — otherwise this is speculative generality against this
-  repo's own stated convention ("Don't add features... beyond what the task
-  requires... Don't design for hypothetical future requirements," `/CLAUDE.md`).
-  Higher effort: touches the already-large `scan_engine.py` plus every D2/L3/
-  L4/L5 collector call site, and needs behaviour-preserving verification
-  across the scan pipeline (`Scan: --estimate dry run`, `Scan: baseline
-  comparison detects breaking change` CI jobs and friends).
+  protocol" sub-design was superseded by direct-call orchestration (now
+  itself retired along with `scan`) plus `service_scan`'s typed API, and
+  why: every level added so far (L3/L4/L5) had needed enough level-specific
+  wiring in `run_scan_core` that a shared 3-method `Protocol` would not have
+  saved orchestration code, only added an indirection with no implementers.
+  Correct `buildsource/CLAUDE.md`'s module map in the same change (done,
+  ahead of the deletion itself, in the ADR-068 Phase 6 doc follow-up).
+  Lowest risk — deletes code nothing depends on; the fast lane +
+  ai-readiness gate confirm no fallout.
+- **Option 2: Retrofit** — since there is no more `scan_engine.
+  run_scan_core()` for this option to refactor, "retrofit" now means
+  building a new `compare`-native direct-call orchestration layer for
+  L3/L4/L5 collection (if and when one exists) as real `LayerProvider`
+  implementations from the start, registered and dispatched uniformly,
+  realizing ADR-035 D10's original design. Only justified by a concrete
+  near-term need for pluggable/external providers (e.g. an ADR-032
+  manifest-driven external extractor reaching this level on the actual
+  roadmap) — otherwise this is speculative generality against this repo's
+  own stated convention ("Don't add features... beyond what the task
+  requires... Don't design for hypothetical future requirements,"
+  `/CLAUDE.md`).
 
 **Recommendation (non-binding).** Option 1, unless there is a known concrete
 near-future consumer needing the pluggable-provider indirection — the

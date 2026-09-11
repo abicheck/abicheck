@@ -101,7 +101,7 @@ Two abicheck features map directly onto this page:
   ([case118](../reference/examples/case118_internal_struct_field_added_scoped.md)–[120](../reference/examples/case120_internal_struct_reordered_scoped.md)),
   public changes stay. Without headers, every exported symbol is treated as
   contract — the safe over-approximation.
-- **Audit mode** (`abicheck scan` with no `--against` — there is no separate
+- **Audit mode** (`abicheck compare --no-baseline` — there is no separate
   `--audit` flag) — a single-build hygiene lint for a
   *leaking* boundary: accidental exports
   ([case143](../reference/examples/case143_audit_accidental_export.md)), private-header
@@ -116,7 +116,7 @@ Both as commands. The one-build audit needs only the build and its public
 headers, and reports the leaking boundary:
 
 ```bash
-abicheck scan libfoo.so -H include/
+abicheck compare --no-baseline libfoo.so -H include/
 ```
 
 The second shows the boundary applied to a *change*: an internal struct

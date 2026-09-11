@@ -357,9 +357,11 @@ def test_sc_offline_snapshot(tmp_path: Path) -> None:
 def test_sc_baseline_pin(tmp_path: Path) -> None:
     # No baseline registry (pre-1.0 CLI reset): a baseline is just an old
     # snapshot file, pinned by keeping it around and passed straight to
-    # `compare`, which folds the always-on tier and the gating comparison
-    # into one CI-facing command. (Historically `scan --against`; ADR-068
-    # Phase 6 retired that command in favor of `compare`.)
+    # `compare`, which folds the always-on cross-source tier and the gating
+    # comparison into one CI-facing command. (`scan v2 --against v1` was
+    # this scenario's spelling before `scan` was deleted outright in
+    # ADR-068 Phase 6 -- no alias, no deprecation window; `compare v1 v2`
+    # is the direct replacement.)
     v1 = _save(_lib("1", [_fn("a"), _fn("b")]), tmp_path / "v1.json")
     v2 = _save(_lib("2", [_fn("a")]), tmp_path / "v2.json")
     res = _cli("compare", v1, v2, "--format", "json")

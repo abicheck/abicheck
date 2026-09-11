@@ -47,6 +47,13 @@ Use `auto` when the domain is a project-level decision you have already
 recorded elsewhere, and a named domain when this run is asking a specific
 question.
 
+A stored-baseline `compare` accepts the same flag, with the same meaning:
+
+```bash
+abicheck compare baseline.json build/libfoo.so \
+  --contract exports
+```
+
 ## Reading the result
 
 ```bash

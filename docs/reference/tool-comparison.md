@@ -49,7 +49,7 @@ This document explains how each ABI checking tool works, what it measured on the
 ## Current scan-quality snapshot
 
 `Examples Validation` is the workflow for the runnable compare-mode catalog. It
-validates the current abicheck scan quality separately from the pinned vendor
+validates abicheck's current compare-mode coverage separately from the pinned vendor
 benchmark below: the catalog lanes answer "what does abicheck currently cover?",
 while the pinned 74-case subset answers "how does abicheck compare to
 ABICC/libabigail on a stable cross-tool corpus?" Volatile catalog lane counts

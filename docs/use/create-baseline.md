@@ -101,7 +101,9 @@ See [Multi-Binary Releases](multi-binary.md) for the bundle/package flags and th
 `abicheck compare OLD NEW` doesn't require a stored baseline at all — `OLD`
 can be a previous native library or a saved ABI dump directly (a single
 file, not a directory or package -- for those, `compare` takes the two
-package roots the same way):
+package roots the same way). `compare` always runs its always-on
+pattern/cross-source audit checks alongside the comparison itself, in one
+pass:
 
 ```bash
 abicheck compare old/libfoo.so new/libfoo.so --header new/include
@@ -124,5 +126,10 @@ abicheck compare old/libfoo.so new/libfoo.so \
   side-scoped headers are unnecessary there. Prefer a pre-dumped snapshot
   baseline when you can — it's unambiguous and needs no toolchain at compare
   time.
+
+(`scan ARTIFACT --against OLD` was this workflow's spelling before `scan`
+was deleted outright in ADR-068 Phase 6 — no alias, no deprecation window;
+`compare OLD NEW` is the direct replacement, with `OLD`/`ARTIFACT` swapping
+argument order to match `compare`'s own `OLD NEW` convention.)
 
 See [Evidence Depth](evidence-depth.md) for the full `--depth` reference.

@@ -297,9 +297,9 @@ result = run_compare_request(CompareRequest(
 ))
 ```
 
-The one-sided audit (`scan` with no `--against`) has **no** Python entry
-point yet: `compare --no-baseline` is the CLI replacement, and (as of the
-fixes recorded in `docs/contribute/known-gaps.md`'s
+The one-sided audit (`compare --no-baseline`, formerly the retired `scan`
+with no `--against`) has **no** Python entry point yet. As of the fixes
+recorded in `docs/contribute/known-gaps.md`'s
 "`compare --no-baseline` does not yet reproduce `scan`'s audit-mode
 findings" entry) it now reproduces `scan`'s own candidate-side findings and,
 opt-in via `--severity-preset`, its exit-code gating too. Concretely: all

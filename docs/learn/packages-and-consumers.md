@@ -11,7 +11,7 @@ summarizes:
 depends_on:
   - abicheck/package.py
   - abicheck/debian_symbols.py
-  - abicheck/scan_abi3_resolve.py
+  - abicheck/workflows/abi3_audit.py
 lifecycle: active
 generated: false
 ---
@@ -87,11 +87,13 @@ An extension module exports one symbol, its init function, so its export
 table says nothing about compatibility. The surface that decides whether
 the module *loads* is the CPython C-API it imports, and the contract on
 that surface is the limited API: a module tagged `abi3` promises to import
-only the stable subset available since a stated Python version. The
-one-build audit checks the promise against the binary:
+only the stable subset available since a stated Python version. `--abi3`
+is not yet wired to `--no-baseline`'s one-sided audit path (it exits 64
+there today) — self-compare the module against itself with plain `compare`
+instead, which checks the promise against the binary the same way:
 
 ```bash
-abicheck scan mymod.abi3.so --abi3 3.9
+abicheck compare mymod.abi3.so mymod.abi3.so --abi3 3.9
 ```
 
 Two more surfaces follow. The Python-level API — the functions, classes

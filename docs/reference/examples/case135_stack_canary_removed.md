@@ -64,7 +64,7 @@ info or headers needed.
 
 ## Why abicheck catches it
 
-abicheck scans each binary's imported dynamic symbols for
+abicheck inspects each binary's imported dynamic symbols for
 `__stack_chk_fail`; its presence on one side and absence on the other is
 reported as a stack-protector regression straight from L0 ELF evidence.
 

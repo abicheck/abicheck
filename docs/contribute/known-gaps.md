@@ -7664,35 +7664,86 @@ legitimate three categories above is a gate in
 reasoned allowlist. Doing the gate first would invert that order and bake
 today's 25 unexamined sites into an allowlist nobody revisits.
 
-## `scan --depth binary` and `compare --depth binary` see different evidence
+## `compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips
 
-`scan --depth binary` extracts exported symbols only. `compare --depth binary`
-on the same two live binaries still reads DWARF and reports type-level
-findings (`type_size_changed`, `type_field_added_compatible`) that the
-symbols-only view cannot produce. Verified live on a two-version C++ fixture:
-identical operands, identical pin, `compare` emits five changes and `scan`
-two.
+**Reopened 2026-09-11** (Codex review, PR #1220 doc follow-up) after an
+earlier pass at that same PR incorrectly marked this entry CLOSED,
+reasoning that deleting `scan` (ADR-068 Phase 6) made the gap moot because
+the comparison it originally described needed a `scan` reading on one side.
+That reasoning was wrong: `scan`'s own `--depth binary` behavior was never
+the bug — it was only the *oracle* this entry originally used to show
+`compare`'s behavior was inconsistent with something. Deleting `scan`
+removes that oracle, not the underlying defect in `compare` itself, and the
+entry's own body already said as much before being closed ("that question
+is now `compare`'s alone to answer" — see below). Verified live against the
+*current* code before reopening, not taken on Codex's word alone:
 
-The two commands are not wrong in the same way. `scan` honours the pin as an
-*extraction floor and ceiling*; `compare`'s `--depth` projection
-(`policy/depth_projection.py`) drops the L3-L5 layers but does not restrict
-the L1 debug parse the resolution already performed, so the pin acts as a
-ceiling on collected layers rather than on read evidence. Which of the two is
-the intended contract at this rung is a `compare`-side question (ADR-063
-Phase 8's `--depth` ceiling), not a `scan` one.
+```
+$ gcc -shared -fPIC -g old.c -o libold.so      # struct Point { int x, y; }
+$ gcc -shared -fPIC -g new.c -o libnew.so      # struct Point { int x, y, z; }
+$ abicheck compare libold.so libnew.so --depth binary --format json
+```
 
-Left open deliberately. ADR-068 Phase 4's typed-API slice fixed the adjacent
-*headers*-rung divergence — `cli_scan_helpers._uses_debug_presence_only`
+reports `verdict: BREAKING` with a `type_size_changed` finding ("Size
+changed: Point (64 → 96 bits)") and a `type_field_added_compatible`
+finding, from DWARF alone (no headers passed on either side). That directly
+contradicts `docs/use/evidence-depth.md`'s own published contract for this
+rung (`| binary | L0/L1 exported symbols + binary metadata + debug-info
+*presence* (no deep DWARF type walk, no L2 AST) + always-on pattern scan |`)
+— "debug-info presence" promises only "is DWARF present", not "walk every
+DWARF type and report on it". `policy/depth_projection.py`'s own module
+docstring confirms this is by design, not an oversight: it documents `BINARY`
+as covering both L0 *and* L1 ("no L2 AST", explicitly *not* "no debug info"),
+and keeps layout/signature facts at the `binary` rung whenever DWARF
+confirms them, "the way a real DWARF-informed binary dump would". The
+*code*'s contract and the *docs*' contract disagree with each other, and
+this entry's status must track that disagreement as still open — reworded
+below to describe the `compare`-only shape of the question now that `scan`
+is gone, but **not marked CLOSED**.
+
+Original gap, kept for context: `scan --depth binary` extracted exported
+symbols only, while `compare --depth binary` on the same two live binaries
+still read DWARF and reported type-level findings that the symbols-only
+view could not produce. The two commands were not wrong in the same way:
+`scan` honoured the pin as an *extraction floor and ceiling*, while
+`compare`'s `--depth` projection (`policy/depth_projection.py`) drops the
+L3-L5 layers but does not restrict the L1 debug parse the resolution
+already performed, so the pin acted as a ceiling on collected layers rather
+than on read evidence. Which of the two was the intended contract at this
+rung was left open as a `compare`-side question (ADR-063 Phase 8's
+`--depth` ceiling) — that question is now `compare`'s alone to answer,
+since there is no `scan` reading to compare it against any more, but it
+remains unanswered: either `docs/use/evidence-depth.md`'s "no deep DWARF
+type walk" promise needs fixing to match what `compare --depth binary`
+actually does, or `policy/depth_projection.py`'s `BINARY`-keeps-L1 behavior
+needs to change to match the documented promise. Neither has happened.
+
+ADR-068 Phase 4's typed-API slice had fixed the adjacent *headers*-rung
+divergence before scan's removal — `cli_scan_helpers._uses_debug_presence_only`
 dropped DWARF at the `HEADERS`/`BUILD` rungs even when no headers existed to
 replace it, so a header-less `scan` lost every type-level finding while
-naming the rung it was asked for — and the parity suite now pins the
-`headers` and unpinned rungs against `compare` as an oracle
-(`tests/test_scan_depth_evidence_shortcut.py`). The `binary` rung is
-excluded from that matrix and recorded here instead, since closing it means
-deciding what `compare --depth binary` should do, which is a separate
-change with its own blast radius. Registered as a `KnownGap` on the
-`evidence.tier_shortcut_without_substitute` entry in
-`tests/regressions/manifest.py`.
+naming the rung it was asked for — and the parity suite pinned the `headers`
+and unpinned rungs against `compare` as an oracle
+(`tests/test_scan_depth_evidence_shortcut.py`). That decision function and
+its seed tests were deleted with the rest of `cli_scan_helpers.py` in ADR-068
+Phase 6. The `evidence.tier_shortcut_without_substitute` `BugClass` this gap
+was registered against in `tests/regressions/manifest.py` was retired in the
+same PR rather than retargeted: a repo-wide audit at retirement time found
+`debug_presence_only` (the underlying dumper-level shortcut parameter,
+still plumbed through `dumper.py`/`service_dump_cache.py`/
+`service_dump_native.py`/`dumper_layout_backfill.py`/
+`workflows/input_resolution.py`) has **no remaining production call site**
+that ever passes `debug_presence_only=True` — every live caller forwards it
+at its default `False`. The shortcut mechanism is therefore currently
+unreachable from any command, so the bug class it protected has nothing left
+to seed-test against. If a future change reintroduces a caller that computes
+`debug_presence_only` from a depth/collect-mode decision (the "none of the
+L3/L4/L5 collect-mode decisions has an equivalent... guard yet" gap the
+original entry also named, which remains open and un-closed by this
+retirement), re-add a `BugClass` entry for it — retargeted to that new
+caller's own seed tests, not restored verbatim, since the invariant text
+should describe the caller that actually exists rather than the deleted
+`scan`-specific one.
 
 ## ~~A depth shortfall is a hard per-member `ERROR` on a directory `compare` but a soft assurance signal on a single-pair one~~ — CLOSED
 
@@ -7930,6 +7981,104 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 `tests/regressions/manifest_tool_surface.py` for the fixture half; the
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
+
+## `compare`'s migrated cross-source checks drop `--since`'s changed-path confidence boost
+
+Found during the ADR-068 Phase 6 doc follow-up (a stale mention of the
+retired `scan --since` in `catalog/cases/case181_xcheck_public_to_internal_dependency/README.md`
+prompted checking whether the claim still held).
+
+`buildsource/cross_source_checks.py`'s `CrosscheckConfig.changed_paths` lets
+a check (currently `public_to_internal_dependency`) report a finding at
+higher confidence when the internal declaration it reaches lives in a file
+the revision actually changed — "this call reaches a file that changed this
+revision" is a stronger signal than "this call reaches *something*
+internal". The retired `scan --since` wired its changed-path set through to
+this automatically.
+
+`compare()`'s own migrated cross-source-evolution path
+(`checker.compare()` → `workflows.cross_source_evolution.
+compute_cross_source_evolution(old, new)`) does **not** currently accept or
+forward a changed-path set at all — the function's signature is
+`(old: AbiSnapshot, new: AbiSnapshot)`, with no `changed_paths` parameter,
+even though `compare`'s own `--since`/`--changed-path` flags exist and are
+already threaded through to other consumers (`cli_compare_helpers.py`'s
+`changed_paths` parameter, ADR-043 D7 POI scoping — comment-tagged
+`# ADR-068 Phase 2c: ADR-043 D7 POI scoping`). So `public_to_internal_dependency`
+is always reported at the lower "reaches something internal" confidence
+under `compare` today, regardless of `--since`/`--changed-path`.
+
+Tractable when picked up, but **`checker.compare()` has no `changed_paths`
+parameter to thread today** (verified against its real signature,
+`abicheck/checker.py`'s `def compare(old, new, suppression=None, *,
+policy=..., ...)` — no `changed_paths` anywhere in it) — an earlier version
+of this entry wrongly described the value as already existing on
+`compare()` and needing only to be threaded further down. Adding a
+`changed_paths` parameter to `checker.compare()` (and updating every
+caller that already resolves a changed-path set — `cli_compare_helpers.py`
+already has one — to actually pass it through) is itself the first piece
+of required wiring work, not a step that can skip straight to modifying
+`compute_cross_source_evolution`/`CrosscheckConfig`. Needs a regression
+test asserting the confidence *does* change under `--since`/
+`--changed-path` on a real (not just internal-API) `compare` invocation,
+not only an internal `run_crosschecks(...)` call — the gap here was
+invisible to internal tests precisely because nothing exercises the public
+`--since` flag's effect on this specific check's confidence.
+
+
+
+## `compare --dry-run`'s cost preview does not reflect `--since`'s changed-path seeding
+
+Found during the PR #1220 doc follow-up (Codex review): a two-sided
+`compare old.so new.so --depth source --since origin/main --dry-run`
+example claimed the dry run "prints the translation units the seed selects
+and the projected per-layer cost without scanning". Verified live against
+the current code before fixing the doc: it does not.
+
+`build_compare_dry_run_result` (`frontends/cli/compare_dry_run.py`) always
+renders `"source scope: target on each side (compare has no PR change
+seed)"` whenever `collect_mode` is `source-target`/`source-changed`/
+`graph-full`, and its "Cost preview" section is built from
+`workflows.compare_cost_preview.estimate_compare_dry_run_cost`, whose
+signature accepts no `since`/changed-path parameter at all — so the TU
+counts and per-layer cost it prints are the *unseeded*, full-target
+numbers regardless of `--since`. The reason is ordering, not a missing
+render field: `cli_compare_helpers.py`'s `--dry-run` branch calls
+`emit_dry_run(...)` (which raises `SystemExit`, per `dry_run.py`) **before**
+`_enrichment.resolve_compare_enrichment_inputs(since=since, ...)` —
+the call that actually interprets `--since` and localizes `collect_mode` —
+ever runs. `--since` genuinely does narrow the real (non-dry-run) replay;
+only the dry-run preview is blind to it.
+
+Tractable when picked up: resolve the changed-path seed (and its resulting
+localized `collect_mode`/TU set) *before* the `--dry-run` emit, the same
+way `--dry-run` already reflects other resolved-but-not-yet-executed
+decisions (depth, headers, tool discovery) rather than echoing raw CLI
+input back. Needs a regression test asserting the dry run's own TU
+count/cost preview actually changes between `--since origin/main` and no
+`--since` on the same real inputs, not only that the flag is accepted.
+
+## `compare --depth binary` ignoring matrix-wide `--sources`/`--build-info` is untested
+
+Found while retiring `tests/scenarios/ci_gating.yaml`'s
+`SC-SCAN-BINARY-DEPTH-MATRIX-ARGS` scenario and its automated test
+(`test_sc_scan_binary_depth_matrix_args`) in the ADR-068 Phase 6 doc
+follow-up: the scenario's premise was that a CI matrix builds one command
+template and varies only `--depth`, leaving `--headers`/`--sources`/
+`--build-info` present on every rung, and the binary rung must ignore the
+deeper inputs and skip pattern-scan/L3 collection. The retired `scan`
+command exposed this as a checkable `coverage` array
+(`layer`/`status` rows) plus a `pattern_scan.files_scanned` field; verified
+live, `compare --format json` emits neither at any `--depth`. `compare
+--depth binary` does reach the same verdict/exit code on the scenario's
+fixture, but nothing currently asserts it *skipped* the deeper collection
+rather than merely projecting an already-collected superset down afterward
+-- the two are observably different only through the now-gone coverage
+block.
+
+Tractable when picked up: decide what `compare`'s own coverage-reporting
+surface should look like for this question (a `--depth`-scoped rung either
+was or wasn't collected), add it, and un-retire the scenario against it.
 
 ### ADR-061 gap F: thirteen nested `buildsource`/`compat`/`impact` modules still carry no disposition
 

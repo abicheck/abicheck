@@ -820,6 +820,33 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "use/github-action-source-scans.md",
                 "reference/exit-codes.md",
                 "start/scanning-conda-packages.md",
+                # Line-pinned (not whole-file, see the docstring above for
+                # why): each of these is a deliberate, past-tense historical
+                # mention added in the ADR-068 Phase 6 doc follow-up --
+                # a repo-wide sweep found these pages still copying `scan`
+                # as a live command, and each was rewritten to name it as
+                # retired rather than allowlisted wholesale.
+                "contribute/architecture-deepening-plan.md#L645",
+                "contribute/architecture-deepening-plan.md#L649",
+                "contribute/architecture-deepening-plan.md#L651",
+                "contribute/architecture-deepening-plan.md#L666",
+                "contribute/architecture-deepening-plan.md#L667",
+                "contribute/performance.md#L186",
+                "contribute/performance.md#L187",
+                "reference/config-file.md#L449",
+                "reference/config-file.md#L452",
+                "use/output-formats.md#L704",
+                "docs/contribute/usecase-registry.yaml#L916",
+                "docs/contribute/usecase-registry.yaml#L921",
+                "docs/contribute/usecase-registry.yaml#L923",
+                "docs/contribute/usecase-registry.yaml#L928",
+                "docs/contribute/usecase-registry.yaml#L934",
+                "docs/contribute/usecase-registry.yaml#L935",
+                "docs/contribute/usecase-registry.yaml#L1030",
+                "docs/contribute/usecase-registry.yaml#L1042",
+                "docs/contribute/usecase-registry.yaml#L1095",
+                "docs/contribute/usecase-registry.yaml#L1114",
+                "docs/contribute/usecase-registry.yaml#L1210",
             }
         ),
     ),

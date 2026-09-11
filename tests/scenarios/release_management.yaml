@@ -54,8 +54,10 @@ scenarios:
       baseline is simply an old dump/library passed directly to `compare`
       (`abicheck compare v1.json v2.json`), which folds the always-on
       cross-source tier and the gating comparison into one command for CI.
-      ADR-068 Phase 6 retired the legacy `scan --against` spelling of this
-      same flow outright.
+      (`scan v2.json --against v1.json` was this scenario's spelling before
+      `scan` was deleted outright in ADR-068 Phase 6 -- no alias, no
+      deprecation window; the flow below and its automated test both use
+      `compare` directly now.)
     flow:
       - abicheck dump libfoo.so -H include/ -o v1.json    # at release time, kept as the baseline
       - abicheck compare v1.json v2.json --format json

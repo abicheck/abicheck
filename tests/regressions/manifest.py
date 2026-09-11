@@ -224,9 +224,11 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "ELF .so-only). A compilation-database-root change is "
                     "real and reproducible but already covered by the "
                     "pre-existing L3-focused test_build_context_"
-                    "completeness.py/test_dump_scan_l3_comparability.py "
-                    "suites, so it was not re-derived here under a new "
-                    "name. Still not through a real CLI invocation or "
+                    "completeness.py suite (test_dump_scan_l3_"
+                    "comparability.py covered this too, until it was "
+                    "deleted with the rest of `scan` in ADR-068 Phase 6), "
+                    "so it was not re-derived here under a new name. "
+                    "Still not through a real CLI invocation or "
                     "abicheck.service (the registry's own stricter bar for "
                     "the 'cli'/'python-api' public_surfaces tags) — only "
                     "direct abicheck.dumper.dump()/abicheck.checker."
@@ -366,8 +368,8 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "override, output/report options) — of these only the "
                     "frontend concern has since had any of this treatment, "
                     "and only for one chain: `--ast-frontend` -> the L4 "
-                    "source-ABI replay backend, where `scan` accepted the "
-                    "value and then ignored it "
+                    "source-ABI replay backend, where `scan` used to "
+                    "accept the value and then ignore it "
                     "(tests/test_explicit_source_extractor_propagation.py, "
                     "exhaustive over the frontend x env domain, grounded in "
                     "_make_source_extractor). ADR-068 Phase 6 deleted `scan` "
@@ -378,11 +380,12 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "caller passes an explicit `--ast-frontend` through to "
                     "L4 source-ABI replay selection today, so this whole "
                     "chain is currently unreachable from any production "
-                    "code path (see that module's own docstring). The "
-                    "primitive's request-domain contract stays covered "
-                    "regardless; only the end-to-end and call-site halves "
-                    "are gone, with no replacement caller to re-derive them "
-                    "against. The same "
+                    "code path (a real, acknowledged capability gap, not "
+                    "silently dropped -- see that module's own module "
+                    "docstring). The primitive's request-domain contract "
+                    "stays covered regardless; only the end-to-end and "
+                    "call-site halves are gone, with no replacement caller "
+                    "to re-derive them against. The same "
                     "concern's *other* consumers (the L2 header parse, the "
                     "preprocessor/pattern pre-scans) are untouched. "
                     "consumer_compile was chosen as the first "
@@ -580,19 +583,40 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    # `evidence.tier_shortcut_without_substitute` (fixed_by PR #1186) used to
-    # live here: the DWARF-vs-header-AST shortcut it pinned
-    # (`cli_scan_helpers._uses_debug_presence_only`) was `scan`-only, and
-    # ADR-068 Phase 6 deleted it along with both of the class's seed tests
-    # (`tests/test_scan_depth_evidence_shortcut.py`,
-    # `tests/test_scan_compare_parity.py`) with no `compare`-side successor
-    # to repoint them at -- `compare` has no equivalent "skip one evidence
-    # source because a substitute is expected to supply the same facts"
-    # cost-shortcut mechanism today. Removed rather than kept with fabricated
-    # seed tests, per this file's own "a BugClass with no seed_tests is
-    # prose, not a regression test" rule; the invariant and its incident
-    # history remain findable in PR #1186 and this file's own git history if
-    # an analogous shortcut is ever added to `compare`.
+    # `evidence.tier_shortcut_without_substitute` (the DWARF-vs-header-AST
+    # cost-shortcut class fixed_by=(1186,)) was retired here, not
+    # retargeted, when ADR-068 Phase 6 deleted `scan` outright: its only two
+    # seed tests (`tests/test_scan_depth_evidence_shortcut.py`,
+    # `tests/test_scan_compare_parity.py`) exercised
+    # `cli_scan_helpers._uses_debug_presence_only` -- the scan-only decision
+    # function that computed *when* to set `dumper`'s `debug_presence_only`
+    # shortcut from scan's own depth/headers logic -- which was deleted with
+    # the rest of `cli_scan_helpers.py`. `debug_presence_only` itself is
+    # still a real, plumbed-through parameter
+    # (`dumper.py`/`service_dump_cache.py`/`service_dump_native.py`/
+    # `dumper_layout_backfill.py`/`workflows/input_resolution.py`), but a
+    # repo-wide audit at retirement time found no remaining production call
+    # site that ever passes `debug_presence_only=True` -- every live caller
+    # forwards the parameter at its default `False`, only tests set it
+    # directly. So the class this entry protected (a shortcut silently
+    # starving a run of evidence with no substitute present) currently has
+    # no reachable trigger from any command, and per this module's own
+    # schema docstring ("a class with no test is a 'Known gaps' AGENTS.md
+    # paragraph, not a registry entry") it does not belong here with an
+    # empty `seed_tests`. See `docs/contribute/known-gaps.md`'s
+    # "`compare --depth binary` still performs a deep DWARF type walk the
+    # public evidence-depth contract says that rung skips" entry (reopened
+    # 2026-09-11 -- an earlier pass at this PR incorrectly marked it CLOSED
+    # on the theory that retiring `scan` mooted it; it did not, since
+    # `scan` was only this entry's oracle, not the bug) for the retirement
+    # note on `debug_presence_only` specifically -- including what would
+    # need to be true (a real caller computing `debug_presence_only` from a
+    # depth/collect-mode decision again) for *that* mechanism to become a
+    # live registry entry once more, retargeted rather than restored
+    # verbatim, since the scan-specific invariant text above would need to
+    # be re-stated against whatever new caller reintroduces the shortcut.
+    # The `--depth binary` DWARF-type-walk defect itself is unrelated to
+    # `debug_presence_only` and remains open, independent of this class.
     BugClass(
         id="evidence.silent_degradation_to_clean_verdict",
         invariant=(
