@@ -212,13 +212,24 @@ concepts:
       genuinely can capture bases/virtual_bases/vtable per translation
       unit, unlike PDB -- dwarf_snapshot.py now cross-checks each
       non-retained ODR-duplicate DIE's own membership against the retained
-      definition's before discarding it, and downgrades bases_fact/
-      virtual_bases_fact/vtable_fact to Fact.partial(...) on disagreement;
-      vtable_transition_is_evidenced's decline check now includes
-      FactStatus.PARTIAL alongside UNSUPPORTED for all three fields. See
-      this concept's own `investigated_declined` entry below for the full
-      account. Only the seven case-(a) fields and the shared
-      declined-comparison accounting remain open.
+      definition's before discarding it, and downgrades exactly the
+      sibling fact(s) among bases_fact/virtual_bases_fact/vtable_fact that
+      actually disagreed to Fact.partial(...) -- per field, not a blanket
+      per-record decision. vtable_transition_is_evidenced's decline check
+      now includes FactStatus.PARTIAL alongside UNSUPPORTED, gated per
+      field at each field's own point of use: vtable_fact at the
+      function's top-level gate (both sides), virtual_bases_fact at the
+      final size/virtual-bases fallback branch that actually reads it --
+      bases_fact is not part of this function's decline logic at all,
+      since it never reads bases/bases_fact. diff_cxx_rules.
+      virtual_method_addition also gained its own explicit
+      vtable_fact_declined(...) check, since the top-level PARTIAL decline
+      can now return False before its owned-signature branch runs even for
+      a genuinely new virtual method -- an invariant that function's own
+      fallthrough logic used to rely on. See this concept's own
+      `investigated_declined` entry below for the full account. Only the
+      seven case-(a) fields and the shared declined-comparison accounting
+      remain open.
     investigated_declined:
       - item: >-
           FactStatus gating for the vtable/TYPE_VTABLE_CHANGED cluster
