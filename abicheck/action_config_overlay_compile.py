@@ -235,7 +235,12 @@ def merge_compile_block(
         if key in _COMPILE_OR_KEYS:
             merged[key] = bool(checkout_blk.get(key)) or bool(value)
         elif key in _COMPILE_SOURCES_WINS_KEYS:
-            merged[key] = value
+            # ``bc.compile_frontend_context or cli_ctx.frontend_context`` --
+            # a falsy sources-root value (``null``/``""``) is "unset" for
+            # this fold and must fall back to the checkout value, not
+            # overwrite it (CodeRabbit review, PR #1222).
+            if value:
+                merged[key] = value
         elif (
             key not in checkout_blk
             or (

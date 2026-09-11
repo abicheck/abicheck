@@ -185,3 +185,53 @@ class TestCompileEmptyStringTreatedAsUnset:
             merge_compile=True,
         )
         assert not out["compile"].get("sysroot")
+
+
+class TestFrontendContextNullOverwriteRegression:
+    """CodeRabbit review, PR #1222: ``frontend_context`` is a
+    ``_COMPILE_SOURCES_WINS_KEYS`` field, not an
+    ``_COMPILE_EMPTY_STRING_UNSET_KEYS`` one (see the sibling class above),
+    but the real resolver's precedence is the identical falsy-is-unset
+    shape: ``cli_options.merge_compile_config``'s ``frontend_context =
+    cli_ctx.frontend_context if frontend_context_explicit else
+    (bc.compile_frontend_context or cli_ctx.frontend_context)`` -- a falsy
+    sources-root value falls back to the checkout value. Before the fix,
+    ``merge_compile_block``'s ``_COMPILE_SOURCES_WINS_KEYS`` branch wrote
+    ``merged[key] = value`` unconditionally whenever the sources document
+    set the key at all, so a sources-root ``compile.frontend_context: null``
+    silently discarded a real checkout value like ``"device"``. Grouped
+    with this module's other falsy-value merge regressions rather than
+    ``test_action_config_overlay.py`` (which is already at the
+    architecture gate's test-file line cap)."""
+
+    def test_null_sources_value_preserves_checkout_value(self) -> None:
+        base = {"compile": {"frontend_context": "device"}}
+        sources_doc = {"compile": {"frontend_context": None}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["frontend_context"] == "device"
+
+    def test_empty_string_sources_value_preserves_checkout_value(self) -> None:
+        """Same falsy-is-unset rule for an empty string, not just ``None``
+        -- ``bc.compile_frontend_context or ...`` treats both identically."""
+        base = {"compile": {"frontend_context": "device"}}
+        sources_doc: dict[str, object] = {"compile": {"frontend_context": ""}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["frontend_context"] == "device"
+
+    def test_nonempty_sources_value_still_wins(self) -> None:
+        """Positive control (already covered in
+        ``test_action_config_overlay.py``, repeated here as the direct
+        negative-space companion to the two regression cases above): a
+        genuinely non-empty sources-root value still wins over the
+        checkout value -- the fix must only change the falsy-sources-value
+        case, not this module's own stated precedence."""
+        base = {"compile": {"frontend_context": "host"}}
+        sources_doc = {"compile": {"frontend_context": "device"}}
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"]["frontend_context"] == "device"

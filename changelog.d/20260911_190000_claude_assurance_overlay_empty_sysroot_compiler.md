@@ -13,8 +13,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   blocks a sources-root `compile.sysroot`/`compile.compiler` setting.**
   `_merge_compile_block`'s per-field `compile:` merge (now
   `action_config_overlay_compile.merge_compile_block`) previously decided
-  "checkout already set this key" by raw key presence, which is right for a
-  genuinely unset field but wrong for `sysroot`/`compiler`: the real
+  "checkout already set this key" by raw key presence, which is right for
+  an explicitly non-empty value but wrong for an empty-string
+  `sysroot`/`compiler`: the real
   `cli_options.merge_compile_config` gates both on the checkout-side
   value's truthiness (`if bc.compile_sysroot`/`if ... bc.compile_compiler`),
   not `is not None`, so an empty-string checkout value is treated exactly

@@ -829,7 +829,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " EnvironmentMatrix's own YAML shape inline via"
         " EnvironmentMatrix.from_dict rather than a side file -- no"
         " surviving CLI override)",
-        ("--env-matrix",),
+        ("--env-matrix", "env-matrix:"),
         # config-file.md/environment-drift.md: each names the old flag only
         # in the sentence explaining its own fold into `deployment:`.
         frozenset({"reference/config-file.md", "learn/environment-drift.md"}),
