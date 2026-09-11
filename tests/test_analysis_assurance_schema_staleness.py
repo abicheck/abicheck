@@ -674,6 +674,78 @@ class TestSchemaStalenessStatus:
         assert aa2.schema_staleness_status == "clean"
         assert not any("param_kind_facts_reliable" in n for n in aa2.notes), aa2.notes
 
+    def test_param_kind_flag_still_taints_when_not_actually_stripped(self) -> None:
+        """The negative mirror of the fix above:
+        :func:`_side_is_stripped_symbols_only`'s own two early-return
+        branches (surviving ``types``/``enums``/``typedefs``, or raw
+        ``dwarf.structs``/``.enums``) must each keep the pair from being
+        misclassified as "stripped" -- a snapshot that still carries
+        type-level evidence never triggers ``diff_symbols._is_stripped_
+        symbols_only``'s own gate, so ``param_kind_facts_reliable`` must
+        still taint."""
+        from abicheck.model import Param, ParamKind, RecordType
+        from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
+
+        fn = Function(
+            name="pub_a",
+            mangled="_Z5pub_avPi",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            params=[
+                Param(name="p", type="int*", kind=ParamKind.POINTER, pointer_depth=1)
+            ],
+        )
+
+        # Branch 1: elf_only_mode set, but the model `types` list survives
+        # -- diff_symbols._is_stripped_symbols_only's own FIRST early
+        # return.
+        old_types_leftover = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            param_kind_facts_reliable=False,
+            types=[RecordType(name="S", kind="struct")],
+        )
+        new_types_leftover = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            # `new` must ALSO clear _is_stripped_symbols_only's own OR
+            # condition (checked on both sides) -- otherwise `new` alone
+            # being genuinely stripped would make params_unconfirmed=True
+            # regardless of `old`'s own real type evidence.
+            types=[RecordType(name="S", kind="struct")],
+        )
+        result = checker.compare(old_types_leftover, new_types_leftover)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("param_kind_facts_reliable" in n for n in aa.notes), aa.notes
+
+        # Branch 2: elf_only_mode set, model `types` empty, but a real raw
+        # DWARF struct/enum survives -- the SECOND early return (checked
+        # via `dwarf.structs`/`.enums` directly).
+        old_dwarf_leftover = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            param_kind_facts_reliable=False,
+            dwarf=DwarfMetadata(structs={"S": StructLayout(name="S", byte_size=4)}),
+        )
+        new_dwarf_leftover = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            dwarf=DwarfMetadata(structs={"S": StructLayout(name="S", byte_size=4)}),
+        )
+        result2 = checker.compare(old_dwarf_leftover, new_dwarf_leftover)
+        aa2 = result2.analysis_assurance
+        assert aa2.schema_staleness_status == "degraded"
+        assert any("param_kind_facts_reliable" in n for n in aa2.notes), aa2.notes
+
     def test_self_diff_never_taints_the_no_baseline_audit(self) -> None:
         """Codex review, PR #1209 round 6: ``workflows.no_baseline_compare``
         audits a candidate with no real baseline by calling ``checker.
