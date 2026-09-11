@@ -13,7 +13,7 @@ commands are the same for any C/C++ shared library.
 
 You always need the **two builds**. Adding the **public headers** makes the
 result reliable (see [§3](#3-the-reliable-baseline-header-aware-l2)); adding your
-sources + build command enables the **recommended** deeper [source scan](#5-going-deeper-the-source-scan-recommended).
+sources + build command enables the **recommended** deeper [source replay](#5-going-deeper-source-replay-recommended).
 
 | Input | Need it for | What it is |
 |-------|-------------|-----------|
@@ -21,7 +21,7 @@ sources + build command enables the **recommended** deeper [source scan](#5-goin
 | **Public headers** | a reliable verdict | the headers a consumer `#include`s — your **API surface**; abicheck parses them to tell public API from internal churn and to see types |
 | **Include root(s)** | parsing those headers | the `-I` directories the headers' *own* `#include`s resolve against — not analysed, they just let the parse succeed |
 | **C/C++ std + `-D` macros** | correct parsing | the dialect / feature macros the library was built with (set once in a [config file](#4-configure-once-abicheckyml)) |
-| **Sources + build command** | the recommended source scan | your source tree plus the command that builds it — lets abicheck replay changed code ([§5](#5-going-deeper-the-source-scan-recommended)) |
+| **Sources + build command** | the recommended source replay | your source tree plus the command that builds it — lets abicheck replay your code ([§5](#5-going-deeper-source-replay-recommended)) |
 | Debug info (DWARF/PDB) | optional | cross-checks types when headers are absent |
 
 !!! tip "Public headers vs. include roots"
@@ -54,7 +54,7 @@ and is always available, but it must treat *every* exported symbol as ABI — it
 can't tell your public API from internal churn. Give abicheck the public headers
 and it scopes internal/leaked symbols out, sees type/enum/signature changes a
 binary can't show, and reports at **HIGH** confidence. (It isn't the deepest
-analysis — the [source scan](#5-going-deeper-the-source-scan-recommended) goes
+analysis — the [source replay](#5-going-deeper-source-replay-recommended) goes
 further — it's the floor for results you can trust.)
 
 ```bash
@@ -70,8 +70,8 @@ abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
 - Add `--ast-frontend clang` on a clang-only host (`castxml` is the default);
   abicheck auto-detects the host libstdc++.
 - Need a specific `-std`/`-D` to parse the headers? Pass `--compiler-option
-  -std=c++20 --compiler-option -DFOO=1` (`compare`, `dump`, and `scan` all
-  share the same compile-context flags), or commit them once in a
+  -std=c++20 --compiler-option -DFOO=1` (`compare` and `dump` share the same
+  compile-context flags), or commit them once in a
   [`.abicheck.yml` `compile:` block](#4-configure-once-abicheckyml) — every
   command folds it in via `--config`.
 
@@ -106,11 +106,11 @@ and raised confidence `LOW → HIGH`.
 ## 4. Configure once: `.abicheck.yml`
 
 Commit a `.abicheck.yml` so the compile context isn't re-typed each run. The
-`compile:` block is shared by **`dump`, `compare`, and `scan`** — pass it with
+`compile:` block is shared by **`dump` and `compare`** — pass it with
 `--config` and one file pins the dialect/macros/include roots for every command.
 Auto-discovery differs by command: `compare` finds the nearest `.abicheck.yml`
-from the working directory upward, while `dump`/`scan` pick it up automatically
-only from the `--sources` tree root — so give a header-only `dump`/`scan` (no
+from the working directory upward, while `dump` picks it up automatically
+only from the `--sources` tree root — so give a header-only `dump` (no
 `--sources`) an explicit `--config`, or its `compile:` settings are silently
 skipped. CLI flags (`--compiler-option`/`-I`/`--ast-frontend`) always override
 the config per run.
@@ -136,16 +136,17 @@ abicheck dump libfoo-2.3.0/lib/libfoo.so -H libfoo-2.3.0/include \
 
 # 2) Run from the NEW source checkout (where .abicheck.yml lives, so its relative
 #    include_dirs resolve), and gate the new build against that snapshot:
-abicheck scan build/libfoo.so -H include/ \
-  --against baselines/libfoo-2.3.0.abi.json --config .abicheck.yml
+abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so \
+  --header new=include/ --config .abicheck.yml
 ```
 
-Run the scan from the project root so the config's `include_dirs` (relative to
-`.abicheck.yml`) point at the checked-out tree. Each side is parsed with **its
-own** headers — the baseline is a snapshot dumped from the old headers, not the
-raw old `.so` (a raw `--against` library would be re-parsed with the *new* `-H`,
-fine only when the headers didn't change). Give the baseline `dump` the same
-include roots, dialect, and macros as the scan side so the comparison isn't noisy
+Run the comparison from the project root so the config's `include_dirs`
+(relative to `.abicheck.yml`) point at the checked-out tree. Each side is parsed
+with **its own** headers — the baseline is a snapshot dumped from the old
+headers, not the raw old `.so` (a raw old-side library would be re-parsed with a
+bare `-H`, fine only when the headers didn't change). Give the baseline `dump`
+the same include roots, dialect, and macros as the new side so the comparison
+isn't noisy
 — passed inline as `-I`/`--compiler-option` here because the baseline is dumped from
 the old checkout (or point `dump --config` at the old tree's `.abicheck.yml` to
 reuse a `compile:` block).
@@ -156,23 +157,23 @@ reuse a `compile:` block).
     with.
 
 Every field and the CLI-vs-config precedence are in
-[Source-Scan Depth](../use/evidence-depth.md#where-each-setting-belongs-cli-vs-config).
+[Evidence depth](../use/evidence-depth.md#where-each-setting-belongs-cli-vs-config).
 
 ---
 
-## 5. Going deeper: the source scan (recommended)
+## 5. Going deeper: source replay (recommended)
 
-Headers give a reliable verdict; the source scan goes further and is
+Headers give a reliable verdict; source replay goes further and is
 **recommended** for thorough checking — it replays your code to catch
 *source-level* ABI changes (inline/template/macro/default-argument body changes)
 that neither the binary nor the headers reveal. The simple model: give it your
 **source tree** and the **command that builds it**.
 
 ```bash
-# run from the new checkout (as in §4), with a diff seed so the source replay
-# (--depth source) only re-parses the changed TUs
-abicheck scan build/libfoo.so -H include/ --sources . --since origin/main \
-  --against baselines/libfoo-2.3.0.abi.json --config .abicheck.yml --depth source
+# run from the new checkout (as in §4); --depth source replays the library's
+# translation units with clang
+abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so \
+  --header new=include/ --sources new=. --config .abicheck.yml --depth source
 ```
 
 - `--sources .` — your checkout.
@@ -182,23 +183,19 @@ abicheck scan build/libfoo.so -H include/ --sources . --since origin/main \
   build:
     query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
   ```
-- `--since origin/main` (or `--changed-path …`) — which files changed, so it
-  replays only the changed translation units. Without a seed, `--depth source`
-  falls back to a headers-only replay.
 
 !!! note "Cross-release body-change diff needs a source-aware baseline"
     The inline/template/macro/default-argument **body**-change comparison runs
     only when *both* sides carry source evidence. The [§4](#4-configure-once-abicheckyml)
-    baseline is a headers-only (L2) snapshot, so a `--depth source` scan against
-    it adds the **new** build's source checks; to diff body changes *across
+    baseline is a headers-only (L2) snapshot, so a `--depth source` comparison
+    against it adds the **new** build's source checks; to diff body changes *across
     releases*, dump the baseline with source evidence too (`abicheck dump … --sources …`).
 
 The depth knob is `--depth {binary,headers,build,source}` (`binary` =
-binary-only, up to `source` = source-ABI replay — unseeded, it replays the
-whole library; with a `--since`/`--changed-path` seed, just the changed TUs);
-leave it off and abicheck **auto**-picks by changed-path risk. **How each depth
+binary-only, up to `source` = source-ABI replay of the whole library target);
+leave it off and abicheck uses whatever evidence the inputs carry. **How each depth
 works, how to produce a compile database for `make`/`cmake`/`bazel`/`meson`,
-and the per-level input table live in [Source-Scan Depth](../use/evidence-depth.md)** —
+and the per-level input table live in [Evidence depth](../use/evidence-depth.md)** —
 that's the home for the build-system details, kept out of this walkthrough on
 purpose. (The old `--source-method s0…s6`/`--mode` axes and the separate
 `--depth full` rung have been removed outright.)
@@ -312,10 +309,10 @@ Other formats — **HTML**, SARIF, JUnit — are in [Output Formats](../use/outp
 
 1. **Collect** the old + new library, and — for a reliable verdict — the public
    headers and their include root; pin `-std`/`-D` in a `.abicheck.yml`.
-2. **Run** the header-aware compare (or `abicheck scan … --config .abicheck.yml`
-   as a CI gate).
-3. **Go deeper** (recommended) with `abicheck scan --sources . --since … --depth source`
+2. **Run** the header-aware compare (add `--config .abicheck.yml` as a CI
+   gate).
+3. **Go deeper** (recommended) with `abicheck compare … --sources . --depth source`
    when you can give it your sources and build command — see
-   [Source-Scan Depth](../use/evidence-depth.md).
+   [Evidence depth](../use/evidence-depth.md).
 4. **Read** the verdict + confidence: headers give a high-confidence,
    public-API-scoped result that names the changes that matter.
