@@ -111,6 +111,7 @@ from .entity_identity import (
 )
 from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabulary has always been importable from this module
     _OUTCOME_PROSE,
+    COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
     COORDINATE_EVIDENCE_QUALIFIED_NAME,
     OUTCOME_COORDINATES_ONLY,
     OUTCOME_MOVED,
@@ -763,11 +764,27 @@ def diff_graph_reconciliation_findings(
         # strictly stronger "both name and location evidence changed" claim
         # on the very same absent evidence -- but a reader sees what it
         # rests on.
+        # Say which gap it actually is: "neither side recorded one" and
+        # "one side's extraction lost it" are different, and saying the
+        # former for both misstates the evidence (Codex review, PR #1228).
+        _weak_evidence_notes = {
+            COORDINATE_EVIDENCE_QUALIFIED_NAME: (
+                "; location evidence: the qualified name's own coordinates "
+                "only -- no declaring file was recorded on either side, so "
+                "a move that kept the same file basename would look "
+                "identical to this"
+            ),
+            COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE: (
+                "; location evidence: the qualified name's own coordinates "
+                "only -- a declaring file was recorded on one side but not "
+                "the other, so the two could not be compared and a move "
+                "that kept the same file basename would look identical to "
+                "this"
+            ),
+        }
         evidence_note = (
-            "; location evidence: the qualified name's own coordinates only "
-            "-- no declaring file was recorded on either side, so a move "
-            "that kept the same file basename would look identical to this"
-            if pair.coordinate_evidence == COORDINATE_EVIDENCE_QUALIFIED_NAME
+            _weak_evidence_notes.get(pair.coordinate_evidence, "")
+            if pair.coordinate_evidence is not None
             else ""
         )
         # Prefer the new side's declaring file (matches the rest of the L5

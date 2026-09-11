@@ -29,7 +29,10 @@ A leaf: nothing here reaches back into the matching module.
 
 from __future__ import annotations
 
-from ..model.graph_identity import closure_location_free_identity
+from ..model.graph_identity import (
+    closure_location_free_identity,
+    closure_marker_files,
+)
 from .entity_identity import CanonicalIdentity
 
 #: Which provider carried the *location* half of an
@@ -42,6 +45,12 @@ from .entity_identity import CanonicalIdentity
 #: cross-directory move is indistinguishable from a pure coordinate shift
 #: on name evidence alone).
 COORDINATE_EVIDENCE_DECLARING_FILE = "declaring_file"
+#: Exactly one side recorded a declaring file. Distinct from
+#: :data:`COORDINATE_EVIDENCE_QUALIFIED_NAME` because "neither side records
+#: one" and "one side's extraction lost it" are different gaps, and the
+#: finding's own text said the former for both until this was split out
+#: (Codex review, PR #1228).
+COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE = "partial_declaring_file"
 COORDINATE_EVIDENCE_QUALIFIED_NAME = "qualified_name"
 
 
@@ -154,7 +163,30 @@ def _classify_outcome(
     old_key = closure_location_free_identity(old_qn)
     new_key = closure_location_free_identity(new_qn)
     renamed = bool(old_qn) and bool(new_qn) and old_key != new_key
-    moved = bool(old_file) and bool(new_file) and old_file != new_file
+    # The marker fallback closes the hole dropping the declaring-file gate
+    # would otherwise open (Codex review, PR #1228, fresh evidence beyond
+    # the same-basename ambiguity): closure_location_free_identity drops
+    # each marker's basename as well as its :line:col, and its own
+    # docstring justifies that by saying a genuine cross-FILE move "is
+    # separately caught by _classify_outcome's own file-based moved check"
+    # -- an argument that holds only while such evidence exists. With none
+    # recorded, "(lambda at old.h:1:2)" vs "(lambda at new.h:9:9)"
+    # collapses to nothing and a real move reads as a compatible
+    # coordinate-only shift. Read from the same place the coordinate shift
+    # is read from: differing marker basenames ARE the location evidence,
+    # exactly as agreeing ones are. Marker counts always match here --
+    # equal location-free keys imply it, since the key collapses every
+    # marker to its bare form.
+    moved_by_marker = (
+        bool(old_qn)
+        and bool(new_qn)
+        and not renamed
+        and bool(closure_marker_files(old_qn))
+        and closure_marker_files(old_qn) != closure_marker_files(new_qn)
+    )
+    moved = (
+        bool(old_file) and bool(new_file) and old_file != new_file
+    ) or moved_by_marker
     if renamed and not moved:
         return OUTCOME_RENAMED
     if moved and not renamed:
@@ -215,7 +247,9 @@ def coordinate_evidence(
     evidence the classification rests on and let a reader weigh it -- a
     :data:`COORDINATE_EVIDENCE_QUALIFIED_NAME` pair cannot rule out a
     same-basename cross-directory move, and says so in the emitted
-    finding's own description.
+    finding's own description. A *differing* marker basename is not this
+    function's problem: :func:`_classify_outcome` already reads that as a
+    move, so such a pair never reaches this outcome at all.
     """
     if (
         _classify_outcome(
@@ -237,6 +271,8 @@ def coordinate_evidence(
     )
     if old_file and new_file:
         return COORDINATE_EVIDENCE_DECLARING_FILE
+    if old_file or new_file:
+        return COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE
     return COORDINATE_EVIDENCE_QUALIFIED_NAME
 
 

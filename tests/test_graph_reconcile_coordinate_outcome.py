@@ -311,3 +311,116 @@ class TestClassifyOutcomeProperties:
             if old_id.kind != "source_decl":
                 continue
             assert _classify_outcome(old_id, new_id) != OUTCOME_COORDINATES_ONLY, label
+
+
+#: Name pairs whose *embedded marker basename* differs -- positive
+#: name-carried evidence of a cross-file move, which
+#: `closure_location_free_identity` collapses along with the coordinates.
+_MARKER_MOVE_CASES: dict[str, tuple[str, str]] = {
+    "paren_at_spelling": ("w<(lambda at old.h:1:2)>", "w<(lambda at new.h:9:9)>"),
+    "normalized_spelling": ("w<(lambda:old.h:1:2)>", "w<(lambda:new.h:9:9)>"),
+    "bare_unnamed_struct": (
+        "unnamed struct at old.h:56:5",
+        "unnamed struct at new.h:61:5",
+    ),
+    "anonymous_union": (
+        "anonymous union at old.h:649:9",
+        "anonymous union at new.h:651:9",
+    ),
+    "absolute_paths": (
+        "w<(lambda at /src/a/old.h:1:2)>",
+        "w<(lambda at /src/a/new.h:9:9)>",
+    ),
+}
+
+#: The complement: the marker basename is UNCHANGED, only its coordinates
+#: move -- including the two-checkout-root spelling, which must not read as
+#: a move just because the absolute paths differ.
+_MARKER_SAME_FILE_CASES: dict[str, tuple[str, str]] = {
+    "paren_at_spelling": ("w<(lambda at f.h:1:2)>", "w<(lambda at f.h:9:9)>"),
+    "normalized_spelling": ("w<(lambda:f.h:1:2)>", "w<(lambda:f.h:9:9)>"),
+    "differing_checkout_roots": (
+        "unnamed struct at /old/checkout/f.h:56:5",
+        "unnamed struct at /new/checkout/f.h:61:5",
+    ),
+    "two_markers_both_stable": (
+        "p<(lambda at f.h:1:2),(lambda at g.h:3:4)>",
+        "p<(lambda at f.h:8:2),(lambda at g.h:9:4)>",
+    ),
+}
+
+
+class TestMarkerCarriedLocationEvidence:
+    """Codex review (PR #1228, fresh evidence): dropping the declaring-file
+    gate opened a hole the gate had been covering.
+    ``closure_location_free_identity`` drops each marker's *basename* as
+    well as its ``:line:col``, and its own docstring justifies that by
+    saying a genuine cross-FILE move is "separately caught by
+    ``_classify_outcome``'s own file-based ``moved`` check" -- true only
+    while such evidence exists. With none recorded, ``old.h`` -> ``new.h``
+    collapsed to nothing and a real move read as the *compatible*
+    coordinate-only kind.
+
+    Stated as the general invariant rather than the one reported pair: over
+    every marker spelling the identity vocabulary accepts, a differing
+    marker basename is a move and an agreeing one is not, and the answer
+    never depends on the checkout root the path happens to carry."""
+
+    def test_differing_marker_basename_is_a_move(self) -> None:
+        for label, (old_qn, new_qn) in _MARKER_MOVE_CASES.items():
+            outcome = _classify_outcome(
+                _identity(old_qn, "", f"sig:{old_qn}\x1fs"),
+                _identity(new_qn, "", f"sig:{new_qn}\x1fs"),
+            )
+            assert outcome == OUTCOME_MOVED, (label, outcome)
+
+    def test_agreeing_marker_basename_is_not_a_move(self) -> None:
+        for label, (old_qn, new_qn) in _MARKER_SAME_FILE_CASES.items():
+            outcome = _classify_outcome(
+                _identity(old_qn, "", f"sig:{old_qn}\x1fs"),
+                _identity(new_qn, "", f"sig:{new_qn}\x1fs"),
+            )
+            assert outcome == OUTCOME_COORDINATES_ONLY, (label, outcome)
+
+    def test_marker_evidence_is_symmetric(self) -> None:
+        """Swapping the sides cannot change which file moved-ness holds."""
+        for label, (old_qn, new_qn) in {
+            **_MARKER_MOVE_CASES,
+            **_MARKER_SAME_FILE_CASES,
+        }.items():
+            old_id = _identity(old_qn, "", f"sig:{old_qn}\x1fs")
+            new_id = _identity(new_qn, "", f"sig:{new_qn}\x1fs")
+            assert _classify_outcome(old_id, new_id) == _classify_outcome(
+                new_id, old_id
+            ), label
+
+    def test_real_declaring_file_evidence_still_wins_where_present(self) -> None:
+        """The fallback is a fallback: a pair with real two-sided declaring
+        files must decide from those, not from the marker text."""
+        old_qn, new_qn = _MARKER_MOVE_CASES["paren_at_spelling"]
+        # Real evidence says the declaring file did NOT change; the marker
+        # text disagrees. The marker fallback must not manufacture a move
+        # out of a disagreement real evidence already settles... but it is
+        # still a file change *somewhere*, so the honest answer is never
+        # the compatible coordinate-only kind.
+        outcome = _classify_outcome(
+            _identity(old_qn, "a.h", f"sig:{old_qn}\x1fs"),
+            _identity(new_qn, "a.h", f"sig:{new_qn}\x1fs"),
+        )
+        assert outcome in (OUTCOME_MOVED, OUTCOME_RECONCILED), outcome
+
+    def test_a_marker_move_never_reports_coordinate_evidence(self) -> None:
+        """`coordinate_evidence` answers None for anything that is not a
+        coordinate-only pair -- a marker-carried move included, so it can
+        never be labelled with a weak-evidence disclosure it does not
+        need."""
+        from abicheck.buildsource.graph_reconcile_outcome import coordinate_evidence
+
+        for label, (old_qn, new_qn) in _MARKER_MOVE_CASES.items():
+            assert (
+                coordinate_evidence(
+                    _identity(old_qn, "", f"sig:{old_qn}\x1fs"),
+                    _identity(new_qn, "", f"sig:{new_qn}\x1fs"),
+                )
+                is None
+            ), label

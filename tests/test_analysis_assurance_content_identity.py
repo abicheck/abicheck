@@ -203,3 +203,80 @@ def test_content_identical_compare_still_warns_it_can_detect_nothing(
     warnings_out = payload.get("coverage_warnings", [])
     assert any("byte-identical" in w for w in warnings_out), warnings_out
     assert any("cannot detect a change" in w for w in warnings_out), warnings_out
+
+
+@pytest.mark.parametrize("vintage", _VINTAGES)
+def test_content_identity_agrees_with_the_canonical_digest(vintage: int) -> None:
+    """The invariant behind `_same_content`, stated against an INDEPENDENT
+    oracle (Codex review, PR #1228): `storage.snapshot_encode.
+    snapshot_content_digest` is what `confidence.note_if_same_binary_
+    compared` — the channel this module's docstring points at for its
+    residual — actually fires on. If the two notions of "same content" can
+    disagree, a pair can read `clean` here while that warning stays
+    silent. Plain `==` DID disagree: `entity_id` is `field(compare=False)`
+    yet is persisted and digested.
+
+    The oracle is deliberately not the function's own implementation: it
+    is the serializer, reached through the public storage entry point."""
+    from abicheck.policy.analysis_assurance_schema_staleness import _same_content
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    a = _load("v4.json", schema_version=vintage, from_headers=True)
+    b = _load("v4.json", schema_version=vintage, from_headers=True)
+    assert _same_content(a, b) is (
+        snapshot_content_digest(a) == snapshot_content_digest(b)
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param("entity_id", id="compare_false_field"),
+        pytest.param("library", id="ordinary_field"),
+        pytest.param("nested_return_type", id="nested_declaration_field"),
+    ],
+)
+def test_any_persisted_difference_defeats_content_identity(mutate: str) -> None:
+    """Generalizes past the one reported field: a difference in an
+    ordinary field, in a `compare=False` field, or nested inside a
+    declaration must each defeat `_same_content` — and each must agree
+    with the digest oracle. `entity_id` is the reported case; the other
+    two are independently-chosen siblings, so the fix cannot be a
+    special-case for one field name."""
+    from abicheck.model.identity import EntityId, EntityKind
+    from abicheck.policy.analysis_assurance_schema_staleness import _same_content
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    a = _load("v4.json", schema_version=25, from_headers=True)
+    b = _load("v4.json", schema_version=25, from_headers=True)
+    assert _same_content(a, b), "fixture must start out identical"
+
+    if mutate == "entity_id":
+        assert b.functions, "fixture must carry a function to perturb"
+        b.functions[0].entity_id = EntityId(
+            scope=(), kind=EntityKind.FUNCTION, leaf_name="perturbed"
+        )
+    elif mutate == "library":
+        b.library = f"{b.library}-other"
+    else:
+        assert b.functions, "fixture must carry a function to perturb"
+        b.functions[0].return_type = f"{b.functions[0].return_type} const"
+
+    assert not _same_content(a, b)
+    assert snapshot_content_digest(a) != snapshot_content_digest(b)
+
+
+def test_content_identity_survives_an_unwalkable_value() -> None:
+    """Fails closed rather than raising: an unexpected value shape in a
+    snapshot field answers "not provably identical", which falls through
+    to the ordinary degraded report — the safe direction."""
+    from abicheck.policy.analysis_assurance_schema_staleness import _all_fields_equal
+
+    class _Odd:
+        def __eq__(self, other: object) -> bool:  # pragma: no cover - never called
+            raise AssertionError("must not be reached")
+
+    assert _all_fields_equal(1, "1") is False
+    assert _all_fields_equal([1, 2], [1, 2, 3]) is False
+    assert _all_fields_equal({"a": 1}, {"b": 1}) is False
+    assert _all_fields_equal(_Odd(), 3) is False

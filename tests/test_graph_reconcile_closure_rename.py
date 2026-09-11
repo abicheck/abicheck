@@ -53,6 +53,7 @@ from abicheck.buildsource.graph_reconcile import (
 )
 from abicheck.buildsource.graph_reconcile_outcome import (
     COORDINATE_EVIDENCE_DECLARING_FILE,
+    COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
     COORDINATE_EVIDENCE_QUALIFIED_NAME,
 )
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
@@ -565,6 +566,73 @@ class TestCoordinateEvidenceIsStated:
         assert pair.outcome == OUTCOME_RENAMED
         assert pair.coordinate_evidence is None
         assert "coordinate_evidence" not in pair.to_dict()
+
+    def test_one_sided_file_evidence_is_reported_as_its_own_gap(self) -> None:
+        """Codex review (PR #1228): with a declaring file on one side only,
+        the evidence value said `qualified_name` and the finding's text
+        said "no declaring file was recorded on either side" -- false, and
+        it hid a one-sided extraction gap. Both orientations, since the
+        gap is the same gap whichever side lost the path."""
+        for label, (old_file, new_file) in {
+            "old_only": ("g.h", None),
+            "new_only": (None, "g.h"),
+        }.items():
+            attrs_old = {"qualified_name": "w<(lambda:g.h:172:22)>"}
+            attrs_new = {"qualified_name": "w<(lambda:g.h:181:22)>"}
+            if old_file:
+                attrs_old["def_file"] = old_file
+            if new_file:
+                attrs_new["def_file"] = new_file
+            pair = _reconcile_one_pair(
+                GraphNode(
+                    id="type://old",
+                    kind="record_type",
+                    label="w<(lambda:g.h:172:22)>",
+                    attrs=attrs_old,
+                ),
+                GraphNode(
+                    id="type://new",
+                    kind="record_type",
+                    label="w<(lambda:g.h:181:22)>",
+                    attrs=attrs_new,
+                ),
+            )
+            assert pair.outcome == OUTCOME_COORDINATES_ONLY, label
+            assert pair.coordinate_evidence == (
+                COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE
+            ), label
+
+    def test_one_sided_finding_text_does_not_claim_neither_side_had_one(
+        self,
+    ) -> None:
+        """The consumer half of the case above: the description must not
+        assert the stronger, false "on either side" claim."""
+        from abicheck.buildsource.graph_reconcile import (
+            GraphReconciliation,
+            diff_graph_reconciliation_findings,
+        )
+
+        pair = _reconcile_one_pair(
+            GraphNode(
+                id="type://old",
+                kind="record_type",
+                label="w<(lambda:g.h:1:2)>",
+                attrs={"qualified_name": "w<(lambda:g.h:1:2)>", "def_file": "g.h"},
+            ),
+            GraphNode(
+                id="type://new",
+                kind="record_type",
+                label="w<(lambda:g.h:9:9)>",
+                attrs={"qualified_name": "w<(lambda:g.h:9:9)>"},
+            ),
+        )
+        findings = diff_graph_reconciliation_findings(
+            GraphReconciliation(reconciled=[pair])
+        )
+        assert len(findings) == 1, findings
+        text = findings[0].description
+        assert "on either side" not in text, text
+        assert "on one side but not the other" in text, text
 
     def test_finding_description_discloses_the_weaker_evidence(self) -> None:
         """The field has a real consumer: the emitted finding's own text.

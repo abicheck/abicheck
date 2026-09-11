@@ -96,6 +96,7 @@ projection is the safe direction, never a fabricated ``"complete"``.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from .analysis_assurance_degraded_facts import degraded_reliability_facts
@@ -446,16 +447,56 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
     return kept
 
 
+def _all_fields_equal(old: object, new: object) -> bool:
+    """Deep equality over *every* field, ``compare=False`` ones included.
+
+    Plain ``==`` on two dataclasses is not this (Codex review, PR #1228,
+    fresh evidence): ``Function``/``Variable``/``RecordType``'s
+    ``entity_id`` is ``field(..., compare=False)`` -- derived identity,
+    deliberately excluded from equality -- yet it IS persisted and IS part
+    of ``storage.snapshot_encode.snapshot_content_digest``. Two snapshots
+    carrying the same declarations under different entity ids therefore
+    satisfy ``old == new`` while their canonical serializations differ,
+    which would let :func:`_same_content` call them one capture AND leave
+    ``confidence.note_if_same_binary_compared`` (digest-driven) silent --
+    the one channel this module's own docstring points at for the residual.
+
+    Fails closed: any pair this walk cannot compare structurally (a
+    mismatched type, an unwalkable container) answers ``False`` and falls
+    through to the ordinary degraded report.
+    """
+    if type(old) is not type(new):
+        return False
+    if dataclasses.is_dataclass(old) and not isinstance(old, type):
+        return all(
+            _all_fields_equal(getattr(old, f.name), getattr(new, f.name))
+            for f in dataclasses.fields(old)
+        )
+    if isinstance(old, (list, tuple)):
+        assert isinstance(new, (list, tuple))
+        return len(old) == len(new) and all(
+            _all_fields_equal(a, b) for a, b in zip(old, new)
+        )
+    if isinstance(old, dict):
+        assert isinstance(new, dict)
+        return old.keys() == new.keys() and all(
+            _all_fields_equal(old[k], new[k]) for k in old
+        )
+    return bool(old == new)
+
+
 def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """Whether *old* and *new* are provably the same content.
 
-    Plain ``AbiSnapshot`` dataclass equality (structural, every field).
+    :func:`_all_fields_equal` -- structural equality over every field the
+    snapshot persists, including the ``compare=False`` ones plain ``==``
+    skips.
     Chosen over a serialized digest (``storage.snapshot_encode.
     snapshot_content_digest``, this repo's existing content fingerprint)
     because ``policy`` may not import ``storage`` (``architecture/
-    modules.yaml``: ``policy -> model, compare``), and because equality is
-    the stronger test of the two -- a digest can only ever agree with it,
-    after paying a full re-serialization. Soundness is what matters here,
+    modules.yaml``: ``policy -> model, compare``). It must agree with that
+    digest's notion of content, which is why it cannot be plain ``==``:
+    see :func:`_all_fields_equal`. Soundness is what matters here,
     and field-wise equality has it in the direction actually used: equal
     ==> every input a pairwise detector reads agrees on both sides ==> no
     pairwise finding is possible. The converse is neither claimed nor
@@ -482,7 +523,7 @@ def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     pins the pairing, so the disclosure cannot quietly disappear and leave
     this return claiming completeness alone.
     """
-    return old == new
+    return _all_fields_equal(old, new)
 
 
 def schema_staleness_status(

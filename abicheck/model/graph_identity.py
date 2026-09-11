@@ -411,3 +411,45 @@ def closure_location_free_identity(identity: str) -> str:
         return match.group(1)
 
     return _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.sub(_replace, normalized)
+
+
+def closure_marker_files(identity: str) -> tuple[str, ...]:
+    """The declaring-file *basename* of every closure/anonymous-tag marker
+    in *identity*, in order (``"w<(lambda at /a/foo.h:4:37)>"`` ->
+    ``("foo.h",)``); empty for an identity carrying no marker.
+
+    The complement of :func:`closure_location_free_identity`: that function
+    drops the basename along with the ``:line:col`` discriminator, and its
+    own docstring justifies dropping the basename on the grounds that a
+    declaration which genuinely moved to a different declaring FILE is
+    "separately caught by ``_classify_outcome``'s own file-based ``moved``
+    check". That argument holds only while such file evidence exists --
+    real header-graph nodes frequently carry none (PR #1228), and then a
+    marker spelling ``old.h`` on one side and ``new.h`` on the other is
+    *positive* evidence of a cross-file move that collapses to nothing.
+    This function recovers exactly that evidence, so the move check can
+    read it from the same place the coordinate shift itself is read from.
+
+    Basenames, not paths: two independently-rooted checkouts spell the same
+    unmoved header differently (``/old/checkout/foo.h`` vs
+    ``/new/checkout/foo.h``), and comparing those would manufacture a move
+    out of a checkout root. The cost is the documented residual that a move
+    keeping the same basename across directories stays invisible here --
+    the same limitation `graph_reconcile_outcome.coordinate_evidence`
+    already records.
+
+    Handles both spellings that reach a real graph node: the raw
+    ``lambda at <path>:<line>:<col>`` form and the
+    ``_normalize_graph_identity``-produced ``lambda:<basename>:<line>:<col>``
+    form.
+    """
+    files: list[str] = []
+    for match in _BARE_ANON_TYPE_LOCATION_RE.finditer(identity):
+        files.append(_basename(match.group(2)))
+    for match in _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.finditer(identity):
+        files.append(_basename(match.group(0).split(":")[-3]))
+    return tuple(files)
+
+
+def _basename(path: str) -> str:
+    return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].strip()
