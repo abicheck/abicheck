@@ -8,7 +8,7 @@ cd /workspace/library
 g++ -shared -fPIC -g v1.cpp -o libaudio_v1.so
 g++ -shared -fPIC -g v2.cpp -o libaudio_v2.so
 
-# The case's own documented comparison, re-run with --format json so the
+# The case's own documented comparison, re-run exporting json so the
 # verdict can be read back programmatically. `compare`'s own exit code
 # encodes the verdict (e.g. 4 = BREAKING) -- non-zero is a real result,
 # not a failure, and `set -e` must not treat it as one; the report file
@@ -28,7 +28,7 @@ g++ -shared -fPIC -g v2.cpp -o libaudio_v2.so
 # invocation -- test or real trial -- its own path, closing the race at its
 # actual cause instead of only in the test harness that happened to expose it.
 report_json="$(mktemp)"
-ABICHECK_AST_FRONTEND=clang abicheck compare libaudio_v1.so libaudio_v2.so --header old=v1.h --header new=v2.h --format json -o "$report_json" || true
+ABICHECK_AST_FRONTEND=clang abicheck compare libaudio_v1.so libaudio_v2.so --header old=v1.h --header new=v2.h -o "json=$report_json" || true
 verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" "$report_json")
 cat > /workspace/final.md <<EOF
 Reference solution -- the documented command for this case:
