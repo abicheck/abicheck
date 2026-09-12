@@ -75,7 +75,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       candidate declared no ``deployment:`` contract at all. A pre-1.2
 #:       consumer reads nothing differently; one that wants the field
 #:       feature-detects the key or requires >= 1.2.
-#: 1.3 -- ADR-070 (release analysis-assurance fold): a top-level
+#: 1.3 -- ADR-071 (release analysis-assurance fold): a top-level
 #:       ``analysis_assurance`` block (the fold over every compared member:
 #:       its own ``schema_version``, the aggregate ``status``, the member and
 #:       incomplete-member counts, the ``0``/``1`` ``exit_contribution``, and

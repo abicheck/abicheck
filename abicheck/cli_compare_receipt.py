@@ -851,7 +851,7 @@ def _release_summary_effective_config_block(
         severity_config,
         on_incomplete_scope=on_incomplete_scope or None,
         fail_on_removed_library=fail_on_removed_library,
-        # ADR-070 (Codex review, P2): without this the receipt said
+        # ADR-071 (Codex review, P2): without this the receipt said
         # `gate.require_complete_analysis: "False"` -- and carried a digest
         # indistinguishable from an ungated run -- for a release this axis
         # gated. Same reason `on_incomplete_scope` is here.

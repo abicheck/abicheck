@@ -1367,7 +1367,7 @@ class TestAnalysisAssuranceCliIntegration:
     def test_config_not_rejected_for_directory_release_compares(
         self, tmp_path: Path
     ) -> None:
-        """ADR-070: the release operand no longer rejects the setting.
+        """ADR-071: the release operand no longer rejects the setting.
 
         Inverted, not deleted -- a silent regression back to a usage error for
         a now-supported setting is what this still guards. The two directories

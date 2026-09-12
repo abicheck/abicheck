@@ -1,6 +1,6 @@
 ### Added
 
-- **ADR-070: `assurance.require_complete` now works for a directory/package
+- **ADR-071: `assurance.require_complete` now works for a directory/package
   (release) comparison**, and for a stored `BundleFacts` operand. It used to
   be a usage error (exit 64) on the premise that the per-library fan-out "has
   no single `analysis_assurance` result to gate on"; it has one per compared
@@ -40,7 +40,7 @@
 ### Removed
 
 - **The four guards that existed only to stay ahead of those missing
-  semantics** (ADR-070): `cli_compare_options._reject_set_input_flags`'s
+  semantics** (ADR-071): `cli_compare_options._reject_set_input_flags`'s
   release rejection, `compare_bundle_facts_rejections`'s mirror of it for a
   stored-`BundleFacts` operand, `buildsource/project_targets.py`'s rejection
   of `analysis.assurance: complete` on a `kind: bundle` run-plan check, and

@@ -495,7 +495,7 @@ def resolve_release_exit_decision(
     outrank a real ``4``/``8`` decided by a *different* member without
     being named as the reason.
 
-    *analysis_assurance_contribution* (ADR-070) is the release's own
+    *analysis_assurance_contribution* (ADR-071) is the release's own
     ``assurance.require_complete`` floor -- ``max`` over every compared
     member's, resolved by ``policy.release_assurance.
     resolve_release_assurance_decision``. Shaped exactly like
@@ -506,7 +506,7 @@ def resolve_release_exit_decision(
     ``resolve_compare_exit_decision`` fills for a scalar ``compare`` rather
     than a release-only sibling field: over one member the fold is the
     identity, so a one-member package must gate and report identically to
-    the scalar path (ADR-070 D1), and a second field would leave a consumer
+    the scalar path (ADR-071 D1), and a second field would leave a consumer
     reading ``analysis_assurance_contribution`` a ``0`` for a run this axis
     actually floored.
 

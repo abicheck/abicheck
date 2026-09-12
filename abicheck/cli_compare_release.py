@@ -349,7 +349,7 @@ def compare_release_cmd(
     probe_matrix_new: Path | None,
     severity_preset: str | None,
     on_incomplete_scope: str = "warn",
-    # ADR-070: `assurance.require_complete`, project-wide (never per-library,
+    # ADR-071: `assurance.require_complete`, project-wide (never per-library,
     # D4) -- a plain keyword parameter for the same reason
     # `on_incomplete_scope` above is one: the setting is config-only, so the
     # fan-out states it here without re-exposing a user-facing flag on this
@@ -1050,7 +1050,7 @@ def compare_release_cmd(
                 )
             )
 
-            # ADR-070 D1/D2: the assurance axis, `max`-folded across every
+            # ADR-071 D1/D2: the assurance axis, `max`-folded across every
             # compared member -- one member's incomplete analysis must still
             # raise the release's exit code, and cannot be masked by a
             # complete sibling. `0` for every run without

@@ -47,7 +47,7 @@ class TestValidateInputsAssuranceBundleInteraction:
     def test_bundle_kind_accepts_analysis_assurance_complete(
         self, tmp_path: Path
     ) -> None:
-        """ADR-070: the rejection this used to pin is gone.
+        """ADR-071: the rejection this used to pin is gone.
 
         `analysis-assurance-complete` is supported for a bundle now -- the
         release fan-out folds every compared member's own

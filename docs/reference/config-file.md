@@ -378,7 +378,7 @@ is not `complete`, independent of the compatibility verdict. Contributes
 exit `1`, folded with `max` the same way `--contract`'s coverage axis is
 (ADR-049 Phase 7): it raises a clean `0` to `1` and never lowers a `2`/`4`.
 Applies to a single-pair `compare` and to a directory/package (release)
-fan-out alike (ADR-070 — the release operand used to reject it). A release
+fan-out alike (ADR-071 — the release operand used to reject it). A release
 has one `analysis_assurance` per compared member, not one for the run, so its
 contribution is `max` over the members': over a one-member package that is
 the identity (it gates exactly as the scalar path does for the same pair),

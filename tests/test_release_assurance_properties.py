@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-070's fold, as executable invariants over generated member sets.
+"""ADR-071's fold, as executable invariants over generated member sets.
 
 `AGENTS.md`'s bug-class regression-testing contract, applied to a *new*
 reusable fold primitive rather than to a reported defect: this is the
@@ -26,7 +26,7 @@ domain-level example tests.
 Three invariants, each named in this work's own task statement and each a
 real way the fold could have been written wrongly:
 
-1. **Cardinality agreement** (ADR-070 D1) — over one member the fold is the
+1. **Cardinality agreement** (ADR-071 D1) — over one member the fold is the
    identity, so a one-member package yields exactly what the scalar path
    yields for that pair. Falsified by any fold that divides by member count,
    requires a quorum, or treats "release" as its own extra state.
@@ -48,7 +48,7 @@ Generated, not fixed-example: Hypothesis drives member count, the per-member
 status drawn from the whole vocabulary (plus an unknown status, so the
 fail-closed rank is exercised too), names, and notes. A fourth class pins the
 *agreement* between the two answers the decision carries, which is the
-property ADR-070 D5 exists to guarantee and the one a report contradicting
+property ADR-071 D5 exists to guarantee and the one a report contradicting
 its own exit code would violate.
 """
 
@@ -158,7 +158,7 @@ class TestFoldAgreesWithItsOracle:
 
 
 class TestCardinalityAgreement:
-    """ADR-070 D1: a one-member release agrees with the scalar path."""
+    """ADR-071 D1: a one-member release agrees with the scalar path."""
 
     @settings(max_examples=200)
     @given(st.sampled_from(_STATUSES), st.booleans())
@@ -195,7 +195,7 @@ class TestCardinalityAgreement:
 
 
 class TestIncompleteMemberIsNotMaskable:
-    """ADR-070 D2: a complete sibling never hides a short member."""
+    """ADR-071 D2: a complete sibling never hides a short member."""
 
     @settings(max_examples=400)
     @given(
@@ -246,7 +246,7 @@ class TestIncompleteMemberIsNotMaskable:
 
 
 class TestFoldIsMonotonic:
-    """ADR-070 D2: adding a member never improves the answer."""
+    """ADR-071 D2: adding a member never improves the answer."""
 
     @settings(max_examples=400)
     @given(_statuses, st.sampled_from(_STATUSES), st.booleans())
@@ -296,7 +296,7 @@ class TestFoldIsMonotonic:
 
 
 class TestDecisionIsSelfConsistent:
-    """ADR-070 D5: the status a reader sees agrees with the number that gated
+    """ADR-071 D5: the status a reader sees agrees with the number that gated
     them. A report contradicting its own exit code is the failure this
     property exists to foreclose."""
 
@@ -338,7 +338,7 @@ class TestDecisionIsSelfConsistent:
         spoken = release_assurance_diagnostic(on, base_exit=base_exit)
         assert (spoken is not None) == (on.incomplete_member_count > 0)
         if spoken is not None:
-            # Names the members, not merely a count (ADR-070 D6).
+            # Names the members, not merely a count (ADR-071 D6).
             for m in on.incomplete_members[:6]:
                 assert m.name in spoken
 

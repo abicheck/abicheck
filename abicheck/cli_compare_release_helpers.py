@@ -1392,7 +1392,7 @@ def _format_release_json(
     from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.release_scope import release_global_ran, unmatched_names
     terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
-    # ADR-070, already decided by the caller; a direct unit-test/legacy call
+    # ADR-071, already decided by the caller; a direct unit-test/legacy call
     # falls back to an empty, setting-off decision (contributes `0`, emits no
     # section) -- the same default `scope_terms` uses just above.
     a_terms = assurance_terms if assurance_terms is not None else release_assurance_terms(
@@ -1463,7 +1463,7 @@ def _format_release_json(
             },
             "exit_code": escalated_exit_code,
         }
-    # ADR-070 D6's orthogonal analysis-assurance axis, max()-aggregated
+    # ADR-071 D6's orthogonal analysis-assurance axis, max()-aggregated
     # across members. Same "present only when active" convention as the
     # severity/coverage blocks around it, so a release report produced
     # without the setting is byte-identical (D4). Key name matches
@@ -1609,7 +1609,7 @@ def _format_release_json(
         suppress=suppress, pack_application=pack_application,
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
-        # ADR-070: the receipt must name the gate that produced this report.
+        # ADR-071: the receipt must name the gate that produced this report.
         require_complete_analysis=a_terms.require_complete,
         env_matrix_source_sha256=env_matrix_source_sha256,
     )

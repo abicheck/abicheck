@@ -166,7 +166,7 @@ if [[ "$KIND" == "bundle" ]]; then
     # baseline-channel: none guard above.
     _fail "allow-new-target: true is not supported when kind is 'bundle' -- a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. Scope the new member individually with a kind: target check instead."
   fi
-  # ADR-070: analysis-assurance-complete IS supported for kind: bundle now.
+  # ADR-071: analysis-assurance-complete IS supported for kind: bundle now.
   # It generates an assurance overlay (assurance: {require_complete: true})
   # and routes the internal analysis step's own `compare` invocation into a
   # directory/package release fan-out; that fan-out used to reject the

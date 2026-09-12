@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-070 D6's report section: a release's ``analysis_assurance``.
+"""ADR-071 D6's report section: a release's ``analysis_assurance``.
 
 The ``compute_*``/``render_*`` split this package's ``AGENTS.md`` asks for,
 and the same shape :mod:`abicheck.report.comparison_scope` already uses for
@@ -27,7 +27,7 @@ the exit value reads it off the decision it resolved, never off this module.
 
 ``section`` is ``None`` unless ``assurance.require_complete`` is in effect,
 which is what keeps every pre-existing release report byte-identical
-(ADR-070 D4) -- the same rule under which the release report gains its
+(ADR-071 D4) -- the same rule under which the release report gains its
 contract-coverage fields only under ``--contract``.
 """
 
@@ -107,7 +107,7 @@ def release_assurance_terms(
 def build_release_assurance_section(
     decision: ReleaseAssuranceDecision,
 ) -> dict[str, Any]:
-    """The release's ``analysis_assurance`` mapping (ADR-070 D6).
+    """The release's ``analysis_assurance`` mapping (ADR-071 D6).
 
     ``incomplete_members`` names the members that fell short and why rather
     than only counting them -- a count is not actionable. ``member_count`` is

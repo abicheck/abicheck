@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-070: turning a release's own member results into the assurance fold.
+"""ADR-071: turning a release's own member results into the assurance fold.
 
 ``policy.release_assurance`` owns the *fold* and deliberately takes plain
 ``(name, status, notes)`` triples -- it may not import the flat-root
@@ -88,7 +88,7 @@ def release_assurance_from_results(
     results: Any, *, require_complete: bool
 ) -> ReleaseAssuranceDecision:
     """The fold over a stored-``BundleFacts`` release's ``per_library``
-    ``DiffResult``s (ADR-070 D8).
+    ``DiffResult``s (ADR-071 D8).
 
     Member names come from ``DiffResult.library``, which is what every other
     view of that report already keys on.
@@ -116,7 +116,7 @@ def release_assurance_from_entries(
 
     Only entries carrying ``analysis_assurance_status`` participate: the
     fan-out writes that key exactly when ``assurance.require_complete`` is in
-    effect (ADR-070 D4), so its absence means "this release was never asked",
+    effect (ADR-071 D4), so its absence means "this release was never asked",
     not "this member is clean". An entry for a member that *failed* to compare
     at all carries no such key either, which is correct -- a member that never
     produced a comparison is ADR-065's scope axis, not this one's.
@@ -146,7 +146,7 @@ def _as_list(value: object) -> list[object]:
 
 def member_assurance_entry_fields(result: Any) -> dict[str, object]:
     """The three per-member keys the live fan-out records into its own
-    ``library_results`` entry (ADR-070 D6).
+    ``library_results`` entry (ADR-071 D6).
 
     Written only when ``assurance.require_complete`` is in effect, so every
     release report produced without the setting stays byte-identical (D4) --

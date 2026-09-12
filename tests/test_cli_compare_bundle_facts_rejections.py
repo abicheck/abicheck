@@ -866,7 +866,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert "--used-by" in out
 
     def test_assurance_require_complete_config_is_accepted(self, tmp_path: Path) -> None:
-        # ADR-070 D8: this driver used to reject assurance.require_complete:
+        # ADR-071 D8: this driver used to reject assurance.require_complete:
         # true (it had no channel for it). It has one now -- it folds every
         # member's own AnalysisAssurance off result.per_library through the
         # same resolve_release_assurance_decision the live fan-out uses -- so

@@ -495,7 +495,7 @@ analysis ran:
   "warnings": [],                         // existing
   "comparison_scope": { ... },            // ADR-065 S2 (schema 2.50): per-member acquisition record,
                                           //   completeness, policy, proven_removed/proven_added
-  "analysis_assurance": { ... },          // ADR-070 (release schema 1.3): the per-member assurance fold --
+  "analysis_assurance": { ... },          // ADR-071 (release schema 1.3): the per-member assurance fold --
                                           //   present only under assurance.require_complete
   "bundle_verdict": "BREAKING",           // new (ADR-023)
   "bundle_findings": [                    // new (ADR-023)
@@ -667,7 +667,7 @@ NEW): X` are now two different lines rather than one wording for both. See
 the migration notes in
 [Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).
 
-## Analysis assurance across a bundle (ADR-070)
+## Analysis assurance across a bundle (ADR-071)
 
 The completeness axis above asks whether every *selected member* was compared
 at all. A second, independent question is whether the comparisons that **did**

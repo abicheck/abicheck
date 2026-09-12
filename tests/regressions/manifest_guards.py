@@ -125,7 +125,7 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "Stated and exercised for ADR-070's analysis-assurance "
+                    "Stated and exercised for ADR-071's analysis-assurance "
                     "axis specifically. The two sibling axes with the same "
                     "shape -- ADR-049's contract-coverage floor and ADR-065 "
                     "D6's incomplete-scope floor -- are covered by their own "

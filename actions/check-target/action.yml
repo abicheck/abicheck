@@ -329,12 +329,12 @@ inputs:
       `checks[].analysis.assurance` on the run-plan); a direct check-target
       caller may also set this explicitly. Ignored (no overlay generated)
       when not exactly 'true'. Supported for `kind: bundle` too, as of
-      ADR-070: the release fan-out the internal `compare` runs for a bundle
+      ADR-071: the release fan-out the internal `compare` runs for a bundle
       folds every compared member's own `analysis_assurance` with `max` into
       the same exit axis a single-library check uses, so a one-member bundle
       gates identically to a `kind: target` check and any member that fell
       short floors the whole bundle. It used to be rejected outright for a
-      bundle (`validate-inputs.sh`), which is the guard ADR-070 retired.
+      bundle (`validate-inputs.sh`), which is the guard ADR-071 retired.
     required: false
     default: 'false'
   extra-args:
@@ -899,32 +899,91 @@ runs:
         # where `--config` is `--policy`'s value, not a flag) -- deliberately
         # duplicated rather than sourced, the same "this step doesn't source
         # run.sh" convention `_is_path_already_qualified` above already
-        # documents. Keeps this list in sync with run.sh's by hand; an
-        # unlisted value-taking option is misread as a bare flag, which can
-        # only under-recognize a `--config` occurrence -- never mis-attribute
-        # some other option's value as one (the same safe-by-construction
-        # direction run.sh's own docstring establishes).
-        _ct_extra_args_is_value_option() {
-          case "$1" in
-            --abi3 | --ast-frontend | --budget | \
-            --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
-            --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
-            --debug-format | --debug-info | --debug-root | --debuginfod-url | \
-            --depth | --devel-pkg | --dump-manifest | --format | \
-            --frontend-context | --header | --include | --instantiation-manifest | \
-            --lang | --ld-library-path | --manifest | --max-findings | \
-            --max-findings-per-library | --output | --output-dir | --pack | \
-            --pdb-path | --policy | --post-manifest | --probe-matrix | \
-            --public-header-dir | --required-symbol | \
-            --search-path | --select | --select-required | --severity-preset | --since | --sources | \
-            --suppress | --sysroot | --use-cases | --used-by | --used-by-manifest | \
-            --variant | --version | --view | \
-            --write | -H | -I | -o)
-              return 0
-              ;;
-          esac
-          return 1
+        # documents. Keeps this list in sync with run.sh's by hand. (This
+        # step runs after the `pip install` above, so a live introspection
+        # call is available here too -- see run.sh's own corrected note and
+        # `docs/contribute/plans/action-cli-surface-drift.md` Phase 3a.)
+        #
+        # A *missing* entry is the safe direction (an unlisted value-taking
+        # option is misread as a bare flag, which can only under-recognize a
+        # `--config` occurrence). A *surplus* entry is not: a name the CLI no
+        # longer takes a value for still consumes the following token here,
+        # so a real `--config` after it is swallowed as its value. Both
+        # directions are now checked against live Click introspection by
+        # `tests/test_extra_args_is_value_option_completeness.py`, over every
+        # command the Action invokes -- don't hand-edit this list without
+        # running it.
+        # Value-taking CLI options, derived from the INSTALLED abicheck
+        # (ADR-070 D3). This was a hand-maintained `case` list kept "in sync
+        # with run.sh's by hand" -- and both copies drifted identically:
+        # twelve names the CLI had retired, four live ones missing. Neither
+        # was catchable by the test guarding them, which checked one
+        # direction against one command. See
+        # `docs/contribute/plans/action-cli-surface-drift.md` and ADR-070.
+        #
+        # This step runs after the workflow's own "Install abicheck" step, and
+        # `$PY`/`$_py_safe_dir` are already established earlier in this same
+        # step, so the query is available here exactly as in `action/run.sh`.
+        # Same `$_py_safe_dir`/cleared-`PYTHONPATH` isolation as every other
+        # abicheck-importing call in this step, for the same reason.
+        #
+        # Scoped to `compare`: check-target forwards `extra-args` to the root
+        # Action under `mode: compare` only, so unlike run.sh (which asks
+        # about whichever command `MODE` selects) the command is fixed here.
+        #
+        # Written as a one-line `-c` script on purpose: this file is YAML, so
+        # a multi-line inline script would have to sit inside the `run: |`
+        # block scalar's indentation, which Python would then reject as an
+        # IndentationError on its own first statement.
+        _ct_cli_value_options=""
+        _ct_cli_value_options_ready="false"
+        # "true" only after a real query succeeded; false means UNDETERMINED.
+        _ct_cli_value_options_derived="false"
+        _ct_cli_value_options_init() {
+          [[ "$_ct_cli_value_options_ready" == "true" ]] && return 0
+          _ct_cli_value_options_ready="true"
+          if [[ -z "${PY:-}" || -z "${_py_safe_dir:-}" ]]; then
+            _ct_cli_value_options_derived="false"
+            return 0
+          fi
+          local _ct_derived _ct_rc=0
+          _ct_derived=$( (cd "$_py_safe_dir" && PYTHONPATH= "$PY" -c 'import click; from abicheck.cli import main; print("\n".join(o for p in main.commands["compare"].params if isinstance(p, click.Option) and not p.is_flag and p.nargs != 0 for o in p.opts))') ) || _ct_rc=$?
+          if [[ "$_ct_rc" -ne 0 || -z "$_ct_derived" ]]; then
+            _ct_cli_value_options_derived="false"
+            return 0
+          fi
+          _ct_cli_value_options="|$(printf '%s' "$_ct_derived" | tr '\n' '|')"
+          _ct_cli_value_options_derived="true"
         }
+
+        # Same rule as run.sh's `_require_cli_value_options_or_fail`, and for
+        # the same reason (Codex review, PR #1234, P2): an opaque-token
+        # fallback is NOT safe. `extra-args: --version --dry-run` is argv the
+        # CLI accepts as --version's own value, so an opaque tokenizer invents
+        # a --dry-run that is not there -- and this step's own trailing/real
+        # --config recognition would misread the same shape. Undetermined is
+        # therefore fatal, but only when `extra-args` is non-empty: with
+        # nothing to tokenize there is no decision to get wrong, so a runner
+        # whose interpreter cannot import abicheck keeps working for every
+        # invocation that does not use the escape hatch.
+        _ct_require_cli_value_options_or_fail() {
+          [[ "${_ct_cli_value_options_derived:-false}" == "true" ]] && return 0
+          [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
+          echo "::error::extra-args is set, but this step cannot determine which abicheck compare options take a value, so it cannot tell a real --config in extra-args from another option's literal value (interpreter: '${PY:-<none resolved>}'; it must be able to import abicheck). Guessing is not safe -- see ADR-070 D3. Install abicheck into this step's interpreter, or remove extra-args." >&2
+          exit 1
+        }
+
+        _ct_extra_args_is_value_option() {
+          _ct_cli_value_options_init
+          [[ -n "$_ct_cli_value_options" ]] || return 1
+          [[ "$_ct_cli_value_options" == *"|$1|"* ]]
+        }
+
+        # Derive once, and decide now whether an undetermined table is fatal,
+        # before any tokenizing consumer runs (a consumer inside a command
+        # substitution could only exit its own subshell).
+        _ct_cli_value_options_init
+        _ct_require_cli_value_options_or_fail
         # Codex review (P2), fresh evidence, PR #1222: expand a Click-style
         # clustered short-option token (`-vH` for `-v -H`) into its
         # constituent single-character options, one per line, BEFORE the
@@ -940,7 +999,7 @@ runs:
         #
         # Deliberately identical to action/run.sh's own
         # `_extra_args_expand_short_clusters` (same accepted shapes, same
-        # `H`/`I`/`o`/`j` value-taking terminal set, same "leave an attached
+        # `H`/`I`/`o` value-taking terminal set, same "leave an attached
         # inline value like `-vHfoo` unexpanded" carve-out) rather than a
         # re-derived approximation -- this step doesn't source run.sh (see
         # `_ct_extra_args_is_value_option` above), so the two copies are
@@ -958,10 +1017,12 @@ runs:
           esac
           _rest="${_tok#-}"
           _last="${_rest: -1}"
-          case "$_last" in
-            H | I | o | j) ;;
-            *) return 1 ;;
-          esac
+          # Derived, not listed (ADR-070 D3): a cluster is only worth
+          # expanding when its last character is a value-taking short option,
+          # which `_ct_extra_args_is_value_option` now answers from the
+          # installed CLI. The hand-listed form carried `j` long after
+          # `compare` lost `-j` with `jobs` (ADR-068 D5).
+          _ct_extra_args_is_value_option "-$_last" || return 1
           _flags="${_rest%?}"
           _n=${#_flags}
           for ((_k = 0; _k < _n; _k++)); do

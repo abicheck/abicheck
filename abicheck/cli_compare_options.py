@@ -74,7 +74,7 @@ def _reject_set_input_flags(
     The per-library fan-out has no public CLI support for these, so reject them
     loudly rather than silently ignore them (ADR-037 D12).
 
-    ``assurance.require_complete`` is not one of these any more (ADR-070):
+    ``assurance.require_complete`` is not one of these any more (ADR-071):
     the premise of its rejection -- "the per-library fan-out has no single
     analysis_assurance result to gate on" -- was wrong. The fan-out has one
     per compared member, and ``policy.release_assurance`` folds them with

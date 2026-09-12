@@ -124,7 +124,7 @@ def _exit_compare_release(
             assurance_decision.exit_contribution if assurance_decision else 0
         ),
     )
-    # ADR-070's assurance notice, emitted here for the same reason the
+    # ADR-071's assurance notice, emitted here for the same reason the
     # evidence-contract one below is (see that comment) -- and *formatted*
     # here rather than by each caller, which is the part that matters: its
     # wording turns on the compatibility axis's own exit code ("floored to 1"

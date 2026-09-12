@@ -1,4 +1,4 @@
-# ADR-070: Release Analysis-Assurance Fold — One Axis, Any Cardinality
+# ADR-071: Release Analysis-Assurance Fold — One Axis, Any Cardinality
 
 **Date:** 2026-09-12
 **Status:** Accepted — implemented. Defines what `assurance.require_complete`

@@ -93,14 +93,14 @@ def _write_release_summary_file(
     primary report (see ``_release_summary_effective_config_block``'s own
     docstring).
 
-    *assurance_terms* (ADR-070) is likewise the same resolved decision the
+    *assurance_terms* (ADR-071) is likewise the same resolved decision the
     primary report used. It is threaded for the same reason *scope_terms* is,
     and the reason is load-bearing rather than cosmetic: this sidecar builds
     its **own** ``exit`` block through the same resolver, so a run floored by
     the assurance axis would otherwise publish a ``summary.json`` whose
     ``exit.code``/``analysis_assurance_contribution`` disagreed with the
     process's real exit status -- exactly the self-contradicting report
-    ADR-070 D5 exists to prevent.
+    ADR-071 D5 exists to prevent.
 
     *env_matrix_source_sha256* (Codex review, P2 follow-up): the same
     release-wide deployment-floor digest the primary release JSON's own
@@ -136,7 +136,7 @@ def _write_release_summary_file(
         scope_public_headers=scope_public_headers,
         on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
-        # ADR-070: the receipt must name the gate that produced this report.
+        # ADR-071: the receipt must name the gate that produced this report.
         require_complete_analysis=bool(assurance_terms.require_complete) if assurance_terms else False,
         env_matrix_source_sha256=env_matrix_source_sha256,
     )

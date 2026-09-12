@@ -8447,16 +8447,16 @@ unproven: check the header before believing it. Bug class
 name-shape defects; this one is about *evidence* selection, not naming, so
 it is deliberately recorded as its own gap.
 
-## ADR-070's release assurance fold: what it deliberately does not do
+## ADR-071's release assurance fold: what it deliberately does not do
 
-ADR-070 gave `assurance.require_complete` real semantics for a
+ADR-071 gave `assurance.require_complete` real semantics for a
 directory/package (release) `compare` and for a stored `BundleFacts` operand,
 and retired the four guards that existed only to stay ahead of the missing
 semantics. Three adjacent things were in scope to consider and deliberately
 left out, each for a stated reason rather than for effort:
 
 1. **No per-library `assurance.require_complete` override.** The setting stays
-   project-wide (ADR-070 D4), like `gate.fail_on_removed_library` and the
+   project-wide (ADR-071 D4), like `gate.fail_on_removed_library` and the
    `release.*` keys. A per-member override is a real config-surface question
    (where does it live — a `release.libraries.<key>` block? a selector? — and
    how does it interact with the D7 precedence resolver), not a fold detail,
@@ -8472,12 +8472,12 @@ left out, each for a stated reason rather than for effort:
    fold's notes name which member to compare.
 3. **The three orthogonal `0`/`1` release axes still fold in three places.**
    ADR-049's contract-coverage floor, ADR-065 D6's incomplete-scope floor and
-   ADR-070's assurance floor now have the same shape — resolve a decision per
+   ADR-071's assurance floor now have the same shape — resolve a decision per
    run, `max` it across members, carry it to the exit and the report — and
    each has its own resolver, its own `*_terms` projection and its own
    parameter threaded through `_format_release_summary`/
    `_finalize_release_output`/`_exit_compare_release`. That is three near-
-   identical threadings, and the `no_growth` baseline bumps ADR-070 needed in
+   identical threadings, and the `no_growth` baseline bumps ADR-071 needed in
    five files are the visible cost of adding the third. The convergence target
    is the duplication-and-convergence plan's own P0
    `EffectiveGate`/`EffectiveEvaluationConfig` work — one object carrying every
@@ -8518,7 +8518,7 @@ left out, each for a stated reason rather than for effort:
    three (`header context asymmetric: the new side carries no header/API-level
    evidence`, `graph completeness unknown`, `contract_coverage is 'partial'`).
 
-   ADR-070 did not cause the asymmetry — it pre-dates this axis and affects
+   ADR-071 did not cause the asymmetry — it pre-dates this axis and affects
    *findings* too, not only assurance — but it is what makes the asymmetry
    gate, so the divergence is worth stating plainly: under
    `assurance.require_complete` a stored-OLD release at `--depth binary` can be

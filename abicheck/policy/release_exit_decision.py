@@ -169,7 +169,7 @@ def resolve_release_exit_decision_for_report(
     the new side's inventory cannot prove is the scope axis's business
     (*incomplete_scope_contribution*), not exit ``8``'s.
     *no_comparison_completed_contribution* is D7's own ``0``/``1``.
-    *analysis_assurance_contribution* (ADR-070) is the release's
+    *analysis_assurance_contribution* (ADR-071) is the release's
     ``assurance.require_complete`` floor, already folded with ``max`` across
     every compared member by ``policy.release_assurance``; ``0`` whenever the
     setting is off, which is every pre-existing invocation.

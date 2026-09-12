@@ -133,7 +133,7 @@ def check_bundle_facts_json_budget(
     try:
         check_json_container_budget(raw, max_json_object_nodes)
     except JsonContainerBudgetExceeded:
-        # Only the *remedy* half of this message changed (ADR-070): it names
+        # Only the *remedy* half of this message changed (ADR-071): it names
         # the real user-facing config key instead of this function's own
         # parameter name, and says who may raise it. The "JSON containers"
         # count phrasing is deliberately left as it was -- the budget does

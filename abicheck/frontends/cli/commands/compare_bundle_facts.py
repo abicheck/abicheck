@@ -745,7 +745,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             # disk, or a non-directory *parent* path component.
             raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
 
-    # ADR-070 D8: the identical fold, over this driver's own members --
+    # ADR-071 D8: the identical fold, over this driver's own members --
     # `result.per_library` carries real `DiffResult`s, so both operand shapes
     # reach one `resolve_release_assurance_decision` and cannot diverge on
     # what `assurance.require_complete` means. Retires this driver's own
@@ -809,7 +809,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             safe_name = Path(diff.library).name or "library"
             # Codex review: a direct write_text() leaked a traceback for an
             # unwritable output_dir; routed through the shared writer.
-            # ADR-070 (Codex review, P1): without the setting an incomplete
+            # ADR-071 (Codex review, P1): without the setting an incomplete
             # member's own file reports a clean exit for a run it floored.
             _safe_write_output(
                 output_dir / f"{safe_name}.json",
@@ -898,7 +898,7 @@ def _render_json(
         ],
         "analysis_errors": list(result.analysis_errors),
     }
-    # ADR-070 D9, present only under the setting (D4): the canonical top-level
+    # ADR-071 D9, present only under the setting (D4): the canonical top-level
     # `analysis_assurance_exit_contribution` (what `aggregate.gate.
     # _analysis_assurance_exit` and the deferred gate read) plus the fold
     # section. The gate-bearing key is a plain scalar needing no `exit` block,

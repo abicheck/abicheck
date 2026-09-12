@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-070: ``assurance.require_complete`` for a release fan-out.
+"""ADR-071: ``assurance.require_complete`` for a release fan-out.
 
 A directory/package ``compare`` has one
 :class:`~abicheck.analysis_assurance.AnalysisAssurance` per compared member,
@@ -32,7 +32,7 @@ Both come back together as one :class:`ReleaseAssuranceDecision`
 (:func:`resolve_release_assurance_decision`) for the same reason ADR-065's
 ``resolve_scope_decision`` bundles its own: the status a reader sees and the
 number that gated them must not be derived twice, or a report can contradict
-its own exit code (ADR-070 D5).
+its own exit code (ADR-071 D5).
 
 The fold is ``max`` and only ever ``max`` (D2): a member's incomplete
 analysis is not maskable by a complete sibling, and adding a member can
@@ -72,7 +72,7 @@ __all__ = [
 #: to the same number so they cannot drift.
 INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION = 1
 
-#: ADR-070 D5's total order, best first. ``complete`` is strictly best and
+#: ADR-071 D5's total order, best first. ``complete`` is strictly best and
 #: every other status is a shortfall, because that is exactly what the exit
 #: fold already treats them as (``analysis_assurance_exit_contribution``
 #: floors on ``status != "complete"``) -- a release whose aggregate status
@@ -112,7 +112,7 @@ class MemberAssurance:
     user would pass to compare that library individually); *status* its own
     ``AnalysisAssurance.status``; *notes* that block's own notes, carried so
     the diagnostic can say *why* a member fell short rather than only that
-    it did (ADR-070 D6).
+    it did (ADR-071 D6).
     """
 
     name: str
@@ -134,7 +134,7 @@ class MemberAssurance:
 
 
 def release_assurance_status(members: tuple[MemberAssurance, ...]) -> str:
-    """The release's aggregate status: the worst member's (ADR-070 D5).
+    """The release's aggregate status: the worst member's (ADR-071 D5).
 
     ``"not_requested"`` for an empty *members* -- a release that compared
     nothing has no evidence to vouch for, and it is deliberately not
@@ -151,7 +151,7 @@ def release_assurance_status(members: tuple[MemberAssurance, ...]) -> str:
 def release_assurance_exit_contribution(
     members: tuple[MemberAssurance, ...], *, require_complete: bool
 ) -> int:
-    """ADR-070 D1/D2/D7's ``0``/``1`` floor: ``max`` over the members'.
+    """ADR-071 D1/D2/D7's ``0``/``1`` floor: ``max`` over the members'.
 
     ``0`` unconditionally when *require_complete* is False -- the same thing
     that keeps the scalar flag purely additive, and the reason every
@@ -209,7 +209,7 @@ def resolve_release_assurance_decision(
     members: tuple[MemberAssurance, ...], *, require_complete: bool
 ) -> ReleaseAssuranceDecision:
     """Decide the assurance axis for *members* -- the one place the status
-    and the contribution are computed together (ADR-070 D5)."""
+    and the contribution are computed together (ADR-071 D5)."""
     return ReleaseAssuranceDecision(
         members=tuple(members),
         require_complete=require_complete,
@@ -247,7 +247,7 @@ def release_assurance_diagnostic(
     Mirrors ``scope_completeness.incomplete_scope_diagnostic`` and
     ``analysis_assurance.assurance_floor_diagnostic`` so the orthogonal-axis
     notices read as one family, and names the members and their reasons
-    rather than a bare count (ADR-070 D6). *base_exit* is the compatibility
+    rather than a bare count (ADR-071 D6). *base_exit* is the compatibility
     axis's own code and decides the wording, never merely whether to speak:
     beside a real break, claiming the exit "was floored to 1" would be false.
     """
@@ -274,7 +274,7 @@ def release_assurance_diagnostic(
             f"Contributes {floor}, below the compatibility axis's own exit "
             f"{base_exit}, which stands"
         )
-    return f"{what} {effect} (ADR-070 release analysis-assurance axis). {mitigation}"
+    return f"{what} {effect} (ADR-071 release analysis-assurance axis). {mitigation}"
 
 
 def _grouped_members(members: tuple[MemberAssurance, ...]) -> str:

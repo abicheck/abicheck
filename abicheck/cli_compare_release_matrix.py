@@ -399,7 +399,7 @@ def _finalize_release_output(
             if scope_terms
             else 0
         ),
-        # ADR-070: the whole resolved decision, not just its contribution --
+        # ADR-071: the whole resolved decision, not just its contribution --
         # `_exit_compare_release` both folds it and formats its notice, and
         # the notice's wording needs the real compatibility exit, which only
         # that function's own resolution knows.

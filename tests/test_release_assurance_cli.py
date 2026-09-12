@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-070 through the real CLI, on a real multi-library bundle.
+"""ADR-071 through the real CLI, on a real multi-library bundle.
 
 `AGENTS.md`'s "Validate the user-facing result" rule: the property suite in
 ``tests/test_release_assurance_properties.py`` states the fold's contract
@@ -252,7 +252,7 @@ class TestReleaseAssuranceThroughTheCli:
     def test_a_one_member_release_agrees_with_the_scalar_path(
         self, bundle: dict[str, Path]
     ) -> None:
-        """ADR-070 D1, on the real pair of code paths.
+        """ADR-071 D1, on the real pair of code paths.
 
         The property suite can only check the release fold against a
         *restatement* of the scalar rule; this runs both real commands on the
@@ -281,7 +281,7 @@ class TestReleaseAssuranceThroughTheCli:
     def test_without_the_setting_the_report_and_exit_are_unchanged(
         self, bundle: dict[str, Path]
     ) -> None:
-        """ADR-070 D4's additivity, as an executable claim: the key is absent
+        """ADR-071 D4's additivity, as an executable claim: the key is absent
         and the exit is clean for a run that never opted in -- on the exact
         input that exits 1 *with* the setting."""
         run = _compare(
@@ -296,7 +296,7 @@ class TestReleaseAssuranceThroughTheCli:
     def test_a_non_json_format_still_explains_the_floor_on_stderr(
         self, bundle: dict[str, Path]
     ) -> None:
-        """ADR-070 D6: a Markdown consumer with no JSON block must still
+        """ADR-071 D6: a Markdown consumer with no JSON block must still
         learn why the run was floored, and which members fell short."""
         run = _compare(
             str(bundle["v1"]), str(bundle["v1_nodebug"]), bundle=bundle, fmt="markdown"
@@ -317,7 +317,7 @@ class TestReleaseAssuranceThroughTheCli:
         every other orthogonal axis threaded into it and not this one, which
         would publish a `summary.json` claiming `exit.code: 0` for a run whose
         process status was `1`. That is precisely the self-contradicting report
-        ADR-070 D5 exists to prevent, and the reason this asserts agreement
+        ADR-071 D5 exists to prevent, and the reason this asserts agreement
         between the sidecar and the process rather than just the presence of a
         field.
         """
@@ -491,7 +491,7 @@ class TestReleaseAssuranceThroughTheCli:
     def test_the_stored_bundle_facts_driver_publishes_the_gate_too(
         self, bundle: dict[str, Path], tmp_path: Path
     ) -> None:
-        """ADR-070 D8/D9 on the *other* driver, end to end.
+        """ADR-071 D8/D9 on the *other* driver, end to end.
 
         `compare_bundle_facts.dispatch` is a separate renderer and a separate
         set of writes from the live release fan-out, and Codex (P1) found it

@@ -345,7 +345,7 @@ class TestAnalysisAssuranceTruthfulnessCli:
 
 
 class TestAnalysisAssuranceCompleteAcceptedForBundle:
-    """ADR-070: ``checks[].analysis.assurance: complete`` on a bundle check
+    """ADR-071: ``checks[].analysis.assurance: complete`` on a bundle check
     is **supported**, and this class pins that it validates cleanly.
 
     It previously pinned the opposite. The rejection existed because the
@@ -354,7 +354,7 @@ class TestAnalysisAssuranceCompleteAcceptedForBundle:
     ``require_complete_analysis=True`` outright on the premise that a bundle
     comparison "has no single ``analysis_assurance`` result to gate on" --
     rejecting here, at run-plan generation time, kept that from surfacing as
-    a hard CLI usage error. ADR-070 supplied the missing semantics (one
+    a hard CLI usage error. ADR-071 supplied the missing semantics (one
     ``AnalysisAssurance`` per compared member, folded with ``max`` into the
     same ``ANALYSIS_ASSURANCE`` exit axis a scalar ``compare`` uses), so the
     fan-out accepts the setting and there is nothing left to reject.

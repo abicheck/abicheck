@@ -1692,7 +1692,7 @@ def _check_issues(
             "target check instead, and add it to this bundle once a real "
             "release has published a baseline-set covering every member."
         )
-    # ADR-070 retired the rejection this guard existed to stay ahead of.
+    # ADR-071 retired the rejection this guard existed to stay ahead of.
     # checks[].analysis.assurance: complete is enforced by translating it
     # into check-target's analysis-assurance-complete input, which merges
     # assurance.require_complete: true into the resolved `.abicheck.yml` and

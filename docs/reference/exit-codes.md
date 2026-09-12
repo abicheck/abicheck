@@ -189,7 +189,7 @@ run, folded with the same `max` discipline:
 | Axis | Contributes | When |
 |---|---|---|
 | Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
-| Analysis assurance (P0.4 / ADR-070) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution (ADR-070) |
+| Analysis assurance (P0.4 / ADR-071) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution (ADR-071) |
 | Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
 
@@ -268,7 +268,7 @@ demote a real ABI break to "warnings only", and it never rewrites the
 compatibility verdict, any finding, or the severity gate's own contribution.
 
 `assurance.require_complete: true` applies to a directory/package (release)
-`compare` too, as of ADR-070 — it used to be rejected there (exit 64). The
+`compare` too, as of ADR-071 — it used to be rejected there (exit 64). The
 release's contribution is `max` over **every compared member's own**
 contribution, folded into this same axis rather than a release-only sibling:
 over one member the fold is the identity, so a one-member package gates and

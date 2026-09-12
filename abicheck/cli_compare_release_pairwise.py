@@ -105,7 +105,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     str | None,
-    # require_complete_analysis (ADR-070)
+    # require_complete_analysis (ADR-071)
     bool,
     "SeverityConfig | None",
     "PackApplication | None",
@@ -458,7 +458,7 @@ def _compare_one_library(
             EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
         )
         if require_complete_analysis:
-            # ADR-070 D6: this member's own assurance fact, for the release's
+            # ADR-071 D6: this member's own assurance fact, for the release's
             # `max` fold to fold and the report to name. Only under the
             # setting (D4), the same rule the coverage block below follows for
             # --contract. The keys and the flat-root read behind them are
@@ -512,7 +512,7 @@ def _compare_one_library(
             # promises the complete list.
             _safe_write_output(
                 lib_report_path,
-                # ADR-070 (Codex review, P2): without this an incomplete
+                # ADR-071 (Codex review, P2): without this an incomplete
                 # member's own `{library}.json` said `exit.code: 0` while that
                 # member floored the run to `1` -- a file contradicting the run
                 # that wrote it, read as clean by aggregate/a deferred gate.
@@ -658,7 +658,7 @@ def _suppress_lockstep_soname_findings(
             # contract `_release_md_library_findings` documents).
             _safe_write_output(
                 lib_report_path,
-                # Same ADR-070 threading as the first write above, same
+                # Same ADR-071 threading as the first write above, same
                 # reason -- see its comment.
                 to_json(
                     result,

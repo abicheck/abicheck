@@ -395,7 +395,7 @@ class ExitDecision:
     def exit_without_analysis_assurance(self) -> int:
         """The code this decision would have had with no assurance axis.
 
-        ``max`` over every other contribution -- the number ADR-070's own
+        ``max`` over every other contribution -- the number ADR-071's own
         diagnostic must compare itself against when it says whether the axis
         *floored* the exit or merely contributed below it. The compatibility
         contribution alone is NOT that number: under a dominant ``16``/``8``/
