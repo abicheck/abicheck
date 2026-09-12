@@ -40,7 +40,19 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # A PR groups by PR number, so a new push supersedes the stale run for
+  # the same PR. A `push` to `main` must group by *ref*, not `run_id`:
+  # every push run has a distinct `run_id`, so the previous spelling gave
+  # each one its own group and `cancel-in-progress` never cancelled a
+  # superseded main run at all — the newer commit's run simply queued
+  # behind the obsolete one. `schedule`/`workflow_dispatch` deliberately
+  # keep keying off `run_id` (unique per run) so two manual or scheduled
+  # runs stay isolated from each other and from PR runs, matching
+  # `mutation.yml`'s own grouping. This workflow is read-only validation;
+  # do not copy this to a workflow with persistent side effects (release
+  # publication, baseline rotation), where cancelling a superseded run can
+  # leave partial state.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: true
 
 jobs:

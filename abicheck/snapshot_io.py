@@ -84,6 +84,11 @@ ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 # second read.
 _SNIFF_BYTES = 4096
 
+# Chunk size for the bounded whole-file read below. Large enough that a
+# real snapshot is read in a handful of syscalls, small enough that the
+# per-read allocation is unrelated to the (gigabyte-scale) safety cap.
+_READ_CHUNK_BYTES = 1024 * 1024
+
 # Decompression bomb defence (Section 8). Real oneDAL-sized snapshots are
 # ~150 MB decoded; this floor is comfortably above that with headroom for
 # larger libraries, while still bounding a maliciously/accidentally huge
@@ -228,6 +233,39 @@ def detect_compression_from_bytes(prefix: bytes) -> SnapshotCompression:
     if prefix.startswith(ZSTD_MAGIC):
         return SnapshotCompression.ZSTD
     return SnapshotCompression.NONE
+
+
+def _read_bounded(f: Any, prefix: bytes, cap: int) -> bytes:
+    """Read *f* forward from *prefix* until EOF or one byte past *cap*.
+
+    Semantically identical to ``prefix + f.read(cap + 1 - len(prefix))``,
+    but never hands a gigabyte-scale size argument to the reader. That
+    single-shot form asks the buffered reader to allocate a buffer of the
+    *requested* size up front -- for an ordinary uncompressed snapshot
+    ``cap`` is ``DEFAULT_MAX_DECODED_BYTES`` (1 GiB), so reading an
+    8 KiB file allocated ~1 GiB. On Linux's overcommitting allocator that
+    is nearly free; on Windows it is committed and zeroed, which made the
+    stored-package comparison paths (which read many snapshots) dominate
+    the Windows CI wall clock -- one test measured 118.03s before this
+    change and 1.80s after, assertions unchanged.
+
+    Reading in bounded chunks keeps every property the single read had:
+    the same single file descriptor (no reopen, no rewind, so a FIFO or
+    ``/dev/stdin`` still works), the same total byte bound, and the same
+    one-byte overshoot so the caller's ``len(raw) > cap`` check still
+    detects a file that grew past the ``fstat`` size through this same fd.
+    """
+    budget = cap + 1 - len(prefix)
+    if budget <= 0:
+        return prefix
+    chunks = [prefix]
+    while budget > 0:
+        chunk = f.read(min(budget, _READ_CHUNK_BYTES))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        budget -= len(chunk)
+    return b"".join(chunks)
 
 
 def _read_past_leading_skippable_frames(f: Any, prefix: bytes) -> bytes:
@@ -541,7 +579,7 @@ def read_snapshot_bytes(
         # never separately sniffed a prefix first). Build the full read
         # from the prefix bytes already consumed plus whatever remains,
         # never re-reading the same bytes twice.
-        raw = prefix + f.read(cap + 1 - len(prefix))
+        raw = _read_bounded(f, prefix, cap)
     if len(raw) > cap:
         raise SnapshotError(f"{p}: stored file exceeds the {cap} byte safety limit.")
 

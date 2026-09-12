@@ -1,0 +1,7 @@
+### Fixed
+
+- **Snapshot reads no longer allocate the safety cap.** `snapshot_io.read_snapshot_bytes` read a whole file with `f.read(cap + 1 - len(prefix))`, where `cap` is the gigabyte-scale decoded/stored safety ceiling — so reading an 8 KiB snapshot requested ~1 GiB from the buffered reader. Linux's overcommitting allocator hid the cost entirely; Windows commits and zeroes, which made the stored-package comparison paths dominate the Windows CI wall clock (one stored-versus-live parity test measured 118.03s before and 1.80s after, assertions unchanged). The read is now chunked, preserving the single file descriptor (so FIFOs and `/dev/stdin` still work), the total byte bound, and the one-byte overshoot that detects a file growing past its `fstat` size.
+
+### Changed
+
+- **Superseded `push` runs are now actually cancelled.** Six read-only validation workflows grouped concurrency by `${{ github.event.pull_request.number || github.run_id }}`. A `push` event carries no PR number and every push has a distinct `run_id`, so each landed in its own group and `cancel-in-progress: true` never cancelled an obsolete `main` run — the newer commit's run queued behind it. They now group by ref on `push` while keeping `run_id` isolation for `schedule`/`workflow_dispatch`. `tests/test_workflow_concurrency_grouping.py` evaluates every cancelling workflow's real group expression against synthesized event contexts, so a future workflow copying the old spelling fails there.
