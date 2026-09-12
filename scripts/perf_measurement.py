@@ -165,6 +165,32 @@ def finite_nonnegative_float_arg(value: str) -> float:
     return parsed
 
 
+def finite_positive_float_arg(value: str) -> float:
+    """``argparse`` ``type=`` for a *duration* or *interval* option: reject zero too.
+
+    A sibling of :func:`finite_nonnegative_float_arg`, separate because the two
+    families differ on exactly one value. Zero is meaningful for a regression
+    floor (it means "pure percentage tolerance"); for a duration it is a
+    silently-broken configuration in both of the places it is used:
+
+    * ``--timeout-seconds 0`` makes every still-running step instantly timed
+      out, so the run produces no measurement at all while looking like a
+      normal failure;
+    * ``--rss-interval-seconds 0`` turns the sampler's ``wait(interval)`` into a
+      busy loop that burns a core continuously and, in doing so, perturbs the
+      very timings it is attached to.
+
+    Neither is something a caller can want, so both are a usage error at parse
+    time rather than a run that misreports what it did.
+    """
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite, positive number, got {value!r}"
+        )
+    return parsed
+
+
 @dataclass(frozen=True)
 class GateThreshold:
     """One metric's resolved regression threshold, as reported in a receipt.

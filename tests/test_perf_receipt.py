@@ -483,3 +483,112 @@ class TestReceiptEnvelope:
         serialized = run.as_dict()
         assert "stdout" not in serialized and "stderr" not in serialized
         assert serialized["wall_seconds"] == 1.0
+
+
+class TestChildrenHighWaterIsNotAttributedToTheWrongRun:
+    """``RUSAGE_CHILDREN.ru_maxrss`` is cumulative, so attaching it is usually wrong.
+
+    It is a high-water mark over every child the harness has ever reaped. The
+    first version attached the post-run reading to each ``CommandRun``, so after
+    one 2 GB step every following tiny step reported 2 GB as its own RSS --
+    confirmed in the committed PVXS receipt, where a 438 MB run carried the
+    preceding 1.9 GB figure. The rule: report it only when this run raised it.
+    """
+
+    class _Usage:
+        def __init__(self, kib):
+            self.ru_maxrss = kib
+
+    def test_a_run_that_raised_the_mark_reports_it(self):
+        out = pr._children_high_water(self._Usage(100), self._Usage(500))
+        assert out["ru_maxrss_bytes"] == 500 * 1024
+        assert out["ru_maxrss_scope"] == "this_run_raised_the_children_high_water_mark"
+
+    @pytest.mark.parametrize("after_kib", [100, 50, 0])
+    def test_a_run_that_did_not_raise_it_reports_none_with_a_reason(self, after_kib):
+        out = pr._children_high_water(self._Usage(100), self._Usage(after_kib))
+        assert out["ru_maxrss_bytes"] is None
+        assert "earlier child" in out["ru_maxrss_scope"]
+        # The reason names the mark that is in the way, so a reader can see what
+        # the number would have been and why it is not this run's.
+        assert str(100 * 1024) in out["ru_maxrss_scope"]
+
+    def test_the_sequence_property_over_a_descending_series(self):
+        # Stated as a property over a series rather than one pair: no step after
+        # the first may inherit an earlier step's figure.
+        marks = [10, 2048_000, 40, 60, 80]
+        reported = []
+        before = self._Usage(0)
+        for kib in marks:
+            # The cumulative mark never decreases, which is the whole problem.
+            after = self._Usage(max(before.ru_maxrss, kib))
+            reported.append(pr._children_high_water(before, after)["ru_maxrss_bytes"])
+            before = after
+        assert reported[0] == 10 * 1024
+        assert reported[1] == 2048_000 * 1024
+        assert reported[2:] == [None, None, None], reported
+
+    def test_no_resource_module_is_none_with_its_own_reason(self):
+        out = pr._children_high_water(None, None)
+        assert out["ru_maxrss_bytes"] is None
+        assert "resource" in out["ru_maxrss_scope"]
+
+
+class TestCommittedReceiptsAreHonest:
+    """A published receipt is read by people, and nothing else gates it.
+
+    `reports/perf/pvxs_profile_receipt.json` carried the preceding run's
+    cumulative `ru_maxrss_bytes` on a row whose sampled tree peak was four times
+    smaller, which reads as a 1.9 GB measurement of a 438 MB run. Fixing the
+    generator does not fix an already-committed artifact, so the artifact's own
+    shape is asserted here -- over every committed receipt, not only that file.
+    """
+
+    @staticmethod
+    def _receipts():
+        root = Path(__file__).resolve().parent.parent / "reports" / "perf"
+        return sorted(root.glob("*.json"))
+
+    def test_there_is_at_least_one_committed_receipt(self):
+        assert self._receipts(), "otherwise every assertion below is vacuous"
+
+    def test_every_committed_receipt_declares_the_current_schema(self):
+        for path in self._receipts():
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            assert doc.get("schema") == pr.RECEIPT_SCHEMA, path
+
+    def test_no_two_rss_rows_share_a_ru_maxrss_value(self):
+        # The defect's observable signature: a cumulative figure repeated across
+        # rows. A row that did not raise the mark must be null, with its scope
+        # stating why, so a repeat can only be a regression of that rule.
+        for path in self._receipts():
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            seen: list[int] = []
+            for rss in _iter_rss_blocks(doc):
+                value = rss.get("ru_maxrss_bytes")
+                if value is None:
+                    assert rss.get("ru_maxrss_scope"), (path, rss)
+                    continue
+                assert value not in seen, (path, value)
+                seen.append(value)
+
+    def test_a_sampled_tree_peak_is_never_presented_as_an_exact_peak(self):
+        for path in self._receipts():
+            text = path.read_text(encoding="utf-8")
+            doc = json.loads(text)
+            for rss in _iter_rss_blocks(doc):
+                assert "peak_rss" not in rss, path
+                assert "sampled_peak_tree_bytes" in rss, path
+
+
+def _iter_rss_blocks(node):
+    """Every ``rss`` mapping anywhere in a receipt, at any nesting depth."""
+    if isinstance(node, dict):
+        rss = node.get("rss")
+        if isinstance(rss, dict):
+            yield rss
+        for value in node.values():
+            yield from _iter_rss_blocks(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _iter_rss_blocks(value)

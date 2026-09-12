@@ -1,7 +1,8 @@
 # Performance receipts
 
 Machine-readable receipts from the perf harnesses
-(`scripts/perf_receipt.py`'s `abicheck-perf-receipt/1` envelope).
+(`scripts/perf_receipt.py`'s `abicheck-perf-receipt/2` envelope — schema 2 split
+the measuring harness's own revision from the measured product's).
 
 **What belongs here:** a small, reviewed receipt worth keeping as a reference
 point — a real-integration profile measurement, or a reference run of the

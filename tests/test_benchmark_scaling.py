@@ -9,6 +9,7 @@ The script is loaded by path because ``scripts/`` is not an installed package.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -439,3 +440,49 @@ class TestApplyRegressionGateRecordsItsThreshold:
             )
             == []
         )
+
+
+class TestStatedOrDefault:
+    """``value or default`` is wrong for a threshold, because ``0.0`` is falsy.
+
+    ``--regress-tolerance 0`` took the 0.5 default in the one place that
+    *printed* the tolerance while ``apply_regression_gate`` correctly gated at
+    ``0.0``, so the printed number contradicted the number that judged the run --
+    the same class of defect this branch removed from the per-scenario override.
+    """
+
+    @pytest.mark.parametrize("value", [0.0, 0, 0.1, 1.0, 99.0])
+    def test_any_stated_value_including_zero_survives(self, value):
+        assert perf_baseline.stated_or_default(value, 0.5) == value
+
+    def test_only_none_falls_back(self):
+        assert perf_baseline.stated_or_default(None, 0.5) == 0.5
+
+    def test_load_baseline_prints_the_stated_zero_not_the_default(
+        self, tmp_path, capsys
+    ):
+        report = tmp_path / "base.json"
+        report.write_text(
+            json.dumps(
+                {"scenarios": {"s": {"points": [{"size": 10, "seconds": 1.0}]}}}
+            ),
+            encoding="utf-8",
+        )
+        perf_baseline.load_baseline(report, 0.0)
+        printed = capsys.readouterr().out
+        assert "tolerance 0%" in printed, printed
+        assert "50%" not in printed
+
+    def test_load_baseline_prints_the_default_when_unstated(self, tmp_path, capsys):
+        report = tmp_path / "base.json"
+        report.write_text(
+            json.dumps(
+                {"scenarios": {"s": {"points": [{"size": 10, "seconds": 1.0}]}}}
+            ),
+            encoding="utf-8",
+        )
+        perf_baseline.load_baseline(report, None)
+        out = capsys.readouterr().out
+        assert (
+            f"tolerance {perf_baseline.DEFAULT_REGRESS_TOLERANCE * 100:.0f}%" in out
+        ), out

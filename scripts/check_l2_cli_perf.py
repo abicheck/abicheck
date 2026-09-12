@@ -109,6 +109,7 @@ import l2_cli_fixture as fixtures  # noqa: E402
 from perf_measurement import (  # noqa: E402
     GateThreshold,
     finite_nonnegative_float_arg,
+    finite_positive_float_arg,
     is_gateable,
     positive_int_arg,
     summarize_samples,
@@ -421,11 +422,27 @@ def _check_extraction(
     if observed is None:
         return ["no native-invocation observation recorded (spy not installed?)"]
     if expectation == "forbidden":
-        # Needs no calibration: the contract is an absolute zero.
-        if observed:
+        # Needs no calibration: the contract is an absolute zero -- and it is a
+        # zero over EVERY observed native invocation, not only the extraction
+        # bucket. A stored-operand path claims no compiler ran at all, so an
+        # `include_pass`, a `--version` probe, or anything classified `other`
+        # falsifies the claim exactly as an AST extraction does. Checking only
+        # `header_extraction` would let a regression that starts spawning
+        # `clang++ -M` or `g++ --version` while loading two stored snapshots
+        # pass a scenario whose entire point is that it spawns nothing.
+        nonzero = {
+            kind: count
+            for kind, count in (run.native_invocations or {}).items()
+            if count
+        }
+        if nonzero:
+            detail = ", ".join(
+                f"{kind}={count}" for kind, count in sorted(nonzero.items())
+            )
             return [
-                f"{observed} header extraction(s) observed on a stored-operand path "
-                "that must perform none -- the stored snapshot was re-extracted"
+                f"native compiler invocation(s) observed ({detail}) on a "
+                "stored-operand path that must perform none -- the stored "
+                "snapshot was re-extracted, or the path grew a new native call"
             ]
     elif expectation == "one_side":
         if observed == 0:
@@ -1261,6 +1278,11 @@ def _rss_receipt(rss: RssSample | None) -> dict[str, Any] | None:
     interval-sampled tree figure and ``ru_maxrss_bytes`` for the kernel
     per-process high-water mark, with the interval and any unavailability reason
     alongside, so a reader can never mistake the first for an exact peak.
+    ``ru_maxrss_bytes`` is present only when this run is what raised the kernel's
+    cumulative children mark; otherwise it is ``None`` and ``ru_maxrss_scope``
+    names the earlier, heavier child that holds it (see
+    ``perf_receipt._children_high_water``) -- attaching a cumulative figure to a
+    step that did not produce it is how a tiny step inherits a 2 GB reading.
     """
     if rss is None:
         return None
@@ -1270,6 +1292,7 @@ def _rss_receipt(rss: RssSample | None) -> dict[str, Any] | None:
         "interval_seconds": rss.interval_seconds,
         "max_concurrent_processes": rss.max_concurrent_processes,
         "ru_maxrss_bytes": rss.ru_maxrss_bytes,
+        "ru_maxrss_scope": rss.ru_maxrss_scope,
         "unavailable_reason": rss.unavailable_reason,
     }
 
@@ -1727,23 +1750,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--regress-tolerance",
         type=finite_nonnegative_float_arg,
-        default=DEFAULT_REGRESS_TOLERANCE,
+        # None, not the default value: `source` below must report whether the
+        # caller stated a number, and an explicit 0.3 is otherwise
+        # indistinguishable from the default 0.3.
+        default=None,
     )
     p.add_argument(
         "--regress-min-delta-seconds",
         type=finite_nonnegative_float_arg,
-        default=DEFAULT_REGRESS_MIN_DELTA_SECONDS,
+        default=None,  # see --regress-tolerance
         help="Absolute floor combined with --regress-tolerance via max(). Nonzero "
         "by default here, unlike the in-process gates: a full-CLI run pays ~0.5s "
         "of interpreter startup whose jitter is a real part of every sample.",
     )
     p.add_argument(
         "--timeout-seconds",
-        type=finite_nonnegative_float_arg,
+        # Positive, not merely non-negative: zero instantly times out every step.
+        type=finite_positive_float_arg,
         default=DEFAULT_TIMEOUT_SECONDS,
     )
     p.add_argument(
-        "--rss-interval-seconds", type=finite_nonnegative_float_arg, default=0.02
+        # Positive: a zero interval busy-loops the sampler thread and perturbs
+        # the timings it is supposed to only observe.
+        "--rss-interval-seconds",
+        type=finite_positive_float_arg,
+        default=0.02,
     )
     p.add_argument("--json-out", type=Path, default=None)
     p.add_argument("--markdown", action="store_true")
@@ -1781,12 +1812,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL: --scenario {args.scenario} matched nothing.")
         return 1
 
+    # "explicit" iff either flag was *supplied*. Deriving it from the tolerance
+    # alone mislabelled the CI lane's own `--regress-min-delta-seconds 0.6` as
+    # "default", and deriving it by value comparison mislabelled an explicitly
+    # stated default-equal value the same way. The field exists so a reader can
+    # check that a strict value was honored, so it has to track the statement,
+    # not the number.
     threshold = GateThreshold(
-        tolerance=args.regress_tolerance,
-        min_delta=args.regress_min_delta_seconds,
-        source="explicit"
-        if args.regress_tolerance != DEFAULT_REGRESS_TOLERANCE
-        else "default",
+        tolerance=(
+            DEFAULT_REGRESS_TOLERANCE
+            if args.regress_tolerance is None
+            else args.regress_tolerance
+        ),
+        min_delta=(
+            DEFAULT_REGRESS_MIN_DELTA_SECONDS
+            if args.regress_min_delta_seconds is None
+            else args.regress_min_delta_seconds
+        ),
+        source=(
+            "explicit"
+            if args.regress_tolerance is not None
+            or args.regress_min_delta_seconds is not None
+            else "default"
+        ),
     )
 
     started = time.perf_counter()
@@ -1831,7 +1879,9 @@ def main(argv: list[str] | None = None) -> int:
             "full_cli; each carries additive=false.",
             "sampled_peak_tree_bytes is a sampled lower bound on concurrent "
             "process-tree RSS, not an exact peak; ru_maxrss_bytes is a separate "
-            "per-process kernel high-water mark.",
+            "per-process kernel high-water mark, reported only for the step that "
+            "raised it (it is cumulative over reaped children) -- null with a "
+            "stated scope otherwise.",
             "Fixture compilation is setup and is excluded from every measured "
             "window; its cost is reported separately.",
         ],

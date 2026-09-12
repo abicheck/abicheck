@@ -90,7 +90,7 @@ def baseline_points_from_report(
 
 
 def load_baseline(
-    baseline_path: Path, regress_tolerance: float
+    baseline_path: Path, regress_tolerance: float | None
 ) -> dict[tuple[str, int], float]:
     """Load baseline scaling JSON and return its (scenario, size) -> seconds mapping.
 
@@ -98,8 +98,16 @@ def load_baseline(
     dict when the file cannot be read or parsed. The caller (``main()``) is
     responsible for treating an empty result as a hard failure when
     ``--baseline`` was explicitly given -- this function only loads, never gates.
+
+    *regress_tolerance* is the caller's CLI value, ``None`` when unstated, and is
+    resolved here via :func:`stated_or_default` rather than at the call site: the
+    call site used ``value or DEFAULT``, under which an explicit
+    ``--regress-tolerance 0`` printed the 50% default while the gate itself used
+    the stated 0.0.
     """
     import json
+
+    regress_tolerance = stated_or_default(regress_tolerance, DEFAULT_REGRESS_TOLERANCE)
 
     try:
         points = baseline_points_from_report(json.loads(baseline_path.read_text()))
@@ -297,3 +305,15 @@ def apply_regression_gate(
         floor_seconds=floor_seconds,
         min_delta_seconds=threshold.min_delta,
     )
+
+
+def stated_or_default(value: float | None, default: float) -> float:
+    """*value* unless it was never stated, in which case *default*.
+
+    Exists because ``value or default`` is wrong for a threshold: ``0.0`` is
+    falsy, so an explicit ``--regress-tolerance 0`` silently became the 0.5
+    default in the one place that *printed* the tolerance, while the code that
+    actually gated the run used the stated ``0.0``. The printed number then
+    contradicted the number that judged the run.
+    """
+    return default if value is None else value

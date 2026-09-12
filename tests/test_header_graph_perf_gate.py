@@ -476,6 +476,51 @@ class TestResolveThresholds:
         for metric, t in hg_gate.resolve_thresholds(self._args([])).items():
             assert set(t.as_dict()) == {"tolerance", "min_delta", "source"}, metric
 
+    # --- provenance: `source` tracks the statement, never a value comparison ---
+
+    def test_a_min_delta_only_caller_is_recorded_as_explicit(self):
+        # The CI job's own spelling. Deriving `source` from args.regress_tolerance
+        # alone labelled this "default", so the receipt named the wrong origin for
+        # the floor that actually gated the run.
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-min-delta-ms", "30"])
+        )
+        assert {t.source for t in resolved.values()} == {"explicit"}
+        assert all(t.min_delta == 30.0 for t in resolved.values())
+
+    def test_a_stated_default_equal_tolerance_is_recorded_as_explicit(self):
+        # The other direction a value comparison gets wrong: the caller stated
+        # the number, and it happens to equal the module default.
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-tolerance", str(hg_gate.DEFAULT_REGRESS_TOLERANCE)])
+        )
+        assert {t.source for t in resolved.values()} == {"explicit"}
+
+    @pytest.mark.parametrize(
+        "argv,expected",
+        [
+            ([], "default"),
+            (["--regress-tolerance", "0.1"], "explicit"),
+            (["--regress-min-delta-ms", "30"], "explicit"),
+            (["--regress-tolerance", "0"], "explicit"),
+            (["--regress-min-delta-ms", "0"], "explicit"),
+            (["--regress-tolerance", "0.5", "--regress-min-delta-ms", "0"], "explicit"),
+        ],
+    )
+    def test_source_over_the_whole_flag_domain(self, argv, expected):
+        # Exhaustive over the small domain rather than one example each: the two
+        # flags x {absent, stated-default, stated-other} is the whole space, and
+        # both zero cases are exactly the ones a falsy-value test would miss.
+        resolved = hg_gate.resolve_thresholds(self._args(argv))
+        assert {t.source for t in resolved.values()} == {expected}, argv
+
+    def test_the_resolved_values_still_fall_back_to_the_module_defaults(self):
+        # Defaulting the flags to None must not leave the threshold itself None.
+        resolved = hg_gate.resolve_thresholds(self._args([]))
+        for t in resolved.values():
+            assert t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE
+            assert t.min_delta == hg_gate.DEFAULT_REGRESS_MIN_DELTA_MS
+
 
 class TestMainEntryPoint:
     def test_skip_message_when_toolchain_missing(self, monkeypatch, capsys):

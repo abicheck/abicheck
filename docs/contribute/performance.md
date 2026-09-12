@@ -364,6 +364,14 @@ kernel's own high-water mark, which never misses a spike but is a maximum over
 Both are reported, labelled, with the interval and the observation limits —
 picking one would hide the other's failure mode.
 
+`ru_maxrss_bytes` comes from `RUSAGE_CHILDREN`, which is **cumulative over every
+child the harness has reaped**, so it is reported only for the step that *raised*
+it. A step that did not raise it gets `null` plus a `ru_maxrss_scope` naming the
+earlier, heavier child that holds the mark. Without that rule, one 2 GB step
+makes every following step report 2 GB as its own RSS — which is exactly what the
+first published PVXS receipt did, showing 1.9 GB against a run whose sampled tree
+peak was 438 MB. Read `sampled_peak_tree_bytes` for such a step.
+
 ### Measured cost of the full-CLI lanes
 
 All figures local (gcc 13.3.0 / castxml 0.7.0 / clang 18.1.3, 4 CPUs, Linux,

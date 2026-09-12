@@ -140,7 +140,6 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from perf_baseline import (  # noqa: E402
-    DEFAULT_REGRESS_TOLERANCE,
     apply_regression_gate,
     check_regressions as check_regressions,
     load_baseline as _load_baseline,
@@ -1946,9 +1945,7 @@ def main(argv: list[str] | None = None) -> int:
     baseline_points: dict[tuple[str, int], float] = {}
     baseline_required = args.baseline is not None
     if baseline_required:
-        baseline_points = _load_baseline(
-            args.baseline, args.regress_tolerance or DEFAULT_REGRESS_TOLERANCE
-        )
+        baseline_points = _load_baseline(args.baseline, args.regress_tolerance)
         if not baseline_points:
             # Fail closed rather than silently degrading to a report-only run:
             # an explicitly-requested --baseline that loaded to zero points

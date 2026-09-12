@@ -530,7 +530,16 @@ class RssSample:
     sample_count: int
     interval_seconds: float
     max_concurrent_processes: int
+    #: The kernel children high-water mark, but **only when this run is what
+    #: raised it**. ``RUSAGE_CHILDREN.ru_maxrss`` is cumulative over every child
+    #: the harness has ever reaped, so reading it after a run and attaching it to
+    #: that run is wrong whenever an earlier, heavier child still holds the mark:
+    #: a tiny step following a 2 GB one would report 2 GB as its own RSS. When
+    #: this run did not raise the mark, its own per-process peak is not separable
+    #: from the cumulative figure, so this is ``None`` and
+    #: ``ru_maxrss_scope`` says why and names the mark that is in the way.
     ru_maxrss_bytes: int | None
+    ru_maxrss_scope: str | None = None
     unavailable_reason: str | None = None
 
 
@@ -633,13 +642,16 @@ class TreeRssSampler:
             self._thread.join(timeout=self.interval * 20 + 1.0)
             self._thread = None
 
-    def result(self, *, ru_maxrss_bytes: int | None) -> RssSample:
+    def result(
+        self, *, ru_maxrss_bytes: int | None, ru_maxrss_scope: str | None = None
+    ) -> RssSample:
         return RssSample(
             sampled_peak_tree_bytes=self.peak or None,
             sample_count=self.samples,
             interval_seconds=self.interval,
             max_concurrent_processes=self.max_processes,
             ru_maxrss_bytes=ru_maxrss_bytes,
+            ru_maxrss_scope=ru_maxrss_scope,
             unavailable_reason=self.unavailable_reason
             or (None if self.samples else "process exited before the first sample"),
         )
@@ -713,6 +725,38 @@ def _communicate_or_reap(
         return stdout, stderr, True
 
 
+def _children_high_water(before: Any, after: Any) -> dict[str, Any]:
+    """This run's own ``ru_maxrss``, or ``None`` with the reason it is unknowable.
+
+    ``RUSAGE_CHILDREN.ru_maxrss`` is a high-water mark accumulated over every
+    child the harness has reaped, not a per-run figure. Reading it after a run
+    and attaching it to that run is only correct when the run *raised* it; after
+    one memory-heavy step, every following step would otherwise inherit that
+    step's number as its own. So: report it when it rose, and say what is in the
+    way when it did not, rather than publishing a number belonging to something
+    else. (``ru_maxrss`` is in KiB on Linux.)
+    """
+    if before is None or after is None:
+        return {
+            "ru_maxrss_bytes": None,
+            "ru_maxrss_scope": "unavailable: no `resource` module on this platform",
+        }
+    if after.ru_maxrss > before.ru_maxrss:
+        return {
+            "ru_maxrss_bytes": after.ru_maxrss * 1024 or None,
+            "ru_maxrss_scope": "this_run_raised_the_children_high_water_mark",
+        }
+    return {
+        "ru_maxrss_bytes": None,
+        "ru_maxrss_scope": (
+            "unavailable: an earlier child already holds the children high-water "
+            f"mark ({before.ru_maxrss * 1024} bytes), so this run's own per-process "
+            "peak is not separable from RUSAGE_CHILDREN -- read "
+            "sampled_peak_tree_bytes instead"
+        ),
+    }
+
+
 def run_measured(
     argv: list[str],
     *,
@@ -772,10 +816,7 @@ def run_measured(
     )
     rss = None
     if sampler is not None:
-        # ru_maxrss is in KiB on Linux.
-        rss = sampler.result(
-            ru_maxrss_bytes=(after.ru_maxrss * 1024 or None) if after else None
-        )
+        rss = sampler.result(**_children_high_water(before, after))
     return CommandRun(
         argv=list(argv),
         exit_code=proc.returncode,

@@ -73,6 +73,7 @@
           "rss": {
             "sampled_peak_tree_bytes": 1949000000,
             "ru_maxrss_bytes": 1979000000,
+            "ru_maxrss_scope": "this_run_raised_the_children_high_water_mark",
             "interval_seconds": 0.05,
             "max_concurrent_processes": 4,
             "unavailable_reason": null
@@ -119,7 +120,8 @@
           },
           "rss": {
             "sampled_peak_tree_bytes": 438000000,
-            "ru_maxrss_bytes": 1979000000,
+            "ru_maxrss_bytes": null,
+            "ru_maxrss_scope": "unavailable: an earlier child already holds the children high-water mark (1979000000 bytes), so this run's own per-process peak is not separable from RUSAGE_CHILDREN -- read sampled_peak_tree_bytes instead",
             "interval_seconds": 0.05,
             "max_concurrent_processes": 2,
             "unavailable_reason": null
@@ -147,7 +149,7 @@
     "MANUAL run, not a CI measurement: the real profiles are periodic/manual only. Kept as a reference point for what a real L2 comparison of a modest real C++ library costs.",
     "CAVEAT: the two revisions' public header trees digest IDENTICALLY (PR #216 is a CI-only change), so this is in practice an EQUIVALENCE comparison -- same headers, two builds -- not a header-changing temporal one. A temporal PVXS number needs a revision pair that actually changes a public header.",
     "The ~10x spread between the two libraries is the size of their public header surfaces (client.h+data.h+server.h vs. one iochooks.h).",
-    "sampled_peak_tree_bytes is a sampled lower bound on concurrent process-tree RSS at a 0.05s interval, not an exact peak; ru_maxrss_bytes is the separate per-process kernel high-water mark and is shared across both rows because it is cumulative over the measuring process's reaped children.",
+    "sampled_peak_tree_bytes is a sampled lower bound on concurrent process-tree RSS at a 0.05s interval, not an exact peak; ru_maxrss_bytes is the separate per-process kernel high-water mark and is cumulative over the measuring process's reaped children, so it is reported only for the row that raised it (libpvxs) and null for the row that did not (libpvxsIoc), where ru_maxrss_scope names the mark in the way -- the earlier published version of this receipt repeated libpvxs's 1979000000 on the libpvxsIoc row, which read as a 1.9GB measurement of a 438MB run.",
     "EPICS base and both pvxs revisions were built as SETUP, outside every measured window. Preparation also needed libevent-dev, which EPICS base does not require but pvxs does.",
     "Reproduce: scripts/l2_real_profiles.py's prepare_script(PVXS), then a compare per library with per-side labelled include roots (--include old:ctxN=... / new:ctxN=...). Note that mixing a labelled side-scoped include with unlabelled global ones did NOT apply the global roots; every root must be given per side.",
     "Re-stamped to receipt schema 2, which splits the harness's own revision from the measured product's. For this run they are the same checkout (an editable install measuring itself); the split matters for the PR-vs-base lane, where one harness measures two products."

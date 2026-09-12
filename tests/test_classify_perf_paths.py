@@ -463,3 +463,46 @@ class TestEntryPointModulesAreClassified:
         # Vacuity guard: a pattern broad enough to match everything under
         # abicheck/ would make the two assertions above meaningless.
         assert not classify.changed_files_are_perf_sensitive(["abicheck/model/fact.py"])
+
+
+class TestL2JobCheckoutHardening:
+    """The two L2 jobs check out and then *run* pull-request code.
+
+    With `actions/checkout`'s default `persist-credentials: true`, its GitHub
+    credential stays in the workspace while the job builds a fixture and executes
+    the CLI from that same checkout. `contents: read` does not disable
+    persistence, so it has to be stated. Asserted over the parsed YAML rather
+    than the text, so a reordering or a comment cannot satisfy it.
+    """
+
+    @staticmethod
+    def _jobs() -> dict:
+        yaml = pytest.importorskip("yaml")
+        root = Path(__file__).resolve().parent.parent
+        doc = yaml.safe_load(
+            (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+        )
+        return doc["jobs"]
+
+    @pytest.mark.parametrize("job", ["l2-cli-perf", "l2-cli-extended"])
+    def test_checkout_does_not_persist_credentials(self, job):
+        steps = self._jobs()[job]["steps"]
+        checkouts = [
+            s for s in steps if str(s.get("uses", "")).startswith("actions/checkout")
+        ]
+        assert checkouts, f"{job} must check the repository out"
+        for step in checkouts:
+            assert step.get("with", {}).get("persist-credentials") is False, step
+
+    @pytest.mark.parametrize("job", ["l2-cli-perf", "l2-cli-extended"])
+    def test_every_remote_action_is_pinned_to_a_commit(self, job):
+        steps = self._jobs()[job]["steps"]
+        remote = [
+            str(s["uses"])
+            for s in steps
+            if "uses" in s and not str(s["uses"]).startswith("./")
+        ]
+        assert remote, f"{job} uses at least one remote action"
+        for uses in remote:
+            ref = uses.split("@", 1)[1]
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), uses

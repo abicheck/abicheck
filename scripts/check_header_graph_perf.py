@@ -802,12 +802,27 @@ def resolve_thresholds(args: argparse.Namespace) -> dict[str, GateThreshold]:
     ``GateThreshold`` with its own ``source`` label and would therefore appear
     in the receipt.
     """
+    # Derived from whether the flag was *supplied*, never from whether its value
+    # differs from the module default. Comparing values gets both edge cases
+    # wrong in opposite directions: `--regress-tolerance 0.5` (stated, equal to
+    # the default) read as "default", and `--regress-min-delta-ms 30` alone --
+    # the spelling the CI job actually uses -- read as "default" too, because
+    # only the tolerance was consulted. Both publish the wrong origin for the
+    # number that gated the run, which is the one thing this receipt field
+    # exists to make checkable.
+    stated = args.regress_tolerance is not None or args.regress_min_delta_ms is not None
     base = GateThreshold(
-        tolerance=args.regress_tolerance,
-        min_delta=args.regress_min_delta_ms,
-        source="explicit"
-        if args.regress_tolerance != DEFAULT_REGRESS_TOLERANCE
-        else "default",
+        tolerance=(
+            DEFAULT_REGRESS_TOLERANCE
+            if args.regress_tolerance is None
+            else args.regress_tolerance
+        ),
+        min_delta=(
+            DEFAULT_REGRESS_MIN_DELTA_MS
+            if args.regress_min_delta_ms is None
+            else args.regress_min_delta_ms
+        ),
+        source="explicit" if stated else "default",
     )
     return {
         metric: resolve_threshold(
@@ -846,19 +861,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--regress-tolerance",
         type=_finite_nonnegative_float,
-        default=DEFAULT_REGRESS_TOLERANCE,
+        # None, not the module default: the receipt's `source` label must be able
+        # to say whether the caller stated this number, and `0.5` given
+        # explicitly is indistinguishable from the default once substituted here.
+        default=None,
         help="Fractional growth allowed vs. baseline, for EVERY gated metric, "
-        "before failing (default: %(default)s = 50%%). The actual allowed delta "
+        f"before failing (default: {DEFAULT_REGRESS_TOLERANCE} = 50%%). "
+        "The actual allowed delta "
         "is max(this fraction x baseline, --regress-min-delta-ms).",
     )
     p.add_argument(
         "--regress-min-delta-ms",
         type=_finite_nonnegative_float,
-        default=DEFAULT_REGRESS_MIN_DELTA_MS,
+        default=None,  # see --regress-tolerance
         help="Absolute-ms floor combined with --regress-tolerance via max(), for "
         "every gated metric -- protects a small baseline from flagging on "
-        "run-to-run noise alone (default: %(default)s = pure percentage "
-        "tolerance, the historical behaviour).",
+        f"run-to-run noise alone (default: {DEFAULT_REGRESS_MIN_DELTA_MS} = pure "
+        "percentage tolerance, the historical behaviour).",
     )
     p.add_argument(
         "--metrics",
