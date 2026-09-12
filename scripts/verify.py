@@ -379,6 +379,18 @@ STEPS: tuple[Step, ...] = (
         description="Use-case registry vs. human docs drift gate",
     ),
     Step(
+        # `action/validate-inputs.sh` runs before abicheck is installed (by
+        # design -- fail fast), so it is the one Action shell that cannot query
+        # the CLI for its choice sets and is permitted a committed generated
+        # artifact instead (ADR-070 D3). This is the drift half: a new, removed
+        # or renamed `click.Choice` value must not diverge from what that
+        # script accepts.
+        "action-cli-surface",
+        _pyscript("scripts/gen_action_cli_surface.py", "--check"),
+        frozenset({PR, FULL}),
+        description="action/cli-surface.txt in sync with the CLI's own click.Choice sets",
+    ),
+    Step(
         # The learning-series hub's step list and role-path table are rendered
         # from docs/_meta/learning-ladder.yaml; this is the drift half only
         # (the ladder's rules run inside docs-contract).
