@@ -46,9 +46,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
 
 #: Contexts whose value is free text chosen by whoever opened the PR,
 #: issue or comment. Numeric ids and SHAs (`pull_request.number`,
@@ -87,8 +85,8 @@ HOSTILE_PAYLOADS = (
 
 def _steps() -> list[tuple[str, str, int, dict]]:
     found = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        doc = yaml.safe_load(path.read_text())
+    for path in workflow_paths():
+        doc = yaml.safe_load(read_repo_text(path))
         for job_name, job in ((doc or {}).get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
@@ -168,7 +166,7 @@ def _run_body_step(script: str, payload: str, workdir: Path) -> tuple[str | None
         timeout=30,
     )
     body = workdir / "pr-body.md"
-    written = body.read_text() if body.exists() else None
+    written = body.read_text(encoding="utf-8") if body.exists() else None
     return written, (workdir / "PWNED").exists()
 
 
@@ -176,7 +174,7 @@ def _run_body_step(script: str, payload: str, workdir: Path) -> tuple[str | None
 #: a file". Read from the workflow rather than retyped, so this cannot go
 #: on testing a string the workflow stopped using.
 def _real_pr_body_script() -> str:
-    doc = yaml.safe_load((WORKFLOW_DIR / "bugfix-test-contract.yml").read_text())
+    doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "bugfix-test-contract.yml"))
     for job in doc["jobs"].values():
         for step in job.get("steps") or []:
             if isinstance(step, dict) and "PR_BODY" in (step.get("env") or {}):

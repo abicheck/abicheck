@@ -138,7 +138,7 @@ class TestActionYmlAgreesOnDependencySources:
     a matrix cell twenty minutes later. This is what stops it drifting."""
 
     def test_mirror_matches_the_action(self) -> None:
-        action = (REPO_ROOT / "action.yml").read_text()
+        action = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
         # The one place action.yml enumerates them: its own validation case.
         marker = "system|conda-forge|conda-forge-gcc14|conda-forge-clang20|none)"
         assert marker in action, "action.yml's dependency-source case changed shape"
@@ -147,7 +147,7 @@ class TestActionYmlAgreesOnDependencySources:
     def test_check_target_forwards_the_input(self) -> None:
         """A per-cell value that check-target accepts but never forwards would
         be silently inert — the failure this whole phase is about."""
-        action = (REPO_ROOT / "actions" / "check-target" / "action.yml").read_text()
+        action = (REPO_ROOT / "actions" / "check-target" / "action.yml").read_text(encoding="utf-8")
         assert "dependency-source:" in action
         assert "dependency-source: ${{ inputs.dependency-source }}" in action
 
@@ -161,7 +161,7 @@ def _resolve_dependency_source(
     resolution *behaviour* — a future edit that keeps the same words but
     changes the branching still fails here.
     """
-    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text())
+    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
     step = next(
         s
         for s in action["runs"]["steps"]

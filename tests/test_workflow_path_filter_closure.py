@@ -42,13 +42,10 @@ moment it does — not when someone remembers to extend a list here.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 import yaml
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+from _workflow_files import REPO_ROOT, read_repo_text, workflow_paths
 
 # A repo-relative script handed to an interpreter, or executed directly.
 _EXECUTED_FILE = re.compile(
@@ -122,14 +119,14 @@ def _required_paths(text: str) -> set[str]:
         action_yml = REPO_ROOT / action / "action.yml"
         required.add(f"{action}/action.yml")
         if action_yml.is_file():
-            required |= _executed_files(action_yml.read_text())
+            required |= _executed_files(read_repo_text(action_yml))
     return required
 
 
 def _filtered_workflows() -> list[tuple[str, str, list[str], set[str]]]:
     cases = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        text = path.read_text()
+    for path in workflow_paths():
+        text = read_repo_text(path)
         doc = yaml.safe_load(text)
         # PyYAML parses the bare `on:` key as the boolean True.
         triggers = (doc or {}).get("on", (doc or {}).get(True)) or {}

@@ -41,13 +41,11 @@ from __future__ import annotations
 
 import itertools
 import re
-from pathlib import Path
 from typing import Any
 
 import yaml
 from _gha_expressions import condition_holds, runner_os_for
-
-WORKFLOW_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+from _workflow_files import read_repo_text, workflow_paths
 
 #: `--cov-report=xml` writes `coverage.xml`; `--cov-report=xml:NAME` writes NAME.
 _COV_REPORT = re.compile(r"--cov-report=xml(?::([\w.\-]+))?")
@@ -91,8 +89,8 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _orphaned_reports() -> list[str]:
     findings = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        doc = yaml.safe_load(path.read_text())
+    for path in workflow_paths():
+        doc = yaml.safe_load(read_repo_text(path))
         for job_name, job in ((doc or {}).get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
@@ -149,8 +147,8 @@ def test_the_survey_actually_finds_coverage_producers() -> None:
     """Guards the scan: a parsing change that matched no producer would make
     the assertion above vacuously true."""
     producers = 0
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        producers += len(_COV_REPORT.findall(path.read_text()))
+    for path in workflow_paths():
+        producers += len(_COV_REPORT.findall(read_repo_text(path)))
     assert producers >= 2, (
         f"found {producers} coverage producers; expected the known lanes"
     )

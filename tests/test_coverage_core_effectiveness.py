@@ -94,7 +94,7 @@ def _selected_core(*, branch: bool) -> str:
 
 
 def _branch_coverage_is_enabled() -> bool:
-    text = (REPO_ROOT / "pyproject.toml").read_text()
+    text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     section = text.split("[tool.coverage.run]", 1)
     if len(section) < 2:
         return False
@@ -114,7 +114,7 @@ _CONTEXT_LINES = 15
 def _requesting_sites() -> list[Path]:
     sites = []
     for candidate in _REQUEST_SITES:
-        text = (REPO_ROOT / candidate).read_text()
+        text = (REPO_ROOT / candidate).read_text(encoding="utf-8")
         if "COVERAGE_CORE" in text and "sysmon" in text:
             sites.append(candidate)
     return sites
@@ -122,7 +122,7 @@ def _requesting_sites() -> list[Path]:
 
 def _context_around_requests(path: Path) -> str:
     """The text immediately surrounding each COVERAGE_CORE line."""
-    lines = (REPO_ROOT / path).read_text().splitlines()
+    lines = (REPO_ROOT / path).read_text(encoding="utf-8").splitlines()
     chunks = []
     for i, line in enumerate(lines):
         if "COVERAGE_CORE" in line:

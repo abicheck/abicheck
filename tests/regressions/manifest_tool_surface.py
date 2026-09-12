@@ -223,6 +223,55 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="tests.locale_dependent_repo_text_read",
+        invariant=(
+            "A test that reads the repository's own checked-in text must "
+            "state the encoding. `Path.read_text()` and `open(path)` with no "
+            "`encoding=` decode using the *host's* preferred encoding -- "
+            "UTF-8 on the Linux and macOS lanes, `cp1252` on a default "
+            "Windows runner -- so a UTF-8 file carrying any non-ASCII byte "
+            "reads fine on two platforms and raises `UnicodeDecodeError` on "
+            "the third. This repository's own workflow comments are full of "
+            "em dashes and section signs, so the condition is not "
+            "hypothetical: four `test_workflow_*.py` guards each read "
+            "`.github/workflows/*.yml` at import time with a bare "
+            "`read_text()` and took down the Windows unit lane at "
+            "*collection*, before any assertion ran. The guard is structural "
+            "(no repository-rooted read leaves the encoding to the platform) "
+            "plus non-vacuity (some checked-in workflow really does contain "
+            "a byte cp1252 rejects), because the structural rule alone would "
+            "pass the day the repository became pure ASCII."
+        ),
+        fixed_by=(1244,),
+        seed_tests=("tests/test_repo_text_reads_state_their_encoding.py",),
+        # `()` per the field's own rule: the seed test parses repository
+        # files with `ast`; it invokes no CLI, no `abicheck.service`, and no
+        # real workflow run.
+        public_surfaces=(),
+        axes={
+            "half": ("structural-scan", "non-vacuity-of-the-content"),
+            "read_form": ("Path.read_text", "open"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The scan recognises a repository-rooted path only when "
+                    "it is built from a root constant this suite actually "
+                    "uses (`REPO_ROOT`, `WORKFLOW_DIR`, `ROOT`, "
+                    "`PROJECT_ROOT`). A test that re-derives the root into a "
+                    "differently-named local, or reaches checked-in content "
+                    "through a fixture-returned path, is not covered -- the "
+                    "same shape as reading it with `subprocess` or "
+                    "`importlib.resources`. Nothing here runs on a real "
+                    "cp1252 host either: the failure is reproduced locally "
+                    "under `LC_ALL=C`, which is a stricter ASCII default, "
+                    "not cp1252 itself."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="ci.inert_concurrency_group_key",
         invariant=(
             "A concurrency group keyed off a value that is unique per run "

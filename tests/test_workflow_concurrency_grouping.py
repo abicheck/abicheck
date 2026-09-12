@@ -36,14 +36,12 @@ here rather than at the next congested merge queue.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 from _gha_expressions import render
-
-WORKFLOW_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+from _workflow_files import read_repo_text, workflow_paths
 
 # Events whose runs can legitimately supersede one another. A schedule or a
 # workflow_dispatch run is deliberately allowed (and expected) to key off
@@ -85,8 +83,8 @@ def _render(group: str, ctx: dict[str, Any]) -> str:
 
 def _cancelling_workflows() -> list[tuple[str, str, list[str]]]:
     found = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        doc = yaml.safe_load(path.read_text())
+    for path in workflow_paths():
+        doc = yaml.safe_load(read_repo_text(path))
         concurrency = (doc or {}).get("concurrency")
         if not isinstance(concurrency, dict):
             continue
