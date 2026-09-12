@@ -347,3 +347,92 @@ class TestReleaseOperandConfigOverlayStaysSingular:
         assert doc["compile"]["options"] == ["-DFOO=1"]
         assert doc["severity"] == {"abi_breaking": "error"}
         assert doc["gate"]["fail_on_removed_library"] is True
+
+
+#: Hostile values for the inputs this change newly lets reach a release
+#: operand's command line. Two distinct attacks, both executed rather than
+#: asserted against script text (bug class
+#: `trust_boundary.shell_workflow_injection`; #705 shipped a text-asserted
+#: defense and #758 had to add the executing test):
+#: a workflow-command forgery (a newline starting a `::error::` line of its
+#: own) and a shell-metacharacter payload whose side effect is observable
+#: as a file that must never appear.
+_FORGERY_PAYLOAD = "headers\n::error::PWNED"
+_SIDE_EFFECT_PAYLOAD_TEMPLATE = "headers; touch {canary}"
+_COMMAND_SUBSTITUTION_PAYLOAD_TEMPLATE = "headers$(touch {canary})"
+_BACKTICK_PAYLOAD_TEMPLATE = "headers`touch {canary}`"
+
+
+class TestReleaseOperandHostileInputHasNoSideEffect:
+    """The newly-reachable inputs are still untrusted workflow values.
+
+    Widening what a directory/package operand forwards widens what a
+    PR-controlled `with:` value reaches: `INPUT_DEPTH` now flows to
+    `add_single_flag` on this shape, and the compile-context inputs now
+    flow into the synthesized `compile:` overlay. Neither may create a
+    workflow command of its own, and neither may execute anything -- proven
+    by running the attack and looking for the side effect, never by
+    asserting that `run.sh` contains a quote.
+
+    The canary is the oracle: a file that exists only if the payload was
+    evaluated by a shell. Absence of a forged annotation is checked on the
+    same runs, so one hostile value is measured on both axes.
+    """
+
+    @pytest.mark.parametrize(
+        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_GCC_OPTIONS", "INPUT_GCC_PATH"]
+    )
+    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
+    @pytest.mark.parametrize(
+        "template",
+        [
+            _SIDE_EFFECT_PAYLOAD_TEMPLATE,
+            _COMMAND_SUBSTITUTION_PAYLOAD_TEMPLATE,
+            _BACKTICK_PAYLOAD_TEMPLATE,
+        ],
+    )
+    def test_no_payload_is_ever_evaluated(
+        self, tmp_path: Path, shape: str, var: str, template: str
+    ) -> None:
+        canary = tmp_path / "pwned.canary"
+        payload = template.format(canary=canary)
+        # The run may exit non-zero (a hostile value is not a valid depth
+        # rung or sysroot); what matters is that nothing executed.
+        _run_compare_raw({var: payload, **_operand_env(shape, tmp_path)}, tmp_path)
+        assert not canary.exists(), (
+            f"{var} payload {payload!r} was evaluated by a shell on a "
+            f"{shape} operand -- it created {canary}"
+        )
+
+    @pytest.mark.parametrize(
+        "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_GCC_OPTIONS"]
+    )
+    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
+    def test_no_value_can_forge_a_workflow_command(
+        self, tmp_path: Path, shape: str, var: str
+    ) -> None:
+        result, _ = _run_compare_raw(
+            {var: _FORGERY_PAYLOAD, **_operand_env(shape, tmp_path)}, tmp_path
+        )
+        for line in result.stdout.splitlines():
+            assert not line.startswith("::error::PWNED"), (
+                f"{var} forged a workflow command on a {shape} operand:\n"
+                f"{result.stdout}"
+            )
+            assert not line.startswith(("::set-output", "::add-mask")), result.stdout
+
+    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
+    def test_a_hostile_compile_context_value_stays_one_config_value(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        """The payload must survive into the overlay as *data* -- one
+        `compile.sysroot` string holding exactly the bytes given, never
+        split into extra tokens and never evaluated. A blanked-out value
+        would hide the attack rather than neutralize it."""
+        canary = tmp_path / "pwned.canary"
+        payload = _SIDE_EFFECT_PAYLOAD_TEMPLATE.format(canary=canary)
+        _, doc = _compare_result(
+            {"INPUT_SYSROOT": payload, **_operand_env(shape, tmp_path)}, tmp_path
+        )
+        assert doc["compile"]["sysroot"] == payload
+        assert not canary.exists()
