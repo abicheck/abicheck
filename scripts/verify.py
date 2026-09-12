@@ -344,6 +344,10 @@ STEPS: tuple[Step, ...] = (
             "--cov-fail-under=95",
         ),
         frozenset({PR, FULL}),
+        # Requested, but inert while branch coverage is on and the
+        # interpreter is below 3.14 -- coverage.py falls back to
+        # CTracer. See ci.yml's own COVERAGE_CORE comment and
+        # tests/test_coverage_core_effectiveness.py.
         env={"COVERAGE_CORE": "sysmon"},
         description="Canonical Linux/3.13 unit-tests CI lane, incl. golden + 95% coverage floor",
     ),

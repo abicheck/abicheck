@@ -1134,9 +1134,25 @@ The other Linux Pythons (3.12/3.14) run the same suite *without* coverage (they 
 only re-check the identical floor, and coverage instrumentation adds ~60% wall time).
 macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers
 their coverage (~93% on macOS), so those lanes run the same tests without the
-fail-under gate (macOS still emits a coverage report). Coverage uses the
-`sys.monitoring` backend (`COVERAGE_CORE=sysmon`, Python 3.12+) to keep the
-instrumentation cheap. If the macOS lane ever fails on coverage, the fix is to keep the
+fail-under gate — and, since a CI audit found the reports had no reader, without
+coverage instrumentation at all. The macOS lane wrote a `coverage.xml` that the
+Codecov upload (gated to Linux/3.13) never took and no gate consulted; the `slow`
+lane wrote a `coverage-slow.xml` that nothing anywhere read. Both were dropped and
+every test kept: instrumentation costs ~60% wall time, so collecting a measurement
+with no consumer is the one kind of coverage work that is pure loss. **If you add
+coverage collection to a lane, give it a consumer in the same change** — an upload,
+an artifact, or a gate.
+
+`COVERAGE_CORE=sysmon` is requested on the unit-test job and in `scripts/verify.py`'s
+`unit-pr` step, but it is **inert**: `branch = true` applies to every lane and
+sys.monitoring cannot measure branches before Python 3.14, so coverage.py warns and
+falls back to CTracer. It is left in place because it becomes live unchanged if the
+coverage lane moves to 3.14; `tests/test_coverage_core_effectiveness.py` fails if that
+disagreement stops being stated where the setting is. Moving the canonical lane to
+3.14 to make it live is a separate decision — it also moves `repo_facts.json`'s
+`canonical_python` and the `ai-readiness` job's pin.
+
+If the macOS lane ever fails on coverage, the fix is to keep the
 gate Linux-scoped — **do not lower the global 95% floor** to make another platform pass.
 
 ## Files that are large — edit carefully

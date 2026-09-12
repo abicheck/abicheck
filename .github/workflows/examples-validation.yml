@@ -19,6 +19,23 @@ on:
       # path this replaced named only one of the three, so a change to the
       # CastXML pin could merge without scheduling the jobs that depend on it.
       - ".github/actions/**"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # and sets up CastXML through a composite action that shells out to
+      # `action/install-castxml.sh`, restores mtimes through
+      # `scripts/restore_git_mtimes.py`, and drives the build-source proof
+      # through `scripts/verify.py`. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
+      - "action/**"
+      - "scripts/restore_git_mtimes.py"
+      - "scripts/verify.py"
   pull_request:
     branches: [main]
     paths:
@@ -37,10 +54,39 @@ on:
       # path this replaced named only one of the three, so a change to the
       # CastXML pin could merge without scheduling the jobs that depend on it.
       - ".github/actions/**"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # and sets up CastXML through a composite action that shells out to
+      # `action/install-castxml.sh`, restores mtimes through
+      # `scripts/restore_git_mtimes.py`, and drives the build-source proof
+      # through `scripts/verify.py`. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
+      - "action/**"
+      - "scripts/restore_git_mtimes.py"
+      - "scripts/verify.py"
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # A PR groups by PR number, so a new push supersedes the stale run for
+  # the same PR. A `push` to `main` must group by *ref*, not `run_id`:
+  # every push run has a distinct `run_id`, so the previous spelling gave
+  # each one its own group and `cancel-in-progress` never cancelled a
+  # superseded main run at all — the newer commit's run simply queued
+  # behind the obsolete one. `schedule`/`workflow_dispatch` deliberately
+  # keep keying off `run_id` (unique per run) so two manual or scheduled
+  # runs stay isolated from each other and from PR runs, matching
+  # `mutation.yml`'s own grouping. This workflow is read-only validation;
+  # do not copy this to a workflow with persistent side effects (release
+  # publication, baseline rotation), where cancelling a superseded run can
+  # leave partial state.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: true
 
 jobs:

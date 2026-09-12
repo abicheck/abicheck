@@ -13,6 +13,21 @@ on:
       - "tests/test_compare_release.py"
       - "tests/test_bundle.py"
       - ".github/workflows/realworld-validation.yml"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # and sets up CastXML through composite actions under
+      # `.github/actions/`, one of which shells out to
+      # `action/install-castxml.sh`. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
+      - "action/**"
+      - ".github/actions/**"
       # CLI-audit P1 (CI hardening): this job is the one lane that runs
       # `abicheck compare` against a real package binary rather than a
       # synthetic snapshot, so it must not be skipped for a change to the
