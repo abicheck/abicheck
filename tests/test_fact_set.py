@@ -261,6 +261,13 @@ def test_rollup_coverage_failed_beats_partial() -> None:
 
 
 def test_rollup_coverage_omits_families_never_reported() -> None:
+    # `_tu(...)` declares no fact_set, so this is also the pre-C.8-producer
+    # case: a TU missing a family entry must not manufacture a "failed"
+    # state, preserving forward-compat for old baselines and fixtures. A
+    # `test_rollup_coverage_missing_family_on_pre_c8_tu_still_omitted` with
+    # a byte-identical body stated that half separately; the C.8 half, where
+    # the TU *does* declare the canonical fact_set, is the genuinely
+    # different input and has its own test below.
     tus = [_tu(coverage={"functions": "complete"})]
     rolled = rollup_coverage(tus)
     assert "macros" not in rolled
@@ -280,15 +287,6 @@ def test_rollup_coverage_missing_family_on_c8_tu_is_not_ignored() -> None:
     rolled = rollup_coverage(tus)
     assert rolled["functions"] == "complete"
     assert rolled["macros"] == "failed"
-
-
-def test_rollup_coverage_missing_family_on_pre_c8_tu_still_omitted() -> None:
-    # A TU with no fact_set at all (pre-C.8 producer) missing a family entry
-    # must not manufacture a "failed" state -- preserves the existing
-    # forward-compat behavior for old baselines/fixtures.
-    tus = [_tu(coverage={"functions": "complete"})]  # no fact_set
-    rolled = rollup_coverage(tus)
-    assert "macros" not in rolled
 
 
 def test_rollup_coverage_unrecognized_state_coerces_to_failed() -> None:

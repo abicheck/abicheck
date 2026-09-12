@@ -349,7 +349,28 @@ def test_sc_accept_known_break(tmp_path: Path) -> None:
 def test_sc_offline_snapshot(tmp_path: Path) -> None:
     # Snapshots are the portable interchange format: compare two stored JSON
     # snapshots offline, no binaries or castxml required.
-    res = _compare(tmp_path, _lib("1", [_fn("a"), _fn("b")]), _lib("2", [_fn("a")]))
+    #
+    # This body used to be byte-identical to `test_sc_ci_gate_breaking`'s,
+    # which asserts the same verdict from the same inputs -- `_compare` always
+    # routes through saved JSON, so the "offline" part was inherent to the
+    # helper and this scenario asserted nothing its sibling did not. It is
+    # kept rather than folded away because the catalog<->test contract below
+    # (`test_every_automated_scenario_has_a_test`) requires a test per
+    # automated scenario id; what it now adds is the distinguishing property
+    # itself, asserted rather than assumed.
+    old_snap = _save(_lib("1", [_fn("a"), _fn("b")]), tmp_path / "old.json")
+    new_snap = _save(_lib("2", [_fn("a")]), tmp_path / "new.json")
+
+    # The operands really are portable stored snapshots: plain JSON on disk,
+    # no binary alongside them.
+    import json as _json
+
+    for operand in (old_snap, new_snap):
+        payload = _json.loads(Path(operand).read_text(encoding="utf-8"))
+        assert isinstance(payload, dict) and payload
+    assert not list(tmp_path.glob("*.so"))
+
+    res = _cli("compare", old_snap, new_snap)
     assert res.exit_code == 4
     assert "BREAKING" in res.output
 

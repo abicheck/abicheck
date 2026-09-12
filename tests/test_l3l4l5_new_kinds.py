@@ -1231,6 +1231,20 @@ def test_common_dependency_edge_kinds_narrowed_edge_not_credited_against_unmarke
     common = _common_dependency_edge_kinds(old, new)
     assert common == frozenset()
 
+    # A `test_common_dependency_edge_kinds_header_and_build_pass_names_not_
+    # double_counted` with a byte-identical body used to sit much further
+    # down this file, under a name claiming the header/build pass-name alias
+    # never manufactures a second "vacuously trusting" authority. Its fixture
+    # exercised no alias at all -- it set `narrowed_passes={"type_graph":
+    # True}` against an unmarked side, i.e. exactly this test's input -- so
+    # the alias claim rested on a duplicate. The alias itself *is* exercised,
+    # by `test_common_dependency_edge_kinds_header_vs_build_never_widens_
+    # call_family` below (header_call_graph vs call_graph) and its siblings.
+    # Residual, stated rather than guessed at: no case pairs a *narrowed*
+    # header-alias pass against an unmarked side, and inventing the expected
+    # value for that combination is a behaviour question for whoever owns the
+    # alias, not something to assert from this duplicate's name.
+
 
 def test_l5_internal_dep_not_flagged_for_narrowed_baseline_vs_unmarked_candidate() -> (
     None
@@ -2207,29 +2221,6 @@ def test_l5_internal_dep_skipped_for_genuinely_new_role_against_pre_stamping_leg
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
-
-
-def test_common_dependency_edge_kinds_header_and_build_pass_names_not_double_counted() -> (
-    None
-):
-    # The regression this alias mechanism specifically guards against: a
-    # narrowed/degraded build-integrated pass on one side must still be
-    # correctly excluded, even though the *other* side (or the same side)
-    # might carry no marker under the header-only pass name at all — the
-    # header alias must never manufacture a *second*, independent "vacuously
-    # trusting" authority for the same kind.
-    old = SourceGraphSummary(
-        nodes=[_N("a", "source_decl"), _N("b", "record_type")],
-        edges=[_E("a", "b", "TYPE_HAS_FIELD_TYPE")],
-        narrowed_passes={"type_graph": True},
-    )
-    new = SourceGraphSummary(
-        nodes=[_N("c", "source_decl"), _N("d", "record_type")],
-        edges=[_E("c", "d", "TYPE_HAS_FIELD_TYPE")],
-        # No extractor_passes/narrowed_passes at all: an unmarked/legacy pack.
-    )
-    common = _common_dependency_edge_kinds(old, new)
-    assert common == frozenset()
 
 
 def test_common_dependency_edge_kinds_header_vs_build_never_widens_call_family() -> (

@@ -1225,6 +1225,43 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   cache-that-caches-nothing mutation is caught separately, since output
   equivalence alone cannot distinguish a correct cache from an absent one.
 
+- **A duplicate test body is a review queue, not a deletion list.** An audit of
+  this suite reported 61 same-module clone groups; re-screening with
+  `scripts/find_duplicate_tests.py` (body + parameters + decorators) found 29,
+  and the count is not the point — the *kind* of clone is. Clones across two
+  differently-named classes are usually intentional: each class states a
+  distinct claim and the body coincides, and `test_signature_normalization.py`
+  has two such pairs that each already name their counterpart in a comment, so
+  removing them would trade a stated regression guard for no measurable time.
+  The category worth reading is same class or module scope with **different
+  names**, because a test whose name promises input X while its body tests
+  input Y is worse than a duplicate — it makes a gap look filled. All nine such
+  groups were worked through; four were one assertion under two names, and the
+  other five each hid something:
+  `_strip_param_signature`'s "pointer parameter is not mistaken for a wrapper"
+  asserted an input the function's own docstring says never reaches that
+  branch (now a function-pointer parameter, which no other case in the file
+  supplied); a `baseline_generation` test never had a manifest that declared
+  one; `test_sc_offline_snapshot` could not be removed at all, because
+  `tests/test_scenarios.py` separately asserts one `test_sc_*` per automated
+  catalog scenario, so it was strengthened to assert the offline property
+  instead of inheriting it from the helper; an `l3l4l5` clone claimed the
+  header/build pass-name alias while exercising no alias; and a
+  `classify_perf_paths` clone named a *workflow-wiring* claim no CLI argument
+  can express, which turned out to be genuinely untested — `performance.yml`
+  sourcing the PR's whole current label set rather than the delivered event's
+  is now asserted, and both regressions it guards against were confirmed by
+  mutating the workflow.
+  Two cautions from that pass. **Mutate before claiming a gap:** one group
+  looked like a missing one-sided-evidence case in the ELF alignment detector,
+  and a mutation test showed `test_declared_alignment_known_one_side_only_
+  falls_back` already covered it — the speculative test was withdrawn and the
+  clone folded instead. And when asserting against workflow *text*, strip
+  comments first: the first version of the `performance.yml` assertion failed
+  because the file documents the rejected `github.event.label.name` spelling in
+  a comment, so a raw substring search reported the very thing it was checking
+  for absent.
+
 ## Line-coverage floor
 
 The `pr` profile's `unit-pr` step (`scripts/verify.py`) enforces a **95%**
