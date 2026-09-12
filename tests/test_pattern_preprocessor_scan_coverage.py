@@ -53,6 +53,7 @@ from abicheck.buildsource.pattern_facts import (
     PatternKind,
 )
 from abicheck.buildsource.preprocessor_facts import PreprocessorFactsResult
+from abicheck.buildsource.preprocessor_probe_families import ProbeTallies
 from abicheck.buildsource.source_inputs import (
     SourceInput,
     SourceInputDisposition,
@@ -161,8 +162,17 @@ class TestPreprocessorScanFullyCovered:
         assert _header_leak_sufficiency(PreprocessorFactsResult()).established is False
 
     def test_all_succeeded_is_covered(self) -> None:
+        # Sufficiency now reads each probe family's own tallies, not the run-wide
+        # aggregates -- so a fully-covered run has to state both families (see
+        # ``test_stored_snapshot_source_licence.py::
+        # TestProbeFamilySufficiencyIsIndependent`` for why).
         result = PreprocessorFactsResult(
-            ran=True, attempted=3, succeeded=3, tus_scanned=3, headers_scanned=2
+            ran=True,
+            attempted=5,
+            succeeded=5,
+            probe_tallies=ProbeTallies(
+                attempted={"macro": 3, "header": 2}, succeeded={"macro": 3, "header": 2}
+            ),
         )
         assert _macro_divergence_sufficiency(result).established is True
         assert _header_leak_sufficiency(result).established is True
@@ -171,13 +181,23 @@ class TestPreprocessorScanFullyCovered:
         """Some (not all) clang -E invocations failing means ``all_failed``
         is False, but coverage is still incomplete -- the CodeRabbit gap."""
         result = PreprocessorFactsResult(
-            ran=True, attempted=3, succeeded=2, tus_scanned=2, headers_scanned=2
+            ran=True,
+            attempted=6,
+            succeeded=4,
+            probe_tallies=ProbeTallies(
+                attempted={"macro": 3, "header": 3}, succeeded={"macro": 2, "header": 2}
+            ),
         )
         assert _macro_divergence_sufficiency(result).established is False
         assert _header_leak_sufficiency(result).established is False
 
     def test_all_failed_is_not_covered(self) -> None:
-        result = PreprocessorFactsResult(ran=True, attempted=3, succeeded=0)
+        result = PreprocessorFactsResult(
+            ran=True,
+            attempted=3,
+            succeeded=0,
+            probe_tallies=ProbeTallies(attempted={"macro": 3}, succeeded={}),
+        )
         assert _macro_divergence_sufficiency(result).established is False
 
     def test_truncated_probes_is_not_covered(self) -> None:
@@ -186,11 +206,14 @@ class TestPreprocessorScanFullyCovered:
         attempted probe itself succeeded."""
         result = PreprocessorFactsResult(
             ran=True,
-            attempted=3,
-            succeeded=3,
-            probes_truncated=1,
-            tus_scanned=3,
-            headers_scanned=2,
+            attempted=5,
+            succeeded=5,
+            probes_truncated=2,
+            probe_tallies=ProbeTallies(
+                attempted={"macro": 3, "header": 2},
+                succeeded={"macro": 3, "header": 2},
+                truncated={"macro": 1, "header": 1},
+            ),
         )
         assert _macro_divergence_sufficiency(result).established is False
         assert _header_leak_sufficiency(result).established is False

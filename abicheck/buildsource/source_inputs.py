@@ -51,12 +51,15 @@ resolve its inputs through, not a patch on one caller.
 
 from __future__ import annotations
 
+import functools
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TypeVar
+
+_T = TypeVar("_T")
 
 
 class SourceInputDisposition(str, Enum):
@@ -150,6 +153,48 @@ WITHHELD_FOR_STORED_SNAPSHOT = SourceReadLicence.withheld(
     "stored snapshot: recorded source paths are provenance, not a licence to "
     "read the current filesystem for historical facts"
 )
+
+
+class LiveSourceEvidence(Protocol):
+    """Anything carrying the runtime-only source-read licence flag.
+
+    Structural on purpose: this module is a dependency-free leaf, and a real
+    ``AbiSnapshot`` import would point it at ``model`` for one attribute.
+    """
+
+    live_source_evidence: bool
+
+
+def granting_live_source_licence(
+    extract: Callable[..., _T],
+) -> Callable[..., _T]:
+    """Wrap a live-extraction function so its result carries the licence.
+
+    Apply this to the *one* operation that builds a snapshot by reading inputs
+    from the filesystem right now -- for the snapshot pipeline that is
+    ``service.run_dump``, which the ``dump`` CLI, ``compare``'s implicit operand
+    dump, ``scan``'s candidate resolution, the cached-dump wrapper's cache-miss
+    path, and the typed Python API all funnel through.
+
+    Granting it at that shared operation rather than at one front end's wrapper
+    is the point: an earlier revision stamped it in the cached-dump wrapper
+    instead, which left the documented ``abicheck.service.run_dump`` API
+    unstamped, so identical inputs produced "not evaluated" source-derived
+    facts through the Python API while working through the CLI -- the
+    front-end parity break AGENTS.md forbids (Codex review).
+
+    Re-applying is idempotent, which matters because the dump pipeline recurses
+    back through its own entry point for the hybrid AST frontend.
+    """
+
+    @functools.wraps(extract)
+    def _stamped(*args: Any, **kwargs: Any) -> _T:
+        result = extract(*args, **kwargs)
+        # Duck-typed rather than isinstance-checked: see LiveSourceEvidence.
+        result.live_source_evidence = True  # type: ignore[attr-defined]
+        return result
+
+    return _stamped
 
 
 @dataclass(frozen=True)
@@ -340,7 +385,19 @@ def resolve_source_inputs(
             )
             continue
         if is_dir:
-            for dirpath, dirnames, filenames in os.walk(rp):
+            # `os.walk` swallows traversal errors by default (`onerror=None`):
+            # an unreadable directory yields *no entries* and no exception, so
+            # without this callback the root would silently vanish from the
+            # account and another readable root could then make the set
+            # "sufficient" -- the exact failure this model exists to prevent
+            # (Codex review, P2). A directory we could not enumerate is a gap,
+            # recorded under the path `os.walk` itself reports as failing, which
+            # may be a subdirectory rather than the root we started from.
+            def _walk_error(error: OSError) -> None:
+                failed = getattr(error, "filename", None) or str(rp)
+                _record(failed, SourceInputDisposition.UNREADABLE)
+
+            for dirpath, dirnames, filenames in os.walk(rp, onerror=_walk_error):
                 dirnames[:] = [d for d in dirnames if d not in pruned_dirs]
                 base = Path(dirpath)
                 for name in filenames:

@@ -46,6 +46,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "stored_snapshot",
                 "verified_context",
             ),
+            "front_end": ("cli", "typed_python_api"),
             "source_mutation": (
                 "unchanged",
                 "delete_file",
@@ -120,6 +121,13 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "not_licensed",
             ),
             "check": ("pattern_escalation", "macro_divergence", "header_leak"),
+            "probe_family": ("macro", "header"),
+            "input_failure_mode": (
+                "missing_root",
+                "unreadable_file",
+                "unenumerable_directory",
+                "unsupported_node",
+            ),
             "fold_state": (
                 "persistent",
                 "introduced",

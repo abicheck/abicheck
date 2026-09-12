@@ -531,7 +531,7 @@ def cached_run_dump(
         parameter cannot reach one of them and silently skip the other
         (CodeFactor: duplicate code).
         """
-        snapshot = run_dump(
+        return run_dump(
             path,
             binary_fmt,
             headers,
@@ -557,16 +557,6 @@ def cached_run_dump(
             include_dependencies=include_dependencies,
             public_include_search_dirs=public_include_search_dirs,
         )
-        # This is the one point at which a snapshot is built from inputs that
-        # exist on disk *right now*, for every live-binary dump `resolve_input`
-        # performs -- so it is the one place entitled to grant the source-read
-        # licence `buildsource/source_inputs.py` defines. The flag is
-        # runtime-only and the storage codec never writes it, so a snapshot
-        # *loaded* from disk can never acquire one from its own content: a
-        # recorded `source_header` path stays provenance rather than becoming
-        # permission to re-read today's filesystem for a historical fact.
-        snapshot.live_source_evidence = True
-        return snapshot
 
     if not cacheable:
         return _dump_uncached()
@@ -656,15 +646,16 @@ def cached_run_dump(
     )
     cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
-        # A cache hit stands in for the live extraction it replaces: this
-        # function is only reached because the caller named live inputs in
-        # *this* run (a binary plus headers on today's filesystem), and
-        # `_cache_key` hashes those inputs' content, so the hit is itself a
-        # provenance check. Re-stamping the source-read licence keeps a warm
-        # cache from quietly producing a different answer than a cold one --
-        # the flag is runtime-only and did not survive the cache's own
-        # serialization round trip. Loading a *stored* snapshot never comes
-        # through here.
+        # A cache hit stands in for the live extraction it replaces, and needs
+        # the source-read licence stamped explicitly: `run_dump` grants it (see
+        # `service_dump_native._grant_live_source_licence`) but this path never
+        # calls `run_dump`, and the flag is runtime-only so it did not survive
+        # the cache's own serialization round trip. Without this, a warm cache
+        # would answer differently from a cold one. Granting it here is sound
+        # rather than convenient: this function is only reached because the
+        # caller named live inputs in *this* run, and `_cache_key` hashes those
+        # inputs' content, so the hit is itself a provenance check. Loading a
+        # *stored* snapshot never comes through here.
         cached.live_source_evidence = True
         return cached
     snap = _dump_uncached()

@@ -697,11 +697,22 @@ claim that the construct was *absent* before, and an absence claim needs
 evidence about the OLD side — not an inference from a file the runner happens
 to be holding.
 
+Sufficiency is also answered per check rather than per run, because the three
+checks rest on different evidence: the lexical scan on a set of files, macro
+divergence on one `clang -E -dM` probe per compile unit, private-header leaks
+on one `clang -M` probe per public header. A build whose compile units exceeded
+the probe cap has not established the absence of a macro divergence, but its
+public headers may still have been probed completely — so the leak check can be
+established while the macro check is not, and neither answer is allowed to
+stand in for the other.
+
 The same rule governs coverage generally. Sufficiency for an absence claim is
 computed from the set of inputs a check *expected*, with every one of them
 accounted for — scanned, missing, unreadable, unsupported, deliberately
 excluded, or not licensed — and any gap leaves the absence unestablished. A
-declared input that no longer exists is a gap, never silent full coverage.
+declared input that no longer exists is a gap, never silent full coverage; so
+is a directory that could not be read, which is easy to miss because a failed
+directory walk reports nothing at all unless you ask it to.
 Presence is the asymmetric case: a construct the scan actually saw is there,
 whatever else the scan failed to read, so `persistent` survives partial
 coverage where `introduced` and `resolved` do not.

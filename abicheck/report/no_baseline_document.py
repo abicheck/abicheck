@@ -148,9 +148,10 @@ __all__ = [
 #:   on this document, but nothing folded it into the one block every other
 #:   report shape's own fan-in reads (Codex review, fresh evidence).
 #: ``1.5``: the ``pattern_preprocessor_scan`` block gains the additive
-#:   ``coverage`` object (per-check, per-side sufficiency) and each pattern
-#:   side gains ``sufficient``/``inputs``, mirroring the compare report's own
-#:   ``4.4``. Additive only here: an audit's candidate side is a live
+#:   ``coverage`` object (per-check, per-side sufficiency), each pattern side
+#:   gains ``sufficient``/``inputs``, and each preprocessor side gains the
+#:   ``family_*`` probe tallies those answers are computed from -- mirroring
+#:   the compare report's own ``4.4``. Additive only here: an audit's candidate side is a live
 #:   extraction, so it keeps its source-read licence and no existing value
 #:   moves -- unlike a stored-snapshot ``compare``, which now honestly
 #:   declines to re-derive (see ``buildsource/source_inputs.py``).

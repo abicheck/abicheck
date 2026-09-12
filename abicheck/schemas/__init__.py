@@ -912,6 +912,12 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``pattern.old``/``pattern.new`` object additionally gains
 #:       ``sufficient`` and an ``inputs`` account (the expected-input set's
 #:       licence, per-disposition counts, and the individual gap entries).
+#:       Each preprocessor side gains ``family_attempted``/
+#:       ``family_succeeded``/``family_truncated`` (preprocessor fact schema
+#:       3): the per-probe-family tallies the ``coverage`` answers are computed
+#:       from, since the run-wide attempted/succeeded/truncated aggregates mix
+#:       the ``-E -dM`` compile-unit probes with the ``-M`` public-header ones
+#:       and so cannot answer either check on its own.
 #:       Additive in the key set, but note the *values* already carried in
 #:       ``escalation_evolution``/``macro_divergence_evolution``/
 #:       ``header_leak_evolution`` change for a stored snapshot: a side whose

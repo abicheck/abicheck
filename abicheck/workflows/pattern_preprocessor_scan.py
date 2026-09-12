@@ -98,6 +98,7 @@ from ..buildsource.preprocessor_facts import (
     PreprocessorFactsResult,
     collect_preprocessor_facts,
 )
+from ..buildsource.preprocessor_probe_families import HEADER_PROBES, MACRO_PROBES
 from ..buildsource.source_inputs import (
     WITHHELD_FOR_STORED_SNAPSHOT,
     SourceReadLicence,
@@ -359,60 +360,63 @@ def _pattern_sufficiency(result: PatternFactsResult) -> Sufficiency:
     )
 
 
-def _preprocessor_probe_gaps(result: PreprocessorFactsResult) -> str:
-    """The gaps common to both preprocessor-derived checks, or ``""``."""
+def _probe_family_gaps(result: PreprocessorFactsResult, family: str) -> str:
+    """Coverage gaps for one **probe family**, or ``""`` when it is complete.
+
+    Answered from that family's own tallies, never from the run-wide
+    ``attempted``/``succeeded``/``probes_truncated`` aggregates. Two reasons,
+    both found by review:
+
+    - The aggregates mix the two families, so a truncated compile-unit set
+      marked the *header-leak* check insufficient even when every public
+      header was probed successfully, and vice versa. Answering sufficiency
+      per check is the point; sharing one predicate quietly undid it.
+    - ``probe_tallies.attempted`` is what distinguishes "probed and found nothing"
+      from "never probed". A successful ``-E -dM`` probe of a unit defining
+      none of the curated ABI macros contributes no entry to ``abi_macros``,
+      so ``tus_scanned`` is ``0`` for an ordinary build with no ABI-toggle
+      macros. Gating on ``tus_scanned`` therefore reported "no translation
+      unit was probed" for a fully-covered run, and its evolution could never
+      leave ``not_evaluated``.
+    """
     if not result.ran:
         return result.skipped_reason or "S2 preprocessor pre-scan did not run"
-    if result.all_failed:
-        return "every clang -E invocation failed"
-    if result.succeeded != result.attempted:
+    tallies = result.probe_tallies
+    attempted = tallies.attempted.get(family, 0)
+    succeeded = tallies.succeeded.get(family, 0)
+    truncated = tallies.truncated.get(family, 0)
+    if attempted == 0:
+        # Nothing of this family was ever run: no compile unit to probe, or no
+        # public header declared. Honest "not established", not a failure.
+        return f"no {family} probe was run"
+    if succeeded == 0:
+        return f"every {family} probe failed"
+    if succeeded != attempted:
+        return f"{attempted - succeeded} of {attempted} {family} probes failed"
+    if truncated:
         return (
-            f"{result.attempted - result.succeeded} of {result.attempted} "
-            "clang -E invocations failed"
-        )
-    if result.probes_truncated:
-        return (
-            f"{result.probes_truncated} probe(s) truncated by "
+            f"{truncated} {family} probe(s) truncated by "
             "ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES"
         )
     return ""
 
 
 def _macro_divergence_sufficiency(result: PreprocessorFactsResult) -> Sufficiency:
-    """Sufficiency for the macro-divergence check specifically.
-
-    Macro divergence is established by the *per-TU* probes, so it additionally
-    needs at least one translation unit to have been captured -- a run that
-    probed only public headers says nothing about macro values.
-    """
-    gaps = _preprocessor_probe_gaps(result)
-    if gaps:
-        return Sufficiency(established=False, reason=gaps)
-    if result.tus_scanned == 0:
-        return Sufficiency(
-            established=False, reason="no translation unit was probed for macros"
-        )
-    return Sufficiency(established=True)
+    """Sufficiency for the macro-divergence check: its own probes only."""
+    gaps = _probe_family_gaps(result, MACRO_PROBES)
+    return Sufficiency(established=not gaps, reason=gaps)
 
 
 def _header_leak_sufficiency(result: PreprocessorFactsResult) -> Sufficiency:
-    """Sufficiency for the private-header-leak check specifically.
+    """Sufficiency for the private-header-leak check: its own probes only.
 
-    Leaks are established by the *per-public-header* include probes. Splitting
-    this from :func:`_macro_divergence_sufficiency` is the point of answering
-    sufficiency per check: a run with compile units but no declared public
-    headers can fully establish macro divergence while establishing nothing
-    about leaks, and the single global predicate this replaces reported one
-    answer for both.
+    Splitting this from :func:`_macro_divergence_sufficiency` is the point of
+    answering sufficiency per check rather than per run: a build with compile
+    units but no declared public headers fully establishes macro divergence
+    while establishing nothing about leaks.
     """
-    gaps = _preprocessor_probe_gaps(result)
-    if gaps:
-        return Sufficiency(established=False, reason=gaps)
-    if result.headers_scanned == 0:
-        return Sufficiency(
-            established=False, reason="no public header was probed for includes"
-        )
-    return Sufficiency(established=True)
+    gaps = _probe_family_gaps(result, HEADER_PROBES)
+    return Sufficiency(established=not gaps, reason=gaps)
 
 
 def compute_pattern_preprocessor_scan(

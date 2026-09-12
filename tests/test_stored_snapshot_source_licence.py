@@ -48,6 +48,7 @@ from abicheck.buildsource.pattern_facts import (
     resolve_expected_source_inputs,
 )
 from abicheck.buildsource.preprocessor_facts import PreprocessorFactsResult
+from abicheck.buildsource.preprocessor_probe_families import ProbeTallies
 from abicheck.buildsource.source_inputs import (
     GAP_DISPOSITIONS,
     WITHHELD_FOR_STORED_SNAPSHOT,
@@ -65,6 +66,8 @@ from abicheck.workflows.pattern_preprocessor_scan import (
     CHECK_PATTERN_ESCALATION,
     Sufficiency,
     _fold_evolution,
+    _header_leak_sufficiency,
+    _macro_divergence_sufficiency,
     compute_pattern_preprocessor_scan,
     snapshot_source_licence,
 )
@@ -433,7 +436,10 @@ class TestExpectedInputSetReplacesDiscoveryDerivedCompleteness:
         )
 
         res = PreprocessorFactsResult(
-            ran=True, attempted=2, succeeded=2, tus_scanned=2, headers_scanned=0
+            ran=True,
+            attempted=2,
+            succeeded=2,
+            probe_tallies=ProbeTallies(attempted={"macro": 2}, succeeded={"macro": 2}),
         )
         assert _macro_divergence_sufficiency(res).established is True
         assert _header_leak_sufficiency(res).established is False
@@ -559,3 +565,236 @@ def test_resolve_source_inputs_without_a_licence_never_touches_disk(
     assert [i.disposition for i in inputs.inputs] == [
         SourceInputDisposition.NOT_LICENSED
     ] * 2
+
+
+# ── Review-round findings: each is a way the two invariants above leak ────────
+
+
+class TestDirectoryTraversalFailureIsAGap:
+    """`os.walk` swallows traversal errors by default, so an unreadable
+    directory yields no entries *and* no exception. Without an `onerror`
+    callback the root vanished from the expected-input account entirely —
+    which is the `coverage.discovery_derived_completeness` bug class exactly,
+    reached through a different door than a missing root (Codex review, P2).
+
+    The primary tests inject the traversal error rather than relying on
+    `chmod`: these suites run as root in some environments, where `chmod 000`
+    denies nothing and a permission-based test would pass without ever
+    exercising the callback — a silent no-op test is worse than none. The
+    permission-based sibling below is kept for the real-syscall path and
+    skipped where it cannot bite.
+    """
+
+    @staticmethod
+    def _walk_raising(target: str, real_walk: Any) -> Any:
+        """An `os.walk` that reports a failure for *target*, as the real one
+        does: by calling `onerror` with an `OSError` carrying `.filename`."""
+
+        def _walk(top: Any, *args: Any, **kwargs: Any) -> Any:
+            onerror = kwargs.get("onerror")
+            if onerror is not None:
+                err = PermissionError(13, "Permission denied")
+                err.filename = target
+                onerror(err)
+            return real_walk(top, *args, **kwargs)
+
+        return _walk
+
+    def test_injected_traversal_failure_is_recorded_as_unreadable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        readable = tmp_path / "open"
+        readable.mkdir()
+        (readable / "seen.hpp").write_text(TEMPLATE_SOURCE)
+        unreachable = str(tmp_path / "open" / "locked")
+
+        monkeypatch.setattr(os, "walk", self._walk_raising(unreachable, os.walk))
+        result = find_pattern_facts([str(readable)])
+
+        # A file really was scanned and nothing was "skipped", so the old
+        # `files_scanned > 0 and files_skipped == 0` signal would have called
+        # this fully covered while a whole directory went unread.
+        assert result.files_scanned == 1
+        assert result.files_skipped == 0
+        assert result.sufficient is False
+        dispositions = {i.path: i.disposition for i in result.inputs.inputs}
+        assert dispositions[unreachable] is SourceInputDisposition.UNREADABLE
+
+    def test_traversal_failure_blocks_the_absence_claim_end_to_end(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The consequence that matters: an unenumerable directory on OLD must
+        stop `introduced` for a construct NEW flags, since OLD's absence was
+        never established."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        (old_dir / "a.hpp").write_text("int f(void);\n")
+        (new_dir / "b.hpp").write_text(PACKED_SOURCE)
+
+        old = _live(_snapshot_recording([str(old_dir / "a.hpp")]))
+        new = _live(_snapshot_recording([str(new_dir / "b.hpp")], version="2.0"))
+
+        # Baseline: with no traversal failure this is a real `introduced`.
+        assert (
+            compute_pattern_preprocessor_scan(
+                old, new
+            ).pattern_escalation_evolution.get("pragma_pack")
+            == "introduced"
+        )
+
+        monkeypatch.setattr(
+            os, "walk", self._walk_raising(str(old_dir / "gone"), os.walk)
+        )
+        # OLD's roots are explicit files, so force the directory-walk path by
+        # pointing the OLD side at its directory instead.
+        old_dir_side = _live(_snapshot_recording([str(old_dir)]))
+        folded = compute_pattern_preprocessor_scan(old_dir_side, new)
+        assert folded.pattern_escalation_evolution.get("pragma_pack") == "not_evaluated"
+        assert folded.coverage[CHECK_PATTERN_ESCALATION]["old"].established is False
+
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        reason="root bypasses directory permissions, so chmod 000 denies nothing",
+    )
+    def test_real_unreadable_directory_is_recorded(self, tmp_path: Path) -> None:
+        """The same invariant through a real `EACCES` from the kernel, not an
+        injected one — the syscall path the injected tests stand in for."""
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "hidden.hpp").write_text(PACKED_SOURCE)
+        readable = tmp_path / "open"
+        readable.mkdir()
+        (readable / "seen.hpp").write_text(TEMPLATE_SOURCE)
+        locked.chmod(0o000)
+        try:
+            result = find_pattern_facts([str(locked), str(readable)])
+            assert result.sufficient is False
+            assert any(
+                i.disposition is SourceInputDisposition.UNREADABLE
+                for i in result.inputs.inputs
+            )
+        finally:
+            locked.chmod(0o755)
+
+
+class TestProbeFamilySufficiencyIsIndependent:
+    """The macro-divergence and header-leak checks run different clang
+    invocations, so their coverage must be tallied separately. Folding both
+    into one attempted/succeeded/truncated triple made each check's
+    sufficiency depend on the other's failures (Codex review, P2)."""
+
+    @staticmethod
+    def _result(**families: tuple[int, int, int]) -> PreprocessorFactsResult:
+        """Build a result from per-family ``(attempted, succeeded, truncated)``."""
+        return PreprocessorFactsResult(
+            ran=True,
+            attempted=sum(f[0] for f in families.values()),
+            succeeded=sum(f[1] for f in families.values()),
+            probes_truncated=sum(f[2] for f in families.values()),
+            probe_tallies=ProbeTallies(
+                attempted={k: v[0] for k, v in families.items()},
+                succeeded={k: v[1] for k, v in families.items()},
+                truncated={k: v[2] for k, v in families.items()},
+            ),
+        )
+
+    def test_truncated_macro_probes_do_not_spoil_the_header_check(self) -> None:
+        res = self._result(macro=(512, 512, 40), header=(3, 3, 0))
+        assert _macro_divergence_sufficiency(res).established is False
+        assert _header_leak_sufficiency(res).established is True
+
+    def test_truncated_header_probes_do_not_spoil_the_macro_check(self) -> None:
+        res = self._result(macro=(4, 4, 0), header=(512, 512, 7))
+        assert _macro_divergence_sufficiency(res).established is True
+        assert _header_leak_sufficiency(res).established is False
+
+    def test_failed_macro_probes_do_not_spoil_the_header_check(self) -> None:
+        res = self._result(macro=(4, 2, 0), header=(3, 3, 0))
+        assert _macro_divergence_sufficiency(res).established is False
+        assert _header_leak_sufficiency(res).established is True
+
+    @pytest.mark.parametrize(
+        "attempted,succeeded,truncated,expected",
+        [
+            (0, 0, 0, False),  # never run for this family
+            (1, 0, 0, False),  # every probe failed
+            (4, 2, 0, False),  # partial failure
+            (4, 4, 1, False),  # cap truncated the set
+            (1, 1, 0, True),  # the only sufficient shape
+            (9, 9, 0, True),
+        ],
+    )
+    def test_family_sufficiency_is_exhaustive_over_probe_shapes(
+        self, attempted: int, succeeded: int, truncated: int, expected: bool
+    ) -> None:
+        """Exhaustive over every shape a family's tallies can take, against a
+        rule stated independently: established iff at least one probe ran, all
+        of them succeeded, and none were truncated."""
+        res = self._result(macro=(attempted, succeeded, truncated))
+        assert _macro_divergence_sufficiency(res).established is expected
+        # Independently-stated oracle, not the implementation's own fold.
+        assert expected == (attempted > 0 and succeeded == attempted and not truncated)
+
+    def test_successful_probe_finding_no_abi_macro_still_establishes_absence(
+        self,
+    ) -> None:
+        """The regression that motivated the family tallies: a successful
+        `-E -dM` probe of a unit defining none of the curated ABI macros
+        contributes no entry to `abi_macros`, so `tus_scanned` is 0 for an
+        ordinary build. Gating on `tus_scanned` reported "no translation unit
+        was probed" for a *fully covered* run, and its evolution could then
+        never leave `not_evaluated`."""
+        res = self._result(macro=(3, 3, 0))
+        assert res.tus_scanned == 0
+        assert res.abi_macros == {}
+        assert _macro_divergence_sufficiency(res).established is True
+        # And end to end: NEW gains a divergence, OLD's clean full-coverage
+        # scan establishes its absence, so this reads `introduced`.
+        folded = _fold_evolution(
+            old=_macro_divergence_sufficiency(res),
+            new=Sufficiency(established=True),
+            old_keys=set(),
+            new_keys={"FOO_ABI"},
+        )
+        assert folded == {"FOO_ABI": "introduced"}
+
+
+class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
+    """`service.run_dump()` is a documented public entry point and does not go
+    through `cached_run_dump`. Stamping the licence there left the typed API
+    unstamped, so identical inputs produced `not_evaluated` through the Python
+    API while working through the CLI (Codex review, P2)."""
+
+    def test_run_dump_grants_the_licence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from abicheck import service, service_dump_native
+
+        produced = AbiSnapshot(library="libfoo.so", version="1.0")
+        assert produced.live_source_evidence is False
+
+        monkeypatch.setattr(
+            service_dump_native,
+            "_run_dump_uncached",
+            lambda *a, **kw: produced,
+        )
+        out = service.run_dump(Path("libfoo.so"), "elf")
+        assert out.live_source_evidence is True
+        assert snapshot_source_licence(out).permitted is True
+
+    def test_licence_is_granted_by_the_shared_dump_not_by_one_front_end(self) -> None:
+        """Structural: the grant lives in the dump operation every front end
+        funnels through, so a front end cannot be added that silently skips it.
+        `cached_run_dump` keeps its own grant only for the *cache-hit* path,
+        which never calls `run_dump` at all."""
+        from abicheck import service_dump_cache, service_dump_native
+        from abicheck.buildsource import source_inputs
+
+        # The grant is the contract owner's, applied once at the shared dump.
+        assert service_dump_native.granting_live_source_licence is (
+            source_inputs.granting_live_source_licence
+        )
+        cache_src = Path(service_dump_cache.__file__).read_text()
+        # Exactly one grant in the cache module, and it is on the hit path.
+        assert cache_src.count("live_source_evidence = True") == 1
+        assert "cached.live_source_evidence = True" in cache_src

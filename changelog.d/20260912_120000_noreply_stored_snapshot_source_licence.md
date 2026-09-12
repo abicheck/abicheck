@@ -15,7 +15,9 @@
   even stat'd, and the report states that the historical evaluation was not
   possible instead of substituting today's tree. The licence is a runtime-only
   `AbiSnapshot` field the storage codec never writes, so a loaded snapshot
-  cannot grant itself one.
+  cannot grant itself one. The licence is granted by the shared dump
+  operation every front end funnels through (`service.run_dump`), so the typed
+  Python API and the CLI behave identically on the same inputs.
 
 - **Coverage sufficiency is computed from the expected input set, not from what
   a discovery walk happened to find.** `pattern_facts` skipped a non-existent
@@ -24,11 +26,24 @@
   coverage off one surviving file. Every declared input is now accounted for by
   exactly one disposition — scanned, missing, unreadable, unsupported,
   deliberately excluded, or not licensed — and any gap leaves an absence claim
-  unestablished; a root that did not exist can never read as fully covered.
+  unestablished; a root that did not exist can never read as fully covered. A
+  directory that could not be enumerated counts too: `os.walk` reports
+  traversal failures through a callback and ignores them without one, so an
+  unreadable directory used to vanish from the account entirely rather than
+  registering as a gap.
   Sufficiency is also answered per check (the lexical scan, macro divergence and
   private-header leaks each answer to their own evidence) rather than by one
   global tally, and is reported per check and per side in the
-  `pattern_preprocessor_scan` block's new `coverage` object.
+  `pattern_preprocessor_scan` block's new `coverage` object, computed from
+  per-probe-family tallies (`family_attempted`/`family_succeeded`/
+  `family_truncated`, preprocessor fact schema 3). The run-wide
+  attempted/succeeded/truncated aggregates could not answer a per-check
+  question: a compile-unit set truncated by
+  `ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES` marked the *header-leak* check
+  insufficient even when every public header was probed, and a successful macro
+  probe of a unit defining none of the curated ABI macros left `tus_scanned` at
+  zero, so an ordinary build could never establish the absence of a macro
+  divergence at all.
 
 - **`introduced`/`resolved` now require the side whose *absence* they assert to
   be established.** The evolution fold decided all four states from one global

@@ -102,6 +102,7 @@
         "abicheck/buildsource/pattern_facts.py",
         "abicheck/buildsource/pattern_facts_files.py",
         "abicheck/buildsource/preprocessor_facts.py",
+        "abicheck/buildsource/preprocessor_probe_families.py",
         "abicheck/buildsource/providers.py",
         "abicheck/buildsource/raw_evidence.py",
         "abicheck/buildsource/redaction.py",
