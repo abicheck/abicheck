@@ -926,6 +926,8 @@ def _format_release_summary(
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
+    max_findings: int | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
 
@@ -965,13 +967,20 @@ def _format_release_summary(
         # cannot drift. See `report/release_oneline.py` for why this is the
         # one of `compare`'s four remaining formats that generalizes without
         # a per-member `DiffResult`.
-        from .report.release_oneline import format_release_oneline
+        from .report.release_oneline import (
+            format_release_oneline,
+            release_global_counts,
+        )
 
         return format_release_oneline(
             worst_verdict,
             library_results,
             severity_exit_code=severity_exit_code,
             env_matrix_source_sha256=env_matrix_source_sha256,
+            # Bundle/probe-matrix findings belong to no library, so they are
+            # absent from `library_results` even though `worst_verdict` folds
+            # them -- see `release_global_counts`.
+            release_global=release_global_counts(bundle_result, matrix_result),
         )
     if fmt == "junit":
         return _format_release_junit(
@@ -994,6 +1003,7 @@ def _format_release_summary(
             scope_terms=scope_terms,
             show_only=show_only,
             env_matrix_source_sha256=env_matrix_source_sha256,
+            require_complete_analysis=require_complete_analysis,
         )
     md = _format_release_markdown(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
@@ -1002,6 +1012,7 @@ def _format_release_summary(
         severity_config=severity_config,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        max_findings=max_findings,
     )
     if demangle:
         from .demangle import demangle_text
@@ -1225,6 +1236,7 @@ def _format_release_json(
     scope_terms: ComparisonScopeTerms | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render the release summary as a JSON document (``release_schema_
     version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
@@ -1270,11 +1282,20 @@ def _format_release_json(
     from .workflows.release_scope import release_global_ran, unmatched_names
     terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    # The release's own assurance gate (`assurance.require_complete`),
+    # threaded into *every* decision a reader sees, not just the process
+    # exit: the persisted `exit` block, `run_outcome` and
+    # `effective_config_fields["gate.require_complete_analysis"]` are
+    # what a machine consumer accepts or rejects a run on, and a run that
+    # exits 1 while its own report says 0/clean/false is exactly the
+    # disagreement `_exit_compare_release` exists to make impossible
+    # (Codex review, PR #1238, P1).
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict, fail_on_removed, removed_keys, severity_exit_code,
         contract_coverage_exit_contribution, library_results, release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+        require_complete_analysis=require_complete_analysis,
     ).to_dict()
     record = terms.record
     summary: dict[str, object] = {
@@ -1464,6 +1485,7 @@ def _format_release_json(
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        require_complete_analysis=require_complete_analysis,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
@@ -1511,6 +1533,7 @@ def _format_release_markdown(
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    max_findings: int | None = None,
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1655,13 +1678,21 @@ def _format_release_markdown(
     lines += _release_md_evidence_contract(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     # The human summary stays bounded even though the shared projection is
-    # now complete -- the cap is a presentation choice, applied here. Read
-    # from the `report.release_display_limits` leaf, not from
-    # `cli_compare_release_matrix`: that would be an import cycle.
-    from .report.release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
+    # now complete -- the cap is a presentation choice, applied here. It is
+    # the **resolved** cap, not the built-in default: `--max-findings-per-
+    # library 20` (or the env var) is documented to control how much the
+    # aggregate summary itemizes, and slicing at the constant ignored it
+    # (Codex review, PR #1238, P2). `resolve_max_release_findings_per_library`
+    # is the one resolver every other consumer of this cap already calls
+    # (it lives in the leaf, so reading it here is not an import cycle), so
+    # the Markdown render cannot disagree with them.
+    from .report.release_display_limits import (
+        resolve_max_release_findings_per_library,
+    )
 
     lines += _release_md_library_findings(
-        display_library_results, display_cap=MAX_RELEASE_FINDINGS_PER_LIBRARY
+        display_library_results,
+        display_cap=resolve_max_release_findings_per_library(max_findings),
     )
     lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)
     lines += _release_md_matrix_findings(matrix_result, display_matrix_changes)

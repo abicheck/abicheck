@@ -749,6 +749,7 @@ def _release_summary_effective_config_block(
     on_incomplete_scope: str = "",
     fail_on_removed_library: bool | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -842,12 +843,10 @@ def _release_summary_effective_config_block(
         surface_metrics_enabled=True,
         reconcile_build_context_enabled=True,
     )
-    # No result/require_complete_analysis/scope at this release-summary
-    # scope, but on_incomplete_scope/fail_on_removed_library ARE (Codex
-    # review, PR #1192, fourth round) -- read from `gate.*` below, not the
-    # now-removed `ec_result.on_incomplete_scope` this used to set instead.
+    # No result/scope at this release-summary scope, but require_complete_analysis/on_incomplete_scope/fail_on_removed_library ARE (Codex review, PR #1192 fourth round for the latter two; PR #1238 for the first, once `assurance.require_complete` started applying to a release at all) -- read from `gate.*` below, not the now-removed `ec_result.on_incomplete_scope` this used to set instead.
     gate = EffectiveGate.from_severity(
         severity_config,
+        require_complete_analysis=require_complete_analysis,
         on_incomplete_scope=on_incomplete_scope or None,
         fail_on_removed_library=fail_on_removed_library,
     )

@@ -236,6 +236,7 @@ def _finalize_release_output(
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
+    max_findings: int | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -279,6 +280,10 @@ def _finalize_release_output(
         demangle=demangle,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        require_complete_analysis=require_complete_analysis,
+        # The Markdown render applies the *resolved* per-library cap, so the
+        # run's own `--max-findings-per-library` has to reach it.
+        max_findings=max_findings,
     )
     _write_or_echo(output, text)
 
@@ -312,6 +317,7 @@ def _finalize_release_output(
             scope_terms=scope_terms,
             write_output=_safe_write_output,
             env_matrix_source_sha256=env_matrix_source_sha256,
+            require_complete_analysis=require_complete_analysis,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same
@@ -465,67 +471,24 @@ def _validate_suppression_early(
 #: this module -- a function-local import between the two was a real new
 #: import cycle. Re-exported here under their original private names for
 #: every existing importer, tests included.
-from .report.release_display_limits import (  # noqa: E402
-    MAX_RELEASE_FINDINGS_PER_LIBRARY as _MAX_RELEASE_FINDINGS_PER_LIBRARY,
-    MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR as _MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR,
+from .report import release_display_limits as _display_limits  # noqa: E402
+
+# Plain assignments (mypy's `no_implicit_reexport`), for the same reason the
+# release-input re-exports below give. The two *resolvers* live in that leaf
+# too, not here: the Markdown renderer applies the resolved cap and reaching
+# back into this module for it was a real import cycle.
+_MAX_RELEASE_FINDINGS_PER_LIBRARY = _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY
+_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = (
+    _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR
+)
+_release_findings_cap_is_explicit = _display_limits.release_findings_cap_is_explicit
+_resolve_max_release_findings_per_library = (
+    _display_limits.resolve_max_release_findings_per_library
 )
 
 
-def _release_findings_cap_is_explicit(max_findings: int | None) -> bool:
-    """Whether *this run* asked for a per-library findings cap.
-
-    True for ``--max-findings-per-library`` or a usable
-    ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY``; False when the cap
-    resolves to the built-in default, which is a *presentation* choice
-    nobody made. That distinction is what lets a machine document stay
-    complete by default while the human summary stays bounded: a reader of
-    ``--format json`` who never asked for truncation must not receive a
-    silently truncated document, and one who *did* ask gets
-    ``findings_truncated`` plus (under ``--output-dir``) ``complete_report``
-    naming the uncapped artifact.
-    """
-    if max_findings is not None:
-        return True
-    import os
-
-    env_value = os.environ.get(_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
-    if not env_value:
-        return False
-    try:
-        return int(env_value) >= 1
-    except ValueError:
-        return False
 
 
-def _resolve_max_release_findings_per_library(max_findings: int | None) -> int:
-    """Resolve the effective per-library findings cap: explicit override,
-    else env, else default. Mirrors
-    ``cli_scan_baseline._resolve_max_baseline_findings`` exactly (same
-    precedence, same "malformed override degrades to the safe default
-    rather than failing the run" behavior).
-
-    *max_findings* is the per-call override (``compare-release
-    --max-findings-per-library``); it wins when given. Otherwise
-    ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY`` lets a CI job raise (or
-    lower) the cap globally without a code change.
-    """
-    if max_findings is not None:
-        if max_findings < 1:
-            raise ValueError(
-                f"max_findings_per_library must be a positive integer, got {max_findings}"
-            )
-        return max_findings
-    import os
-
-    env_value = os.environ.get(_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
-    if env_value:
-        try:
-            parsed = int(env_value)
-        except ValueError:
-            return _MAX_RELEASE_FINDINGS_PER_LIBRARY
-        if parsed >= 1:
-            return parsed
-    return _MAX_RELEASE_FINDINGS_PER_LIBRARY
 
 
 def _release_change_kind_str(c: Any) -> str:

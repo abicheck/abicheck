@@ -1194,6 +1194,8 @@ def compare_release_cmd(
                     scope_terms=scope_terms,
                     demangle=_resolve_demangle(secondary_fmt, demangle),
                     env_matrix_source_sha256=env_matrix_source_sha256,
+                    require_complete_analysis=require_complete_analysis,
+                    max_findings=max_findings_per_library,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1228,6 +1230,7 @@ def compare_release_cmd(
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,
                 require_complete_analysis=require_complete_analysis,
+                max_findings=max_findings_per_library,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)

@@ -35,6 +35,8 @@ from __future__ import annotations
 __all__ = [
     "MAX_RELEASE_FINDINGS_PER_LIBRARY",
     "MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR",
+    "release_findings_cap_is_explicit",
+    "resolve_max_release_findings_per_library",
 ]
 
 #: Findings rendered per library in a release *summary* before the render
@@ -47,3 +49,59 @@ MAX_RELEASE_FINDINGS_PER_LIBRARY = 10
 #: ``max_findings``. Kept distinct from a CLI/API default of ``None`` so
 #: "not specified" stays distinguishable from "explicitly 10".
 MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY"
+
+
+def release_findings_cap_is_explicit(max_findings: int | None) -> bool:
+    """Whether *this run* asked for a per-library findings cap.
+
+    True for ``--max-findings-per-library`` or a usable
+    ``ABICHECKMAX_RELEASE_FINDINGS_PER_LIBRARY``; False when the cap
+    resolves to the built-in default, which is a *presentation* choice
+    nobody made. That distinction is what lets a machine document stay
+    complete by default while the human summary stays bounded: a reader of
+    ``--format json`` who never asked for truncation must not receive a
+    silently truncated document, and one who *did* ask gets
+    ``findings_truncated`` plus (under ``--output-dir``) ``complete_report``
+    naming the uncapped artifact.
+    """
+    if max_findings is not None:
+        return True
+    import os
+
+    env_value = os.environ.get(MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
+    if not env_value:
+        return False
+    try:
+        return int(env_value) >= 1
+    except ValueError:
+        return False
+
+def resolve_max_release_findings_per_library(max_findings: int | None) -> int:
+    """Resolve the effective per-library findings cap: explicit override,
+    else env, else default. Mirrors
+    ``cli_scan_baseline._resolve_max_baseline_findings`` exactly (same
+    precedence, same "malformed override degrades to the safe default
+    rather than failing the run" behavior).
+
+    *max_findings* is the per-call override (``compare-release
+    --max-findings-per-library``); it wins when given. Otherwise
+    ``ABICHECKMAX_RELEASE_FINDINGS_PER_LIBRARY`` lets a CI job raise (or
+    lower) the cap globally without a code change.
+    """
+    if max_findings is not None:
+        if max_findings < 1:
+            raise ValueError(
+                f"max_findings_per_library must be a positive integer, got {max_findings}"
+            )
+        return max_findings
+    import os
+
+    env_value = os.environ.get(MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
+    if env_value:
+        try:
+            parsed = int(env_value)
+        except ValueError:
+            return MAX_RELEASE_FINDINGS_PER_LIBRARY
+        if parsed >= 1:
+            return parsed
+    return MAX_RELEASE_FINDINGS_PER_LIBRARY

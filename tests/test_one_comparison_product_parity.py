@@ -500,3 +500,195 @@ class TestReleaseArtifactsDoNotDependOnCardinality:
             f"{len(libraries)} library" in line or f"{len(libraries)} libraries" in line
         )
         assert f"{breaking} breaking" in line, line
+
+
+# ---------------------------------------------------------------------------
+# 5. Review-round regressions (Codex, PR #1238)
+# ---------------------------------------------------------------------------
+
+
+class TestTheReportAgreesWithTheProcessExit:
+    """P1: `assurance.require_complete` reached only the process exit.
+
+    Every release report decision -- the JSON `exit` block, `run_outcome`,
+    `effective_config_fields["gate.require_complete_analysis"]`, and the
+    `--output-dir` sidecar -- was resolved with the setting defaulted off, so
+    a run that exited `1` persisted `exit.code: 0` and `false`. A machine
+    consumer reading the artifact would accept a run the process failed.
+    """
+
+    def test_the_json_exit_block_matches_the_real_exit(self, tmp_path: Path) -> None:
+        old_dir, new_dir = _incomplete_analysis_pair(tmp_path)
+        _project_config(tmp_path, require_complete=True)
+        summary = tmp_path / "summary.json"
+
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(tmp_path / ".abicheck.yml"),
+            "--format",
+            "json",
+            "-o",
+            str(summary),
+        )
+        assert result.exit_code == 1, result.output
+        doc = json.loads(summary.read_text(encoding="utf-8"))
+        assert doc["exit"]["code"] == result.exit_code
+        assert doc["exit"]["analysis_assurance_contribution"] == 1
+        assert "analysis_assurance" in doc["exit"]["reasons"]
+        assert (
+            doc["effective_config_fields"]["gate.require_complete_analysis"] == "True"
+        )
+
+    def test_the_output_dir_sidecar_matches_too(self, tmp_path: Path) -> None:
+        """The sidecar is its own document with its own resolver call -- and
+        the axis that shipped before this one was missed at exactly this
+        third call site."""
+        old_dir, new_dir = _incomplete_analysis_pair(tmp_path)
+        _project_config(tmp_path, require_complete=True)
+        reports = tmp_path / "reports"
+
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(tmp_path / ".abicheck.yml"),
+            "--format",
+            "json",
+            "-o",
+            str(tmp_path / "s.json"),
+            "--output-dir",
+            str(reports),
+        )
+        assert result.exit_code == 1, result.output
+        doc = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
+        assert doc["exit"]["code"] == result.exit_code
+        assert doc["exit"]["analysis_assurance_contribution"] == 1
+
+    def test_without_the_setting_the_report_stays_clean(self, tmp_path: Path) -> None:
+        """The negative control: the fix must not make every run report the
+        floor. Same operands, setting off."""
+        old_dir, new_dir = _incomplete_analysis_pair(tmp_path)
+        _project_config(tmp_path, require_complete=False)
+        summary = tmp_path / "summary.json"
+
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(tmp_path / ".abicheck.yml"),
+            "--format",
+            "json",
+            "-o",
+            str(summary),
+        )
+        assert result.exit_code == 0, result.output
+        doc = json.loads(summary.read_text(encoding="utf-8"))
+        assert doc["exit"]["code"] == 0
+        assert doc["exit"]["analysis_assurance_contribution"] == 0
+
+
+class TestTheMarkdownCapHonoursTheRequestedValue:
+    """P2: the Markdown render sliced at the built-in constant, so raising
+    `--max-findings-per-library` above 10 changed nothing it itemized --
+    contradicting the option's own documented contract."""
+
+    @pytest.mark.parametrize(("cap", "expected"), [(3, 3), (20, 20)])
+    def test_the_requested_cap_is_what_is_rendered(
+        self, tmp_path: Path, cap: int, expected: int
+    ) -> None:
+        """Parametrized below *and* above the default 10: below alone would
+        pass against a `min(requested, 10)` bug, and above alone would pass
+        against one that ignores the option only when lowering it."""
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "markdown",
+            "--max-findings-per-library",
+            str(cap),
+        )
+        assert result.exit_code == 4, result.output
+        rendered = sum(
+            1
+            for line in result.output.splitlines()
+            if line.startswith("- **func_removed**")
+        )
+        assert rendered == expected, result.output
+
+    def test_the_env_var_is_honoured_the_same_way(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same contract through the env var, which is the other half of the
+        documented override and resolves through the same function."""
+        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "18")
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
+        result = _invoke("compare", str(old_dir), str(new_dir), "--format", "markdown")
+        assert result.exit_code == 4, result.output
+        rendered = sum(
+            1
+            for line in result.output.splitlines()
+            if line.startswith("- **func_removed**")
+        )
+        assert rendered == 18, result.output
+
+
+class TestOnelineIncludesReleaseGlobalFindings:
+    """P2: `format_release_oneline` received only `library_results`, so a
+    release whose only break is a bundle or probe-matrix finding printed
+    `BREAKING: no changes (0 total)` -- omitting the very findings
+    responsible for the verdict it announced."""
+
+    def test_a_release_global_finding_reaches_the_counts(self) -> None:
+        """Driven at the renderer with real `Change` objects rather than
+        through a staged bundle: what regressed is the fold, and a
+        `BundleDiffResult` fixture would test the bundle analyser instead."""
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import Change
+        from abicheck.model.change_catalog.kinds import ChangeKind
+        from abicheck.report.release_oneline import (
+            format_release_oneline,
+            release_global_counts,
+        )
+
+        class _FakeMatrix:
+            policy = "strict_abi"
+            policy_file = None
+            changes = [
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="gone",
+                    description="removed under one build configuration",
+                )
+            ]
+
+        counts = release_global_counts(None, _FakeMatrix())
+        # Bucketed by the finding's own effective verdict, not by a second
+        # classifier: `func_removed` is BREAKING under `strict_abi`.
+        assert Verdict.BREAKING.name == "BREAKING"
+        assert counts["breaking"] == 1
+        assert counts["total"] == 1
+
+        line = format_release_oneline("BREAKING", [], release_global=counts)
+        assert "1 breaking" in line, line
+        assert "(1 total)" in line, line
+        assert "no changes" not in line, line
+
+    def test_no_release_global_findings_changes_nothing(self) -> None:
+        """The negative control: with neither result present the line is the
+        same one it was before the fold existed."""
+        from abicheck.report.release_oneline import (
+            format_release_oneline,
+            release_global_counts,
+        )
+
+        counts = release_global_counts(None, None)
+        assert format_release_oneline("NO_CHANGE", [], release_global=counts) == (
+            format_release_oneline("NO_CHANGE", [])
+        )
