@@ -1364,19 +1364,21 @@ class TestAnalysisAssuranceCliIntegration:
         res = _compare(tmp_path, _breaking_pair(), "--require-complete-analysis")
         assert res.exit_code == 4, res.output
 
-    def test_config_not_rejected_for_directory_release_compares(
+    def test_config_accepted_for_directory_release_compares(
         self, tmp_path: Path
     ) -> None:
-        """ADR-071: the release operand no longer rejects the setting.
+        """It used to be a usage error here, and only here.
 
-        Inverted, not deleted -- a silent regression back to a usage error for
-        a now-supported setting is what this still guards. The two directories
-        are empty, so the run still fails on its own grounds (nothing was
-        compared, ADR-065 D7); only the old rejection's absence is asserted
-        here. The positive release behaviour -- the `max` fold, the report
-        block, the exit floor -- lives in tests/test_release_assurance_cli.py
-        (real multi-library bundle) and tests/test_release_assurance_
-        properties.py (the fold's own invariants).
+        ``assurance.require_complete`` was rejected outright for a
+        directory/package operand ("the per-library fan-out has no single
+        analysis_assurance result to gate on"), which made the setting's
+        meaning depend on the input shape. The fan-out now folds each
+        member's own 0/1 assurance floor with ``max()`` -- the identical
+        contribution a single-pair ``compare`` of that member computes --
+        so the setting is accepted. Behaviour equality between the two
+        shapes is pinned in
+        ``tests/test_one_comparison_product_parity.py``; this only pins
+        that the rejection is gone.
         """
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"

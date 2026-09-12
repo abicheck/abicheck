@@ -1692,20 +1692,6 @@ def _check_issues(
             "target check instead, and add it to this bundle once a real "
             "release has published a baseline-set covering every member."
         )
-    # ADR-071 retired the rejection this guard existed to stay ahead of.
-    # checks[].analysis.assurance: complete is enforced by translating it
-    # into check-target's analysis-assurance-complete input, which merges
-    # assurance.require_complete: true into the resolved `.abicheck.yml` and
-    # forwards it to a real `compare` invocation
-    # (analysis_assurance_gate.py's own module docstring). For a bundle check
-    # that invocation is the directory/package release fan-out, which used to
-    # reject the setting outright because it "has no single analysis_assurance
-    # result to gate on". It has one per compared member, and
-    # policy/release_assurance.py now folds them with `max` into the same
-    # ANALYSIS_ASSURANCE exit axis a scalar `compare` uses -- so a bundle
-    # check may declare it, and there is nothing left here to reject. The
-    # `is_bundle` rejection below this point is deliberately gone rather than
-    # softened to a warning: a supported setting is not a finding.
     return issues
 
 

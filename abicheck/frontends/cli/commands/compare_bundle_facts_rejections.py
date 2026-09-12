@@ -253,12 +253,20 @@ def reject_unsupported_options(
         # (see _reject_set_input_flags's own comment for the full reasoning).
         suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
-        # ADR-071 D8: `assurance.require_complete` is deliberately NOT
-        # forwarded any more. It has a real channel here now --
-        # `compare_bundle_facts.dispatch` folds every member's own
-        # `AnalysisAssurance` -- so it is no longer one of the "no channel,
-        # reject rather than silently diverge" set this module exists for.
     )
+    # ADR-071 D8: `assurance.require_complete` is deliberately neither
+    # forwarded to `_reject_set_input_flags` nor rejected here. It reached
+    # this module at all only while the live fan-out rejected it; the fold
+    # that replaced that rejection reads each *comparison's* own
+    # `AnalysisAssurance`, not a rollup carried by either operand -- so a
+    # stored-BundleFacts OLD side is no obstacle to it. Every member
+    # comparison this driver runs produces a real `DiffResult` (stored OLD
+    # snapshot against the live NEW artifact) and therefore its own
+    # assurance status, which is exactly what `compare_bundle_facts.dispatch`
+    # folds. What a stored side genuinely cannot do is *manufacture*
+    # evidence it never captured: a shallow stored snapshot yields `partial`,
+    # which the gate then reports and floors on, rather than being silently
+    # ignored.
     if any(
         kwargs.get(name) is not None
         for name in (

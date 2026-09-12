@@ -327,6 +327,60 @@ class PackManifestError(AbicheckError, ValueError):
     """
 
 
+class ReleaseOperandError(ValidationError):
+    """Raised when a directory/package release operand cannot be resolved.
+
+    An unrecognized package format, a directory holding no supported ABI
+    input, an operand that is neither file nor directory, or a stored
+    ``ProjectSnapshot`` package whose requested variant is ambiguous,
+    collides, or cannot be read.
+
+    Every one of these used to be raised from inside the resolution as a
+    ``click.UsageError``/``click.ClickException``, which is what kept the
+    release fan-out's pre-execution half reachable only from a Click
+    command: an engine module may not import ``click`` (the
+    ``engine-cli-boundary`` gate), and a Python caller with no Click
+    context received an undocumented exception type. The resolution
+    (``workflows.release_inputs``) raises this instead; translating it to a
+    ``click.UsageError`` with the same message is the CLI boundary's job
+    (``frontends.cli.release_compare_request``), so the exit code and text
+    a user sees are unchanged.
+
+    A :class:`ValidationError` subclass, so every existing ``except
+    ValidationError`` usage-error translation already covers it.
+
+    **Two subclasses, because the CLI's two exit codes are a real
+    distinction, not an accident of which ``click`` type each site happened
+    to raise.** Raised bare (or as :class:`ReleaseOperandContentError`), this
+    is a fact about the operand's *content* -- an unrecognized package
+    format, a directory holding nothing readable -- which the CLI reports as
+    a ``click.ClickException``, exit ``1``. :class:`ReleaseOperandUsageError`
+    is a fact about what the *caller asked for* -- an ambiguous or
+    unselectable stored-package variant -- which the CLI reports as a
+    ``click.UsageError``, exit ``64``. Both were already those two exit codes
+    before the resolution moved engine-side, and a caller catching the base
+    class gets both.
+    """
+
+
+class ReleaseOperandContentError(ReleaseOperandError):
+    """The operand's own content cannot be resolved (CLI exit ``1``).
+
+    An explicit name for the bare-``ReleaseOperandError`` case above, so a
+    raise site states which exit code it means instead of relying on the
+    absence of a subclass.
+    """
+
+
+class ReleaseOperandUsageError(ReleaseOperandError):
+    """What the caller asked for cannot be honored (CLI exit ``64``).
+
+    Today: a stored ``ProjectSnapshot`` package whose requested variant is
+    ambiguous, collides, or cannot be read -- the case that previously
+    raised ``click.UsageError`` from inside the resolution.
+    """
+
+
 class PlanningError(AbicheckError, ValueError):
     """Raised by :func:`abicheck.workflows.plan.AnalysisPlanner.resolve` when a
     request cannot be satisfied by any resolved collector/backend combination

@@ -189,7 +189,7 @@ class TestTempDirTracking:
             return None
 
         with patch(
-            "abicheck.cli_compare_release_matrix._resolve_release_package_side",
+            "abicheck.workflows.release_inputs.resolve_release_package_side",
             side_effect=_fake_resolve_release_package_side,
         ):
             request = ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)
@@ -248,7 +248,7 @@ class TestTempDirTracking:
             return None
 
         with patch(
-            "abicheck.cli_compare_release_matrix._resolve_release_package_side",
+            "abicheck.workflows.release_inputs.resolve_release_package_side",
             side_effect=_fake_resolve_release_package_side,
         ):
             request = ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)

@@ -89,8 +89,18 @@ def _exit_compare_release(
     rank a proven removal below the evidence axis in one implementation
     only.
 
+    *assurance_decision* carries ``.abicheck.yml``'s
+    ``assurance.require_complete`` and the per-member statuses behind it
+    (ADR-071). The release fan-out used to reject the setting outright ("no
+    single ``analysis_assurance`` result to gate on"); there is one per
+    compared member, and the aggregate is the same ``max()`` every other
+    orthogonal ``0``/``1`` axis here already uses, so library count no
+    longer changes what the setting means. The decision rather than a bare
+    flag, because this function also *formats* the axis's notice, whose
+    wording turns on the resolved code -- see the comment at that call.
+
     *library_results* is the per-member list the resolver reads the
-    evidence-contract and operational-error axes off. ``compare
+    evidence-contract, assurance and operational-error axes off. ``compare
     --bundle-facts`` has no such list (its whole release is one folded
     result) and passes none; its ``"ERROR"`` sentinel reaches the resolver
     through *worst_verdict* instead, which is why that resolver takes the
@@ -110,6 +120,23 @@ def _exit_compare_release(
     )
 
     members = list(library_results or [])
+    if assurance_decision is not None and not members:
+        # `compare --bundle-facts` reaches here with no per-member entry dicts
+        # at all (its whole release arrives as one folded document), but it
+        # *does* run a real comparison per member and therefore has a real
+        # `AnalysisAssurance` for each -- which is why the stored operand is
+        # supported rather than rejected (ADR-071 D8). The resolver derives
+        # this axis from the per-member rows on purpose (see
+        # `release_analysis_assurance_contribution`: a value every reporter
+        # must supply identically is not an argument), so the rows are what
+        # this driver supplies, carrying only the one key this axis reads.
+        # Every other per-member axis reads its own keys with a defaulting
+        # `.get`/membership test, so an assurance-only row contributes `0` to
+        # each of them -- it adds a member to this fold, never to theirs.
+        members = [
+            {"library": m.name, "analysis_assurance_status": m.status}
+            for m in assurance_decision.members
+        ]
     decision = resolve_release_exit_decision_for_report(
         worst_verdict,
         fail_on_removed,
@@ -120,8 +147,14 @@ def _exit_compare_release(
         release_global_verdict,
         incomplete_scope_contribution=incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=no_comparison_completed_exit_contribution,
-        analysis_assurance_contribution=(
-            assurance_decision.exit_contribution if assurance_decision else 0
+        # One parameter, not two: the resolver re-derives the fold from the
+        # per-member `library_results` it already has, while the notice below
+        # needs the member rows behind it -- so this function takes the whole
+        # decision and hands the resolver only the setting that produced it.
+        # Passing both separately would let a caller state a `require_complete`
+        # the notice contradicts.
+        require_complete_analysis=bool(
+            assurance_decision is not None and assurance_decision.require_complete
         ),
     )
     # ADR-071's assurance notice, emitted here for the same reason the

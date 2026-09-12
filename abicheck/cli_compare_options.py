@@ -65,7 +65,6 @@ def _reject_set_input_flags(
     audit_suppressions: bool = False,
     suppress: Path | None = None,
     include_labels: dict[Path, str] | None = None,
-    require_complete_analysis: bool = False,
     budget: str | None = None,
     pdb_path: Path | None = None,
 ) -> None:
@@ -74,14 +73,17 @@ def _reject_set_input_flags(
     The per-library fan-out has no public CLI support for these, so reject them
     loudly rather than silently ignore them (ADR-037 D12).
 
-    ``assurance.require_complete`` is not one of these any more (ADR-071):
-    the premise of its rejection -- "the per-library fan-out has no single
-    analysis_assurance result to gate on" -- was wrong. The fan-out has one
-    per compared member, and ``policy.release_assurance`` folds them with
-    ``max`` into the same ``ExitReason.ANALYSIS_ASSURANCE`` axis a scalar
-    ``compare`` uses, so a one-member package gates identically to the
-    scalar path. The parameter is still accepted (every caller passes it by
-    keyword) and deliberately unused here.
+    ``assurance.require_complete`` is not one of these any more: the
+    per-library fan-out folds each member's own analysis-assurance floor
+    with ``max()`` (``policy.release_exit_decision.
+    release_analysis_assurance_contribution``), which is the identical
+    ``0``/``1`` contribution a single-pair ``compare`` of that member would
+    compute -- so a release of one library and that library compared alone
+    agree, and library count no longer changes what the setting means. The
+    rejection rested on "the fan-out has no single analysis_assurance
+    result to gate on"; it has one per member, and aggregating orthogonal
+    floors with ``max()`` is what every other release axis here already
+    does.
 
     ``--pack`` is not one of these -- its own, separate resolution (CLI
     cleanup phase two, "PR B" slice 1) decides what to accept or reject.

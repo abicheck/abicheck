@@ -21,6 +21,41 @@ its orthogonal completeness axis. Owners:
 `abicheck/frontends/cli/release_exit.py`,
 `abicheck/frontends/cli/release_summary.py`.
 
+## Relationship to PR #1238
+
+This decision was reached and implemented concurrently with, and independently
+of, PR #1238, which landed the same fold's *threading* on `main` first: the
+`analysis_assurance_contribution` slot in `resolve_release_exit_decision`, the
+per-member `analysis_assurance_status` stamp, and the setting's acceptance by
+the live fan-out (retiring three of the four guards). That work is not
+re-litigated or duplicated here — it is the shipped implementation of D1–D3,
+and this ADR is the decision record it was missing.
+
+What this ADR adds on top of it:
+
+- **One owner for the fold rule** (`policy/release_assurance.py`).
+  `release_exit_decision.release_analysis_assurance_contribution` calls it
+  rather than restating `max(status != "complete")`, the same
+  share-don't-mirror discipline `policy/gate_pack_fold.py` already applies to
+  the gate-pack fold.
+- **Publication (D5/D6).** A gated release must be able to *say so*: the
+  `analysis_assurance` fold section naming which members fell short and why,
+  the canonical top-level `analysis_assurance_exit_contribution` that
+  `abicheck aggregate` and the Action's deferred gate read, the per-library
+  `{library}.json` and `summary.json` sidecars, and a one-line stderr notice
+  for non-JSON formats. With the floor visible only inside `exit`, a release
+  that exited `1` published documents every consumer reads as clean.
+- **The stored-`BundleFacts` operand (D8).** PR #1238 kept a rejection for
+  that operand on the premise that a stored side "carries no per-member
+  analysis-assurance rollup to aggregate". The rollup being folded is not the
+  operand's: every member of a stored-baseline release is still compared
+  against a live NEW artifact and still produces its own `AnalysisAssurance`.
+  That rejection is retired here, with the fourth guard, and the stored driver
+  folds, gates and publishes identically.
+- **The invariants as property tests** over generated member sets, not fixed
+  examples (`tests/test_release_assurance_properties.py`), registered as bug
+  class `gate.per_member_axis_fold`.
+
 ## Context
 
 `assurance.require_complete: true` asks one question: *was the evidence this

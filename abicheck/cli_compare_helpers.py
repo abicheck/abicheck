@@ -1260,7 +1260,6 @@ def run_compare(
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
             include_labels=include_labels,
-            require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
             suppress=suppress,
             budget=budget, pdb_path=pdb_path,

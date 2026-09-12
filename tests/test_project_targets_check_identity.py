@@ -345,23 +345,22 @@ class TestAnalysisAssuranceTruthfulnessCli:
 
 
 class TestAnalysisAssuranceCompleteAcceptedForBundle:
-    """ADR-071: ``checks[].analysis.assurance: complete`` on a bundle check
-    is **supported**, and this class pins that it validates cleanly.
+    """``checks[].analysis.assurance: complete`` on a bundle check is
+    ordinary configuration now.
 
-    It previously pinned the opposite. The rejection existed because the
-    underlying ``compare`` invocation for a bundle check is the
-    directory/package release fan-out, which rejected
-    ``require_complete_analysis=True`` outright on the premise that a bundle
-    comparison "has no single ``analysis_assurance`` result to gate on" --
-    rejecting here, at run-plan generation time, kept that from surfacing as
-    a hard CLI usage error. ADR-071 supplied the missing semantics (one
-    ``AnalysisAssurance`` per compared member, folded with ``max`` into the
-    same ``ANALYSIS_ASSURANCE`` exit axis a scalar ``compare`` uses), so the
-    fan-out accepts the setting and there is nothing left to reject.
-
-    Inverted rather than deleted, deliberately: a declared, now-supported
-    setting silently regressing to a validation error is exactly the class of
-    break this class was written to catch, only in the other direction."""
+    It was rejected at run-plan generation time (PR #1222) for a real
+    reason: ``check-target`` forwards it as
+    ``assurance: {require_complete: true}`` into the underlying ``compare``
+    invocation, which for a bundle check is the directory/package release
+    fan-out -- and that fan-out rejected the setting outright, turning the
+    bundle check into a hard CLI usage error. The rejection was the
+    actionable answer while that was true. The fan-out now folds each
+    member's own analysis-assurance floor with ``max()``
+    (``policy.release_exit_decision.release_analysis_assurance_
+    contribution``), which is the identical contribution a single-pair
+    ``compare`` of that member computes, so the setting reaches a real gate
+    and the validation-time rejection -- a restriction that existed only
+    because of the input shape -- is gone with it."""
 
     @staticmethod
     def _bundle_config(assurance: str) -> ProjectTargetsConfig:
@@ -394,7 +393,7 @@ class TestAnalysisAssuranceCompleteAcceptedForBundle:
 
     def test_bundle_check_without_assurance_passes(self) -> None:
         """Negative control: a bundle check declaring no assurance
-        requirement at all validates cleanly, as it always did."""
+        requirement at all is unaffected by this new rule."""
         config = ProjectTargetsConfig.from_dict(
             {
                 "targets": {

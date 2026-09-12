@@ -56,6 +56,7 @@ __all__ = [
     "member_assurance_fields",
     "release_assurance_from_entries",
     "release_assurance_from_results",
+    "stamp_member_assurance",
 ]
 
 #: What a member whose ``DiffResult`` carries no ``AnalysisAssurance`` at all
@@ -175,3 +176,25 @@ def member_assurance_entry_fields(result: Any) -> dict[str, object]:
             result, require_complete=True
         ),
     }
+
+
+def stamp_member_assurance(
+    entry: dict[str, object], result: Any, *, require_complete: bool
+) -> None:
+    """Record one member's assurance facts into its ``library_results`` *entry*.
+
+    The status is unconditional (readable even on a run that did not opt in);
+    the notes and the member's own ``0``/``1`` only under the setting, which is
+    what lets the release report name *which* member fell short (ADR-071 D6).
+
+    One function rather than two calls at the one call site, so the fan-out
+    holds no opinion about which keys this axis owns -- and so the status is
+    resolved through :func:`member_assurance_fields`, where an absent block
+    reads ``complete`` (fails *open*) exactly as the scalar rule's own
+    defensive ``0`` does. A bare ``getattr(result, ..., None)`` there would let
+    a result with no block contribute ``1``, which is the one way a one-member
+    release could disagree with that member compared alone (D1).
+    """
+    entry["analysis_assurance_status"] = member_assurance_fields(result)[0]
+    if require_complete:
+        entry.update(member_assurance_entry_fields(result))

@@ -495,20 +495,26 @@ def resolve_release_exit_decision(
     outrank a real ``4``/``8`` decided by a *different* member without
     being named as the reason.
 
-    *analysis_assurance_contribution* (ADR-071) is the release's own
-    ``assurance.require_complete`` floor -- ``max`` over every compared
-    member's, resolved by ``policy.release_assurance.
-    resolve_release_assurance_decision``. Shaped exactly like
-    *contract_coverage_contribution* and folded in every non-dominant branch
-    below, in **both** schemes, so it raises a clean ``0`` to ``1`` and never
-    lowers a real ``2``/``4`` -- and preserved, never deciding, under a
-    dominant ``16``/``8``/``7``. Deliberately the *same* axis
-    ``resolve_compare_exit_decision`` fills for a scalar ``compare`` rather
-    than a release-only sibling field: over one member the fold is the
-    identity, so a one-member package must gate and report identically to
-    the scalar path (ADR-071 D1), and a second field would leave a consumer
-    reading ``analysis_assurance_contribution`` a ``0`` for a run this axis
-    actually floored.
+    *analysis_assurance_contribution* is ``.abicheck.yml``'s
+    ``assurance.require_complete``, aggregated across the release's members
+    with ``max()`` by the caller -- the same ``0``/``1`` orthogonal floor a
+    single-pair ``compare`` folds, and passed here rather than computed so
+    this stays a pure resolver like every other axis. It participates in
+    exactly the branches ``contract_coverage_contribution`` does, and for
+    the same reason: **library count must not change what the setting
+    means**, so a release of one library and that library compared on its
+    own must reach the same exit code. It had no slot here at all until
+    now, which is why the release fan-out rejected the setting outright
+    instead of honouring it.
+
+    The rule itself (``max`` over each member's own ``0``/``1``) has one
+    owner, ``policy.release_assurance`` (ADR-071), which
+    ``release_exit_decision.release_analysis_assurance_contribution``
+    calls rather than restates -- and it is deliberately the *same* axis
+    ``resolve_compare_exit_decision`` fills for a scalar ``compare``, not a
+    release-only sibling field, so a consumer reading
+    ``analysis_assurance_contribution`` never sees ``0`` for a run this
+    axis actually floored.
 
     *incomplete_scope_contribution*/*no_comparison_completed_contribution*
     (ADR-065 D6/D7, S2) are two more ``0``/``1`` fold participants, shaped

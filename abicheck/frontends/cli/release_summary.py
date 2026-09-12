@@ -66,6 +66,7 @@ def _write_release_summary_file(
     assurance_terms: ReleaseAssuranceTerms | None = None,
     write_output: Callable[[Path, str], None] | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -92,15 +93,6 @@ def _write_release_summary_file(
     real configuration every library was compared under, same as the
     primary report (see ``_release_summary_effective_config_block``'s own
     docstring).
-
-    *assurance_terms* (ADR-071) is likewise the same resolved decision the
-    primary report used. It is threaded for the same reason *scope_terms* is,
-    and the reason is load-bearing rather than cosmetic: this sidecar builds
-    its **own** ``exit`` block through the same resolver, so a run floored by
-    the assurance axis would otherwise publish a ``summary.json`` whose
-    ``exit.code``/``analysis_assurance_contribution`` disagreed with the
-    process's real exit status -- exactly the self-contradicting report
-    ADR-071 D5 exists to prevent.
 
     *env_matrix_source_sha256* (Codex review, P2 follow-up): the same
     release-wide deployment-floor digest the primary release JSON's own
@@ -136,11 +128,18 @@ def _write_release_summary_file(
         scope_public_headers=scope_public_headers,
         on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
-        # ADR-071: the receipt must name the gate that produced this report.
-        require_complete_analysis=bool(assurance_terms.require_complete) if assurance_terms else False,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        require_complete_analysis=require_complete_analysis,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    # `require_complete_analysis` reaches this sidecar's own decision too,
+    # not only the process exit -- the same reason the release JSON threads
+    # it (Codex review, PR #1238, P1): this file is what a consumer reads
+    # when `--output-dir` is the artifact it collects, and it must not report
+    # `exit.code: 0` for a run that exited `1`. It is also exactly the shape
+    # of the bug the evidence-contract axis already hit here once, which is
+    # why `release_evidence_contract_contribution` is derived inside the
+    # resolver rather than passed in.
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict,
         fail_on_removed,
@@ -151,9 +150,7 @@ def _write_release_summary_file(
         release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
-        analysis_assurance_contribution=(
-            assurance_terms.decision.exit_contribution if assurance_terms else 0
-        ),
+        require_complete_analysis=require_complete_analysis,
     ).to_dict()
     record = terms.record
     # This sidecar is documented/contracted to always be full and
@@ -196,11 +193,13 @@ def _write_release_summary_file(
         summary_data["env_matrix_source_sha256"] = env_matrix_source_sha256
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section
+    # ADR-071 D6: the same fold section and the same canonical top-level
+    # gate key the primary release JSON carries. This sidecar is what a
+    # consumer collects when `--output-dir` is the artifact, so leaving the
+    # axis only inside `exit` here would be the same gate-loses-its-reason
+    # gap the top-level key exists to close for the primary document.
     if assurance_terms is not None and assurance_terms.section is not None:
         summary_data["analysis_assurance"] = assurance_terms.section
-        # The canonical top-level key aggregate/the deferred gate read -- see
-        # `cli_compare_release_helpers._format_release_json`'s own comment for
-        # why the floor living only inside `exit` is not enough.
         summary_data["analysis_assurance_exit_contribution"] = (
             assurance_terms.decision.exit_contribution
         )

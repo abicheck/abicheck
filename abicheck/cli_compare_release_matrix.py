@@ -44,7 +44,6 @@ should import from here directly.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -52,13 +51,20 @@ import click
 
 from .bundle import BundleDiffResult
 from .checker import Change, DiffResult
-from .cli import (
+
+# Several names imported below are no longer used by this module: release
+# input resolution moved to `workflows.release_inputs` (see the re-export
+# note further down). They stay imported because `cli_compare_release.py`
+# re-exports them *from here* and direct tests import them by those names --
+# deleting them would be an import break for no gain, so the blocks are
+# marked rather than trimmed.
+from .cli import (  # noqa: F401
     _build_match_map,
     _collect_release_inputs,
     _safe_write_output,
     _write_or_echo,
 )
-from .cli_compare_release_helpers import (
+from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _debian_symbols_warning,
     _discover_include_roots,
@@ -75,34 +81,45 @@ from .frontends.cli.options.params import (
 from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
     _write_release_summary_file as _write_release_summary_file,
 )
-from .frontends.cli.release_variant_operand import _resolve_release_package_side
+from .frontends.cli.release_variant_operand import (  # noqa: F401
+    _resolve_release_package_side,
+)
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
-from .workflows.extraction import package_component_inventory
+from .workflows.extraction import package_component_inventory  # noqa: F401
 from .workflows.gate import incomplete_scope_diagnostic
 
 if TYPE_CHECKING:
-    from .model.package_inventory import PackageInventory
+    from .model.package_inventory import PackageInventory  # noqa: F401
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
 
-def _discover_files(
-    input_dir: Path,
-    lib_dir: Path,
-    include_private: bool,
-    discover_shared_libraries: Callable[..., list[Path]],
-    is_package: Callable[[Path], bool],
-) -> list[Path]:
-    """Discover library files from a directory or extracted package."""
-    if is_package(input_dir):
-        files = discover_shared_libraries(lib_dir, include_private=include_private)
-        if not files:
-            files = _collect_release_inputs(lib_dir)
-    else:
-        files = _collect_release_inputs(lib_dir)
-    return files
+
+
+#: Release *input resolution* -- package/debug/devel extraction, library
+#: discovery, stored-``ProjectSnapshot`` variant materialization,
+#: ``--dso-only`` classification, per-side headers/includes and key matching
+#: -- moved to ``workflows.release_inputs`` (ADR-061 gap D's "Remaining
+#: scope"): it is engine work, it raised ``click`` errors from inside the
+#: resolution, and both facts are what kept the release request/plan off
+#: ``abicheck.service``. Re-exported here under their original private names
+#: for every existing importer, tests included. Neither raises ``click``
+#: anything now -- they raise the typed ``errors.ReleaseOperandContentError``/
+#: ``ReleaseOperandUsageError``, which
+#: ``frontends.cli.release_compare_request`` translates at the CLI boundary
+#: into the two ``click`` types (and therefore the two exit codes) this
+#: command always produced. The ``_extract_if_package``/``_build_match_map``
+#: wrappers in this file's sibling CLI modules keep their own translation for
+#: their *other* callers (``dump``, ``compare --bundle-facts``), which still
+#: reach them directly.
+from .workflows import release_inputs as _release_inputs  # noqa: E402
+
+# Plain assignments, for the same `no_implicit_reexport` reason
+# `cli_compare_release_helpers.py`'s own re-exports give.
+_discover_files = _release_inputs.discover_files
+_prepare_compare_release_inputs = _release_inputs.prepare_release_inputs
 
 
 def _collect_matrix_result(
@@ -216,10 +233,17 @@ def _finalize_release_output(
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    # Both of these come from one origin -- `compare_release_cmd` resolves
+    # `assurance_terms` *from* `require_complete_analysis` over the same
+    # `library_results` -- so they cannot state different settings. The flag
+    # is what the exit resolver and the receipt read; the terms are what the
+    # report section and the stderr notice are rendered from (ADR-071 D5/D6).
     assurance_terms: ReleaseAssuranceTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
+    max_findings: int | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -264,6 +288,10 @@ def _finalize_release_output(
         demangle=demangle,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        require_complete_analysis=require_complete_analysis,
+        # The Markdown render applies the *resolved* per-library cap, so the
+        # run's own `--max-findings-per-library` has to reach it.
+        max_findings=max_findings,
     )
     _write_or_echo(output, text)
 
@@ -298,6 +326,7 @@ def _finalize_release_output(
             assurance_terms=assurance_terms,
             write_output=_safe_write_output,
             env_matrix_source_sha256=env_matrix_source_sha256,
+            require_complete_analysis=require_complete_analysis,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same
@@ -452,57 +481,29 @@ def _validate_suppression_early(
         )
 
 
-#: Default cap on findings embedded in each library's ``findings``/
-#: ``findings_view`` lists in the release summary so a large fan-out cannot
-#: blow up the always-on release output; ``--output-dir`` (see
-#: ``cli_compare_release_pairwise.py``'s per-library ``<lib>.json`` sidecar)
-#: remains the way to see every library's full, unfiltered report
-#: unconditionally. Overridable per run via ``compare-release
-#: --max-findings-per-library``, or globally via the
-#: ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY`` env var when neither passes
-#: an explicit value -- mirrors ``cli_scan_baseline``'s identical
-#: ``_MAX_BASELINE_FINDINGS``/``_resolve_max_baseline_findings`` pair (see
-#: :func:`_resolve_max_release_findings_per_library`), which this cap used
-#: to lack entirely (Codex review: "a presentation default masquerading as
-#: a contract").
-_MAX_RELEASE_FINDINGS_PER_LIBRARY = 10
+#: Both values now live in the ``report.release_display_limits`` leaf, so
+#: the Markdown renderer that applies the cap can read it without importing
+#: this module -- a function-local import between the two was a real new
+#: import cycle. Re-exported here under their original private names for
+#: every existing importer, tests included.
+from .report import release_display_limits as _display_limits  # noqa: E402
 
-#: Env var read by :func:`_resolve_max_release_findings_per_library` when a
-#: caller does not pass an explicit ``max_findings``. Kept distinct from a
-#: CLI/API default of ``None`` so "not specified" is distinguishable from
-#: "explicitly 10".
-_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY"
+# Plain assignments (mypy's `no_implicit_reexport`), for the same reason the
+# release-input re-exports below give. The two *resolvers* live in that leaf
+# too, not here: the Markdown renderer applies the resolved cap and reaching
+# back into this module for it was a real import cycle.
+_MAX_RELEASE_FINDINGS_PER_LIBRARY = _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY
+_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = (
+    _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR
+)
+_release_findings_cap_is_explicit = _display_limits.release_findings_cap_is_explicit
+_resolve_max_release_findings_per_library = (
+    _display_limits.resolve_max_release_findings_per_library
+)
 
 
-def _resolve_max_release_findings_per_library(max_findings: int | None) -> int:
-    """Resolve the effective per-library findings cap: explicit override,
-    else env, else default. Mirrors
-    ``cli_scan_baseline._resolve_max_baseline_findings`` exactly (same
-    precedence, same "malformed override degrades to the safe default
-    rather than failing the run" behavior).
 
-    *max_findings* is the per-call override (``compare-release
-    --max-findings-per-library``); it wins when given. Otherwise
-    ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY`` lets a CI job raise (or
-    lower) the cap globally without a code change.
-    """
-    if max_findings is not None:
-        if max_findings < 1:
-            raise ValueError(
-                f"max_findings_per_library must be a positive integer, got {max_findings}"
-            )
-        return max_findings
-    import os
 
-    env_value = os.environ.get(_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
-    if env_value:
-        try:
-            parsed = int(env_value)
-        except ValueError:
-            return _MAX_RELEASE_FINDINGS_PER_LIBRARY
-        if parsed >= 1:
-            return parsed
-    return _MAX_RELEASE_FINDINGS_PER_LIBRARY
 
 
 def _release_change_kind_str(c: Any) -> str:
@@ -671,8 +672,18 @@ def _release_finding_dicts(
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
     max_findings: int | None = None,
+    *,
+    uncapped: bool = False,
 ) -> tuple[list[dict[str, object]], list[str]]:
     """Project a library's gating findings into small, capped dicts.
+
+    *uncapped* builds the **complete** projection instead, and returns no
+    cut kinds -- nothing was cut. Used for the machine documents when no
+    cap was actually requested (see
+    :func:`_release_findings_cap_is_explicit`): a truncated JSON/JUnit
+    document nobody asked to truncate is not a summary, it is a lossy
+    result, and this release schema has no per-library findings array
+    elsewhere for a consumer to fall back to.
 
     Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
     ``stack_report._stack_finding_dicts``. Counts (not already-built dicts)
@@ -713,7 +724,11 @@ def _release_finding_dicts(
     from .reporter import release_finding_entry
     from .reporter_markdown import apply_show_only
 
-    cap = _resolve_max_release_findings_per_library(max_findings)
+    cap = (
+        _resolve_max_release_findings_per_library(max_findings)
+        if not uncapped
+        else None
+    )
     findings: list[dict[str, object]] = []
     cut_kinds: list[str] = []
     for bucket_name, bucket_changes in _release_display_buckets(diff, severity_config):
@@ -725,8 +740,11 @@ def _release_finding_dicts(
                 kind_sets=diff._effective_kind_sets(),
                 policy_file=diff.policy_file,
             )
-        remaining = max(0, cap - len(findings))
-        included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
+        if cap is None:
+            included, excluded = list(bucket_changes), []
+        else:
+            remaining = max(0, cap - len(findings))
+            included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
         for c in included:
             findings.append(release_finding_entry(c, bucket_name, diff.policy_file))
         # Keep tallying excluded kinds across every remaining bucket (not
@@ -818,6 +836,11 @@ def _strip_diff_results_and_adjust_verdict(
     Returns the (possibly updated) *worst_verdict* string.
     """
     cap = _resolve_max_release_findings_per_library(max_findings)
+    # `entry["findings"]` feeds every renderer, and only the human ones want
+    # a cap. Left complete unless this run actually asked for truncation, so
+    # a machine document is complete by default; `_release_md_library_
+    # findings` applies the presentation cap at render time instead.
+    uncapped = not _release_findings_cap_is_explicit(max_findings)
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -826,11 +849,11 @@ def _strip_diff_results_and_adjust_verdict(
             display_buckets = _release_display_buckets(diff, severity_config)
             total_gating = sum(len(cat_changes) for _, cat_changes in display_buckets)
             findings, cut_kinds = _release_finding_dicts(
-                diff, severity_config, None, max_findings
+                diff, severity_config, None, max_findings, uncapped=uncapped
             )
             if findings:
                 entry["findings"] = findings
-                if total_gating > cap:
+                if not uncapped and total_gating > cap:
                     entry["findings_truncated"] = True
                     _accumulate_release_kind_counts(
                         entry, "findings_truncated_kinds", cut_kinds
@@ -866,10 +889,10 @@ def _strip_diff_results_and_adjust_verdict(
                     for _, cat_changes in display_buckets
                 )
                 findings_view, cut_kinds_view = _release_finding_dicts(
-                    diff, severity_config, show_only, max_findings
+                    diff, severity_config, show_only, max_findings, uncapped=uncapped
                 )
                 entry["findings_view"] = findings_view
-                if total_gating_view > cap:
+                if not uncapped and total_gating_view > cap:
                     entry["findings_view_truncated"] = True
                     _accumulate_release_kind_counts(
                         entry, "findings_view_truncated_kinds", cut_kinds_view
@@ -945,209 +968,3 @@ def _strip_diff_results_and_adjust_verdict(
     return worst_verdict
 
 
-def _prepare_compare_release_inputs(
-    old_dir: Path,
-    new_dir: Path,
-    debug_info1: Path | None,
-    debug_info2: Path | None,
-    devel_pkg1: Path | None,
-    devel_pkg2: Path | None,
-    include_private_dso: bool,
-    dso_only: bool,
-    headers: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...],
-    new_headers_only: tuple[Path, ...],
-    includes: tuple[Path, ...],
-    old_includes_only: tuple[Path, ...],
-    new_includes_only: tuple[Path, ...],
-    config_includes: tuple[Path, ...],
-    extract_if_package: Callable[
-        [Path, Path | None, Path | None],
-        tuple[Path, Path | None, Path | None, Path | None, bool],
-    ],
-    discover_shared_libraries: Callable[..., list[Path]],
-    is_package: Callable[[Path], bool],
-    is_elf_shared_object: Callable[[Path], bool],
-    *,
-    old_variant: str | None = None,
-    new_variant: str | None = None,
-    make_temp_dir: Callable[[str], Path] | None = None,
-) -> tuple[
-    Path | None,
-    Path | None,
-    list[Path],
-    list[Path],
-    list[Path],
-    list[Path],
-    dict[str, Path],
-    dict[str, Path],
-    list[str],
-    list[str],
-    dict[str, str],
-    dict[str, str],
-    PackageInventory | None,
-    PackageInventory | None,
-]:
-    """Prepare inputs/maps/keys for compare-release command.
-
-    ADR-065 S4 removed the old-minus-new / new-minus-old key lists from this
-    return: pairing answers *which* members have a counterpart and nothing
-    else -- what an unpaired member means is decided once, by
-    `workflows.release_scope.build_release_scope_record`. The two mappings
-    before the inventories (D1) name the stored members `--dso-only` could
-    not classify; the trailing two (S3) are each side's declared **component
-    inventory** when that side was a package archive this run unpacked --
-    `None` for a directory operand, for a stored `ProjectSnapshot` package
-    (whose own `inventory_complete` assertion governs), and for a file pair.
-
-    *old_variant*/*new_variant* and *make_temp_dir* (ADR-062 A1.7) are the
-    stored-side plumbing for a `ProjectSnapshot` package operand -- ``None``
-    (the default) leaves every pre-existing loose-directory/archive caller
-    unaffected. When a side *is* a package directory, its variant is
-    unpacked into per-library sub-package directories
-    (`_resolve_release_package_side`) instead of running the live
-    extraction/discovery path for that side; the two sides are resolved
-    fully independently, so a `stored/live` or `live/stored` release is the
-    same code path as `stored/stored`/`live/live`, just with one side's
-    branch taken instead of the other's.
-    """
-    old_pkg_map = (
-        _resolve_release_package_side(old_dir, old_variant, make_temp_dir, side="old")
-        if make_temp_dir is not None
-        else None
-    )
-    new_pkg_map = (
-        _resolve_release_package_side(new_dir, new_variant, make_temp_dir, side="new")
-        if make_temp_dir is not None
-        else None
-    )
-    # ADR-065 D1/D2: a stored member --dso-only could not classify is an
-    # acquisition failure the caller records, not a silent narrowing.
-    old_unclassified: dict[str, str] = {}
-    new_unclassified: dict[str, str] = {}
-    if dso_only:
-        # --dso-only's stored-side counterpart to is_elf_shared_object
-        # filtering a live directory's files below (Codex review: previously
-        # only applied there, so a stored non-ELF/executable artifact stayed
-        # in scope). No-op on either map that's already None.
-        from .workflows.release_package import dso_only_filter_pair
-
-        old_cls, new_cls = dso_only_filter_pair(old_pkg_map, new_pkg_map)
-        if old_cls is not None:
-            old_pkg_map, old_unclassified = old_cls.members, old_cls.unclassified
-        if new_cls is not None:
-            new_pkg_map, new_unclassified = new_cls.members, new_cls.unclassified
-
-    (old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file, old_whole) = (
-        extract_if_package(old_dir, debug_info1, devel_pkg1)
-    )
-    (new_lib_dir, new_debug_dir, new_header_dir, new_symbols_file, new_whole) = (
-        extract_if_package(new_dir, debug_info2, devel_pkg2)
-    )
-    old_files: list[Path] = []
-    new_files: list[Path] = []
-    if old_pkg_map is not None:
-        old_map, old_warns = dict(old_pkg_map), []
-    else:
-        old_files = _discover_files(
-            old_dir,
-            old_lib_dir,
-            include_private_dso,
-            discover_shared_libraries,
-            is_package,
-        )
-        if dso_only:
-            old_files = [f for f in old_files if is_elf_shared_object(f)]
-        old_map, old_warns = _build_match_map(old_files)
-    if new_pkg_map is not None:
-        new_map, new_warns = dict(new_pkg_map), []
-    else:
-        new_files = _discover_files(
-            new_dir,
-            new_lib_dir,
-            include_private_dso,
-            discover_shared_libraries,
-            is_package,
-        )
-        if dso_only:
-            new_files = [f for f in new_files if is_elf_shared_object(f)]
-        new_map, new_warns = _build_match_map(new_files)
-    warning_msgs: list[str] = [
-        f"Warning: {warning}" for warning in (old_warns + new_warns)
-    ]
-    debian_symbols_note = _debian_symbols_warning(old_symbols_file, new_symbols_file)
-    if debian_symbols_note is not None:
-        warning_msgs.append(debian_symbols_note)
-    # E-S3 case 3: each side's own declared symbols contract vs. its own
-    # contained binary (distinct from the old-vs-new diff just above).
-    warning_msgs.extend(
-        _debian_symbols_release_conflict_lines(
-            old_symbols_file, old_lib_dir, new_symbols_file, new_lib_dir
-        )
-    )
-    old_h, new_h = _resolve_release_headers(
-        headers,
-        old_headers_only,
-        new_headers_only,
-        old_header_dir,
-        new_header_dir,
-    )
-    # config_includes (the project .abicheck.yml compile.include_dirs
-    # suffix, already folded into `includes` by the caller) must survive a
-    # per-library-pair --old-include/--new-include override, which
-    # otherwise fully replaces `includes` for that side -- so it is
-    # re-appended explicitly here rather than relied on via `includes`
-    # (Codex review, fresh evidence).
-    old_inc = (
-        list(old_includes_only) + list(config_includes)
-        if old_includes_only
-        else list(includes)
-    )
-    new_inc = (
-        list(new_includes_only) + list(config_includes)
-        if new_includes_only
-        else list(includes)
-    )
-    old_inc.extend(_discover_include_roots(old_header_dir))
-    new_inc.extend(_discover_include_roots(new_header_dir))
-    matched_keys, old_map, new_map = _match_release_keys(
-        old_dir,
-        new_dir,
-        old_map,
-        new_map,
-        old_files,
-        new_files,
-        is_package,
-    )
-    # ADR-065 S3: the declared component inventory, built from the members
-    # this run selected out of a container it unpacked *in full*. Only a
-    # live package operand has one -- a stored `ProjectSnapshot` side
-    # (`*_pkg_map is not None`) already carries its own `inventory_complete`
-    # assertion, which `release_inventory_evidence` reads instead, and a
-    # directory operand proves nothing about what the release ships.
-    old_inventory = (
-        package_component_inventory(old_lib_dir, old_files, container_complete=True)
-        if old_pkg_map is None and old_whole
-        else None
-    )
-    new_inventory = (
-        package_component_inventory(new_lib_dir, new_files, container_complete=True)
-        if new_pkg_map is None and new_whole
-        else None
-    )
-    return (
-        old_debug_dir,
-        new_debug_dir,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
-        old_map,
-        new_map,
-        warning_msgs,
-        matched_keys,
-        old_unclassified,
-        new_unclassified,
-        old_inventory,
-        new_inventory,
-    )

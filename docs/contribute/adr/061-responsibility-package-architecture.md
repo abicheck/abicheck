@@ -1593,38 +1593,57 @@ The gap's two original halves are now in different states:
   invocation and a direct typed-request-shaped call resolve to the same
   scope, gate configuration, and degraded-member markers).
 
-**What remains open, precisely** (see
-`abicheck/frontends/cli/release_compare_request.py`'s own docstring for the
-same account in code): `resolve_release_compare_plan` is reachable from
-Python with no Click context — but it is not yet reachable from
-`abicheck.service`'s typed API surface, because the functions it must call
-(`_prepare_compare_release_inputs`, `frontends.cli.
-release_variant_operand._resolve_release_package_side`, and their own
-siblings — input discovery, package extraction, stored-variant resolution)
-are still classified `frontends`/flat `cli_*`, not `workflows`/`extract`.
-The `engine-cli-boundary` AI-readiness gate forbids `abicheck.service` from
-importing them directly, and at least one of them
-(`_resolve_release_package_side`) still raises a real `click.UsageError` on
-a malformed stored-package variant rather than a typed `errors.py`
-exception — a caller with no Click context receives that as a plain,
-uncaught exception. Closing this fully needs a real migration slice: move
-that call chain (and its Click-exception raises, converted to the typed
-exception hierarchy the rest of the engine uses) into `workflows`/`extract`
-per this ADR's own migration rules, then give `abicheck.service` a real
-entry point built on it. Also still open: the wider `EffectiveEvaluationConfig`
-namespaces beyond gate (above), and the release fan-out's execution half
-(per-library dump/compare dispatch, matrix/probe expansion, bundle-facts
-writing, output rendering) — this closure package's slice covers only the
-*resolution* half, matching `workflows/artifact/contracts.py`'s own
-Milestone A/B precedent of resolving before executing.
+**Closed (closure package 4, final slice).** The account this section
+carried — that `resolve_release_compare_plan` was reachable from Python with
+no Click context but *not* from `abicheck.service`, because the functions it
+must call (`_prepare_compare_release_inputs`, `frontends.cli.
+release_variant_operand._resolve_release_package_side` and their siblings:
+input discovery, package extraction, stored-variant resolution) were
+classified `frontends`/flat `cli_*` and at least one raised a real
+`click.UsageError` from inside the resolution — described the state before
+that migration slice landed. It has now landed, as this ADR's own rules
+require rather than as a wrapper:
+
+- that whole call chain is `abicheck/workflows/release_inputs.py`, and every
+  `click.UsageError`/`click.ClickException` it raised is the typed
+  `errors.ReleaseOperandError` (a `ValidationError` subclass, so existing
+  usage-error translation already covers it);
+- the request/plan pair itself is `abicheck/workflows/release_request.py`,
+  and `abicheck/frontends/cli/release_compare_request.py` is a
+  delegation-only facade whose one remaining job is translating that typed
+  error back into a `click.UsageError` — so a user's message and exit `64`
+  are unchanged;
+- `abicheck.service` exposes it as `resolve_release_compare`, alongside
+  `ReleaseCompareRequest`/`ReleaseComparePlan`/
+  `cleanup_release_compare_plan`.
+
+`tests/test_release_request_parity.py` is the completion test for this half,
+and it is behavioural on both sides: a real `compare` CLI run and a direct
+`service.resolve_release_compare` call resolve the same scope, gate and
+markers (parametrized over cardinality), and the same malformed operand
+raises a typed error for the API caller while still exiting `64` with the
+*identical message* for the CLI one. It deliberately asserts none of this
+from file text: an `import click` grep would pass while the two surfaces
+behaved differently.
+
+Also still open (unchanged by this slice): the wider
+`EffectiveEvaluationConfig` namespaces beyond gate (above), and the release
+fan-out's execution half (per-library dump/compare dispatch, matrix/probe
+expansion, bundle-facts writing, output rendering) — this closure package
+covers only the *resolution* half, matching `workflows/artifact/contracts.py`'s
+own Milestone A/B precedent of resolving before executing. The missing
+`dump` fan-out that should own baseline capture rather than
+`compare --bundle-facts-out` is recorded in `docs/contribute/known-gaps.md`;
+it was blocked on exactly the migration above, and is now unblocked.
 
 **Completion test:** equivalent CLI and typed-API inputs produce equal
 resolved scope, configuration, acquisition records, and outcomes across
 live and stored operands; selection, inventory, and acquisition state are
 fields on the shared request/plan, not frontend locals. Met for the
 release fan-out's own pre-execution resolution, reachable as one direct
-Python call; not yet met for a caller with no CLI-layer dependency at all
-(`abicheck.service`), which is the remaining scope above.
+Python call *and* from `abicheck.service` with typed errors -- see the
+completion test named above. Not yet met for the execution half, which is
+the remaining scope above.
 
 ### E. Storage and model ownership, not file placement
 

@@ -153,9 +153,7 @@ def member_attributed_notes(decision: ReleaseAssuranceDecision) -> list[str]:
         if member.notes:
             lines.extend(f"{member.name}: {note}" for note in member.notes)
         else:
-            lines.append(
-                f"{member.name}: {member.status} (no further detail recorded)"
-            )
+            lines.append(f"{member.name}: {member.status} (no further detail recorded)")
     return lines
 
 

@@ -105,8 +105,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     str | None,
-    # require_complete_analysis (ADR-071)
-    bool,
+    bool,  # require_complete_analysis (ADR-071)
     "SeverityConfig | None",
     "PackApplication | None",
     bool,
@@ -457,17 +456,20 @@ def _compare_one_library(
         entry["evidence_contract_error_contribution"] = (
             EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
         )
-        if require_complete_analysis:
-            # ADR-071 D6: this member's own assurance fact, for the release's
-            # `max` fold to fold and the report to name. Only under the
-            # setting (D4), the same rule the coverage block below follows for
-            # --contract. The keys and the flat-root read behind them are
-            # `workflows.release_assurance_members`' -- see its docstring.
-            from .workflows.release_assurance_members import (
-                member_assurance_entry_fields,
-            )
+        # `.abicheck.yml`'s `assurance.require_complete`, per member -- the
+        # same orthogonal 0/1 floor, folded with max() into the release exit
+        # by `_exit_compare_release`. Library count must not change what the
+        # setting means: this is exactly the contribution a single-pair
+        # `compare` of the same library would compute, so a release of one
+        # library and that library compared on its own agree. Recorded
+        # unconditionally (the flag's own `require_complete` gate lives in
+        # the fold, not here) so the per-library status is readable in the
+        # release JSON even on a run that did not opt in.
+        # ADR-071 D1/D6: which keys this axis owns, and the fail-open status
+        # read behind them, are `stamp_member_assurance`'s (see its docstring).
+        from .workflows.release_assurance_members import stamp_member_assurance
 
-            entry.update(member_assurance_entry_fields(result))
+        stamp_member_assurance(entry, result, require_complete=require_complete_analysis)
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -512,16 +514,16 @@ def _compare_one_library(
             # promises the complete list.
             _safe_write_output(
                 lib_report_path,
-                # ADR-071 (Codex review, P2): without this an incomplete
-                # member's own `{library}.json` said `exit.code: 0` while that
-                # member floored the run to `1` -- a file contradicting the run
-                # that wrote it, read as clean by aggregate/a deferred gate.
-                to_json(
-                    result,
-                    severity_config=severity_config,
-                    require_complete_analysis=require_complete_analysis,
-                ),
+                # ADR-071 (Codex P2): without this an incomplete member's own
+                # `{library}.json` said `exit.code: 0` for a run it floored to `1`.
+                to_json(result, severity_config=severity_config, require_complete_analysis=require_complete_analysis),
             )
+            # The unambiguous index a truncated machine document owes its
+            # reader: this member's *complete*, uncapped report, by path.
+            # `entry["findings"]` is a capped presentation projection, and a
+            # machine consumer that cannot tell where the rest is has been
+            # handed an implicitly truncated document.
+            entry["complete_report"] = str(lib_report_path)
         return entry
     except Exception as exc:
         # One classification, four outcomes, ordering constraints of its own
@@ -628,7 +630,8 @@ def _suppress_lockstep_soname_findings(
         from .workflows.disposition import supersede_as_suppressed
 
         supersede_as_suppressed(
-            result, unnecessary,
+            result,
+            unnecessary,
             application_point="lockstep_soname_suppression",
             rule_id="lockstep_soname_bump",
             reason=(
@@ -658,13 +661,8 @@ def _suppress_lockstep_soname_findings(
             # contract `_release_md_library_findings` documents).
             _safe_write_output(
                 lib_report_path,
-                # Same ADR-071 threading as the first write above, same
-                # reason -- see its comment.
-                to_json(
-                    result,
-                    severity_config=severity_config,
-                    require_complete_analysis=require_complete_analysis,
-                ),
+                # Same ADR-071 threading as the first write above.
+                to_json(result, severity_config=severity_config, require_complete_analysis=require_complete_analysis),
             )
     return suppressed
 
@@ -826,7 +824,9 @@ def _compare_release_libraries(
                 f"Unsupported: {entry['library']}: {entry.get('reason', '')}", err=True
             )
         elif v == "failed":
-            click.echo(f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True)
+            click.echo(
+                f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True
+            )
         if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
             worst_verdict, 0
         ):
