@@ -1,0 +1,47 @@
+name: SVS diagnostic offline inputs
+
+on:
+  push:
+    branches: [diagnostics/svs-main-c29824f]
+    paths: [.github/workflows/diagnostic-svs-offline.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: c29824f809b5ed9f23f40b8b03898674fac580b8
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Package exact main and dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p payload/wheelhouse
+          git rev-parse HEAD | tee payload/abicheck-commit.txt
+          test "$(git rev-parse HEAD)" = c29824f809b5ed9f23f40b8b03898674fac580b8
+          git archive --format=tar.gz --output=payload/abicheck-source.tar.gz HEAD
+          python -m pip wheel . --wheel-dir payload/wheelhouse
+          python -m pip download pytest pytest-cov pytest-xdist pytest-timeout hypothesis filelock jsonschema --dest payload/wheelhouse
+          python --version > payload/python-version.txt
+      - name: Fetch published SVS baseline
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 --max-time 120 \
+            https://github.com/intel/ScalableVectorSearch/releases/download/v0.4.0/svs-cpp-runtime-bindings.tar.gz \
+            --output payload/svs-v0.4.0-runtime.tar.gz
+          echo '90833ee345afc0b448d56f8f2db743a9d8cf707cc4879b2b1df6d73c0a150a68  payload/svs-v0.4.0-runtime.tar.gz' | sha256sum --check
+          (cd payload && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Upload offline diagnostic inputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: svs-offline-c29824f
+          path: payload/
+          retention-days: 1
+          if-no-files-found: error
