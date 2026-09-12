@@ -1458,7 +1458,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         # v18 was n=2. A fourth `same_persisted_content` caller had been
         # added without anyone noticing the third, and nothing anywhere
         # measured the count.
-        fixed_by=(),
+        fixed_by=(1245,),
         seed_tests=("tests/test_snapshot_digest_recomputation.py",),
         public_surfaces=("cli", "python-api"),
         axes={
