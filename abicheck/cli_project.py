@@ -27,8 +27,10 @@ artifact, and grouping the three under one advanced-integration namespace is
 how that bar is satisfied here without losing any of the three checks:
 
 \b
-  project validate        was: project-targets validate
-  project validate-build  was: build-output validate
+  project validate        was: project-targets validate, build-output
+                          validate, and project validate-use-cases —
+                          one command over three input schemas (plan
+                          Phase 7p)
   project plan            was: run-plan generate
 
 Two former subcommands are **not** carried forward as public CLI surface:
@@ -62,6 +64,11 @@ from .buildsource.project_targets import (
     validate_project_targets,
 )
 from .buildsource.run_plan import generate_run_plan
+from .buildsource.validation_input import (
+    ValidationInputError,
+    ValidationInputKind,
+    classify_validation_input,
+)
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
 from .workflows.extraction import (
@@ -80,8 +87,9 @@ def project_group() -> None:
 
     \b
     Subcommands:
-      validate         Check .abicheck.yml's targets/bundles/profiles/channels block.
-      validate-build   Check a project-produced abicheck-build/ directory.
+      validate         Check one project-integration document: a project
+                       config, an abicheck-build/ directory, or an
+                       impact-use-cases.yaml manifest.
       plan             Derive run-plan.json from .abicheck.yml + build-output.json.
       history          Derive lifecycle events + coverage from N stored snapshots (ADR-066 S1).
 
@@ -101,14 +109,24 @@ def project_group() -> None:
 
 
 # --------------------------------------------------------------------------
-# project validate  (was: project-targets validate)
+# --------------------------------------------------------------------------
+# project validate — one command, three input schemas (plan Phase 7p)
+#
+# Was three subcommands (``validate``, ``validate-build``,
+# ``validate-use-cases``): one question over three schemas, each with its
+# own copy of --format/-o/-v. Dispatch is by validated schema discriminator
+# or recognized directory contract, never by filename — buildsource/
+# validation_input.py owns it and says why that distinction is
+# load-bearing. Recognizing a document authorizes nothing:
+# --toolchain-bindings stays explicitly supplied.
 # --------------------------------------------------------------------------
 
 
 @project_group.command("validate")
 @click.argument(
-    "config",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    "input_path",
+    metavar="INPUT",
+    type=click.Path(exists=True, path_type=Path),
     default=".abicheck.yml",
 )
 @output_options(
@@ -128,49 +146,140 @@ def project_group() -> None:
         "declared — that the resolved executable's probed identity actually "
         "matches. Loaded only from this explicit path — never auto-"
         "discovered, per the untrusted-config trust boundary "
-        "ProfileCompileSpec.binding documents."
+        "ProfileCompileSpec.binding documents. Applies to a project config; "
+        "supplying it with any other INPUT is a usage error."
     ),
 )
 @verbose_option
 def project_validate_cmd(
-    config: Path,
+    input_path: Path,
     fmt: str,
     output: Path | None,
     toolchain_bindings: Path | None,
     verbose: bool,
 ) -> None:
-    """Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
+    """Validate INPUT, a project-integration document (ADR-047, ADR-057).
 
-    CONFIG defaults to ``.abicheck.yml`` in the current directory. Checks:
-    every target's ``kind``-specific required fields are set (and no
-    kind-inappropriate field is); ``app-consumer``/``plugin-contract``
-    targets' ``library`` resolves to a real ``kind: library`` target; every
-    ``bundle:`` reference and bundle membership resolves and agrees; every
-    ``checks[].channel`` resolves to a declared baseline channel (or is the
-    ``"none"`` no-baseline sentinel); ``checks[].depth``/``gate_mode`` are
-    valid; every ``checks[].profiles`` entry resolves to a declared profile;
-    every id is a valid, ``check_id``-embeddable identifier. With
-    ``--toolchain-bindings``, also checks every declared
-    ``profiles.<id>.compile.binding``/``consumer_compile.binding`` resolves
-    against that file, and that a resolved binding's probed compiler
-    identity matches any declared
-    ``compiler_family``/``compiler_version``/``target``
-    (G34 Phase A; MSVC bindings are skipped — see
-    ``abicheck.buildsource.toolchain_probe``'s module docstring).
-
-    Structural/type errors in the YAML itself (unknown key, wrong type) fail
-    immediately as a usage error; this command's own validation report only
-    covers cross-reference/semantic issues on an already-well-formed block.
+    INPUT defaults to ``.abicheck.yml``. Which validation runs is decided by
+    INPUT's own shape, never by its name:
 
     \b
-    Exit codes:
-      0   Valid — no errors (warnings may still be present).
-      1   One or more validation errors.
-      64  Usage error (CONFIG is not readable YAML, or fails strict parsing).
+      a YAML mapping           -> a project config's targets:/bundles:/
+                                  profiles:/baseline: block (ADR-047 §3)
+      a directory, or a
+      build-output.json        -> that build output (ADR-047 §11.1)
+      a YAML list              -> an impact-use-cases.yaml manifest
+                                  (G29 Phase 4, ADR-057 amendment)
+
+    **Project config.** Every target's ``kind``-specific required fields are
+    set (and no kind-inappropriate field is); ``app-consumer``/
+    ``plugin-contract`` targets' ``library`` resolves to a real
+    ``kind: library`` target; every ``bundle:`` reference and bundle
+    membership resolves and agrees; every ``checks[].channel`` resolves to a
+    declared baseline channel (or is the ``"none"`` no-baseline sentinel);
+    ``checks[].depth``/``gate_mode`` are valid; every ``checks[].profiles``
+    entry resolves to a declared profile; every id is a valid,
+    ``check_id``-embeddable identifier. With ``--toolchain-bindings``, also
+    checks every declared ``profiles.<id>.compile.binding``/
+    ``consumer_compile.binding`` resolves against that file, and that a
+    resolved binding's probed compiler identity matches any declared
+    ``compiler_family``/``compiler_version``/``target`` (G34 Phase A; MSVC
+    bindings are skipped — see ``abicheck.buildsource.toolchain_probe``'s
+    module docstring). Structural/type errors in the YAML itself fail
+    immediately as a usage error; the validation report covers
+    cross-reference/semantic issues on an already-well-formed block.
+
+    **Build output.** Every declared public/generated header root is
+    non-empty; every target's binary exists and matches its digests[] entry;
+    ``evidence.projection`` is 'declared' for every target that has evidence
+    ('inferred' is schema-reserved for a future attribution mechanism and is
+    always rejected); no evidence pack is referenced by more than one
+    target, and a referenced pack's own identity (manifest.library or a
+    tagged TU's target_id) agrees with the specific target using it.
+
+    **Use-case manifest.** Structure only: a well-formed YAML list of use
+    cases, where a non-mapping entry, an unrecognized field, or a
+    missing/blank ``use_case`` name is a usage error. Attributing a real
+    comparison's findings to the use cases that reach them is
+    ``abicheck compare --use-cases MANIFEST`` — reported beside every
+    other finding, not a second diffing surface inside a validator.
+
+    \b
+    Exit codes: 0 valid (warnings may still be present) · 1 validation
+    errors · 64 usage error (INPUT unreadable, not a recognizable
+    project-integration document, or failing strict parsing).
     """
     _setup_verbosity(verbose)
 
-    parsed = _load_project_targets_config(config)
+    try:
+        kind, target = classify_validation_input(input_path)
+    except ValidationInputError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    if (
+        toolchain_bindings is not None
+        and kind is not ValidationInputKind.PROJECT_CONFIG
+    ):
+        raise click.UsageError(
+            "--toolchain-bindings applies to a project config; "
+            f"{input_path} is a {kind.value}."
+        )
+
+    if kind is ValidationInputKind.EMPTY_DOCUMENT:
+        ok, payload, text = _validate_empty_document(target, toolchain_bindings)
+    elif kind is ValidationInputKind.PROJECT_CONFIG:
+        ok, payload, text = _validate_project_config(target, toolchain_bindings)
+    elif kind is ValidationInputKind.BUILD_OUTPUT:
+        ok, payload, text = _validate_build_output(target)
+    else:
+        ok, payload, text = _validate_use_case_manifest(target)
+
+    rendered = json.dumps(payload, indent=2) if fmt == "json" else text
+
+    if output is not None:
+        _safe_write_output(output, rendered)
+    else:
+        click.echo(rendered)
+
+    sys.exit(0 if ok else 1)
+
+
+def _report_lines(header: str, report: object) -> list[str]:
+    """Render a validation report's errors/warnings — shared by the two
+    report-producing kinds, which had byte-identical copies of this."""
+    errors = list(getattr(report, "errors", []))
+    warnings = list(getattr(report, "warnings", []))
+    lines = [header]
+    if not errors:
+        lines.append("OK — no errors.")
+    else:
+        lines.append(f"FAILED — {len(errors)} error(s):")
+        lines.extend(f"  - {e}" for e in errors)
+    if warnings:
+        lines.append(f"{len(warnings)} warning(s):")
+        lines.extend(f"  - {w}" for w in warnings)
+    return lines
+
+
+def _validate_project_config(
+    config: Path,
+    toolchain_bindings: Path | None,
+) -> tuple[bool, dict[str, object], str]:
+    try:
+        parsed = _load_project_targets_config(config)
+    except click.UsageError as exc:
+        # A mapping is read as a project config, since that is the one
+        # shape with no self-describing tag. Say so when the read fails:
+        # the likeliest cause is a document of another kind that lost its
+        # discriminating shape (a use-case manifest whose entries stopped
+        # being a list), and a bare "unknown key" message would send the
+        # user looking for a typo instead.
+        raise click.UsageError(
+            f"{exc.format_message()}\n"
+            f"({config} was read as a project config — a YAML mapping with "
+            "no schema: tag. A use-case manifest is a YAML list; a build "
+            "output is a directory or a build-output.json.)"
+        ) from exc
     report = validate_project_targets(parsed)
 
     if toolchain_bindings is not None:
@@ -185,26 +294,74 @@ def project_validate_cmd(
             check_profile_toolchain_identity(parsed.profiles, bindings_file)
         )
 
-    if fmt == "json":
-        text = json.dumps(report.to_dict(), indent=2)
-    else:
-        lines = [f"project validation: {config}"]
-        if report.ok:
-            lines.append("OK — no errors.")
-        else:
-            lines.append(f"FAILED — {len(report.errors)} error(s):")
-            lines.extend(f"  - {e}" for e in report.errors)
-        if report.warnings:
-            lines.append(f"{len(report.warnings)} warning(s):")
-            lines.extend(f"  - {w}" for w in report.warnings)
-        text = "\n".join(lines)
+    text = "\n".join(_report_lines(f"project validation: {config}", report))
+    return report.ok, report.to_dict(), text
 
-    if output is not None:
-        _safe_write_output(output, text)
-    else:
-        click.echo(text)
 
-    sys.exit(0 if report.ok else 1)
+def _validate_build_output(directory: Path) -> tuple[bool, dict[str, object], str]:
+    try:
+        report = validate_build_output(directory)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    text = "\n".join(_report_lines(f"build-output validation: {directory}", report))
+    return report.ok, report.to_dict(), text
+
+
+def _validate_use_case_manifest(manifest: Path) -> tuple[bool, dict[str, object], str]:
+    from .errors import UseCaseManifestError
+    from .impact.use_cases import load_use_case_manifest
+
+    try:
+        definitions = load_use_case_manifest(manifest)
+    except (UseCaseManifestError, OSError) as exc:
+        # OSError alongside the manifest-specific error (Codex review, fresh
+        # evidence): load_use_case_manifest() deliberately leaves a missing/
+        # unreadable MANIFEST unwrapped (its own docstring) — Click's
+        # exists=True check only guarantees the path was there at argument
+        # parsing time, not at the read a moment later (permissions change,
+        # the file disappearing), so an unhandled OSError here would exit 1
+        # with a bare traceback instead of the documented usage-error path.
+        raise click.UsageError(str(exc)) from exc
+
+    payload = {
+        "manifest": str(manifest),
+        "ok": True,
+        "use_case_count": len(definitions),
+    }
+    text = "\n".join(
+        [
+            f"use-case manifest validation: {manifest}",
+            f"OK — {len(definitions)} use case(s), structurally well-formed.",
+        ]
+    )
+    return True, payload, text
+
+
+def _validate_empty_document(
+    path: Path,
+    toolchain_bindings: Path | None,
+) -> tuple[bool, dict[str, object], str]:
+    """An empty document — validated under every reading, not assigned to one.
+
+    YAML cannot distinguish an empty mapping from an empty list, and both
+    superseded commands accepted one: an ``.abicheck.yml`` declaring no
+    targets (whose *config* validation still has warnings worth printing —
+    "no targets declared" is the whole point of running it) and a manifest
+    declaring zero use cases. So the config validation actually runs, and
+    the other readings are stated beside it. Picking one silently would
+    lose whichever the caller meant.
+    """
+    ok, payload, text = _validate_project_config(path, toolchain_bindings)
+    payload = {**payload, "kind": "empty-document", "use_case_count": 0}
+    text = "\n".join(
+        [
+            text,
+            "Note: this document is empty, so it is also a vacuously valid "
+            "use-case manifest (0 use cases).",
+        ]
+    )
+    return ok, payload, text
 
 
 def _load_project_targets_config(config: Path) -> ProjectTargetsConfig:
@@ -223,156 +380,6 @@ def _load_project_targets_config(config: Path) -> ProjectTargetsConfig:
         return ProjectTargetsConfig.from_dict(raw)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
-
-
-# --------------------------------------------------------------------------
-# project validate-build  (was: build-output validate)
-# --------------------------------------------------------------------------
-
-
-@project_group.command("validate-build")
-@click.argument(
-    "directory",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-)
-@output_options(
-    ["text", "json"],
-    default="text",
-    format_help="Output format for the validation report.",
-)
-@verbose_option
-def project_validate_build_cmd(
-    directory: Path,
-    fmt: str,
-    output: Path | None,
-    verbose: bool,
-) -> None:
-    """Validate DIRECTORY's build-output.json (ADR-047 §11.1).
-
-    Checks: every declared public/generated header root is non-empty; every
-    target's binary exists and matches its digests[] entry; evidence.projection
-    is 'declared' for every target that has evidence ('inferred' is
-    schema-reserved for a future attribution mechanism and is always
-    rejected); no evidence pack is referenced by more than one target, and a
-    referenced pack's own identity (manifest.library or a tagged TU's
-    target_id) agrees with the specific target using it.
-
-    \b
-    Exit codes:
-      0   Valid — no errors (warnings may still be present).
-      1   One or more validation errors.
-      64  Usage error (DIRECTORY is not a readable build-output.json).
-    """
-    _setup_verbosity(verbose)
-
-    try:
-        report = validate_build_output(directory)
-    except (FileNotFoundError, ValueError) as exc:
-        raise click.UsageError(str(exc)) from exc
-
-    if fmt == "json":
-        text = json.dumps(report.to_dict(), indent=2)
-    else:
-        lines = [f"build-output validation: {directory}"]
-        if report.ok:
-            lines.append("OK — no errors.")
-        else:
-            lines.append(f"FAILED — {len(report.errors)} error(s):")
-            lines.extend(f"  - {e}" for e in report.errors)
-        if report.warnings:
-            lines.append(f"{len(report.warnings)} warning(s):")
-            lines.extend(f"  - {w}" for w in report.warnings)
-        text = "\n".join(lines)
-
-    if output is not None:
-        _safe_write_output(output, text)
-    else:
-        click.echo(text)
-
-    sys.exit(0 if report.ok else 1)
-
-
-# --------------------------------------------------------------------------
-# project validate-use-cases  (G29 Phase 4, ADR-057 amendment)
-# --------------------------------------------------------------------------
-
-
-@project_group.command("validate-use-cases")
-@click.argument(
-    "manifest",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-)
-@output_options(
-    ["text", "json"],
-    default="text",
-    format_help="Output format for the validation report.",
-)
-@verbose_option
-def project_validate_use_cases_cmd(
-    manifest: Path,
-    fmt: str,
-    output: Path | None,
-    verbose: bool,
-) -> None:
-    """Validate MANIFEST, an ``impact-use-cases.yaml`` file (G29 Phase 4,
-    ADR-057 amendment; see docs/contribute/use-case-impact.md).
-
-    Checks the manifest is a well-formed YAML list of use cases: a
-    non-mapping entry, an unrecognized field, or a missing/blank
-    ``use_case`` name is a usage error.
-
-    Structure only. Resolving a manifest's entrypoints against a real
-    library, and attributing a real comparison's findings to the use cases
-    that reach them, is ``abicheck compare --use-cases MANIFEST`` -- one
-    comparison, reported in the same place as every other finding, rather
-    than a second snapshot-diffing surface grown inside a validator (the
-    ``--against``/``--against-new`` pair that used to live here).
-
-    \b
-    Exit codes:
-      0   Valid — the manifest is well-formed.
-      64  Usage error (MANIFEST is malformed or unreadable).
-    """
-    _setup_verbosity(verbose)
-
-    from .errors import UseCaseManifestError
-    from .impact.use_cases import load_use_case_manifest
-
-    try:
-        definitions = load_use_case_manifest(manifest)
-    except (UseCaseManifestError, OSError) as exc:
-        # OSError alongside the manifest-specific error (Codex review, fresh
-        # evidence): load_use_case_manifest() deliberately leaves a missing/
-        # unreadable MANIFEST unwrapped (its own docstring) — Click's
-        # exists=True check only guarantees the path was there at argument
-        # parsing time, not at the read a moment later (permissions change,
-        # the file disappearing), so an unhandled OSError here would exit 1
-        # with a bare traceback instead of the documented usage-error path.
-        raise click.UsageError(str(exc)) from exc
-
-    if fmt == "json":
-        text = json.dumps(
-            {
-                "manifest": str(manifest),
-                "ok": True,
-                "use_case_count": len(definitions),
-            },
-            indent=2,
-        )
-    else:
-        text = "\n".join(
-            [
-                f"use-case manifest validation: {manifest}",
-                f"OK — {len(definitions)} use case(s), structurally well-formed.",
-            ]
-        )
-
-    if output is not None:
-        _safe_write_output(output, text)
-    else:
-        click.echo(text)
-
-    sys.exit(0)
 
 
 # --------------------------------------------------------------------------

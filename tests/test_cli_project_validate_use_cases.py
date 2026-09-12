@@ -15,7 +15,9 @@
 
 """``impact-use-cases.yaml``'s two CLI front doors (G29 Phase 4, ADR-057).
 
-``abicheck project validate-use-cases`` checks a manifest's own structure;
+``abicheck project validate`` checks a manifest's own structure (one
+command over three input schemas since plan Phase 7p — the manifest is
+recognized by its top-level list shape, not by its filename);
 ``abicheck compare --use-cases`` folds it into a real comparison and reports
 which of that comparison's findings each declared use case reaches. (The
 ``--against``/``--against-new`` pair that used to diff two snapshots from
@@ -43,7 +45,7 @@ from abicheck.serialization import save_snapshot
 
 
 def _run(args: list[str]) -> Result:
-    return CliRunner().invoke(main, ["project", "validate-use-cases", *args])
+    return CliRunner().invoke(main, ["project", "validate", *args])
 
 
 def _compare(manifest: Path, old: Path, new: Path, *extra: str) -> Result:
@@ -193,10 +195,16 @@ class TestStructuralValidationOnly:
         assert "0 use case" in res.output
 
     def test_malformed_manifest_is_a_usage_error(self, tmp_path: Path) -> None:
+        # A mapping is not a manifest at all under Phase 7p's shape
+        # dispatch — it is read as a project config, the one shape with no
+        # self-describing tag. Still exit 64, and the message says which
+        # reading was applied rather than sending the user hunting for a
+        # typo in a document of the wrong kind.
         manifest = _write_manifest(tmp_path, "not_a_list: true\n")
         res = _run([str(manifest)])
         assert res.exit_code == 64
-        assert "top-level document" in res.output
+        assert "read as a project config" in res.output
+        assert "a YAML list" in res.output
 
     def test_unknown_field_is_a_usage_error(self, tmp_path: Path) -> None:
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoint: [train]\n")

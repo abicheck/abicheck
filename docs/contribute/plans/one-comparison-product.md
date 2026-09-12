@@ -1699,14 +1699,51 @@ mechanism* first and an option count second:
   `root-cause` **with a measurement**, not declared redundant. Net option
   count: **0** — which is the point: this slice reduces decisions, not
   strings beginning with `--`.
-- **7p — `project validate` consolidation.** `project validate`,
-  `validate-build` and `validate-use-cases` are one question over three
-  input schemas. Target: `abicheck project validate INPUT`, dispatching on
-  a validated schema discriminator or a recognized directory contract —
-  **never on a filename guess**, and recognizing a project file never
-  authorizes its nominated toolchain (`--toolchain-bindings` stays the
-  explicit authorization). **Net −2 subcommands**, −4 duplicated output
-  options once 7m's export request is shared.
+- **7p — `project validate` consolidation. Done.** `project validate`,
+  `validate-build` and `validate-use-cases` were one question over three
+  input schemas. Now `abicheck project validate INPUT`, dispatching on a
+  validated schema discriminator or a recognized directory contract —
+  never on a filename guess, and recognizing a project file never
+  authorizes its nominated toolchain (`--toolchain-bindings` applies to a
+  project config and is a usage error elsewhere, rather than being
+  silently ignored). **−2 subcommands**, −4 duplicated output options;
+  the remaining `--format`/`-o` pair folds with 7m like every other
+  command's.
+
+  The classifier is `buildsource/validation_input.py` — beside the
+  build-output contract it routes on, since ADR-061 classifies
+  `frontends/` as `may_import: [model, workflows, report]` and routing on
+  anything but that real contract would be the filename guess this slice
+  rules out. A directory (or a `build-output.json` named directly, which resolves to
+  its directory) declaring `schema: abicheck.build-output/v1` is a build
+  output, reusing `is_build_output_dir` — the same contract every other
+  build-output consumer routes on; a top-level list is a use-case
+  manifest; a mapping is a project config, as the one shape carrying no
+  self-describing tag. Its property test is exhaustive over
+  shape × filename, with each shape's *conventional* name among the
+  misleading ones, so a filename-based implementation fails rather than
+  coincidentally passing — AGENTS.md's primitive-level rule, and the
+  reason this is a separate module rather than a branch inside the
+  command.
+
+  **Three consequences worth not rediscovering**, each a real behavior
+  change the consolidation forces, none of them a capability loss:
+
+  1. **An empty document is validated under every reading, not assigned
+     to one.** YAML cannot tell an empty mapping from an empty list, and
+     both superseded commands accepted one. So the project-config
+     validation still runs (its "no targets declared" warning is the
+     whole reason to run it) and the vacuous manifest reading is stated
+     beside it. Silently picking either would have dropped whichever the
+     caller meant — the empty config's warnings, or the manifest's `0
+     use cases` answer.
+  2. **A mapping that was meant to be a manifest is read as a config**,
+     because shape is the discriminator. Exit code is unchanged (`64`)
+     and the message now names the reading applied, so the user is not
+     sent hunting for a typo in a document of the wrong kind.
+  3. **Unparseable YAML fails at classification**, ahead of every
+     validator, rather than inside the project-config loader. Same exit
+     code, same named file.
 - **7q — `aggregate --run-plan` into `--manifest`.** A run plan is a
   second schema for the same "expected set" input; the projection is
   validated internally. `--discovered-only` stays **explicit** — it states
@@ -1827,10 +1864,10 @@ listed beside it so the gap is legible rather than averaged away:
 | `deps compare` | 8 | **7** | 7 | — (7m) |
 | `project history` | 5 | **4** | 4 | — (7m) |
 | `project plan` | 8 | **6** | 6 | — (7r + 7m) |
-| `project validate` | 4 | **3** | 3 | — (7m) |
-| `project validate-build` | 3 | **0** | folded | 7p |
-| `project validate-use-cases` | 3 | **0** | folded | 7p |
-| **Native total** | **109** | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** |
+| `project validate` | 4 | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
+| `project validate-build` | 3 | **0** | folded | **done (7p)** |
+| `project validate-use-cases` | 3 | **0** | folded | **done (7p)** |
+| **Native total** | **109** (103 after 7p) | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** |
 | `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
 
 Read the last column as this phase's actual position: **on six of the ten

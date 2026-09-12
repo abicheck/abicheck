@@ -47,7 +47,7 @@ any *report-schema* ``Change.affected_use_cases`` field or
 drive-by extension here).
 
 :func:`explain_use_case_impact` (G29 Phase 4, added alongside the
-``project validate-use-cases --against-new`` CLI mode) is a narrower, real
+``project validate-use-cases --against-new`` CLI mode, both now retired) is a narrower, real
 step past graph-building alone: given a real two-snapshot diff's changed
 symbols, it answers *which declared use case(s)' own entrypoints reach
 each one* — but it is a **read-only report view**, not a `Change`
@@ -439,7 +439,7 @@ class UseCaseResolution:
     docstring), which is correct for graph construction but leaves a
     manifest author with zero visibility into *which* of their declared
     entrypoints actually matched anything. This dataclass is that missing
-    visibility, for a caller (``project validate-use-cases``) that wants to
+    visibility, for a caller (``project validate``) that wants to
     report it without changing what the graph itself records.
     """
 

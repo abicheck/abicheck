@@ -297,6 +297,25 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset({"AGENTS.md"}),
     ),
     (
+        "project validate-build / project validate-use-cases (plan Phase 7p"
+        " folded both into one project validate INPUT, dispatching on the"
+        " document's own schema discriminator or directory contract rather"
+        " than on its filename)",
+        ("validate-build", "validate-use-cases"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # Historical record: the plan that ordered the fold and the
+                # ADRs/plan sections that describe the surface as it was.
+                "contribute/plans",
+                "contribute/adr",
+                # Migration note naming the retired spelling beside the
+                # replacement, which is the point of the note.
+                "reference/build-output-schema.md",
+            }
+        ),
+    ),
+    (
         "project validate-use-cases --against/--against-new (resolving a"
         " manifest against a real library, and attributing a comparison's"
         " findings to the use cases that reach them, is compare --use-cases)",
