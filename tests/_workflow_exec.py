@@ -103,6 +103,20 @@ HOSTILE_SCALAR_CORPUS = [
 FORBIDDEN_ARTIFACT_NAME_CHARS = set('":<>|*?\r\n/\\')
 
 
+#: Skips a test whose fixture needs a path containing a literal newline byte.
+#: POSIX filesystems allow one -- which is exactly why the workflow-command
+#: injection defenses (`_gha_escape`, `action/run.sh`'s own helper) exist and
+#: are exercised with such a path. Windows rejects the character in a filename
+#: at the OS level (`OSError: [WinError 123]`), so the attack shape cannot be
+#: constructed there at all: the test has nothing to say about the defense on
+#: that platform, rather than the defense being unverified. Shared here so the
+#: three sites needing it state one reason, not three.
+requires_newline_in_filenames = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows filenames cannot contain a literal newline (WinError 123)",
+)
+
+
 def load_workflow(name: str) -> dict[str, Any]:
     with open(WORKFLOWS / name, encoding="utf-8") as fh:
         return yaml.safe_load(fh)

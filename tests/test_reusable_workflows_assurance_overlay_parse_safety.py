@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Any
 
 from _assurance_overlay_exec import _run_overlay, _written_overlay
-from _workflow_exec import make_workspace
+from _workflow_exec import make_workspace, requires_newline_in_filenames
 
 
 def _run_explicit(tmp_path: Path, base_config_yaml: str) -> Any:
@@ -157,6 +157,7 @@ class TestAssuranceOverlayExplicitConfigParseFailureEscaping:
         assert "::error::" in result.stderr
         assert "config-path" not in result.outputs
 
+    @requires_newline_in_filenames
     def test_malformed_yaml_escapes_workflow_command_injection(
         self, tmp_path: Path
     ) -> None:
@@ -193,9 +194,7 @@ class TestAssuranceOverlayDiscoveredConfigParseFailureEscaping:
     same way, and covered here so the fix cannot regress independently on
     either branch."""
 
-    def test_malformed_discovered_yaml_fails_loud_escaped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_malformed_discovered_yaml_fails_loud_escaped(self, tmp_path: Path) -> None:
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text("foo:\n\tbar: 1\n", encoding="utf-8")
         result = _run_overlay(workspace, {"BASE_CONFIG": ""})

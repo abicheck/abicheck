@@ -110,7 +110,12 @@ class TestCompileEmptyStringTreatedAsUnset:
             merge_compile=True,
         )
         expected = _real_two_stage_sysroot(tmp_path, checkout_compile, sources_compile)
-        assert expected == "/real/path"
+        # The real resolver returns `str(Path(...))`, i.e. the *platform's*
+        # spelling of this path ("\\real\\path" on Windows). Asserting the
+        # POSIX literal made this a Linux/macOS-only test that simply failed
+        # on the windows lane; `str(Path(...))` states the same thing — the
+        # sources-root value won — on every platform.
+        assert expected == str(Path("/real/path"))
         assert out["compile"]["sysroot"] == expected
 
     def test_empty_checkout_compiler_is_treated_as_unset(self, tmp_path: Path) -> None:
@@ -157,7 +162,7 @@ class TestCompileEmptyStringTreatedAsUnset:
             merge_compile=True,
         )
         expected = _real_two_stage_sysroot(tmp_path, checkout_compile, sources_compile)
-        assert expected == "/checkout/sysroot"
+        assert expected == str(Path("/checkout/sysroot"))
         assert out["compile"]["sysroot"] == expected
 
     def test_nonempty_checkout_compiler_still_blocks_sources_root(

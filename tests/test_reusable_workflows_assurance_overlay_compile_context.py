@@ -35,7 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from _assurance_overlay_exec import _run_overlay, _written_overlay
-from _workflow_exec import make_workspace
+from _workflow_exec import make_workspace, requires_newline_in_filenames
 
 from abicheck.cli_options import merge_compile_config
 from abicheck.dry_run_estimate import CompileContext
@@ -626,6 +626,7 @@ class TestAssuranceOverlayEscapesWorkflowCommandInjection:
     interpolated path/exception in this step's error-emission call
     sites."""
 
+    @requires_newline_in_filenames
     def test_newline_in_explicit_build_config_path_does_not_smuggle_a_command(
         self, tmp_path: Path
     ) -> None:
@@ -650,6 +651,7 @@ class TestAssuranceOverlayEscapesWorkflowCommandInjection:
         assert not any(line.startswith("::") for line in lines[1:])
         assert "%0A" in result.stderr
 
+    @requires_newline_in_filenames
     def test_newline_in_sources_root_path_does_not_smuggle_a_command(
         self, tmp_path: Path
     ) -> None:
