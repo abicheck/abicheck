@@ -44,11 +44,14 @@ from abicheck.model import (
     Fact,
     FactStatus,
     Function,
+    SymbolBinding,
     Variable,
+    Visibility,
     in_source_declaration_index,
     surface_fact_summary,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolType
 
 #: Every way a producer can leave one of the three facts. "Unknown" is
 #: represented by all four of its real statuses, not just one, so an
@@ -466,3 +469,104 @@ class TestExportGainedIsRecordedNotDropped:
             expect_loss = old_exported and not new_exported
             assert bool(kinds & gain) is expect_gain, (old_exported, new_exported)
             assert bool(kinds & loss) is expect_loss, (old_exported, new_exported)
+
+
+class TestNarrowingToObservedExportsKeepsPromisedDeclarations:
+    """The ELF-narrowing path, exercised with real ELF metadata.
+
+    Registered because this class's siblings all build snapshots *without*
+    `elf`, so `diff_symbols._public_functions` takes its `elf is None` early
+    return and the narrowing pass never runs. That is why they reported the
+    gained export correctly while the narrowing was still dropping a promised
+    declaration whose name is absent from the export table -- the defect had
+    to be found by reading rather than by a failure (CodeRabbit review).
+
+    So these cases supply `elf.symbols`, which is the only way the filter
+    under test executes at all.
+    """
+
+    OLD_SYM = "_Z8promisedv"
+
+    @staticmethod
+    def _promised(exported: Fact[bool], *, mangled: str) -> Function:
+        """A declaration the run was *told* is promised, via a real producer
+        fact rather than the legacy bridge -- the distinction the retention
+        rule turns on."""
+        return _fn(
+            name="promised",
+            mangled=mangled,
+            declared_in_headers_fact=_TRUE,
+            in_public_contract_fact=_TRUE,
+            binary_exported_fact=exported,
+        )
+
+    #: Always present in the export table, so the table is never *empty*.
+    #: That matters: `_public_functions` returns early on `not elf.symbols`,
+    #: so a snapshot whose only distinction is an empty table never reaches
+    #: the narrowing at all -- the first version of this class made exactly
+    #: that mistake and passed with the fix reverted.
+    OTHER_SYM = "_Z9unrelatedv"
+
+    @classmethod
+    def _snap_with_elf(cls, fn: Function, *exported_names: str) -> AbiSnapshot:
+        snap = _snap("1.0", fn)
+        snap.elf = ElfMetadata(
+            symbols=[
+                ElfSymbol(
+                    name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+                )
+                for n in (cls.OTHER_SYM, *exported_names)
+            ]
+        )
+        return snap
+
+    def test_a_gained_export_is_not_reported_as_an_addition(self) -> None:
+        """The reported consequence: with the old side absent from the export
+        table, narrowing used to drop it, so the pair never matched and the
+        run said `FUNC_ADDED` for a declaration that was already there."""
+        old = self._snap_with_elf(self._promised(_FALSE, mangled=self.OLD_SYM))
+        new = self._snap_with_elf(
+            self._promised(_TRUE, mangled=self.OLD_SYM), self.OLD_SYM
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.FUNC_EXPORT_ADDED in kinds, sorted(k.value for k in kinds)
+        assert ChangeKind.FUNC_ADDED not in kinds
+
+    def test_a_promised_unexported_declaration_survives_narrowing(self) -> None:
+        """The other half: it stays represented on both sides rather than
+        vanishing from the maps, so an unchanged one reports nothing at all
+        instead of an add/remove pair."""
+        both = self._snap_with_elf(self._promised(_FALSE, mangled=self.OLD_SYM))
+        other = self._snap_with_elf(self._promised(_FALSE, mangled=self.OLD_SYM))
+        kinds = {c.kind for c in compare(both, other).changes}
+        assert not kinds & {
+            ChangeKind.FUNC_ADDED,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        }, sorted(k.value for k in kinds)
+
+    def test_narrowing_still_excludes_a_record_without_contract_evidence(self) -> None:
+        """The negative control, and the reason the retention rule is not
+        `in_public_surface`: a debug-info record with no contract evidence --
+        what the narrowing exists to exclude -- must still be narrowed out."""
+        from abicheck.extract.surface_fact_producers import debug_info_surface_facts
+        from abicheck.model.surface_facts import has_observed_contract_evidence
+
+        internal = _fn(
+            name="internal",
+            mangled="_Z8internalv",
+            **debug_info_surface_facts(exported=False),  # type: ignore[arg-type]
+        )
+        assert not has_observed_contract_evidence(internal)
+        assert has_observed_contract_evidence(
+            self._promised(_FALSE, mangled=self.OLD_SYM)
+        )
+
+    def test_legacy_evidence_does_not_widen_narrowing(self) -> None:
+        """A pre-v46 `PUBLIC` record bridges to a confirmed contract fact, but
+        that value is re-derived from the very enum the narrowing already
+        accounted for -- honouring it here would change how every stored
+        snapshot narrows."""
+        from abicheck.model.surface_facts import has_observed_contract_evidence
+
+        assert not has_observed_contract_evidence(_fn(visibility=Visibility.PUBLIC))
