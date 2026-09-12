@@ -52,6 +52,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
     _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
@@ -74,6 +75,7 @@ __all__ = [
     "decode_function_facts",
     "decode_record_facts",
     "decode_snapshot_facts",
+    "surface_facts_or_legacy_bridge",
     "decode_variable_facts",
     "encode_fact_fields",
 ]
@@ -118,12 +120,21 @@ _ENUM_FACT_KEYS = (
 # ADR-063 Phase 5 (fourth batch): Variable's own case-(b) *_fact siblings --
 # a distinct tuple since Variable is a different owner/collection
 # ("variables", not "types"/"enums").
+#: The three surface facts ``Visibility`` conflated (see ``model/
+#: surface_facts.py``). Spelled out in *each* owner's own key tuple below
+#: rather than shared through one splatted tuple: ``scripts/
+#: fact_registry_completeness.py``'s encode/decode wiring check is
+#: deliberately owner-scoped (one key tuple owns exactly one dataclass), so
+#: a shared tuple would leave both owners' three fields looking unwired.
 _VARIABLE_FACT_KEYS = (
     "source_header_fact",
     "alignment_bits_fact",
     "elf_binding_fact",
     "deprecated_fact",
     "access_fact",
+    "declared_in_headers_fact",
+    "in_public_contract_fact",
+    "binary_exported_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -141,6 +152,9 @@ _FUNCTION_FACT_KEYS = (
     "elf_binding_fact",
     "is_compiler_generated_fact",
     "deprecated_fact",
+    "declared_in_headers_fact",
+    "in_public_contract_fact",
+    "binary_exported_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -374,6 +388,35 @@ def decode_enum_facts(e: dict[str, Any], schema_version: int) -> dict[str, Any]:
     }
 
 
+def surface_facts_or_legacy_bridge(
+    owner_dict: dict[str, Any], decoded: dict[str, Any]
+) -> dict[str, Any]:
+    """Turn a *missing* surface-fact key back into ``None``.
+
+    A missing/``null`` key must read as ``None`` at *every* schema version
+    for these three fields, not as ``Fact.not_collected()`` the way the
+    case-(a)/(b) fields do -- and that difference is deliberate. The hazard
+    those fields guard against is a caller-supplied legacy default
+    (``bases=[]``) being read as a confirmed value; these three have no
+    legacy scalar sibling at all. What they have instead is ``visibility``,
+    which every document carries, and ``model/surface_facts.py``'s bridge
+    derives all three from it -- marked ``PARTIAL``, with a
+    ``derived-from-legacy-visibility`` diagnostic -- precisely when they are
+    ``None``. Keeping ``not_collected()`` here would *discard* that real (if
+    weaker) evidence for a v46+ document whose producer simply did not set
+    these fields, e.g. a snapshot built through the typed API or by a test,
+    silently turning "public" into "nothing established".
+    """
+    for key in (
+        "declared_in_headers_fact",
+        "in_public_contract_fact",
+        "binary_exported_fact",
+    ):
+        if not owner_dict.get(key):
+            decoded[key] = None
+    return decoded
+
+
 def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, Any]:
     """Decode every ``Variable`` ``Fact[...]`` sibling from one variable dict.
 
@@ -409,23 +452,44 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
         # carries this same object back into the legacy `access` field --
         # where every reader expects a real AccessLevel member.
         access_fact = replace(access_fact, value=AccessLevel(access_fact.value))
-    return {
-        "source_header_fact": decode_fact(
-            v.get("source_header_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
-        ),
-        "alignment_bits_fact": decode_fact(
-            v.get("alignment_bits_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
-        ),
-        "elf_binding_fact": elf_binding_fact,
-        "deprecated_fact": decode_fact_with_legacy_presence(
-            v, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
-        ),
-        "access_fact": access_fact,
-    }
+    return surface_facts_or_legacy_bridge(
+        v,
+        {
+            "source_header_fact": decode_fact(
+                v.get("source_header_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+            ),
+            "alignment_bits_fact": decode_fact(
+                v.get("alignment_bits_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
+            ),
+            "elf_binding_fact": elf_binding_fact,
+            "deprecated_fact": decode_fact_with_legacy_presence(
+                v,
+                "deprecated",
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+            ),
+            "access_fact": access_fact,
+            "declared_in_headers_fact": decode_fact(
+                v.get("declared_in_headers_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+            ),
+            "in_public_contract_fact": decode_fact(
+                v.get("in_public_contract_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+            ),
+            "binary_exported_fact": decode_fact(
+                v.get("binary_exported_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+            ),
+        },
+    )
 
 
 def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, Any]:
@@ -447,57 +511,78 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
         elf_binding_fact = replace(
             elf_binding_fact, value=SymbolBinding(elf_binding_fact.value)
         )
-    return {
-        "contract_attributes_fact": decode_fact(
-            f.get("contract_attributes_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "is_explicit_fact": decode_fact(
-            f.get("is_explicit_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "is_hidden_friend_fact": decode_fact(
-            f.get("is_hidden_friend_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "source_header_fact": decode_fact(
-            f.get("source_header_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "is_variadic_fact": decode_fact(
-            f.get("is_variadic_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "exception_spec_fact": decode_fact(
-            f.get("exception_spec_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "is_override_fact": decode_fact(
-            f.get("is_override_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "hidden_friend_owner_fact": decode_fact(
-            f.get("hidden_friend_owner_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "elf_binding_fact": elf_binding_fact,
-        "is_compiler_generated_fact": decode_fact(
-            f.get("is_compiler_generated_fact"),
-            schema_version,
-            min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
-        ),
-        "deprecated_fact": decode_fact_with_legacy_presence(
-            f, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
-        ),
-    }
+    return surface_facts_or_legacy_bridge(
+        f,
+        {
+            "contract_attributes_fact": decode_fact(
+                f.get("contract_attributes_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "is_explicit_fact": decode_fact(
+                f.get("is_explicit_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "is_hidden_friend_fact": decode_fact(
+                f.get("is_hidden_friend_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "source_header_fact": decode_fact(
+                f.get("source_header_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "is_variadic_fact": decode_fact(
+                f.get("is_variadic_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "exception_spec_fact": decode_fact(
+                f.get("exception_spec_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "is_override_fact": decode_fact(
+                f.get("is_override_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "hidden_friend_owner_fact": decode_fact(
+                f.get("hidden_friend_owner_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "elf_binding_fact": elf_binding_fact,
+            "is_compiler_generated_fact": decode_fact(
+                f.get("is_compiler_generated_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+            ),
+            "deprecated_fact": decode_fact_with_legacy_presence(
+                f,
+                "deprecated",
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+            ),
+            "declared_in_headers_fact": decode_fact(
+                f.get("declared_in_headers_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+            ),
+            "in_public_contract_fact": decode_fact(
+                f.get("in_public_contract_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+            ),
+            "binary_exported_fact": decode_fact(
+                f.get("binary_exported_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+            ),
+        },
+    )
 
 
 def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, Any]:

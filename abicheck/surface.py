@@ -350,7 +350,8 @@ def compute_public_surface(
     (it needs nothing from ``surface.py``, precisely so this import can be
     a real, top-level one rather than a deferred workaround for a cycle).
 
-    Public roots are :data:`Visibility.PUBLIC` functions/variables. The
+    Public roots are functions/variables in the public surface (the three
+    split facts, ``model/surface_facts.in_public_surface``). The
     public type set is the transitive closure over the types they
     reference (returns, params, fields, bases, typedef targets) -- computed
     today (ADR-063 Phase 3 D5) from ``compare/surface_graph.py``'s

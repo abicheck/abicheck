@@ -118,6 +118,12 @@ from .bundle_resolution_reachability import reachable_intra_libraries
 from .checker_types import DiffResult
 from .model import AbiSnapshot, Visibility
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import (
+    binary_exported,
+    declaration_confirmed_absent,
+    is_confirmed_true,
+    is_legacy_derived,
+)
 
 #: G38 stabilization: this used to be a locally-duplicated frozenset
 #: (comment preserved below for the history of why each kind is or isn't
@@ -290,7 +296,7 @@ def _symbol_evidence_sufficient(
     """
     fn = snapshot.function_map.get(symbol)
     if fn is not None:
-        if fn.visibility is Visibility.ELF_ONLY:
+        if declaration_confirmed_absent(fn):
             return False
         if fn.is_variadic is None:
             # Codex review, fresh evidence: diff_symbols._check_variadic_
@@ -325,7 +331,7 @@ def _symbol_evidence_sufficient(
         return all(not _type_spelling_is_unresolved(p.type) for p in fn.params)
     var = snapshot.variable_map.get(symbol)
     if var is not None:
-        if var.visibility is Visibility.ELF_ONLY:
+        if declaration_confirmed_absent(var):
             return False
         return not _type_spelling_is_unresolved(var.type)
     return False
@@ -366,6 +372,16 @@ def _symbol_was_exported(
     entry = fn if fn is not None else snapshot.variable_map.get(symbol)
     if entry is None:
         return False
+    # The export question is now its own fact (model/surface_facts.py), so a
+    # producer that actually consulted an export table answers it directly
+    # -- no provenance-dependent re-interpretation needed, and in
+    # particular no need to guess for the combination the enum could not
+    # hold (declared, promised, not exported).
+    exported = binary_exported(entry)
+    if not is_legacy_derived(exported):
+        return is_confirmed_true(exported)
+    # A pre-split snapshot: keep this function's own documented reading of
+    # the conflated enum, which is strictly sharper than the bridge's.
     if entry.visibility is Visibility.PUBLIC:
         return True
     if entry.visibility is Visibility.ELF_ONLY:

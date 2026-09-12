@@ -41,9 +41,9 @@ from .model import (
     RecordType,
     ScopeOrigin,
     Variable,
-    Visibility,
     resolved_fact_value,
 )
+from .model.surface_facts import in_public_surface
 from .surface import _type_identifiers
 
 if TYPE_CHECKING:
@@ -445,7 +445,7 @@ def _is_public(
     tallies — ``public_entity_ids`` membership when given (ADR-063 Phase 3
     D5), else the pre-Phase-3 ``Visibility.PUBLIC`` check, unchanged."""
     if public_entity_ids is None:
-        return decl.visibility == Visibility.PUBLIC
+        return in_public_surface(decl)
     return decl.entity_id is not None and decl.entity_id in public_entity_ids
 
 

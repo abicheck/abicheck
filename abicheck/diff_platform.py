@@ -62,7 +62,6 @@ from .diff_types import _RESERVED_FIELD_RE
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
-    Visibility,
     cv_qualifiers_only_differ,
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
@@ -70,6 +69,7 @@ from .model import (
 from .model.binary_naming import strip_vendor_hash
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
+from .model.surface_facts import is_abi_visible, is_export_confirmed_absent
 from .name_classification import RTTI_DATA_PREFIXES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -1104,12 +1104,12 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = {
         f.mangled: f
         for f in old.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        if is_abi_visible(f)
     }
     new_map = {
         f.mangled: f
         for f in new.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        if is_abi_visible(f)
     }
 
     removed = set(old_map.keys()) - set(new_map.keys())
@@ -1161,12 +1161,12 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = {
         f.mangled: f
         for f in old.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        if is_abi_visible(f)
     }
     new_map = {
         f.mangled: f
         for f in new.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        if is_abi_visible(f)
     }
 
     removed = set(old_map.keys()) - set(new_map.keys())
@@ -1960,7 +1960,7 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
         # (BREAKING) for the binary-level concern.
 
         # Skip if function moved to hidden visibility — FUNC_VISIBILITY_CHANGED handles it
-        if getattr(f_new, "visibility", None) == Visibility.HIDDEN:
+        if is_export_confirmed_absent(f_new):
             continue
 
         # Symbol disappeared from ELF without explicit annotation — likely deleted

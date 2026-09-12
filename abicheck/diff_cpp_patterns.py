@@ -77,6 +77,7 @@ from .model.export_index import (
     build_raw_export_index,
     pe_export_ids_with_ordinal_placeholder as _pe_export_ids,
 )
+from .model.surface_facts import is_abi_visible
 from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
@@ -206,7 +207,6 @@ def detect_sycl_overload_set_removal(
     the ``func_removed`` stream because they are children of the grouped
     finding.
     """
-    from .diff_symbols import _PUBLIC_VIS
 
     old.index()
     new.index()
@@ -219,8 +219,8 @@ def detect_sycl_overload_set_removal(
     # included for consistency with the sibling ISA-dropped detector, though
     # a param-type check can't fire in symbols-only mode anyway (no header
     # info means Function.params is always empty there).
-    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
-    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    old_funcs = [f for f in old.functions if is_abi_visible(f)]
+    new_funcs = [f for f in new.functions if is_abi_visible(f)]
     new_mangled = {f.mangled for f in new_funcs}
     # Bare-name -> {distinct qualified_names}, merged from both sides, so a
     # bare param spelling (``queue&``) can be resolved to its real namespace
@@ -498,7 +498,6 @@ def detect_cpu_dispatch_isa_dropped(
     are those rolled up under the grouped finding so the per-symbol
     ``func_removed`` noise doesn't double-count.
     """
-    from .diff_symbols import _PUBLIC_VIS
 
     old.index()
     new.index()
@@ -512,8 +511,8 @@ def detect_cpu_dispatch_isa_dropped(
     # this detector is calibrated as an L0 (symbols-only) signal, where every
     # real exported function is ELF_ONLY, never PUBLIC; excluding it would
     # empty out old_funcs/new_funcs and silently disable case83 in that mode.
-    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
-    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    old_funcs = [f for f in old.functions if is_abi_visible(f)]
+    new_funcs = [f for f in new.functions if is_abi_visible(f)]
     new_mangled = {f.mangled for f in new_funcs}
     removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
     all_surviving_stems = _build_all_surviving_stems(new_funcs)
@@ -660,7 +659,6 @@ def detect_tag_type_renamed(
     for two empty tags that share a namespace purely by coincidence, backed
     by symbol churn no consumer can ever see.
     """
-    from .diff_symbols import _PUBLIC_VIS
 
     old.index()
     new.index()
@@ -671,8 +669,8 @@ def detect_tag_type_renamed(
     if not removed_empties or not added_empties:
         return []
     added_by_ns = _group_by_namespace(added_empties)
-    old_mangled = {f.mangled for f in old.functions if f.visibility in _PUBLIC_VIS}
-    new_mangled = {f.mangled for f in new.functions if f.visibility in _PUBLIC_VIS}
+    old_mangled = {f.mangled for f in old.functions if is_abi_visible(f)}
+    new_mangled = {f.mangled for f in new.functions if is_abi_visible(f)}
     only_removed = old_mangled - new_mangled
     only_added = new_mangled - old_mangled
     findings: list[Change] = []
@@ -818,12 +816,11 @@ def detect_default_template_arg_changed(
     emit a DEFAULT_TEMPLATE_ARG_CHANGED finding for a helper no consumer can
     ever see.
     """
-    from .diff_symbols import _PUBLIC_VIS
 
     old.index()
     new.index()
-    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
-    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    old_funcs = [f for f in old.functions if is_abi_visible(f)]
+    new_funcs = [f for f in new.functions if is_abi_visible(f)]
     new_mangled = {f.mangled for f in new_funcs}
     removed = [f for f in old_funcs if f.mangled not in new_mangled]
     # Key by *qualified* callable stem (full namespace path with all

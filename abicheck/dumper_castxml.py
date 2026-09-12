@@ -96,6 +96,7 @@ from .extract.headers.castxml.names import (
 from .extract.headers.scope_segments import (
     entity_is_record_member as entity_is_record_member,
 )
+from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
     AccessLevel,
     EnumType,
@@ -534,6 +535,15 @@ class _CastxmlParser:
                 re.search(r"\bconst\b", type_name)
             )
             vis = self._variable_visibility(el, mangled, name)
+            # Export evidence as its own fact, independent of the
+            # declaration and contract facts -- see model/surface_facts.py.
+            # `_variable_visibility`'s CPO fallback promotes to PUBLIC with
+            # no symbol looked up at all, so trust the raw lookup here.
+            exported_ = (
+                None
+                if self._ctx.no_binary_evidence
+                else self._visibility(mangled, name) is Visibility.PUBLIC
+            )
             # ADR-063 Phase 2: whether `mangled` is a genuine mangling at
             # all. castxml emits a pseudo-Itanium `mangled` attribute even
             # for a C-linkage variable, and the ELF-export override above
@@ -551,6 +561,9 @@ class _CastxmlParser:
                     mangled=mangled,
                     type=type_name,
                     visibility=vis,
+                    **header_ast_surface_facts(
+                        exported=exported_, producer="castxml"
+                    ),
                     is_const=is_const,
                     # G31: reuses `_access_level` (already used for `Field`).
                     access=self._access_level(el),

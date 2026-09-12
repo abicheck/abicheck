@@ -906,7 +906,16 @@ _ARTIFACT_NAMES = frozenset(
 #:       this boundary is therefore meaningless, which is exactly what the
 #:       version bump exists to signal; the per-field ``effective_config_
 #:       fields`` dict beside it stays attributable as before.
-REPORT_SCHEMA_VERSION = "4.3"  #: 4.3 -- see the comment immediately above.
+#: 4.4 -- additive per-finding ``surface_facts`` block: the three facts
+#:       ``Visibility`` used to conflate (``declared_in_headers`` /
+#:       ``in_public_contract`` / ``binary_exported``), each
+#:       ``"true"``/``"false"``/``"unknown"``. Present only on a finding
+#:       that has one declaration behind it, and always complete when
+#:       present -- ``"unknown"`` is spelled out rather than omitted,
+#:       since an absent key is what a reader takes for a negative. See
+#:       ``model/surface_facts.py`` and the ``Visibility.PUBLIC`` entry in
+#:       ``docs/contribute/known-gaps.md``.
+REPORT_SCHEMA_VERSION = "4.4"  #: 4.4 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

@@ -27,6 +27,7 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
+from .compare.export_transition import check_export_lost
 from .compare.fact_comparison import compare_facts
 from .compare.functions import function_identity_index
 from .detector_registry import registry
@@ -124,7 +125,6 @@ from .model import (
     ParamKind,
     RecordType,
     Variable,
-    Visibility,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
@@ -138,10 +138,21 @@ from .model import (
 # for back-compat.
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import (
+    declaration_confirmed_absent,
+    is_abi_visible,
+    is_export_confirmed_absent,
+    surface_fact_summary,
+)
 from .name_classification import is_local_rtti_symbol
 
-# Visibility levels that constitute the public ABI surface.
-_PUBLIC_VIS = (Visibility.PUBLIC, Visibility.ELF_ONLY)
+# The public ABI surface is asked as a question now, not matched against a
+# set of enum members: `is_abi_visible` holds for an entity the binary
+# exports *or* one the promised contract carries -- the union the old
+# ``(PUBLIC, ELF_ONLY)`` tuple spelled out, plus the combination the enum
+# could not represent at all (promised, declared, and not exported).
+# `declaration_confirmed_absent` is the export-table-only half of the old
+# ``== ELF_ONLY`` test. See model/surface_facts.py.
 
 
 # Sentinel the dumper writes for the type/return type of a symbol whose
@@ -210,9 +221,9 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
         k: v
         for k, v in snap.function_map.items()
         if (
-            v.visibility in _PUBLIC_VIS
+            is_abi_visible(v)
             and (
-                v.visibility != Visibility.ELF_ONLY
+                not declaration_confirmed_absent(v)
                 or is_abi_relevant_elf_symbol(
                     k,
                     filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
@@ -270,9 +281,9 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
         k: v
         for k, v in snap.variable_map.items()
         if (
-            v.visibility in _PUBLIC_VIS
+            is_abi_visible(v)
             and (
-                v.visibility != Visibility.ELF_ONLY
+                not declaration_confirmed_absent(v)
                 or is_abi_relevant_elf_symbol(
                     k,
                     filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
@@ -308,8 +319,12 @@ def _check_removed_function(
     f_hidden = new_all.get(mangled)
     if (
         f_hidden is not None
-        and f_hidden.visibility == Visibility.HIDDEN
-        and not (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
+        # The new side still declares it but no longer exports it -- read
+        # from the export fact, which is exactly this question (and, unlike
+        # the old enum, does not also assert anything about the
+        # declaration). See model/surface_facts.py.
+        and is_export_confirmed_absent(f_hidden)
+        and not (elf_only_mode and declaration_confirmed_absent(f_old))
     ):
         return make_change(
             ChangeKind.FUNC_VISIBILITY_CHANGED,
@@ -320,10 +335,16 @@ def _check_removed_function(
             # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
             entity_id=f_old.entity_id or f_hidden.entity_id,
+            # The three split facts for the *new* side, which is the side
+            # this finding is about: a reader can see that the declaration
+            # survived and only the export went away, rather than having to
+            # infer it from one conflated enum value (see Change.
+            # surface_facts and model/surface_facts.py).
+            surface_facts=surface_fact_summary(f_hidden),
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
-        if (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
+        if (elf_only_mode and declaration_confirmed_absent(f_old))
         else ChangeKind.FUNC_REMOVED
     )
     return make_change(
@@ -335,6 +356,10 @@ def _check_removed_function(
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
         entity_id=f_old.entity_id,
         demangled_symbol=_elf_only_demangled_name(mangled, f_old.visibility),
+        # The old side's three facts: whether this removal rests on header
+        # evidence, on the export table, or on neither (see
+        # Change.surface_facts).
+        surface_facts=surface_fact_summary(f_old),
     )
 
 
@@ -746,6 +771,7 @@ def _check_function_signature(
     changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
     changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
     changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
+    changes.extend(check_export_lost(mangled, f_old, f_new))
     return changes
 
 
@@ -841,7 +867,7 @@ def _match_old_function(
     if (
         f_new_all is not None
         and f_new_all.is_deleted
-        and f_new_all.visibility in _PUBLIC_VIS
+        and is_abi_visible(f_new_all)
     ):
         return []
 
@@ -916,7 +942,7 @@ def _detect_newly_deleted_functions(
         ):
             continue
         # Skip functions that are not part of the public ABI surface.
-        if f_new.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(f_new):
             continue
         f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
         if f_old_any is not None and not f_old_any.is_deleted:
@@ -1254,6 +1280,8 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
             demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
+            # See _check_removed_function's identical stamp.
+            surface_facts=surface_fact_summary(v_old),
         )
     ]
 

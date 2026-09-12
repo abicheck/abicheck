@@ -79,6 +79,23 @@ from .fact_registry import (
 )
 from .snapshot import AbiSnapshot as AbiSnapshot
 from .stdlib_surface import stdlib_namespaces_excluded as stdlib_namespaces_excluded
+from .surface_facts import (
+    binary_exported as binary_exported,
+    declaration_confirmed_absent as declaration_confirmed_absent,
+    declared_in_headers as declared_in_headers,
+    in_public_contract as in_public_contract,
+    in_public_surface as in_public_surface,
+    in_source_declaration_index as in_source_declaration_index,
+    is_abi_visible as is_abi_visible,
+    is_binary_exported as is_binary_exported,
+    is_confirmed_false as is_confirmed_false,
+    is_confirmed_true as is_confirmed_true,
+    is_export_confirmed_absent as is_export_confirmed_absent,
+    is_header_declared as is_header_declared,
+    is_legacy_derived as is_legacy_derived,
+    is_unknown as is_unknown,
+    surface_fact_summary as surface_fact_summary,
+)
 from .vocabulary import (
     AccessLevel as AccessLevel,
     ElfVisibility as ElfVisibility,
@@ -89,6 +106,21 @@ from .vocabulary import (
 
 __all__ = [
     "AbiSnapshot",
+    "binary_exported",
+    "declaration_confirmed_absent",
+    "declared_in_headers",
+    "in_public_contract",
+    "in_public_surface",
+    "in_source_declaration_index",
+    "is_abi_visible",
+    "is_binary_exported",
+    "is_confirmed_false",
+    "is_confirmed_true",
+    "is_export_confirmed_absent",
+    "is_header_declared",
+    "is_legacy_derived",
+    "is_unknown",
+    "surface_fact_summary",
     "AccessLevel",
     "COMPILER_INTERNAL_TYPES",
     "DependencyInfo",

@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
+from .model.surface_facts import in_public_surface
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function
@@ -436,8 +437,7 @@ def _strip_leading_return_type(sig: str) -> str:
 
 def _public_functions(snap: AbiSnapshot) -> list[Function]:
     """Return the subset of public functions in *snap*."""
-    from .model import Visibility
-    return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
+    return [f for f in snap.functions if in_public_surface(f)]
 
 
 def _normalize_mach_o_mangled(mangled: str) -> str:
@@ -741,12 +741,11 @@ def detect_cpo_kind_changed(
     never cross-match. A qualified name present only in functions (old) and
     only in variables (new), or vice versa, triggers the finding.
     """
-    from .model import Visibility
 
     def _func_names(snap: AbiSnapshot) -> set[str]:
         out: set[str] = set()
         for f in snap.functions:
-            if f.visibility != Visibility.PUBLIC:
+            if not in_public_surface(f):
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
@@ -768,7 +767,7 @@ def detect_cpo_kind_changed(
     def _var_names(snap: AbiSnapshot) -> set[str]:
         out: set[str] = set()
         for v in snap.variables:
-            if v.visibility != Visibility.PUBLIC:
+            if not in_public_surface(v):
                 continue
             # castxml never namespace-qualifies Variable.name itself, but a
             # real external-linkage variable's mangled name demangles to the
@@ -844,12 +843,11 @@ def detect_overload_set_rerouted(
     signal that existing call sites may now resolve to a different
     overload (silent re-routing).
     """
-    from .model import Visibility
 
     def _by_stem(snap: AbiSnapshot) -> dict[str, list[Function]]:
         out: dict[str, list[Function]] = defaultdict(list)
         for f in snap.functions:
-            if f.visibility != Visibility.PUBLIC:
+            if not in_public_surface(f):
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             stem = _strip_template_args(qname)
@@ -973,7 +971,7 @@ def detect_mandatory_template_param_added(
     removal is also caught by ``func_removed`` so the user does see a
     finding even when this detector misses.
     """
-    from .model import ScopeOrigin, Visibility
+    from .model import ScopeOrigin
 
     def _arities(snap: AbiSnapshot) -> tuple[dict[str, set[int]], dict[str, bool]]:
         out: dict[str, set[int]] = defaultdict(set)
@@ -986,7 +984,7 @@ def detect_mandatory_template_param_added(
         # automatically for the common case.
         is_public: dict[str, bool] = defaultdict(bool)
         for f in snap.functions:
-            if f.visibility != Visibility.PUBLIC:
+            if not in_public_surface(f):
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             if "<" not in qname:
@@ -1083,12 +1081,11 @@ def detect_unspecified_return_now_named(
     are reported with different descriptions so reviewers see whether
     they gained or lost a deduced return.
     """
-    from .model import Visibility
 
     def _index(snap: AbiSnapshot) -> dict[tuple[str, tuple[str, ...]], str]:
         out: dict[tuple[str, tuple[str, ...]], str] = {}
         for f in snap.functions:
-            if f.visibility != Visibility.PUBLIC:
+            if not in_public_surface(f):
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             key = (qname, tuple(p.type for p in f.params))
@@ -1170,23 +1167,22 @@ def detect_missing_instantiations(
     counting that declaration-only entry as "surviving" would silently mask
     the exact removal this detector exists to catch.
     """
-    from .model import Visibility
 
     old.index()
     new.index()
     new_mangled = {
-        f.mangled for f in new.functions if f.visibility == Visibility.PUBLIC
+        f.mangled for f in new.functions if in_public_surface(f)
     }
     findings: list[Change] = []
     surviving_stems: set[str] = set()
     for fn in new.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         qname = _qualified_function_name(fn.name, fn.mangled)
         if _looks_like_template_instantiation(qname):
             surviving_stems.add(_strip_template_args(qname))
     for fn in old.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         if fn.mangled in new_mangled:
             continue

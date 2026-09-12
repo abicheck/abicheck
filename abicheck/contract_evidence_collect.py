@@ -125,7 +125,8 @@ from .contract_relevance_types import (
 )
 from .diff_cxx_rules import owner_class_of
 from .export_surface import ExportSurface, observed_exports_by_platform
-from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
+from .model import AbiSnapshot, EnumType, Function, RecordType
+from .model.surface_facts import in_public_surface
 from .policy.public_surface import (
     PublicSurface,
     _index_surface_types,
@@ -637,7 +638,7 @@ def _domain_identity(snap: AbiSnapshot) -> str:
 def _public_header_declarations(snap: AbiSnapshot, surf: PublicSurface) -> list[str]:
     """Canonical node ids of the header provider's observed roots.
 
-    Roots are the ``Visibility.PUBLIC`` declarations
+    Roots are the public-surface declarations
     :func:`~abicheck.surface._seed_public_roots` seeds the live closure from,
     recorded as ``decl:`` node ids so a replay can start the same walk from
     the persisted graph. Public *types* are deliberately not listed: they are
@@ -646,10 +647,10 @@ def _public_header_declarations(snap: AbiSnapshot, surf: PublicSurface) -> list[
     """
     out: list[str] = []
     for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
-        if fn.visibility == Visibility.PUBLIC:
+        if in_public_surface(fn):
             out.append(_decl_node(key))
     for var in snap.variables:
-        if var.visibility == Visibility.PUBLIC:
+        if in_public_surface(var):
             out.append(_decl_node(_canonical_decl_key(var.name, var.mangled)))
     return out
 

@@ -51,6 +51,7 @@ from .compare.qualified_name_normalization import (
 )
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
+from .model.surface_facts import in_source_declaration_index
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType, ScopeOrigin
@@ -461,15 +462,21 @@ def _func_index_items(
 ) -> list[_IndexItem]:
     """Collect public functions as ``_IndexItem``\\ s for the paired index.
 
-    Only public functions are indexed so internal helpers in
+    Only public declarations are indexed so internal helpers in
     ``experimental::`` don't get reported.
-    """
-    from .model import Visibility
 
+    A *source declaration* index, so membership is
+    :func:`~abicheck.model.surface_facts.in_source_declaration_index` --
+    the declaration and contract facts, never the export fact. The removal
+    event this index feeds is "absent from the new side", so keying it off
+    export evidence (as the old conflated ``visibility == PUBLIC`` filter
+    did) made a lost export read as a removed source API -- see
+    ``model/surface_facts.py``.
+    """
     demangled = _batch_demangle_public(snap)
     out: list[_IndexItem] = []
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_source_declaration_index(f):
             continue
         # qname keeps its parameter list (when demangled) — that's what
         # distinguishes one overload from another for the (stripped, leaf)
@@ -1025,13 +1032,13 @@ def _looks_like_std_reexport(
 
 
 def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
-    """Return the set of qualified declared names of public functions in *snap*."""
-    from .model import Visibility
-
+    """Return the set of qualified declared names of public functions in
+    *snap* -- the source-declaration population, see
+    :func:`_func_index_items`."""
     demangled = _batch_demangle_public(snap)
     out: set[str] = set()
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_source_declaration_index(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
@@ -1040,14 +1047,15 @@ def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
 
 
 def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
-    """Demangle every public mangled name in *snap* in one batch call."""
+    """Demangle every public mangled name in *snap* in one batch call --
+    same population as :func:`_func_index_items`: a declaration whose export
+    vanished is still declared."""
     from .demangle import demangle_batch
-    from .model import Visibility
 
     mangled = [
         f.mangled
         for f in snap.functions
-        if f.mangled.startswith("_Z") and f.visibility == Visibility.PUBLIC
+        if f.mangled.startswith("_Z") and in_source_declaration_index(f)
     ]
     return demangle_batch(mangled) if mangled else {}
 
@@ -1057,7 +1065,7 @@ def _build_std_reexport_change(declared: str, underlying: str) -> Change:
 
     ADR-044 D1 (Codex review): only ever emitted for a declaration that was a
     *public* function (``detect_std_reexport_removed`` filters on
-    ``Visibility.PUBLIC`` before calling this) — same construction-time
+    the source-declaration population before calling this) — same construction-time
     tagging rationale as ``_emit_experimental_change``.
     """
     return make_change(
@@ -1090,15 +1098,13 @@ def detect_std_reexport_removed(
     declared name is in ``std::``, or when the mangled name does not
     demangle to ``std::``.
     """
-    from .model import Visibility
-
     demangled = _batch_demangle_public(old)
     new_declared = _collect_public_declared_names(new)
 
     changes: list[Change] = []
     seen: set[str] = set()
     for f in old.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_source_declaration_index(f):
             continue
         declared = _qualified_function_name(f.name, f.mangled, demangled)
         if not declared or declared in seen or declared in new_declared:
@@ -1155,8 +1161,8 @@ def _index_versioned(
 def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     """Return ``[(qualified_name, is_reliably_public), …]`` for *snap*.
 
-    A function entry is reliably public because it was filtered to
-    ``Visibility.PUBLIC`` above. A type entry is reliably public only when
+    A function entry is reliably public because it was filtered to the
+    source-declaration population above (see :func:`_func_index_items`). A type entry is reliably public only when
     ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
     public-header scoping via ``-H``/``--header``) —
     the one signal that *does* exist for a type in the absence of a
@@ -1164,12 +1170,12 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     ``origin`` is ``ScopeOrigin.UNKNOWN``, so this degrades to the prior
     untagged behavior automatically, not a regression for the common case.
     """
-    from .model import ScopeOrigin, Visibility
+    from .model import ScopeOrigin
 
     demangled = _batch_demangle_public(snap)
     items: list[tuple[str, bool]] = []
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_source_declaration_index(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
@@ -1198,7 +1204,7 @@ def _emit_version_bumps(
         old_q = old_list[0][0]
         new_q = new_list[0][0]
         # `_collect_versioned_entries` marks a function entry reliably
-        # public (Visibility.PUBLIC filter) and a type entry reliably
+        # public (source-declaration filter) and a type entry reliably
         # public only when its origin is ScopeOrigin.PUBLIC_HEADER (Codex
         # review) — untagged otherwise, same as before public-header
         # scoping is used. `or`, not `and` (Codex review, fresh evidence):

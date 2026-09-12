@@ -35,8 +35,9 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
-from .model import AbiSnapshot, RecordType, Visibility, resolved_fact_value
+from .model import AbiSnapshot, RecordType, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import is_abi_visible
 
 #: Typedefs resized by glibc's ``_TIME_BITS=64`` (time64) option.
 _TIME64_TYPEDEFS = frozenset({"time_t", "suseconds_t"})
@@ -98,7 +99,9 @@ def _bucket(type_str: str, bits32: bool) -> str | None:
 #: import the heavy symbol-diff module). ELF_ONLY covers the DWARF/binary
 #: path without headers, where exported signatures are just as much public
 #: ABI as header-proven ones (Codex review #510).
-_ABI_VISIBLE = (Visibility.PUBLIC, Visibility.ELF_ONLY)
+#: Asked through model/surface_facts.is_abi_visible now -- the same union
+#: (exported, or promised by the contract), without the enum's inability to
+#: express a promised-but-unexported declaration.
 
 # Qualified identifiers are captured whole ("ns::Event" is one token, not
 # {ns, Event}) so a namespaced record/alias key matches its public spelling
@@ -118,13 +121,13 @@ def _seed_surface_tokens(snap: AbiSnapshot) -> set[str]:
     """Identifier tokens spelled directly by ABI-visible signatures and variables."""
     tokens: set[str] = set()
     for fn in snap.functions:
-        if fn.visibility not in _ABI_VISIBLE:
+        if not is_abi_visible(fn):
             continue
         _add_tokens(tokens, fn.return_type)
         for p in fn.params:
             _add_tokens(tokens, getattr(p, "type", ""))
     for var in snap.variables:
-        if getattr(var, "visibility", Visibility.PUBLIC) not in _ABI_VISIBLE:
+        if not is_abi_visible(var):
             continue
         _add_tokens(tokens, var.type)
     return tokens

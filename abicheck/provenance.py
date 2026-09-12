@@ -34,8 +34,14 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
+from typing import cast
 
-from .model import AbiSnapshot, Fact, ScopeOrigin, Visibility
+from .model import AbiSnapshot, Fact, ScopeOrigin
+from .model.surface_facts import (
+    SurfaceFactBearing,
+    declaration_confirmed_absent,
+    public_header_contract_fact,
+)
 
 # Directory prefixes that mark a header as belonging to the toolchain or the
 # operating system rather than the project under test.  Matched as path-segment
@@ -736,7 +742,11 @@ def tag_provenance(
     """
     loc = getattr(decl, "source_location", None)
     sh = header_from_location(loc)
-    export_only = getattr(decl, "visibility", None) == Visibility.ELF_ONLY
+    # "Exported, with no header declaration accounted for" -- read from the
+    # split fact (model/surface_facts.py) rather than from the conflated
+    # enum, so a declaration a header parse *did* find keeps its provenance
+    # even when the artifact stopped exporting it.
+    export_only = declaration_confirmed_absent(cast("SurfaceFactBearing", decl))
     decl.source_header = sh  # type: ignore[attr-defined]
     # ADR-063 Phase 5: this function sets source_header via plain
     # post-construction attribute assignment, which never re-runs
@@ -779,3 +789,12 @@ def tag_provenance(
             origin_cache[cache_key] = cached
         origin = cached
     decl.origin = origin  # type: ignore[attr-defined]
+    # The scope half of the three surface facts, owned by model/
+    # surface_facts.py: this is the one pass that knows the run's real scope
+    # selection. Only ever adds a positive -- see that function.
+    if hasattr(decl, "in_public_contract_fact"):
+        contract = public_header_contract_fact(
+            cast("SurfaceFactBearing", decl), origin
+        )
+        if contract is not None:
+            decl.in_public_contract_fact = contract  # type: ignore[attr-defined]

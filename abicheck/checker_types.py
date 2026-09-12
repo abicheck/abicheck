@@ -452,6 +452,11 @@ class Change:
     # field(kw_only=True)-appended-last convention as
     # `candidate_side_enrichment` above.
     demangled_symbol: str | None = field(default=None, kw_only=True)
+    # ``model/surface_facts.surface_fact_summary()``'s output for this
+    # finding's declaration, verbatim (each value "true"/"false"/"unknown",
+    # never an omitted key); ``None`` when no single declaration is behind
+    # the finding. Appended last, keyword-only, like `demangled_symbol`.
+    surface_facts: dict[str, str] | None = field(default=None, kw_only=True)
 
 
 @dataclass

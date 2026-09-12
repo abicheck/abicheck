@@ -45,6 +45,7 @@ from .model.consumer_spec import (
     as_consumer_spec,
     verify_digest,
 )
+from .model.surface_facts import is_abi_visible
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import (
     close_consumer_scope,
@@ -1442,6 +1443,10 @@ def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:
 #: PUBLIC is the header/DWARF-aware default; ELF_ONLY is how a symbols-only dump
 #: (a stripped binary with no headers/DWARF — the common `plugin-check old.so
 #: new.so` case) represents an exported `.dynsym` entry. HIDDEN is not exported.
+#: Retained as the legacy spelling for callers that still hold a bare
+#: ``Visibility``; every read inside this module goes through
+#: ``model/surface_facts.is_abi_visible``, which answers the same question
+#: from the three split facts rather than from the conflated enum.
 _EXPORTED_VISIBILITIES: frozenset[Visibility] = frozenset(
     {Visibility.PUBLIC, Visibility.ELF_ONLY}
 )
@@ -1461,10 +1466,10 @@ def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     """
     names: set[str] = set()
     for fn in snap.functions:
-        if fn.visibility in _EXPORTED_VISIBILITIES:
+        if is_abi_visible(fn):
             names |= _resolvable_symbol_names(fn.name, fn.mangled)
     for var in snap.variables:
-        if var.visibility in _EXPORTED_VISIBILITIES:
+        if is_abi_visible(var):
             names |= _resolvable_symbol_names(var.name, getattr(var, "mangled", None))
     return names
 

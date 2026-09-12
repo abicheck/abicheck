@@ -280,6 +280,20 @@ class Function:
     is_compiler_generated_fact: Fact[bool | None] | None = field(
         default=None, kw_only=True
     )
+    # The three facts ``Visibility`` conflated (see
+    # ``model/surface_facts.py``, which owns every read of these): (a) a
+    # header this run parsed declares this entity, (b) it belongs to the
+    # promised public contract for this run's scope/contract selection,
+    # (c) the artifact's export table carries a symbol for it. Each is
+    # independent of the other two, and each keeps a real "unknown" —
+    # ``None`` here means "no producer set this", which the accessors in
+    # that module resolve against the legacy ``visibility`` value rather
+    # than inventing a negative. Never read directly: a plain read cannot
+    # tell a confirmed ``False`` from unestablished evidence, which is the
+    # exact conflation this split exists to close.
+    declared_in_headers_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    in_public_contract_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    binary_exported_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.contract_attributes, self.contract_attributes_fact = (
@@ -397,6 +411,20 @@ class Variable:
     elf_binding_fact: Fact[SymbolBinding | None] | None = field(
         default=None, kw_only=True
     )
+    # The three facts ``Visibility`` conflated (see
+    # ``model/surface_facts.py``, which owns every read of these): (a) a
+    # header this run parsed declares this entity, (b) it belongs to the
+    # promised public contract for this run's scope/contract selection,
+    # (c) the artifact's export table carries a symbol for it. Each is
+    # independent of the other two, and each keeps a real "unknown" —
+    # ``None`` here means "no producer set this", which the accessors in
+    # that module resolve against the legacy ``visibility`` value rather
+    # than inventing a negative. Never read directly: a plain read cannot
+    # tell a confirmed ``False`` from unestablished evidence, which is the
+    # exact conflation this split exists to close.
+    declared_in_headers_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    in_public_contract_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    binary_exported_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.source_header, self.source_header_fact = bridge_legacy_and_fact(

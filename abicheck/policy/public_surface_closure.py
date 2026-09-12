@@ -109,7 +109,8 @@ from ..compare.surface_graph import (
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
-from ..model.vocabulary import ScopeOrigin, Visibility
+from ..model.surface_facts import in_public_surface
+from ..model.vocabulary import ScopeOrigin
 from .public_surface import (
     _DEMOTE_ORIGINS,
     PublicSurface,
@@ -256,7 +257,7 @@ def _seed_public_roots(
     """Record public symbols on *surface*; return (seed type names, has_public).
 
     Seeds the type-closure work-list from the return/parameter/variable types of
-    every :data:`Visibility.PUBLIC` function and variable -- read from *refs*,
+    every function and variable in the public surface -- read from *refs*,
     a fresh, directly-computed :class:`~abicheck.compare.surface_graph.
     ReferencedIdentifiers`, rather than re-parsing ``fn.return_type``/
     ``p.type``/``var.type`` here a second time (falling back to a direct,
@@ -269,7 +270,7 @@ def _seed_public_roots(
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
         _record_origin(surface, keys, getattr(fn, "origin", ScopeOrigin.UNKNOWN))
-        if fn.visibility == Visibility.PUBLIC:
+        if in_public_surface(fn):
             has_public = True
             surface.public_symbols |= keys
             if fn.params or _is_real_type(fn.return_type):
@@ -293,7 +294,7 @@ def _seed_public_roots(
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
         _record_origin(surface, keys, getattr(var, "origin", ScopeOrigin.UNKNOWN))
-        if var.visibility == Visibility.PUBLIC:
+        if in_public_surface(var):
             has_public = True
             surface.public_symbols |= keys
             if _is_real_type(var.type):
@@ -565,7 +566,8 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     was superseded -- see this module's own top-of-file docstring for the
     full history).
 
-    Public roots are :data:`Visibility.PUBLIC` functions/variables. The
+    Public roots are functions/variables ``model/surface_facts.
+    in_public_surface`` admits. The
     public type set is the transitive closure over the types they
     reference (returns, params, fields, bases, typedef targets), read from
     *refs* -- a fresh, directly-computed

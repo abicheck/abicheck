@@ -65,6 +65,7 @@ from .extract.dwarf_scope import (
     record_scope_segment as _record_scope_segment,
     variable_entity_id as _dwarf_variable_entity_id,
 )
+from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -525,17 +526,14 @@ class _DwarfSnapshotBuilder:
         if _attr_bool(die, "DW_AT_declaration") and not is_deleted:
             return
 
-        # Visibility: must be in ELF exported symbols.
-        # BUT: deleted functions won't have symbols in the new binary, so bypass
-        # the export check — we need them in the snapshot for cross-reference.
-        # A function that is present in the binary (has a real DWARF
-        # definition, already established above — declarations without a
-        # definition returned earlier) with external linkage (DW_AT_external,
-        # i.e. not a C `static`) but absent from the dynamic export set has had
-        # its ELF visibility hidden — recorded as Visibility.HIDDEN rather than
-        # dropped, so it isn't indistinguishable from an outright removal (see
-        # case06_visibility). A function with NO external linkage (a genuine
-        # `static`) was never part of the ABI and is correctly dropped.
+        # Must be in the ELF dynamic export set -- except a deleted function,
+        # which has no symbol in the new binary and is kept for
+        # cross-reference. A definition with external linkage (DW_AT_external,
+        # not a C `static`) absent from the export set had its ELF visibility
+        # hidden: recorded rather than dropped, so it stays distinguishable
+        # from an outright removal (see case06_visibility); one with no
+        # external linkage was never ABI and is dropped. This reaches the
+        # model as its own export fact -- see model/surface_facts.py.
         visibility = Visibility.PUBLIC
         if not is_deleted and not self._is_exported(mangled, name):
             if _attr_bool(die, "DW_AT_external"):
@@ -654,6 +652,7 @@ class _DwarfSnapshotBuilder:
             return_type=ret_type,
             params=params,
             visibility=visibility,
+            **debug_info_surface_facts(exported=visibility is Visibility.PUBLIC),
             is_virtual=is_virtual,
             is_extern_c=is_extern_c,
             vtable_index=vtable_index,
@@ -761,6 +760,7 @@ class _DwarfSnapshotBuilder:
                 mangled=mangled,
                 type=type_name,
                 visibility=Visibility.PUBLIC,
+                **debug_info_surface_facts(exported=True),
                 is_const=is_const,
                 # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
                 entity_id=_dwarf_variable_entity_id(

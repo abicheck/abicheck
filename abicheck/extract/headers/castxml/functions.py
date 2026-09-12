@@ -39,6 +39,7 @@ from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, Fact, Function, Param, Visibility
 from ....model.identity import entity_id_for_function
+from ...surface_fact_producers import header_ast_surface_facts
 from .context import CastxmlParserContext
 from .location import (
     access_level,
@@ -550,6 +551,20 @@ def parse_function_element(
         if el.tag in ("Constructor", "Destructor")
         else visibility(ctx, raw_mangled, name)
     )
+    # The export half of that answer, kept as its own fact (see
+    # ``model/surface_facts.py``): ``None`` when nothing was looked up --
+    # a header-only dump has no export table at all, and the ctor/dtor
+    # fallback above promotes to PUBLIC precisely when castxml gave it no
+    # mangled name to look up. "Not looked up" must stay distinguishable
+    # from "looked up and absent", which is what let a lost export read
+    # as a lost declaration.
+    exported_: bool | None
+    if ctx.no_binary_evidence or (
+        el.tag in ("Constructor", "Destructor") and not raw_mangled
+    ):
+        exported_ = None
+    else:
+        exported_ = visibility_ is Visibility.PUBLIC
 
     # Hoisted so the identity constructor is handed the identical values
     # the model object records, rather than a second, independently
@@ -563,6 +578,7 @@ def parse_function_element(
         return_type=ret_type,
         params=params,
         visibility=visibility_,
+        **header_ast_surface_facts(exported=exported_, producer="castxml"),
         is_virtual=is_virtual,
         is_noexcept=bool(noexcept_re),
         is_extern_c=is_extern_c,
