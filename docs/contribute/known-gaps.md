@@ -8465,7 +8465,11 @@ Two residuals are deliberately open, both recorded on the
 
 1. **No mechanical gate against a future violator.** Nothing stops a new
    consumer from reading `AbiSnapshot.source_header` (or a compile unit's
-   `source`) and opening it without resolving a licence first. The shape of
+   `source`) and opening it without resolving a licence first — nor a new front
+   end from calling `dumper.dump` directly and forgetting to *grant* one. Both
+   halves of that already bit once: the ABICC-compatible CLI was found doing
+   exactly the second (PR #1236's review round), after `service.run_dump` had
+   already been fixed for the first. The shape of
    the fix is known — an AST scan in `scripts/check_ai_readiness.py`, the way
    `fact-field-readers` guards `Fact[T]` reads, with an allowlist of the
    reader sites that legitimately hold a licence — but it is a gate of its

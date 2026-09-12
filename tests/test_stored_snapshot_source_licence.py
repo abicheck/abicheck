@@ -492,3 +492,121 @@ def test_the_verified_context_override_is_reachable_through_compare(
     assert granted is not None
     assert set(granted.pattern_escalation_evolution.values()) == {"persistent"}
     assert granted.coverage[CHECK_PATTERN_ESCALATION]["old"].established is True
+
+
+class TestEveryFrontEndThatExtractsLiveGrantsTheLicence:
+    """A front end that dumps for itself has to grant the licence for itself.
+
+    `service.run_dump` covers everything that funnels through it, but the
+    ABICC-compatible CLI calls `dumper.dump` directly and deliberately — to skip
+    `run_dump`'s dependency-scope wrapper — so its genuinely live, header-derived
+    snapshots came back unlicensed and its report withheld the source-derived
+    facts as if they were a stored snapshot's (Codex review). Same parity class
+    as the earlier `run_dump` finding, one front end over.
+    """
+
+    def test_the_helper_grants_only_for_header_derived_provenance(self) -> None:
+        from abicheck.workflows.pattern_preprocessor_scan import (
+            grant_live_source_licence,
+        )
+
+        header_derived = AbiSnapshot(library="l", version="1", from_headers=True)
+        assert grant_live_source_licence(header_derived).live_source_evidence is True
+
+        # The ABICC `abi-dumper`-style path can dump a descriptor with no
+        # headers; that must still be denied.
+        dwarf_only = AbiSnapshot(library="l", version="1")
+        assert grant_live_source_licence(dwarf_only).live_source_evidence is False
+
+    def test_the_abicc_front_end_grants_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Through the real `_snapshot_from_compat_input`, with only the dump
+        itself stubbed — so removing the grant from that function fails this.
+
+        Asserting the helper in isolation would not: the whole finding was that
+        the call site never invoked it.
+        """
+        from abicheck.compat import cli as compat_cli
+        from abicheck.compat.descriptor import CompatDescriptor
+
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"\x7fELF")
+        header = tmp_path / "pub.hpp"
+        header.write_text(PACKED_SOURCE)
+
+        produced = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+        assert produced.live_source_evidence is False
+        monkeypatch.setattr(compat_cli, "dump", lambda *a, **kw: produced)
+
+        snap, version = compat_cli._snapshot_from_compat_input(
+            CompatDescriptor(version="1.0", headers=[header], libs=[so]),
+            None,
+            tmp_path / "desc.xml",
+            headers_list_path=None,
+            single_header=None,
+            skip_headers_set=set(),
+            quiet=True,
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            sysroot=None,
+            nostdinc=False,
+            lang=None,
+        )
+        assert version == "1.0"
+        assert snap.live_source_evidence is True
+
+    def test_the_abicc_front_end_still_denies_a_headerless_dump(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The grant is conditional at this call site too: the ABICC
+        `abi-dumper`-style path can dump a descriptor with no headers."""
+        from abicheck.compat import cli as compat_cli
+        from abicheck.compat.descriptor import CompatDescriptor
+
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"\x7fELF")
+        dwarf_only = AbiSnapshot(library="libfoo.so", version="1.0")
+        monkeypatch.setattr(compat_cli, "dump", lambda *a, **kw: dwarf_only)
+
+        snap, _ = compat_cli._snapshot_from_compat_input(
+            CompatDescriptor(version="1.0", headers=[], libs=[so]),
+            None,
+            tmp_path / "desc.xml",
+            headers_list_path=None,
+            single_header=None,
+            skip_headers_set=set(),
+            quiet=True,
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            sysroot=None,
+            nostdinc=False,
+            lang=None,
+        )
+        assert snap.live_source_evidence is False
+
+    def test_an_unlicensed_live_comparison_would_withhold_its_own_facts(
+        self, tmp_path: Path
+    ) -> None:
+        """Why it matters, stated as the observable difference: the same live,
+        header-derived pair reports nothing when unstamped and `persistent` when
+        stamped. This is what the ABICC report was doing before the grant."""
+        from abicheck.checker import compare
+
+        header = tmp_path / "pub.hpp"
+        header.write_text(PACKED_SOURCE)
+
+        def _pair(licensed: bool) -> dict[str, str]:
+            old = _snapshot_recording([str(header)])
+            new = _snapshot_recording([str(header)], version="2.0")
+            for side in (old, new):
+                side.from_headers = True
+                side.live_source_evidence = licensed
+            block = compare(old, new).pattern_preprocessor_scan
+            assert block is not None
+            return block.pattern_escalation_evolution
+
+        assert _pair(licensed=False) == {}
+        assert set(_pair(licensed=True).values()) == {"persistent"}

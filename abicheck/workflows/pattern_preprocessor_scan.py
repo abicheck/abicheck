@@ -102,6 +102,7 @@ from ..buildsource.preprocessor_probe_families import HEADER_PROBES, MACRO_PROBE
 from ..buildsource.source_inputs import (
     WITHHELD_FOR_STORED_SNAPSHOT,
     SourceReadLicence,
+    extraction_read_source_inputs,
 )
 from ..model import AbiSnapshot, ScopeOrigin
 from ..policy.evidence_status import CrossSourceEvolution
@@ -135,6 +136,25 @@ class Sufficiency:
 
     def to_dict(self) -> dict[str, Any]:
         return {"established": self.established, "reason": self.reason}
+
+
+def grant_live_source_licence(snapshot: AbiSnapshot) -> AbiSnapshot:
+    """Stamp the source-read licence on a snapshot a front end extracted itself.
+
+    ``service.run_dump`` grants it for everything that funnels through it, but a
+    front end that calls ``dumper.dump`` directly -- the ABICC-compatible CLI
+    does, deliberately, to skip ``run_dump``'s dependency-scope wrapper -- has to
+    grant it here, or its genuinely live comparison reports the source-derived
+    facts as withheld for a stored snapshot (Codex review).
+
+    Lives in this layer because ADR-061 forbids a ``frontends`` module importing
+    ``extract``: the licence *policy* for a snapshot belongs to the workflow that
+    consumes it, and a front end asks rather than reaching past it. Conditional
+    on the same predicate as every other grant, so a headerless/DWARF-only
+    descriptor dump is still correctly denied.
+    """
+    snapshot.live_source_evidence = extraction_read_source_inputs(snapshot)
+    return snapshot
 
 
 def snapshot_source_licence(

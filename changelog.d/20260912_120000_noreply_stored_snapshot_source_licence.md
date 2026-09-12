@@ -115,3 +115,13 @@
   point — `missing` sends a reader looking for a deleted file when the link is
   plainly still there.
 
+- **Every front end that extracts live grants the licence.** The
+  ABICC-compatible CLI calls `dumper.dump` directly — deliberately, to skip
+  `run_dump`'s dependency-scope wrapper — so its genuinely live, header-derived
+  comparisons came back unlicensed and its JSON report withheld the
+  source-derived facts as if they belonged to a stored snapshot. It now grants
+  through `workflows.pattern_preprocessor_scan.grant_live_source_licence`, which
+  lives in that layer because ADR-061 forbids a `frontends` module importing
+  `extract`. Conditional there too, so the `abi-dumper`-style headerless
+  descriptor path stays denied.
+
