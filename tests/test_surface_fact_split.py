@@ -974,9 +974,7 @@ class TestExportGainedIsRecordedNotDropped:
         }
 
     @pytest.mark.parametrize("owner", ["function", "variable"])
-    def test_the_two_directions_are_exclusive_and_exhaustive(
-        self, owner: str
-    ) -> None:
+    def test_the_two_directions_are_exclusive_and_exhaustive(self, owner: str) -> None:
         """Across the full confirmed×confirmed grid, exactly one of the two
         transition findings fires, and only for a real transition.
 
@@ -1030,9 +1028,7 @@ class TestLegacyElfOnlyKeepsHeaderEvidenceUnknown:
         assert surface_fact_summary(fn)["declared_in_headers"] == "unknown"
 
     @pytest.mark.parametrize("vis", list(Visibility))
-    def test_no_legacy_member_ever_claims_header_absence(
-        self, vis: Visibility
-    ) -> None:
+    def test_no_legacy_member_ever_claims_header_absence(self, vis: Visibility) -> None:
         """Exhaustive over the enum's whole domain, both with and without
         header provenance: the bridge may answer true or unknown, never a
         confirmed false. A confirmed false is a claim no ``Visibility`` value
