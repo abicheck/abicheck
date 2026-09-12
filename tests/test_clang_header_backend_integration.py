@@ -36,6 +36,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from _clang_ast_cache_isolation import (
+    _METHOD_SHAPED_KINDS,
+    _count_kinds,
+    _isolate_ast_cache,
+    _PruneSpy,
+    _reset_ast_memo,
+)
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import _clang_header_dump, dump
@@ -1448,72 +1455,6 @@ def stream_prune_lib(tmp_path: Path) -> tuple[Path, Path]:
     return so, header
 
 
-def _isolate_ast_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str = "xdg-cache"
-) -> None:
-    """Force a fresh on-disk AST cache dir so a prior (unpruned) run's cached
-    raw JSON file can never be served back for a differently-configured call
-    -- the streaming pruner only ever runs on a fresh parse, never on a
-    disk-cache hit (see ``dumper_clang_streaming.py``'s module docstring).
-
-    ``name`` is what makes two calls within *one* test genuinely independent.
-    It exists because it did not: every call derived the same
-    ``tmp_path / "xdg-cache"`` root, so a test that dumped twice off one
-    ``tmp_path`` (pruning off, then on) pointed both runs at the same cache
-    and the second was served the first run's cached raw JSON -- meaning the
-    pruner never parsed anything, and an "off vs. on are equivalent"
-    assertion compared the unpruned result with itself. Pass a distinct
-    ``name`` per configuration; the in-process AST memo has to be cleared
-    alongside it (see ``_reset_ast_memo``), since a disk-cache miss alone
-    does not force a reparse.
-    """
-    root = tmp_path / name
-    root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("XDG_CACHE_HOME", str(root))
-
-
-def _reset_ast_memo() -> None:
-    """Drop the in-process clang-AST memo slot.
-
-    ``conftest.py``'s ``_isolate_ast_memo`` clears this between *tests*; a
-    test that performs two differently-configured dumps needs it cleared
-    between those two dumps too, for the same reason ``_isolate_ast_cache``
-    needs a distinct name.
-    """
-    from abicheck import dumper_cache
-
-    dumper_cache._ast_memo_slot.set(None)
-
-
-class _PruneSpy:
-    """Records whether the streaming pruner's loader actually ran, and what
-    it reported, for the duration of one ``dump()`` call.
-
-    An equivalence test's claim is that pruning-off and pruning-on agree;
-    that claim is only meaningful if the pruning-on run really took the
-    pruning path *in that same comparison*. A sibling test proving the
-    pruner can engage on this repro does not establish it here -- a served
-    cache hit would silently skip it.
-    """
-
-    def __init__(self) -> None:
-        self.calls = 0
-        self.pruned_counts: list[int] = []
-
-    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from abicheck import dumper_clang_errors
-
-        real = dumper_clang_errors.load_pruned_clang_ast
-
-        def _spy(*args: object, **kwargs: object):
-            root, pruned_count = real(*args, **kwargs)
-            self.calls += 1
-            self.pruned_counts.append(pruned_count)
-            return root, pruned_count
-
-        monkeypatch.setattr(dumper_clang_errors, "load_pruned_clang_ast", _spy)
-
-
 def test_streaming_pruner_disabled_by_default(
     stream_prune_lib: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -1548,17 +1489,14 @@ def test_streaming_pruner_produces_an_equivalent_public_model(
     _reset_ast_memo()
     baseline = dump(so, [header], header_backend="clang", lang="c++")
 
-    # The baseline must not have taken the pruning path at all -- otherwise
-    # there is no "off" side to compare against.
-    assert spy.calls == 0
+    assert spy.calls == 0  # no pruning on the "off" side
 
     monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
     _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-pruned")
     _reset_ast_memo()
     pruned = dump(so, [header], header_backend="clang", lang="c++")
 
-    # ... and the pruned run must have genuinely reparsed and pruned, in
-    # THIS comparison, rather than being served the baseline's cached AST.
+    # Genuinely reparsed and pruned in THIS comparison -- see _PruneSpy.
     assert spy.calls == 1
     assert spy.pruned_counts[0] > 0
 
@@ -1622,20 +1560,6 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     assert pruned_count == 0  # already-pruned placeholders aren't prunable kinds
 
 
-_METHOD_SHAPED_KINDS = frozenset(
-    {"CXXMethodDecl", "CXXConstructorDecl", "CXXDestructorDecl", "CXXConversionDecl"}
-)
-
-
-def _count_kinds(node: object, kinds: frozenset) -> int:
-    if isinstance(node, dict):
-        n = 1 if node.get("kind") in kinds else 0
-        return n + sum(_count_kinds(v, kinds) for v in node.values())
-    if isinstance(node, list):
-        return sum(_count_kinds(v, kinds) for v in node)
-    return 0
-
-
 def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
     stream_prune_lib: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -1667,8 +1591,7 @@ def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
     pruned_root, _, _ = _clang_header_dump(
         [header], [], compiler="clang", lang="c++", memoize=False
     )
-    # Without this, a cache hit would make the two roots the same object
-    # graph and the method-count equality below vacuously true.
+    # Without this the method-count equality below is vacuously true.
     assert spy.calls == 1
     assert spy.pruned_counts[0] > 0
 
