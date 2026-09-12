@@ -46,9 +46,11 @@ from _source_licence_fixtures import (
     live as _live,
     snapshot_recording as _snapshot_recording,
     stored as _stored,
+    with_build_evidence as _with_build_evidence,
     write_tree as _write_tree,
 )
 
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.pattern_facts import (
     find_pattern_facts,
 )
@@ -56,11 +58,13 @@ from abicheck.buildsource.source_inputs import (
     WITHHELD_FOR_STORED_SNAPSHOT,
     SourceInputDisposition,
     SourceReadLicence,
+    build_evidence_collected_live,
     extraction_read_source_inputs,
 )
 from abicheck.model import AbiSnapshot, ScopeOrigin
 from abicheck.workflows.pattern_preprocessor_scan import (
     CHECK_PATTERN_ESCALATION,
+    build_evidence_licence,
     compute_pattern_preprocessor_scan,
     snapshot_source_licence,
 )
@@ -610,3 +614,249 @@ class TestEveryFrontEndThatExtractsLiveGrantsTheLicence:
 
         assert _pair(licensed=False) == {}
         assert set(_pair(licensed=True).values()) == {"persistent"}
+
+
+# ── Class 1, continued: the *second* evidence source ─────────────────────────
+
+
+class TestEachEvidenceSourceIsLicensedByItsOwnProvenance:
+    """A side can hold live headers and a pre-captured build pack at once.
+
+    The licence was originally snapshot-wide, answered from the header AST
+    alone. A live header dump combined with a pre-captured `--build-info` pack
+    therefore licensed re-reading the *pack's* recorded compile-unit paths from
+    whatever occupies them on this runner — the same fabrication the licence
+    exists to prevent, reached through the other evidence source (Codex review,
+    P2). Both the lexical scan (compile-unit roots) and the preprocessor scan
+    (`clang -E` over those units) read that source.
+
+    Stated exhaustively over the small domain rather than as one repro: the two
+    provenances are independent booleans, so all four combinations are
+    enumerated, and each is checked for what it may read *and* for what it may
+    conclude.
+    """
+
+    @staticmethod
+    def _pair(tmp_path: Path, *, live_headers: bool, live_pack: bool):
+        header = _write_tree(tmp_path / "inc", {"widget.h": TEMPLATE_SOURCE})[0]
+        unit = _write_tree(tmp_path / "src", {"widget.cpp": PACKED_SOURCE})[0]
+        pair = []
+        for version in ("1.0", "2.0"):
+            snap = _snapshot_recording([header], version=version)
+            _with_build_evidence(snap, [unit], live_pack=live_pack)
+            if live_headers:
+                snap.from_headers = True
+                snap.live_source_evidence = True
+            pair.append(snap)
+        return pair[0], pair[1], header, unit
+
+    @pytest.mark.parametrize("live_headers", [True, False])
+    @pytest.mark.parametrize("live_pack", [True, False])
+    def test_a_source_is_read_only_under_its_own_licence(
+        self, tmp_path: Path, live_headers: bool, live_pack: bool
+    ) -> None:
+        old, new, header, unit = self._pair(
+            tmp_path, live_headers=live_headers, live_pack=live_pack
+        )
+        result = compute_pattern_preprocessor_scan(old, new)
+
+        # `template class Widget<int>;` lives only in the header, `#pragma
+        # pack` only in the compile unit, so each construct's presence is a
+        # direct read-out of which source was actually opened.
+        kinds = set(result.pattern_new.get("counts_by_kind", {}))
+        assert ("explicit_template_instantiation" in kinds) is live_headers
+        assert ("pragma_pack" in kinds) is live_pack
+
+        accounted = {
+            i["path"]: i["disposition"] for i in result.pattern_new["inputs"]["gaps"]
+        }
+        # Nothing is silently dropped: an unlicensed root stays in the account.
+        assert (accounted.get(header) == "not_licensed") is not live_headers
+        assert (accounted.get(unit) == "not_licensed") is not live_pack
+
+    @pytest.mark.parametrize("live_headers", [True, False])
+    @pytest.mark.parametrize("live_pack", [True, False])
+    def test_only_a_fully_licensed_side_establishes_an_absence(
+        self, tmp_path: Path, live_headers: bool, live_pack: bool
+    ) -> None:
+        """Mixed provenance is never "fully covered".
+
+        The half that *was* licensed reports its observations, but an absence
+        claim spans every expected input, so one unlicensed source keeps the
+        side insufficient — which is what stops the fold asserting `introduced`
+        or `resolved` off a partially-read side.
+        """
+        old, new, _, _ = self._pair(
+            tmp_path, live_headers=live_headers, live_pack=live_pack
+        )
+        result = compute_pattern_preprocessor_scan(old, new)
+        sides = result.coverage[CHECK_PATTERN_ESCALATION]
+        established = live_headers and live_pack
+        for side in ("old", "new"):
+            assert sides[side].established is established
+            assert bool(sides[side].reason) is not established
+
+    def test_a_live_pack_licenses_a_headerless_side_build_reads(
+        self, tmp_path: Path
+    ) -> None:
+        """The symmetric direction, which the first fix denied outright.
+
+        A `--sources`-only collection (no `-H`, so no header licence) genuinely
+        read its compile units in this run, and now says so per source instead
+        of reporting every source-derived fact as not evaluated.
+        """
+        old, new, _, unit = self._pair(tmp_path, live_headers=False, live_pack=True)
+        result = compute_pattern_preprocessor_scan(old, new)
+        assert "pragma_pack" in result.pattern_new.get("counts_by_kind", {})
+        assert build_evidence_licence(new).permitted is True
+        assert snapshot_source_licence(new).permitted is False
+
+    @pytest.mark.parametrize(
+        "mutation",
+        ["delete_file", "edit_file", "substitute_unrelated_file", "relocate_tree"],
+    )
+    def test_a_precaptured_packs_facts_are_invariant_under_source_mutation(
+        self, tmp_path: Path, mutation: str
+    ) -> None:
+        """The acceptance invariant, for the second evidence source.
+
+        The side's *headers* are a genuine live extraction of this run, so the
+        side as a whole is licensed -- which is exactly the shape that used to
+        let the pack's recorded compile units be re-read. Mutating the tree the
+        pack names must not move a single fact, and the oracle is this same
+        comparison captured before the mutation.
+        """
+        unit_dir = tmp_path / "checkout"
+        unit = unit_dir / "widget.cpp"
+        _write_tree(unit_dir, {"widget.cpp": PACKED_SOURCE})
+        header = _write_tree(tmp_path / "inc", {"widget.h": TEMPLATE_SOURCE})[0]
+
+        pair = []
+        for version in ("1.0", "2.0"):
+            snap = _snapshot_recording([header], version=version)
+            _with_build_evidence(snap, [str(unit)], live_pack=False)
+            snap.from_headers = True
+            snap.live_source_evidence = True
+            pair.append(snap)
+        old, new = pair
+        before = compute_pattern_preprocessor_scan(old, new).to_dict()
+
+        if mutation == "delete_file":
+            unit.unlink()
+        elif mutation == "edit_file":
+            unit.write_text(PACKED_SOURCE + "\ntemplate class Gadget<int>;\n")
+        elif mutation == "substitute_unrelated_file":
+            unit.write_text("int unrelated_symbol;\n")
+        elif mutation == "relocate_tree":
+            unit_dir.rename(tmp_path / "moved")
+
+        after = compute_pattern_preprocessor_scan(old, new).to_dict()
+        assert after == before, f"pre-captured facts changed under {mutation!r}"
+        # And the header half still contributed, so this is not vacuous.
+        assert (
+            "explicit_template_instantiation"
+            in after["pattern"]["new"]["counts_by_kind"]
+        )
+
+    def test_an_explicit_verified_context_still_covers_both_sources(
+        self, tmp_path: Path
+    ) -> None:
+        """A caller asserting provenance is asserting it about the tree.
+
+        The override is a statement that the recorded tree *is* the one on
+        disk, which is not a claim about one evidence source's route to it — so
+        it must not be narrowed by the pack's own unstamped flag.
+        """
+        old, new, _, _ = self._pair(tmp_path, live_headers=False, live_pack=False)
+        override = SourceReadLicence.verified_context("the harness checked it out")
+        result = compute_pattern_preprocessor_scan(
+            old, new, old_source_licence=override, new_source_licence=override
+        )
+        kinds = set(result.pattern_new.get("counts_by_kind", {}))
+        assert {"explicit_template_instantiation", "pragma_pack"} <= kinds
+        assert result.coverage[CHECK_PATTERN_ESCALATION]["new"].established is True
+
+
+class TestOnlyAnInlineCollectionInThisRunIsLive:
+    """`build_evidence_collected_live`'s rule, and the real embed step's use of it.
+
+    The predicate is exhaustive over its own two-boolean domain; the embed test
+    is what proves the production call site passes the right booleans, since a
+    predicate asserted in isolation passes just as well when nothing calls it.
+    """
+
+    @pytest.mark.parametrize(
+        "precaptured,collected_inline,expected",
+        [
+            (False, True, True),  # a pure inline collection: read now
+            (True, True, False),  # merged with a pre-captured pack: fail closed
+            (True, False, False),  # a loaded pack only
+            (False, False, False),  # nothing collected at all
+        ],
+    )
+    def test_the_rule(
+        self, precaptured: bool, collected_inline: bool, expected: bool
+    ) -> None:
+        assert (
+            build_evidence_collected_live(
+                precaptured=precaptured, collected_inline=collected_inline
+            )
+            is expected
+        )
+
+    def test_a_loaded_pack_never_arrives_stamped(self, tmp_path: Path) -> None:
+        """The flag is runtime-only: it cannot survive a round trip.
+
+        Asserted through the real storage codec and the real pack codec, not by
+        reading the field's `dataclasses.field` metadata — the property that
+        matters is that a snapshot read back off disk grants nothing.
+        """
+        snap = _with_build_evidence(
+            _snapshot_recording([]), ["/nonexistent/a.cpp"], live_pack=True
+        )
+        snap.from_headers = True
+        snap.live_source_evidence = True
+        reloaded = _stored(snap, tmp_path, "old.abi.json")
+        assert reloaded.build_source is not None
+        assert reloaded.build_source.live_source_evidence is False
+        assert build_evidence_licence(reloaded).permitted is False
+
+    def test_the_embed_step_grants_it_for_an_inline_collection_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Drives the real `embed_build_source`, stubbing only the collectors.
+
+        Both routes produce the identical merged pack, so the only thing under
+        test is which provenance the step attributes to it.
+        """
+        from abicheck.buildsource import embed as embed_mod, inline as inline_mod
+        from abicheck.buildsource.pack import BuildSourcePack
+
+        def _pack() -> BuildSourcePack:
+            return BuildSourcePack(
+                root=Path(""),
+                build_evidence=BuildEvidence(
+                    compile_units=[CompileUnit(id="cu0", source="/src/a.cpp")]
+                ),
+            )
+
+        tree = tmp_path / "src"
+        tree.mkdir()
+        monkeypatch.setattr(inline_mod, "collect_inline_pack", lambda **kw: _pack())
+        monkeypatch.setattr(embed_mod, "load_pack_or_raise", lambda p: _pack())
+
+        inline_side = AbiSnapshot(library="libfoo.so", version="1.0")
+        embed_mod.embed_build_source(inline_side, None, tree)
+        assert inline_side.build_source is not None
+        assert inline_side.build_source.live_source_evidence is True
+
+        # A pack *directory* on the same argument: same facts, historical.
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        # A real pack directory: `is_pack_dir` validates the version marker,
+        # not merely the manifest's presence.
+        (pack_dir / "manifest.json").write_text('{"build_source_pack_version": 1}')
+        pack_side = AbiSnapshot(library="libfoo.so", version="1.0")
+        embed_mod.embed_build_source(pack_side, None, pack_dir)
+        assert pack_side.build_source is not None
+        assert pack_side.build_source.live_source_evidence is False

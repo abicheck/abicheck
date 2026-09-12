@@ -55,6 +55,27 @@ class BuildSourcePack:
     source_abi: SourceAbiSurface | None = None
     source_graph: SourceGraphSummary | None = None
 
+    #: Were this pack's normalized facts collected from inputs that exist on
+    #: disk **now, in this run**? Runtime-only: never serialized by
+    #: :meth:`to_embedded_dict`, never reconstructed by
+    #: :meth:`from_embedded_dict` or ``pack_io.load``, and excluded from
+    #: equality/repr -- so a pack that came off disk (a stored snapshot's
+    #: embedded payload, a pre-captured ``--build-info`` pack directory)
+    #: cannot claim one, exactly like ``AbiSnapshot.live_source_evidence``.
+    #:
+    #: It exists because a snapshot-wide licence is too coarse. A live header
+    #: dump combined with a pre-captured pack is live for its *declared
+    #: headers* and historical for the pack's *compile units* at the same
+    #: time, and the pattern/preprocessor pre-scans read both. Granting them
+    #: one licence off the header AST let the pack's recorded paths be
+    #: re-read from an unrelated checkout -- the same fabrication the licence
+    #: exists to prevent, reached through the other evidence source (Codex
+    #: review, P2). See ``buildsource/source_inputs.py`` for the contract and
+    #: ``workflows/pattern_preprocessor_scan.py`` for the two licences.
+    live_source_evidence: bool = field(
+        default=False, repr=False, compare=False, kw_only=True
+    )
+
     # -- construction -------------------------------------------------------
 
     @classmethod

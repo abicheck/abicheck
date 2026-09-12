@@ -423,6 +423,25 @@ class PatternFactsResult:
         """True if any located construct warrants a deeper source-ABI scan."""
         return any(fact.escalates for fact in self.facts)
 
+    def merged(self, other: PatternFactsResult) -> PatternFactsResult:
+        """Combine two scans of the same side run under *different* licences.
+
+        A side's roots can come from two evidence sources with independent
+        provenance (see ``workflows/pattern_preprocessor_scan.py``), and only
+        one of them may be licensed. Running the scan once per source and
+        merging keeps each source's licence honest while still reporting one
+        result: facts and tallies add, and the expected-input accounts merge
+        (:meth:`SourceInputSet.merged`), so the unlicensed source's roots stay
+        visible as ``not_licensed`` gaps that keep :attr:`sufficient` false.
+        """
+        return PatternFactsResult(
+            facts=[*self.facts, *other.facts],
+            files_scanned=self.files_scanned + other.files_scanned,
+            files_skipped=self.files_skipped + other.files_skipped,
+            version=self.version,
+            inputs=self.inputs.merged(other.inputs),
+        )
+
     def counts_by_kind(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for fact in self.facts:

@@ -680,14 +680,25 @@ side from whatever happens to sit at the same path today — a different branch,
 an edited header, or an unrelated file. Every answer it produced would be a
 statement about the present dressed as history.
 
-So abicheck reads a side's recorded source paths only when it is entitled to:
+So abicheck reads a side's recorded source paths only when it is entitled to.
+A side can carry two source-evidence sources — its declared headers, and the
+compile units of an embedded L3 build pack — and each is judged on its own
+provenance, because one can be today's and the other historical at the same
+time:
 
-| Side | What happens |
+| Evidence source on a side | What happens |
 |---|---|
-| Extracted in this run **from headers** (you passed `-H`, so the AST frontend opened those files) | Read normally — those paths are today's paths |
-| Extracted in this run from the binary alone (DWARF or the symbol table) | **Not read.** `DW_AT_decl_file` names a path on the *build* machine, which this run never opened |
-| Loaded from a stored snapshot | **Not read at all.** The check reports that the historical evaluation was not possible |
-| Loaded, with an explicitly supplied and verified source context | Read, on the caller's stated provenance |
+| Declared headers, extracted in this run **from headers** (you passed `-H`, so the AST frontend opened those files) | Read normally — those paths are today's paths |
+| Declared headers, extracted in this run from the binary alone (DWARF or the symbol table) | **Not read.** `DW_AT_decl_file` names a path on the *build* machine, which this run never opened |
+| Build pack collected in this run (`--sources`, or a `--build-info` build directory) | Read normally — this run resolved those compile units |
+| Build pack that came off disk (a pre-captured `--build-info` pack, or one embedded in a stored snapshot) | **Not read.** Its recorded compile-unit paths are as historical as a stored snapshot's |
+| Anything loaded from a stored snapshot | **Not read at all.** The check reports that the historical evaluation was not possible |
+| Loaded, with an explicitly supplied and verified source context | Read, on the caller's stated provenance — the caller has asserted the recorded tree *is* the one on disk, which covers both sources |
+
+A side that is licensed for one source and not the other reports what it read
+and still establishes no *absence*: the unlicensed paths stay visible in the
+coverage account as `not_licensed`, so a construct that only the unread half
+could have contained never reads as `introduced`.
 
 The second row is the one that surprises people. A snapshot built from debug
 info records where each declaration was *compiled from*, not a file this run

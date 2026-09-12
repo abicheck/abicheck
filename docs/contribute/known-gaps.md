@@ -8489,20 +8489,31 @@ Two residuals are deliberately open, both recorded on the
    be answerable rather than honestly declined; do not instead widen the
    licence, which would reintroduce exactly the defect above.
 
-A third residual, narrower than both: the licence requires *header-derived*
-provenance (`extraction_read_source_inputs`), which is what the header-AST
-frontends establish by actually opening the files they attribute declarations
-to. A dump that collected only L3 build evidence (`--sources` with no `-H`) did
-read its compile units, but nothing distinguishable at the grant point
-separates that from a *loaded* build-source pack whose paths are as historical
-as a stored snapshot's. Such a run therefore reports its source-derived facts
-as not evaluated. That is the deliberate direction -- declining a fact we could
-have had, rather than risking one we did not -- and closing it properly means
-recording on the snapshot *which* inputs an extraction actually opened, not
-loosening the predicate. The same applies to a DWARF-only dump, whose
-`DW_AT_decl_file` paths name the build machine's tree: that one is not a gap
-but the point, and it is why the grant is conditional at all (see the review
-round on PR #1236).
+**Closed, and how (one licence per evidence source).** A third residual used
+to sit here: the licence required *header-derived* provenance
+(`extraction_read_source_inputs`), so a dump that collected only L3 build
+evidence (`--sources` with no `-H`) reported its source-derived facts as not
+evaluated even though it genuinely had read its compile units, because nothing
+at the grant point separated that from a *loaded* pack whose paths are as
+historical as a stored snapshot's. The same coarseness had a worse, opposite
+failure the same review round found: a live header dump merged with a
+pre-captured `--build-info` pack was granted one snapshot-wide licence off the
+header AST, and the pattern/preprocessor scans then read the *pack's* recorded
+compile-unit paths from whatever occupies them on this runner — the original
+fabrication, reached through the other evidence source (PR #1236, Codex P2).
+
+Both directions are one defect: a side holds up to two source-evidence sources
+with independent provenance, and one licence cannot be correct for both. So the
+licence is now resolved per source — declared headers via
+`snapshot_source_licence`, an embedded build pack via `build_evidence_licence`,
+which asks the pack itself (`BuildSourcePack.live_source_evidence`, stamped by
+`buildsource/embed.py` only for an inline collection performed in this run and,
+like the snapshot flag, never serialized). A partially-licensed side reports
+what it read and keeps the unlicensed roots in the expected-input account as
+`not_licensed` gaps, so no *absence* is established from the half that was read.
+What remains true is that the grant is *conditional*, which is the point for a
+DWARF-only dump whose `DW_AT_decl_file` paths name the build machine's tree:
+that side never opened them, so it gets no header licence.
 
 Note also the *shape* of the accepted trade-off in the third fix: the
 evolution fold now decides each identity from what is established for that

@@ -125,3 +125,22 @@
   `extract`. Conditional there too, so the `abi-dumper`-style headerless
   descriptor path stays denied.
 
+
+- **The source-read licence is resolved per evidence source, not per side.** A
+  side carries up to two source-evidence sources with independent provenance —
+  its declared headers, and the compile units of an embedded L3 build pack — and
+  one licence could not be correct for both. A live header dump combined with a
+  pre-captured `--build-info` pack was granted a snapshot-wide licence off the
+  header AST, and the pre-scans then read the *pack's* recorded compile-unit
+  paths from whatever occupies them on this runner: the original fabrication,
+  reached through the other evidence source. Each source is now judged on its
+  own provenance (`BuildSourcePack.live_source_evidence`, stamped by
+  `embed_build_source` only for an inline collection performed in this run and,
+  like the snapshot flag, never serialized), and a partially-licensed side
+  reports what it read while establishing no *absence* over what it did not —
+  the unlicensed roots stay in the coverage account as `not_licensed`. This also
+  fixes the opposite direction, which the first cut declined outright: a
+  `--sources`-only dump (no `-H`) genuinely read its compile units and now says
+  so, instead of reporting every source-derived fact as not evaluated. An
+  explicit verified context still covers both sources, since it is an assertion
+  about the tree rather than about one route to it.

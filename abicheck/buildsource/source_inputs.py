@@ -156,6 +156,27 @@ WITHHELD_FOR_STORED_SNAPSHOT = SourceReadLicence.withheld(
 )
 
 
+def build_evidence_collected_live(*, precaptured: bool, collected_inline: bool) -> bool:
+    """Were a pack's L3-L5 facts collected from inputs that exist on disk *now*?
+
+    The rule, stated once so both the embed step that grants the flag and the
+    tests that pin it read the same sentence: **only an inline collection
+    performed in this run is live, and any pre-captured contribution makes the
+    whole merged pack historical.**
+
+    Fail-closed on the second half deliberately. A merge of a pre-captured
+    ``--build-info`` pack with an inline ``--sources`` collection produces one
+    pack whose compile units come from both, and which layer each fact came
+    from is a per-layer precedence decision (``_combine_packs``) that the
+    consumer of the licence -- a lexical scan over recorded paths -- has no way
+    to re-derive per path. Treating the merge as historical loses assurance;
+    treating it as live would let a pack captured on another machine be
+    re-read from this one, which is the fabrication the licence exists to
+    prevent.
+    """
+    return collected_inline and not precaptured
+
+
 class LiveSourceEvidence(Protocol):
     """A snapshot-shaped object, as far as the licence is concerned.
 
@@ -188,12 +209,16 @@ def extraction_read_source_inputs(snapshot: Any) -> bool:
     same "a guess is not evidence" reasoning
     ``diff_symbols``/``diff_platform_elf_symbols`` already apply to it.
 
-    Deliberately conservative: a dump that collected only L3 build evidence
-    (``--sources`` with no ``-H``) did read its compile units, but nothing
-    distinguishable at this point separates that from a *loaded* build-source
-    pack whose paths are as historical as a stored snapshot's. Such a run
-    reports its source-derived facts as not evaluated rather than risking the
-    fabrication; see ``docs/contribute/known-gaps.md``.
+    Scoped to the *declared-header* evidence source on purpose. A dump that
+    also collected L3 build evidence (``--sources``) did read its compile
+    units, and that is a separate provenance question with a separate answer:
+    ``BuildSourcePack.live_source_evidence``, stamped by
+    :func:`build_evidence_collected_live` at the one place that can tell an
+    inline collection from a loaded pack. ``workflows/
+    pattern_preprocessor_scan.py`` resolves one licence per source rather than
+    one per side, so neither answer can license reads the other established
+    (this replaced an earlier, deliberately conservative note here that
+    withheld the build-evidence reads outright -- Codex review, P2).
     """
     return bool(
         getattr(snapshot, "from_headers", False)
@@ -252,6 +277,32 @@ class SourceInput:
 
     def to_dict(self) -> dict[str, Any]:
         return {"path": self.path, "disposition": self.disposition.value}
+
+
+#: Precedence when two evidence sources report *different* dispositions for the
+#: same path (see :meth:`SourceInputSet.merged`). Highest first, and a total
+#: order on purpose: a first-wins merge makes a side's sufficiency depend on
+#: which evidence source happened to resolve first, which is the order-
+#: dependence this repository's own primitive-level property tests exist to
+#: catch (found by exactly such a test here).
+#:
+#: ``SCANNED`` wins outright -- the file genuinely was read, so no coverage is
+#: missing for it whatever the other source made of the path. Every *gap* then
+#: outranks ``EXCLUDED``, fail-closed: one source deliberately putting a path
+#: out of scope must not license ignoring another source's real gap on it. The
+#: three filesystem-observed gaps outrank ``SELECTED``/``NOT_LICENSED``, which
+#: assert only that nothing was looked at; sufficiency is identical across all
+#: five, so this half of the order decides the *label* a reader is given, and
+#: prefers the one carrying an observation.
+DISPOSITION_PRECEDENCE: tuple[SourceInputDisposition, ...] = (
+    SourceInputDisposition.SCANNED,
+    SourceInputDisposition.UNREADABLE,
+    SourceInputDisposition.MISSING,
+    SourceInputDisposition.UNSUPPORTED,
+    SourceInputDisposition.SELECTED,
+    SourceInputDisposition.NOT_LICENSED,
+    SourceInputDisposition.EXCLUDED,
+)
 
 
 @dataclass(frozen=True)
@@ -338,6 +389,37 @@ class SourceInputSet:
             if path not in known and not ok
         )
         return self.with_inputs(resolved)
+
+    def merged(self, other: SourceInputSet) -> SourceInputSet:
+        """Combine two accounts resolved under *different* licences.
+
+        One scan can draw on two evidence sources with independent provenance
+        (a snapshot's declared headers and an embedded build pack's compile
+        units), so it needs one account spanning both. Inputs concatenate,
+        de-duplicated by path under :data:`DISPOSITION_PRECEDENCE` -- a path
+        both sources declare must not be counted twice, and the outcome must
+        not depend on which source was resolved first.
+
+        The set-level ``licence`` is the permitted one when exactly one side
+        is permitted, which is what keeps mixed provenance honest rather than
+        collapsing it either way: the unlicensed side's roots stay in the
+        account as ``NOT_LICENSED`` gaps, so :attr:`sufficient` is false and
+        :meth:`insufficiency_reason` names them -- while the licensed side's
+        observations are still reported. Neither side permitted keeps this
+        set's own withheld licence and its reason.
+        """
+        rank = {d: i for i, d in enumerate(DISPOSITION_PRECEDENCE)}
+        by_path: dict[str, SourceInput] = {}
+        for item in (*self.inputs, *other.inputs):
+            held = by_path.get(item.path)
+            if held is None or rank[item.disposition] < rank[held.disposition]:
+                by_path[item.path] = item
+        licence = self.licence
+        if not licence.permitted and other.licence.permitted:
+            licence = other.licence
+        return SourceInputSet(
+            inputs=tuple(by_path[p] for p in sorted(by_path)), licence=licence
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

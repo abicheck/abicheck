@@ -45,6 +45,7 @@ from .pack import BuildSourcePack
 from .pack_io import to_ref
 from .pack_load import load_inputs_pack_or_raise, load_pack_or_raise
 from .snapshot_exports import exported_symbols_from_snapshot
+from .source_inputs import build_evidence_collected_live
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -320,6 +321,14 @@ def embed_build_source(
                 merged.manifest, coverage=coverage, artifacts=[]
             ),
         )
+    # The source-read licence for *this pack's* recorded paths, decided here
+    # because this is the one place that knows where each contribution came
+    # from (see source_inputs.build_evidence_collected_live). Runtime-only: it
+    # is never serialized, so re-loading this snapshot withholds it again.
+    merged.live_source_evidence = build_evidence_collected_live(
+        precaptured=bi_pack is not None or src_pack is not None,
+        collected_inline=inline_pack is not None,
+    )
     snap.build_source = merged
     # Provenance hint: prefer the source input, else build-info.
     hint = str(sources) if sources is not None else str(build_info)

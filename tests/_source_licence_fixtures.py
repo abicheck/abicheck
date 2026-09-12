@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin
 from abicheck.serialization import load_snapshot, write_snapshot
 
@@ -71,7 +73,38 @@ def live(snapshot: AbiSnapshot) -> AbiSnapshot:
     `from_headers` is what makes granting it legitimate (see
     `extraction_read_source_inputs` -- a DWARF-only extraction records paths it
     never opened).
+
+    An embedded build pack is stamped too, since that is a *second*,
+    independently-licensed evidence source (`build_evidence_licence`): a
+    harness saying "this whole side was collected live in this run" has to say
+    it for both, and one that means only the headers should not use this helper
+    for the pack.
     """
     snapshot.from_headers = True
     snapshot.live_source_evidence = True
+    if snapshot.build_source is not None:
+        snapshot.build_source.live_source_evidence = True
+    return snapshot
+
+
+def with_build_evidence(
+    snapshot: AbiSnapshot, sources: list[str], *, live_pack: bool = False
+) -> AbiSnapshot:
+    """Attach an embedded L3 pack recording *sources* as its compile units.
+
+    *live_pack* is the pack's own source-read licence
+    (`BuildSourcePack.live_source_evidence`) -- the second, independently
+    provenanced evidence source. Default `False`, matching every pack that came
+    off disk: a pre-captured `--build-info` directory, or a stored snapshot's
+    embedded payload.
+    """
+    snapshot.build_source = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(
+            compile_units=[
+                CompileUnit(id=f"cu{i}", source=s) for i, s in enumerate(sources)
+            ]
+        ),
+        live_source_evidence=live_pack,
+    )
     return snapshot

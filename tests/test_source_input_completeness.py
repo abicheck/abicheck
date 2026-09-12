@@ -52,7 +52,9 @@ from abicheck.buildsource.pattern_facts import (
 from abicheck.buildsource.preprocessor_facts import PreprocessorFactsResult
 from abicheck.buildsource.preprocessor_probe_families import ProbeTallies
 from abicheck.buildsource.source_inputs import (
+    DISPOSITION_PRECEDENCE,
     GAP_DISPOSITIONS,
+    WITHHELD_FOR_STORED_SNAPSHOT,
     SourceInput,
     SourceInputDisposition,
     SourceInputSet,
@@ -792,3 +794,150 @@ def test_a_changed_filter_with_no_join_predicate_narrows_nothing(
         licence=SourceReadLicence.live_extraction(),
     )
     assert [i.disposition for i in inputs.inputs] == [SourceInputDisposition.SELECTED]
+
+
+class TestSourceInputSetMergeProperties:
+    """`SourceInputSet.merged` stated as invariants, not as one caller's case.
+
+    A new reusable combining primitive gets this treatment per this repo's own
+    "Primitive-level property tests" guidance: the merge exists so one scan can
+    span two independently-licensed evidence sources, and the properties that
+    make it safe to build a sufficiency answer on are order-independence, no
+    double-counting, no silent loss, and a mixed-provenance result that is never
+    sufficient. Enumerated exhaustively over the disposition domain rather than
+    sampled, since the domain is small enough to close completely.
+    """
+
+    _DISPOSITIONS = tuple(SourceInputDisposition)
+
+    @staticmethod
+    def _set(
+        items: list[tuple[str, SourceInputDisposition]], *, permitted: bool
+    ) -> SourceInputSet:
+        licence = (
+            SourceReadLicence.live_extraction()
+            if permitted
+            else WITHHELD_FOR_STORED_SNAPSHOT
+        )
+        return SourceInputSet(
+            inputs=tuple(SourceInput(path=p, disposition=d) for p, d in items),
+            licence=licence,
+        )
+
+    def test_the_precedence_is_a_total_order_over_every_disposition(self) -> None:
+        """A newly-added disposition must be ranked, not silently unranked.
+
+        `merged` indexes the precedence table directly, so an unranked member
+        would be a `KeyError` at merge time on some real input rather than a
+        failure here. Exhaustiveness is mechanical even though the *ordering*
+        judgement is not — the same split this repo applies to the canonical
+        identity contract.
+        """
+        assert set(DISPOSITION_PRECEDENCE) == set(SourceInputDisposition)
+        assert len(DISPOSITION_PRECEDENCE) == len(SourceInputDisposition)
+
+    @pytest.mark.parametrize("left", _DISPOSITIONS)
+    @pytest.mark.parametrize("right", _DISPOSITIONS)
+    def test_order_never_changes_the_outcome(
+        self, left: SourceInputDisposition, right: SourceInputDisposition
+    ) -> None:
+        """Every disposition pair on the same path merges order-independently.
+
+        An order-dependent merge would make a side's sufficiency depend on which
+        evidence source happened to be resolved first — the exact defect class
+        that made `_paired_stable_indices` need this kind of test.
+        """
+        a = self._set([("shared.h", left)], permitted=True)
+        b = self._set([("shared.h", right)], permitted=True)
+        forward = a.merged(b)
+        backward = b.merged(a)
+        assert {i.disposition for i in forward.inputs} == {
+            i.disposition for i in backward.inputs
+        }
+        assert forward.sufficient == backward.sufficient
+
+    @pytest.mark.parametrize("left", _DISPOSITIONS)
+    @pytest.mark.parametrize("right", _DISPOSITIONS)
+    def test_a_shared_path_is_accounted_for_exactly_once(
+        self, left: SourceInputDisposition, right: SourceInputDisposition
+    ) -> None:
+        """Counted twice, one header could make a complete set read incomplete.
+
+        Or the reverse: a duplicated `scanned` entry inflating the scanned tally
+        past a real gap. Either way the account stops being an account.
+        """
+        merged = self._set([("shared.h", left)], permitted=True).merged(
+            self._set([("shared.h", right)], permitted=True)
+        )
+        assert [i.path for i in merged.inputs] == ["shared.h"]
+
+    @pytest.mark.parametrize("disposition", _DISPOSITIONS)
+    def test_no_input_is_ever_dropped(
+        self, disposition: SourceInputDisposition
+    ) -> None:
+        a = self._set([("a.h", disposition)], permitted=True)
+        b = self._set([("b.cpp", disposition)], permitted=True)
+        assert {i.path for i in a.merged(b).inputs} == {"a.h", "b.cpp"}
+
+    def test_a_real_outcome_outranks_not_licensed_on_the_same_path(self) -> None:
+        """One source read the path; the other was not licensed to.
+
+        The read happened, so the account records it — `not_licensed` is the
+        weaker statement and must not mask a real observation.
+        """
+        scanned = self._set(
+            [("shared.h", SourceInputDisposition.SCANNED)], permitted=True
+        )
+        unlicensed = self._set(
+            [("shared.h", SourceInputDisposition.NOT_LICENSED)], permitted=False
+        )
+        for merged in (scanned.merged(unlicensed), unlicensed.merged(scanned)):
+            assert [i.disposition for i in merged.inputs] == [
+                SourceInputDisposition.SCANNED
+            ]
+            assert merged.sufficient is True
+
+    @pytest.mark.parametrize("licensed_first", [True, False])
+    def test_mixed_provenance_is_never_sufficient(self, licensed_first: bool) -> None:
+        """The whole point of the merge: one unlicensed source keeps it open.
+
+        The licensed half's observations survive (it reports a scanned input),
+        but the absence claim does not — and the reason names the gap rather
+        than the licence, since the set as a whole *was* partly readable.
+        """
+        licensed = self._set(
+            [("read.h", SourceInputDisposition.SCANNED)], permitted=True
+        )
+        withheld = self._set(
+            [("historical.cpp", SourceInputDisposition.NOT_LICENSED)], permitted=False
+        )
+        merged = (
+            licensed.merged(withheld) if licensed_first else withheld.merged(licensed)
+        )
+        assert merged.licence.permitted is True
+        assert merged.scanned == 1
+        assert merged.sufficient is False
+        assert "not_licensed" in merged.insufficiency_reason()
+
+    def test_two_withheld_sources_keep_a_licence_reason(self) -> None:
+        """Neither side readable: the reason must name the licence, not a tally.
+
+        A caller reading "incomplete expected-input set" for a side nothing was
+        licensed to read would be told the wrong thing about why.
+        """
+        a = self._set([("a.h", SourceInputDisposition.NOT_LICENSED)], permitted=False)
+        b = self._set([("b.cpp", SourceInputDisposition.NOT_LICENSED)], permitted=False)
+        merged = a.merged(b)
+        assert merged.licence.permitted is False
+        assert merged.insufficiency_reason() == WITHHELD_FOR_STORED_SNAPSHOT.reason
+
+    def test_merging_an_empty_account_is_the_identity(self) -> None:
+        """A side with no build pack at all must decide exactly as before.
+
+        This is what keeps every pre-existing single-source invocation
+        bit-for-bit unchanged.
+        """
+        one = self._set([("a.h", SourceInputDisposition.SCANNED)], permitted=True)
+        empty = SourceInputSet(licence=one.licence)
+        assert one.merged(empty) == one
+        assert empty.merged(one).inputs == one.inputs

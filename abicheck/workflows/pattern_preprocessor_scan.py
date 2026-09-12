@@ -86,6 +86,18 @@ is stat'd or opened for that side and the result says the historical
 evaluation was **not possible** -- every identity folds to ``not_evaluated``
 rather than being characterised against a same-looking path on the current
 runner.
+
+**One licence per evidence source, not per side.** The two sources above have
+independent provenance and a side can hold one of each: a live header dump
+combined with a pre-captured ``--build-info`` pack is live for its declared
+headers and historical for the pack's compile units simultaneously. So the
+declared headers are read under :func:`snapshot_source_licence` and the
+embedded pack's recorded paths under :func:`build_evidence_licence`, which
+asks the pack itself (``BuildSourcePack.live_source_evidence``, stamped only
+for an inline collection performed in this run and equally unserialized).
+Mixed provenance keeps the unlicensed source's roots in the expected-input
+account as ``not_licensed`` gaps, so the licensed half's observations are
+reported while no *absence* claim is established from them.
 """
 
 from __future__ import annotations
@@ -106,6 +118,16 @@ from ..buildsource.source_inputs import (
 )
 from ..model import AbiSnapshot, ScopeOrigin
 from ..policy.evidence_status import CrossSourceEvolution
+
+#: The licence a snapshot's *embedded build pack* gets when nothing establishes
+#: that its compile units were collected in this run (see
+#: :func:`build_evidence_licence`).
+WITHHELD_FOR_PRECAPTURED_BUILD_EVIDENCE = SourceReadLicence.withheld(
+    "pre-captured build evidence: the pack's recorded compile-unit paths are "
+    "provenance, not a licence to read the current filesystem for historical "
+    "facts"
+)
+
 
 #: Schema version for the ``pattern_preprocessor_scan`` report block.
 #: Independent of every other schema version in this codebase (see
@@ -265,49 +287,116 @@ def _declared_source_headers(
     return headers
 
 
-def _pattern_scan_roots(snapshot: AbiSnapshot) -> list[str]:
-    """Candidate file roots for the lexical pre-scan (see module docstring)."""
-    roots = _declared_source_headers(snapshot)
-    build_source = snapshot.build_source
-    if build_source is not None and build_source.build_evidence is not None:
-        for cu in build_source.build_evidence.compile_units:
-            if cu.source:
-                roots.add(cu.source)
-    return sorted(roots)
+def _build_evidence_roots(snapshot: AbiSnapshot) -> list[str]:
+    """Compile-unit source paths recorded by *snapshot*'s embedded L3 pack."""
+    pack = snapshot.build_source
+    if pack is None or pack.build_evidence is None:
+        return []
+    return sorted({cu.source for cu in pack.build_evidence.compile_units if cu.source})
+
+
+def build_evidence_licence(
+    snapshot: AbiSnapshot, override: SourceReadLicence | None = None
+) -> SourceReadLicence:
+    """The licence for *snapshot*'s embedded **build pack**'s recorded paths.
+
+    A second licence, because a snapshot-wide one is too coarse to be correct.
+    The two evidence sources this module reads have independent provenance: a
+    live header dump combined with a pre-captured ``--build-info`` pack is live
+    for its declared headers and historical for the pack's compile units *at
+    the same time*. Answering both from ``AbiSnapshot.live_source_evidence``
+    (which :func:`extraction_read_source_inputs` derives from the header AST
+    alone) licensed re-reading the pack's paths from whatever occupies them on
+    this runner -- the fabrication the licence exists to prevent, reached
+    through the other evidence source (Codex review, P2).
+
+    So this asks the pack itself: ``BuildSourcePack.live_source_evidence``,
+    stamped by ``buildsource.embed.embed_build_source`` only for an inline
+    collection performed in this run and never serialized, so a loaded pack
+    cannot claim one. An explicit ``override`` still governs both sources -- a
+    caller supplying a provenance-verified context has asserted that the
+    recorded tree *is* the one on disk, which is a statement about the tree,
+    not about one evidence source's route to it.
+
+    This also makes the two directions symmetric, closing the conservative gap
+    :func:`extraction_read_source_inputs` documents: a ``--sources``-only dump
+    (no ``-H``, so no header licence) now licenses the build-evidence reads it
+    genuinely performed, instead of reporting them as not evaluated.
+    """
+    if override is not None:
+        return override
+    pack = snapshot.build_source
+    if pack is not None and getattr(pack, "live_source_evidence", False):
+        return SourceReadLicence.live_extraction()
+    return WITHHELD_FOR_PRECAPTURED_BUILD_EVIDENCE
 
 
 def _run_pattern_scan(
-    snapshot: AbiSnapshot, licence: SourceReadLicence
+    snapshot: AbiSnapshot,
+    licence: SourceReadLicence,
+    build_licence: SourceReadLicence,
 ) -> PatternFactsResult:
-    """Run the lexical pre-scan for one side, under *licence*.
+    """Run the lexical pre-scan for one side, under its two licences.
 
-    Without a licence ``find_pattern_facts`` stats nothing and opens nothing:
-    the roots are accounted for as ``not_licensed`` and the result reports the
-    scan as not possible (see :mod:`abicheck.buildsource.source_inputs`).
+    Declared ``source_header`` roots are read under *licence*; the embedded
+    build pack's compile-unit roots under *build_licence*. Without a licence
+    ``find_pattern_facts`` stats nothing and opens nothing for that source: its
+    roots are accounted for as ``not_licensed`` and keep the merged result
+    insufficient, so an absence claim over the side is never established from
+    the half that *was* licensed (see
+    :mod:`abicheck.buildsource.source_inputs`).
     """
-    return find_pattern_facts(_pattern_scan_roots(snapshot), licence=licence)
+    header_roots = sorted(_declared_source_headers(snapshot))
+    build_roots = _build_evidence_roots(snapshot)
+    if licence.permitted == build_licence.permitted:
+        # One licence covers both sources: one scan, one account, and no
+        # double-counting of a path both sources declare.
+        return find_pattern_facts(
+            sorted(set(header_roots) | set(build_roots)), licence=licence
+        )
+    return find_pattern_facts(header_roots, licence=licence).merged(
+        find_pattern_facts(build_roots, licence=build_licence)
+    )
 
 
 def _run_preprocessor_scan_for(
-    snapshot: AbiSnapshot, licence: SourceReadLicence
+    snapshot: AbiSnapshot,
+    licence: SourceReadLicence,
+    build_licence: SourceReadLicence,
 ) -> PreprocessorFactsResult:
-    """Run the S2 preprocessor pre-scan for one side, under *licence*.
+    """Run the S2 preprocessor pre-scan for one side, under its two licences.
 
     ``clang -E`` resolves the recorded compile units' ``#include``s against the
     filesystem it is run on, so it is exactly as unlicensed as the lexical
     scan for a stored snapshot -- and worse, since an include that resolves
     differently today produces a *different macro value*, not merely a missing
-    file. An unlicensed side is therefore never probed at all; it returns the
-    primitive's own honest ``ran=False`` shape with the licence's reason.
+    file.
+
+    Every probe here is driven by the recorded **build evidence** (a header
+    probe still needs a compile unit's flags to preprocess against), so
+    *build_licence* gates the whole scan: without it nothing is probed at all
+    and this returns the primitive's own honest ``ran=False`` shape carrying
+    that licence's reason. *licence* -- the declared-header one -- gates only
+    the public-header probe family: with the build collected live in this run
+    but the headers historical, the macro-divergence probes are legitimate
+    while the per-header ones are not, so the header list is withheld and that
+    family reports "no header probe was run" rather than characterising a
+    stored snapshot's headers against whatever occupies their paths now.
     """
-    if not licence.permitted:
+    if not build_licence.permitted:
         return PreprocessorFactsResult(
             ran=False,
-            skipped_reason=(f"S2 preprocessor pre-scan not possible: {licence.reason}"),
+            skipped_reason=(
+                f"S2 preprocessor pre-scan not possible: {build_licence.reason}"
+            ),
         )
     build_source = snapshot.build_source
     build = build_source.build_evidence if build_source is not None else None
-    public_headers = sorted(_declared_source_headers(snapshot, public_only=True))
+    public_headers = (
+        sorted(_declared_source_headers(snapshot, public_only=True))
+        if licence.permitted
+        else []
+    )
     return collect_preprocessor_facts(build, public_headers)
 
 
@@ -456,9 +545,13 @@ def compute_pattern_preprocessor_scan(
     """
     old_licence = snapshot_source_licence(old, old_source_licence)
     new_licence = snapshot_source_licence(new, new_source_licence)
+    # A second, independently-provenanced licence per side; see
+    # build_evidence_licence for why one snapshot-wide answer is not correct.
+    old_build_licence = build_evidence_licence(old, old_source_licence)
+    new_build_licence = build_evidence_licence(new, new_source_licence)
 
-    old_pattern = _run_pattern_scan(old, old_licence)
-    new_pattern = _run_pattern_scan(new, new_licence)
+    old_pattern = _run_pattern_scan(old, old_licence, old_build_licence)
+    new_pattern = _run_pattern_scan(new, new_licence, new_build_licence)
     pattern_old_suf = _pattern_sufficiency(old_pattern)
     pattern_new_suf = _pattern_sufficiency(new_pattern)
     pattern_evolution = _fold_evolution(
@@ -468,8 +561,8 @@ def compute_pattern_preprocessor_scan(
         new_keys={f.kind.value for f in new_pattern.facts if f.escalates},
     )
 
-    old_preproc = _run_preprocessor_scan_for(old, old_licence)
-    new_preproc = _run_preprocessor_scan_for(new, new_licence)
+    old_preproc = _run_preprocessor_scan_for(old, old_licence, old_build_licence)
+    new_preproc = _run_preprocessor_scan_for(new, new_licence, new_build_licence)
     macro_old_suf = _macro_divergence_sufficiency(old_preproc)
     macro_new_suf = _macro_divergence_sufficiency(new_preproc)
     macro_evolution = _fold_evolution(

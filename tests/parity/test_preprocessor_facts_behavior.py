@@ -159,8 +159,13 @@ def test_live_sides_surface_a_preprocessor_scan_leak_as_introduced(
     )
 
     old, new, leak_key = _widget_snapshots(tmp_path)
-    old.live_source_evidence = True
-    new.live_source_evidence = True
+    # Both evidence sources, since this asserts a fully-live pair: the declared
+    # headers and the embedded build pack carry independent provenance and are
+    # licensed separately (see `build_evidence_licence`).
+    for side in (old, new):
+        side.live_source_evidence = True
+        assert side.build_source is not None
+        side.build_source.live_source_evidence = True
 
     result = compute_pattern_preprocessor_scan(old, new)
     assert result.header_leak_evolution.get(leak_key) == "introduced"

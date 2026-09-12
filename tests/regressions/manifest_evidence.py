@@ -36,9 +36,13 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "truncated, substituted, deleted, relocated, made unreadable, "
             "replaced by a directory), and where the confirmed historical "
             "facts are absent the result states that the historical "
-            "evaluation was not possible rather than substituting today's."
+            "evaluation was not possible rather than substituting today's. "
+            "The licence is resolved **per evidence source**, not per side: "
+            "one source's live provenance never licenses reading another's "
+            "recorded paths, and a partially-licensed side reports the half "
+            "it read while establishing no absence over the half it did not."
         ),
-        fixed_by=(1141,),
+        fixed_by=(1141, 1236),
         seed_tests=("tests/test_stored_snapshot_source_licence.py",),
         axes={
             "side_provenance": (
@@ -46,7 +50,12 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "stored_snapshot",
                 "verified_context",
             ),
-            "front_end": ("cli", "typed_python_api"),
+            "front_end": ("cli", "typed_python_api", "abicc_compat"),
+            # A side holds up to two independently-provenanced source-evidence
+            # sources at once, and each is licensed on its own: a live header
+            # dump merged with a pre-captured --build-info pack is live for its
+            # declared headers and historical for the pack's compile units.
+            "evidence_source": ("declared_headers", "embedded_build_pack"),
             "source_mutation": (
                 "unchanged",
                 "delete_file",
