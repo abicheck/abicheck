@@ -490,13 +490,22 @@ pytest_add_cli_args = [
     # tests/test_mutation_workflow_contract.py keeps that true — if one of
     # these ever starts importing one, the exclusion stops being free and
     # that test says so.
-    # Two AI-readiness tests validate the tree they run in, and a mutants
-    # tree is by construction full of 1M-line generated files — they cannot
-    # pass there and are not about the detector core. Deselected rather than
+    # This AI-readiness test validates the tree it runs in, and a mutants
+    # tree is by construction full of 1M-line generated files — it cannot
+    # pass there and is not about the detector core. Deselected rather than
     # ignored, so the rest of that file still runs.
+    #
+    # `test_main_returns_zero_on_clean_tree` used to need a second entry here
+    # for the same reason: it ran nearly the whole readiness registry over
+    # the live tree. It was replaced by
+    # `tests/test_ai_readiness_main_dispatch.py`, which drives the real
+    # `main()` over a small synthetic registry and so inspects no tree at
+    # all — nothing there needs deselecting, in a mutants/ copy or anywhere
+    # else. `test_every_deselected_test_still_exists` in
+    # tests/test_mutation_workflow_contract.py is what caught the stale
+    # entry when that test was removed.
     "--deselect=tests/test_ai_readiness.py::test_no_hard_file_size_violations",
-    "--deselect=tests/test_ai_readiness.py::test_main_returns_zero_on_clean_tree",
-    # Same "validates the tree it runs in" class as the two entries directly
+    # Same "validates the tree it runs in" class as the entry directly
     # above (PR #1115's own diff -- discovered the same way as the
     # `test_action_check_target*`/`test_agent_evals.py`/`test_engine_
     # primitive_call_sites.py` entries elsewhere in this list: touching

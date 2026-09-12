@@ -19,7 +19,7 @@ generated: false
 > text/markdown report. It genuinely answers "was this use case affected",
 > but it is read-only: no `Change` field, no exit-code contribution, and
 > still no `USE_CASE_IMPACT_CONFIRMED` finding kind (see "What this does
-> not cover yet" below). `abicheck project validate-use-cases` checks a
+> not cover yet" below). `abicheck project validate` checks a
 > manifest's structure on its own.
 
 An optional `impact-use-cases.yaml` manifest lets you declare a project's own
@@ -34,7 +34,7 @@ amending [ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md).
 `abicheck.impact.use_cases` parses the manifest, builds/joins the graph
 facts, and (`explain_use_case_impact`) answers which declared use case(s)
 reach a given changed symbol. Two CLI surfaces use it:
-`abicheck project validate-use-cases <manifest>` checks the manifest's own
+`abicheck project validate <manifest>` checks the manifest's own
 structure, and `abicheck compare --use-cases <manifest> OLD NEW` resolves
 each use case's entrypoints against the comparison's own snapshots and
 reports which of its findings each use case reaches
@@ -45,7 +45,7 @@ reports which of its findings each use case reaches
 ## Checking a manifest with the CLI
 
 ```console
-$ abicheck project validate-use-cases impact-use-cases.yaml
+$ abicheck project validate impact-use-cases.yaml
 use-case manifest validation: impact-use-cases.yaml
 OK — 2 use case(s), structurally well-formed.
 
@@ -60,7 +60,7 @@ Use-case impact (impact-use-cases.yaml):
   proof of absence).
 ```
 
-`project validate-use-cases` checks only the manifest's own structure (a
+`project validate` checks only the manifest's own structure (a
 non-mapping entry, an unrecognized field, or a missing `use_case` name is a
 usage error, exit 64).
 

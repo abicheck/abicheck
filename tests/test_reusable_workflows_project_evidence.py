@@ -499,7 +499,7 @@ def test_resolver_rejects_evidence_shared_across_targets(tmp_path: Path) -> None
     *points* somewhere safe -- it says nothing about whether the
     build-output.json making a 'declared' claim is actually trustworthy.
     Two targets sharing one evidence pack is exactly the shape
-    validate_build_output() (the same check `project validate-build` runs,
+    validate_build_output() (the same check `project validate` runs on a build output,
     which `project plan` never calls) already rejects; the resolver must
     run it before treating this target's evidence as scoped to it.
     """

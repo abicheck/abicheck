@@ -1488,30 +1488,6 @@ def test_no_hard_file_size_violations(car):
     assert f.errors == [], f"File-size hard-limit violations: {f.errors}"
 
 
-def test_main_returns_zero_on_clean_tree(car, capsys):
-    """End-to-end: running the script against the live tree should exit 0.
-
-    Skips the slowest whole-tree scans to avoid re-running them: mypy-baseline
-    needs mypy (dedicated CI lane); import-cycle-growth/banned-imports each
-    re-walk every module's AST and are already asserted individually by
-    test_no_unapproved_import_cycle_growth/test_no_banned_imports (it was the
-    dominant unit-lane offender at ~14.6s under coverage, with no added
-    coverage since scripts/ isn't measured and the full gate already runs
-    standalone in the ai-readiness CI job). The rest still verify main() exits 0.
-    """
-    rc = car.main(
-        [
-            "--skip",
-            "mypy-baseline",
-            "--skip",
-            "import-cycle-growth",
-            "--skip",
-            "banned-imports",
-        ]
-    )
-    assert rc == 0, capsys.readouterr().out
-
-
 def test_examples_readme_sync_in_sync(car):
     """The live examples/README.md catalog must agree with ground_truth.json."""
     f = car.Findings()

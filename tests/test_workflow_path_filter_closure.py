@@ -42,13 +42,10 @@ moment it does — not when someone remembers to extend a list here.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 import yaml
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+from _workflow_files import REPO_ROOT, read_repo_text, workflow_paths
 
 # A repo-relative script handed to an interpreter, or executed directly.
 _EXECUTED_FILE = re.compile(
@@ -113,23 +110,43 @@ def _covers(globs: list[str], path: str) -> bool:
 
 
 def _required_paths(text: str) -> set[str]:
+    """Files a workflow's own jobs execute, so its paths filter must name
+    them: scripts it runs, `pyproject.toml` where it installs this
+    package, and the `action.yml` of each local action it uses."""
     required = _executed_files(text)
     if "pip install -e" in text:
         # Every such job installs *this* package; its dependency bounds,
         # entry points and optional extras all live in pyproject.toml.
         required.add("pyproject.toml")
-    for action in _LOCAL_ACTION.findall(text):
-        action_yml = REPO_ROOT / action / "action.yml"
+    # To a fixed point, because a local action may itself use another one:
+    # scanning only the direct manifests would leave a nested action, and
+    # every file *it* executes, outside the filter (CodeRabbit review). No
+    # such nesting exists in this repository today -- which is exactly why
+    # the traversal has to be written now rather than when the first one
+    # appears and silently is not covered. The visited set makes a cycle
+    # terminate instead of recursing forever.
+    pending, visited = list(_LOCAL_ACTION.findall(text)), set()
+    while pending:
+        action = pending.pop()
+        if action in visited:
+            continue
+        visited.add(action)
         required.add(f"{action}/action.yml")
-        if action_yml.is_file():
-            required |= _executed_files(action_yml.read_text())
+        action_yml = REPO_ROOT / action / "action.yml"
+        if not action_yml.is_file():
+            continue
+        action_text = read_repo_text(action_yml)
+        required |= _executed_files(action_text)
+        pending += _LOCAL_ACTION.findall(action_text)
     return required
 
 
 def _filtered_workflows() -> list[tuple[str, str, list[str], set[str]]]:
+    """One case per (workflow, event) that restricts itself with `paths`,
+    carrying the declared globs and the paths it actually depends on."""
     cases = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        text = path.read_text()
+    for path in workflow_paths():
+        text = read_repo_text(path)
         doc = yaml.safe_load(text)
         # PyYAML parses the bare `on:` key as the boolean True.
         triggers = (doc or {}).get("on", (doc or {}).get(True)) or {}
@@ -160,6 +177,8 @@ def test_the_survey_found_filtered_workflows() -> None:
 def test_path_filter_covers_the_workflow_own_infrastructure(
     name: str, event: str, globs: list[str], required: set[str]
 ) -> None:
+    """A workflow that skips itself when its own machinery changes is a
+    gate that silently stops gating."""
     missing = sorted(p for p in required if not _covers(globs, p))
     assert not missing, (
         f"{name} [{event}]: the jobs depend on these files but the paths "

@@ -68,7 +68,7 @@ def _helpers_region() -> str:
     return text[:idx]
 
 
-def _cli_introspection_prelude() -> str:
+def _cli_introspection_prelude(py_bin: str | None = None) -> str:
     """Shell establishing the three variables `_cli_value_options_init` needs.
 
     `_helpers_region()` stops at run.sh's "Build the abicheck command" marker,
@@ -84,9 +84,13 @@ def _cli_introspection_prelude() -> str:
 
     Uses this interpreter (`sys.executable`), which is by construction the one
     with abicheck importable when the test suite is running at all.
+
+    *py_bin* overrides that interpreter. Its one use is
+    ``TestDerivedOptionTableIsLineEndingAgnostic`` below, which needs an
+    interpreter whose stdout line endings differ from this platform's.
     """
     return (
-        f"\n_PY_BIN={shlex.quote(sys.executable)}\n"
+        f"\n_PY_BIN={shlex.quote(py_bin or sys.executable)}\n"
         '_PY_SAFE_DIR="$(mktemp -d)"\n'
         "_PY_BIN_HAS_ABICHECK=true\n"
         "trap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
@@ -788,12 +792,29 @@ class TestEffectiveFormat:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestExtraArgsWriteJsonPath:
-    """``--write`` is a scalar Click option: a repeated occurrence resolves
-    to the *last* one, whatever its format -- not the first ``json=...``
-    match found (Codex review, P2, PR #1071). `_extra_args_write_json_path`
-    must track the last occurrence the same way `_effective_format` already
-    does for `--format`, including "un-discovering" a previously-seen JSON
-    path when a later, non-JSON `--write` wins instead.
+    """``--write`` is **repeatable**, so every ``json=`` occurrence is real.
+
+    This class previously asserted the opposite -- that ``--write`` is a scalar
+    Click option resolving to the last occurrence whatever its format, so that
+    a later non-JSON ``--write`` "un-discovers" an earlier JSON path (Codex
+    review, P2, PR #1071). That premise is false for ``compare``, which
+    declares the option with ``multiple=True``
+    (``frontends/cli/options/secondary_output.py``'s ``deco_multi``, ADR-068
+    D4's "one analysis, several artifacts"), with
+    ``--write json=a.json --write markdown=b.md`` as its own help text's
+    example. Both artifacts are written.
+
+    The tree carried both claims at once -- this class and
+    ``test_a_non_json_user_write_no_longer_suppresses_the_internal_one``
+    contradicted each other -- and the contradiction was settled against the
+    option declaration rather than either comment. The clearing it pinned was a
+    real defect: the combination above reported no requested JSON path, so a
+    missing ``a.json`` left an exit-0 run publishing COMPATIBLE (Codex review,
+    P2, a later round).
+
+    ``_extra_args_write_json_paths`` now answers all of them, newline-separated;
+    the singular ``_extra_args_write_json_path`` answers the first, which is all
+    ``_json_report_src`` needs (it wants *a* readable report, not every one).
     """
 
     def _value(self, extra_args: str) -> str:
@@ -807,22 +828,31 @@ class TestExtraArgsWriteJsonPath:
     def test_single_write_json(self) -> None:
         assert self._value("--write json=out.json") == "out.json"
 
-    def test_last_write_json_occurrence_wins(self) -> None:
-        # Click's own resolved value here is "second.json", not the first
-        # match -- an early `return 0` on the first hit disagreed with that.
-        assert (
-            self._value("--write json=first.json --write json=second.json")
-            == "second.json"
+    def _all(self, extra_args: str) -> str:
+        return _run_value(
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_write_json_paths"
         )
 
-    def test_a_later_non_json_write_overrides_an_earlier_json_one(self) -> None:
-        # Click keeps only the last `--write`, regardless of format -- if
-        # that last one isn't `json=...`, there is no JSON path to recover
-        # at all, even though an earlier occurrence was one.
-        assert self._value("--write json=out.json --write text=out.txt") == ""
+    def test_two_json_writes_both_count(self) -> None:
+        # Repeatable: both artifacts are written, so both are requested. The
+        # singular helper answers the first; the plural one answers both.
+        both = "--write json=first.json --write json=second.json"
+        assert self._value(both) == "first.json"
+        assert self._all(both).split() == ["first.json", "second.json"]
 
-    def test_a_later_json_write_overrides_an_earlier_non_json_one(self) -> None:
+    def test_a_later_non_json_write_does_not_erase_an_earlier_json_one(self) -> None:
+        # The defect this class used to pin: `markdown=` following `json=` does
+        # not un-write the JSON artifact, so the path stays discoverable.
+        combo = "--write json=out.json --write markdown=out.md"
+        assert self._value(combo) == "out.json"
+        assert self._all(combo).split() == ["out.json"]
+
+    def test_a_later_json_write_after_a_non_json_one_counts(self) -> None:
         assert self._value("--write text=out.txt --write json=out.json") == "out.json"
+
+    def test_no_json_write_answers_nothing(self) -> None:
+        assert self._value("--write markdown=out.md") == ""
+        assert self._all("--write markdown=out.md") == ""
 
     def test_unrelated_extra_args(self) -> None:
         assert self._value("--verbose --gate-api-break") == ""

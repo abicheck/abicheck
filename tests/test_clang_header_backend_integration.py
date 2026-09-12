@@ -36,6 +36,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from _clang_ast_cache_isolation import (
+    _METHOD_SHAPED_KINDS,
+    _count_kinds,
+    _isolate_ast_cache,
+    _PruneSpy,
+    _reset_ast_memo,
+)
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import _clang_header_dump, dump
@@ -1448,14 +1455,6 @@ def stream_prune_lib(tmp_path: Path) -> tuple[Path, Path]:
     return so, header
 
 
-def _isolate_ast_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Force a fresh on-disk AST cache dir so a prior (unpruned) run's cached
-    raw JSON file can never be served back for a differently-configured call
-    -- the streaming pruner only ever runs on a fresh parse, never on a
-    disk-cache hit (see ``dumper_clang_streaming.py``'s module docstring)."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
-
-
 def test_streaming_pruner_disabled_by_default(
     stream_prune_lib: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -1482,14 +1481,24 @@ def test_streaming_pruner_produces_an_equivalent_public_model(
     the same public function/type/enum/typedef set survives, only
     dependency-header function/variable noise is trimmed."""
     so, header = stream_prune_lib
+    spy = _PruneSpy()
+    spy.install(monkeypatch)
 
     monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
-    _isolate_ast_cache(monkeypatch, tmp_path)
+    _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-unpruned")
+    _reset_ast_memo()
     baseline = dump(so, [header], header_backend="clang", lang="c++")
 
+    assert spy.calls == 0  # no pruning on the "off" side
+
     monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
-    _isolate_ast_cache(monkeypatch, tmp_path)  # a *different*, still-fresh cache dir
+    _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-pruned")
+    _reset_ast_memo()
     pruned = dump(so, [header], header_backend="clang", lang="c++")
+
+    # Genuinely reparsed and pruned in THIS comparison -- see _PruneSpy.
+    assert spy.calls == 1
+    assert spy.pruned_counts[0] > 0
 
     # The library's own public declarations are completely unaffected.
     baseline_add = next(f for f in baseline.functions if f.name == "add")
@@ -1551,20 +1560,6 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     assert pruned_count == 0  # already-pruned placeholders aren't prunable kinds
 
 
-_METHOD_SHAPED_KINDS = frozenset(
-    {"CXXMethodDecl", "CXXConstructorDecl", "CXXDestructorDecl", "CXXConversionDecl"}
-)
-
-
-def _count_kinds(node: object, kinds: frozenset) -> int:
-    if isinstance(node, dict):
-        n = 1 if node.get("kind") in kinds else 0
-        return n + sum(_count_kinds(v, kinds) for v in node.values())
-    if isinstance(node, list):
-        return sum(_count_kinds(v, kinds) for v in node)
-    return 0
-
-
 def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
     stream_prune_lib: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -1581,18 +1576,24 @@ def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
     drop a declaration. Verified against the real clang AST end to end,
     not just the unit-level `_PRUNABLE_DECL_KINDS` set."""
     so, header = stream_prune_lib
+    spy = _PruneSpy()
+    spy.install(monkeypatch)
 
     monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
-    _isolate_ast_cache(monkeypatch, tmp_path)
+    _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-unpruned")
     unpruned_root, _, _ = _clang_header_dump(
         [header], [], compiler="clang", lang="c++", memoize=False
     )
+    assert spy.calls == 0
 
     monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
-    _isolate_ast_cache(monkeypatch, tmp_path)  # a *different*, still-fresh cache dir
+    _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-pruned")
     pruned_root, _, _ = _clang_header_dump(
         [header], [], compiler="clang", lang="c++", memoize=False
     )
+    # Without this the method-count equality below is vacuously true.
+    assert spy.calls == 1
+    assert spy.pruned_counts[0] > 0
 
     unpruned_methods = _count_kinds(unpruned_root, _METHOD_SHAPED_KINDS)
     pruned_methods = _count_kinds(pruned_root, _METHOD_SHAPED_KINDS)

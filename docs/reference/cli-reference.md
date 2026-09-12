@@ -94,7 +94,7 @@ Compare two ABI surfaces and report changes.
 | `--diagnostic-comparison` | no | `False` | ADR-050 D2's sanctioned escape hatch: when OLD and NEW were extracted under a genuinely incomparable profile/scope (ExtractionContract mismatch), downgrade the default hard failure (exit 16, no verdict) into a tentative diff instead, stamped assurance: "none" everywhere in the report so a reader knows not to trust it the way an ordinary comparable diff is trusted. Not needed, and does nothing, on a comparable pair. |
 | `--contract` | no | — | Which evidence domain each finding is judged against (ADR-049 Phase 6), and the flag that turns the contract evaluator on -- omit it and nothing about the run changes. 'public': the header-derived declared surface. 'exports': the binary's own export table (ELF .dynsym / PE export directory / Mach-O export trie) plus the raw type closure reachable from it -- a private-header type reached from a real export is inside this contract, an unexported public-header declaration is not. 'all': every entity, no root or closure evidence required. 'auto': evaluate, but let the domain be chosen by the D7 precedence chain below an explicit CLI value -- the --scope-public-headers/--no-scope-public-headers legacy alias, then .abicheck.yml. Each finding is stamped with a contract\_relevance (IN\_CONTRACT/PROVEN\_OUT\_OF\_CONTRACT/UNKNOWN\_UNPROVEN/UNKNOWN\_UNRESOLVED/NOT\_APPLICABLE), a contract\_reason\_code and -- when resolved -- a contract\_assurance, rendered per finding in --format json/markdown, in sarif/junit properties, and as an html badge; --format review's compact digest renders it only in the --used-by/--required-symbol scoped-gate appendix. --format json additionally carries contract\_evidence\_refs per finding (which evidence records the decision rests on) and a top-level contract\_context block (observed provider evidence, resolved evaluation context, decision receipt), so a decision can be replayed or re-evaluated later without re-reading the binaries. **The decisions are authoritative** (ADR-049 Phase 7): relevance is classified before compatibility policy, and policy scores only IN\_CONTRACT/NOT\_APPLICABLE findings -- so this changes verdicts and exit codes. Nothing is hidden: an excluded finding stays in the report with the relevance and reason that explain why it did not gate. Uncertainty is not treated as compatible either -- if the selected domain's required evidence is incomplete, the orthogonal contract-coverage ledger contributes exit 1, folded with max so it never lowers an ABI break's 2/4. Set contract.unresolved=warn (e.g. via a `kind: contract` --pack) to accept incomplete coverage: that zeroes the contribution while still reporting every failure. The coverage floor itself applies to a directory/package (release) comparison too -- each library's own floor is max()-folded into the release's exit code the same way, and a pack-supplied contract.unresolved applies there too (see --pack's own help). Choices: `public`, `exports`, `all`, `auto`. |
 | `--pack` | no | — | Select an ADR-049 D8 pack manifest (repeatable). A pack is a small versioned YAML document (id/version/kind/assignments) carrying one reusable piece of configuration. 'kind: policy' assigns ChangeKind slugs to break/warn/risk/ignore, exactly as --policy's overrides do; 'kind: contract' assigns surface.internal\_namespaces and contract.unresolved (the latter needs --contract, which is what computes the coverage it configures); 'kind: gate' assigns gate.severity.<category> (gate.exit\_code\_scheme was removed along with --exit-code-scheme, CLI cleanup phase two PR G2 -- the one automatic gate algorithm is fully determined by whether a severity setting is in effect, so a pack asserting it is rejected at load time). Composition is D8's: an explicitly stated value (--policy, --severity-preset, or .abicheck.yml) always outranks a pack, and two selected packs assigning different values to the same field are a usage error unless something else already states it. A manifest assigning a field this build resolves but does not yet apply is rejected rather than silently recorded. On a directory/package (release) comparison, a 'kind: policy'/'kind: contract'/'kind: gate' pack's policy.overrides/surface.internal\_namespaces/contract.unresolved/gate.severity.<category> all apply to every library uniformly (folded into the release's own resolved GateOptions); contract.unresolved still needs --contract on that release comparison, same as everywhere else. On `scan` this requires --against (a pack's only application there is the baseline comparison), and a 'kind: gate' pack's gate.severity.<category> applies to the baseline comparison's exit code the same way --severity-preset given directly already does. |
-| `--use-cases` | no | — | An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 amendment) whose declared use cases this comparison's own findings are attributed to: for each use case, which changes its resolved entrypoints can be shown to reach. Needs a source graph on at least one side (dump --sources/--build-info, or the always-on header-only graph). Read-only -- an unattributed finding is an absence of proof, not proof the finding is harmless, so this never moves a verdict or an exit code. Validate a manifest on its own with `abicheck project validate-use-cases`. |
+| `--use-cases` | no | — | An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 amendment) whose declared use cases this comparison's own findings are attributed to: for each use case, which changes its resolved entrypoints can be shown to reach. Needs a source graph on at least one side (dump --sources/--build-info, or the always-on header-only graph). Read-only -- an unattributed finding is an absence of proof, not proof the finding is harmless, so this never moves a verdict or an exit code. Validate a manifest on its own with `abicheck project validate`. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--variant` | no | — | Which build variant to compare when an operand is a stored ProjectSnapshot package directory declaring more than one. Scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --variant old=v1 --variant new=v2); a bare value applies to both. Defaults to the package's only variant when it declares exactly one; a usage error otherwise. No-op for a live directory/archive/single-file operand. |
 
@@ -320,13 +320,13 @@ Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
 
 ### `project validate`
 
-Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
+Validate INPUT, a project-integration document (ADR-047, ADR-057).
 
 **Arguments**
 
 | Name | Required | Description |
 |---|:--:|---|
-| `config` | no |  |
+| `input_path` | no |  |
 
 **Options**
 
@@ -334,41 +334,5 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 |---|:--:|---|---|
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1) to additionally check every declared profiles.<id>.compile.binding (and consumer\_compile.binding) resolves, and — when compiler\_family/compiler\_version/target is also declared — that the resolved executable's probed identity actually matches. Loaded only from this explicit path — never auto-discovered, per the untrusted-config trust boundary ProfileCompileSpec.binding documents. |
-| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
-### `project validate-build`
-
-Validate DIRECTORY's build-output.json (ADR-047 §11.1).
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `directory` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
-| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
-### `project validate-use-cases`
-
-Validate MANIFEST, an ``impact-use-cases.yaml`` file (G29 Phase 4, ADR-057 amendment; see docs/contribute/use-case-impact.md).
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `manifest` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
-| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1) to additionally check every declared profiles.<id>.compile.binding (and consumer\_compile.binding) resolves, and — when compiler\_family/compiler\_version/target is also declared — that the resolved executable's probed identity actually matches. Loaded only from this explicit path — never auto-discovered, per the untrusted-config trust boundary ProfileCompileSpec.binding documents. Applies to a project config; supplying it with any other INPUT is a usage error. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |

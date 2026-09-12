@@ -62,9 +62,25 @@ def _compare_argv(
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
     stub = fake_bin / "abicheck"
+    # Honors `--write json=PATH` the way a real abicheck does, in addition to
+    # capturing argv. It used to only echo a report to stdout, which left a
+    # requested JSON destination empty -- and `run.sh` now reports a
+    # caller-requested JSON report that never arrived as REPORT_UNREADABLE
+    # (exit 1), so the unfaithful stub failed these argv tests for a reason
+    # unrelated to argv. A real abicheck exiting 0 always honors `--write`.
     stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        'for _a in "$@"; do\n'
+        '  case "$_a" in\n'
+        # Both documented spellings: `--write json=PATH` arrives as a separate
+        # `json=PATH` token, `--write=json=PATH` as one. A stub handling only
+        # the first leaves the second's destination unwritten, which is exactly
+        # the parametrized pair these tests exist to distinguish.
+        '    json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#json=}" ;;\n'
+        '    --write=json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#--write=json=}" ;;\n'
+        "  esac\n"
+        "done\n"
         'echo \'{"verdict":"COMPATIBLE"}\'\n'
         "exit 0\n",
         encoding="utf-8",
@@ -468,7 +484,17 @@ def _compare_github_output(
         "  esac\n"
         "done\n"
         'if [[ -n "$_out" ]]; then\n'
-        "  printf 'not-actually-sarif\\n' > \"$_out\"\n"
+        # Valid JSON, and still deliberately not SARIF -- which is all this
+        # stub's scenario needs. It used to write the bare line
+        # "not-actually-sarif": non-SARIF, but also not parseable as anything,
+        # and under an *effective* format of json (what `extra-args --format
+        # json` makes this run) that is a report abicheck itself would never
+        # produce at this path. `run.sh` now reports an unreadable requested
+        # JSON report as REPORT_UNREADABLE, so the unfaithful fixture failed
+        # the step for a reason unrelated to what these tests check. The
+        # subject -- report-path withheld when the effective format stops
+        # matching `format: sarif` -- is unchanged.
+        '  printf \'%s\\n\' \'{"verdict": "COMPATIBLE"}\' > "$_out"\n'
         "else\n"
         '  echo \'{"verdict":"COMPATIBLE"}\'\n'
         "fi\n"

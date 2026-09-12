@@ -498,7 +498,7 @@ class TestWorkspaceIsolation:
         """The corpus itself, not a synthetic stand-in: three of the eight
         leaked before this — one naming the tool and the exact change kinds it
         reports."""
-        pack = json.loads((EVAL_DIR / "skill-eval-pack.json").read_text())
+        pack = json.loads((EVAL_DIR / "skill-eval-pack.json").read_text(encoding="utf-8"))
         ready = {s: e for s, e in pack["scenarios"].items() if e["status"] == "ready"}
         assert ready, "the pack lists no ready scenario to check"
         for sid, entry in ready.items():

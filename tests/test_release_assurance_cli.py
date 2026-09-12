@@ -140,6 +140,24 @@ def bundle(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     # shape in which the assurance axis is the sole thing that can decide the
     # exit code. Built from the OLD sources so nothing else differs.
     _build(old_src, base / "v1_nodebug", old_inc, debug=False)
+    # The NEW sources again, but with exactly one member (`thread`) built
+    # without `-g`. This is ADR-071 D3's own worked example of a per-member
+    # shortfall -- "every member compared, one member's DWARF missing => scope
+    # complete, assurance partial" -- and it is the only fixture shape in this
+    # module that isolates a shortfall to a *single* member while its siblings
+    # stay `complete` and `core`'s real ABI break still decides the exit code.
+    #
+    # An earlier revision tried to manufacture the same shape by passing
+    # `--header` for two of the three libraries and expecting the third to read
+    # `partial`. That premise was wrong: `AnalysisAssurance` measures whether
+    # the evidence each comparison *did* run on was complete and symmetric, not
+    # whether a member's evidence tier matches its siblings'. Both sides of the
+    # header-less member were symmetric `-g` builds, so `header_context_status`
+    # and `dwarf_context_status` were legitimately `clean` and the member
+    # legitimately `complete` -- on the scalar path too, verified directly, so
+    # nothing about the release fold was implicated.
+    _build(new_src, base / "v2_one_nodebug", new_inc, ("core", "dpc"))
+    _build(new_src, base / "v2_one_nodebug", new_inc, ("thread",), debug=False)
     # A one-member release carved out of the same build, for the cardinality
     # invariant -- the same bytes, so any difference is the fold's, not the
     # fixture's.
@@ -154,6 +172,7 @@ def bundle(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "v1": base / "v1",
         "v2": base / "v2",
         "v1_nodebug": base / "v1_nodebug",
+        "v2_one_nodebug": base / "v2_one_nodebug",
         "one_v1": base / "one_v1",
         "one_v2": base / "one_v2",
         "old_inc": old_inc,
@@ -222,12 +241,18 @@ class TestReleaseAssuranceThroughTheCli:
     def test_a_single_member_shortfall_is_not_masked_by_complete_siblings(
         self, bundle: dict[str, Path]
     ) -> None:
-        """Headers for two of three members: the third is ``partial`` and the
-        release's aggregate follows it, naming that member."""
+        """One of three members built without ``-g``: it is ``partial`` and the
+        release's aggregate follows it, naming that member.
+
+        The siblings are `complete` on the same run, which is what makes this
+        the masking check rather than a restatement of
+        ``test_the_axis_floors_an_otherwise_clean_release_to_one`` (where every
+        member is short of evidence and any fold that looked at only one member
+        would still pass).
+        """
         run = _compare(
             str(bundle["v1"]),
-            str(bundle["v2"]),
-            headers_for=("core", "dpc"),
+            str(bundle["v2_one_nodebug"]),
             bundle=bundle,
         )
         doc = json.loads(run.stdout)
@@ -373,14 +398,14 @@ class TestReleaseAssuranceThroughTheCli:
         `_exit_compare_release` now formats it from the decision it just
         resolved, which is the only place that number is known.
 
-        Here `core` breaks (exit 4) while `thread` is short of evidence, so the
-        notice must say the axis's contribution *stands below* the real exit,
-        not that it floored anything.
+        Here `core` breaks (exit 4) while `thread` is short of evidence (it is
+        the one member built without ``-g``), so the notice must say the axis's
+        contribution *stands below* the real exit, not that it floored
+        anything.
         """
         run = _compare(
             str(bundle["v1"]),
-            str(bundle["v2"]),
-            headers_for=("core", "dpc"),
+            str(bundle["v2_one_nodebug"]),
             bundle=bundle,
             fmt="markdown",
         )

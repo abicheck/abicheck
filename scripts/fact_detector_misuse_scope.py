@@ -31,9 +31,72 @@ module's own constraint.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+import functools
+from collections.abc import Callable, Iterator
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 
+def _memoize_per_tree(func: Callable[..., _T]) -> Callable[..., _T]:
+    """Cache a **pure** per-tree helper's result on the tree object itself.
+
+    Several helpers here are whole-tree walks that the scan recomputes more
+    than once for the same module: profiling the real `abicheck/` tree (787
+    files) showed `_def_containing_qualnames` called four times per file,
+    and `_locally_bound_constructor_shadow_names` and
+    `_lexical_function_parents` twice each -- because
+    `fact_equality_misuse_sites` computes them and then calls
+    `_fact_aliases`, which independently computes them again. Each is a
+    full `ast.walk`, and together they accounted for the bulk of the scan's
+    13.7M `ast.walk` calls.
+
+    Correctness rests on two properties, both checked rather than assumed
+    before this was added:
+
+    * Every decorated helper is a pure function of its arguments -- it
+      reads the tree and returns a freshly-built mapping, consulting no
+      global or mutable state.
+    * No caller mutates a returned mapping (verified by grepping every
+      call site for subscript-assignment, `update`, `setdefault`, `pop`
+      and `clear` on the bound names). Sharing one object between callers
+      would otherwise let one caller's write be seen by another.
+
+    If a future helper breaks either property, it must not be decorated.
+    `tests/test_fact_detector_misuse_memoization.py` states both the
+    caching contract and the equivalence to the uncached computation.
+
+    The cache lives in the tree node's own `__dict__`, so it is scoped to
+    that tree and collected with it -- deliberately not a module-level dict
+    keyed on `id(tree)`, which would both leak for the lifetime of the
+    process and risk serving a stale entry after an id is reused by a new
+    object at the same address.
+    """
+    slot = f"_abicheck_memo__{func.__name__}"
+
+    @functools.wraps(func)
+    def wrapper(tree: ast.Module, *args: Any) -> _T:
+        cache: dict[tuple[int, ...], _T] | None = tree.__dict__.get(slot)
+        if cache is None:
+            cache = {}
+            tree.__dict__[slot] = cache
+        # Extra arguments are keyed by identity, not value: the only ones
+        # in use are themselves per-tree derived mappings (a
+        # `_QualnameSpans`), which are unhashable and, now that their own
+        # producer is memoized too, are the identical object on every call
+        # for a given tree. Identity keying is therefore exact here, and
+        # a caller that somehow passed a freshly-built equal-but-distinct
+        # mapping would get a correct (merely uncached) recomputation
+        # rather than a wrong answer.
+        key = tuple(id(a) for a in args)
+        if key not in cache:
+            cache[key] = func(tree, *args)
+        return cache[key]
+
+    return wrapper
+
+
+@_memoize_per_tree
 def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
     """Return every named scope's exact `((start_line, start_col),
     (end_line, end_col), qualname)` span in *tree* -- resolve a query
@@ -285,6 +348,7 @@ def _qualname_at(pos: tuple[int, int], spans: _QualnameSpans) -> str:
     return best if best is not None else "<module>"
 
 
+@_memoize_per_tree
 def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     """Map each function's qualname to its nearest *enclosing function's*
     qualname -- skipping any intervening class scope -- or `"<module>"` if
@@ -473,6 +537,7 @@ def _lexical_function_parents(tree: ast.Module) -> dict[str, str]:
     return parents
 
 
+@_memoize_per_tree
 def _def_containing_qualnames(tree: ast.Module) -> dict[tuple[int, int], str]:
     """Map each `def`/`class` statement's own `(lineno, col_offset)` to the
     qualname of the scope that *directly, syntactically* contains it --
@@ -1062,6 +1127,7 @@ def _match_pattern_names(pattern: ast.pattern) -> list[str]:
     return names
 
 
+@_memoize_per_tree
 def _locally_bound_constructor_shadow_names(
     tree: ast.Module, qualnames: _QualnameSpans
 ) -> dict[str, set[str]]:

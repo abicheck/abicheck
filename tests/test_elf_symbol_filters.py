@@ -191,11 +191,10 @@ def test_legitimate_symbols_are_not_filtered(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 def test_empty_string_is_filtered() -> None:
-    assert _is_abi_relevant_symbol("") is False
-
-
-def test_none_like_empty_is_filtered() -> None:
-    # The function signature accepts str; passing "" covers the falsy branch.
+    # The signature accepts `str`, so "" is the only falsy input reachable
+    # here -- a second test asserting the same call under the name
+    # `test_none_like_empty_is_filtered` said so in its own comment and then
+    # repeated this exact assertion, so it is folded in rather than kept.
     assert _is_abi_relevant_symbol("") is False
 
 

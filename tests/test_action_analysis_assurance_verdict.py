@@ -377,6 +377,11 @@ class TestConfigDrivenAssuranceGateReadsTheNoBaselineShapeToo:
             "no_baseline": True,
             "verdict": None,
             "findings": [],
+            # `report/no_baseline.py` emits `suppressed_findings` unconditionally
+            # beside `findings`, and the reader now requires both: an absent
+            # `suppressed_findings` cannot establish that policy suppressed
+            # nothing, so a half-present pair is not a result (ADR-067).
+            "suppressed_findings": [],
             "exit_axes": {"analysis_assurance": contribution, "audit_gate": 0},
             "exit_code": 1 if contribution else 0,
         }

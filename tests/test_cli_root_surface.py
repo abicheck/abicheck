@@ -25,7 +25,10 @@ existed, the root surface had drifted back into mirroring an internal
 pipeline (config -> build-output -> run-plan -> aggregate) instead of
 user-facing operations, the exact failure mode ADR-043 reset the CLI to
 avoid. ADR-054 consolidates those four into one ``project`` group
-(``project validate``/``validate-build``/``plan``) and folds the standalone
+(``project validate``/``validate-build``/``plan``; plan Phase 7p then
+folded ``validate-build`` and ``validate-use-cases`` into a single
+``project validate INPUT`` dispatching on each document's own schema)
+and folds the standalone
 ``plan --dump-manifest`` diagnostic into ``dump --dump-manifest --dry-run``;
 ``build-output baseline-libraries`` and ``run-plan to-aggregate-manifest``
 are dropped from the public CLI entirely (the former stays a library

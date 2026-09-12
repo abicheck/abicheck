@@ -168,7 +168,19 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "is."
         ),
         fixed_by=(1240,),
-        seed_tests=("tests/test_coverage_core_effectiveness.py",),
+        seed_tests=(
+            "tests/test_coverage_core_effectiveness.py",
+            # The consumer half, left as a known gap by PR #1240 and closed
+            # immediately after. Closing it found a third site that PR's own
+            # inspection had missed -- the integration lane, whose producer
+            # runs on Linux *and* macOS while its Codecov upload is gated to
+            # ubuntu -- which is the argument for making a rule executable
+            # rather than writing it down.
+            "tests/test_workflow_coverage_consumers.py",
+            # The evaluator both guards rest on, with its own contract
+            # suite -- chiefly *which way it fails*.
+            "tests/test_gha_expression_evaluator.py",
+        ),
         # `()` per the field's own rule: these seed tests read and parse
         # workflow/config files, they do not invoke the CLI, `abicheck.
         # service`, or a real workflow run. A claimed surface a seed test
@@ -178,20 +190,131 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         # them).
         public_surfaces=(),
         axes={
-            "half": ("requested-vs-selected-core", "documented-fallback"),
+            "half": (
+                "requested-vs-selected-core",
+                "documented-fallback",
+                "report-has-a-consumer",
+            ),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "Only the coverage-core half is executable. Nothing "
-                    "asserts the consumer half -- that every `--cov-report` "
-                    "a workflow writes is uploaded, archived or gated -- so "
-                    "a future lane can reintroduce an unread report and "
-                    "only a human reading the diff would notice. The "
+                    "The consumer half checks each *matrix combination*, "
+                    "which needs every step's `if:` evaluated against it, so "
+                    "it inherits `_gha_expressions`' deliberate subset: an "
+                    "unmodelled reference or function evaluates as *absent*. "
+                    "That direction is deliberate but not uniformly safe. "
+                    "For a consumer it fails closed (the step is not counted "
+                    "as reading the report, so at worst a real consumer is "
+                    "reported as missing); for a *producer* it fails open "
+                    "(the step is not counted as writing one, so an orphaned "
+                    "report under an unmodelled `if:` is missed). Both beat "
+                    "the original defect, where an unmodelled token returned "
+                    "truthy and made any such step read as active. A matrix "
+                    "built from an expression cannot be expanded statically "
+                    "at all and is scanned as one nameless combination. The "
                     "core-effectiveness test also probes the interpreter "
                     "running the suite, not the pinned Python of each CI "
                     "lane, so a lane on a different version is checked only "
                     "through the stated caveat, not by measurement."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="tests.dead_harness_reads_as_a_passing_control",
+        invariant=(
+            "A test harness whose failure mode produces the same observation "
+            "as its success signal must prove it can execute at all, or the "
+            "suite reports safety it never checked. "
+            "`test_workflow_untrusted_text_interpolation` executes hostile PR "
+            "bodies against the real workflow step and reads the attack as "
+            '"the file was not written verbatim" -- which is also exactly '
+            "what a harness that cannot run a shell produces. On the Windows "
+            "lane it handed Git bash a POSIX-only `PATH`, so no step ran, "
+            'every payload came back as "nothing written", and the negative '
+            "controls read that as the attack firing: a fully green "
+            "injection-defence module testing nothing. The fix is a "
+            "precondition that runs a payload-free script whose only job is "
+            "to write the file the other assertions look for, so a dead "
+            "harness fails loudly instead of reassuring."
+        ),
+        fixed_by=(1244,),
+        seed_tests=("tests/test_workflow_untrusted_text_interpolation.py",),
+        # A real `bash` execution of a real workflow step body.
+        public_surfaces=("github-action",),
+        axes={
+            "half": ("harness-liveness-precondition", "hostile-payload-corpus"),
+            "platform": ("posix", "windows-git-bash"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The precondition proves the harness can run *a* script "
+                    "and write *a* file; it does not prove the environment it "
+                    "hands the step matches a real runner's. The POSIX lanes "
+                    "still get a deliberately hermetic environment while "
+                    "Windows inherits the host's, so the two platforms do not "
+                    "execute under identical conditions -- a difference that "
+                    "is stated rather than closed. Nothing here runs on a "
+                    "real Windows host either; the dead-harness shape was "
+                    "reproduced locally by pointing the resolver at a binary "
+                    "that exits cleanly without writing."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="tests.locale_dependent_repo_text_read",
+        invariant=(
+            "A test that reads the repository's own checked-in text must "
+            "state the encoding. `Path.read_text()` and `open(path)` with no "
+            "`encoding=` decode using the *host's* preferred encoding -- "
+            "UTF-8 on the Linux and macOS lanes, `cp1252` on a default "
+            "Windows runner -- so a UTF-8 file carrying any non-ASCII byte "
+            "reads fine on two platforms and raises `UnicodeDecodeError` on "
+            "the third. This repository's own workflow comments are full of "
+            "em dashes and section signs, so the condition is not "
+            "hypothetical: four `test_workflow_*.py` guards each read "
+            "`.github/workflows/*.yml` at import time with a bare "
+            "`read_text()` and took down the Windows unit lane at "
+            "*collection*, before any assertion ran. The guard is structural "
+            "(no repository-rooted read leaves the encoding to the platform) "
+            "plus non-vacuity (some checked-in workflow really does contain "
+            "a byte cp1252 rejects), because the structural rule alone would "
+            "pass the day the repository became pure ASCII. The scan must "
+            "also follow *aliases*: a review found it walking only the call "
+            "target, so `path = REPO_ROOT / x` and `for path in "
+            "workflow_paths():` -- the two spellings this suite reaches for "
+            "first -- went unflagged, and adding alias tracking immediately "
+            "turned up two more unencoded reads of checked-in files."
+        ),
+        fixed_by=(1244,),
+        seed_tests=("tests/test_repo_text_reads_state_their_encoding.py",),
+        # `()` per the field's own rule: the seed test parses repository
+        # files with `ast`; it invokes no CLI, no `abicheck.service`, and no
+        # real workflow run.
+        public_surfaces=(),
+        axes={
+            "half": ("structural-scan", "non-vacuity-of-the-content"),
+            "read_form": ("Path.read_text", "open"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The scan recognises a repository-rooted path only when "
+                    "it is built from a root constant this suite actually "
+                    "uses (`REPO_ROOT`, `WORKFLOW_DIR`, `ROOT`, "
+                    "`PROJECT_ROOT`). A test that re-derives the root into a "
+                    "root constant it does not know, or reaches checked-in "
+                    "content through a fixture-returned path, is not covered -- the "
+                    "same shape as reading it with `subprocess` or "
+                    "`importlib.resources`. Nothing here runs on a real "
+                    "cp1252 host either: the failure is reproduced locally "
+                    "under `LC_ALL=C`, which is a stricter ASCII default, "
+                    "not cp1252 itself."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),
@@ -875,5 +998,99 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="docs/contribute/known-gaps.md",
             ),
         ),
+    ),
+    BugClass(
+        id="cli_surface.name_independent_dispatch_undone_downstream",
+        invariant=(
+            "When a front end decides what an operand *is* from its own "
+            "content -- a schema discriminator, a directory contract -- "
+            "every consumer it then hands that operand to must accept it "
+            "as given. Re-deriving a conventional filename from it (taking "
+            "a named manifest's parent directory and looking for the usual "
+            "name beside it) re-introduces, one layer down, exactly the "
+            "name dependency the dispatch just refused, and turns a valid "
+            "input into 'not found'. The corollary is where this class "
+            "actually escapes: proving the *classifier* is name-independent "
+            "proves nothing about the pipeline behind it, so the "
+            "generalized test must run the whole public invocation under "
+            "the non-conventional name, not just the classification step."
+        ),
+        fixed_by=(1242,),
+        seed_tests=(
+            "tests/test_cli_project_validate_dispatch.py",
+            "tests/test_build_output.py",
+        ),
+        # Earned: the seed's name-independence matrix runs real `CliRunner`
+        # invocations of `abicheck project validate` end to end, which is
+        # the half that was missing when the defect shipped.
+        public_surfaces=("cli",),
+        axes={
+            "input_kind": (
+                "project-config",
+                "build-output",
+                "use-case-manifest",
+                "empty-document",
+            ),
+            "operand_shape": ("directory", "named-manifest-file"),
+            "filename": (
+                ".abicheck.yml",
+                "impact-use-cases.yaml",
+                "build-output.json",
+                "run-42.json",
+                "config.yaml",
+                "NOTES",
+            ),
+        },
+    ),
+    BugClass(
+        id="cli_surface.derived_table_lost_in_its_own_encoding",
+        invariant=(
+            "When a surface derives a table by introspecting another "
+            "program and then encodes it for lookup (the composite "
+            "Action's `$_CLI_VALUE_OPTIONS`, a delimiter-framed string "
+            "built from `abicheck`'s own Click parameter list), the "
+            "encoding round-trips EVERY entry the derivation produced -- "
+            "so membership answers the same for the first entry, the last "
+            "entry, and every entry in between, on every platform the "
+            "surface runs on. Two independent ways it did not: the table "
+            "was framed with a leading but no trailing delimiter, so the "
+            "positionally-last spelling never matched the fully-delimited "
+            "lookup key; and the captured stdout's line endings were the "
+            "*producing interpreter's*, so on Windows -- where a native "
+            "python.exe translates every written newline to CRLF -- every "
+            "entry carried a trailing CR and nothing matched at all. "
+            "Distinct from `cli_surface.copied_option_table_went_stale`, "
+            "which is about the enumeration's CONTENT drifting from the "
+            "CLI: here the content was correct and the transport lost it, "
+            "which defeats that class's own introspection rather than "
+            "repeating it. Both defects failed in the silent direction the "
+            "derivation's hard-failure path exists to prevent -- "
+            "`_CLI_VALUE_OPTIONS_DERIVED` still read `true`, so no option "
+            "read as value-taking and a literal `--write`/`--dry-run` "
+            "sitting in `extra-args` as another option's value was misread "
+            "as a real flag, suppressing the step's own report injection "
+            "while a full comparison ran. Corollary: the guard asserts the "
+            "whole table against the live Click list rather than sampling "
+            "options, because both defects are positional or global, and "
+            "it exercises a real interpreter whose newline convention "
+            "differs from the host's, because asserting the shell's "
+            "parsing of hand-written text cannot observe what the "
+            "subprocess actually wrote."
+        ),
+        fixed_by=(1234, 1239),
+        seed_tests=("tests/test_action_run_sh_option_table.py",),
+        # Not earned: the seed sources `run.sh`'s own helper region and
+        # drives it under a real bash, but that is the script's functions in
+        # isolation, not an executed workflow/composite-action step.
+        public_surfaces=(),
+        axes={
+            "line_ending": ("lf", "crlf"),
+            "table_position": ("first", "middle", "last"),
+            "option_shape": ("long", "short", "not-an-option"),
+            "consumer": (
+                "membership-test",
+                "short-cluster-expansion",
+            ),
+        },
     ),
 )

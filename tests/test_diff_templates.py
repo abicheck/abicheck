@@ -195,10 +195,34 @@ class TestStripParamSignature:
         assert _segments(result)[-1] == "bar"
 
     def test_pointer_parameter_is_not_mistaken_for_a_wrapper(self) -> None:
-        # A "*" in the parameter list itself (not a return-type wrapper)
-        # must not trip the wrapper heuristic — it's followed by ","/")",
-        # never a further "(".
-        assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
+        # A "*" in the parameter list must not trip the wrapper heuristic.
+        #
+        # This test used to assert `lib::sort(int*, int*)`, byte-identical to
+        # `test_plain_function_unaffected` above -- and by the function's own
+        # docstring that input "never reache[s] this whitespace-gated logic
+        # at all", so it could not exercise the heuristic it names. A
+        # function-pointer *parameter* is the input that does: its "(" IS
+        # preceded by whitespace, the one signal the wrapper branch keys on,
+        # yet the real parameter list still starts at the "(" glued to the
+        # function's own name. No other case in this file supplies a
+        # function-pointer parameter.
+        assert _strip_param_signature("lib::apply(void (*)(int))") == "lib::apply"
+        # Trailing ordinary parameter after the function-pointer one.
+        assert (
+            _strip_param_signature("lib::apply(void (*)(int), int*)") == "lib::apply"
+        )
+        # The whitespace-preceded "(" not first in the list, so a scan that
+        # gave up at the first one it saw would still pass without this.
+        assert (
+            _strip_param_signature("lib::apply(int*, void (*)(char*, int))")
+            == "lib::apply"
+        )
+        # Pointer-to-member-function parameter: "Class::*" inside the list,
+        # the same text the real wrapper branch recognizes in a return type.
+        assert (
+            _strip_param_signature("ns::C::bind(void (ns::C::*)(int))")
+            == "ns::C::bind"
+        )
 
     def test_decltype_return_type_does_not_truncate(self) -> None:
         # Codex review, fresh evidence: a dependent decltype expression in

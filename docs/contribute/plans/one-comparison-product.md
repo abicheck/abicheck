@@ -407,8 +407,8 @@ The number is a consequence of the model, not the goal.
 > state.** Phase 7i re-derived both live counts by Click introspection and
 > itemized, per flag, every option standing between them and the targets —
 > see its own table in §6 Phase 7. Read that, not this, for where the
-> surface actually is: as of that slice `compare` is at **50** (from 78 at
-> the original audit, 56 at the start of the slice) and `dump` at **21**
+> surface actually is: as of that slice `compare` was at **50** (from 78 at
+> the original audit, 56 at the start of the slice) and `dump` at **21**; live today, after Phase 6, **47** and **18** (Phase 7l)
 > (from 39 / 24). Both targets remain reachable, and every residual option
 > has a named owner and a named blocker; two of them are *deliberate keeps*
 > that the targets below predate.
@@ -1596,7 +1596,10 @@ now recorded where the check runs.
 changes; no machine contract changes, so no schema bump. It is a
 documentation-and-enforcement slice whose whole product is that the surface
 can no longer grow unruled. **Counts after 7k: `compare` 50, `dump` 21**
-(unchanged from 7j).
+(unchanged from 7j). Both numbers are the *pre-Phase-6* surface: `scan`'s
+retirement took `--env-matrix`, `--require-complete-analysis` and
+`--build-target` with it, so the live, Click-introspected counts are
+**`compare` 47, `dump` 18** — see Phase 7l.
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
@@ -1625,6 +1628,303 @@ Every PR in this phase meets the merge criteria recorded in
 `64` with no hidden alias, front-end parity in the same PR, schema bump where
 a machine contract changes, and verdict/gate/exit/coverage/assurance asserted
 separately. That list is carried forward unchanged; it is not restated here.
+
+### Phase 7l — external CLI audit (2026-09-12), reconciled
+
+An external, static source/reference audit of the whole CLI surface at
+`31cbd4a` was reviewed against this phase's existing rulings. Its counts
+reproduce exactly (`compare` **47** visible, `dump` **18**, Click-
+introspected — the "50/21" in 7i/7j/7k is the pre-Phase-6 surface, before
+`scan`'s retirement took `--env-matrix`, `--require-complete-analysis` and
+`--build-target` off `compare`/`dump` with it), so the two surfaces are
+talking about the same CLI and the disagreements below are about *rulings*,
+not about state.
+
+Its central claim is one this phase should adopt explicitly, because 7i/7k
+did not state it: **a necessary capability does not require a dedicated
+flag, and a removal that costs the user three commands or an invented
+manifest is not a simplification.** Its corollary matters equally — "there
+is no replacement today" is a *migration prerequisite*, not permanent
+ownership, which is exactly what a `deferred` ruling already says, and
+several of our `per_run_operand` rulings would be honestly re-read as
+`deferred` under it.
+
+**Adopted — new work this phase did not have.** Each becomes a numbered
+slice below rather than a flag row, because each is a *replacement
+mechanism* first and an option count second:
+
+- **7m — one export request.** `--format`/`-o/--output`/`--write`/
+  `--output-dir`/`--max-findings-per-library` are four mechanisms for
+  "which artifacts does this analysis produce". Target: one repeatable
+  `-o FORMAT=DESTINATION` with `-` for stdout (Click already supports `-`
+  in its file handling, so 7k's own decline of the `--write` merge — "a
+  path-less `--write` value would be one flag carrying two grammars" —
+  does not survive this framing: it is one grammar, and `-` is the
+  stdout spelling). `--output-dir`'s per-component fan-out and
+  `--max-findings-per-library`'s summary cap are then consequences of the
+  export set, not separate escape routes: complete machine data is never
+  truncated, and a human summary is bounded automatically. **Net −4**,
+  and the first removal on this surface that reduces what a user must
+  *decide*, not just what they must type. Blocked on: ADR-061 gap C (one
+  document, several projections) — already this plan's Phase 5
+  prerequisite — plus collision detection, Windows path handling, and
+  F-19's output-format invariance holding across the new grammar.
+- **7n — evidence transports, one input per evidence *role*.**
+  `--debug-root` merges into `--debug-info` (a detached debug file, a
+  directory of them, and a debug package are three transports of one
+  role); `--devel-pkg` merges into `-H` (a development package is a
+  carrier of header evidence); `--probe-matrix` merges into a typed
+  `--build-info` (probe observations and compile context stay distinct
+  *internally* and may be supplied together). **Net −3.** The bar for
+  each is that the merged input keeps the schema, side ownership, and
+  binary/debug identity validation it has today — accepting more filename
+  extensions is not the deliverable. **Explicitly not merged:
+  `--sources` and `--build-info`** — a checkout and the context it was
+  built under are independent inputs that are routinely supplied
+  together; an `--evidence` grammar there would trade a flag for a type
+  vocabulary the user must learn and for harder ambiguity diagnosis. That
+  boundary is the audit's own, and this plan endorses it.
+- **7o — `--view`'s internal grammar.** 7i/7k ruled `--view` a keep and
+  never looked inside it. It now carries report mode, a
+  severity/entity/action display filter with its own AND/OR rules across
+  repeated groups, demangle toggles, pattern explanation, filtered-finding
+  display and suppression audit — the four flags Phase 5 merged, still
+  four decisions. Target: `patterns`, `filtered` and `suppressions` become
+  unconditional disclosure (compact counts always, detail in the canonical
+  result — which is ADR-067's accounting rule, not a display preference);
+  `demangle`/`no-demangle` become automatic once human output carries a
+  copyable exact symbol and machine output carries both names; the display
+  dimensions derive from the canonical finding model rather than a second
+  `ChangeKind`-name interpretation. `leaf` is re-examined against
+  `root-cause` **with a measurement**, not declared redundant. Net option
+  count: **0** — which is the point: this slice reduces decisions, not
+  strings beginning with `--`.
+- **7p — `project validate` consolidation. Done.** `project validate`,
+  `validate-build` and `validate-use-cases` were one question over three
+  input schemas. Now `abicheck project validate INPUT`, dispatching on a
+  validated schema discriminator or a recognized directory contract —
+  never on a filename guess, and recognizing a project file never
+  authorizes its nominated toolchain (`--toolchain-bindings` applies to a
+  project config and is a usage error elsewhere, rather than being
+  silently ignored). **−2 subcommands**, −4 duplicated output options;
+  the remaining `--format`/`-o` pair folds with 7m like every other
+  command's.
+
+  The classifier is `buildsource/validation_input.py` — beside the
+  build-output contract it routes on, since ADR-061 classifies
+  `frontends/` as `may_import: [model, workflows, report]` and routing on
+  anything but that real contract would be the filename guess this slice
+  rules out. A directory (or a `build-output.json` named directly, which resolves to
+  its directory) declaring `schema: abicheck.build-output/v1` is a build
+  output, reusing `is_build_output_dir` — the same contract every other
+  build-output consumer routes on; a top-level list is a use-case
+  manifest; a mapping is a project config, as the one shape carrying no
+  self-describing tag. Its property test is exhaustive over
+  shape × filename, with each shape's *conventional* name among the
+  misleading ones, so a filename-based implementation fails rather than
+  coincidentally passing — AGENTS.md's primitive-level rule, and the
+  reason this is a separate module rather than a branch inside the
+  command.
+
+  **Three consequences worth not rediscovering**, each a real behavior
+  change the consolidation forces, none of them a capability loss:
+
+  1. **An empty document is validated under every reading, not assigned
+     to one.** YAML cannot tell an empty mapping from an empty list, and
+     both superseded commands accepted one. So the project-config
+     validation still runs (its "no targets declared" warning is the
+     whole reason to run it) and the vacuous manifest reading is stated
+     beside it. Silently picking either would have dropped whichever the
+     caller meant — the empty config's warnings, or the manifest's `0
+     use cases` answer.
+  2. **A mapping that was meant to be a manifest is read as a config**,
+     because shape is the discriminator. Exit code is unchanged (`64`)
+     and the message now names the reading applied, so the user is not
+     sent hunting for a typo in a document of the wrong kind.
+  3. **Unparseable YAML fails at classification**, ahead of every
+     validator, rather than inside the project-config loader. Same exit
+     code, same named file.
+- **7q — `aggregate --run-plan` into `--manifest`.** A run plan is a
+  second schema for the same "expected set" input; the projection is
+  validated internally. `--discovered-only` stays **explicit** — it states
+  that the operator has no expected inventory, and inferring that from an
+  empty manifest is how a CI matrix silently goes green with missing jobs.
+  **Net −1.**
+- **7r — `project plan --allow-empty` retired** once a legitimately empty
+  selection produces an *explained skipped plan* rather than needing a
+  bypass switch, and bootstrap validation routes to `project validate`.
+  **Net −1.** Its other four inputs (`--build-output`, `--project`,
+  `--head-sha`, `--toolchain-bindings`) are ruled keeps here for the
+  audit's reason, which this plan adopts as a general rule:
+  **auto-detection is a useful default, not proof that an explicit
+  override is unnecessary** (a Git origin may describe a fork or mirror;
+  the planner's checkout is not necessarily the candidate revision).
+
+**Adopted as re-rulings of existing entries** (`rulings.py` changes from
+`per_run_operand` to `deferred`, with the named blocker, when the slice
+above lands — not before, since a deferral needs a real prerequisite):
+`--format`, `--write`, `--output-dir`, `--max-findings-per-library`
+(7m) · `--debug-root`, `--devel-pkg`, `--probe-matrix` (7n).
+
+**Declined, with the reason recorded** — each was already measured or
+already decided, and the audit did not have the measurement:
+
+- **`dump --compression` → retire.** Declined; 7k already ruled this
+  against §4.2's AUTO row, and the audit concedes the counterexample
+  itself (`-o build/abi.json --compression zstd`: the publishing job owns
+  the encoding, and the suffix cannot express it). "Retire it through a
+  storage preference or an external re-compression step" is a capability
+  trade the audit labels a "conscious convenience tradeoff"; this plan's
+  Non-goals rule it out — we do not shorten the CLI by making a supported
+  workflow require an extra step.
+- **`--dry-run` → `--plan`.** Declined, and it is not a neutral rename:
+  ADR-054 folded a `plan` *command* back into `dump --dump-manifest
+  --dry-run` precisely to stop a second "preflight" vocabulary growing
+  next to the established one. Re-introducing `--plan` as a flag spelling
+  re-opens that drift for a stated zero option-count gain. (`project
+  plan` is a different noun — a run plan artifact — and is unaffected.)
+- **`--used-by-manifest` → `--used-by @FILE`.** Declined again, same
+  reason as 7k: a manifest carries digest/platform/profile provenance and
+  a required-vs-advisory distinction a consumer path cannot express, so
+  the collapse either drops content or overloads one flag with two value
+  grammars. The audit's own `@`-prefix proposal is the second of those.
+  (Its ruling that `--required-symbol` stays *distinct* from `--used-by`
+  — a host contract is not an observed import table — matches ours.)
+- **`--severity-preset` merged into policy selection.** Declined *for
+  now*, not on the merits: the audit itself names the real blocker
+  (gate activation must be consistent across pairwise, bundle and
+  no-baseline execution first), and this plan will not merge a gate
+  selector into a policy document while a no-baseline run still describes
+  the preset as what arms its audit gate. Re-examine after that
+  convergence; the audit's constraint that acceptance, classification and
+  suppression stay *separate meanings* under one resolved selection is
+  adopted verbatim as the design bar.
+- **`--select-required` merged into an expected inventory.** Already this
+  plan's ADR-065 dependency (P5), not a new finding; `--select-required`
+  stays until package component inventories land, and 7k's own decline
+  (it declares a completeness *obligation* feeding the scope exit axis)
+  stands until then.
+- **`--follow-deps`/`--search-path`/`--ld-library-path` → one
+  `--environment old=|new=` operand.** Not declined, but **not adopted as
+  a reduction**: it is a *new* operand, the audit counts it as such, and
+  7i's measurement (the dependency walk embeds absolute host paths, so it
+  may never become unconditional) plus 7k's measurement (the two path
+  flags insert at different loader steps and record different
+  `resolution_reason` values, so collapsing them changes which library
+  resolves) both survive it. Recorded as **future direction, owned by
+  G42** (named deployment environments and provider resolution), where an
+  environment is a real named object rather than a flag rename. The
+  audit's two constraints are carried into G42's own acceptance bar: the
+  replacement must keep the *same-run* enrichment of a comparison or
+  snapshot (telling the user to "run `deps` separately" is not parity),
+  and removing `--follow-deps` must never mean resolving against the
+  current host by default.
+
+**Noted, no change here.** `compat`'s 94 logical options (27 hidden) are
+frozen by ADR-068 D7 and excluded from every count — the audit agrees and
+proposes nothing there. `abicheck-cc` and the Clang plugin take compiler
+arguments and `ABICHECK_*` variables, not abicheck flags; the audit's
+useful point is that wrapper, plugin and `dump` capture settings should be
+*generated from one capture specification* rather than maintained three
+times, which is G34's territory, and that `ABICHECK_CC_DISABLE` treating
+`"0"` as "disable" is a real defect worth fixing on its own. Its warning
+that environment variables must not become the new hidden CLI is adopted
+as a standing constraint on every CONFIG demotion in this phase: a
+demoted flag lands in `.abicheck.yml`, never in an undocumented variable.
+
+**The acceptance bar for every slice above**, stated once (it is the
+audit's, and it is stricter than "the old spelling exits 64"):
+
+> The old user task still has a simple, supported invocation, with the
+> same relevant evidence and a truthful result.
+
+A test asserting only that a removed flag now errors proves deletion, not
+simplification, and does not satisfy 7m–7r.
+
+**Counts if 7m–7r land:** `compare` 47 → **40** (7m −4, 7n −3), which is
+§4.5's target reached without touching the five `deferred` entries;
+`dump` 18 → **17** (7n's `--debug-root` merge), with `--build-target`
+already gone with `scan` and §4.5's ≤16 target reachable only through one
+further ruling, not through this audit.
+
+**The whole-surface count, verified and re-derived.** 7i/7k only ever
+counted `compare` and `dump`; the audit counts every command, and every one
+of its twelve numbers reproduces exactly by Click introspection on this
+branch (one logical option once, short aliases and `--no-` spellings
+collapsed, `--help`/`--help-all` excluded). The "adopted" column is what
+7m–7r above actually deliver — not the audit's own end state, which is
+listed beside it so the gap is legible rather than averaged away:
+
+| Command | Today | After 7m–7r | Audit's end state | The gap, named |
+|---|---|---|---|---|
+| `compare` | 47 | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
+| `dump` | 18 | **17** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
+| `aggregate` | 6 | **4** | 4 | — (7q + 7m's shared export) |
+| `deps tree` | 7 | **6** | 6 | — (7m) |
+| `deps compare` | 8 | **7** | 7 | — (7m) |
+| `project history` | 5 | **4** | 4 | — (7m) |
+| `project plan` | 8 | **6** | 6 | — (7r + 7m) |
+| `project validate` | 4 | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
+| `project validate-build` | 3 | **0** | folded | **done (7p)** |
+| `project validate-use-cases` | 3 | **0** | folded | **done (7p)** |
+| **Native total** | **109** (103 after 7p) | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** |
+| `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
+
+Read the last column as this phase's actual position: **on six of the ten
+native commands the audit's end state and ours are identical**, and the
+entire 87-vs-68 difference is the contract/capture-config question this
+plan has already gated (Phase 9, G42, P5) or ruled against with a
+measurement. There is no third, unexamined bucket. `--format`/`-o`
+converging on one export request is what moves every command except
+`compare`/`dump`, which is why 7m is sequenced first: it is one mechanism
+that closes eight rows.
+
+**Six smaller audit items, ruled here rather than left unrecorded** —
+these were in the audit and absent from the first pass of this section:
+
+- **`--abi3` → declared floor activates the check.** Adopted *in part*: an
+  `.abicheck.yml`-declared `abi3` floor should arm the applicable check
+  without a second enable flag. The flag itself stays until that key
+  exists, and the audit's own guard is adopted with it — **an arbitrary
+  CPython extension must never be assumed to promise `abi3`**, so the
+  check arms from a declaration, never from sniffing the binary. Owner:
+  G26 (`--abi3`'s own workstream), not this phase.
+- **`--dump-manifest`, `--include-system-declarations` → capture
+  contract.** The audit argues both are properties of *how this project
+  captures evidence*, against our `per_run_operand` rulings. Recorded as a
+  live disagreement rather than settled: it is the same question 7p/7n
+  cannot answer alone, and it needs the capture-specification work
+  (below) to have a home at all. Neither ruling changes until then, and
+  the plan states why on each: a multi-TU recipe and a dependency-surface
+  selector both vary per invocation today because no capture spec exists
+  to carry them.
+- **`--bundle-facts-out`: the blocker is a task, not a property.** 7d
+  ruled it a keep because "`dump` has no directory/package fan-out to hold
+  this". The audit is right that this is a *missing implementation*, not a
+  reason the flag belongs on `compare` forever. Re-recorded as a keep
+  **with a named owner** — bundle capture in `dump` — so it reads as
+  deferred-by-absence rather than settled. `rulings.py` keeps
+  `per_run_operand` until that capture exists (a `deferred` ruling needs a
+  blocker that is actually being built).
+- **`deps`: the default `/` root must be visible in the resolved plan.**
+  Adopted, and it is a correctness point rather than a CLI one: an
+  unspecified `--sysroot`/`--old-root`/`--new-root` currently reads in the
+  output like a deliberately chosen deployment environment. No flag
+  changes; the resolved plan and report state that the root was defaulted.
+  Owner: Phase 8's `ReportDocument` projection, which already renders the
+  stack report.
+- **`ABICHECK_CC_DISABLE` treats `"0"` as disable.** A real defect
+  (any non-empty value disables capture), not a CLI-surface item. Fix
+  separately with a regression test over the *class* — truthy/falsey
+  string parsing across every `ABICHECK_*` boolean, not just this one
+  variable — per AGENTS.md's bug-class rule.
+- **One capture specification for `dump`, `abicheck-cc` and the Clang
+  plugin.** The audit's strongest structural point outside `compare`:
+  public roots, library identity and version are configured three times in
+  three vocabularies (`-H`/`ABICHECK_CC_HEADERS`/`public-roots=`). Not
+  this plan's to own — recorded as G34's, and as the prerequisite that
+  makes the two `per_run_operand` rulings above answerable.
+
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
 

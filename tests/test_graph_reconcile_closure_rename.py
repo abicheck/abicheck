@@ -48,6 +48,7 @@ from abicheck.buildsource.graph_reconcile import (
     OUTCOME_COORDINATES_ONLY,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
+    OUTCOME_RECONCILED_UNRESOLVED,
     OUTCOME_RENAMED,
     reconcile_added_removed,
 )
@@ -214,9 +215,11 @@ class TestClosureCoordinateShiftIsNotARename:
             },
         )
         pair = _reconcile_one_pair(old_node, new_node)
-        assert pair.outcome == OUTCOME_RECONCILED, (
+        assert pair.outcome == OUTCOME_RECONCILED_UNRESOLVED, (
             "a coordinate shift accompanying a real signature change must "
-            "not be reported as a no-op coordinate-only shift"
+            "not be reported as a no-op coordinate-only shift -- and, since "
+            "neither the location-free name nor the declaring file changed, "
+            "must not be reported as the combined rename-and-move either"
         )
 
     def test_closure_owning_template_genuinely_renamed_still_detected(self) -> None:
@@ -696,7 +699,8 @@ class TestCoordinateEvidenceIsStated:
             text = findings[0].description
             assert "both name and location evidence changed" not in text, (label, text)
             assert (
-                "does not establish whether the declaring location changed" in text
+                "does not establish whether the name or the declaring "
+                "location changed" in text
             ), (
                 label,
                 text,

@@ -72,7 +72,9 @@ __all__ = [
     "is_sectioned_document",
     "load_bundle_facts",
     "load_snapshot",
+    "digest_scope",
     "load_snapshot_document",
+    "run_scoped_digest_cache",
     "save_bundle_facts",
     "save_snapshot",
     "snapshot_content_digest",
@@ -103,6 +105,10 @@ from .storage.snapshot_codec import (
     snapshot_to_dict as snapshot_to_dict,
     snapshot_to_json as snapshot_to_json,
     write_snapshot as write_snapshot,
+)
+from .storage.snapshot_digest_cache import (
+    digest_scope as digest_scope,
+    run_scoped_digest_cache as run_scoped_digest_cache,
 )
 from .workflows.snapshot_load import backfill_python_ext_from_evidence
 
