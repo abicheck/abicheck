@@ -278,6 +278,63 @@ class TestMypySemanticsParity:
         assert stale == {"pkg.nope", "pkg.nope.*", "pkg.sub.leaf.deeper"}
 
 
+class TestNamespacePackages:
+    """A PEP 420 namespace directory IS a module target, verified against mypy.
+
+    Proposed in review on PR #1251 as the opposite: that ancestor names should
+    be collected only where an `__init__.py`/`__init__.pyi` exists, because
+    mypy supposedly has no concrete module for a namespace directory. Checked
+    against mypy 1.19.1 with this repo's settings and it is not so -- with
+    `--warn-unused-configs --no-incremental` (the warning is suppressed under
+    incremental mode, main.py's own condition), mypy reports a section for a
+    *nonexistent* package as unused but NOT one for a namespace directory that
+    contains a module.
+
+    That distinction is load-bearing here rather than theoretical:
+    `abicheck/report`, `abicheck/workflows` and `abicheck/frontends/cli` are
+    all namespace directories in this repository, and running mypy over the
+    real tree with sections for all three reports none of them unused. Adopting
+    the proposed rule would have made the gate report valid overrides under
+    those three packages as stale -- a false positive on this very tree.
+
+    So these tests pin the verified behavior in both directions, to stop the
+    same plausible-but-wrong reasoning being re-applied later.
+    """
+
+    def test_namespace_directory_containing_a_module_is_a_valid_target(
+        self, mot, tmp_path
+    ):
+        pkg = _tree(tmp_path, ("leaf",))
+        (pkg / "ns").mkdir()
+        (pkg / "ns" / "mod.py").write_text("")  # deliberately no __init__.py
+        pp = _pyproject(tmp_path, ["pkg.ns", "pkg.ns.mod"])
+        assert mot.stale_override_targets(pp, pkg, "pkg") == []
+
+    def test_directory_holding_no_module_is_not_a_valid_target(self, mot, tmp_path):
+        """The other half of mypy's rule: an empty directory is not a module,
+        and mypy does report such a section unused."""
+        pkg = _tree(tmp_path, ("leaf",))
+        (pkg / "empty").mkdir()
+        pp = _pyproject(tmp_path, ["pkg.empty"])
+        assert [t for t, _ in mot.stale_override_targets(pp, pkg, "pkg")] == [
+            "pkg.empty"
+        ]
+
+    @pytest.mark.parametrize(
+        "namespace_package",
+        ["abicheck.report", "abicheck.workflows", "abicheck.frontends.cli"],
+    )
+    def test_this_repo_s_own_namespace_packages_resolve(self, mot, namespace_package):
+        """Live-tree guard: these three carry no `__init__.py`, and mypy
+        confirms sections for them are used. A future change to ancestor
+        collection that breaks them fails here rather than in CI."""
+        assert not (
+            ROOT / Path(namespace_package.replace(".", "/")) / "__init__.py"
+        ).exists()
+        known = mot._module_names(ROOT / "abicheck", "abicheck")
+        assert namespace_package in known
+
+
 class TestCheckFunction:
     def test_reports_one_error_per_stale_target(self, mot, tmp_path, monkeypatch):
         pkg = _tree(tmp_path, ("live",))
