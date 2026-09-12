@@ -42,13 +42,7 @@ from abicheck.aggregate import (
     target_id_from_path,
 )
 from abicheck.change_registry_types import Verdict
-
-try:
-    import jsonschema
-except ImportError:  # pragma: no cover - exercised only when jsonschema absent
-    jsonschema = None
-
-from tests.schema_validation import validate_instance
+from tests.schema_validation import requires_jsonschema, validate_instance
 
 LINUX = "linux-x86_64"
 WINDOWS = "windows-x86_64"
@@ -1348,7 +1342,7 @@ class TestJsonSchema:
         assert schema["$id"].endswith("aggregate_report.schema.json")
         assert "aggregate_schema_version" in schema["properties"]
 
-    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    @requires_jsonschema
     def test_real_output_validates_against_schema(self, tmp_path: Path):
         from abicheck.schemas import load_aggregate_report_schema
 
@@ -1371,7 +1365,7 @@ class TestJsonSchema:
         assert d["aggregate_schema_version"] == AGGREGATE_SCHEMA_VERSION
         assert d["unexpected_targets"]
 
-    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    @requires_jsonschema
     def test_discovered_only_output_validates(self, tmp_path: Path):
         from abicheck.schemas import load_aggregate_report_schema
 

@@ -52,13 +52,7 @@ from abicheck.workflows.aggregate.reconcile import (
     resolve_cross_abi_identity,
     resolve_report_change_identity,
 )
-
-try:
-    import jsonschema
-except ImportError:  # pragma: no cover - exercised only when jsonschema absent
-    jsonschema = None
-
-from tests.schema_validation import validate_instance
+from tests.schema_validation import requires_jsonschema, validate_instance
 
 LINUX = "linux-x86_64"
 
@@ -455,7 +449,7 @@ class TestFindingMatrix:
         assert entry["undetermined_profiles"] == []
         assert entry["identity_tier"] in {"canonical", "normalized", "reduced"}
 
-    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    @requires_jsonschema
     def test_matrix_output_validates_against_schema(self, tmp_path: Path) -> None:
         from abicheck.schemas import load_aggregate_report_schema
 
@@ -1522,7 +1516,7 @@ class TestProfileContractState:
         assert entry.unaffected_profiles == ("clang",)
         assert {p.profile for p in entry.profile_contract} == {"gcc"}
 
-    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    @requires_jsonschema
     def test_matrix_output_validates_against_schema(self, tmp_path: Path) -> None:
         from abicheck.schemas import load_aggregate_report_schema
 
@@ -1533,7 +1527,7 @@ class TestProfileContractState:
         (entry,) = d["finding_matrix"]
         assert entry["profile_contract"]
 
-    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    @requires_jsonschema
     def test_matrix_output_without_any_contract_evaluation_still_validates(
         self, tmp_path: Path
     ) -> None:

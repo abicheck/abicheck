@@ -36,10 +36,32 @@ place (both are things this suite really does — see
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 from typing import Any
 
-__all__ = ["validate_instance", "validator_for"]
+import pytest
+
+__all__ = [
+    "jsonschema_available",
+    "requires_jsonschema",
+    "validate_instance",
+    "validator_for",
+]
+
+
+def jsonschema_available() -> bool:
+    """Whether the optional `jsonschema` dependency is installed."""
+    return importlib.util.find_spec("jsonschema") is not None
+
+
+#: The one spelling of "skip this structural-validation test when `jsonschema`
+#: is absent". Each consumer used to carry its own four-line
+#: `try: import jsonschema / except ImportError: jsonschema = None` preamble
+#: purely to feed a `skipif`; that boilerplate has one owner now.
+requires_jsonschema = pytest.mark.skipif(
+    not jsonschema_available(), reason="jsonschema not installed"
+)
 
 _VALIDATORS: dict[tuple[str, int], Any] = {}
 
