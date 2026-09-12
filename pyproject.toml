@@ -89,13 +89,6 @@ dev = [
     "jsonschema>=4.0",
     "scriv[toml]>=1.5",  # changelog-fragment tool, see changelog.d/README.md
 ]
-# Real-world validation harness (validation/): fetches + extracts conda-forge
-# packages. Modern conda-forge ships `.conda` (zstd-compressed) artifacts, so
-# this lane also needs a zstd backend -- `zstandard` is now a core dependency
-# (ADR-059) and this extra is kept empty rather than removed, so an existing
-# `pip install "abicheck[validation]"` invocation in a script/CI job doesn't
-# start failing on an unknown extra.
-validation = []
 # Mirrors [tool.pixi.feature.docs.pypi-dependencies] and the `lint-and-types`
 # CI job's docs install — `pip install -e ".[dev,docs]"` is what
 # `scripts/verify.py --profile pr`'s docs-build step needs to actually run
@@ -162,7 +155,6 @@ disable_error_code = ["attr-defined"]
 module = [
     "abicheck.cli_resolve",
     "abicheck.cli_aggregate",
-    "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
     # `cli_compare_release_matrix`/`cli_compare_release_pairwise` (G38 Phase
     # 15 file-split prerequisite) declare no Click decorator of their own --
@@ -175,18 +167,11 @@ module = [
     # re-running mypy before restoring it).
     "abicheck.cli_compare_release_matrix",
     "abicheck.cli_compare_release_pairwise",
-    "abicheck.cli_debian_symbols",
-    "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
     "abicheck.cli_dump_helpers",
     "abicheck.cli_graph",
-    "abicheck.cli_inputs",
-    "abicheck.cli_plugin",
     "abicheck.cli_pr_comment",
-    "abicheck.cli_probe",
     "abicheck.cli_stack",
-    "abicheck.cli_suggest",
-    "abicheck.cli_surface",
     "abicheck.compat.cli",
     # ADR-061 Phase 4 moved `cli.py`'s command bodies and shared runtime here;
     # they carry the same click-decorator surface `cli` itself did.
@@ -214,17 +199,15 @@ module = ["abicheck.cli"]
 disable_error_code = ["no-any-return", "misc", "has-type"]
 
 [[tool.mypy.overrides]]
-# ``cli_scan`` uses click decorators (untyped → ``no-any-return``/``misc``, as
-# above) AND imports ``yaml`` for the optional ``--risk-rules`` profile (stubs
-# may be absent → ``import-untyped``). One block so the codes don't conflict.
-# ``cli_scan_baseline`` is the extracted ``--baseline``/``--estimate`` sub-flow
-# (same ``yaml`` + engine-``Any`` surface), so it shares the same relaxations.
-# ``cli_project`` (G30 P1.1/P1.4/P1.5, consolidated by ADR-054) reads
-# ``.abicheck.yml`` directly for its ``project validate``/``plan`` commands,
-# same ``yaml`` import.
+# ``cli_project`` (G30 P1.1/P1.4/P1.5, consolidated by ADR-054) uses click
+# decorators (untyped → ``no-any-return``/``misc``) AND reads ``.abicheck.yml``
+# directly for its ``project validate``/``plan`` commands, so it imports
+# ``yaml`` (stubs may be absent → ``import-untyped``). One block so the codes
+# don't conflict. This block also carried ``cli_scan``/``cli_scan_baseline``
+# until ADR-068 Phase 6 deleted the ``scan`` command and its scan-only
+# modules; the entries outlived the files and were removed in the
+# pre-release historical-surface cleanup.
 module = [
-    "abicheck.cli_scan",
-    "abicheck.cli_scan_baseline",
     "abicheck.cli_project",
 ]
 disallow_untyped_decorators = false
@@ -257,10 +240,6 @@ module = [
     "abicheck.buildsource.project_targets",
     "abicheck.buildsource.toolchain_bindings",
     "abicheck.cli_compare_receipt",
-    # ADR-061 Phase 4 moved this out of the flat root into `workflows/`; the
-    # override did not follow it, so `mypy abicheck/` reports one error on a
-    # clean `main` in any environment where the stubs are not visible.
-    "abicheck.workflows.scan_config",
 ]
 disable_error_code = ["import-untyped"]
 

@@ -236,7 +236,15 @@ isn't available in your environment (add `,docs,dist` for full parity).
 ## Architecture — module map
 
 Entry points:
-- `abicheck/cli.py` — Click CLI (large file, at the 2000-line hard cap; be careful with edits)
+- `abicheck/cli.py` — Click CLI **root only**: the root group, its
+  `--version`/SIGTERM wiring, the side-effect registration imports, and the
+  lazy `__getattr__` compatibility shim (see `frontends/cli/moved.py`).
+  ~140 lines, no product logic — ADR-061 Phase 4 moved every command body,
+  shared runtime helper, and process-exit decision to
+  `abicheck/frontends/cli/`. Add a command there, not here. (This line read
+  "large file, at the 2000-line hard cap" long after that stopped being
+  true — exactly the drift the "don't trust hard-coded line counts" warning
+  below is about.)
 - `abicheck/compat/cli.py` — ABICC-compatible CLI wrapper
 - `abicheck/__main__.py` — `python -m abicheck` entry
 
@@ -1307,7 +1315,7 @@ python scripts/check_ai_readiness.py 2>&1 | grep "exceeds soft limit"
 
 That sentence is load-bearing: this paragraph previously named the WARN set as
 "`cli.py`, `dumper.py`, and `buildsource/cross_source_checks.py`" long after it had
-stopped being true (`cli.py` is now a 131-line registration facade), which is
+stopped being true (`cli.py` is now a small registration facade), which is
 exactly the drift the "don't trust hard-coded line counts" warning above is
 about. As a shape rather than a list: the WARN set is **large — roughly 100
 files, about a third of them under `abicheck/`** — and a meaningful number sit

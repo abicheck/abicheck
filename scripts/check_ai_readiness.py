@@ -105,6 +105,9 @@ from gen_agent_skills import (  # noqa: E402
     discover_skills as _discover_generated_skills,
 )
 from learning_nav_order import check_learning_nav_order  # noqa: E402
+from mypy_override_targets import (  # noqa: E402
+    check_mypy_override_targets,
+)
 from no_inline_gate_computation import (  # noqa: E402
     check_no_inline_gate_computation,
 )
@@ -3504,6 +3507,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "action-version-freshness": check_action_version_freshness,
     "import-cycle-growth": check_import_cycles,
     "mypy-baseline": check_mypy_baseline,
+    "mypy-override-targets": check_mypy_override_targets,
     "examples-ground-truth": check_examples_ground_truth,
     "examples-readme-sync": check_examples_readme_sync,
     "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
