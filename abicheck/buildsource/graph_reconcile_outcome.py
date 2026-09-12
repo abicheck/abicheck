@@ -204,9 +204,21 @@ def _classify_outcome(
     # different file". The reordering is still a real difference the
     # location-free key collapses, so it disqualifies coordinate-only
     # below -- it is simply not evidence of a *move*.
+    # A marker KIND change is not location evidence at all (CodeRabbit
+    # review, PR #1229): `X<(lambda at a.h:1:2)>` -> `X<(unnamed struct at
+    # a.h:1:2)>` names the same file throughout, and the location-free key
+    # keeps the kind, so it is already a rename. Reading the differing
+    # `(kind, basename)` pairs as a move on top of that asserted a file
+    # change nothing shows. A move means some marker now names a different
+    # FILE, which presupposes the markers still correspond -- so the kinds
+    # must line up before their basenames mean anything.
+    marker_kinds_align = sorted(kind for kind, _ in old_markers) == sorted(
+        kind for kind, _ in new_markers
+    )
     markers_differ = (
         bool(old_markers)
         and len(old_markers) == len(new_markers)
+        and marker_kinds_align
         and sorted(old_markers) != sorted(new_markers)
     )
     markers_reordered = (

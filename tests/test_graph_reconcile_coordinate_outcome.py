@@ -704,6 +704,37 @@ class TestReorderedMarkersAreNotAMove:
             a, b = f"({kind} at a.h:1:2)", f"({kind} at b.h:3:4)"
             assert self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>") == OUTCOME_RECONCILED
 
+    def test_a_marker_kind_change_at_one_file_is_a_rename_not_a_move(self) -> None:
+        """CodeRabbit review (PR #1229): carrying the kind in the multiset
+        made a kind-ONLY change read as a move. `X<(lambda at a.h:1:2)>` ->
+        `X<(unnamed struct at a.h:1:2)>` names `a.h` throughout, and the
+        location-free key keeps the kind, so it is already a rename —
+        asserting a move on top of that claims a file change nothing shows.
+
+        Over every ordered pair of kinds, not the one shape: the defect is
+        "a differing pair was read as differing FILES", which has nothing
+        to do with which two kinds are involved."""
+        kinds = ("lambda", "unnamed struct", "anonymous union", "unnamed enum")
+        for first in kinds:
+            for second in kinds:
+                if first == second:
+                    continue
+                old_qn = f"X<({first} at a.h:1:2)>"
+                new_qn = f"X<({second} at a.h:1:2)>"
+                assert self._pair(old_qn, new_qn) == OUTCOME_RENAMED, (old_qn, new_qn)
+
+    def test_misaligned_marker_kinds_carry_no_move_evidence_at_all(self) -> None:
+        """The same rule when the file changes too: with the kinds no longer
+        lining up there is no correspondence between the sides, so nothing
+        says WHICH marker moved — the same answer a differing marker COUNT
+        already gets (`test_unalignable_marker_counts_make_no_move_claim`). The
+        rename is still reported; only the unsupported move
+        claim is withheld."""
+        assert (
+            self._pair("X<(lambda at a.h:1:2)>", "X<(unnamed struct at b.h:1:2)>")
+            == OUTCOME_RENAMED
+        )
+
     def test_a_repeated_marker_file_is_compared_as_a_multiset(self) -> None:
         """Two markers naming the same file, one of which moves, must
         still read as a move — a set-based comparison would lose that."""
