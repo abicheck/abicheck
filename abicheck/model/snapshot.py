@@ -696,15 +696,15 @@ class AbiSnapshot:
     # DWARF-only baselines do not produce false API breaks.
     from_headers_inferred: bool = field(default=False, repr=False, compare=False)
 
-    # Runtime-only source-read licence (not serialized; deny-by-default). True
-    # only for a snapshot built by a live extraction in *this* run, so re-reading
-    # the ``source_header``/compile-unit paths it records still describes the tree
-    # it came from. ``storage/snapshot_encode.py`` drops the key, so a loaded
-    # snapshot is always False and cannot license itself from its own on-disk
-    # content -- see ``buildsource/source_inputs.py`` for the full contract, and
-    # ask ``workflows.pattern_preprocessor_scan.snapshot_source_licence`` rather
-    # than reading this directly.
-    live_source_evidence: bool = field(default=False, repr=False, compare=False)
+    # Runtime-only source-read licence, granted only where the extraction really
+    # *read* the paths it records; `buildsource/source_inputs.py` owns the
+    # contract and the predicate, and `pattern_preprocessor_scan.
+    # snapshot_source_licence` is what consumers ask. Never serialized
+    # (`storage/snapshot_encode.py` drops it), so a loaded snapshot cannot
+    # license itself. Keyword-only per `api.positional_slot_rebinding`.
+    live_source_evidence: bool = field(
+        default=False, repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(

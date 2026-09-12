@@ -459,3 +459,36 @@ class TestLicenceRequiresThatSourceInputsWereActuallyRead:
             side.live_source_evidence = extraction_read_source_inputs(side)
         licensed = compute_pattern_preprocessor_scan(old, new)
         assert set(licensed.pattern_escalation_evolution.values()) == {"persistent"}
+
+
+def test_the_verified_context_override_is_reachable_through_compare(
+    tmp_path: Path,
+) -> None:
+    """The override must be usable by an actual comparison, not only by the
+    workflow helper underneath it.
+
+    It began life as a parameter on `compute_pattern_preprocessor_scan` alone,
+    which `checker.compare()` called without — so the documented
+    verified-context case was unreachable except by mutating the runtime flag,
+    i.e. not a shipped capability at all (AGENTS.md "finish the workflow":
+    wire the consumer before claiming a feature; Codex review).
+    """
+    from abicheck.checker import compare
+
+    header = tmp_path / "pub.hpp"
+    header.write_text(PACKED_SOURCE)
+    old = _stored(_snapshot_recording([str(header)]), tmp_path, "o.json")
+    new = _stored(_snapshot_recording([str(header)], version="2.0"), tmp_path, "n.json")
+
+    # Without a licence, `compare` declines to re-read the stored sides.
+    withheld = compare(old, new).pattern_preprocessor_scan
+    assert withheld is not None
+    assert withheld.pattern_escalation_evolution == {}
+
+    verified = SourceReadLicence.verified_context("checkout pinned to snapshot sha")
+    granted = compare(
+        old, new, old_source_licence=verified, new_source_licence=verified
+    ).pattern_preprocessor_scan
+    assert granted is not None
+    assert set(granted.pattern_escalation_evolution.values()) == {"persistent"}
+    assert granted.coverage[CHECK_PATTERN_ESCALATION]["old"].established is True

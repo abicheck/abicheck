@@ -369,6 +369,16 @@ class TestComputePatternPreprocessorScanCoverageFold:
     def test_partial_preprocessor_scan_folds_not_evaluated_instead_of_resolved(
         self,
     ) -> None:
+        """NEW's *partial* macro coverage is what must block `resolved`.
+
+        This test briefly stopped proving that (CodeRabbit review): once
+        sufficiency moved to the per-family tallies, neither constructed side set
+        `probe_tallies`, so both were unestablished for lack of *any* tallies and
+        the assertion would have passed even with a clean NEW. Both sides now
+        carry real macro-family tallies, and the clean-NEW control below is what
+        makes the partial case discriminate -- without it this is a test that
+        passes for the wrong reason, the #699 -> #721 shape AGENTS.md names.
+        """
         from abicheck.buildsource.preprocessor_facts import MacroDivergence
 
         old = _empty_snapshot("libfoo.so", "1.0")
@@ -378,32 +388,57 @@ class TestComputePatternPreprocessorScanCoverageFold:
             ran=True,
             attempted=2,
             succeeded=2,
-            tus_scanned=2,
+            probe_tallies=ProbeTallies(attempted={"macro": 2}, succeeded={"macro": 2}),
             divergences=[
                 MacroDivergence(macro="FOO_VERSION", values={"1": ["tu1"]}),
             ],
         )
-        new_preproc = PreprocessorFactsResult(
-            ran=True,
-            attempted=2,
-            succeeded=1,  # partial: one clang -E invocation failed
+
+        def _fold(new_preproc: PreprocessorFactsResult) -> str | None:
+            with (
+                patch(
+                    "abicheck.workflows.pattern_preprocessor_scan._run_pattern_scan",
+                    return_value=PatternFactsResult(),
+                ),
+                patch(
+                    "abicheck.workflows.pattern_preprocessor_scan._run_preprocessor_scan_for",
+                    side_effect=[old_preproc, new_preproc],
+                ),
+            ):
+                result = compute_pattern_preprocessor_scan(old, new)
+            return result.macro_divergence_evolution.get("FOO_VERSION")
+
+        # NEW probed every unit successfully and saw no divergence: its silence
+        # is established, so the OLD-only divergence really is `resolved`.
+        assert (
+            _fold(
+                PreprocessorFactsResult(
+                    ran=True,
+                    attempted=2,
+                    succeeded=2,
+                    probe_tallies=ProbeTallies(
+                        attempted={"macro": 2}, succeeded={"macro": 2}
+                    ),
+                )
+            )
+            == "resolved"
         )
 
-        with (
-            patch(
-                "abicheck.workflows.pattern_preprocessor_scan._run_pattern_scan",
-                return_value=PatternFactsResult(),
-            ),
-            patch(
-                "abicheck.workflows.pattern_preprocessor_scan._run_preprocessor_scan_for",
-                side_effect=[old_preproc, new_preproc],
-            ),
-        ):
-            result = compute_pattern_preprocessor_scan(old, new)
-
-        # A naive "ran and not all_failed" fold would report "resolved"
-        # here; full coverage requires succeeded == attempted on NEW.
-        assert result.macro_divergence_evolution.get("FOO_VERSION") == "not_evaluated"
+        # Same input, except one of NEW's macro probes failed. Its silence now
+        # proves nothing, so the claim is withheld.
+        assert (
+            _fold(
+                PreprocessorFactsResult(
+                    ran=True,
+                    attempted=2,
+                    succeeded=1,  # partial: one clang -E invocation failed
+                    probe_tallies=ProbeTallies(
+                        attempted={"macro": 2}, succeeded={"macro": 1}
+                    ),
+                )
+            )
+            == "not_evaluated"
+        )
 
     def test_hit_only_on_incomplete_side_is_never_silently_dropped(
         self,

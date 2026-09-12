@@ -103,3 +103,15 @@
   candidate whose `is_file()` or classification raises is likewise recorded as
   unreadable rather than aborting the advisory walk.
 
+- **The verified-context override is reachable through `compare()`.** It began
+  as a parameter on the workflow helper alone, which `checker.compare()` called
+  without — so the documented case was unusable except by mutating an internal
+  runtime flag. `compare(..., old_source_licence=, new_source_licence=)` now
+  forwards it. Deliberately no CLI flag: "trust these paths" is a claim only a
+  caller that verified them can make.
+
+- A dangling symlink among the declared inputs is reported `unsupported` rather
+  than `missing`. Both are gaps, so sufficiency is unchanged; the label is the
+  point — `missing` sends a reader looking for a deleted file when the link is
+  plainly still there.
+

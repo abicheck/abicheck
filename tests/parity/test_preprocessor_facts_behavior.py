@@ -170,7 +170,6 @@ def test_live_sides_surface_a_preprocessor_scan_leak_as_introduced(
     )
 
 
-@pytest.mark.integration
 def test_compare_of_stored_snapshots_never_probes_the_current_filesystem(
     tmp_path: Path,
 ) -> None:
@@ -181,10 +180,14 @@ def test_compare_of_stored_snapshots_never_probes_the_current_filesystem(
 
     This test asserted ``introduced`` from two `.json` operands until the
     source-read licence landed, which was the P1 defect. A stored side is now
-    not probed at all, and says so."""
-    if not ClangPreprocessorExtractor().available():
-        pytest.skip("clang++ not on PATH")
+    not probed at all, and says so.
 
+    Deliberately **not** guarded on clang's availability, and not
+    ``integration``-marked: the behaviour under test is that no probe is
+    attempted, so requiring a compiler to observe it would skip the assertion on
+    exactly the runners where a missing compiler could otherwise be mistaken for
+    the fix working (CodeRabbit review). It now also proves the stored answer is
+    reached without a toolchain at all."""
     from abicheck.serialization import snapshot_to_json
 
     old, new, _ = _widget_snapshots(tmp_path)

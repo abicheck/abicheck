@@ -79,8 +79,9 @@ class SourceInputDisposition(str, Enum):
     MISSING = "missing"
     #: Exists, but could not be read (permissions, I/O error, decode failure).
     UNREADABLE = "unreadable"
-    #: Exists, but is not a thing this scanner can read (a FIFO, a socket, a
-    #: device node, a dangling symlink target type).
+    #: Present in some form, but not a thing this scanner can read: a FIFO, a
+    #: socket, a device node, or a symlink whose target is gone. Distinct from
+    #: ``MISSING``, where nothing is at the path at all.
     UNSUPPORTED = "unsupported"
     #: Deliberately out of scope — the caller's ``changed_paths`` filter
     #: excluded it. Not a coverage gap: the caller asked for this.
@@ -489,10 +490,19 @@ def resolve_source_inputs(
                         else SourceInputDisposition.EXCLUDED,
                     )
             continue
+        try:
+            dangling = rp.is_symlink()
+        except OSError:
+            dangling = False
+        # A dangling symlink is `UNSUPPORTED`, not `MISSING`, and the difference
+        # is what a reader does next: `MISSING` sends them looking for a deleted
+        # file, when `ls` will plainly show the link still sitting there. Either
+        # way it is a gap, so sufficiency is unaffected -- this is about the
+        # label being true (Codex/CodeRabbit review).
         _record(
             rp,
             SourceInputDisposition.UNSUPPORTED
-            if exists
+            if exists or dangling
             else SourceInputDisposition.MISSING,
         )
 

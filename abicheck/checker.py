@@ -145,8 +145,9 @@ from .policy.policy_file_namespaces import (
 from .policy_file import PolicyFile
 
 if TYPE_CHECKING:
+    from .buildsource.source_inputs import SourceReadLicence
     from .environment_matrix import EnvironmentMatrix
-    from .model.identity import EntityId
+    from .model.identity import EntityId  # noqa: F401
     from .policy.acknowledgment import AcknowledgmentList
     from .post_processing import PipelineContext
     from .suppression import SuppressionList
@@ -894,6 +895,8 @@ def compare(
     new_public_entity_ids: frozenset[EntityId] | None = None,
     cross_source_checks: bool = True,
     pattern_preprocessor_scan: bool = True,
+    old_source_licence: SourceReadLicence | None = None,
+    new_source_licence: SourceReadLicence | None = None,
     acknowledgments: AcknowledgmentList | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
@@ -974,6 +977,10 @@ def compare(
             *old*/*new*, merging the evolution-stated result into
             ``changes``. **On by default**, evidence-gated per check/side;
             never changes a finding's default verdict.
+        old_source_licence: Per-side provenance-verified source-read licence
+            (``new_source_licence`` likewise): a caller that established a
+            *stored* snapshot's recorded paths really are its own tree. Without
+            one such a side reads ``not_evaluated`` (``source_inputs.py``).
         pattern_preprocessor_scan: ADR-068 D3/D4/D5 (plan §3 #6/#8, Phase
             2b). Runs the lexical pattern pre-scan and the preprocessor
             pre-scan (``workflows.pattern_preprocessor_scan``) on
@@ -1425,7 +1432,12 @@ def compare(
             compute_pattern_preprocessor_scan,
         )
 
-        result.pattern_preprocessor_scan = compute_pattern_preprocessor_scan(old, new)
+        result.pattern_preprocessor_scan = compute_pattern_preprocessor_scan(
+            old,
+            new,
+            old_source_licence=old_source_licence,
+            new_source_licence=new_source_licence,
+        )
 
     # ADR-067 C-S1/D3 (also resolves `acknowledged_by`, D5): `verdict_scored`
     # is the redundant subset the verdict was scored over.

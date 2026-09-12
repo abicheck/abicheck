@@ -158,6 +158,14 @@ class TestExpectedInputSetReplacesDiscoveryDerivedCompleteness:
         assert dispositions[str(dropped)] is SourceInputDisposition.EXCLUDED
         assert result.sufficient is True
 
+    @pytest.mark.skipif(
+        not hasattr(os, "mkfifo"),
+        reason="os.mkfifo is unavailable on Windows, where CI runs the whole suite",
+    )
+    @pytest.mark.skipif(
+        not hasattr(os, "mkfifo"),
+        reason="os.mkfifo is unavailable on Windows, where CI runs the whole suite",
+    )
     def test_unsupported_input_is_its_own_state(self, tmp_path: Path) -> None:
         """A root that exists but is not a readable file (a FIFO here) is
         ``unsupported`` -- neither silently dropped nor mislabelled missing."""
@@ -169,6 +177,27 @@ class TestExpectedInputSetReplacesDiscoveryDerivedCompleteness:
         inputs = resolve_expected_source_inputs([str(fifo), str(scanned)])
         dispositions = {i.path: i.disposition for i in inputs.inputs}
         assert dispositions[str(fifo)] is SourceInputDisposition.UNSUPPORTED
+        assert inputs.sufficient is False
+
+    def test_a_dangling_symlink_is_unsupported_not_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """The portable sibling of the FIFO case above, and the label the
+        disposition contract promises.
+
+        Both are gaps, so sufficiency is unaffected either way -- this is about
+        the label being true. ``MISSING`` would send a reader looking for a
+        deleted file when ``ls`` plainly shows the link still sitting there;
+        ``UNSUPPORTED`` points at the broken link, which is the actionable fact.
+        """
+        link = tmp_path / "pub.hpp"
+        link.symlink_to(tmp_path / "never_existed.hpp")
+        assert link.is_symlink() and not link.exists()
+
+        inputs = resolve_expected_source_inputs([str(link)])
+        assert [i.disposition for i in inputs.inputs] == [
+            SourceInputDisposition.UNSUPPORTED
+        ]
         assert inputs.sufficient is False
 
     def test_sufficiency_is_answered_per_check_not_globally(
