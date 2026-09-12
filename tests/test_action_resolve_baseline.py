@@ -34,6 +34,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "resolve-baseline"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -41,28 +42,11 @@ RUN_SH = ACTION_DIR / "run.sh"
 PROFILE = "linux-x86_64-gcc13-release"
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale.
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_action(
     env_extra: dict[str, str], cwd: Path
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
     """Invoke the real script end-to-end with a GITHUB_OUTPUT file."""
+    require_bash()
     github_output = cwd / "github_output"
     github_output.write_text("")
     # Strip any inherited INPUT_* from the host/CI environment before
@@ -79,7 +63,7 @@ def _run_action(
         **env_extra,
     }
     result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

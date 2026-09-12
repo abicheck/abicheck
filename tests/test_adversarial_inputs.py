@@ -18,7 +18,7 @@ from abicheck.compat.abicc_dump_import import (
 )
 from abicheck.model import AbiSnapshot, Function, Param, Variable
 from abicheck.policy_file import PolicyFile
-from abicheck.reporter import to_json, to_markdown
+from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
 from abicheck.serialization import load_snapshot, snapshot_from_dict
 from abicheck.suppression import SuppressionList
 
@@ -599,7 +599,7 @@ class TestReporterEdgeCases:
     def test_stat_mode_json(self) -> None:
         """Stat mode JSON output for empty result."""
         result = self._make_diff_result()
-        output = to_json(result, stat=True)
+        output = to_stat_json(result)
         parsed = json.loads(output)
         assert "verdict" in parsed
         assert "summary" in parsed
@@ -607,5 +607,5 @@ class TestReporterEdgeCases:
     def test_stat_mode_markdown(self) -> None:
         """Stat mode Markdown output for empty result."""
         result = self._make_diff_result()
-        output = to_markdown(result, stat=True)
+        output = to_stat(result)
         assert "NO_CHANGE" in output

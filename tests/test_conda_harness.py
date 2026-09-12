@@ -236,7 +236,11 @@ def test_abicheck_verdict_removes_temp_file(monkeypatch: pytest.MonkeyPatch) -> 
     captured: dict[str, str] = {}
 
     def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        out = cmd[cmd.index("-o") + 1]
+        # `-o` carries a FORMAT=DESTINATION operand (plan slice 7m); the
+        # destination is the half after the first `=`, split the same way
+        # the real CLI splits it.
+        operand = cmd[cmd.index("-o") + 1]
+        out = operand.split("=", 1)[1]
         captured["out"] = out
         Path(out).write_text('{"verdict": "COMPATIBLE"}')
         return None

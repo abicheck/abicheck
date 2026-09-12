@@ -130,6 +130,6 @@ def test_f4_source_only_change_classed_api_break_not_breaking(tmp_path: Path) ->
     assert ChangeKind.INLINE_FUNCTION_REMOVED not in BREAKING_KINDS
 
     compare_report_verdict = invoke_cli(
-        "compare", str(old), str(new), "--depth", "source", "--format", "json"
+        "compare", str(old), str(new), "--depth", "source", "-o", "json=-"
     )
     assert json.loads(compare_report_verdict.stdout)["verdict"] == "API_BREAK"

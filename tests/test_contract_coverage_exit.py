@@ -168,8 +168,8 @@ class TestTheCoverageExitIsApplied:
         result = _compare(
             tmp_path,
             _breaking_pair(),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--contract",
             "exports",
         )
@@ -197,12 +197,10 @@ class TestTheCoverageExitIsApplied:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                f"json={out}",
                 "--contract",
                 "exports",
-                "-o",
-                str(out),
             ],
         )
         report = json.loads(out.read_text(encoding="utf-8"))
@@ -222,8 +220,8 @@ class TestTheGatingConditionIsVisible:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            fmt,
+            "-o",
+            f"{fmt}=-",
             "--contract",
             "exports",
         )
@@ -232,11 +230,11 @@ class TestTheGatingConditionIsVisible:
         # actionable, "2 coverage failures" is not.
         assert "export_table" in result.output, result.output
         # ...and points at the way out, so the message is actionable. Both
-        # halves are things a CLI user really has: `--format json` for the
+        # halves are things a CLI user really has: a `json` export for the
         # ledger, `--pack` for `contract.unresolved`. The MCP tool has
         # neither, which is why its own wording differs.
         assert "contract.unresolved=warn" in result.output
-        assert "--format json" in result.output
+        assert "-o json=..." in result.output
 
     def test_json_does_not_repeat_what_its_report_already_carries(
         self, tmp_path: Path
@@ -252,8 +250,8 @@ class TestTheGatingConditionIsVisible:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--contract",
                 "exports",
             ],
@@ -280,8 +278,8 @@ class TestTheGatingConditionIsVisible:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            "oneline",
+            "-o",
+            "oneline=-",
             "--contract",
             "exports",
         )
@@ -359,9 +357,9 @@ class TestTheGatingConditionIsVisible:
         self, tmp_path: Path
     ) -> None:
         """Staying quiet requires *every* rendered report to carry the ledger.
-        With `--format json --secondary-format markdown` the markdown carries
-        none of it, so answering from the primary alone let that report say
-        the change is safe while the process exited 1 (Codex review)."""
+        With a json export beside a markdown one the markdown carries none of
+        it, so answering from the first alone let that report say the change
+        is safe while the process exited 1 (Codex review)."""
         old_p, new_p = _write(tmp_path, *_compatible_pair())
         result = CliRunner().invoke(
             main,
@@ -369,11 +367,9 @@ class TestTheGatingConditionIsVisible:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
                 "-o",
-                str(tmp_path / "r.json"),
-                "--write",
+                f"json={tmp_path / 'r.json'}",
+                "-o",
                 f"markdown={tmp_path / 'r.md'}",
                 "--contract",
                 "exports",
@@ -406,10 +402,8 @@ class TestArtifactsAgreeWithTheProcessExit:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            "sarif",
             "-o",
-            str(out),
+            f"sarif={out}",
             "--contract",
             "exports",
         )
@@ -429,7 +423,7 @@ class TestArtifactsAgreeWithTheProcessExit:
         """The fold must not invent a floor for a run that had none."""
         out = tmp_path / "report.sarif"
         result = _compare(
-            tmp_path, _compatible_pair(), "--format", "sarif", "-o", str(out)
+            tmp_path, _compatible_pair(), "-o", f"sarif={out}"
         )
         assert result.exit_code == 0, result.output
         invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
@@ -457,10 +451,8 @@ class TestArtifactsAgreeWithTheProcessExit:
         result = _compare(
             tmp_path,
             _breaking_pair(),
-            "--format",
-            "sarif",
             "-o",
-            str(out),
+            f"sarif={out}",
             "--contract",
             mode,
         )
@@ -580,14 +572,12 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                f"json={out}",
                 "--contract",
                 "exports",
                 "--pack",
                 str(self._warn_pack(tmp_path)),
-                "-o",
-                str(out),
             ],
         )
         report = json.loads(out.read_text(encoding="utf-8"))
@@ -646,8 +636,8 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            "review",
+            "-o",
+            "review=-",
             "--contract",
             "exports",
             "--pack",

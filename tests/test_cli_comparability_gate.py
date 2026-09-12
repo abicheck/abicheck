@@ -124,7 +124,7 @@ class TestNotComparableExitCode:
         out_p = tmp_path / "report.json"
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json", "-o", str(out_p)],
+            ["compare", str(old_p), str(new_p), "-o", f"json={out_p}"],
         )
         assert result.exit_code == 16
         doc = json.loads(out_p.read_text(encoding="utf-8"))
@@ -147,7 +147,7 @@ class TestNotComparableExitCode:
         out_p = tmp_path / "report.sarif"
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "sarif", "-o", str(out_p)],
+            ["compare", str(old_p), str(new_p), "-o", f"sarif={out_p}"],
         )
         assert result.exit_code == 16
         doc = json.loads(out_p.read_text(encoding="utf-8"))
@@ -170,7 +170,7 @@ class TestNotComparableExitCode:
         out_p = tmp_path / "report.xml"
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "junit", "-o", str(out_p)],
+            ["compare", str(old_p), str(new_p), "-o", f"junit={out_p}"],
         )
         assert result.exit_code == 16
         xml = out_p.read_text(encoding="utf-8")
@@ -373,7 +373,7 @@ class TestCompareReleaseNotComparable:
         out_dir.mkdir()
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--output-dir", str(out_dir)],
+            ["compare", str(old_dir), str(new_dir), "-o", f"json={out_dir}/"],
         )
         assert result.exit_code == 16
         doc = json.loads((out_dir / "libtest.json").read_text(encoding="utf-8"))

@@ -298,7 +298,7 @@ class TestGatePolicyCLI:
             )
         )
         res = self._run(
-            ["--manifest", str(tmp_path / "m.json"), "--format", "json", str(tmp_path)]
+            ["--manifest", str(tmp_path / "m.json"), "-o", "json=-", str(tmp_path)]
         )
         assert res.exit_code == 0
         payload = json.loads(res.output)

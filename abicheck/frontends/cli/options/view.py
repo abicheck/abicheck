@@ -40,12 +40,12 @@ Grammar (each ``--view TOKEN`` occurrence contributes one of):
   its evidence is explained, never whether it happened.
 * ``filtered`` -- render the scope/disposition ledger of findings excluded
   from the verdict (``--show-filtered``'s old spelling). The ledger itself
-  is unconditional (ADR-067 S1) and always present in ``--format json``;
+  is unconditional (ADR-067 S1) and always present in ``-o json=...``;
   this only controls whether the markdown/text render echoes it.
 * ``suppressions`` -- render the suppression audit section
   (``--audit-suppressions``'s old spelling). The audit is computed on every
   run that was given ``--suppress`` and always present in
-  ``--format json``/sarif/junit/html; this only controls whether the
+  ``-o json=...``/sarif/junit/html; this only controls whether the
   markdown/text/review render echoes it.
 
 The last three are the Phase 5 residue of §4.1's AUTO rows: each used to be

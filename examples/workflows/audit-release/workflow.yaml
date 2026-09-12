@@ -50,8 +50,8 @@ steps:
     # result can be asserted structurally rather than by grepping prose.
     # The documented command above is still what runs first.
     json_variant:
-      - --format
-      - json
+      - -o
+      - json=-
     expect_json:
       # `verdict: null` and `changes: []` are the audit's whole contract
       # (D2); the finding rides under `findings[]`, not `changes[]`, so

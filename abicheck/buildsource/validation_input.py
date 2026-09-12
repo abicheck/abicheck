@@ -20,7 +20,7 @@ The dispatch behind the single ``project validate`` command (plan
 ``validate-build`` and ``validate-use-cases`` were one question — "is this
 project-integration document well formed?" — asked over three input
 schemas, each with its own subcommand and its own copy of
-``--format``/``-o``/``-v``.
+``-o``/``-v``.
 
 Two rules govern this dispatch, and both exist because the obvious
 implementation violates them:

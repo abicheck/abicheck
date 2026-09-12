@@ -240,10 +240,8 @@ def test_dependency_include_dir_supplied_scan_and_self_compare_succeed(
             str(dep_dir),
             "--config",
             str(cfg),
-            "--format",
-            "json",
             "-o",
-            str(out_json),
+            f"json={out_json}",
         ],
     )
     assert result.exit_code == 0, result.output

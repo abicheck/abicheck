@@ -170,10 +170,8 @@ def test_self_compare_reports_no_change_for_plain_unnamespaced_functions(
             str(src_dir / "main.h"),
             "--config",
             str(cfg),
-            "--format",
-            "json",
             "-o",
-            str(out_json),
+            f"json={out_json}",
         ],
     )
     assert result.exit_code == 0, result.output

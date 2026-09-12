@@ -3585,60 +3585,46 @@ class TestRenderOutput:
         assert isinstance(out, str)
         assert "\n" not in out.strip()
 
-    def test_stat_kwarg_is_a_compatibility_shim_for_oneline(self, diff_result, snap):
-        """CodeRabbit review: `render_output` is exported via
-        `abicheck.service.__all__` (Tier-2 typed API), so an existing
-        caller spelling the pre-PR-1 `render_output(..., stat=True)` must
-        not get a bare `TypeError` -- only the CLI's own `--stat` flag was
-        announced as removed, not this function's signature. For a
-        non-``json`` *fmt*, `stat=True` is equivalent to
-        `fmt=ONELINE_FORMAT` (the human one-line renderer)."""
-        from abicheck.service_render import ONELINE_FORMAT
+    def test_stat_json_document_is_summary_only(self, diff_result, snap):
+        """``to_stat_json`` is the summary-only JSON document: no ``changes``
+        array, but the verdict.
 
-        assert render_output(
-            "markdown", diff_result, snap, stat=True
-        ) == render_output(ONELINE_FORMAT, diff_result, snap)
-
-    def test_stat_kwarg_with_json_fmt_preserves_the_old_stat_json_shape(
-        self, diff_result, snap
-    ):
-        """Codex review, fresh evidence: an earlier revision of this shim
-        collapsed `render_output("json", ..., stat=True)` onto the human
-        one-line renderer too, silently breaking a Tier-2 caller that fed
-        the pre-PR-1 `--stat --format json` shape to `json.loads()`. The
-        JSON case must keep returning `to_stat_json`'s summary-only JSON
-        object (no `changes` array), not human text."""
+        This claim used to be asserted through ``render_output("json", ...,
+        stat=True)``, a compatibility shim standing in for the removed
+        ``--stat`` flag. The shim is gone -- it was a *dispatch* flag
+        ("ignore the format I asked for and render a different document")
+        that also sat above ``_reject_unsupported_format``, so an invalid
+        format returned a summary instead of raising. The document it reached
+        is unchanged and is asserted here directly, at the function that owns
+        it."""
         from abicheck.reporter import to_stat_json
 
-        out = render_output("json", diff_result, snap, stat=True)
-        assert json.loads(out) == json.loads(to_stat_json(diff_result))
-        d = json.loads(out)
+        d = json.loads(to_stat_json(diff_result))
         assert "changes" not in d
         assert d["verdict"] == diff_result.verdict.value
 
-    def test_stat_kwarg_with_junit_fmt_is_never_short_circuited(
-        self, diff_result, snap
-    ):
-        """Codex review, fresh evidence: the pre-PR-1 `--stat` boolean's own
-        guard was `if stat and fmt != "junit": ...` -- JUnit was *never*
-        replaced by the one-line summary, since an XML consumer needs the
-        real `<testsuite>` document regardless of `--stat`. A revision of
-        this shim that routed every non-JSON `fmt` (JUnit included) to the
-        human one-line renderer silently broke that XML consumer."""
-        assert render_output(
-            "junit", diff_result, snap, stat=True
-        ) == render_output("junit", diff_result, snap, stat=False)
+    def test_stat_json_forwards_require_complete_analysis(self, diff_result, snap):
+        """Codex/CodeRabbit review: the assurance exit contribution must reach
+        the summary-only document too, not just the full report.
+
+        Asserted against ``to_stat_json`` directly now that ``render_output``
+        has no ``stat`` keyword to forward through."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.reporter import to_stat_json
+
+        diff_result.analysis_assurance = AnalysisAssurance(status="partial")
+        d = json.loads(to_stat_json(diff_result, require_complete_analysis=True))
+        assert d["analysis_assurance_exit_contribution"] == 1
 
     def test_show_recommendation_false_still_suppresses_the_section(
         self, diff_result, snap
     ):
-        """Codex review, fresh evidence: `show_recommendation` is a real,
-        effective toggle, not an inert compatibility shim -- an earlier
-        revision hard-coded `True` into the `to_markdown` call regardless
-        of what the caller passed, silently reintroducing the
-        recommendation section for a direct Tier-2 caller that explicitly
-        asked it be suppressed (only the CLI's own `--recommend` flag was
-        announced removed, not this keyword's effect)."""
+        """``show_recommendation`` is a real, effective toggle, not an inert
+        parameter -- an earlier revision hard-coded ``True`` into the
+        ``to_markdown`` call regardless of what the caller passed, silently
+        reintroducing the section for a caller that explicitly asked it be
+        suppressed. Still the contract after the default flipped: the
+        *default* changed, the parameter's effect did not."""
         with_rec = render_output(
             "markdown", diff_result, snap, show_recommendation=True
         )
@@ -3647,57 +3633,36 @@ class TestRenderOutput:
         )
         assert with_rec != without_rec
 
-    def test_show_recommendation_default_matches_pre_removal_api(
-        self, diff_result, snap
-    ):
-        """Codex review, fresh evidence, second round: the default must stay
-        `False` -- the exact pre-removal Tier-2 Python API default -- not
-        `True`. An earlier revision changed the default to match the CLI's
-        own unconditional-inclusion behaviour, which silently changed what
-        an existing direct caller gets when it omits this keyword entirely
-        (a public-API default change this PR's docs never announced). The
-        CLI achieves its own unconditional inclusion by having its wrapper
-        (`cli._render_output`) pass `show_recommendation=True` explicitly,
-        not by changing this function's default -- see
-        `test_cli_recommendation_is_unconditional_despite_the_false_default`
-        below for that half of the contract."""
-        assert render_output(
-            "markdown", diff_result, snap
-        ) == render_output("markdown", diff_result, snap, show_recommendation=False)
+    def test_show_recommendation_default_matches_the_cli(self, diff_result, snap):
+        """The default is ``True``, and the CLI's own wrapper agrees with it.
 
-    def test_cli_recommendation_is_unconditional_despite_the_false_default(
-        self, diff_result, snap
-    ):
-        """The CLI's own `cli._render_output` wrapper explicitly passes
-        `show_recommendation=True` to `render_output` (it never relies on
-        the library default), so its own markdown output stays
-        unconditional even though `render_output`'s own default flipped
-        back to `False` in this round's fix."""
-        from abicheck.cli import _render_output
+        This deliberately reverses an earlier decision, so the reasoning
+        matters. Two prior review rounds argued the default must stay
+        ``False`` -- the pre-removal Tier-2 value -- with the CLI passing
+        ``True`` explicitly to get its own unconditional inclusion. That kept
+        an existing caller's output byte-stable, but it left the two front
+        ends disagreeing about what omitting the keyword means: the CLI's
+        recommendation was unconditional while a Tier-2 caller silently got
+        no recommendation section at all, which made ``render_output``'s own
+        docstring ("unconditionally included in every human-facing format")
+        false for the audience it was written for.
 
-        cli_markdown = _render_output("markdown", diff_result, snap)
+        Aligning the default is the point: one behavior for every caller that
+        does not ask otherwise, with suppression still available as an
+        explicit opt-out (asserted above). The CLI's rendered output is
+        unchanged by this -- it passed ``True`` before and gets ``True`` now,
+        verified byte-for-byte across all seven ``--format`` values against
+        the pre-change revision."""
+        from abicheck.frontends.cli.runtime import _render_output
+
         default_markdown = render_output("markdown", diff_result, snap)
-        explicit_true_markdown = render_output(
+        explicit_true = render_output(
             "markdown", diff_result, snap, show_recommendation=True
         )
-        assert cli_markdown == explicit_true_markdown
-        assert cli_markdown != default_markdown
+        cli_markdown = _render_output("markdown", diff_result, snap)
 
-    def test_stat_json_forwards_require_complete_analysis(self, diff_result, snap):
-        """Codex/CodeRabbit review: `render_output`'s own `stat`
-        short-circuit (before format dispatch) bypassed
-        `require_complete_analysis` entirely, independent of the identical
-        `to_json`-level gap already covered in test_reporter.py -- this is
-        the service-level entry point `compare --stat --format json
-        --require-complete-analysis` actually goes through."""
-        from abicheck.analysis_assurance import AnalysisAssurance
-
-        diff_result.analysis_assurance = AnalysisAssurance(status="partial")
-        out = render_output(
-            "json", diff_result, snap, stat=True, require_complete_analysis=True
-        )
-        d = json.loads(out)
-        assert d["analysis_assurance_exit_contribution"] == 1
+        assert default_markdown == explicit_true
+        assert cli_markdown == default_markdown
 
     def test_json_follow_deps(self, snap):
         snap.dependency_info = DependencyInfo(
@@ -4894,7 +4859,7 @@ class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
 
     def test_cli_pe_forwards_headers(self, tmp_path):
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4905,7 +4870,7 @@ class TestCliNativeBinaryHeaderWiring:
         assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
 
     def test_cli_macho_forwards_headers(self, tmp_path):
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
@@ -4917,7 +4882,7 @@ class TestCliNativeBinaryHeaderWiring:
     def test_cli_pe_wraps_abicheck_error_as_click(self, tmp_path):
         import click
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4928,7 +4893,7 @@ class TestCliNativeBinaryHeaderWiring:
     def test_cli_macho_wraps_abicheck_error_as_click(self, tmp_path):
         import click
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
@@ -4990,20 +4955,37 @@ class TestTryAttachNumpyCapiSurface:
 
 class TestRunDumpDependencyScope:
     """``run_dump`` is built from ``_run_dump_uncached`` via
-    ``dumper_scoping.wrap_run_dump_with_dependency_scope`` -- default
-    ``include_dependencies=True`` preserves every existing caller's
-    (scan/MCP/dump's own inline calls) unfiltered behavior, tagged
-    explicitly "full"; passing ``include_dependencies=False`` (what
-    ``compare`` now defaults to) filters the same way ``dump`` does by
-    default. See tests/test_dumper_scoping.py for direct coverage of the
-    wrapping function itself."""
+    ``dumper_scoping.wrap_run_dump_with_dependency_scope``. Its
+    ``include_dependencies`` default is ``False`` -- the same value
+    ``dump --include-system-declarations`` and
+    ``InputSpec.include_dependencies`` carry -- so a Tier-2 caller that omits
+    the keyword gets the same ``"filtered"`` surface the CLI gives for the
+    same inputs. Passing ``True`` restores the unfiltered ``"full"`` surface.
+    See tests/test_dumper_scoping.py for direct coverage of the wrapping
+    function itself."""
 
-    def test_run_dump_defaults_to_full(self, tmp_path):
+    def test_run_dump_defaults_to_filtered_matching_the_cli(self, tmp_path):
+        """The default used to be ``True`` ("full"), which is what made the
+        typed API and the CLI produce different surfaces from identical
+        inputs -- and, because
+        ``comparability.check_contracts_comparable`` refuses a ``filtered``
+        vs ``full`` pair, made a CLI baseline uncomparable against a
+        typed-API candidate (``scope_mismatch``, no verdict). Measured on a
+        one-header C++ library: 10 functions via the CLI, 5,597 via
+        ``DumpRequest``."""
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         with patch("abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf")
+        assert result.dependency_scope == "filtered"
+
+    def test_run_dump_include_dependencies_true_restores_full(self, tmp_path):
+        elf_path = tmp_path / "lib.so"
+        elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+        with patch("abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap):
+            result = run_dump(elf_path, "elf", include_dependencies=True)
         assert result.dependency_scope == "full"
 
     def test_run_dump_include_dependencies_false_filters(self, tmp_path):
@@ -5027,7 +5009,7 @@ class TestRunDumpDependencyScope:
         assert run_dump.__qualname__ == "run_dump"
         sig = inspect.signature(run_dump)
         assert "include_dependencies" in sig.parameters
-        assert sig.parameters["include_dependencies"].default is True
+        assert sig.parameters["include_dependencies"].default is False
 
 
 class TestMetadataAttachFailuresAreSwallowed:

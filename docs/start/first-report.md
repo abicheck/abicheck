@@ -13,12 +13,12 @@ generated: false
 
 ## Output formats
 
-`abicheck compare` prints `markdown` by default; pass `--format json` for
-machine-readable output (CI logic, agents), or `--format sarif`/`html`/`junit`
+`abicheck compare` prints `markdown` by default; pass `-o json=-` for
+machine-readable output (CI logic, agents), or `-o sarif=...`/`html`/`junit`
 for Code Scanning, standalone reports, or CI test dashboards respectively:
 
 ```bash
-abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h --format json -o result.json
+abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h -o json=result.json
 ```
 
 See [Output Formats](../use/output-formats.md) for the full reference

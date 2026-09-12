@@ -30,7 +30,7 @@ from pathlib import Path
 
 import click
 
-from .cli import _write_or_echo
+from .frontends.cli.runtime import _write_or_echo
 
 
 @click.command("pr-comment")
@@ -108,10 +108,10 @@ def pr_comment_cmd(
 ) -> None:
     """Render a sticky PR-comment body from a JSON REPORT.
 
-    REPORT is a JSON file from 'abicheck compare --format json' (directory/
+    REPORT is a JSON file from 'abicheck compare -o json=...' (directory/
     package fan-out and --used-by/--required-symbol(s) scoped reports all
     produce a compatible shape) or 'abicheck compare --no-baseline ...
-    --format json' (recognised by its own 'audit_report_schema_version' key
+    -o json=...' (recognised by its own 'audit_report_schema_version' key
     -- the Action's own audit-only mode: scan translation, ADR-068,
     produces this shape). A *stored* report from the retired `scan` command
     (recognised by its own 'scan_schema_version' key) is no longer a
@@ -126,7 +126,7 @@ def pr_comment_cmd(
 
     \b
     Example:
-      abicheck compare old.json new.so -H include/ --format json -o report.json
+      abicheck compare old.json new.so -H include/ -o json=report.json
       python -m abicheck.cli_pr_comment report.json --sha "$GITHUB_SHA" -o comment.md
     """
     from .pr_comment import (

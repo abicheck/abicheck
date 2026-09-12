@@ -183,7 +183,7 @@ or to the native `compare` command:
 abicheck compat check -lib libfoo -old libfoo-v1.json -new libfoo-v2.json
 
 # Via native compare (abicheck exit codes):
-abicheck compare libfoo-v1.json libfoo-v2.json --format html -o report.html
+abicheck compare libfoo-v1.json libfoo-v2.json -o html=report.html
 ```
 
 **Dump format support:** abicheck reads native **JSON** dumps and minimal ABICC Perl

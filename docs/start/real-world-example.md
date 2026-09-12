@@ -301,9 +301,9 @@ are for the hypothetical `libfoo`:
 The `type_field_added` break is a struct layout change — **only** detectable with
 headers; the binary-only run could not have found it.
 
-### Machine-readable (`--format json`)
+### Machine-readable (`-o json=...`)
 
-For CI, add `--format json`. Key fields (**abridged** — a full report also has
+For CI, add `-o json=...`. Key fields (**abridged** — a full report also has
 `report_schema_version`, `library`, `old_version`/`new_version`,
 `old_file`/`new_file`, `policy`, `suppression`, `detectors`, `evidence_tiers`,
 and `summary.source_breaks`/`summary.affected_pct`):

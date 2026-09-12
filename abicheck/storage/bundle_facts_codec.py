@@ -33,9 +33,9 @@ module needs ``snapshot_to_dict``/``snapshot_from_dict`` from
 exactly the ``serialization.py <-> storage.bundle_facts_codec`` cycle
 ``scripts/check_ai_readiness.py``'s ``import-cycle-growth`` check flags via
 a full ``ast.walk`` (so even a function-scoped ``from ... import ...``
-counts) -- the same reason ``abicheck.cli``'s own ``__getattr__`` resolves
-its moved names through ``abicheck.frontends.cli.moved`` instead of
-importing them back (ADR-061 gap A). This module's own static
+counts) -- the same reason ``buildsource/source_graph.py`` resolves
+``diff_source_graph_findings`` through a lazy ``__getattr__`` instead of
+importing it back (ADR-061 gap A). This module's own static
 ``from .serialization import ...`` is the real, needed half of that
 edge -- ``serialization.py``'s side is what stays dynamic.
 """

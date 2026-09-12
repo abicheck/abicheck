@@ -1572,6 +1572,6 @@ def assurance_floor_diagnostic(
     return (
         f"Analysis assurance incomplete (status={aa.status!r}) under "
         f"assurance.require_complete: {where}. {effect} (P0.4 "
-        "analysis-assurance axis). Use --format json for the full "
+        "analysis-assurance axis). Use -o json=... for the full "
         "analysis_assurance block."
     )

@@ -86,8 +86,13 @@ class TestScopedCompatFoldDemangle:
     def test_json_output_never_demangles(self, tmp_path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         result = _invoke(
-            "compare", str(old_p), str(new_p),
-            "--required-symbol", _MANGLED, "--format", "json",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--required-symbol",
+            _MANGLED,
+            "-o",
+            "json=-",
         )
         data = json.loads(result.stdout)
         assert data["required_symbol_contract"]["missing_entrypoints"] == [_MANGLED]

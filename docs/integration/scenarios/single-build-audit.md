@@ -60,7 +60,7 @@ ADR-068 D2:
   about a baseline this run was told does not exist (ADR-068 D3).
 
 `--header`/`--include`, `--sources`/`--build-info`, `--depth`, `--contract`,
-`--policy`/`--suppress`, `--dry-run` and `-o/--output` all work. `--format`
+`--policy`/`--suppress`, `--dry-run` and `-o/--output` all work. The export
 accepts `json`, `markdown`, `sarif`, `junit` and `oneline`; `html` and
 `review` are a declared usage error, because both render a *comparison*
 (verdict badge, OLD → NEW counts, release recommendation) and an audit has

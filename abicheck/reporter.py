@@ -179,7 +179,7 @@ def to_stat_json(
 
     *severity_config*, when given, adds a ``severity`` block (same shape as
     the full JSON report's — see :func:`_build_severity_json`) so ``--stat
-    --format json`` reflects the actual severity-aware gate instead of only
+    -o json=...`` reflects the actual severity-aware gate instead of only
     the compatibility verdict. Without it, ``--stat`` output has historically
     bypassed severity handling entirely (it short-circuits in
     ``service.render_output`` before format dispatch).
@@ -1210,17 +1210,14 @@ def to_json(
     show_only: str | None = None,
     report_mode: str = "full",
     show_impact: bool = False,
-    stat: bool = False,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
     include_exit_decision: bool = True,  # exit block (2.41); see exit_decision.py
     contract_evaluation: bool = False,  # ADR-061 P2 item 5
 ) -> str:
-    if stat:
-        return to_stat_json(
-            result, indent=indent, severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis, show_only=show_only, contract_evaluation=contract_evaluation)
-
+    # A `stat` parameter used to short-circuit to `to_stat_json` here. Call
+    # `to_stat_json` directly for the summary-only document; this function
+    # renders the full report.
     if report_mode == "leaf":
         return _to_json_leaf(
             result, indent=indent, show_only=show_only, severity_config=severity_config,

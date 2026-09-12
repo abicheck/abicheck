@@ -1045,8 +1045,8 @@ def run_abicheck_full(
             "compare",
             str(merged[0]),
             str(merged[1]),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--pattern-verdicts",
         ]
         if case in _AST_BUILD_SOURCE_EXTRA_EVIDENCE_CASES:
@@ -1172,8 +1172,8 @@ def _run_abicheck_dump_compare(
                 "compare",
                 str(snap1),
                 str(snap2),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--pattern-verdicts",
             ],
             capture_output=True,
@@ -2749,10 +2749,10 @@ def _run_bundle_case(
         "compare",
         str(old_dir),
         str(new_dir),
-        "--format",
-        "json",
-        "--output-dir",
-        str(report_dir),
+        "-o",
+        "json=-",
+        "-o",
+        f"json={report_dir}/",
     ]
     manifest_file = entry.get("manifest_file")
     if manifest_file:
@@ -2827,8 +2827,8 @@ def _run_snapshot_pair_case(
         "compare",
         str(old_file),
         str(new_file),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     ]
     del reconcile  # ADR-039 reconciliation is unconditional now; see docstring.
     try:
@@ -3318,8 +3318,8 @@ def _abicheck_tier_result(
                 "compare",
                 str(snap1),
                 str(snap2),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
             capture_output=True,
             text=True,

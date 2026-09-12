@@ -297,11 +297,16 @@ def _run_dump_uncached(
             dumper_cache.ast_memoize_scope(),
             closure_identity.defer_closure_identity_renumbering(),
         ):
+            # NOT redundant: each sub-dump must keep its FULL surface so the
+            # outer wrapper scopes the merged result once. Filtering here is
+            # unrecoverable -- see PR #1258 (a filtered surface labelled
+            # `dependency_scope="full"`).
             castxml_snap = run_dump(
                 path,
                 binary_fmt,
                 header_backend="castxml",
                 compile=_forced_compile("castxml"),
+                include_dependencies=True,
                 **common_kwargs,
             )
             clang_snap = run_dump(
@@ -309,6 +314,7 @@ def _run_dump_uncached(
                 binary_fmt,
                 header_backend="clang",
                 compile=_forced_compile("clang"),
+                include_dependencies=True,
                 **common_kwargs,
             )
         merged = closure_identity.renumber_anonymous_closure_identities(

@@ -51,6 +51,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 # Starts from _PY_BIN's own resolution, not _baseline_unavailable() -- the
@@ -88,19 +89,6 @@ def _baseline_region() -> str:
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start)
     return _path_qualified_helper_source() + "\n" + text[start:end]
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 def _make_tar_zst(archive_path: Path, src_dir: Path) -> None:
@@ -236,12 +224,13 @@ def _run_bash_script(
     such command-line-length ceiling on any platform. Mirrors
     ``test_action_run_sh_dry_run_baseline.py``'s identical helper.
     """
+    require_bash()
     fd, path = tempfile.mkstemp(suffix=".sh")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(script)
         return subprocess.run(
-            [_bash_executable(), path],
+            [bash_executable(), path],
             capture_output=True,
             text=True,
             env=env,

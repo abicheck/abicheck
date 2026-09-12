@@ -14,6 +14,12 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from _package_fixtures import (
+    _make_conda_v2,
+    _make_tar_mode,
+    _make_wheel,
+    _write_zstd_tar,
+)
 
 from abicheck.errors import ExtractionSecurityError
 from abicheck.package import (
@@ -260,13 +266,6 @@ def _make_tar(archive_path: Path, files: dict[str, bytes]) -> None:
             tf.addfile(info, io.BytesIO(content))
 
 
-def _make_wheel(archive_path: Path, files: dict[str, bytes]) -> None:
-    """Create a zip archive (used for .whl and .conda)."""
-    with zipfile.ZipFile(archive_path, "w") as zf:
-        for name, content in files.items():
-            zf.writestr(name, content)
-
-
 def _make_conda_legacy(archive_path: Path, files: dict[str, bytes]) -> None:
     """Create a legacy conda .tar.bz2 package with info/ directory."""
     files_with_info = {"info/index.json": b'{"name":"test"}', **files}
@@ -386,7 +385,7 @@ class TestIsPackage:
 
     def test_conda_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "numpy-1.26.conda"
-        _make_wheel(f, {"lib/libfoo.so": b"elf"})
+        _make_conda_v2(f, {"lib/libfoo.so": b"elf"})
         assert is_package(f) is True
 
     def test_whl_extension(self, tmp_path: Path) -> None:
@@ -408,7 +407,7 @@ class TestDetectExtractor:
 
     def test_tar_xz(self, tmp_path: Path) -> None:
         f = tmp_path / "test.tar.xz"
-        f.write_bytes(b"\xfd7zXZ\x00" + b"\x00" * 100)
+        _make_tar_mode(f, "w:xz")
         ext = detect_extractor(f)
         assert isinstance(ext, TarExtractor)
 
@@ -426,7 +425,7 @@ class TestDetectExtractor:
 
     def test_conda(self, tmp_path: Path) -> None:
         f = tmp_path / "test.conda"
-        _make_wheel(f, {"metadata.json": b"{}"})
+        _make_conda_v2(f, {})
         ext = detect_extractor(f)
         assert isinstance(ext, CondaExtractor)
 
@@ -474,17 +473,17 @@ class TestTarExtractor:
 
     def test_detect_tar_xz(self, tmp_path: Path) -> None:
         f = tmp_path / "test.tar.xz"
-        f.touch()
+        _make_tar_mode(f, "w:xz")
         assert TarExtractor().detect(f)
 
     def test_detect_tgz(self, tmp_path: Path) -> None:
         f = tmp_path / "test.tgz"
-        f.touch()
+        _make_tar_mode(f, "w:gz")
         assert TarExtractor().detect(f)
 
     def test_detect_plain_tar(self, tmp_path: Path) -> None:
         f = tmp_path / "test.tar"
-        f.touch()
+        _make_tar_mode(f, "w")
         assert TarExtractor().detect(f)
 
     def test_not_detect_so(self, tmp_path: Path) -> None:
@@ -894,10 +893,7 @@ class TestCompareReleaseTarPackages:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_tar), str(new_tar),
-            "--format", "json",
-        ])
+        result = runner.invoke(main, ["compare", str(old_tar), str(new_tar), "-o", "json=-"])
         # Should succeed — NO_CHANGE since snapshots are identical
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -921,10 +917,7 @@ class TestCompareReleaseTarPackages:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(tar), str(tar),
-            "--format", "json", "--keep-extracted",
-        ])
+        result = runner.invoke(main, ["compare", str(tar), str(tar), "-o", "json=-", "--keep-extracted"])
         assert result.exit_code == 64, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -952,10 +945,7 @@ class TestCompareReleaseDirectoryPassthrough:
         (new_dir / "libfoo.so.json").write_text(snapshot_to_json(snap))
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json",
-        ])
+        result = runner.invoke(main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -970,7 +960,8 @@ class TestWheelExtractor:
 
     def test_detect_non_whl(self, tmp_path: Path) -> None:
         f = tmp_path / "test.zip"
-        _make_wheel(f, {"a": b""})
+        with zipfile.ZipFile(f, "w") as zf:
+            zf.writestr("a", b"")
         assert not WheelExtractor().detect(f)
 
     def test_extract_whl(self, tmp_path: Path) -> None:
@@ -2246,7 +2237,7 @@ class TestPlatformMachineFromWheelFilename:
 class TestCondaExtractor:
     def test_detect_conda_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "numpy-1.26.conda"
-        _make_wheel(f, {"metadata.json": b"{}"})
+        _make_conda_v2(f, {})
         assert CondaExtractor().detect(f)
 
     def test_detect_legacy_conda_tar_bz2(self, tmp_path: Path) -> None:
@@ -2336,10 +2327,7 @@ class TestCompareReleaseWheelPackages:
         _make_wheel(new_whl, {"libfoo.so.json": snapshot_to_json(snap).encode()})
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_whl), str(new_whl),
-            "--format", "json",
-        ])
+        result = runner.invoke(main, ["compare", str(old_whl), str(new_whl), "-o", "json=-"])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -3454,17 +3442,17 @@ class TestIsElfSharedObjectExtended:
 class TestIsPackageExtended:
     def test_tar_xz_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "sdk.tar.xz"
-        f.write_bytes(b"\xfd7zXZ\x00" + b"\x00" * 100)
+        _make_tar_mode(f, "w:xz")
         assert is_package(f) is True
 
     def test_tar_bz2_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "sdk.tar.bz2"
-        f.write_bytes(b"BZ" + b"\x00" * 100)
+        _make_tar_mode(f, "w:bz2")
         assert is_package(f) is True
 
     def test_plain_tar_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "sdk.tar"
-        f.write_bytes(b"\x00" * 100)
+        _make_tar_mode(f, "w")
         assert is_package(f) is True
 
     def test_nonexistent_file(self, tmp_path: Path) -> None:
@@ -3980,7 +3968,7 @@ class TestDebExtractorExtended:
     def test_tar_zst_is_package(self, tmp_path: Path) -> None:
         """Plain .tar.zst archives are recognized as package inputs."""
         f = tmp_path / "sdk.tar.zst"
-        f.write_bytes(b"not real zstd")
+        _write_zstd_tar(f)
         assert TarExtractor().detect(f)
         assert is_package(f)
 
@@ -4074,14 +4062,14 @@ class TestDebExtractorExtended:
 
 
 class TestCondaExtractorExtended:
-    def test_detect_tar_bz2_few_dashes_rejected(self, tmp_path: Path) -> None:
-        """tar.bz2 with fewer than 2 dashes is not conda."""
+    def test_detect_legacy_conda_tar_by_its_marker(self, tmp_path: Path) -> None:
+        """Its `info/` tree decides, not a dash count (plan Phase 7n)."""
         f = tmp_path / "data.tar.bz2"
         with tarfile.open(f, "w:bz2") as tf:
             info = tarfile.TarInfo(name="info/index.json")
             info.size = 2
             tf.addfile(info, io.BytesIO(b"{}"))
-        assert not CondaExtractor().detect(f)
+        assert CondaExtractor().detect(f)
 
     def test_detect_corrupt_tar_bz2(self, tmp_path: Path) -> None:
         """Corrupt tar.bz2 with conda-style name should return False."""
@@ -4144,10 +4132,7 @@ class TestCompareReleaseDsoOnly:
         cfg.write_text("release:\n  dso_only: true\n")
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--config", str(cfg),
-        ])
+        result = runner.invoke(main, ["compare", str(old_dir), str(new_dir), "-o", "json=-", "--config", str(cfg)])
         # Flag accepted (no usage error); zero pairs is exit 1 `no_comparison_completed` (ADR-065 D7)
         assert result.exit_code == 1, f"Exit {result.exit_code}: {result.output}"
         assert '"reasons": [\n      "no_comparison_completed"\n    ]' in result.stdout
@@ -4179,10 +4164,7 @@ class TestExtractedTempDirsAlwaysCleanedUp:
             tf.addfile(info, io.BytesIO(data))
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(archive), str(archive),
-            "--format", "json",
-        ])
+        result = runner.invoke(main, ["compare", str(archive), str(archive), "-o", "json=-"])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
         assert "Extracted files kept in:" not in result.output
 

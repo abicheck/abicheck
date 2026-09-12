@@ -169,7 +169,7 @@ example — every real report carries the field):
 }
 ```
 
-`contract_coverage` is present in every `--format json` output, with
+`contract_coverage` is present in every `-o json=...` output, with
 `exit_contribution: 0` and an empty `incomplete_targets` list when no
 target's report used `--contract` — it is never omitted. `analysis_assurance`
 is the exact sibling, present the same way, with `exit_contribution: 0` and
@@ -347,7 +347,7 @@ above. The full field list for both blocks is in
 ```bash
 abicheck aggregate REPORTS_DIR \
   --manifest abi-targets.json \
-  --format json -o aggregate.json
+  -o json=aggregate.json
 ```
 
 | Flag | Default | Notes |
@@ -355,7 +355,7 @@ abicheck aggregate REPORTS_DIR \
 | `--manifest PATH` | — | The single source of truth for the expected-target set; its own `gate` block sets the missing-required/unexpected-target policy. |
 | `--run-plan PATH` | — | Alternative to `--manifest`: a `project plan` run-plan.json, whose projected manifest can carry the same `gate` block. |
 | `--discovered-only` | — | No required-target coverage gate (contract coverage still applies). |
-| `--format` | `text` | `text` \| `json`. |
+| `-o FORMAT=DESTINATION` | `text=-` | `text` \| `json`; `-` is stdout, repeatable. |
 
 Full generated flag reference, pulled from the live `--help` output: [CLI
 Reference](../reference/cli-reference.md#aggregate).

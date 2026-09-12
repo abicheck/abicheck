@@ -57,7 +57,7 @@ cleanup removed the selector flag this section used to name entirely —
 these findings are ordinary `changes[]` entries, no flag needed):
 
 ```bash
-abicheck compare old.json new.so -H include/ --format json
+abicheck compare old.json new.so -H include/ -o json=-
 ```
 
 ### The release recommendation
@@ -67,7 +67,7 @@ SONAME or SemVer action the change set implies, which turns "additions
 present" into "this is a minor release, not a patch":
 
 ```bash
-abicheck compare last-release.json new.so -H include/ --depth source --format markdown
+abicheck compare last-release.json new.so -H include/ --depth source -o markdown=-
 ```
 
 The field's shape is owned by

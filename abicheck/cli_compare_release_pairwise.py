@@ -47,10 +47,11 @@ import click
 
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
-from .cli import _normalize_binary_input, _safe_write_output
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import member_error_entry
+from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
 from .reporter import to_json
 from .workflows.contracts import CompareResult
@@ -319,7 +320,7 @@ def _compare_one_library(
     (Codex review, fresh evidence, PR #1154 follow-up: "Keep per-library
     output-dir reports unfiltered") -- ``--output-dir`` is the "always
     full" escape hatch a truncated aggregate report directs a reader to,
-    matching a secondary ``--write``'s own contract; the display-filtered
+    matching a secondary ``-o``'s own contract; the display-filtered
     ``findings``/``findings_view`` split lives one level up, in
     :func:`~abicheck.cli_compare_release_matrix._strip_diff_results_and_adjust_verdict`,
     which has the real live ``DiffResult`` to filter from.
@@ -506,7 +507,7 @@ def _compare_one_library(
             # reader to `--output-dir` as the one uncapped, *complete*
             # per-library source when the aggregate report's own findings
             # list was truncated, the same "always full" contract a
-            # secondary `--write` already gets (see
+            # secondary `-o` already gets (see
             # `cli_compare_release_helpers._release_findings_for_render`).
             # Applying the primary display filter here too would let
             # `--view show=...` make a genuinely truncated (or simply
@@ -850,7 +851,7 @@ def _compare_release_libraries(
             err=True,
         )
 
-    # collect_diff_results (JUnit / a secondary `--write junit=...` render)
+    # collect_diff_results (JUnit / a secondary `-o junit=...` render)
     # used to need an independent re-run (`_collect_release_extras`) purely
     # to recover the old `AbiSnapshot` alongside each `DiffResult` -- the
     # primary pass above now stashes both directly in each library's own

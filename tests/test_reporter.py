@@ -5,7 +5,7 @@ import json
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.reporter import to_json, to_markdown, to_review_digest
+from abicheck.reporter import to_json, to_markdown, to_review_digest, to_stat_json
 
 
 class TestReviewDigest:
@@ -191,7 +191,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
             assert d["analysis_assurance_exit_contribution"] == 1, mode
 
     def test_stat_forwards_severity_config(self):
-        """Codex review: to_json(stat=True, severity_config=...) returned
+        """Codex review: to_stat_json(severity_config=...) returned
         before forwarding severity_config to to_stat_json, so a caller going
         through to_json directly (not service.render_output) silently lost
         the severity block/exit code in stat JSON output."""
@@ -199,11 +199,11 @@ class TestAnalysisAssuranceExitContributionPersistence:
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         r = _result(Verdict.COMPATIBLE, changes=[c])
-        d = json.loads(to_json(r, stat=True, severity_config=PRESET_DEFAULT))
+        d = json.loads(to_stat_json(r, severity_config=PRESET_DEFAULT))
         assert "severity" in d
 
     def test_stat_forwards_require_complete_analysis(self):
-        """Codex/CodeRabbit review: `to_json(stat=True)`'s early return
+        """Codex/CodeRabbit review: `to_stat_json()`'s early return
         dropped `require_complete_analysis` entirely, so `compare --stat
         --format json --require-complete-analysis` exited 1 for incomplete
         analysis while the stat report itself carried no
@@ -213,12 +213,12 @@ class TestAnalysisAssuranceExitContributionPersistence:
 
         r = _result(Verdict.COMPATIBLE)
         r.analysis_assurance = AnalysisAssurance(status="partial")
-        d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
+        d = json.loads(to_stat_json(r, require_complete_analysis=True))
         assert d["analysis_assurance_exit_contribution"] == 1
 
     def test_stat_omits_the_contribution_without_a_real_assurance_object(self):
         r = _result(Verdict.COMPATIBLE)
-        d = json.loads(to_json(r, stat=True, require_complete_analysis=True))
+        d = json.loads(to_stat_json(r, require_complete_analysis=True))
         assert "analysis_assurance_exit_contribution" not in d
 
 
@@ -1792,7 +1792,7 @@ class TestStatJsonConfidence:
 
     def test_stat_json_default_confidence(self):
         r = _result(Verdict.NO_CHANGE)
-        d = json.loads(to_json(r, stat=True))
+        d = json.loads(to_stat_json(r))
         assert d["confidence"] == "high"
         assert d["evidence_tiers"] == []
         assert "coverage_warnings" not in d
@@ -1809,7 +1809,7 @@ class TestStatJsonConfidence:
         r.confidence = Confidence.LOW
         r.evidence_tiers = ["elf"]
         r.coverage_warnings = ["DWARF stripped"]
-        d = json.loads(to_json(r, stat=True))
+        d = json.loads(to_stat_json(r))
         assert d["confidence"] == "low"
         assert d["evidence_tiers"] == ["elf"]
         assert d["coverage_warnings"] == ["DWARF stripped"]

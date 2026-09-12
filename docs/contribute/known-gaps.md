@@ -6614,8 +6614,8 @@ non-multiple option — a second, JSON-targeted `--write` this script
 appended would always lose to the user's own later one and never execute.
 When that user-supplied `--write` targets `json=`, `_extra_args_write_json_
 path` already recovers it, so `_json_report_src` still finds structured
-evidence. When it targets a **non-JSON** format (`--write text=...`,
-`--write markdown=...`, ...), there is no JSON anywhere, and ADR-049's
+evidence. When it targets a **non-JSON** format (`-o text=...`,
+`-o markdown=...`, ...), there is no JSON anywhere, and ADR-049's
 unconditional contract-coverage/analysis-assurance floors plus the
 severity-category gate genuinely go blind for that one run — accepted, not
 fixed, per `action/AGENTS.md`'s own "Known, accepted limitation"
@@ -6724,7 +6724,7 @@ candidate's shape, both verified live against `main` at `fd6ba681`:
   `scan libgreet.so --header include` reports
   `crosscheck:exported_not_public present … undeclared_export=1` and
   `[warning] exported_not_public: 1`, while
-  `compare --no-baseline libgreet.so --header include --format json`
+  `compare --no-baseline libgreet.so --header include -o json=...`
   exits 0 with `"changes": []`, no `verdict`, and no cross-source or
   `pattern_preprocessor_scan` block in the document at all.
 
@@ -7316,6 +7316,44 @@ performs (`--used-by`, `--used-by-manifest`, `--required-symbol`,
 `--instantiation-manifest`, `--follow-deps` and its search-path siblings,
 `--debug-info`, `--devel-pkg`). That last family is recorded here rather
 than left as an accepted no-op precisely so it is a visible decision.
+### A resolved PDB/DWP/dSYM artifact reaches no dump path
+
+`debug_resolver`'s chain can resolve four kinds of artifact, and only one
+of them is consumed. `service_dump_native._dump_elf` reads
+`DebugArtifact.dwarf_path` and nothing else -- a `dwp_path`, a `dwo_dir` or
+a `dsym_path` is resolved, logged, and dropped -- and the PE branch of
+`_run_dump_uncached` never passes `debug_roots` to `_dump_pe` at all, so a
+PDB found in a debug root is dropped too (the PE path's only PDB input is
+`debug.pdb_path`, via `locate_pdb(pdb_path_override=...)`).
+
+**Pre-existing, and predates plan Phase 7n** -- `--debug-root` had the same
+shape. What 7n changed is that the gap became *sayable*: merging the debug
+role into one input meant naming a detached artifact directly, which would
+have resolved a PDB/DWP and then silently ignored it, and (first review
+round) made the resolver return one *ahead* of `EmbeddedDwarfResolver`, so
+a binary carrying perfectly good DWARF would have been compared with none.
+Both are closed: `extract/detached_debug.DetachedDebugFileResolver` is
+DWARF-only and yields to the rest of the chain, and naming a PDB/DWP file
+is a usage error naming `debug.pdb_path` (the spelling that *is* read).
+
+The *directory* form is deliberately still accepted, because rejecting it
+would break the case that works -- a build-id tree or path mirror of ELF
+`.debug` sidecars, which is what the input is mostly for. So a directory
+that happens to hold PDBs still resolves to an artifact nobody reads. That
+is this gap, unchanged; do not "fix" it by rejecting directories.
+
+Closing it properly means threading `debug_roots` into `_dump_pe` and
+teaching `_dump_elf` to consume `dwp_path`/`dwo_dir`/`dsym_path` -- real
+capability work on the extraction paths, not a CLI change, which is why
+ADR-068's flag-topology slices leave it alone. Found by Codex review on
+PR #1253.
+
+**Update (plan Phase 7n):** `--debug-root`, `--devel-pkg` and
+`--probe-matrix` no longer exist as flags -- each merged into the one input
+for its evidence role (`--debug-info`, `-H/--header`, `--build-info`). The
+rejections above are unchanged in substance and still keyed on the
+generated destinations (`devel_pkg2`, `probe_matrix_*`, ...), which is what
+made them survive the rename; only the spelling each message names moved.
 Writing the test found one the manual audit had missed
 (`--used-by-manifest`), which is the argument for the mechanism in one line.
 
@@ -7787,7 +7825,7 @@ is now `compare`'s alone to answer" — see below). Verified live against the
 ```
 $ gcc -shared -fPIC -g old.c -o libold.so      # struct Point { int x, y; }
 $ gcc -shared -fPIC -g new.c -o libnew.so      # struct Point { int x, y, z; }
-$ abicheck compare libold.so libnew.so --depth binary --format json
+$ abicheck compare libold.so libnew.so --depth binary -o json=-
 ```
 
 reports `verdict: BREAKING` with a `type_size_changed` finding ("Size
@@ -8017,7 +8055,7 @@ Auditing a real ELF shared library raises an **uncaught**
 bare CLI call:
 
 ```console
-$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 --format json
+$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 -o json=-
 abicheck.policy.no_baseline_findings.NoBaselineInvariantError: a snapshot
 compared against itself must never produce a comparison finding -- if this
 fires, a detector is reading non-identity state. Offending findings:
@@ -8175,7 +8213,7 @@ template and varies only `--depth`, leaving `--headers`/`--sources`/
 deeper inputs and skip pattern-scan/L3 collection. The retired `scan`
 command exposed this as a checkable `coverage` array
 (`layer`/`status` rows) plus a `pattern_scan.files_scanned` field; verified
-live, `compare --format json` emits neither at any `--depth`. `compare
+live, `compare -o json=...` emits neither at any `--depth`. `compare
 --depth binary` does reach the same verdict/exit code on the scenario's
 fixture, but nothing currently asserts it *skipped* the deeper collection
 rather than merely projecting an already-collected superset down afterward
@@ -8860,7 +8898,7 @@ the ones whose renderers take a single `DiffResult`:
 `DiffResult` at all (it is a count summary, and the release summary already
 carries every count), so `report/release_oneline.py` folds the per-library
 counts through the same `format_stat_line` a single-pair `compare` renders
-and the release path accepts `--format oneline`/`--write oneline=...` like
+and the release path accepts `-o oneline=...`/`-o oneline=...` like
 any other.
 
 So library count still changes which of `sarif`/`html`/`review` are

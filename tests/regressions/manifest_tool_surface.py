@@ -1019,6 +1019,19 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_cli_project_validate_dispatch.py",
             "tests/test_build_output.py",
+            # The second surface to route on content: plan Phase 7n's one
+            # input per evidence role (`--debug-info`, `-H/--header`,
+            # `--build-info`). Its own escape would have been one layer
+            # further down than #1242's -- `package.detect_extractor`
+            # answering `None` for a real package under a name with no
+            # known suffix, so the front end's content routing produced
+            # "Unrecognized package format". Its end-to-end matrix is
+            # mutation-verified against exactly that: the package
+            # transport's evidence is that the *extractor* got to speak,
+            # not that the run completed (a misclassified package falls
+            # through to another transport and the comparison completes
+            # anyway, which is how this class hides).
+            "tests/test_evidence_transport_roles.py",
         ),
         # Earned: the seed's name-independence matrix runs real `CliRunner`
         # invocations of `abicheck project validate` end to end, which is
@@ -1030,6 +1043,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "build-output",
                 "use-case-manifest",
                 "empty-document",
+                # Phase 7n's evidence transports, on the same axis: each is
+                # a kind of operand a front end must recognise from content.
+                "debug-package",
+                "debug-directory",
+                "detached-debug-file",
+                "devel-package",
+                "probe-matrix",
+                "compile-database",
             ),
             "operand_shape": ("directory", "named-manifest-file"),
             "filename": (
@@ -1039,6 +1060,9 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "run-42.json",
                 "config.yaml",
                 "NOTES",
+                "libfoo-dbg.rpm",
+                "libfoo.so.debug",
+                "compile_commands.json",
             ),
         },
     ),
@@ -1103,5 +1127,47 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             "copy": ("action/run.sh", "actions/check-target/action.yml"),
         },
+    ),
+    BugClass(
+        id="cli_surface.destination_collision_checked_only_by_exact_path",
+        invariant=(
+            "When one CLI operand claims a *tree* (a directory destination "
+            "whose contents the tool generates) and another names a path, "
+            "the two collide whenever the second resolves ANYWHERE inside "
+            "the first -- not only when the two spellings resolve to the "
+            "same path. An exact-path check is the natural way to write "
+            "collision detection and is wrong here for a structural "
+            "reason: the generated names come from the operand's own "
+            "inventory, resolved long after the flags are parsed, so no "
+            "parse-time check can enumerate them. Containment is decidable "
+            "without them; name prediction is not. The rule is also "
+            "order-independent -- which operand the user spelled first "
+            "says nothing about which document overwrites the other."
+        ),
+        # PR #1257 (plan slice 7m): `-o json=reports/ -o markdown=reports/
+        # libfoo.json` was accepted, and the run exited 0 after the
+        # aggregate Markdown document overwrote the per-library JSON the
+        # fan-out had just written -- automation was handed a corrupt,
+        # mislabeled artifact with a success exit code.
+        fixed_by=(1257,),
+        seed_tests=("tests/test_cli_export_grammar.py",),
+        public_surfaces=("cli",),
+        axes={
+            "nesting_depth": ("direct-child", "generated-summary", "deep"),
+            "spelling": ("plain", "dot-segment", "parent-segment"),
+            "operand_order": ("directory-first", "file-first"),
+            "near_miss": ("sibling-prefix", "unrelated", "ancestor"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Stated for the export request, the one operand family "
+                    "in this CLI that owns a generated tree. A second "
+                    "tree-claiming operand elsewhere would be found by "
+                    "hand, not by a gate."
+                ),
+                reference="docs/contribute/plans/one-comparison-product.md",
+            ),
+        ),
     ),
 )

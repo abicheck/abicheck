@@ -198,8 +198,8 @@ class TestF19OutputFormatInvariance:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                fmt,
+                "-o",
+                f"{fmt}=-",
                 "--view",
                 view_demangle,
                 "--suppress",
@@ -238,8 +238,8 @@ class TestF19OutputFormatInvariance:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--view",
                 view_demangle,
                 "--suppress",
@@ -272,7 +272,7 @@ class TestF19OutputFormatInvariance:
         old_p, new_p = _write_pair(tmp_path)
 
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert baseline.exit_code == 4, baseline.output
         baseline_facts = _canonical_facts(json.loads(baseline.stdout))
@@ -285,11 +285,11 @@ class TestF19OutputFormatInvariance:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
-                "--write",
+                "-o",
+                "json=-",
+                "-o",
                 f"markdown={out_md}",
-                "--write",
+                "-o",
                 f"sarif={out_sarif}",
             ],
         )
@@ -310,13 +310,18 @@ class TestF19OutputFormatInvariance:
         old_p, new_p = _write_pair(tmp_path)
 
         without = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         with_flag = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "json",
-                "--view", "filtered",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "--view",
+                "filtered",
             ],
         )
         assert without.exit_code == with_flag.exit_code == 4
@@ -359,7 +364,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         old_p, new_p = _write_pair(tmp_path)
 
         without = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         with_patterns = CliRunner().invoke(
             main,
@@ -367,8 +372,8 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--view",
                 "patterns",
             ],
@@ -407,7 +412,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         monkeypatch.setattr(service_module, "compare_snapshots", _spy)
 
         for view_patterns in (False, True):
-            args = ["compare", str(old_p), str(new_p), "--format", "json"]
+            args = ["compare", str(old_p), str(new_p), "-o", "json=-"]
             if view_patterns:
                 args += ["--view", "patterns"]
             result = CliRunner().invoke(main, args)
@@ -438,8 +443,13 @@ class TestViewGrammar:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--format", "markdown", "--view", "show=removed",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "--view",
+                "show=removed",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -459,8 +469,15 @@ class TestViewGrammar:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "markdown",
-                "--view", "show=removed", "--view", "show=added",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "--view",
+                "show=removed",
+                "--view",
+                "show=added",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -490,8 +507,15 @@ class TestViewGrammar:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "markdown",
-                "--view", "show=breaking", "--view", "show=added",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "--view",
+                "show=breaking",
+                "--view",
+                "show=added",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -527,13 +551,22 @@ class TestViewGrammar:
         three combined must still leave the JSON payload untouched."""
         old_p, new_p = _write_pair(tmp_path)
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         combined = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "json",
-                "--view", "leaf", "--view", "demangle", "--view", "patterns",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "--view",
+                "leaf",
+                "--view",
+                "demangle",
+                "--view",
+                "patterns",
             ],
         )
         assert baseline.exit_code == combined.exit_code == 4
@@ -550,13 +583,18 @@ class TestViewGrammar:
         this one token, distinct from the content-preserving tokens above."""
         old_p, new_p = _write_pair(tmp_path)
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         narrowed = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "json",
-                "--view", "show=breaking",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "--view",
+                "show=breaking",
             ],
         )
         assert baseline.exit_code == narrowed.exit_code == 4
@@ -593,8 +631,15 @@ class TestShowOnlyCliHintIsReRunnable:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "markdown",
-                "--view", "show=breaking", "--view", "show=added",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "--view",
+                "show=breaking",
+                "--view",
+                "show=added",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -612,7 +657,11 @@ class TestShowOnlyCliHintIsReRunnable:
         rerun = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "markdown",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
                 *[f"--view={t}" for t in tokens],
             ],
         )
@@ -626,8 +675,15 @@ class TestShowOnlyCliHintIsReRunnable:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "html",
-                "--view", "show=breaking", "--view", "show=added",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "html=-",
+                "--view",
+                "show=breaking",
+                "--view",
+                "show=added",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -649,9 +705,15 @@ class TestShowOnlyCliHintIsReRunnable:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "html",
-                "--view", "show=breaking,variables",
-                "--view", "show=compatible,variables",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "html=-",
+                "--view",
+                "show=breaking,variables",
+                "--view",
+                "show=compatible,variables",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -701,7 +763,7 @@ class TestSurfaceMetricsAreUnconditional:
         old_p, new_p = self._shrinking_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json", "--surface-metrics"],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--surface-metrics"],
         )
         assert result.exit_code == 64, result.output
         assert "No such option" in result.output
@@ -711,7 +773,7 @@ class TestSurfaceMetricsAreUnconditional:
     ) -> None:
         old_p, new_p = self._shrinking_pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert result.exit_code == 4, result.output
         kinds = {c["kind"] for c in json.loads(result.stdout)["changes"]}
@@ -730,8 +792,13 @@ class TestAuditSuppressionsNoOpWithoutSuppress:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--format", "json",
-                "--view", "suppressions",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "--view",
+                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -849,21 +916,33 @@ def _run_permutation(
 ) -> tuple[int, dict[str, Any]]:
     """Run one point of the space; return ``(exit_code, canonical facts)``.
 
-    Every case adds its own ``--write json=<path>`` -- itself one of the
-    axes under test, and documented to always render the full, unfiltered
-    report -- so the canonical block can be read back even for a
-    ``--format`` (html/junit/oneline/...) whose primary output is not
-    structured. The extra ``--write`` artifacts on top of it are what vary
-    the ``--write`` axis itself.
+    Every case adds its own ``-o json=<path>`` export -- itself one of the
+    axes under test -- so the canonical block can be read back even for a
+    format (html/junit/oneline/...) whose own output is not structured. The
+    extra exports on top of it are what vary the export-set axis itself.
+
+    Plan slice 7m note: that json export is no longer *contracted
+    unfiltered*. Under the one repeatable ``-o FORMAT=DESTINATION`` a
+    display selector means the same thing for every export (there is no
+    "secondary" to exempt), so a ``--view show=`` case reaches here with a
+    narrowed ``changes`` list -- which is why the show axis is asserted
+    through its own disclosure below rather than against the unfiltered
+    oracle.
     """
     fmt, mode, demangle, patterns, filtered, suppressions, show, extra = case
     extractor = out_dir / "canonical.json"
     args = [
-        "compare", str(old_p), str(new_p),
-        "--format", fmt,
-        "--suppress", str(suppress),
-        "--view", mode,
-        "--write", f"json={extractor}",
+        "compare",
+        str(old_p),
+        str(new_p),
+        "-o",
+        f"{fmt}=-",
+        "-o",
+        f"json={extractor}",
+        "--suppress",
+        str(suppress),
+        "--view",
+        mode,
     ]
     for token, enabled in (
         ("patterns", patterns), ("filtered", filtered), ("suppressions", suppressions),
@@ -874,12 +953,54 @@ def _run_permutation(
         if optional is not None:
             args += ["--view", optional]
     for i, extra_fmt in enumerate(extra):
-        args += ["--write", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
+        args += ["-o", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 4, (case, result.output, result.exception)
-    return result.exit_code, _facts_from_report(
-        json.loads(extractor.read_text(encoding="utf-8"))
-    )
+    payload = json.loads(extractor.read_text(encoding="utf-8"))
+    return result.exit_code, _facts_from_report(payload)
+
+
+def _assert_agrees_with_oracle(
+    case: tuple[Any, ...], facts: dict[str, Any], oracle: dict[str, Any], payload_path: Path
+) -> None:
+    """Check one permutation's canonical facts against the engine oracle.
+
+    Every axis but one is a pure presentation choice, so the facts must
+    equal the oracle outright. ``--view show=`` is the exception by
+    definition -- it is a *display filter*, and since plan slice 7m it
+    filters every export uniformly rather than exempting a "secondary" one.
+    For those points the invariant is stated as disclosure rather than
+    equality: the document names the filter it applied and reports the true
+    pre-filter totals, so the full result stays recoverable from the
+    filtered document itself. Anything the filter cannot touch (the
+    verdict, the suppression and out-of-surface ledgers, the assurance
+    status) must still equal the oracle exactly.
+    """
+    mode, show = case[1], case[6]
+    if show is None:
+        assert facts == oracle, case
+        return
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    if mode == "full":
+        # The shared document states the filter it applied and the totals
+        # over the true pre-filter pool. `leaf`/`impact`/`root-cause` are
+        # their own documents (ADR-061 Phase 2's own scope decision) and
+        # carry their own shapes, so the disclosure is required where it is
+        # defined rather than asserted everywhere by coincidence.
+        assert payload["show_only_filter"] == show.removeprefix("show="), case
+        assert (
+            payload["filtered_summary"]["total_changes"] == facts["changes_count"]
+        ), case
+    for unfilterable in (
+        "verdict",
+        "suppressed_count",
+        "out_of_surface_count",
+        "assurance_status",
+    ):
+        assert facts[unfilterable] == oracle[unfilterable], (case, unfilterable)
+    # A filter narrows; it never invents. Every displayed change is one the
+    # engine really produced.
+    assert set(facts["changes"]) <= set(oracle["changes"]), case
 
 
 class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
@@ -922,7 +1043,9 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         out_dir.mkdir(exist_ok=True)
         for case in rng.sample(_permutations(), 150):
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
-            assert facts == oracle, case
+            _assert_agrees_with_oracle(
+                case, facts, oracle, out_dir / "canonical.json"
+            )
             assert exit_code == 4, case
 
     @pytest.mark.slow
@@ -938,5 +1061,7 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         out_dir.mkdir(exist_ok=True)
         for case in _permutations():
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
-            assert facts == oracle, case
+            _assert_agrees_with_oracle(
+                case, facts, oracle, out_dir / "canonical.json"
+            )
             assert exit_code == 4, case

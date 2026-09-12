@@ -151,7 +151,7 @@ class TestBug3OutputDirCreation:
     """_safe_write_output must emit a visible warning when creating dirs."""
 
     def test_creates_dirs_with_stderr_message(self, tmp_path: Path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         target = tmp_path / "deep" / "nested" / "output.json"
         # Capture stderr via CliRunner
         _safe_write_output(target, '{"test": true}')
@@ -160,7 +160,7 @@ class TestBug3OutputDirCreation:
         assert (tmp_path / "deep" / "nested").is_dir()
 
     def test_existing_dir_no_error(self, tmp_path: Path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         target = tmp_path / "output.json"
         _safe_write_output(target, '{"test": true}')
         assert target.exists()
@@ -329,7 +329,7 @@ class TestBug6RemovedLibraryVerdict:
         old_dir = self._old_dir(tmp_path)
         new_dir = tmp_path / "new"
         _write(new_dir, "libbar.so.json", _snap(library="libbar.so"))
-        result = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         d = json.loads(result.stdout)
         assert d["verdict"] == "NO_CHANGE"
         assert d["comparison_scope"]["proven_removed"] == []
@@ -345,7 +345,7 @@ class TestBug6RemovedLibraryVerdict:
         old_dir = self._old_dir(tmp_path)
         new_pkg = tmp_path / "new_pkg"
         _write_stored_package(new_pkg, {"libbar.so": _snap(library="libbar.so")})
-        result = _invoke("compare", str(old_dir), str(new_pkg), "--format", "json")
+        result = _invoke("compare", str(old_dir), str(new_pkg), "-o", "json=-")
         d = json.loads(result.output)
         assert d["comparison_scope"]["proven_removed"] == ["libfoo.so.json"]
         assert d["verdict"] == "COMPATIBLE_WITH_RISK"
@@ -364,7 +364,7 @@ class TestBug6RemovedLibraryVerdict:
         _write_snap(new_dir / "libfoo.json", snap_foo)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-",
         )
         d = json.loads(result.output)
         # Added-only should not elevate verdict beyond matched results

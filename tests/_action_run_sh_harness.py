@@ -35,6 +35,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -58,7 +59,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def _stub_abicheck(tmp_path: Path, *, exit_code: int, payload: bytes | None) -> Path:
-    """An abicheck that exits *exit_code* and writes *payload* to its ``-o`` path.
+    """An abicheck that exits *exit_code* and writes *payload* to every
+    ``-o FORMAT=DESTINATION`` file destination it is given.
 
     ``payload=None`` writes nothing at all -- the "died after the exit code,
     before the report" shape, which is the one a real truncated/killed run
@@ -66,19 +68,29 @@ def _stub_abicheck(tmp_path: Path, *, exit_code: int, payload: bytes | None) -> 
     """
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
+    # Plan slice 7m: the one export request is `-o FORMAT=DESTINATION`, so
+    # the stub honours *every* `-o` it is given -- splitting on the first
+    # `=` exactly as the real CLI does, and skipping the stdout destination
+    # `-`, which names no file. A stub that only understood a bare path (or
+    # only the first `-o`) would be unfaithful to the emitter in precisely
+    # the way tests/CLAUDE.md warns about: run.sh's own destination
+    # bookkeeping would then be exercised against a stub that never wrote
+    # what a real run writes.
     body = [
         "#!/usr/bin/env bash",
         "prev=''",
         'for arg in "$@"; do',
         '  if [[ "$prev" == "-o" ]]; then',
+        '    dest="${arg#*=}"',
+        '    if [[ "$arg" == *=* && "$dest" != "-" ]]; then',
     ]
     if payload is None:
-        body.append("    :")
+        body.append("      :")
     else:
         blob = tmp_path / "payload.bin"
         blob.write_bytes(payload)
-        body.append(f'    cp "{blob}" "$arg"')
-    body += ["  fi", '  prev="$arg"', "done", f"exit {exit_code}"]
+        body.append(f'      cp "{blob}" "$dest"')
+    body += ["    fi", "  fi", '  prev="$arg"', "done", f"exit {exit_code}"]
     stub = bindir / "abicheck"
     stub.write_text("\n".join(body) + "\n", encoding="utf-8")
     stub.chmod(0o755)
@@ -92,6 +104,7 @@ def _lib(tmp_path: Path, name: str) -> str:
 
 
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
+    require_bash()
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"
@@ -111,7 +124,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
         }
     )
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

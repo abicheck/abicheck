@@ -64,7 +64,9 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     # removed from the CLI (see ``cli_options.severity_options``).
     "severity": frozenset({"--severity-preset"}),
     "scope": frozenset({"--scope-public-headers"}),
-    "output": frozenset({"--format", "--output"}),
+    # Plan slice 7m: one flag, one grammar -- `--format` retired into
+    # `-o FORMAT=DESTINATION`, so this family is a single member.
+    "output": frozenset({"--output"}),
     # Two-sided evidence family (ADR-037 D3 ``@evidence_options``): registered
     # but *not* required — only commands that take source depth (``compare``)
     # compose it.
@@ -79,10 +81,13 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     # resolves local ELF debug artifacts the package/snapshot-oriented commands
     # do not take. ``--dwarf-only``/``--debuginfod``/``--debuginfod-url``/
     # ``--debug-format`` were hidden, config-backed duplicates removed outright
-    # in ADR-068 D5 / Phase 7a; only the coarse ``--debug-root`` remains.
+    # in ADR-068 D5 / Phase 7a; only the coarse per-run input remains, and
+    # since plan Phase 7n it is the whole debug role -- ``--debug-info``,
+    # which absorbed ``--debug-root``'s directory/detached-file transports
+    # alongside the debug package it already took.
     "debug_resolution": frozenset(
         {
-            "--debug-root",
+            "--debug-info",
         }
     ),
 }
@@ -94,7 +99,7 @@ FAMILY_DECORATOR: dict[str, str] = {
     "policy": "policy_options",
     "severity": "severity_options",
     "scope": "scope_options",
-    "output": "output_options",
+    "output": "export_options",
     "evidence": "evidence_options",
 }
 

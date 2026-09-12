@@ -240,7 +240,11 @@ class TestStatOutput:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old), str(new), "--format", "oneline",
+            "compare",
+            str(old),
+            str(new),
+            "-o",
+            "oneline=-",
         ])
         assert result.exit_code == 0
         output = result.output.strip()
@@ -266,7 +270,11 @@ class TestRenderOutputFormats:
         old, new = snapshot_pair
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old), str(new), "--format", "sarif",
+            "compare",
+            str(old),
+            str(new),
+            "-o",
+            "sarif=-",
         ])
         assert result.exit_code == 0
         # Read stdout (not .output) so any stderr warning — e.g. the
@@ -515,10 +523,15 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "deps", "compare", "usr/bin/test",
-                "--old-root", str(baseline),
-                "--new-root", str(candidate),
-                "--format", "json",
+                "deps",
+                "compare",
+                "usr/bin/test",
+                "--old-root",
+                str(baseline),
+                "--new-root",
+                str(candidate),
+                "-o",
+                "json=-",
             ])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -608,10 +621,15 @@ class TestStackCheckCommand:
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
             result = runner.invoke(main, [
-                "deps", "compare", "usr/bin/test",
-                "--old-root", str(baseline),
-                "--new-root", str(candidate),
-                "--output", str(out_file),
+                "deps",
+                "compare",
+                "usr/bin/test",
+                "--old-root",
+                str(baseline),
+                "--new-root",
+                str(candidate),
+                "-o",
+                f"markdown={out_file}",
             ])
             assert result.exit_code == 0
             assert out_file.exists()
@@ -632,9 +650,11 @@ class TestCompareOutputToFile:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old), str(new),
-            "--format", "json",
-            "-o", str(out_file),
+            "compare",
+            str(old),
+            str(new),
+            "-o",
+            f"json={out_file}",
         ])
         assert result.exit_code == 0
         assert out_file.exists()

@@ -431,7 +431,7 @@ gets backfilled, only report on it.
 `schema_version` and `report_schema_version` are different fields on different
 files:
 
-| | Snapshot (`dump`) | Comparison report (`compare --format json`) |
+| | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
 | **Type** | integer (currently `46`) | string `MAJOR.MINOR` (e.g. `1.0`) |

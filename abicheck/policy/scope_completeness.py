@@ -72,7 +72,7 @@ DEFAULT_INCOMPLETE_SCOPE_POLICY = "warn"
 CLI_MITIGATION = (
     "Supply the missing members (or compare one artifact against its own "
     "counterpart), or set scope.on_incomplete: block in .abicheck.yml to "
-    "fail the run on an incompletely checked scope. --format json carries "
+    "fail the run on an incompletely checked scope. -o json=... carries "
     "the full comparison_scope record."
 )
 

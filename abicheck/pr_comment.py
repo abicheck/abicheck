@@ -860,7 +860,7 @@ def _release_contract_coverage_findings(
     no aggregated ``contract_coverage_failures`` array (only each library's
     own int fields), so this can name *which libraries* were affected but not
     *which provider* fell short within them — a caller wanting that detail
-    still needs ``--format json``'s per-library section.
+    still needs ``-o json=...``'s per-library section.
 
     Always ``([], False)`` when the run never passed ``--contract``
     — both keys are entirely absent then, mirroring the single-pair report's
@@ -883,7 +883,7 @@ def _release_contract_coverage_findings(
     detail = (
         f"Incomplete for: {', '.join(affected)}"
         if affected
-        else "See --format json's per-library contract_coverage_failure_count for detail"
+        else "See -o json=...'s per-library contract_coverage_failure_count for detail"
     )
     if not blocking:
         detail += " (accepted by contract.unresolved: warn)"

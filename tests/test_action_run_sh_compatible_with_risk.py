@@ -38,6 +38,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parent.parent / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -59,8 +60,10 @@ def _stub_abicheck(tmp_path: Path, *, exit_code: int, report: dict) -> Path:
         "#!/usr/bin/env bash\n"
         "prev=''\n"
         'for arg in "$@"; do\n'
-        '  if [[ "$prev" == "-o" ]]; then\n'
-        f'    cp "{payload}" "$arg"\n'
+        # `-o` carries FORMAT=DESTINATION (plan slice 7m); a `-`
+        # destination is stdout and writes no file.
+        '  if [[ "$prev" == "-o" && "$arg" == *=* && "$arg" != *=- ]]; then\n'
+        f'    cp "{payload}" "${{arg#*=}}"\n'
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"
@@ -73,6 +76,7 @@ def _stub_abicheck(tmp_path: Path, *, exit_code: int, report: dict) -> Path:
 
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
     """Run ``action/run.sh`` and return its ``GITHUB_OUTPUT`` key/value pairs."""
+    require_bash()
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"
@@ -92,7 +96,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
         }
     )
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -324,10 +328,10 @@ class TestRenderedTextIsNeverReconstructedIntoAVerdict:
 
 
 class TestSarifIsNeverReadForAVerdict:
-    """ADR-063 Track T8: ``format: sarif`` combined with an ``extra-args
-    --write <non-json>=...`` suppresses the automatic JSON sidecar
-    (``--write`` is a single-valued CLI option), leaving no abicheck-native
-    JSON anywhere. ``_report_compat_verdict`` used to reach into the SARIF
+    """ADR-063 Track T8: ``format: sarif`` with an ``extra-args`` export
+    that renders SARIF everywhere leaves no abicheck-native
+    ``run_outcome``/``verdict`` document for the boundary to read.
+    ``_report_compat_verdict`` used to reach into the SARIF
     primary report's own ``runs[0].properties.abiVerdict`` for that case.
     That fallback is retired with the rest of the boundary's verdict
     reconstruction: SARIF is a rendering, not the structured
@@ -362,12 +366,16 @@ class TestSarifIsNeverReadForAVerdict:
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "sarif",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.sarif"),
-                # A non-JSON --write occupies the CLI's one --write slot,
-                # which is exactly what suppresses the Action's own PR_JSON
-                # injection (_extra_args_has_write_flag) -- reproducing the
-                # reported combination rather than asserting the fixed
-                # helpers in isolation.
-                "INPUT_EXTRA_ARGS": f"--write markdown={extra_md}",
+                # Plan slice 7m: a caller-stated export set replaces the
+                # Action's own, and the PR_JSON sidecar is still injected
+                # unless the caller names a json destination -- so the
+                # retired "--write occupies the one slot" route to "no
+                # native JSON anywhere" is gone. What reproduces the
+                # reported combination now is the stub rendering SARIF to
+                # every destination the run asks for, sidecar included:
+                # there is a .json file, and nothing in it is a native
+                # verdict document.
+                "INPUT_EXTRA_ARGS": f"-o markdown={extra_md}",
             },
             bindir,
         )

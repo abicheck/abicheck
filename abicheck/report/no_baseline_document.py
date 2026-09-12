@@ -421,7 +421,7 @@ class NoBaselineDocument:
     #: ADR-049 Phase 5's unsuppressible sibling ledger, already serialized.
     #: The contribution above is a *number*; this is what a reader has to act
     #: on -- which provider, on which side, fell short and why. Carrying only
-    #: the number meant even ``--format json`` exited 1 with no way to tell
+    #: the number meant even ``-o json=...`` exited 1 with no way to tell
     #: (Codex review, P2). ``()`` when a domain closed cleanly is a real
     #: answer and distinct from "no contract was selected"; the projections
     #: keep that distinction by emitting ``[]`` only under a contract.

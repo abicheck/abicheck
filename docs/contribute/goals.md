@@ -95,10 +95,10 @@ Make the tool convenient for AI agents and automation pipelines:
     - `compare` command: 0 = compatible/no_change, 2 = source break, 4 = breaking ABI change
     - `compat` command: 0 = compatible/no_change, 1 = breaking, 2 = error
 - Python API (`from abicheck.service import run_compare`) — not just CLI
-- `--format json/markdown` output modes
+- `-o json=-/markdown` output modes
 - Snapshot files for offline/async workflows (`abicheck dump` → `.abi.json`)
 
-**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--report-mode leaf|impact`) for CI gate pipelines, plus a `--format oneline` one-line summary (originally reached via a built-in `--profile quick`, removed outright by ADR-068 D5). (An MCP server for AI-agent integration shipped and was later removed; agent integrations now use the CLI's structured JSON/SARIF output or the typed Python API directly.)
+**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--report-mode leaf|impact`) for CI gate pipelines, plus a `-o oneline=-` one-line summary (originally reached via a built-in `--profile quick`, removed outright by ADR-068 D5). (An MCP server for AI-agent integration shipped and was later removed; agent integrations now use the CLI's structured JSON/SARIF output or the typed Python API directly.)
 
 ---
 

@@ -108,7 +108,7 @@ class TestBundleCompareOperandRouting:
         old_path = _write_stub(tmp_path, "old.bundlefacts.json")
         new_path = _write_stub(tmp_path, "new.bundlefacts.json")
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
 
         assert code != 64
         # ADR-065 D7 (Codex review, thirtieth round): a zero-pair run with a
@@ -128,7 +128,7 @@ class TestBundleCompareOperandRouting:
         old_dir.mkdir()
         new_path = _write_stub(tmp_path, "new.bundlefacts.json")
 
-        code, out = _invoke("compare", str(old_dir), str(new_path), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_path), "-o", "json=-")
 
         assert code == 64
         assert "not yet supported" in out
@@ -158,8 +158,8 @@ class TestStoredPairEarlyRejections:
             str(new_path),
             "--header",
             f"new={header_dir}",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -193,11 +193,11 @@ class TestStoredPairEarlyRejections:
         devel_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--devel-pkg", f"new={devel_dir}"
+            "compare", str(old_path), str(new_path), "-H", f"new={devel_dir}"
         )
 
         assert code == 64
-        assert "--devel-pkg" in out
+        assert "--header new=" in out
 
     def test_bundle_facts_library_manifest_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
@@ -519,7 +519,7 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.HIDDEN
         )
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
 
         data = json.loads(out)
         assert data["mode"] == "bundle_facts"
@@ -536,7 +536,7 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
         )
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
 
         data = json.loads(out)
         assert data["verdict"] == "NO_CHANGE"
@@ -570,8 +570,8 @@ class TestStoredPairEndToEnd:
             str(new_path),
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         data = json.loads(out)
@@ -589,7 +589,7 @@ class TestStoredPairEndToEnd:
         )
 
         _code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--format", "markdown"
+            "compare", str(old_path), str(new_path), "-o", "markdown=-"
         )
 
         assert "NEW (stored facts)" in out
@@ -612,7 +612,7 @@ class TestStoredPairEndToEnd:
             variant_fingerprint="sycl",
         )
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
 
         assert code != 0
         assert code != 64  # a real ValueError, not a usage error
@@ -640,8 +640,8 @@ class TestStoredPairEndToEnd:
             str(new_path),
             "--depth",
             "binary",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0
@@ -779,7 +779,7 @@ class TestStoredPairEndToEnd:
         save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
         save_bundle_facts(capture_bundle_facts({"libcore.so": new_snapshot}), new_path)
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
 
         assert code == 16
         assert "not comparable" in out

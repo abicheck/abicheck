@@ -24,11 +24,12 @@ plain resolved values and either raise ``click.UsageError`` or warn -- so a
 leaf module is their natural home, and it also removes the reason
 ``cli_compare_helpers`` had to import them from a command module behind a
 ``# cycle`` comment. ``commands/compare.py`` re-exports both names, so that
-import path (and ``frontends/cli/moved.py``'s mapping) is unchanged.
+import path is unchanged.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -49,33 +50,52 @@ def _reject_application_operand(
     )
 
 
+def _reject_directory_export_for_single_pair(output_dir: Path | None) -> None:
+    """A per-component export over a single pair is a usage error, not a warning.
+
+    Plan slice 7m. The retired ``--output-dir`` was *warned about and
+    ignored* here, alongside the other set-only knobs, which was tolerable
+    while it was a knob: nothing was promised, so nothing went missing. As a
+    destination inside the one export request it is a promised **artifact**,
+    and quietly not producing an artifact the user asked for is precisely
+    what the plan's non-goals forbid ("Not shortening the CLI by hiding
+    behavior or ignoring supplied input"). So it fails, naming the operand
+    shape that would make it meaningful.
+    """
+    if output_dir is None:
+        return
+    raise click.UsageError(
+        f"-o <format>={output_dir}{os.sep} is a per-component export, and this "
+        "comparison is a single old/new pair -- there are no components to "
+        "fan out to, so nothing would be written there. Name a file (or '-') "
+        "for this format, or compare a directory/package pair."
+    )
+
+
 def _warn_unused_set_flags(
     *,
     dso_only: bool,
     output_dir: Path | None,
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
-    max_findings_per_library: int | None = None,
 ) -> None:
-    """Warn that the set-input fan-out flags do not apply to single-file inputs."""
+    """Warn that the set-input fan-out flags do not apply to single-file inputs.
+
+    ``output_dir`` is *not* warned about here any more -- see
+    :func:`_reject_directory_export_for_single_pair`, which rejects it -- but
+    stays in the signature so the one call site passes its whole set-only
+    group to one place.
+    """
+    _reject_directory_export_for_single_pair(output_dir)
     used = []
     if dso_only:
         # Phase 7d demoted --dso-only to .abicheck.yml's release.dso_only --
         # there is no CLI flag left to name here, only the config key.
         used.append("release.dso_only")
-    if output_dir is not None:
-        used.append("--output-dir")
     if select:
         used.append("--select")
     if select_required:
         used.append("--select-required")
-    if max_findings_per_library is not None:
-        # Codex/CodeRabbit review: a single-pair `compare` has no release
-        # summary to cap, and this option previously reached the single-pair
-        # path silently -- the given value was neither applied nor reported,
-        # the exact "dropped flag" defect this warning mechanism exists to
-        # prevent for its siblings above.
-        used.append("--max-findings-per-library")
     if used:
         click.echo(
             "Warning: " + ", ".join(used) + " only apply to directory/package "

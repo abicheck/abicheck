@@ -58,7 +58,7 @@ Exit code is `4` (ABI break) — see [Exit Codes](../../../docs/reference/exit-c
   were built with `-g`, abicheck still catches the removed symbol from DWARF
   debug info alone (a weaker evidence tier; see
   [Evidence & Detectability](../../../docs/learn/evidence-and-detectability.md)).
-- Want machine-readable output for CI? Add `--format json` or `--format sarif`
+- Want machine-readable output for CI? Add `-o json=-` or `-o sarif=-`
   — see [Output Formats](../../../docs/use/output-formats.md).
 - Want this gating a pull request automatically? See
   [the GitHub Action](../../../docs/use/github-action.md).

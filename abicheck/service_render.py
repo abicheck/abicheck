@@ -28,7 +28,12 @@ from .errors import ValidationError
 from .model import AbiSnapshot
 from .report.build import build_report_envelope
 from .report.envelope import RenderOptions, ReportEnvelope
-from .reporter import to_json, to_markdown, to_stat, to_stat_json
+from .reporter import (
+    to_json,
+    to_markdown,
+    to_stat as to_stat,  # re-exported; see service.py's own note
+    to_stat_json as to_stat_json,  # likewise
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,7 +49,7 @@ if TYPE_CHECKING:
     from .workflows.gate import SeverityConfig
 
 #: ``fmt`` value for :func:`render_output` — a one-line human summary.
-#: A public ``--format oneline`` choice on ``compare`` (CLI cleanup phase
+#: A public ``-o oneline=...`` choice on ``compare`` (CLI cleanup phase
 #: two, PR 1 removed the old ``--stat`` boolean threaded through every
 #: renderer; this is its sole surviving replacement. It was reachable only
 #: via the built-in ``quick`` ``--profile`` injecting ``fmt="oneline"``
@@ -70,8 +75,7 @@ def render_output(
     severity_config: SeverityConfig | None = None,
     demangle: bool = False,
     contract_evaluation: bool = False,
-    stat: bool = False,
-    show_recommendation: bool = False,
+    show_recommendation: bool = True,
     require_complete_analysis: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
@@ -87,50 +91,31 @@ def render_output(
     the CLI itself resolves the per-format default via
     ``cli_compare_options._resolve_demangle`` before calling here.
 
-    The release recommendation is unconditionally included in every
-    human-facing format (markdown/review) and in JSON's own ``summary``
-    block — there is no longer a flag suppressing it (CLI cleanup phase two,
-    PR 1: ``--recommend`` removed as a no-op-by-default CLI opt-in).
+    The release recommendation is included in every human-facing format
+    (markdown/review) and in JSON's own ``summary`` block. ``show_recommendation``
+    defaults to ``True`` -- the behavior every real consumer gets -- and remains
+    an explicit opt-out for a caller that wants the section suppressed.
 
-    ``stat``/``show_recommendation`` are compatibility shims for existing
-    Tier-2 Python API callers (this function is exported via
-    ``abicheck.service.__all__``) — the CLI's own ``--stat``/``--recommend``
-    flags are gone, but a signature change here is a separate, unannounced
-    break this PR's own docs never claimed (Codex review). ``show_recommendation``
-    stays a real, effective toggle for the markdown renderer, default
-    ``False`` — the exact pre-removal default (Codex review, fresh evidence,
-    second round: an earlier revision changed this default to ``True`` to
-    match the CLI's new unconditional-inclusion behaviour, but that silently
-    changed what an *existing* Tier-2 caller gets when it omits this keyword
-    entirely, which is a public-API default change this PR's docs never
-    announced either — only the CLI flag removal was). The CLI's own
-    unconditional inclusion is instead achieved by its wrapper
-    (``cli._render_output``) passing ``show_recommendation=True`` explicitly,
-    not by changing this function's default. A yet-earlier revision also
-    hard-coded ``True`` into the ``to_markdown`` call below regardless of
-    what the caller passed, silently reintroducing the recommendation
-    section for a caller that explicitly asked it be suppressed — fixed
-    first, and unaffected by this default-value correction. Only
-    ``review``'s own unconditional inclusion (above) and JSON's unconditional
-    ``release_recommendation`` field are unaffected by this parameter — those
-    never had a suppressing flag to restore. Prefer ``fmt=ONELINE_FORMAT``
-    directly in new code.
+    It used to default to ``False``, with the CLI wrapper passing ``True`` to
+    compensate. That made this function's own docstring false for the audience
+    it was written for: the CLI's recommendation was unconditional, but a
+    Tier-2 caller omitting the keyword silently got no recommendation section
+    at all. Two front ends disagreeing about the default *is* the divergence,
+    so the default now states the shipped behavior and a suppressing caller
+    says so.
 
-    ``stat=True`` reproduces the old ``--stat`` boolean's own format-dependent
-    dispatch, not a single fixed replacement — the pre-removal behaviour it
-    stands in for was itself three different outcomes depending on *fmt*:
-    ``to_stat_json`` (a summary-only JSON object, no ``changes`` array) for
-    ``fmt="json"``; ``fmt="junit"`` was *never* short-circuited by ``stat`` at
-    all (the pre-removal code's own guard was ``if stat and fmt != "junit":
-    ...``) and always fell through to real JUnit XML, since a JUnit consumer
-    needs the structured `<testsuite>` document regardless of ``--stat``; and
-    ``to_stat`` (a human one-line string) for every other *fmt*, matching
-    plain ``fmt=ONELINE_FORMAT``. A caller doing ``render_output("json", ...,
-    stat=True)`` and feeding the result to ``json.loads()``, or
-    ``render_output("junit", ..., stat=True)`` and feeding the result to an
-    XML parser, must keep getting that shape back, not human text (Codex
-    review, two rounds — an earlier revision of this shim collapsed every
-    case but JSON onto ``to_stat``, silently breaking a JUnit caller too).
+    A ``stat`` parameter used to stand in for the removed ``--stat`` flag,
+    reproducing its format-dependent dispatch: ``to_stat_json`` for
+    ``fmt="json"``, real JUnit XML for ``fmt="junit"`` (never short-circuited),
+    and ``to_stat`` for everything else. It was a dispatch flag rather than a
+    rendering option -- "ignore the format I passed and render a different
+    document" -- and each of its three outcomes already has a direct public
+    spelling: :data:`ONELINE_FORMAT` for the one-line summary,
+    :func:`~abicheck.reporter.to_stat_json` for the summary-only JSON, and
+    plain ``fmt="junit"`` for JUnit. It also sat *above*
+    ``_reject_unsupported_format``, so ``render_output("nonsense", stat=True)``
+    returned a summary instead of raising :class:`ValidationError`. Call the
+    function or format you want.
 
     ADR-061 gap C / duplication-and-convergence Phase 4: apart from the two
     ``--stat``/``oneline`` short-circuits below (a summary-only document with
@@ -146,16 +131,7 @@ def render_output(
     Raises:
         ValidationError: For unrecognised output format.
     """
-    if stat and fmt == "json":
-        return to_stat_json(
-            result,
-            severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-            show_only=show_only,
-            contract_evaluation=contract_evaluation,
-        )
-
-    if (stat and fmt != "junit") or fmt == ONELINE_FORMAT:
+    if fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
     _reject_unsupported_format(fmt)

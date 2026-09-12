@@ -218,31 +218,26 @@ class TestNormalizeSidedOptions:
         assert kw["old_build_info"] == Path("b1") and kw["new_build_info"] == Path("b2")
         assert "sources" not in kw and "build_info" not in kw
 
-    def test_debug_root_pdb_probe_matrix(self) -> None:
+    def test_debug_info_and_pdb(self) -> None:
+        """Plan Phase 7n: one `debug_info` dest, split per transport.
+
+        Nothing here is a package (no such file exists), so every value
+        routes to the debug-root buckets `--debug-root` used to own, with
+        the identical base+per-side fan-out. The package half's own routing
+        has its own contract in `test_evidence_transport_roles.py`.
+        """
         kw: dict[str, object] = {
-            "debug_root": (("both", Path("d")), ("old", Path("od"))),
+            "debug_info": (("both", Path("d")), ("old", Path("od"))),
             "pdb": (("both", Path("p")), ("new", Path("np"))),
-            "probe_matrix": (("old", Path("mo")), ("new", Path("mn"))),
         }
         normalize_sided_options(kw)
-        # debug_root: multi base+per-side
+        # debug_info's searchable transports: multi base+per-side
         assert kw["debug_roots"] == (Path("d"),)
         assert kw["debug_roots_old"] == (Path("od"),)
+        assert kw["debug_info1"] is None and kw["debug_info2"] is None
         # pdb: base+per-side single (base kept, not fanned)
         assert kw["pdb_path"] == Path("p")
         assert kw["old_pdb_path"] is None and kw["new_pdb_path"] == Path("np")
-        # probe_matrix: per-side single
-        assert kw["probe_matrix_old"] == Path("mo") and kw["probe_matrix_new"] == Path("mn")
-
-    def test_debug_info_and_devel_pkg(self) -> None:
-        kw: dict[str, object] = {
-            "debug_info": (("both", Path("di")),),
-            "devel_pkg": (("old", Path("d1")), ("new", Path("d2"))),
-        }
-        normalize_sided_options(kw)
-        # debug_info: both fans out to each side
-        assert kw["debug_info1"] == Path("di") and kw["debug_info2"] == Path("di")
-        assert kw["devel_pkg1"] == Path("d1") and kw["devel_pkg2"] == Path("d2")
 
     def test_absent_keys_are_untouched(self) -> None:
         kw: dict[str, object] = {"other": 1}

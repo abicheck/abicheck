@@ -69,16 +69,16 @@ scenarios:
     test: test_sc_ci_severity_gate
 
   - id: SC-CI-STAT
-    title: One-line summary for CI logs (--format oneline)
+    title: One-line summary for CI logs (-o oneline=...)
     persona: CI engineer
     narrative: >
       A pipeline wants a compact, greppable one-line result in the job log
       instead of a full report. CLI cleanup phase two, PR 1 removed the
-      boolean --stat flag; --format oneline is its sole surviving one-line
+      boolean --stat flag; -o oneline=... is its sole surviving one-line
       output (originally reached only via the built-in `quick` --profile,
       removed outright by plan Phase 7e).
     flow:
-      - abicheck compare old.json new.json --format oneline
+      - abicheck compare old.json new.json -o oneline=-
     expected:
       exit_code: 4
       output_contains: total
@@ -117,7 +117,7 @@ scenarios:
       # ADR-068 Phase 6 retired `scan` outright; this scenario now runs the
       # identical check through `compare`, which pins the requested
       # `--depth binary` the same way `scan` used to.
-      - abicheck compare old.json new.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
+      - abicheck compare old.json new.json -H include/ --sources src/ --build-info compile_commands.json --depth binary -o json=-
     expected:
       exit_code: 4
       verdict: BREAKING
@@ -136,11 +136,11 @@ scenarios:
       A library's binary surface is unchanged, but a build raises the minimum
       C++ standard floor (17 → 20) — a source-level break that a per-binary diff
       cannot see. By passing the probe build-config matrices to compare
-      (--probe-matrix old=/new=), the CXX_STANDARD_FLOOR_RAISED
+      (--build-info old=/new=, routed on the matrix document), the CXX_STANDARD_FLOOR_RAISED
       finding is folded into the same verdict and report, turning a NO_CHANGE
       binary diff into an API_BREAK gate (exit 2).
     flow:
-      - abicheck compare old.json new.json --probe-matrix old=old.matrix.json --probe-matrix new=new.matrix.json
+      - abicheck compare old.json new.json --build-info old=old.matrix.json --build-info new=new.matrix.json
     expected:
       exit_code: 2
       verdict: API_BREAK
@@ -165,8 +165,8 @@ scenarios:
       alone, and uses compare-release so sibling-library relationships in the
       bundle are analysed.
     flow:
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format json -o abi.json
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format junit -o abi.xml
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o junit=abi.xml
     expected:
       # Block only on CONFIRMED public breaks; when scoping fell back the result
       # is unconfirmed and must be manual-review-only, never an auto-fail.
@@ -202,8 +202,8 @@ scenarios:
       --view filtered ledger) and communicate the release impact to reviewers via
       a job summary / PR comment rather than raw JSON.
     flow:
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format json -o abi.json
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --output-dir reports/ --format markdown
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=reports/ -o markdown=-
     expected:
       fail_when:
         - verdict in [BREAKING, API_BREAK]
@@ -224,6 +224,6 @@ scenarios:
       This specific scenario just has no automated end-to-end CLI test yet.
       changed_libraries and the scope.public_additions / filtered_internal_changes
       rollup are emitted today and unit-tested in tests/test_compare_release.py.
-      Per-library release_recommendation is available in the --output-dir reports
+      Per-library release_recommendation is available in the -o json=reports/
       (single-library JSON). The job_summary / pr_comment digest is the G3
       review-UX deliverable; full automation needs a real multi-library bundle.

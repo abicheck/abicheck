@@ -20,7 +20,7 @@ scenarios:
       still-likely bump in prose. See SC-LINUX-ELF-BASELINE for the
       binary-evidence-present case, where version_bump is a concrete value.
     flow:
-      - abicheck compare old.json new.json --format json
+      - abicheck compare old.json new.json -o json=-
     expected:
       state: unavailable
       version_bump: null
@@ -60,7 +60,7 @@ scenarios:
       `compare` directly now.)
     flow:
       - abicheck dump libfoo.so -H include/ -o v1.json    # at release time, kept as the baseline
-      - abicheck compare v1.json v2.json --format json
+      - abicheck compare v1.json v2.json -o json=-
     expected:
       exit_code: 4
       verdict: BREAKING

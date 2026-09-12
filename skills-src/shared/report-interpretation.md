@@ -8,7 +8,7 @@ summarizes:
 
 # Reading an abicheck JSON report
 
-Always drive `--format json` for analysis and reserve the rendered formats
+Always drive `-o json=...` for analysis and reserve the rendered formats
 for what the user sees. The available formats and when each is appropriate
 are owned by [the output formats page](../../docs/use/output-formats.md).
 

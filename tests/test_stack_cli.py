@@ -73,7 +73,7 @@ class TestDepsCommand:
         # Class-scoped, so it can't take the function-scoped `real_binary`
         # fixture — resolve the binary via the shared helper instead.
         binary = _pick_elf()
-        result = CliRunner().invoke(main, ["deps", "tree", str(binary), "--format", "json"])
+        result = CliRunner().invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0
         return json.loads(result.output)
 
@@ -92,7 +92,11 @@ class TestDepsCommand:
     def test_deps_output_file(self, runner, real_binary, tmp_path):
         outfile = tmp_path / "deps.json"
         result = runner.invoke(main, [
-            "deps", "tree", str(real_binary), "--format", "json", "-o", str(outfile),
+            "deps",
+            "tree",
+            str(real_binary),
+            "-o",
+            f"json={outfile}",
         ])
         assert result.exit_code == 0
         assert outfile.exists()
@@ -216,7 +220,12 @@ def _extract_json(output: str) -> dict:
 class TestCompareFollowDeps:
     def test_compare_follow_deps_json(self, runner, real_lib):
         result = runner.invoke(main, [
-            "compare", str(real_lib), str(real_lib), "--follow-deps", "--format", "json",
+            "compare",
+            str(real_lib),
+            str(real_lib),
+            "--follow-deps",
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 0
         data = _extract_json(result.output)

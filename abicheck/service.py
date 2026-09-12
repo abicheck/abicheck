@@ -221,6 +221,15 @@ from .service_render import (  # noqa: E402,F401
     _render_deps_section_md,
     _render_json_output,
     render_output,
+    # The summary-only documents, re-exported through `service_render` (which
+    # renders with them) because they are the direct replacement for
+    # `render_output(..., stat=True)`. That keyword was a dispatch flag --
+    # "render a different document than the format I asked for" -- and was
+    # removed, so the documents it reached stay reachable at the same import
+    # site a caller already used. `to_stat` is also `render_output`'s own
+    # `fmt=ONELINE_FORMAT`; `to_stat_json` never had a format spelling.
+    to_stat,
+    to_stat_json,
 )
 
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/
@@ -285,6 +294,8 @@ __all__ = [
     "expand_header_inputs",
     "load_suppression_and_policy",
     "render_output",
+    "to_stat",
+    "to_stat_json",
     "resolve_compare_request",
     "resolve_input",
     "resolve_release_compare",

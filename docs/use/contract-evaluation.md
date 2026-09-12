@@ -58,7 +58,7 @@ abicheck compare baseline.json build/libfoo.so \
 
 ```bash
 abicheck compare old.so new.so -H include/ \
-  --contract public --format json -o report.json
+  --contract public -o json=report.json
 ```
 
 Two things to check in the JSON:
@@ -130,7 +130,7 @@ for the deeper "why", not just "whether."
       --contract public \
       --pack packs/accept-unresolved.yml \
       --severity-preset default \
-      --format json -o report.json
+      -o json=report.json
 ```
 
 Read `report.json`'s `verdict` for the gated compatibility result and

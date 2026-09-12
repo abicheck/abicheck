@@ -135,7 +135,7 @@ carries values a PR author can influence. If the boundary needs a fact,
 give it a field in the structured report.
 
 The consequence to know when reading a failure report: a run whose report
-is genuinely unreadable (a crash, or an `extra-args --write` that
+is genuinely unreadable (a crash, or an `extra-args -o` export that
 suppressed the internal sidecar) gets no
 `SEVERITY_ERROR`/`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no
 escalation, since no structured evidence stated one. That is deliberate:
@@ -155,7 +155,7 @@ Two predicates close that without weakening anything above:
   report was requested" are different, and only the first is a failure of this
   step. **Requested** means `format: json` (wherever it lands — `output-file`
   or stdout; asking for json *is* the request) or a caller-supplied
-  `extra-args --write json=PATH`. It does not include the internal sidecar.
+  `extra-args -o json=PATH`. It does not include the internal sidecar.
   `no_result` is the generalization of `empty`: a document can parse, be
   non-empty, and still carry no verdict anything can read (`{"error": "write
   interrupted"}`, a lone `report_schema_version`, `{"findings": null}`,
@@ -176,8 +176,8 @@ Two predicates close that without weakening anything above:
   nothing (ADR-067's "record before disposing", applied to the reader).
 
   **"Requested" means every caller-named destination, not the first.**
-  `compare`'s `--write` is repeatable (`multiple=True`, ADR-068 D4), so
-  `--write json=a.json --write markdown=b.md` really does write `a.json`, and
+  `compare`'s `-o` is repeatable (plan slice 7m's one export request), so
+  `-o json=a.json -o markdown=b.md` really does write `a.json`, and
   each `json=` destination is independently required. A stale comment calling
   the option scalar and last-wins had the extractor *clear* an earlier `json=`
   path on seeing a later non-json one — settle contradictions like that against
@@ -236,12 +236,12 @@ Two predicates close that without weakening anything above:
 
   **Stdout mode is judged by the mode, not by an empty destination inventory.**
   `format: json` with no effective output path sends the requested report to
-  stdout *even when an `extra-args --write json=` names another artifact*, so
+  stdout *even when an `extra-args -o json=` names another artifact*, so
   gating the stdout check on "the inventory is empty" let a valid secondary mask
   an unusable stdout report — the same masking this section exists to close, one
   branch over. The stdout document is also validated through its own
   `$_STDOUT_JSON_FILE` rather than `_report_validity`, whose chain falls through
-  to a `--write` destination in precisely the case a missing stdout report
+  to an export destination in precisely the case a missing stdout report
   presents.
 
   **A verdict must be one the emitters actually produce.** `KNOWN_VERDICTS`
@@ -257,7 +257,7 @@ Two predicates close that without weakening anything above:
 
   **Any caller-supplied string reaching an annotation goes through
   `_sanitize_annotation` first.** That includes *paths*, not just report text:
-  every `--write json=` destination comes from `extra-args`, so a diagnostic
+  every `-o json=` destination comes from `extra-args`, so a diagnostic
   naming one interpolates PR-controlled input into a `::error::` workflow
   command, and GitHub percent-decodes workflow-command data — `x%0A::add-mask::secret`
   becomes a second command. `_reject_unusable_report` sanitizes at the one
@@ -270,18 +270,20 @@ Two predicates close that without weakening anything above:
   first destination that arrived. `_caller_json_destinations` answers the
   different question this validation owes the caller: "where was a report
   asked for", every one of them. Routing the validation through the chain let a
-  missing `format: json` primary be masked by a valid `extra-args --write
-  json=secondary.json` (`--write` names an independent artifact whose path must
+  missing `format: json` primary be masked by a valid `extra-args -o
+  json=secondary.json` (each export names an independent artifact whose path must
   differ from `-o`, so it can never satisfy the primary request). Each
   destination is asked `report_validity` on its own path, and stdout mode — the
   one shape naming no destination — is the only case that falls back to the
   chain.
 
   **The primary destination is `_effective_output_file`, not `$OUTPUT_FILE`.**
-  `extra-args` can carry its own `-o`/`--output`, and since `CMD` puts this
-  script's flags first and `extra-args` last, Click's last-wins rule makes the
-  override the real destination — the exact sibling of the `--format` override
-  `_effective_format` already resolved. Keying on the input alone failed both
+  `extra-args` can carry its own `-o FORMAT=DESTINATION` exports, and since
+  plan slice 7m this script injects none of its own when it does — `-o` is
+  repeatable and a duplicate destination is a usage error rather than a
+  last-wins override, so a caller who states an export set owns it whole.
+  That set is therefore the real destination, resolved by the exact sibling
+  of the format resolution `_effective_format` performs off the same parse. Keying on the input alone failed both
   ways: an override with no `output-file` input named no destination, so a
   file-writing run was validated as the *stdout* shape and a working run
   published `REPORT_UNREADABLE`; with both given, the superseded path was
@@ -399,7 +401,7 @@ Asserting one and assuming the others agree is how they came to disagree.
 
 `_json_report_expected` is deliberately narrow, and the part it leaves open is
 worth stating rather than discovering. When the primary format is not json,
-this script injects an internal `--write json=$PR_JSON` sidecar for its own
+this script injects an internal `-o json=$PR_JSON` sidecar for its own
 PR-comment and annotation rendering. If *that* turns up missing, the run still
 publishes `verdict: COMPATIBLE` — and at exit 0 the real tier could equally
 have been `NO_CHANGE`, `COMPATIBLE_WITH_RISK`, or a `BREAKING`/`API_BREAK` the
@@ -420,17 +422,18 @@ own migration, not an incremental widening of the predicate here. Tracked as a
 `KnownGap` on the `report.unestablished_result_reads_as_success` bug class
 (`tests/regressions/manifest.py`).
 
-**Known, accepted limitation (Codex review, P1, fresh evidence):** a
-`scan --against` step whose own `extra-args` carries a non-JSON secondary
-(`--write text=...`) reaches exactly this "genuinely unreadable" case for
-the unconditional coverage/assurance/severity-category floors too — the
-CLI's `--write` option takes one `FORMAT=PATH` operand, Click keeps only
-the *last* occurrence of a repeated option, and `extra-args` is appended
-after the internal injection, so a second, JSON-targeted `--write` this
-script also appended would simply lose to the user's own and never
-execute. There is no way to recover a structured report in this specific
-combination without either silently discarding the user's explicit
-`--write` choice (wrong — the whole point of `_extra_args_has_write_flag`
+**Known, accepted limitation (Codex review, P1, fresh evidence):** a step
+whose own `extra-args` carries a non-JSON export set (`-o text=...`)
+reaches exactly this "genuinely unreadable" case for the unconditional
+coverage/assurance/severity-category floors too — a caller-stated export
+set replaces this script's own, so the internal JSON sidecar is not
+injected alongside it. (Before plan slice 7m the same combination failed
+for a different mechanical reason: `--write` was a separate flag and
+`extra-args` was appended last, so an injected JSON write lost to the
+user's own under Click's last-wins rule. Same outcome, and the same
+resolution.) There is no way to recover a structured report in this
+specific combination without either silently discarding the user's
+explicit exports (wrong — the whole point of `_extra_args_has_export`
 is not to do that) or unconditionally re-running the analysis a second
 time purely to obtain one (`_maybe_post_pr_comment` already accepts that
 cost, but only for the sticky-comment feature specifically, and only under
@@ -438,10 +441,10 @@ its own narrower guards — doing it unconditionally for the floors would
 impose a second, potentially expensive analysis on every such run, a
 different and larger trade-off than this bug fix's scope). So this one
 combination is accepted, not fixed: the floors go blind exactly there, and
-the fix is on the caller's side (drop the non-JSON `--write`, or add
+the fix is on the caller's side (add a `-o json=PATH` export of your own, or set
 `format: json`) rather than in this script.
 
-**This is why `compare`'s and `scan`'s own `--write json=$PR_JSON` sidecar
+**This is why the internal `-o json=$PR_JSON` sidecar
 injection is unconditional** (not gated on `pr-comment`, since Track T8):
 `_severity_gate_categories`/`_coverage_gated`/`_assurance_gated` all read
 that same JSON, and ADR-049's contract-coverage/analysis-assurance floors
@@ -456,10 +459,10 @@ break (which outranks those axes in the CLI's own max-fold) combined with
 `fail-on-breaking: false` left no JSON anywhere, silently disabling floors
 the AGENTS.md text right here already documented as unconditional. Don't
 re-gate that injection on anything but the effective format, whether the
-user's own `extra-args` already requested a `--write`, and whether
+user's own `extra-args` already states its own exports, and whether
 `extra-args` carries an *effective* `--dry-run` (`_extra_args_has_dry_run_
 flag` — a dedicated `INPUT_DRY_RUN` is not the only way to request one,
-and injecting `--write`/`-o` alongside a real `--dry-run` is a CLI usage
+and injecting an export to a file alongside a real `--dry-run` is a CLI usage
 error, not merely redundant; `_maybe_post_pr_comment`'s own dry-run skip
 checks the same effective flag, for the identical reason) — see the
 injection's own comment in both mode branches for the exact conditions.

@@ -143,7 +143,7 @@ the previous release under the release profile, which adds the release
 recommendation (SONAME or SemVer action) to the report:
 
 ```bash
-abicheck compare last-release.json build/libfoo.so -H include/ --depth source --format markdown
+abicheck compare last-release.json build/libfoo.so -H include/ --depth source -o markdown=-
 ```
 
 The published baseline is what the next release cut compares against, and

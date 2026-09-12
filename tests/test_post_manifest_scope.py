@@ -375,8 +375,8 @@ def test_compare_cli_post_manifest_flag_scopes_to_committed_surface(
             str(new_p),
             "--post-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         ],
     )
     assert res.exit_code == 0, res.output  # kernel churn demoted -> compatible
@@ -427,8 +427,8 @@ def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(
             "--post-manifest",
             str(manifest),
             "--no-scope-public-headers",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         ],
     )
     assert res.exit_code == 0, res.output
@@ -484,8 +484,8 @@ def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(
             "--post-manifest",
             str(manifest),
             "--no-scope-public-headers",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         ],
     )
     assert res.exit_code == 4, res.output
@@ -647,8 +647,8 @@ def test_compare_cli_removed_committed_wrapper_still_breaks(tmp_path: Path) -> N
             str(new_p),
             "--post-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         ],
     )
     assert res.exit_code != 0, res.output  # removed committed wrapper -> breaking

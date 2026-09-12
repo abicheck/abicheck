@@ -61,7 +61,6 @@ def to_markdown(
     show_only: str | None = None,
     report_mode: str = "full",
     show_impact: bool = False,
-    stat: bool = False,
     severity_config: SeverityConfig | None = None,
     show_recommendation: bool = False,
     demangle: bool = False,
@@ -87,7 +86,6 @@ def to_markdown(
 
     alternate = _markdown_alternate_rendering(
         result,
-        stat=stat,
         report_mode=report_mode,
         show_impact=show_impact,
         show_only=show_only,
@@ -125,7 +123,6 @@ def to_markdown(
 def _markdown_alternate_rendering(
     result: DiffResult,
     *,
-    stat: bool,
     report_mode: str,
     show_impact: bool,
     show_only: str | None,
@@ -135,14 +132,16 @@ def _markdown_alternate_rendering(
 ) -> str | None:
     """Render one of the non-default markdown views, or ``None`` for the default.
 
-    ``--stat`` and the ``leaf`` / ``root-cause`` report modes each produce a
-    complete document of their own; the caller returns it as-is (after its own
-    demangling pass) rather than continuing into the full report.
-    """
-    from ..reporter_markdown import to_stat
+    The ``leaf`` / ``root-cause`` report modes each produce a complete document
+    of their own; the caller returns it as-is (after its own demangling pass)
+    rather than continuing into the full report.
 
-    if stat:
-        return to_stat(result, severity_config=severity_config)
+    A ``stat`` parameter used to select ``reporter_markdown.to_stat`` here. It
+    was a dispatch flag, not a rendering option -- "ignore every other argument
+    and render a different document" -- and the one-line summary has its own
+    public spelling (``render_output(fmt="oneline")``, or ``to_stat``
+    directly). Call the function you want.
+    """
     if report_mode == "leaf":
         return _to_markdown_leaf(
             result,

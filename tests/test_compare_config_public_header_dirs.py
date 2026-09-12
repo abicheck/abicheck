@@ -112,7 +112,7 @@ class TestConfigPublicHeaderDirsReachesTheResolvedRequest:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "--format", "json"],
+            ["compare", str(old), str(new), "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         return seen_requests
@@ -277,7 +277,7 @@ class TestDirectoryReleaseCompareReachesConfigDirs:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--format", "json"],
+            ["compare", str(old_dir), str(new_dir), "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         assert len(seen_requests) == 1

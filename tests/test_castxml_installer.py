@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable, require_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "action" / "install-castxml.sh"
@@ -107,6 +108,7 @@ def test_composite_installer_keeps_unsupported_linux_best_effort() -> None:
 def test_composite_installer_uses_distro_castxml_on_unsupported_arch(
     tmp_path: Path,
 ) -> None:
+    require_bash()
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     log = tmp_path / "sudo.log"
@@ -123,7 +125,7 @@ def test_composite_installer_uses_distro_castxml_on_unsupported_arch(
         (fake_bin / command).chmod(0o755)
 
     result = subprocess.run(
-        ["bash", str(ROOT / "action/install-deps.sh")],
+        [bash_executable(), str(ROOT / "action/install-deps.sh")],
         capture_output=True,
         text=True,
         env={**os.environ, "PATH": f"{fake_bin}:/usr/bin:/bin"},
@@ -162,6 +164,7 @@ def test_composite_installer_minimal_ubuntu_remains_warning_only(
 
 
 def test_existing_install_is_replaced_before_version_probe(tmp_path: Path) -> None:
+    require_bash()
     asset = _host_asset()
     if asset is None:
         pytest.skip("behavioral installer test needs a supported Ubuntu runner")
@@ -217,7 +220,7 @@ def test_existing_install_is_replaced_before_version_probe(tmp_path: Path) -> No
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
     result = subprocess.run(
-        ["bash", str(INSTALLER)], capture_output=True, text=True, env=env, check=False
+        [bash_executable(), str(INSTALLER)], capture_output=True, text=True, env=env, check=False
     )
     assert result.returncode == 0, result.stderr
     assert not poison_log.exists()
@@ -226,6 +229,7 @@ def test_existing_install_is_replaced_before_version_probe(tmp_path: Path) -> No
 
 
 def test_local_archive_checksum_rejection_is_fail_closed(tmp_path: Path) -> None:
+    require_bash()
     if _host_asset() is None:
         pytest.skip("behavioral installer test needs a supported Ubuntu runner")
     bad_archive = tmp_path / "untrusted.tar.gz"
@@ -236,7 +240,7 @@ def test_local_archive_checksum_rejection_is_fail_closed(tmp_path: Path) -> None
         "ABICHECK_CASTXML_INSTALL_ROOT": str(tmp_path / "install"),
     }
     result = subprocess.run(
-        ["bash", str(INSTALLER)], capture_output=True, text=True, env=env, check=False
+        [bash_executable(), str(INSTALLER)], capture_output=True, text=True, env=env, check=False
     )
     assert result.returncode != 0
     assert "FAILED" in result.stdout + result.stderr

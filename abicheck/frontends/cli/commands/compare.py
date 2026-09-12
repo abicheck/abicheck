@@ -54,15 +54,14 @@ from ....cli_options import (
     contract_options,
     debug_resolution_options,
     evidence_options,
+    export_options,
     include_dependencies_option,
     normalize_sided_options,
-    output_options,
     pack_option,
     policy_options,
     reject_bundle_facts_manifest_without_old_bundle_facts,
     release_options,
     scope_options,
-    secondary_output_options,
     set_input_options,
     severity_options,
     two_sided_input_options,
@@ -72,13 +71,13 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
-from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers and frontends/cli/moved.py both resolve these names here
+from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers resolves these names here
     _reject_application_operand as _reject_application_operand,
     _warn_unused_set_flags as _warn_unused_set_flags,
 )
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
+from ..options.evidence_roles import reject_unsupported_detached_debug
 from ..options.params import (
-    SIDED_EXISTING_PATH_PARAM,
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 
@@ -187,7 +186,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # secondary format, resolved per-format inside compare_release_cmd.
     # report_mode's "leaf"/"root-cause" restructure a single DiffResult's own
     # root-cause graph -- the release report has no such graph to
-    # restructure (the same mismatch --format sarif/html/review hits below),
+    # restructure (the same mismatch -o sarif=.../html/review hits below),
     # so those two are rejected. "impact" (Codex review, PR #1154 second
     # follow-up: "Reject unsupported impact views instead of silently
     # dropping them") is neither implemented as a real aggregate nor
@@ -227,41 +226,38 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         report_mode = "full"
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
-            f"--format {fmt} is not available when comparing directories or "
+            f"-o {fmt}=... is not available when comparing directories or "
             "packages: sarif/html/review require a single-pair (non-directory, "
             "non-package) comparison. Choose one of: "
             f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
-            f"a time (a single old/new .so pair) to use --format {fmt}."
+            f"a time (a single old/new .so pair) to export {fmt}."
         )
-    # CLI cleanup phase two, PR E: --write now works for a release operand
-    # (compare_release_cmd's own secondary_output_options only declares
-    # json/markdown/junit, matching _RELEASE_FORMATS) -- but `compare`'s own
-    # --write accepts sarif/html/review too, parsed by its own Click
-    # callback *before* this dispatch ever runs, so an incompatible
-    # secondary format must be rejected here explicitly. Without this,
+    # `compare`'s own `-o` accepts sarif/html/review (a single-pair
+    # comparison renders all three), and the export set is parsed before
+    # this dispatch knows the operands are directories -- so a format this
+    # fan-out cannot produce must be rejected here explicitly. Without it,
     # compare_release_cmd's own callback is reached directly (not through
-    # Click's arg parsing, so its own decorator-level validation never
-    # runs) and _format_release_summary's fallback branch would silently
-    # render markdown to the requested sarif/html/review path instead of
+    # Click's arg parsing, so its own decorator-level validation never runs)
+    # and _format_release_summary's fallback branch would silently render
+    # markdown to the requested sarif/html/review destination instead of
     # erroring.
     #
-    # ADR-068 D4/Phase 5: `--write` is repeatable, and the release engine
-    # now renders every one of them from the same already-computed result
-    # (one analysis, several artifacts) -- so the operand is forwarded whole
-    # rather than unpacked to a single pair and the extras rejected. The
-    # per-write PATH-uniqueness and --output collision checks are Click's
-    # own callback and `reject_incoherent_secondary_writes`', shared with
-    # `compare`; only the *format* restriction below is release-specific.
+    # Every export is checked, not just the first: the release engine renders
+    # each one from the same already-computed result (one analysis, several
+    # artifacts), so each must name a format it can actually produce.
+    # Destination collisions and stdout exclusivity were already settled
+    # while the operand was parsed (`frontends.cli.options.export`); only the
+    # *format* restriction below is release-specific.
     secondary_writes = kwargs.get("secondary_writes", ())
     for secondary_fmt, _ in secondary_writes:
         if secondary_fmt not in _RELEASE_FORMATS:
             raise click.UsageError(
-                f"--write {secondary_fmt}=... is not available when comparing "
+                f"-o {secondary_fmt}=... is not available when comparing "
                 "directories or packages: sarif/html/review require a "
                 "single-pair (non-directory, non-package) comparison. Choose "
                 f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
-                "library at a time (a single old/new .so pair) to use --write "
-                f"{secondary_fmt}=..."
+                "library at a time (a single old/new .so pair) to export "
+                f"{secondary_fmt}."
             )
     from ....cli_compare_release import compare_release_cmd
 
@@ -614,32 +610,26 @@ def _embed_inline_source_side(
 # the unreduced `compile_context_options()` decorator unchanged.
 @two_sided_input_options
 # ── Compare options (unchanged) ──────────────────────────────────────────────
-@output_options(
+@export_options(
     ["json", "markdown", "sarif", "html", "junit", "review", "oneline"],
-    format_help="Output format. 'review' emits a compact GitHub-facing digest "
-                "(verdict + counts + release recommendation + manual-review banner) "
-                "suitable for a job summary or PR comment. 'oneline' emits a single "
-                "human-readable summary line -- the 'just tell me' flow.",
-)
-@secondary_output_options(
-    ["json", "markdown", "sarif", "html", "junit", "review"],
-    multiple=True,
-    format_help="Emit a second output format from this same comparison run, to "
-                "its own file, without re-running the comparison (e.g. "
-                "--format markdown for a human alongside --write json=abi.json "
-                "for tooling). FORMAT is one of {formats}; PATH must differ from "
-                "--output/-o. Always renders the full, unfiltered report "
-                "(ignores --view show=...). For a directory/package (release) "
-                "comparison, only json/markdown/junit are available, and only "
-                "one --write is supported there.",
+    default_format="markdown",
+    supports_directory=True,
+    directory_formats=["json"],
+    help_extra=" 'review' emits a compact GitHub-facing digest (verdict + "
+               "counts + release recommendation + manual-review banner) "
+               "suitable for a job summary or PR comment; 'oneline' emits a "
+               "single human-readable summary line -- the 'just tell me' "
+               "flow. A directory/package (release) comparison renders "
+               "json/markdown/junit/oneline only. Every export is rendered "
+               "from the one completed comparison -- asking for more "
+               "artifacts never re-runs the analysis and never changes the "
+               "verdict or the exit code.",
 )
 @click.option(
     "--view", "view", multiple=True, callback=_validate_view, expose_value=True,
     metavar="TOKEN",
     help="Repeatable rendering selector (ADR-068 D4): never changes the "
-         "verdict, findings, or exit code. Replaces --report-mode/"
-         "--show-only/--demangle/--no-demangle/--explain-patterns/"
-         "--show-filtered/--audit-suppressions. TOKEN: "
+         "verdict, findings, or exit code. TOKEN: "
          "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
          "'show=<tokens>' (severity/element/action filter, same vocabulary "
          "as the old --show-only, repeatable to OR groups together); "
@@ -647,7 +637,7 @@ def _embed_inline_source_side(
          "markdown/review/html); 'patterns' (explain pattern-verdict "
          "modulation, which always runs where evidence exists); 'filtered' "
          "(echo the scope/disposition ledger of findings excluded from the "
-         "verdict, always computed and always in --format json); "
+         "verdict, always computed and always in -o json=...); "
          "'suppressions' (echo the --suppress rule audit, likewise always "
          "computed -- a no-op without --suppress, never an error). Example: "
          "--view leaf --view demangle --view show=breaking,functions.",
@@ -695,15 +685,14 @@ def _embed_inline_source_side(
                    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
                    "private __pp_* kernel churn and other non-committed exports are demoted "
                    "to the filtered ledger (see --view filtered).")
-@click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
-              help="Build-configuration matrix snapshot, "
-                   "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
-                   "old=m1 --probe-matrix new=m2). With both sides given, build-config "
-                   "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
-                   "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
-                   "verdict and report (G2: probe -> compare; ADR-040).")
+# one-comparison-product.md Phase 7n: --probe-matrix is gone. A probe-matrix
+# snapshot is build evidence, so it is one of --build-info's operands now,
+# recognised from the document's own schema/required-key contract rather
+# than a filename -- probe observations and compile context stay distinct
+# internally and may be supplied together for one side.
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
-# --debug-root{,1,2}: the shared local-ELF debug-resolution family. The
+# --debug-info: the whole separate-debug-info role (Phase 7n merged
+# --debug-root into it -- directory, detached file, or debug package). The
 # dwarf-only/debuginfod[-url]/debug-format hidden flags are gone (ADR-068 D5,
 # Phase 7a) -- debug.* .abicheck.yml keys are their only spelling now.
 @debug_resolution_options
@@ -796,7 +785,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     source-graph completeness — independent of what the verdict says)
     contributes exit 1 the same way, folded with the same max discipline.
     Without the setting, analysis_assurance is still always computed and
-    reported in --format json, it just never affects the exit code. Single-
+    reported in -o json=..., it just never affects the exit code. Single-
     pair compares only, not the directory/package release fan-out (see
     docs/reference/config-file.md's `assurance:` section).
     \b
@@ -828,7 +817,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       # With version labels and SARIF output
       abicheck compare libfoo.so.1 libfoo.so.2 \\
         --header old=v1/foo.h --header new=v2/foo.h \\
-        --version old=1.0 --version new=2.0 --format sarif -o abi.sarif
+        --version old=1.0 --version new=2.0 -o sarif=abi.sarif
     \b
       # Compare saved snapshot vs current build (mixed mode)
       abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
@@ -848,9 +837,26 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from ....cli_compare_helpers import run_compare
 
+    # Plan slice 7m: one repeatable ``-o FORMAT=DESTINATION`` request reaches
+    # this callback as a single ``ExportSet``; expand it into the
+    # ``fmt``/``output``/``secondary_writes``/``output_dir`` dest names every
+    # downstream consumer (run_compare, the release fan-out, the abort
+    # renderers, the exit fold) already threads, so the grammar change stops
+    # at this boundary rather than rippling through the whole compare stack.
+    from ..options.export import expand_export_kwargs, reject_dry_run_with_exports
+
+    reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
+    expand_export_kwargs(kwargs)
+
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.
     normalize_sided_options(kwargs)
+    # Phase 7n: --debug-info's detached-file transport is DWARF-only; a named
+    # PDB/DWP is refused here rather than resolved and then ignored.
+    reject_unsupported_detached_debug(
+        [*kwargs.get("debug_roots", ()), *kwargs.get("debug_roots_old", ()),
+         *kwargs.get("debug_roots_new", ())]
+    )
 
     # ADR-068 D4/Phase 5: resolve --view (frontends.cli.options.view) into
     # the same report_mode/show_only/demangle/explain_patterns dest names

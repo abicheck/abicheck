@@ -16,7 +16,7 @@ misrepresents the change as dozens of problems instead of one.
 ## Use abicheck's own grouping, not your own
 
 ```bash
-abicheck compare OLD NEW --view root-cause --format json
+abicheck compare OLD NEW --view root-cause -o json=-
 ```
 
 The report then carries `root_causes` (findings grouped by

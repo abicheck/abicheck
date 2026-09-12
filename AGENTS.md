@@ -237,11 +237,15 @@ isn't available in your environment (add `,docs,dist` for full parity).
 
 Entry points:
 - `abicheck/cli.py` — Click CLI **root only**: the root group, its
-  `--version`/SIGTERM wiring, the side-effect registration imports, and the
-  lazy `__getattr__` compatibility shim (see `frontends/cli/moved.py`).
-  ~140 lines, no product logic — ADR-061 Phase 4 moved every command body,
+  `--version`/SIGTERM wiring, and the side-effect registration imports.
+  ~120 lines, no product logic — ADR-061 Phase 4 moved every command body,
   shared runtime helper, and process-exit decision to
-  `abicheck/frontends/cli/`. Add a command there, not here. (This line read
+  `abicheck/frontends/cli/`. Add a command there, not here. It carried a
+  lazy `__getattr__` alias table (`frontends/cli/moved.py`) keeping ~80
+  private helpers importable from `abicheck.cli` after they moved; every
+  caller now imports from the owner, so the table, the resolver and the
+  assignment guard that protected it are deleted. **Import from the owner,
+  and patch the owner** — `abicheck.cli` re-exports nothing. (This entry read
   "large file, at the 2000-line hard cap" long after that stopped being
   true — exactly the drift the "don't trust hard-coded line counts" warning
   below is about.)
@@ -392,9 +396,21 @@ Core pipeline (in order of data flow):
      produced under; `comparability.check_contracts_comparable` refuses
      (`ScopeMismatchError`) to compare two sides with a differing explicit
      value, and `service.run_dump`'s `include_dependencies` parameter
-     (default `True`, folded into the whole-snapshot disk cache key) is
+     (folded into the whole-snapshot disk cache key) is
      what lets `compare`'s own live-binary dumping filter consistently with
-     a `dump` baseline instead of always producing the unfiltered surface
+     a `dump` baseline instead of always producing the unfiltered surface.
+     **That parameter, `InputSpec.include_dependencies`, and the CLI flag all
+     default to `False`** (exclude toolchain/system declarations) — one
+     default across every front end. `run_dump`/`InputSpec` defaulted to
+     `True` until the defaults-alignment pass, which meant a typed-API caller
+     omitting the field got the *unfiltered* surface while the identical CLI
+     invocation got the filtered one (measured: 10 vs 5,597 functions on a
+     one-header C++ library), and — since the two are not comparable — a CLI
+     baseline could not be compared against a typed-API candidate at all
+     (`scope_mismatch`, no verdict). Note there are **three** places that
+     spell this default: the `InputSpec` field, `wrap_run_dump_with_
+     dependency_scope`'s wrapper keyword, and the synthetic `__signature__`
+     it builds for introspection; a test asserts the last two agree
 3. **Diffing** — compare two snapshots
    - `diff_symbols.py` — function/variable/parameter changes
    - `diff_types.py` — struct/enum/union/typedef changes
@@ -1403,7 +1419,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   3. At the bottom of `cli.py`, add `cli_<name>` to the side-effect `from . import (...)` block — that runs after `main` and helpers are defined, registering the new command.
   4. If the new module uses `@click` decorators, add `abicheck.cli_<name>` to the `disallow_untyped_decorators = false` override in `pyproject.toml` (alongside the existing entries).
   5. If `scripts/check_ai_readiness.py` flags a cycle, this is `IMPORT_CYCLE_ALLOWLIST`'s known CLI-registration cluster — see "What NOT to do" below before extending it.
-  6. **Shared utility flags go through a decorator, not an inline copy.** `-v/--verbose` is `@verbose_option`, `--format`/`-o/--output` are `output_options(...)`, language is `lang_option(...)` (all in `cli_options.py`). Every visible option must carry `help=` text and a shared concept must use one canonical primary spelling — both are enforced by `tests/test_cli_contract.py` (`test_no_option_has_empty_help`, `test_shared_concept_canonical_spelling`).
+  6. **Shared utility flags go through a decorator, not an inline copy.** `-v/--verbose` is `@verbose_option`, the one `-o FORMAT=DESTINATION` export request is `export_options(...)`, language is `lang_option(...)` (all in `cli_options.py`). Every visible option must carry `help=` text and a shared concept must use one canonical primary spelling — both are enforced by `tests/test_cli_contract.py` (`test_no_option_has_empty_help`, `test_shared_concept_canonical_spelling`).
   7. **Moving helpers out of a module that re-exports them?** If you relocate a helper that an existing module re-exports "for API stability / tests" (e.g. the `cli_buildsource` block), preserve the old import path with a lazy module-level `__getattr__` shim that resolves via `importlib.import_module` — a static `from .new_module import …` re-export would re-introduce the import cycle the split was meant to avoid (see the shim at the tail of `cli_buildsource.py`).
 
 ## Exit codes

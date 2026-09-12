@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +73,7 @@ from ...cli_resolve import (
     _sniff_text_format,
 )
 from ...frontends.cli import help as cli_help
+from .options.export import ExportSet
 from .options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
@@ -359,15 +360,19 @@ def _render_output(
 ) -> str:
     """Render comparison result in the requested output format.
 
-    No ``stat``/``show_recommendation`` parameters (CLI cleanup phase two,
-    PR 1): the one-line summary is reached only via ``fmt ==
-    service_render.ONELINE_FORMAT`` (``--format oneline``). The release
-    recommendation is unconditional for every CLI
-    invocation -- achieved by explicitly passing ``show_recommendation=True``
-    below, not by changing :func:`service.render_output`'s own default
-    (which stays ``False``, the pre-removal Tier-2 Python API default, per
-    Codex review, fresh evidence -- a direct caller that omits the keyword
-    must keep getting the behaviour it always got).
+    No ``stat``/``show_recommendation`` parameters: the one-line summary is
+    reached only via ``fmt == service_render.ONELINE_FORMAT``
+    (``-o oneline=...``), and the summary-only JSON via
+    ``service.to_stat_json``.
+
+    ``show_recommendation=True`` is still passed explicitly below even though
+    :func:`service.render_output`'s own default is now ``True`` as well. It is
+    redundant, deliberately: this wrapper states the CLI's own contract (the
+    release recommendation is unconditional for every CLI invocation) rather
+    than inheriting it, so a future change to the library default cannot alter
+    CLI output without a test here failing first. It previously *compensated*
+    for a ``False`` default, which is the divergence the defaults-alignment
+    pass removed.
     """
     from ...service import render_output
     return render_output(
@@ -395,7 +400,8 @@ def _load_probe_matrix_changes(
         return None
     if probe_matrix_old is None or probe_matrix_new is None:
         raise click.UsageError(
-            "--probe-matrix needs both sides: --probe-matrix old=… --probe-matrix new=…"
+            "a build-configuration matrix needs both sides: --build-info old=<matrix> "
+            "--build-info new=<matrix>"
         )
     from ...workflows.findings import diff_matrix, load_matrix_snapshot
 
@@ -433,6 +439,35 @@ def _write_or_echo(output: Path | None, text: str) -> None:
         click.echo(text)
 
 
+def emit_export_set(
+    exports: ExportSet, render: Callable[[str], str]
+) -> None:
+    """Write every document export in *exports*, rendering each format once.
+
+    Plan slice 7m's emit half. Two properties are structural here rather
+    than tested per command:
+
+    * *render* is called at most once per **format**, and its result is
+      reused for every target naming that format -- so two exports of one
+      format are byte-identical because they are literally the same string,
+      not because two renders happened to agree (plan §7 F-19).
+    * targets are written in request order, and a stdout target goes through
+      the identical ``_write_or_echo`` path a file target does, so "which
+      destination" changes nothing but the destination.
+
+    Directory (per-component fan-out) targets are **not** emitted here --
+    they are the release fan-out's own writes, driven by the command that
+    owns that fan-out.
+    """
+    rendered: dict[str, str] = {}
+    for target in exports.documents:
+        text = rendered.get(target.fmt)
+        if text is None:
+            text = render(target.fmt)
+            rendered[target.fmt] = text
+        _write_or_echo(target.destination, text)
+
+
 def _announce_exit_scheme(
     scheme: str,
     *, fmt: str = "markdown",
@@ -445,7 +480,7 @@ def _announce_exit_scheme(
     once by the time we get here. Kept on stderr so it never pollutes the
     report on stdout, and only for the human-readable formats — machine formats
     (json/sarif/junit) and the one-line format (``service_render.
-    ONELINE_FORMAT``, ``--format oneline``, ``--stat``'s sole surviving
+    ONELINE_FORMAT``, ``-o oneline=...``, ``--stat``'s sole surviving
     replacement) are consumed by tooling that treats the
     whole captured stream as data, so the banner is suppressed for those too;
     the ``fmt not in {...}`` check below already covers it without a separate

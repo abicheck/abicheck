@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare --format oneline`` for a directory/package (release) operand.
+"""``compare -o oneline=...`` for a directory/package (release) operand.
 
 The "just tell me" flow, at release cardinality. ``compare`` has rendered
 ``oneline`` for a single pair since CLI cleanup phase two PR 1; a directory

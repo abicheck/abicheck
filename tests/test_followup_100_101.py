@@ -363,7 +363,8 @@ class TestCliPolicy:
     def test_policy_invalid_case_rejected(self, tmp_path: Any) -> None:
         from click.testing import CliRunner
 
-        from abicheck.cli import _EXIT_USAGE_ERROR, main
+        from abicheck.cli import main
+        from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR
         old_p, new_p = self._write_snapshots(tmp_path)
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "--policy", "SDK_VENDOR"])
         # Invalid option value → Click usage error, remapped to the dedicated

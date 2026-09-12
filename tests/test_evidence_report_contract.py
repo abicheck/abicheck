@@ -149,7 +149,7 @@ class TestEvidenceReportGoesToStderr:
     def test_json_stdout_is_parseable_while_tables_go_to_stderr(self, tmp_path):
         old, new = self._pair_with_embedded_evidence(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--format", "json"]
+            main, ["compare", str(old), str(new), "-o", "json=-"]
         )
         assert result.exit_code in (0, 2, 4), result.stderr
         # The whole point: stdout is *only* the report document.

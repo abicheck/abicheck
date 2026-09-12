@@ -170,7 +170,7 @@ abi3audit stays specialized to abi3 internal-consistency checks. abicheck's
 addition is everything abi3audit doesn't cover: inter-release CPython
 ABI/Python-API changes, native-library changes, NumPy targeting, deployment
 floors, bundled-library topology, and policy aggregation — via the existing
-`abicheck compare <previous-wheel> <new-wheel> --format json`, wrapped in a
+`abicheck compare <previous-wheel> <new-wheel> -o json=-`, wrapped in a
 project's own script to select the matching baseline until automatic
 resolution (gap 2 above) exists.
 

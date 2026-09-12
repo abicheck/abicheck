@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable, require_bash
 
 from abicheck.buildsource.project_targets import (
     DEFAULT_PROFILE_RUNNER_LABEL,
@@ -161,6 +162,7 @@ def _resolve_dependency_source(
     resolution *behaviour* — a future edit that keeps the same words but
     changes the branching still fails here.
     """
+    require_bash()
     action = yaml.safe_load((REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
     step = next(
         s
@@ -178,7 +180,7 @@ def _resolve_dependency_source(
     # cause — see the skipif above for the real one — but the relative form
     # is correct on its own merits, so it stays.)
     completed = subprocess.run(
-        ["bash", "resolve.sh"],
+        [bash_executable(), "resolve.sh"],
         cwd=tmp_path,
         env={
             **os.environ,

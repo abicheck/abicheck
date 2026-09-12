@@ -621,7 +621,7 @@ report to `-o`:
 
 ```bash
 abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
-  --sources new=. --depth source --format json -o artifacts/libfoo-1.0-report.json
+  --sources new=. --depth source -o json=artifacts/libfoo-1.0-report.json
 ```
 
 ### Omitting `--depth` — `auto`, and why it is not risk-driven any more

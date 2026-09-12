@@ -267,33 +267,24 @@ def _validate_no_baseline_invocation(
     errors (exit 64) rather than silent no-ops -- see
     :data:`_UNSUPPORTED_OPTIONS` for why that inversion is the rule here.
     """
-    from ....dry_run import reject_dry_run_with_output
-    from ..options import reject_incoherent_secondary_writes
-
     fmt = kwargs.get("fmt") or "markdown"
     if fmt not in _SUPPORTED_FORMATS:
         raise click.UsageError(_unsupported_format_message(fmt))
 
-    output = kwargs.get("output")
-    dry_run = bool(kwargs.get("dry_run", False))
     # ADR-068 D4: "a complete machine-readable result must always be
-    # obtainable without a second run" -- `--write` was accepted and silently
-    # dropped on this path (the same silently-inert-flag class as
-    # `--contract` and the evidence options), so a job asking for a JSON
+    # obtainable without a second run" -- a second artifact was once accepted
+    # and silently dropped on this path (the same silently-inert-flag class
+    # as `--contract` and the evidence options), so a job asking for a JSON
     # artifact alongside a human-readable one got nothing and no warning.
-    # The two coherence rules (`--dry-run` writes nothing; a secondary PATH
-    # may not collide with `-o`) come from the shared guard both `compare`
-    # forms use, not a second copy.
+    # Plan slice 7m: the two coherence rules that used to be re-checked here
+    # (`--dry-run` writes nothing; two exports may not collide) are now
+    # properties of the one export request, enforced while it is parsed and
+    # at `compare`'s own callback boundary -- so what is left here is the one
+    # thing only this path knows: which formats it can render.
     secondary_writes = tuple(kwargs.get("secondary_writes") or ())
-    reject_dry_run_with_output(dry_run, output)
-    reject_incoherent_secondary_writes(
-        dry_run=dry_run, output=output, secondary_writes=secondary_writes
-    )
     for write_fmt, _path in secondary_writes:
         if write_fmt not in _SUPPORTED_FORMATS:
-            raise click.UsageError(
-                _unsupported_format_message(write_fmt, flag="--write")
-            )
+            raise click.UsageError(_unsupported_format_message(write_fmt))
     _reject_old_sided_inputs(kwargs)
     _reject_unsupported_options(kwargs)
     _reject_context_stashed_options(ctx)
@@ -580,11 +571,13 @@ def _run_no_baseline_compare_cmd(
     _emit_no_baseline_report(result, inv)
 
 
-def _unsupported_format_message(fmt: str, *, flag: str = "--format") -> str:
-    """The usage error for a ``--format`` this audit does not render.
+def _unsupported_format_message(fmt: str) -> str:
+    """The usage error for an export format this audit does not render.
 
-    *flag* names the option the rejected value came from (``--format`` or
-    ``--write``), so the message quotes what the user typed.
+    One message rather than a *flag*-parameterized pair: since plan slice 7m
+    every export -- the stdout one and every file one -- comes from the same
+    ``-o FORMAT=DESTINATION`` operand, so there is only one option left to
+    name.
 
     Names the ruling rather than promising a later phase: ``html`` and
     ``review`` are narrative renderings of a *comparison* (a verdict badge,
@@ -595,13 +588,13 @@ def _unsupported_format_message(fmt: str, *, flag: str = "--format") -> str:
     supported = "/".join(sorted(_SUPPORTED_FORMATS))
     if fmt in NO_BASELINE_UNSUPPORTED_FORMATS:
         return (
-            f"{flag} {fmt} is not available with --no-baseline: it renders a "
+            f"-o {fmt}=... is not available with --no-baseline: it renders a "
             "compatibility comparison (verdict, OLD -> NEW counts, release "
             "recommendation), and a single-build audit has none of those "
             f"(ADR-068 D2). Use one of {supported} instead; oneline is the "
             "closest equivalent to a review digest."
         )
     return (
-        f"--no-baseline does not support {flag} {fmt} -- only {supported} "
+        f"--no-baseline does not support -o {fmt}=... -- only {supported} "
         "are available for an audit report."
     )

@@ -348,6 +348,7 @@ class TestBashResolutionNeverFallsBackToWhatItRejected:
         """The invariant the defect broke, on whatever platform runs this:
         `have_bash()` is true exactly when what `bash_executable()` returns is
         a real bash. Their disagreement was the whole finding."""
+        require_bash()
         assert have_bash() is (not is_wsl_launcher_stub(bash_executable()))
 
 

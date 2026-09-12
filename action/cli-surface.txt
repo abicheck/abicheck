@@ -3,19 +3,19 @@
 # CLI choice sets `action/validate-inputs.sh` needs before abicheck is
 # installed. Read with `grep -qxF`. See the generator's docstring for
 # why only genuine click.Choice sets appear here (ADR-070 D3).
-CHOICE compare --format json
-CHOICE compare --format markdown
-CHOICE compare --format sarif
-CHOICE compare --format html
-CHOICE compare --format junit
-CHOICE compare --format review
-CHOICE compare --format oneline
-CHOICE deps-tree --format json
-CHOICE deps-tree --format markdown
-CHOICE deps-tree --format html
-CHOICE deps-compare --format json
-CHOICE deps-compare --format markdown
-CHOICE deps-compare --format html
+CHOICE compare -o json
+CHOICE compare -o markdown
+CHOICE compare -o sarif
+CHOICE compare -o html
+CHOICE compare -o junit
+CHOICE compare -o review
+CHOICE compare -o oneline
+CHOICE deps-tree -o json
+CHOICE deps-tree -o markdown
+CHOICE deps-tree -o html
+CHOICE deps-compare -o json
+CHOICE deps-compare -o markdown
+CHOICE deps-compare -o html
 CHOICE dump --compression auto
 CHOICE dump --compression none
 CHOICE dump --compression gzip

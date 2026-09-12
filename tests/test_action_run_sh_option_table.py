@@ -44,9 +44,9 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 from test_action_run_sh_helpers import (
     RUN_SH,
-    _bash_executable,
     _cli_introspection_prelude,
     _helpers_region,
 )
@@ -60,6 +60,7 @@ def _run_harness_with(py_bin: str, body: str) -> str:
     making the binary a parameter there would invite a future test to pass one
     by accident.
     """
+    require_bash()
     script = _helpers_region() + _cli_introspection_prelude(py_bin) + f"\n{body}\n"
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
@@ -68,7 +69,7 @@ def _run_harness_with(py_bin: str, body: str) -> str:
         path = fh.name
     try:
         result = subprocess.run(
-            [_bash_executable(), path], capture_output=True, text=True
+            [bash_executable(), path], capture_output=True, text=True
         )
     finally:
         os.unlink(path)

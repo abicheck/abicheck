@@ -294,10 +294,8 @@ def run_abicheck(old: str, new: str, old_ver: str, new_ver: str) -> dict | None:
         f"old={old_ver}",
         "--version",
         f"new={new_ver}",
-        "--format",
-        "json",
         "-o",
-        out_path,
+        f"json={out_path}",
     ]
     subprocess.run(cmd, capture_output=True, text=True)
     try:

@@ -119,7 +119,7 @@ def fold_abi3_into_extra_changes(
 
 def report_abi3_evidence_contract_error(result: Any, failure: str | None) -> None:
     """Stamp ADR-064's exit-7 axis for a failed ``--abi3`` precondition and
-    say so on stderr (so the message survives ``--format json`` on stdout)."""
+    say so on stderr (so the message survives ``-o json=...`` on stdout)."""
     from ...workflows.abi3_audit import record_abi3_evidence_contract_error
 
     record_abi3_evidence_contract_error(result, failure)

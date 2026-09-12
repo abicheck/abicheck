@@ -72,7 +72,7 @@ def resolve_and_reject_shared_pdb_path(
             "(removed from the CLI, and not reinvented as a config key), "
             "applying it to two different PE binaries risks silently "
             "reading the same debug info for both and reporting a false "
-            "clean result. Use --debug-root old=<dir>/new=<dir> instead -- "
+            "clean result. Use --debug-info old=<dir>/new=<dir> instead -- "
             "it resolves each side's own PDB by that side's binary name."
         )
     return pdb_path

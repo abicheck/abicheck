@@ -113,8 +113,8 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_dir),
             "--policy",
             str(policy_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert code == 0, out  # demoted to risk -> COMPATIBLE_WITH_RISK
         data = json.loads(out)
@@ -144,8 +144,8 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert code == 4, out  # undemoted FUNCTION_REMOVED -> BREAKING
         data = json.loads(out)
@@ -176,8 +176,8 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_path),
             "--policy",
             str(policy_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         single_fields = json.loads(single_out)["effective_config_fields"]
 
@@ -187,8 +187,8 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_dir),
             "--policy",
             str(policy_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         release_fields = json.loads(release_out)["effective_config_fields"]
 
@@ -227,8 +227,8 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_path),
             "--policy",
             str(policy_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         single_fields = json.loads(single_out)["effective_config_fields"]
         assert single_fields["policy.base"].startswith("sdk_vendor")
@@ -239,8 +239,8 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_dir),
             "--policy",
             str(policy_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         release_fields = json.loads(release_out)["effective_config_fields"]
 
@@ -280,8 +280,13 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         )
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
-            "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
         )
         assert code == 0, out  # demoted to COMPATIBLE -> exit 0
         fields = json.loads(out)["effective_config_fields"]
@@ -301,7 +306,7 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-",
         )
         assert code == 4, out  # undemoted FUNCTION_REMOVED -> BREAKING
         fields = json.loads(out)["effective_config_fields"]
@@ -332,9 +337,15 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         )
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--config", str(cfg), "--policy", str(policy_path),
-            "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--policy",
+            str(policy_path),
+            "-o",
+            "json=-",
         )
         assert code == 4, out  # explicit file's "break" wins -> BREAKING
         fields = json.loads(out)["effective_config_fields"]
@@ -362,8 +373,15 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         out_dir = tmp_path / "out"
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
-            "--format", "json", "--output-dir", str(out_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
+            "-o",
+            f"json={out_dir}/",
         )
         assert code == 0, out
         release_fields = json.loads(out)["effective_config_fields"]
@@ -431,8 +449,8 @@ class TestReleasePolicyOverrideWarningFiresOnce:
                 str(new_dir),
                 "--policy",
                 str(policy_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output

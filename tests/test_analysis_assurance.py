@@ -1309,7 +1309,7 @@ class TestAnalysisAssuranceCliIntegration:
     def test_json_report_always_carries_analysis_assurance(
         self, tmp_path: Path
     ) -> None:
-        res = _compare(tmp_path, _header_pair(), "--format", "json")
+        res = _compare(tmp_path, _header_pair(), "-o", "json=-")
         assert res.exit_code == 0, res.output
         payload = json.loads(res.output[res.output.index("{") :])
         aa = payload["analysis_assurance"]
@@ -1326,7 +1326,7 @@ class TestAnalysisAssuranceCliIntegration:
         purely additive."""
         res = _compare(tmp_path, _elf_only_pair())
         assert res.exit_code == 0, res.output
-        payload_res = _compare(tmp_path, _elf_only_pair(), "--format", "json")
+        payload_res = _compare(tmp_path, _elf_only_pair(), "-o", "json=-")
         payload = json.loads(payload_res.output[payload_res.output.index("{") :])
         # Sanity: this fixture really is a non-"complete" case, so the next
         # assertion (flag raises it to 1) is actually testing something.
@@ -1342,7 +1342,7 @@ class TestAnalysisAssuranceCliIntegration:
             tmp_path,
             _elf_only_pair(),
             "--require-complete-analysis",
-            "--format", "json",
+            "-o", "json=-",
         )
         assert res.exit_code == 1, res.output
         # The floor diagnostic is echoed to stderr (see
@@ -1450,8 +1450,8 @@ class TestAnalysisAssuranceOutOfBandPack:
                 str(new_p),
                 "--build-info",
                 "old=" + str(pack_dir),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
@@ -1642,8 +1642,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--format",
-                "sarif",
+                "-o",
+                "sarif=-",
                 *_assurance_config_args(tmp_path),
             ],
         )
@@ -1672,8 +1672,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--format",
-                "junit",
+                "-o",
+                "junit=-",
                 *_assurance_config_args(tmp_path),
             ],
         )
@@ -1714,8 +1714,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--format",
-                "sarif",
+                "-o",
+                "sarif=-",
             ],
         )
         assert res.exit_code == 0, res.output

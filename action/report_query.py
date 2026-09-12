@@ -843,7 +843,7 @@ def _annotations(report: dict[str, Any], *, additions: bool) -> list[str]:
         annotation = entry["annotation"]
         # `_json_report_src` can, in a rare failure-before-write case,
         # resolve to a JSON file this invocation never produced (a stale
-        # --output-file/--write destination that already existed in the
+        # --output-file/-o export destination that already existed in the
         # checked-out tree before abicheck ran, e.g. one a PR author
         # committed). Printing `annotation` verbatim in that case would echo
         # an arbitrary, attacker-controlled workflow command -- including

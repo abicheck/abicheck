@@ -179,7 +179,7 @@ class TestEmbeddedInstantiationManifest:
         new_pkg = tmp_path / "new_pkg"
         _write_directory(new_pkg, new_libs)
 
-        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "-o", "json=-")
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
         # CodeRabbit review: a bare non-empty check can pass on an unrelated
@@ -695,7 +695,7 @@ class TestEmbeddedManifestForEmptyVariant:
         new_pkg = tmp_path / "new_pkg"
         _write_directory(new_pkg, new_libs)
 
-        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "-o", "json=-")
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
         matching = [
@@ -745,8 +745,8 @@ class TestBundleFactsOutCarriesEmbeddedManifest:
             "compare",
             str(old_pkg),
             str(new_pkg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--bundle-facts-out",
             str(out_path),
         )
@@ -840,7 +840,7 @@ class TestBothSidesEmptyVariantsStillEnforceManifests:
         )
         write_project_manifest(new_pkg, new_manifest)
 
-        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "-o", "json=-")
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
         matching = [

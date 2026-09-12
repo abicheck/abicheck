@@ -300,13 +300,17 @@ def bash_executable() -> str:
     substring assertion) and exits 1, which reads as every test in the file
     failing at once for no stated reason.
 
-    This is the canonical copy. Roughly two dozen ``test_action_*`` modules
-    still carry their own private ``_bash_executable``, each written before
-    there was a shared home for it -- a new module should import this one
-    rather than clone a twenty-fifth, which is exactly how
-    ``test_action_run_sh_build_info_conflict`` shipped with a bare ``bash``
-    and reddened the Windows lane. Migrating the existing copies is a
-    separate, mechanical change and deliberately not done here.
+    This is the *only* copy. The twenty-nine private ``_bash_executable``
+    clones that used to shadow it have been folded onto it, and
+    ``tests/test_subprocess_bash_is_resolved.py`` now fails on a new clone,
+    on a new bare ``["bash", ...]`` argv, and on a call site that resolves
+    without asking :func:`require_bash` first -- the convention was what kept
+    failing (``test_action_run_sh_build_info_conflict`` and, later,
+    ``test_extra_args_is_value_option_completeness`` each shipped a bare
+    ``bash`` and reddened the Windows lane), so it is a gate now. The clones
+    mattered beyond tidiness: each was a *pre-stub-detection* copy, so every
+    module carrying one still handed the WSL launcher to ``subprocess`` after
+    this function had learned to reject it.
 
     ``GIT_BASH_PATH`` is honoured first so a runner with Git installed
     somewhere unusual can point at it.
@@ -409,6 +413,13 @@ def run_step(
     # `EOF\r`, so the heredoc never terminates, and `set -euo pipefail`-style
     # bodies break on the trailing CR (Codex review, PR #1230). The body must
     # reach bash byte-for-byte as the YAML holds it.
+    # Every path through this function runs bash -- there is no `shell: python`
+    # branch here -- so the guard belongs at the top rather than beside the
+    # call. Without it a consumer that never marks itself reaches
+    # `bash_executable()`'s documented `"bash"` fallback and executes the WSL
+    # launcher on a stub-only runner, which is what `_assurance_overlay_exec`
+    # was doing (Codex review, PR #1255).
+    require_bash()
     body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
     body.write_bytes(step["run"].encode("utf-8"))
     # Git Bash wants forward slashes, but a backslash is a legal *filename*

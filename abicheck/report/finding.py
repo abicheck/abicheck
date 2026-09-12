@@ -115,7 +115,7 @@ def report_findings_for(result: DiffResult) -> tuple[ReportFinding, ...]:
     instance -- e.g. a caller rendering twice with a demotion in between
     would keep serving the first render's verdicts (Codex review). Recomputed
     every call instead: this function is one pass over ``result.changes``,
-    called at most twice per report (primary + `--write` secondary), so the
+    called at most twice per report (primary + `-o` secondary), so the
     cost is negligible next to the correctness this trades for it.
 
     A caller holding only a duck-typed stub result (``html_report.py``

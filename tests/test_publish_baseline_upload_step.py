@@ -21,7 +21,7 @@ past the AI-readiness 2000-line hard cap (CLAUDE.md "Files that are large
 -- edit carefully"). Each class here executes the real step's embedded
 ``run:`` script verbatim (extracted via the small helper set below, a
 deliberate near-duplicate of test_publish_baseline_workflows.py's own
-``_load``/``_steps``/``_bash_executable``/``_WINDOWS_PYTHON3_SKIP`` --
+``_load``/``_steps``/``bash_executable``/``_WINDOWS_PYTHON3_SKIP`` --
 kept independent rather than imported cross-module, so each test file
 stays independently collectible) against a stubbed ``gh``, covering the
 safe-retry/immutability logic's several distinct rejection shapes: a
@@ -57,22 +57,10 @@ from typing import Any
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable, require_bash
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -86,7 +74,7 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
 
 #: Shared by every ``TestUploadReleaseAsset*`` class below -- each executes
 #: the real "Upload release asset" step's embedded script via
-#: ``_bash_executable()``, which calls ``python3`` directly; Git Bash on
+#: ``bash_executable()``, which calls ``python3`` directly; Git Bash on
 #: Windows typically only resolves ``python``, not ``python3`` (mirrors
 #: ``test_reusable_workflows.py``'s identical convention).
 _WINDOWS_PYTHON3_SKIP = pytest.mark.skipif(
@@ -141,6 +129,7 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
     @_WINDOWS_PYTHON3_SKIP
     @_JQ_REQUIRED
     def test_identical_tar_gz_content_is_a_safe_retry(self, tmp_path: Path) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -252,7 +241,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -291,6 +280,7 @@ class TestUploadReleaseAssetRejectsCrossProfileCollision:
     @_WINDOWS_PYTHON3_SKIP
     @_JQ_REQUIRED
     def test_same_content_different_profile_is_rejected(self, tmp_path: Path) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -395,7 +385,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -436,6 +426,7 @@ class TestUploadReleaseAssetRejectsMissingProfile:
     def test_existing_manifest_with_no_profile_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -529,7 +520,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -571,6 +562,7 @@ class TestUploadReleaseAssetRejectsUnsupportedManifestVersion:
     def test_unsupported_manifest_version_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -670,7 +662,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -710,6 +702,7 @@ class TestUploadReleaseAssetRejectsUnsupportedSnapshotSchema:
     def test_snapshot_schema_newer_than_installed_reader_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -815,7 +808,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -847,6 +840,7 @@ gh() {{
         reader -- matching profile and content, so every other guard
         would classify it as a safe retry.
         """
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -968,7 +962,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -995,6 +989,7 @@ gh() {{
         message. Explicit ``isinstance`` validation now makes this a clean
         rejection instead of a crash.
         """
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1090,7 +1085,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -1133,6 +1128,7 @@ class TestUploadReleaseAssetRejectsMismatchedProjectRef:
     def test_different_project_ref_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1230,7 +1226,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -1249,6 +1245,7 @@ gh() {{
     def test_missing_project_ref_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1343,7 +1340,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -1385,6 +1382,7 @@ class TestUploadReleaseAssetHandlesLeadingDashAssetName:
     def test_leading_dash_asset_name_is_uploaded_via_a_relative_path(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import shlex
         import subprocess
         import tempfile
@@ -1436,7 +1434,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -1482,6 +1480,7 @@ class TestUploadReleaseAssetRejectsSymlinkContainingExistingAsset:
     def test_in_root_symlink_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1579,7 +1578,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -1619,6 +1618,7 @@ class TestUploadReleaseAssetRejectsCorruptedExistingContent:
     def test_declared_digest_matching_but_real_bytes_differing_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1725,7 +1725,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,
@@ -1769,6 +1769,7 @@ class TestUploadReleaseAssetRejectsGenuinelyDifferentContent:
     def test_self_consistent_but_genuinely_different_content_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1876,7 +1877,7 @@ gh() {{
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(script)
             result = subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,

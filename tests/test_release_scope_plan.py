@@ -315,9 +315,7 @@ class TestScopePlanIsExecutionAuthoritative:
             "abicheck.workflows.release_request.resolve_release_scope_plan",
             side_effect=_narrow_to_libfoo_only,
         ):
-            code, out = _invoke(
-                "compare", str(old_dir), str(new_dir), "--format", "json"
-            )
+            code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
 
         assert code == 0
         data = json.loads(out)
@@ -368,8 +366,8 @@ class TestExplicitSelectionFoldedIntoScopePlan:
                 str(new_dir),
                 "--select",
                 "libfoo.json",
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             )
 
         assert code == 0

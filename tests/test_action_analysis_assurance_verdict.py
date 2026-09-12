@@ -73,6 +73,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parent.parent / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -93,8 +94,10 @@ def _stub_abicheck(tmp_path: Path, *, exit_code: int, report: dict | None) -> Pa
         "#!/usr/bin/env bash\n"
         "prev=''\n"
         'for arg in "$@"; do\n'
-        '  if [[ "$prev" == "-o" ]]; then\n'
-        f'    cp "{payload}" "$arg"\n'
+        # `-o` carries FORMAT=DESTINATION (plan slice 7m); a `-`
+        # destination is stdout and writes no file.
+        '  if [[ "$prev" == "-o" && "$arg" == *=* && "$arg" != *=- ]]; then\n'
+        f'    cp "{payload}" "${{arg#*=}}"\n'
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"
@@ -106,6 +109,7 @@ def _stub_abicheck(tmp_path: Path, *, exit_code: int, report: dict | None) -> Pa
 
 
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
+    require_bash()
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"
@@ -125,7 +129,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
         }
     )
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

@@ -382,6 +382,38 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="config.front_end_default_divergence",
+        invariant=(
+            "An option offered by more than one front end carries the same "
+            "default in each, so a caller that states nothing gets the same "
+            "behavior whichever front end it used."
+        ),
+        fixed_by=(1258,),
+        seed_tests=("tests/test_front_end_default_parity.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The *typed surfaces* are now derived, not listed: the "
+                    "sweep walks abicheck.service.__all__ plus the InputSpec "
+                    "field/of and run_dump's synthetic signature, so a new or "
+                    "renamed public entry point carrying the option is covered "
+                    "the moment it exists. That half was a real gap and it bit "
+                    "immediately -- the first revision listed three surfaces "
+                    "and review found resolve_input and run_compare still "
+                    "defaulting the other way, run_compare writing its value "
+                    "into both InputSpecs and so overriding the field default "
+                    "the test did check. What remains hand-maintained is "
+                    "SHARED_OPTIONS, the list of *options* reachable from more "
+                    "than one front end (one entry today). Deriving that too "
+                    "means matching Click dests against typed parameter names "
+                    "across every command, which would also sweep in "
+                    "coincidental name collisions; left listed deliberately."
+                ),
+                reference="PR #1258",
+            ),
+        ),
+    ),
+    BugClass(
         id="config.propagation_completeness",
         invariant=(
             "An accepted configuration value either reaches every "

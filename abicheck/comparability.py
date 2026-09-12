@@ -69,7 +69,7 @@ dropped scope:
   never a synthetic finding-shaped ``result``) via
   :func:`sarif.to_sarif_not_comparable`, and an errored JUnit testcase via
   :func:`junit_report.to_junit_xml_not_comparable` — wired into native
-  ``compare``'s ``_report_not_comparable`` for ``--format sarif``/``junit``,
+  ``compare``'s ``_report_not_comparable`` for ``-o sarif=...``/``junit``,
   and into ``compare-release``'s own ``_format_release_junit`` (a
   ``"not_comparable"`` per-library entry was previously excluded from
   ``error_libs`` entirely, silently producing zero testsuites for it).

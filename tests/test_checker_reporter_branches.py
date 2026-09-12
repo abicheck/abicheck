@@ -616,7 +616,7 @@ class TestToJsonBranches:
 
     def test_to_json_stat_mode(self):
         result = _make_diff(verdict=Verdict.NO_CHANGE)
-        out = to_json(result, stat=True)
+        out = to_stat_json(result)
         d = json.loads(out)
         assert "verdict" in d
         assert "summary" in d
@@ -675,7 +675,7 @@ class TestToMarkdownBranches:
 
     def test_to_markdown_stat_mode(self):
         result = _make_diff(verdict=Verdict.NO_CHANGE)
-        out = to_markdown(result, stat=True)
+        out = to_stat(result)
         assert "NO_CHANGE" in out
 
     def test_to_markdown_with_show_impact(self):

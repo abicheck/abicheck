@@ -30,6 +30,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _workflow_exec import bash_executable, require_bash
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "# If output was captured"
 _END_MARKER = 'echo "</details>"\n    fi'
@@ -48,25 +50,6 @@ def _summary_fence_region() -> str:
     return text[start:end]
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
     """Run the extracted snippet with FORMAT/ABICHECK_OUTPUT set, return stdout.
 
@@ -77,6 +60,7 @@ def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
     docstring); omitted, the isolated snippet behaves exactly as it did
     before that value existed.
     """
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
     ) as f:
@@ -89,7 +73,7 @@ def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
         env.pop("_EFFECTIVE_FORMAT", None)
     try:
         result = subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
     finally:

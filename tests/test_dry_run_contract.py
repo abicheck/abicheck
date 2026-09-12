@@ -517,7 +517,7 @@ class TestCompareDryRun:
         out = tmp_path / "would-not-be-written.json"
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "--dry-run", "-o", str(out)],
+            ["compare", str(old), str(new), "--dry-run", "-o", f"markdown={out}"],
         )
         assert result.exit_code == 64
         assert not out.exists()
@@ -644,7 +644,7 @@ class TestDepsTreeDryRun:
         binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
         out = tmp_path / "would-not-be-written.json"
         result = CliRunner().invoke(
-            main, ["deps", "tree", str(binary), "--dry-run", "-o", str(out)]
+            main, ["deps", "tree", str(binary), "--dry-run", "-o", f"markdown={out}"]
         )
         assert result.exit_code == 64
         assert not out.exists()
@@ -683,9 +683,16 @@ class TestDepsCompareDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "deps", "compare", "usr/bin/myapp",
-                "--old-root", str(old_root), "--new-root", str(new_root),
-                "--dry-run", "-o", str(out),
+                "deps",
+                "compare",
+                "usr/bin/myapp",
+                "--old-root",
+                str(old_root),
+                "--new-root",
+                str(new_root),
+                "--dry-run",
+                "-o",
+                f"markdown={out}",
             ],
         )
         assert result.exit_code == 64

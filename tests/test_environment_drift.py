@@ -852,10 +852,7 @@ class TestPlatformBaselineFloorCliEndToEnd:
         self._write_config(cfg_p, "2.27")
         result = CliRunner().invoke(
             main,
-            [
-                "compare", str(old_p), str(new_p),
-                "--config", str(cfg_p), "--format", "json",
-            ],
+            ["compare", str(old_p), str(new_p), "--config", str(cfg_p), "-o", "json=-"],
         )
         # promote_baseline_violation_findings promotes this finding to
         # BREAKING (Codex review, P1); legacy exit-code scheme: 4 = ABI break.
@@ -875,10 +872,7 @@ class TestPlatformBaselineFloorCliEndToEnd:
         self._write_config(cfg_p, "2.27")
         result = CliRunner().invoke(
             main,
-            [
-                "compare", str(old_p), str(new_p),
-                "--config", str(cfg_p), "--format", "json",
-            ],
+            ["compare", str(old_p), str(new_p), "--config", str(cfg_p), "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         assert "platform_baseline_floor_raised" not in result.output

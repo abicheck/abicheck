@@ -216,12 +216,18 @@ class TestCompareDumpManifestEndToEnd:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_so), str(new_so),
-                "-H", "old=" + str(old_h),
-                "--dump-manifest", "new=" + str(manifest),
-                "--config", str(cfg),
+                "compare",
+                str(old_so),
+                str(new_so),
+                "-H",
+                "old=" + str(old_h),
+                "--dump-manifest",
+                "new=" + str(manifest),
+                "--config",
+                str(cfg),
                 "--diagnostic-comparison",
-                "--format", "json", "-o", str(out),
+                "-o",
+                f"json={out}",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -259,12 +265,18 @@ class TestCompareDumpManifestEndToEnd:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_so), str(new_so),
-                "-H", "old=" + str(old_h),
-                "--dump-manifest", "new=" + str(manifest),
-                "--config", str(cfg),
+                "compare",
+                str(old_so),
+                str(new_so),
+                "-H",
+                "old=" + str(old_h),
+                "--dump-manifest",
+                "new=" + str(manifest),
+                "--config",
+                str(cfg),
                 "--diagnostic-comparison",
-                "--format", "json", "-o", str(out),
+                "-o",
+                f"json={out}",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -307,12 +319,18 @@ class TestCompareDumpManifestEndToEnd:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_so), str(new_so),
-                "--dump-manifest", "old=" + str(old_manifest),
-                "--dump-manifest", "new=" + str(new_manifest),
-                "--config", str(cfg),
+                "compare",
+                str(old_so),
+                str(new_so),
+                "--dump-manifest",
+                "old=" + str(old_manifest),
+                "--dump-manifest",
+                "new=" + str(new_manifest),
+                "--config",
+                str(cfg),
                 "--diagnostic-comparison",
-                "--format", "json", "-o", str(out),
+                "-o",
+                f"json={out}",
             ],
         )
         assert result.exit_code == 0, result.output

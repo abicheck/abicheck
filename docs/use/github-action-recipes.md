@@ -320,7 +320,7 @@ Gate:
   Failed — exit 1; required coverage incomplete.
 ```
 
-Add `--format json` for a versioned, machine-readable result — the four axes
+Add `-o json=...` for a versioned, machine-readable result — the four axes
 are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
 `coverage` (`status`/counts/`missing_required_targets`), `compatibility`
 (`verdict`/`analyzed_targets`), and `contract_coverage`
@@ -500,7 +500,7 @@ For any non-`pull_request` trigger (or `pr-comment: false`), where the
 Action never builds a JSON report for a release-style operand, `abicheck`
 itself also announces this to the job's stderr log so the fact isn't
 silently invisible there either — the ordinary release Markdown/step
-summary doesn't carry it (only `--format json`'s own
+summary doesn't carry it (only `-o json=...`'s own
 `contract_coverage_exit_contribution` field does).
 
 A breaking/review finding's row also carries, when the report provides them:

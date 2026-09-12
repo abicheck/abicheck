@@ -856,7 +856,7 @@ class TestBuildCompareDirectCmd:
 
         assert cmd[:2] == [sys.executable, "-m"]
         assert cmd[2:6] == ["abicheck.cli", "compare", str(v1_so), str(v2_so)]
-        assert "--format" in cmd and cmd[cmd.index("--format") + 1] == "json"
+        assert "-o" in cmd and cmd[cmd.index("-o") + 1] == "json=-"
         assert "-H" in cmd
         h_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"]
         assert h_values == [f"old={v1_hdr}", f"new={v2_hdr}"]

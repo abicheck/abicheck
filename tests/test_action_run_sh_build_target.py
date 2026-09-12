@@ -42,6 +42,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
@@ -52,20 +53,8 @@ def _mode_branches_region() -> str:
     return text[: text.index(_END_MARKER)]
 
 
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+    require_bash()
     script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
         "w",
@@ -80,7 +69,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     env.update(env_extra)
     try:
         result = subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -100,6 +89,7 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
     """Run the mode-branch region and return the raw result, so a rejected
     input's own nonzero exit and `::error::` line can be asserted (`_run_cmd`
     treats a nonzero exit as a harness failure)."""
+    require_bash()
     script = _mode_branches_region() + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
@@ -110,7 +100,7 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
     env.update(env_extra)
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
     finally:

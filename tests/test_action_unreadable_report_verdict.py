@@ -322,7 +322,7 @@ class TestTheScopeOfTheCheckIsDeliberate:
     """The boundary of `_json_report_expected`, pinned as behavior.
 
     The check covers a JSON report the *caller* asked for (`format: json` plus
-    `output-file`), not the internal `--write json=` sidecar `run.sh` injects
+    `output-file`), not the internal `-o json=` sidecar `run.sh` injects
     for its own PR-comment/annotation rendering when the primary format is not
     json. Recording that boundary here keeps a future widening a deliberate
     decision rather than an accident -- and the widening is specifically not
@@ -369,7 +369,7 @@ class TestEveryCallerRequestedJsonModeIsCovered:
     modes the caller had explicitly asked JSON for uncovered -- the documented
     stdout mode, and a caller-supplied `extra-args --write json=PATH`. In both,
     an exit-0 run that produced nothing still published COMPATIBLE (Codex
-    review, P2). The internal `--write json=` sidecar the Action injects for
+    review, P2). The internal `-o json=` sidecar the Action injects for
     itself stays excluded; `TestTheScopeOfTheCheckIsDeliberate` pins that half.
     """
 
@@ -415,8 +415,8 @@ class TestEveryCallerRequestedJsonModeIsCovered:
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
 
-    def test_a_caller_supplied_write_json_path_is_caught(self, tmp_path: Path) -> None:
-        # `format: markdown` plus the caller's own `--write json=` -- the JSON
+    def test_a_caller_supplied_json_export_is_caught(self, tmp_path: Path) -> None:
+        # `format: markdown` plus the caller's own `-o json=` -- the JSON
         # request arrives through the passthrough, which makes it no less the
         # caller's. The stub honors neither, so nothing arrives.
         target = tmp_path / "caller.json"
@@ -426,7 +426,7 @@ class TestEveryCallerRequestedJsonModeIsCovered:
             self._env(
                 tmp_path,
                 INPUT_FORMAT="markdown",
-                INPUT_EXTRA_ARGS=f"--write json={target}",
+                INPUT_EXTRA_ARGS=f"-o json={target}",
             ),
             bindir,
         )
