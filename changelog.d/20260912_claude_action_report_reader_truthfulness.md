@@ -30,6 +30,11 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **The `report-path` output names the file the run actually wrote.** It
+  published the nominal `output-file` input, so an `extra-args -o/--output` run
+  emitted an empty value or, worse, a stale pre-existing file at the superseded
+  path — which `action.yml`'s SARIF-upload step gates on and consuming workflows
+  read. It now resolves the effective path and requires the file to be fresh.
 - **Click's attached `-oPATH` form is recognized as the report destination**, so
   a run writing to a file is no longer judged as the stdout shape (or judged at
   the superseded input path).

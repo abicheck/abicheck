@@ -299,6 +299,17 @@ Two predicates close that without weakening anything above:
   on each requested path, stdout included. Asking only the chain-selected report
   let a clean primary hide a contradictory secondary.
 
+  **Every consumer of the destination uses the effective path.** There are four:
+  the destination inventory, the pre-run fingerprint bookkeeping,
+  `_json_report_src`, and the published `report-path` output. Teaching some and
+  not others is how this went wrong twice — first the reading chain (a report
+  that validated and was never read), then `report-path` (an empty value, or a
+  *stale* pre-existing file handed to the SARIF upload and to consuming
+  workflows). `report-path` also requires freshness, for the same reason every
+  requested destination does: a file this run did not write belongs to an
+  earlier one. **Add a consumer of the output path and resolve it through
+  `_EFFECTIVE_OUTPUT_FILE`**, never `$OUTPUT_FILE`.
+
   **`-oPATH` counts as naming the destination.** `_extra_args_options` leaves an
   *attached* short option an opaque bare token deliberately — that form consumes
   no following token, so "unexpanded" is the right answer for every other

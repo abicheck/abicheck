@@ -5051,10 +5051,30 @@ fi
   # must never reach that step. No other output/behavior changes --
   # `report-path` for any other purpose than gating that one step is
   # unaffected.
+  #
+  # The path is `_EFFECTIVE_OUTPUT_FILE`, not the nominal `$OUTPUT_FILE`: an
+  # `extra-args -o/--output` overrides where the report really lands, and
+  # publishing the input value instead emitted an empty `report-path` (the
+  # superseded path was never written) or, worse, a *stale* pre-existing file at
+  # it -- so the SARIF upload and any consuming workflow skipped the artifact or
+  # took the wrong one (Codex review, P2). The same override is already resolved
+  # for validation and for reading the report; teaching those two and not the
+  # published output was the gap.
+  #
+  # Freshness is required for the same reason it is required of every requested
+  # destination: a file this invocation did not write is some earlier run's, and
+  # handing it to a downstream step is the forgery the pre-run fingerprint
+  # bookkeeping exists to prevent. Compared against `_output_file_pre_fp`, which
+  # is recorded for the effective path under every format, and degrading to
+  # "no freshness claim" when that bookkeeping never ran -- the same rule
+  # `_json_report_src` applies, for the same snippet-extraction tests.
+  _REPORT_PATH_OUT="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
   if [[ "$_SARIF_UPLOAD_FORMAT_MISMATCH" == "1" ]]; then
     echo "report-path="
-  elif [[ -n "${OUTPUT_FILE:-}" && -f "${OUTPUT_FILE}" ]]; then
-    echo "report-path=${OUTPUT_FILE}"
+  elif [[ -n "$_REPORT_PATH_OUT" && -f "$_REPORT_PATH_OUT" ]] \
+       && { [[ -z "${_output_file_pre_fp+x}" ]] \
+            || [[ "$(_file_fingerprint "$_REPORT_PATH_OUT")" != "$_output_file_pre_fp" ]]; }; then
+    echo "report-path=$_REPORT_PATH_OUT"
   else
     echo "report-path="
   fi

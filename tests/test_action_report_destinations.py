@@ -883,3 +883,106 @@ class TestAnAttachedShortOutputOptionIsHonoured:
         )
         assert outputs.get("verdict") == "BREAKING", outputs
         assert not (tmp_path / "fake.h").exists(), "should not be an output path"
+
+
+class TestReportPathPublishesTheEffectiveDestination:
+    """`report-path` must name the file this run actually wrote.
+
+    The override was resolved for validation and for reading the report, and not
+    for the published output — so an `extra-args -o/--output` run emitted an
+    empty `report-path` (the superseded input path was never written) or, worse,
+    published a *stale* pre-existing file at it. `action.yml`'s SARIF-upload step
+    gates on this output, and consuming workflows read it, so both outcomes are
+    real harm: skip the artifact, or take the wrong one (Codex review, P2).
+
+    Freshness is required here for the same reason every requested destination
+    needs it: a file this invocation did not write belongs to some earlier run,
+    and handing it downstream is exactly what the pre-run fingerprint
+    bookkeeping exists to prevent.
+    """
+
+    def _env(self, tmp_path: Path, extra: str, output_file: Path | None) -> dict:
+        env = {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_EXTRA_ARGS": extra,
+        }
+        if output_file is not None:
+            env["INPUT_OUTPUT_FILE"] = str(output_file)
+        return env
+
+    def _stub(self, tmp_path: Path, dest: Path) -> Path:
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        blob = tmp_path / "payload.json"
+        blob.write_text(
+            json.dumps({"report_schema_version": "4.4", "verdict": "COMPATIBLE"}),
+            encoding="utf-8",
+        )
+        stub = bindir / "abicheck"
+        stub.write_text(
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+        )
+        stub.chmod(0o755)
+        return bindir
+
+    @pytest.mark.parametrize("spelling", ("--output", "-o", "--output=", "-o!attached"))
+    def test_the_override_is_published(self, tmp_path: Path, spelling: str) -> None:
+        dest = tmp_path / "override.json"
+        if spelling == "-o!attached":
+            extra = f"-o{dest}"
+        else:
+            joiner = "" if spelling.endswith("=") else " "
+            extra = f"{spelling}{joiner}{dest}"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(tmp_path, self._env(tmp_path, extra, None), bindir)
+        assert outputs.get("report-path") == str(dest), (spelling, outputs)
+
+    def test_a_superseded_input_path_is_not_published(self, tmp_path: Path) -> None:
+        # The worse half of the finding: the superseded path pre-exists with
+        # unrelated content, so publishing `$OUTPUT_FILE` handed a downstream
+        # step a file from some other run entirely.
+        superseded = tmp_path / "input_path.json"
+        superseded.write_text('{"verdict": "BREAKING"}', encoding="utf-8")
+        dest = tmp_path / "override.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, f"--output {dest}", superseded), bindir
+        )
+        assert outputs.get("report-path") == str(dest), outputs
+        assert outputs.get("report-path") != str(superseded), outputs
+
+    def test_a_stale_output_file_is_not_published(self, tmp_path: Path) -> None:
+        # No override at all: the input path pre-exists and this run writes
+        # nothing, so there is no artifact of *this* run to hand downstream.
+        stale = tmp_path / "report.json"
+        stale.write_text('{"verdict": "COMPATIBLE"}', encoding="utf-8")
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "abicheck"
+        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        outputs = _run_action(tmp_path, self._env(tmp_path, "", stale), bindir)
+        assert outputs.get("report-path") == "", outputs
+
+    def test_an_ordinary_output_file_is_still_published(self, tmp_path: Path) -> None:
+        # The control: the common case — no override, the run writes the input
+        # path — must keep publishing it, or the SARIF upload never fires.
+        dest = tmp_path / "report.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(tmp_path, self._env(tmp_path, "", dest), bindir)
+        assert outputs.get("report-path") == str(dest), outputs
+
+    def test_a_rewritten_pre_existing_output_file_is_published(
+        self, tmp_path: Path
+    ) -> None:
+        # Freshness must key on "did this run write it", not "did it pre-exist":
+        # re-running a step over an existing report.json is ordinary, and
+        # withholding `report-path` there would be a regression of its own.
+        dest = tmp_path / "report.json"
+        dest.write_text('{"verdict": "BREAKING"}', encoding="utf-8")
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(tmp_path, self._env(tmp_path, "", dest), bindir)
+        assert outputs.get("report-path") == str(dest), outputs
