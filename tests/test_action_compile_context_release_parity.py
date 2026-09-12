@@ -99,15 +99,24 @@ class TestCompareReleaseStyleOperandCompileContext:
         assert "not support" not in stderr
         assert "--config" not in cmd
 
-    def test_compare_release_style_ast_frontend_auto_matches_single_pair(
+    def test_compare_release_style_ast_frontend_auto_synthesizes_nothing(
         self,
     ) -> None:
         """ "auto" is the documented no-op spelling of ast-frontend -- it
         resolves to the same default castxml selection as leaving the input
-        unset entirely (see the input's description in action.yml). It used
-        to need a carve-out from the release-operand guard; with that guard
-        gone it simply takes the single-pair treatment, which is the
-        oracle asserted here."""
+        unset entirely (see the input's description in action.yml), so it
+        synthesizes no overlay at all, on this operand shape exactly as on
+        a single pair.
+
+        This case used to assert only that the release overlay *equalled*
+        the single-pair one, which was true while both wrongly produced an
+        empty `{"compile": {}}` overlay -- parity held at the wrong value,
+        and a `--config` reached the CLI that a run configuring nothing
+        should never have put there (Codex review, PR #1233). The
+        end-to-end half, including the same equivalence for `lang: c++`,
+        is `tests/test_action_run_sh_release_capability_parity.py`'s
+        `TestNoOpInputsSynthesizeNoOverlay`.
+        """
         release_cmd, stderr = _run_region(
             _COMPARE_MODE_MARKER,
             {
@@ -118,6 +127,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             _COMPARE_COMPILE_CONTEXT_START,
         )
         assert "not support" not in stderr
+        assert "--config" not in release_cmd
         single_cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,
             {
@@ -127,9 +137,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             },
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        assert _read_compile_config_overlay(release_cmd) == (
-            _read_compile_config_overlay(single_cmd)
-        )
+        assert single_cmd == release_cmd
 
     def test_compare_release_style_ast_frontend_clang_reaches_the_overlay(
         self,

@@ -1315,7 +1315,28 @@ add_compile_context_flags() {
   # *default*, not a user override, so it must not by itself count as "lang
   # was explicitly requested" (CodeRabbit review, PR #1146, finding #6): a
   # non-empty INPUT_LANG only counts when it differs from that default.
-  if [[ -z "${INPUT_AST_FRONTEND:-}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
+  # `auto` is the documented no-op spelling of ast-frontend -- it resolves
+  # to exactly what leaving the input unset resolves to -- so it is
+  # excluded here for the same reason the `c++` lang default is: a run that
+  # configures nothing must synthesize nothing. Without this, `ast-frontend:
+  # auto` alone produced an empty `{"compile": {}}` overlay and put a
+  # `--config` on the command line that was not there before, routing a
+  # discovered project `.abicheck.yml` through this function's own
+  # merge-and-strip path instead of letting the CLI discover it directly.
+  # Harmless-looking and not: `discover` mode strips `compile.compiler`
+  # (see `_merge_config_overlay_with_discovered_project_config`'s trust
+  # distinction), so a project that set one could silently lose it. The
+  # release path made this reachable where it previously was not, but the
+  # fix belongs here rather than at that call site -- the single-pair path
+  # has the same behavior and `auto` means the same thing on both (Codex
+  # review, PR #1233; its own stated mechanism, a `compile.lang: c++` in
+  # the overlay, is not what this produced -- the empty overlay and the
+  # `--config` it carries are).
+  local _ast_frontend_requested="${INPUT_AST_FRONTEND:-}"
+  if [[ "$_ast_frontend_requested" == "auto" ]]; then
+    _ast_frontend_requested=""
+  fi
+  if [[ -z "${_ast_frontend_requested}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
         && "${INPUT_NOSTDINC:-false}" != "true" \
         && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
@@ -3004,10 +3025,15 @@ elif [[ "$MODE" == "compare" ]]; then
     # forwarded verbatim, exactly as the single-pair branch below forwards
     # it: `cli_compare_options._resolve_depth_for_set_inputs` rejects no
     # rung -- it returns the requested rung for the fan-out to forward, with
-    # the floor enforced per member downstream
-    # (`service_compare_pipeline.resolve_compare_request` ->
-    # `enforce_requested_depth`) and the ceiling applied by
-    # `policy.depth_projection.project_pair_to_depth`.
+    # the shortfall answered per member downstream
+    # (`policy/depth_evidence_contract.py`, ADR-064's exit-7 axis) and the
+    # ceiling applied by `policy.depth_projection.project_pair_to_depth`.
+    # That axis is narrower than an earlier revision of this comment
+    # claimed (Codex review): it fires only for a pinned `build`/`source`
+    # rung, and only for a *live* side this run extracts. A member that is
+    # already a serialized snapshot was never extracted by this run, so
+    # there is no shortfall to report for it -- the same pre-dumped-member
+    # case that makes those rungs reachable here at all.
     add_single_flag "--depth" "$_depth_lc"
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"

@@ -467,14 +467,19 @@ inputs:
       escalation). --depth source analyses the whole current library
       target unless since/changed-path seeds a narrower changed scope. Maps
       to --depth. For a compare directory/package (release) operand, every
-      rung is forwarded per member exactly as for a single pair, and a
-      member that falls short of the pinned rung fails as that member's own
-      error. build and source are reachable there without any inline
-      evidence input when the members are pre-dumped snapshots that already
-      carry it (dump --sources/--build-info); what a release operand does
-      not support is the inline sources/build-info/compile-db inputs
-      themselves, which are rejected with an error before the run since the
-      per-library fan-out never collects them.
+      rung is forwarded per member exactly as for a single pair. build and
+      source are reachable there without any inline evidence input when the
+      members are pre-dumped snapshots that already carry it (dump
+      --sources/--build-info); what a release operand does not support is
+      the inline sources/build-info/compile-db inputs themselves, which are
+      rejected with an error before the run since the per-library fan-out
+      never collects them. Note what pinning a rung does and does not
+      guarantee: a shortfall is reported (ADR-064's exit-7 evidence-contract
+      axis) only for a pinned build/source rung on a side this run extracts
+      live. A member that is already a serialized snapshot was never
+      extracted by this run, so no shortfall is reported for it -- a
+      successful run is therefore not by itself proof that every member
+      carried the requested evidence.
     required: false
   since:
     description: >

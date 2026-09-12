@@ -144,6 +144,17 @@ def _operand_env(shape: str, tmp_path: Path) -> dict[str, str]:
     raise AssertionError(f"unknown operand shape {shape!r}")
 
 
+def _flag_names(cmd: str) -> list[str]:
+    """The `--flag` tokens of a captured command line, in order.
+
+    Values are dropped deliberately: two runs of the same configuration
+    under different temp directories differ in operand paths and in the
+    injected `--write json=<tmp>` sidecar, so the comparable thing is which
+    flags were emitted, not their arguments.
+    """
+    return [token for token in cmd.split() if token.startswith("-")]
+
+
 def _captured_config(tmp_path: Path) -> dict[str, Any]:
     """The `--config` document the fake CLI stub snapshotted, or `{}`."""
     captured_config = tmp_path / "captured_config.json"
@@ -492,3 +503,64 @@ class TestReleaseOperandHostileInputHasNoSideEffect:
         )
         assert doc["compile"]["sysroot"] == payload
         assert not canary.exists()
+
+
+class TestNoOpInputsSynthesizeNoOverlay:
+    """A run that configures nothing must send nothing.
+
+    `ast-frontend: auto` is the documented no-op spelling -- it resolves to
+    exactly what leaving the input unset resolves to -- so it must not by
+    itself put a `--config` on the command line. It used to: the overlay
+    came out as an empty `{"compile": {}}`, and the `--config` carrying it
+    routed a discovered project `.abicheck.yml` through `run.sh`'s own
+    merge-and-strip path instead of letting the CLI discover it directly,
+    which in `discover` mode drops `compile.compiler` (Codex review, PR
+    #1233).
+
+    The oracle is the unset input, on both operand shapes: `auto` must be
+    indistinguishable from omitting the input entirely. Asserted against
+    the *whole* command line, not just the absence of `--config`, so a
+    future no-op input that leaks some other flag is caught by the same
+    case.
+    """
+
+    #: Values documented as resolving to exactly what "unset" resolves to.
+    #: `lang: c++` is action.yml's own declared default, so an omitted
+    #: `lang` arrives as this and must not count as a request either.
+    _NO_OP_INPUTS: tuple[tuple[str, str], ...] = (
+        ("INPUT_AST_FRONTEND", "auto"),
+        ("INPUT_LANG", "c++"),
+    )
+
+    @pytest.mark.parametrize("var,value", _NO_OP_INPUTS)
+    @pytest.mark.parametrize("shape", ("single", *_RELEASE_OPERAND_SHAPES))
+    def test_a_no_op_value_is_indistinguishable_from_unset(
+        self, tmp_path: Path, shape: str, var: str, value: str
+    ) -> None:
+        baseline_dir = tmp_path / "baseline"
+        baseline_dir.mkdir()
+        baseline_cmd, baseline_doc = _compare_result(
+            _operand_env(shape, baseline_dir), baseline_dir
+        )
+
+        configured_dir = tmp_path / "configured"
+        configured_dir.mkdir()
+        configured_cmd, configured_doc = _compare_result(
+            {var: value, **_operand_env(shape, configured_dir)}, configured_dir
+        )
+
+        assert configured_doc == baseline_doc == {}
+        # Compare the flag *shape*, not the raw strings: the two runs use
+        # different temp directories, so operand paths and the injected
+        # `--write json=<tmp>` sidecar legitimately differ.
+        assert _flag_names(configured_cmd) == _flag_names(baseline_cmd)
+
+    @pytest.mark.parametrize("shape", ("single", *_RELEASE_OPERAND_SHAPES))
+    def test_a_real_frontend_choice_still_reaches_the_overlay(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        """The companion: only the documented no-op spelling is exempt."""
+        _, doc = _compare_result(
+            {"INPUT_AST_FRONTEND": "clang", **_operand_env(shape, tmp_path)}, tmp_path
+        )
+        assert doc["compile"]["frontend"] == "clang"
