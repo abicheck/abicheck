@@ -421,8 +421,22 @@ line-pinned allowlist. What Phase 2-3 proposes is the same rule one layer
 further out, and it changes observable Action behaviour (an input combination
 that fails in 5 seconds today would fail in 4 minutes, or succeed). That is
 an architectural decision with a migration, which AGENTS.md's authority rule
-puts in ADR territory. A draft sketch is in Phase 5 below; it should be
-written as part of Phase 2, not ahead of it.
+puts in ADR territory.
+
+**Drafted: [ADR-070 — The Action Layer Does Not Encode CLI
+Semantics](../adr/070-action-layer-does-not-encode-cli-semantics.md)**
+(Proposed, not implemented). Its four rules are what Phases 2 and 3 execute:
+D1 input grammar only, D2 the CLI owns flag acceptance and configuration
+resolution, D3 derive a needed CLI fact from the *installed* CLI rather than
+transcribing it, D4 a justification cites a symbol that exists. It also
+states the accepted cost in full — deleting a restriction mirror moves some
+failures after the toolchain install and replaces a tailored Action message
+with the CLI's — and records why the three rejected alternatives are the
+plan's Phases 1/4/5 rather than its answer.
+
+(An earlier revision of this paragraph said "a draft sketch is in Phase 5
+below". There was no such sketch; the pointer was dangling. Noted rather than
+quietly deleted, since it is the same defect class this document audits.)
 
 Phase 1 needs no ADR: it strengthens an existing test's invariant and
 corrects data that test should already have been protecting.
