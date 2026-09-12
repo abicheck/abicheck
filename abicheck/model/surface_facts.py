@@ -74,6 +74,7 @@ __all__ = [
     "binary_exported",
     "declaration_confirmed_absent",
     "declared_in_headers",
+    "has_observed_contract_evidence",
     "headers_discarded_surface_facts",
     "in_public_contract",
     "in_public_surface",
@@ -86,7 +87,6 @@ __all__ = [
     "is_export_table_only_record",
     "is_header_declared",
     "is_legacy_derived",
-    "is_public_export",
     "is_public_export",
     "is_unknown",
     "public_header_contract_fact",
@@ -246,6 +246,31 @@ def in_public_surface(decl: SurfaceFactBearing) -> bool:
     if is_confirmed_false(exported):
         return False
     return is_confirmed_true(declared_in_headers(decl))
+
+
+def has_observed_contract_evidence(decl: SurfaceFactBearing) -> bool:
+    """Confirmed (b) from a *producer*, not from the legacy enum bridge.
+
+    The narrow predicate an ELF-export narrowing pass needs to know it must
+    not drop a declaration. ``_public_functions``/``_public_variables``
+    restrict a snapshot carrying ELF symbols to declarations whose name is in
+    the observed export set, which is right for the DWARF-recorded internal
+    subprograms it exists to exclude — their (b) is unknown — but wrong for a
+    declaration the run was *told* is promised and simply is not exported: a
+    public inline member, or one a version script stopped exporting. Dropping
+    those reported a gained export as ``FUNC_ADDED`` rather than
+    ``FUNC_EXPORT_ADDED``, and left a public unexported inline out of the map
+    altogether (CodeRabbit review).
+
+    Legacy-derived evidence is deliberately excluded. A pre-v46 ``PUBLIC``
+    record bridges to a confirmed (b), but that value is re-derived from the
+    same enum the narrowing already accounted for, so honouring it here would
+    change how every stored snapshot narrows. Only a real producer fact — a
+    supplied public-header set, or a backend's own judgement — widens this.
+    """
+    return is_confirmed_true(in_public_contract(decl)) and not is_legacy_derived(
+        in_public_contract(decl)
+    )
 
 
 def is_export_table_only_record(decl: SurfaceFactBearing) -> bool:

@@ -15,6 +15,13 @@
 
 """The *binary* half of a surface change whose declaration did not change.
 
+A note on the finding descriptions below: they say the *declaration remains
+present*, never that it is declared in the available headers. These detectors
+read only the two export facts, and a matched pair can reach them from a
+producer that never saw a header at all -- a DWARF-derived record leaves fact
+(a) unknown. Claiming header evidence there would be the same over-claim the
+whole split exists to remove (CodeRabbit review).
+
 One detector, owned here rather than grown into ``diff_symbols.py``: it
 belongs to the export axis, not the signature axis every other check in
 that module compares. See ``model/surface_facts.py`` for the three facts it
@@ -29,13 +36,16 @@ from ..diff_helpers import make_change
 from ..model import Function, Variable
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.surface_facts import (
+    has_observed_contract_evidence,
     is_abi_visible,
     is_binary_exported,
     is_export_confirmed_absent,
     surface_fact_summary,
 )
+from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 
 __all__ = [
+    "survives_export_narrowing",
     "check_export_gained",
     "check_export_lost",
     "check_function",
@@ -64,6 +74,47 @@ def check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Chang
     """:func:`check_function` for data symbols."""
     return check_variable_export_lost(mangled, v_old, v_new) + (
         check_variable_export_gained(mangled, v_old, v_new)
+    )
+
+
+def survives_export_narrowing(
+    key: str,
+    decl: Function,
+    exported: set[str],
+    name_counts: dict[str, int],
+) -> bool:
+    """Whether *decl* survives narrowing a snapshot to its observed exports.
+
+    ``diff_symbols._public_functions`` restricts a snapshot that carries ELF
+    symbols to the declarations the binary actually exports, which is right
+    for the DWARF-recorded internal subprograms it exists to exclude. Four
+    things legitimately escape it, and they belong on the export axis rather
+    than inline in the symbol differ:
+
+    * an exact mangled match, or an unambiguous display-name match;
+    * a ``= delete``d declaration that DWARF did not supply — it has no
+      symbol by construction;
+    * a synthetic constructor/destructor key. castxml omitted the real
+      mangled name, so the key can never equal a real exported symbol;
+      requiring a match would always fail and silently drop a genuinely
+      public overload (case78's removed / case111's added overload) or a
+      public virtual destructor whose visibility was resolved from source
+      access (Codex review, PR #582);
+    * a declaration the run was *told* is promised and that simply is not
+      exported — a public inline member, or one a version script stopped
+      exporting. Dropping those reported a gained export as ``FUNC_ADDED``
+      rather than ``FUNC_EXPORT_ADDED`` and left a public unexported inline
+      out of the map altogether (CodeRabbit review). See
+      ``has_observed_contract_evidence`` for why legacy-derived evidence
+      deliberately does not widen this.
+    """
+    return (
+        key in exported
+        or (decl.name in exported and name_counts.get(decl.name) == 1)
+        or (decl.is_deleted and not decl.deleted_from_dwarf)
+        or is_synthetic_ctor_key(key)
+        or is_synthetic_dtor_key(key)
+        or has_observed_contract_evidence(decl)
     )
 
 
@@ -138,8 +189,8 @@ def check_export_gained(mangled: str, f_old: Function, f_new: Function) -> list[
             symbol=mangled,
             name=f_new.name,
             description=(
-                f"Function now exported by the binary, and already declared "
-                f"in the available headers: {f_new.name}"
+                f"Function now exported by the binary while its declaration "
+                f"remains present: {f_new.name}"
             ),
             old_value=f_old.visibility.value,
             new_value=f_new.visibility.value,
@@ -167,8 +218,8 @@ def check_variable_export_gained(
             symbol=mangled,
             name=v_new.name,
             description=(
-                f"Variable now exported by the binary, and already declared "
-                f"in the available headers: {v_new.name}"
+                f"Variable now exported by the binary while its declaration "
+                f"remains present: {v_new.name}"
             ),
             old_value=v_old.visibility.value,
             new_value=v_new.visibility.value,
@@ -208,8 +259,8 @@ def check_export_lost(mangled: str, f_old: Function, f_new: Function) -> list[Ch
             symbol=mangled,
             name=f_old.name,
             description=(
-                f"Function no longer exported by the binary, but still "
-                f"declared in the available headers: {f_old.name}"
+                f"Function no longer exported by the binary, but its "
+                f"declaration remains present: {f_old.name}"
             ),
             old_value=f_old.visibility.value,
             new_value=f_new.visibility.value,
@@ -242,8 +293,8 @@ def check_variable_export_lost(
             symbol=mangled,
             name=v_old.name,
             description=(
-                f"Variable no longer exported by the binary, but still "
-                f"declared in the available headers: {v_old.name}"
+                f"Variable no longer exported by the binary, but its "
+                f"declaration remains present: {v_old.name}"
             ),
             old_value=v_old.visibility.value,
             new_value=v_new.visibility.value,

@@ -95,10 +95,6 @@ from .diff_symbols_variables import (
     _without_top_level_const,
     var_access_changes,
 )
-from .dumper_castxml import (
-    is_synthetic_ctor_key,
-    is_synthetic_dtor_key,
-)
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -248,26 +244,7 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     return {
         k: v
         for k, v in funcs.items()
-        if (
-            k in exported
-            or (v.name in exported and name_counts.get(v.name) == 1)
-            or (v.is_deleted and not v.deleted_from_dwarf)
-            # A synthetic constructor-overload key (castxml omitted its real
-            # mangled name) can never equal a real exported symbol — it isn't
-            # one, by construction (see dumper_castxml's synthesis comment).
-            # Requiring an ELF match here would always fail and silently drop
-            # a genuinely public, non-deleted constructor overload (case78's
-            # removed / case111's added overload); its visibility was already
-            # resolved from source access when castxml gave no name to check.
-            or is_synthetic_ctor_key(k)
-            # Same reasoning for a synthetic destructor key ("~ClassName",
-            # castxml omitted the real mangled name): it can never equal a
-            # real exported symbol either, so without this a genuinely
-            # public virtual destructor's PUBLIC visibility
-            # (_ctor_or_dtor_visibility) would still be silently dropped
-            # here — necessary but not sufficient (Codex review, PR #582).
-            or is_synthetic_dtor_key(k)
-        )
+        if _export_transition.survives_export_narrowing(k, v, exported, name_counts)
     }
 
 

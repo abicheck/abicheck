@@ -48,7 +48,10 @@ __all__ = [
 
 
 def header_ast_surface_facts(
-    *, exported: bool | None, producer: str | None = None
+    *,
+    exported: bool | None,
+    judged_public: bool = False,
+    producer: str | None = None,
 ) -> dict[str, Any]:
     """Facts for a declaration a header-AST backend parsed out of a header.
 
@@ -56,6 +59,24 @@ def header_ast_surface_facts(
     ``None`` for a header-only dump with no binary at all — in which case
     (c) is unknown rather than ``False``, since there is no artifact that
     could have exported anything.
+
+    *judged_public*: the backend resolved this declaration's visibility to
+    ``PUBLIC`` on evidence **other than** the export lookup. Two real
+    fallbacks do that, and both are contract judgements rather than
+    observations of the binary: a customisation point object that was never
+    ODR-used has no emitted symbol at all
+    (``dumper_castxml._variable_visibility``), and a constructor/destructor
+    with no contrary attribute is "declared public without contrary
+    evidence" (``_ctor_or_dtor_visibility``). Recording only the export
+    lookup for those left (b) unknown *and* (c) confirmed false, which made
+    ``in_public_surface`` answer ``False`` and silently dropped the CPO from
+    ``detect_cpo_kind_changed`` (CodeRabbit review). A pre-v46 snapshot did
+    not have that problem, because the bridge reads (b) straight off the
+    ``PUBLIC`` the fallback stored — so this is what keeps a fresh dump
+    agreeing with a stored one.
+
+    Deliberately ``PARTIAL``: it is a judgement the producer derived from
+    its own attribute evidence, not a public-header set it was handed.
     """
     return {
         "declared_in_headers_fact": Fact.present(True, producer=producer),
@@ -68,6 +89,12 @@ def header_ast_surface_facts(
         "in_public_contract_fact": (
             Fact.present(True, producer=producer)
             if exported
+            else Fact.partial(
+                True,
+                "backend resolved visibility to public without export evidence",
+                producer=producer,
+            )
+            if judged_public
             else Fact.not_collected(
                 "no public-header set declared and no export evidence",
                 producer=producer,

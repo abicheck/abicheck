@@ -555,8 +555,15 @@ def visibility_and_surface_facts(
         name,
         no_binary_evidence=no_binary_evidence,
     )
+    # `ELF_ONLY` (a `.symtab`-only symbol) is export evidence too -- see the
+    # castxml sibling's note: the fresh producer and the legacy bridge must
+    # agree, or the same symbol reads differently by snapshot vintage.
     return vis, header_ast_surface_facts(
-        exported=None if no_binary_evidence else vis is Visibility.PUBLIC,
+        exported=(
+            None
+            if no_binary_evidence
+            else vis in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        ),
         producer="clang",
     )
 

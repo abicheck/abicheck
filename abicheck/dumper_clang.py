@@ -1360,7 +1360,8 @@ class _ClangAstParser:
                         exported=(
                             None
                             if self._no_binary_evidence
-                            else self._visibility(mangled, name) is Visibility.PUBLIC
+                            else self._visibility(mangled, name)
+                            in (Visibility.PUBLIC, Visibility.ELF_ONLY)
                         ),
                         producer="clang",
                     ),

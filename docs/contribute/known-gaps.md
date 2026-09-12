@@ -8451,9 +8451,13 @@ The three points the original entry named, and what each became:
    classifies exactly as it did before (pinned by
    `tests/test_surface_fact_split.py::TestLegacyBridgeIsBehaviourPreserving`)
    and the weaker provenance stays visible rather than being laundered into
-   a producer's own claim. The bridge reads a *negative* out of `ELF_ONLY`
-   (a header parse ran and did not account for the symbol) but never a
-   positive declaration out of "it was exported".
+   a producer's own claim. No enum member establishes (a) in either
+   direction: not a positive out of "it was exported", and not a negative
+   out of `ELF_ONLY` either, since both header backends assign `ELF_ONLY` to
+   a declaration they parsed *out of a header* whose symbol landed in
+   `.symtab`. The record's own header provenance is what answers (a) — a
+   positive when it is present, unknown when it is absent — and it is
+   consulted for every member alike.
 2. **Producers answer only what they observed**
    (`extract/surface_fact_producers.py`). A header-AST backend asserts (a);
    it asserts (c) only when a real export table was consulted, and leaves it
