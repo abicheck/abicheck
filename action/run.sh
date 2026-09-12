@@ -2897,41 +2897,44 @@ elif [[ "$MODE" == "compare" ]]; then
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
     # review): INPUT_DEPTH is a raw, unvalidated Action input string, so a
-    # workflow spelling `depth: BUILD`/`BINARY`/etc. previously matched none
-    # of the case-sensitive comparisons below -- silently skipping the
-    # fail-loud guard for build/source (defeating its entire purpose) and
-    # silently dropping `binary` with no forwarding and no ::notice:: either.
+    # workflow spelling `depth: BUILD`/`BINARY`/etc. matches none of the
+    # case-sensitive comparisons a previous revision made here -- silently
+    # dropping the rung with no forwarding and no annotation either.
     # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
     # Not `local` -- this runs in the top-level script body, not a function.
     _depth_lc=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
-    # A caller that explicitly asked for build/source-depth evidence (via
-    # --depth build/source, or by supplying --sources/--build-info/
-    # --compile-db directly) against a directory/package operand would
-    # otherwise have that request silently dropped: the flags above are
-    # skipped rather than forwarded, so the comparison would quietly run
-    # without the requested evidence and could miss a source-only break
-    # while still reporting a clean/normal result -- fail loud instead
-    # (Codex review).
-    if [[ "$_depth_lc" == "build" || "$_depth_lc" == "source" \
-       || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
+    # Inline build/source evidence is the one thing genuinely unservable
+    # here: `cli_resolve._reject_evidence_flags_for_set_inputs` rejects
+    # --sources/--build-info/--dump-manifest for a set input, because the
+    # per-library fan-out collects none of it, so forwarding them would be
+    # a hard usage error and dropping them would run the comparison without
+    # the requested evidence -- missing a source-only break while still
+    # reporting a clean result. Fail loud instead (Codex review).
+    #
+    # `--depth` is deliberately NOT part of this guard, on any rung. It
+    # left `_EVIDENCE_SET_INPUT_FLAGS` when the fan-out moved onto
+    # `service.run_compare`: a member may itself be a pre-dumped snapshot
+    # carrying embedded L3/L4/L5 evidence (`dump --sources`/`--build-info`),
+    # which satisfies `build`/`source` with no inline collection at all, so
+    # rejecting those rungs here denied a genuinely reachable configuration
+    # -- and reachability is a property of the members, not of the operand's
+    # cardinality. A member that cannot reach the pinned rung says so as
+    # that member's own error (ADR-064's exit-7 axis), rather than being
+    # pre-judged for its neighbours. Keeping a rung rejection here was the
+    # same defect this whole change removes, one guard further down the
+    # file (Codex review, PR #1233).
+    if [[ -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to collect inline evidence, or pre-dump each member with `dump --sources/--build-info` so its snapshot already carries it (a directory of such snapshots satisfies --depth build/source with no inline collection at all)."
       exit 1
     fi
-    # Every remaining rung of the public ladder (binary, headers) is
+    # Every rung of the public ladder (binary, headers, build, source) is
     # forwarded verbatim, exactly as the single-pair branch below forwards
     # it: `cli_compare_options._resolve_depth_for_set_inputs` rejects no
-    # rung any more -- it returns the requested rung for the fan-out to
-    # forward, with the floor enforced per member downstream
+    # rung -- it returns the requested rung for the fan-out to forward, with
+    # the floor enforced per member downstream
     # (`service_compare_pipeline.resolve_compare_request` ->
     # `enforce_requested_depth`) and the ceiling applied by
-    # `policy.depth_projection.project_pair_to_depth`. A member that falls
-    # short of the requested rung fails as that member's own ERROR on the
-    # release acquisition record, which is the release-shaped answer. The
-    # `::notice::`-and-drop this branch used to apply to `headers` (on the
-    # grounds that "the per-library fan-out has no per-library
-    # evidence-floor enforcement yet") restated a CLI restriction that had
-    # already been lifted, and silently ran the comparison at whatever
-    # evidence each library happened to have instead of the pinned rung.
+    # `policy.depth_projection.project_pair_to_depth`.
     add_single_flag "--depth" "$_depth_lc"
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"

@@ -39,6 +39,15 @@ combination, in which case the Action must fail loud rather than drop it
 `--compile-db` residue below, which `cli_resolve.
 _reject_evidence_flags_for_set_inputs` really does still reject).
 
+The first revision of this module made the same mistake one guard further
+down `run.sh`: it kept `--depth build`/`source` rejected for a release
+operand, on the belief that those rungs need inline evidence the fan-out
+cannot collect. They do not -- a member may be a pre-dumped snapshot that
+already carries L3/L4/L5 evidence, and `_resolve_depth_for_set_inputs`
+returns every typed rung -- so that guard was itself a stale-CLI-claim,
+caught in review (Codex, PR #1233) rather than by any test here. The
+inline *inputs* are the real residue; the rung was never one.
+
 Shaped so a future systematic check for this whole class can absorb it:
 every case is `(input, operand shape) -> the single-pair answer`, enumerated
 over the input families rather than written one fixed input at a time, and
@@ -55,7 +64,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from test_action_run_sh_compare_build_source import (
     _bash_executable,  # noqa: F401  (re-exported for the harness below)
     _run_compare_raw,
@@ -89,12 +97,20 @@ _COMPILE_CONTEXT_INPUTS: tuple[tuple[str, str], ...] = (
 #: none, so all of them are measured rather than one representative.
 _RELEASE_OPERAND_SHAPES: tuple[str, ...] = ("dir-new", "dir-old", "rpm-new", "whl-new")
 
-#: The depth rungs the CLI still refuses for a set input, and why -- they
-#: need inline build/source evidence the fan-out does not collect
-#: (`cli_resolve._reject_evidence_flags_for_set_inputs`). Everything not
-#: listed here must reach the CLI verbatim.
-_CLI_REJECTED_DEPTH_RUNGS: tuple[str, ...] = ("build", "source")
-_FORWARDED_DEPTH_RUNGS: tuple[str, ...] = ("binary", "headers")
+#: The depth rungs the CLI refuses for a set input: **none**. Stated as an
+#: empty tuple rather than omitted, because that is the finding this module
+#: exists for -- `_EVIDENCE_SET_INPUT_FLAGS` lists only
+#: `sources`/`build_info`/`dump_manifest`, and
+#: `_resolve_depth_for_set_inputs` returns every typed rung. A first
+#: revision of this module kept `build`/`source` here, which was the same
+#: stale-guard defect it was written to close, one guard further down
+#: `run.sh` (Codex review, PR #1233): a member may itself be a pre-dumped
+#: snapshot carrying embedded L3/L4/L5 evidence, so those rungs are
+#: reachable without inline collection. Kept as a named table so a future
+#: sweep reads the residue as data, and so re-adding a rung is a visible
+#: edit rather than a silent one.
+_CLI_REJECTED_DEPTH_RUNGS: tuple[str, ...] = ()
+_FORWARDED_DEPTH_RUNGS: tuple[str, ...] = ("binary", "headers", "build", "source")
 
 #: The inline evidence inputs the CLI still refuses for a set input.
 _CLI_REJECTED_EVIDENCE_INPUTS: tuple[tuple[str, str], ...] = (
@@ -243,17 +259,14 @@ class TestReleaseOperandDepthLadderMatchesSinglePair:
         )
         assert f"--depth {rung}" in cmd
 
-    @pytest.mark.parametrize("rung", _CLI_REJECTED_DEPTH_RUNGS)
-    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
-    def test_cli_rejected_rung_fails_loud(
-        self, tmp_path: Path, shape: str, rung: str
-    ) -> None:
-        result, captured = _run_compare_raw(
-            {"INPUT_DEPTH": rung, **_operand_env(shape, tmp_path)}, tmp_path
-        )
-        assert result.returncode != 0
-        assert "::error::" in result.stdout
-        assert not captured.is_file(), "abicheck must never be invoked"
+    def test_no_rung_is_rejected(self) -> None:
+        """The whole public ladder is forwarded, so the rejected-rung table
+        is empty and every rung is exercised by the parity case above. An
+        executable statement of the residue rather than a deleted test: if
+        a rung is ever re-added to `_CLI_REJECTED_DEPTH_RUNGS` without a
+        matching fail-loud case, this fails and says so."""
+        assert _CLI_REJECTED_DEPTH_RUNGS == ()
+        assert set(_FORWARDED_DEPTH_RUNGS) == {"binary", "headers", "build", "source"}
 
     @pytest.mark.parametrize("var,value", _CLI_REJECTED_EVIDENCE_INPUTS)
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)

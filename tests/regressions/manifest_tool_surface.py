@@ -435,7 +435,13 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # had already been lifted -- the compile-context rejection and
             # the `--depth headers` drop for a directory/package operand.
             # Same invariant, one layer out, and the same oracle discipline:
-            # the other operand shape, never the adapter's own table.
+            # the other operand shape, never the adapter's own table. Note
+            # the class reproducing itself inside its own fix: the first
+            # revision of that module kept `--depth build`/`source`
+            # rejected for a release operand -- a stale CLI claim of
+            # exactly the kind being removed -- and only review caught it,
+            # which is the strongest evidence yet that the mechanical
+            # sweep in this class's gap note is the thing actually needed.
             "tests/test_action_run_sh_release_capability_parity.py",
         ),
         public_surfaces=("cli", "github-action"),
@@ -445,6 +451,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "header-graph-attach-claim",
                 "action-compile-context-rejection",
                 "action-depth-headers-drop",
+                "action-depth-build-source-rejection",
             ),
             "depth_rung": ("binary", "headers", "build", "source"),
             "member_evidence": ("binary", "headers", "build"),

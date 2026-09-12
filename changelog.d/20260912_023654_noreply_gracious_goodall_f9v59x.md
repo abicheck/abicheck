@@ -12,5 +12,7 @@
   now forwarded exactly as they are for a single pair, and
   `action/validate-inputs.sh` no longer fails the step before dependency
   install for a comparison the run itself would serve. `depth: build`/`source`
-  and inline `sources`/`build-info`/`compile-db` — which the CLI really does
-  still reject for that shape — keep failing loud.
+  are forwarded there too — reachable without any inline evidence input when
+  the members are pre-dumped snapshots that already carry it — while the
+  inline `sources`/`build-info`/`compile-db` inputs, which the fan-out really
+  does not collect, keep failing loud.

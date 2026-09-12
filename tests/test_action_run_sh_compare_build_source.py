@@ -395,30 +395,42 @@ class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
 
 
 class TestCompareModeFailsFastOnUnservableDirectoryEvidenceRequest:
-    """A directory/package operand can never actually collect build/source
-    evidence (the CLI's per-library release fan-out rejects it outright),
-    so silently dropping a real evidence request there would let the
-    comparison run without the evidence and still report a clean/normal
-    result -- e.g. missing a source-only break. Must fail loud instead
-    (Codex review, PR #625)."""
+    """A directory/package operand can never *collect inline* build/source
+    evidence (the CLI's per-library release fan-out rejects
+    --sources/--build-info/--dump-manifest outright), so silently dropping
+    such a request would let the comparison run without the evidence and
+    still report a clean/normal result -- e.g. missing a source-only break.
+    Must fail loud instead (Codex review, PR #625).
 
-    def test_depth_source_against_directory_operand_fails(self, tmp_path: Path) -> None:
+    Scoped to those *inputs*, never to a ``--depth`` rung (Codex review, PR
+    #1233): a member may itself be a pre-dumped snapshot carrying embedded
+    L3/L4/L5 evidence, which satisfies ``build``/``source`` with no inline
+    collection at all, so rejecting those rungs here denied a genuinely
+    reachable configuration -- the same stale-guard defect this PR removes
+    elsewhere. See ``test_action_run_sh_release_capability_parity.py``."""
+
+    def test_depth_source_against_directory_operand_is_forwarded(
+        self, tmp_path: Path
+    ) -> None:
+        """Reachability is a property of the members, not of the operand's
+        cardinality: a directory of pre-dumped snapshots reaches ``source``,
+        and a member that cannot says so as its own error downstream."""
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "source"}, tmp_path
         )
-        assert result.returncode != 0
-        assert not captured.is_file(), "abicheck stub must never be invoked"
+        assert "--depth source" in cmd
 
-    def test_depth_build_against_directory_operand_fails(self, tmp_path: Path) -> None:
+    def test_depth_build_against_directory_operand_is_forwarded(
+        self, tmp_path: Path
+    ) -> None:
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "build"}, tmp_path
         )
-        assert result.returncode != 0
-        assert not captured.is_file()
+        assert "--depth build" in cmd
 
     def test_explicit_sources_against_directory_operand_fails_even_without_depth(
         self, tmp_path: Path
@@ -510,20 +522,18 @@ class TestCompareModeDirectoryDepthAsymmetry:
         )
         assert "--depth binary" in cmd
 
-    def test_depth_build_uppercase_against_directory_operand_still_fails(
+    def test_depth_build_uppercase_is_lowercased_and_forwarded(
         self, tmp_path: Path
     ) -> None:
-        """The fail-loud guard for build/source must not be case-sensitive
-        either -- a case mismatch there would silently skip the guard
-        entirely (defeating its purpose) rather than merely dropping the
-        flag, letting the comparison run without the requested evidence."""
+        """Case-insensitive like every other rung -- INPUT_DEPTH is a raw
+        Action input and the CLI's own ``DepthParam.convert()`` accepts
+        every case variant, so no spelling may be the one that drops it."""
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "BUILD"}, tmp_path
         )
-        assert result.returncode != 0
-        assert not captured.is_file(), "abicheck stub must never be invoked"
+        assert "--depth build" in cmd
 
     def test_depth_headers_uppercase_is_lowercased_and_forwarded(
         self, tmp_path: Path

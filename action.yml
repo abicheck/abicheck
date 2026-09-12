@@ -466,12 +466,15 @@ inputs:
       source explicitly to collect those (there is no risk-driven auto
       escalation). --depth source analyses the whole current library
       target unless since/changed-path seeds a narrower changed scope. Maps
-      to --depth. For a compare directory/package (release) operand,
-      binary and headers are forwarded per member exactly as for a single
-      pair (a member that falls short of the pinned rung fails as that
-      member's own error), while build and source are rejected with an
-      error before the run: the per-library fan-out collects no inline
-      build/source evidence, so the request could never be served.
+      to --depth. For a compare directory/package (release) operand, every
+      rung is forwarded per member exactly as for a single pair, and a
+      member that falls short of the pinned rung fails as that member's own
+      error. build and source are reachable there without any inline
+      evidence input when the members are pre-dumped snapshots that already
+      carry it (dump --sources/--build-info); what a release operand does
+      not support is the inline sources/build-info/compile-db inputs
+      themselves, which are rejected with an error before the run since the
+      per-library fan-out never collects them.
     required: false
   since:
     description: >
