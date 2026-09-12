@@ -280,6 +280,37 @@ class Function:
     is_compiler_generated_fact: Fact[bool | None] | None = field(
         default=None, kw_only=True
     )
+    # ADR-069 follow-up: the two *independent* facts `Visibility` conflates.
+    # `Visibility.PUBLIC` has always meant "declared in a parsed header AND
+    # dynamically exported", so every `visibility == Visibility.PUBLIC` guard
+    # silently answered both questions at once -- and a declaration that is
+    # still in the header but stopped being exported fell out of every
+    # source-surface index, which is how a still-declared inline method got
+    # reported as a *source* removal (see `docs/contribute/known-gaps.md`,
+    # "`Visibility.PUBLIC` is used as a proxy ...").
+    #
+    # These two carry the facts apart. Neither has a legacy sibling field, so
+    # there is no `bridge_legacy_and_fact` pair here: an omitted field
+    # normalizes to `Fact.not_collected()` in `__post_init__`, which is the
+    # only honest reading for a producer that never looked.
+    #
+    # - `declared_fact`  -- True when a source-declaration producer (a
+    #   header-AST backend) actually parsed this declaration out of a header.
+    #   NOT_COLLECTED whenever no header evidence exists at all (a headerless
+    #   ELF/PE/Mach-O dump, a DWARF-only snapshot, an export-table-synthesized
+    #   entry): "we did not look" must never read as "not declared".
+    # - `exported_fact`  -- True when the artifact's *observed* dynamic export
+    #   table contains this symbol. PRESENT(False) only when a real export
+    #   table was captured and the symbol is absent from it; NOT_COLLECTED
+    #   when no export table was observed at all, mirroring
+    #   `export_surface.py`'s fail-closed treatment of an uncaptured table.
+    #
+    # Read them through `model/declaration_surface.py`, never directly: that
+    # module owns the "evidence first, legacy `Visibility` proxy only when
+    # there is no evidence" rule every consumer needs to stay bit-for-bit
+    # unchanged on a pre-v46 snapshot.
+    declared_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    exported_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.contract_attributes, self.contract_attributes_fact = (
@@ -324,6 +355,10 @@ class Function:
                 None,
             )
         )
+        if self.declared_fact is None:
+            self.declared_fact = Fact.not_collected()
+        if self.exported_fact is None:
+            self.exported_fact = Fact.not_collected()
 
 
 @dataclass
@@ -397,6 +432,10 @@ class Variable:
     elf_binding_fact: Fact[SymbolBinding | None] | None = field(
         default=None, kw_only=True
     )
+    # See ``Function.declared_fact``/``exported_fact`` for the full
+    # rationale -- identical shape and identical meaning for a variable.
+    declared_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    exported_fact: Fact[bool] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.source_header, self.source_header_fact = bridge_legacy_and_fact(
@@ -414,3 +453,7 @@ class Variable:
         self.access, self.access_fact = bridge_legacy_and_fact(
             self.access, self.access_fact, _OMITTED_VAR_ACCESS, AccessLevel.PUBLIC
         )
+        if self.declared_fact is None:
+            self.declared_fact = Fact.not_collected()
+        if self.exported_fact is None:
+            self.exported_fact = Fact.not_collected()

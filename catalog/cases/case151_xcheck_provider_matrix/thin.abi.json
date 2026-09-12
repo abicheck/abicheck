@@ -111,6 +111,11 @@
         "status": "not_collected",
         "value": null
       },
+      "declared_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "deleted_from_dwarf": false,
       "deprecated": null,
       "deprecated_fact": {
@@ -127,6 +132,11 @@
       "elf_visibility": "default",
       "exception_spec": null,
       "exception_spec_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
+      "exported_fact": {
         "diagnostics": [],
         "status": "not_collected",
         "value": null
@@ -209,7 +219,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 45,
+  "schema_version": 46,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

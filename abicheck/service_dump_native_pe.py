@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
-from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
+from .model import AbiSnapshot, EnumType, Fact, Function, RecordType, Visibility
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -168,6 +168,10 @@ def _dump_pe(
             return_type="?",
             visibility=Visibility.PUBLIC,
             is_extern_c=not (exp.name or "").startswith("?"),
+            # ADR-069 follow-up: built straight from the export table, with
+            # no header parsed -- observed export, declaration unknown (see
+            # model/declaration_surface.py).
+            exported_fact=Fact.present(True),
         )
         for exp in pe_meta.exports
     ]
@@ -264,6 +268,8 @@ def _dump_macho(
             return_type="?",
             visibility=Visibility.PUBLIC,
             is_extern_c=not exp.name.startswith("_Z"),
+            # See the PE branch above: export-table evidence only.
+            exported_fact=Fact.present(True),
         )
         for exp in macho_meta.exports
         if exp.name

@@ -409,6 +409,42 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "declared_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-069 follow-up (schema v46). Not produced by either parser's own `parse_*()` methods: both backends' declarations are stamped after the parse, at the one choke point that also holds the artifact's export sets (`extract/declaration_surface_stamp.py`), so the answer is FULL for both and identical by construction rather than per-backend."
+        ),
+    ),
+    FactRow(
+        "Function",
+        "exported_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "Same producer as declared_fact -- see that row. NOT_COLLECTED, never False, whenever no export table was observed for the artifact."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "declared_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "ADR-069 follow-up (schema v46). Not produced by either parser's own `parse_*()` methods: both backends' declarations are stamped after the parse, at the one choke point that also holds the artifact's export sets (`extract/declaration_surface_stamp.py`), so the answer is FULL for both and identical by construction rather than per-backend."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "exported_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "Same producer as declared_fact -- see that row. NOT_COLLECTED, never False, whenever no export table was observed for the artifact."
+        ),
+    ),
+    FactRow(
+        "Function",
         "entity_id",
         _FULL,
         _FULL,

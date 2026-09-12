@@ -32,7 +32,7 @@ import re
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .model import AbiSnapshot, Function, Visibility
+from .model import AbiSnapshot, Function, in_exported_public_api
 from .model.change_catalog.kinds import ChangeKind
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
@@ -91,12 +91,12 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map: dict[str, Function] = {
         f.mangled: f
         for f in old.functions
-        if f.visibility == Visibility.PUBLIC and isinstance(f.mangled, str) and f.mangled
+        if in_exported_public_api(f) and isinstance(f.mangled, str) and f.mangled
     }
     new_map: dict[str, Function] = {
         f.mangled: f
         for f in new.functions
-        if f.visibility == Visibility.PUBLIC and isinstance(f.mangled, str) and f.mangled
+        if in_exported_public_api(f) and isinstance(f.mangled, str) and f.mangled
     }
 
     removed = set(old_map) - set(new_map)

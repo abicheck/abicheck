@@ -27,6 +27,7 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
+from .compare.export_axis_findings import export_removed_still_declared
 from .compare.fact_comparison import compare_facts
 from .compare.functions import function_identity_index
 from .detector_registry import registry
@@ -306,6 +307,10 @@ def _check_removed_function(
 ) -> Change:
     """Create a Change for a function that was removed or hidden."""
     f_hidden = new_all.get(mangled)
+    # Still declared, no longer exported is its own axis, not a removal.
+    export_axis = export_removed_still_declared(mangled, f_old, f_hidden)
+    if export_axis is not None:
+        return export_axis
     if (
         f_hidden is not None
         and f_hidden.visibility == Visibility.HIDDEN
@@ -1244,7 +1249,13 @@ def _check_variable(
     )
 
 
-def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
+def _var_removed(mangled: str, v_old: Variable, v_new: Variable | None = None) -> list[Change]:
+    """One removal finding for *v_old* -- or, when *v_new* (the new side's
+    declaration in any state) still declares it and only the export went
+    away, ``compare/export_axis_findings.py``'s finding instead."""
+    export_axis = export_removed_still_declared(mangled, v_old, v_new)
+    if export_axis is not None:
+        return [export_axis]
     return [
         make_change(
             ChangeKind.VAR_REMOVED,
@@ -1291,7 +1302,8 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
-        on_removed=_var_removed,
+        # `new.variable_map`: an unexported declaration is in no public view.
+        on_removed=lambda m, v: _var_removed(m, v, new.variable_map.get(m)),
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
             m, o, n, cv_facts_reliable=cv_facts_reliable

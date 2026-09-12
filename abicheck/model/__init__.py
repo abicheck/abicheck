@@ -25,6 +25,7 @@ owned.
 |---|---|
 | ``vocabulary`` | the closed enums an entity is described with |
 | ``declarations`` | ``Param``/``Function``/``Variable`` |
+| ``declaration_surface`` | reads *declared* and *exported* apart (see its docstring) |
 | ``entities`` | ``TypeField``/``RecordType``/``EnumMember``/``EnumType`` |
 | ``extraction_contract`` | ADR-050 comparability fingerprints, dependency ledger |
 | ``snapshot`` | ``AbiSnapshot`` itself |
@@ -52,6 +53,17 @@ from ..name_classification import (
     is_non_abi_surface_type as is_non_abi_surface_type,
 )
 from .availability import FactStatus as FactStatus
+from .declaration_surface import (
+    NON_PUBLIC_SOURCE_ORIGINS as NON_PUBLIC_SOURCE_ORIGINS,
+    SurfaceAnswer as SurfaceAnswer,
+    declared_in_source as declared_in_source,
+    dynamically_exported as dynamically_exported,
+    export_only_loss as export_only_loss,
+    in_exported_public_api as in_exported_public_api,
+    in_exported_public_header_api as in_exported_public_header_api,
+    in_source_surface as in_source_surface,
+    source_removal_supported as source_removal_supported,
+)
 from .declarations import Function as Function, Param as Param, Variable as Variable
 from .elf_facts import SymbolBinding as SymbolBinding
 from .entities import (

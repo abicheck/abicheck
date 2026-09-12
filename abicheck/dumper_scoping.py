@@ -104,7 +104,14 @@ from .dumper_clang_streaming import suppress_streaming_prune
 from .extract.occurrence_dependency_scope import (
     scoped_occurrences_excluding_dependencies,
 )
-from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
+from .model import (
+    AbiSnapshot,
+    EnumType,
+    Function,
+    RecordType,
+    Variable,
+    in_exported_public_header_api as _public_root,
+)
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from .model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 from .provenance import is_dependency_header
@@ -1285,16 +1292,10 @@ def scope_snapshot_excluding_dependencies(
         # through its own fields even though no *public* declaration
         # reaches it (Codex review, fresh evidence). Filtered on `origin`
         # alone here, since there is no `visibility` to additionally check.
-        public_root_functions = [
-            f
-            for f in kept_functions
-            if f.visibility == Visibility.PUBLIC and f.origin not in _NON_PUBLIC_ORIGINS
-        ]
-        public_root_variables = [
-            v
-            for v in kept_variables
-            if v.visibility == Visibility.PUBLIC and v.origin not in _NON_PUBLIC_ORIGINS
-        ]
+        # The public-header conjunction lives in one place -- see
+        # model/declaration_surface.in_exported_public_header_api.
+        public_root_functions = [f for f in kept_functions if _public_root(f)]
+        public_root_variables = [v for v in kept_variables if _public_root(v)]
         public_root_types = [
             t for t in kept_types if t.origin not in _NON_PUBLIC_ORIGINS
         ]

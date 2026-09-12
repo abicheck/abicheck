@@ -103,3 +103,12 @@ _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 41
 # about it looked wrong by inspection). Guarded by
 # AbiSnapshot.param_kind_facts_reliable.
 _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45
+
+# ADR-069 follow-up: the schema_version Function/Variable.declared_fact and
+# .exported_fact started being persisted at. These two have no legacy
+# sibling field to back-fill from -- a pre-v46 snapshot recorded only the
+# conflated `Visibility`, and inferring either fact from it would be
+# exactly the conflation this pair exists to undo -- so a missing key
+# decodes to None and `__post_init__` resolves it to `Fact.not_collected()`
+# ("no evidence"), never to a `False` that would fabricate findings.
+_MIN_SCHEMA_VERSION_FOR_DECLARED_EXPORTED_FACTS = 46

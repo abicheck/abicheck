@@ -52,10 +52,10 @@ if TYPE_CHECKING:
 
 
 def _public_function_names(snap) -> set[str]:  # type: ignore[no-untyped-def]
-    from .model import Visibility
+    from .model import in_exported_public_api
     out: set[str] = set()
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_exported_public_api(f):
             continue
         out.add(f.name or f.mangled)
     return out

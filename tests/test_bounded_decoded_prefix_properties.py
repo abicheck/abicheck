@@ -552,7 +552,10 @@ def _realistic_zstd_snapshot(
     same toy-fixture trap this module's header describes. Long, mutually
     dissimilar mangled names (real oneDAL carries deeply-templated ones) are
     what push the ratio down far enough for a 4096-byte stored prefix to land
-    mid-block.
+    mid-block. (The per-declaration entropy was raised once already, when
+    schema v46 added two more constant-shaped `Fact` keys per function and
+    the extra boilerplate lifted the ratio back out of the regime -- the
+    assertion below is what caught that, exactly as intended.)
 
     The precondition is *asserted*, not assumed: if a future zstd/serializer
     change moves this fixture back out of the regime, these tests say so
@@ -565,8 +568,8 @@ def _realistic_zstd_snapshot(
     rng = random.Random(4242)
     funcs = [
         Function(
-            name=f"oneapi_dal_kernel_{i}_{_dense(rng, 2000)}",
-            mangled=f"_ZN6oneapi3dal{_dense(rng, 4000)}6kernelE{i}v",
+            name=f"oneapi_dal_kernel_{i}_{_dense(rng, 3000)}",
+            mangled=f"_ZN6oneapi3dal{_dense(rng, 6000)}6kernelE{i}v",
             return_type="void",
             params=[Param(name="p", type=_dense(rng, 200))],
             visibility=Visibility.PUBLIC,

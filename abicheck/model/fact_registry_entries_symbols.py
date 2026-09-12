@@ -211,6 +211,66 @@ SYMBOL_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="Function",
+        field="declared",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-069 follow-up (schema v46). Half of the declared-vs-exported split: True when a source-declaration producer actually parsed this declaration out of a header. Unlike every case-(a)/(b) conversion around it, this field has no legacy sibling at all -- it is a genuinely new fact, so there is nothing to bridge and an omitted field resolves straight to Fact.not_collected(). That resting state is the point: a headerless dump must report declaration presence as unknown, never as absent. Read via model/declaration_surface.py, never directly."
+        ),
+    ),
+    _E(
+        owner="Function",
+        field="exported",
+        value_type="bool",
+        producing_backends=("castxml", "clang", "elf", "pe", "macho"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-069 follow-up (schema v46). The other half: True when the artifact's observed dynamic export table contains this symbol. PRESENT(False) requires a table to have actually been captured; when none was, the fact stays NOT_COLLECTED rather than claiming a confirmed non-export (the same fail-closed rule export_surface.py applies to an uncaptured export table). Also produced by the export-table-only synthesis paths (extract/export_symbol_identity.py, service_dump_native_pe.py), which set this one and leave declared unknown."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="declared",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-069 follow-up (schema v46). Half of the declared-vs-exported split: True when a source-declaration producer actually parsed this declaration out of a header. Unlike every case-(a)/(b) conversion around it, this field has no legacy sibling at all -- it is a genuinely new fact, so there is nothing to bridge and an omitted field resolves straight to Fact.not_collected(). That resting state is the point: a headerless dump must report declaration presence as unknown, never as absent. Read via model/declaration_surface.py, never directly."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="exported",
+        value_type="bool",
+        producing_backends=("castxml", "clang", "elf", "pe", "macho"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-069 follow-up (schema v46). The other half: True when the artifact's observed dynamic export table contains this symbol. PRESENT(False) requires a table to have actually been captured; when none was, the fact stays NOT_COLLECTED rather than claiming a confirmed non-export (the same fail-closed rule export_surface.py applies to an uncaptured export table). Also produced by the export-table-only synthesis paths (extract/export_symbol_identity.py, service_dump_native_pe.py), which set this one and leave declared unknown."
+        ),
+    ),
+    _E(
+        owner="Function",
         field="is_compiler_generated",
         value_type="bool | None",
         producing_backends=("castxml",),

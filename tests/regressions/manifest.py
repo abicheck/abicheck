@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
@@ -1435,11 +1436,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 
 
 #: The whole registry: this module's analysis classes plus each per-axis
-#: sibling's own list. An assembly point, the shape `abicheck/
-#: change_registry.py` already uses -- adding a class to a sibling needs no
-#: edit here.
+#: sibling's own list -- the assembly shape `change_registry.py` uses.
 BUG_CLASSES: tuple[BugClass, ...] = (
     _ANALYSIS_BUG_CLASSES
+    + EVIDENCE_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + REPORT_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES
