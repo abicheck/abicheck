@@ -49,7 +49,7 @@ from .header_utils import (
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot, in_exported_public_api
 
 if TYPE_CHECKING:
     from .dry_run_estimate import CompileContext
@@ -64,8 +64,8 @@ def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
     Clang/GCC toolchain that emits Itanium names — every symbol collapses to
     ``HIDDEN`` and header scoping has had no effect.
     """
-    return any(f.visibility == Visibility.PUBLIC for f in snap.functions) or any(
-        v.visibility == Visibility.PUBLIC for v in snap.variables
+    return any(in_exported_public_api(f) for f in snap.functions) or any(
+        in_exported_public_api(v) for v in snap.variables
     )
 
 

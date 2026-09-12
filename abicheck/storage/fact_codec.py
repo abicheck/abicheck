@@ -44,6 +44,7 @@ from .fact_backfill import (
 )
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
+    _MIN_SCHEMA_VERSION_FOR_DECLARED_EXPORTED_FACTS,
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
@@ -124,6 +125,9 @@ _VARIABLE_FACT_KEYS = (
     "elf_binding_fact",
     "deprecated_fact",
     "access_fact",
+    # ADR-069 follow-up (schema v46) -- see Variable.declared_fact.
+    "declared_fact",
+    "exported_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -141,6 +145,9 @@ _FUNCTION_FACT_KEYS = (
     "elf_binding_fact",
     "is_compiler_generated_fact",
     "deprecated_fact",
+    # ADR-069 follow-up (schema v46) -- see Function.declared_fact.
+    "declared_fact",
+    "exported_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -425,6 +432,16 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
             v, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
         ),
         "access_fact": access_fact,
+        "declared_fact": decode_fact(
+            v.get("declared_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_DECLARED_EXPORTED_FACTS,
+        ),
+        "exported_fact": decode_fact(
+            v.get("exported_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_DECLARED_EXPORTED_FACTS,
+        ),
     }
 
 
@@ -496,6 +513,16 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
         ),
         "deprecated_fact": decode_fact_with_legacy_presence(
             f, "deprecated", schema_version, _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS
+        ),
+        "declared_fact": decode_fact(
+            f.get("declared_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_DECLARED_EXPORTED_FACTS,
+        ),
+        "exported_fact": decode_fact(
+            f.get("exported_fact"),
+            schema_version,
+            min_schema_version=_MIN_SCHEMA_VERSION_FOR_DECLARED_EXPORTED_FACTS,
         ),
     }
 

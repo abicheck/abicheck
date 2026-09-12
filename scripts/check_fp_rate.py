@@ -58,6 +58,7 @@ from abicheck.model import (  # noqa: E402
     AbiSnapshot,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -587,6 +588,34 @@ def _public_function_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
     old = _snap("1", functions=[_fn("api"), _fn("also_public")])
     new = _snap("2", functions=[_fn("api")])
     return old, new
+
+
+def _export_dropped_declaration_retained() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Byte-identical headers; one function stops being dynamically exported.
+
+    A **real-break** sentinel, deliberately not an internal-noise case. The
+    defect this pair reproduces was a *source*-removal finding on a
+    declaration that never moved (`docs/contribute/known-gaps.md`), and the
+    fix for it splits the declared and exported facts apart -- but the
+    export loss itself stays breaking, because an already-linked consumer
+    resolves that symbol at load time and will not find it. Filing this as
+    internal noise would assert the opposite, so it sits here instead:
+    proof that the fix reclassified the finding without softening it.
+    """
+
+    def _side(version: str, *, exported: bool) -> AbiSnapshot:
+        inline_member = Function(
+            name="api_inline",
+            mangled="_Z10api_inlinev",
+            return_type="void",
+            visibility=Visibility.PUBLIC if exported else Visibility.HIDDEN,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            declared_fact=Fact.present(True),
+            exported_fact=Fact.present(exported),
+        )
+        return _snap(version, functions=[_fn("api"), inline_member])
+
+    return _side("1", exported=True), _side("2", exported=False)
 
 
 def _public_param_type_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -1131,6 +1160,11 @@ CORPUS: list[Case] = [
         _public_std_string_typedef_alias_layout_changed,
     ),
     Case("public_function_removed", False, _public_function_removed),
+    Case(
+        "export_dropped_declaration_retained",
+        False,
+        _export_dropped_declaration_retained,
+    ),
     Case("public_param_type_changed", False, _public_param_type_changed),
     Case("public_return_type_changed", False, _public_return_type_changed),
     Case("public_variable_removed", False, _public_variable_removed),
@@ -1546,6 +1580,7 @@ CASE_CATEGORY: dict[str, str] = {
     # symbol linkage / visibility
     "elf_only_function_removed": "symbol-linkage",
     "hidden_function_signature_changed": "symbol-linkage",
+    "export_dropped_declaration_retained": "symbol-linkage",
     "public_function_removed": "symbol-linkage",
     "public_param_type_changed": "symbol-linkage",
     "public_return_type_changed": "symbol-linkage",

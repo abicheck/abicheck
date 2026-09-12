@@ -145,7 +145,7 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     it. There is no pairwise comparison here for
     :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
     """
-    from .model import RecordType, Visibility, resolved_fact_value
+    from .model import RecordType, in_exported_public_api, resolved_fact_value
     from .surface import _type_identifiers
 
     record_by_name: dict[str, RecordType] = {rec.name: rec for rec in snap.types}
@@ -160,13 +160,13 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
 
     queue: list[str] = []
     for fn in snap.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_exported_public_api(fn):
             continue
         _add_type(queue, fn.return_type)
         for param in fn.params:
             _add_type(queue, getattr(param, "type", None))
     for var in snap.variables:
-        if var.visibility == Visibility.PUBLIC:
+        if in_exported_public_api(var):
             _add_type(queue, var.type)
 
     public_by_value: set[str] = set()

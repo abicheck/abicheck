@@ -48,6 +48,7 @@ from typing import Protocol
 from ..model import EnumType, Function, RecordType, Variable
 from ..model.identity import EntityId
 from ..model.semantic_ir import SemanticIR
+from .declaration_surface_stamp import export_table_observed, stamp_header_ast_surface
 from .semantic_normalizer import normalize_header_ast
 
 __all__ = ["HeaderAstFields", "parse_header_ast_fields"]
@@ -90,15 +91,36 @@ class HeaderAstFields:
 
 
 def parse_header_ast_fields(
-    parser: _HeaderAstParser, *, producer: str
+    parser: _HeaderAstParser,
+    *,
+    producer: str,
+    exported_dynamic: Iterable[str],
+    exported_static: Iterable[str],
 ) -> HeaderAstFields:
     """Run *parser*'s own ``parse_*()`` methods once each and normalize the
     result into a :class:`SemanticIR` alongside them -- see this module's
     own docstring for why this exists as a dedicated function rather than
     inline calls at each call site.
+
+The two export sets are the artifact's observed export tables, the
+    PE/Mach-O counterpart of what ``dumper_manifest.
+    resolve_header_ast_result`` already has in hand for ELF. They are taken
+    here rather than a pre-computed boolean so the "was a table observed at
+    all" question is answered in exactly one place
+    (``extract/declaration_surface_stamp.export_table_observed``), and are
+    required rather than defaulted so a future third format cannot silently
+    inherit a convenient answer it never established.
     """
     functions = tuple(parser.parse_functions())
     variables = tuple(parser.parse_variables())
+    stamp_header_ast_surface(
+        functions,
+        variables,
+        observed_export_table=export_table_observed(
+            exported_dynamic, exported_static
+        ),
+        producer=producer,
+    )
     types = tuple(parser.parse_types())
     enums = tuple(parser.parse_enums())
     typedefs_qualified = parser.parse_typedefs_qualified()

@@ -49,11 +49,16 @@ from .compare.qualified_name_normalization import (
     version_strip_segments as _version_strip_segments,
     version_suffix as _version_suffix,  # noqa: F401  (public-surface re-export)
 )
+from .compare.source_surface_removal import (
+    declarations_by_qualified_name,
+    removal_is_supported,
+)
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
+from .model import in_source_surface
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot, RecordType, ScopeOrigin
+    from .model import AbiSnapshot, Function, RecordType, ScopeOrigin
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -464,12 +469,19 @@ def _func_index_items(
     Only public functions are indexed so internal helpers in
     ``experimental::`` don't get reported.
     """
-    from .model import Visibility
-
     demangled = _batch_demangle_public(snap)
     out: list[_IndexItem] = []
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        # Source axis, not export axis: this index answers "what do the
+        # public headers declare", and the event it feeds is a *source*
+        # removal. The legacy `visibility != Visibility.PUBLIC` guard
+        # additionally required a live dynamic export, which is exactly how
+        # a still-declared inline method that merely stopped being emitted
+        # dropped out of the new side's index and was reported as removed
+        # (`docs/contribute/known-gaps.md`). `in_source_surface` falls back
+        # to that same legacy predicate with no evidence, so a pre-v46
+        # snapshot is unchanged.
+        if not in_source_surface(f):
             continue
         # qname keeps its parameter list (when demangled) — that's what
         # distinguishes one overload from another for the (stripped, leaf)
@@ -803,12 +815,18 @@ def _findings_for(
     new_origins: dict[str, ScopeOrigin] | None = None,
     old_items: list[_IndexItem] | None = None,
     new_items: list[_IndexItem] | None = None,
+    new_declarations: dict[str, Function] | None = None,
 ) -> list[Change]:
     """Walk old/new indices, emitting one finding per classified event.
 
     *old_origins*/*new_origins* are ``None`` for the function-sourced path
     (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
     the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
+
+    *new_declarations* maps a new-side qualified name to the declaration
+    carrying it, for every new-side function -- see
+    ``compare/source_surface_removal.py`` for what it is checked against
+    and why. ``None`` disables that check.
 
     *old_items*/*new_items* are the flat (pre-pairing) ``_IndexItem`` lists
     the caller built ``old_index``/``new_index`` from, used only for the
@@ -906,6 +924,10 @@ def _findings_for(
         )
         if event is None:
             continue
+        # A removal needs the declaration gone from the *source* surface,
+        # not merely from this index.
+        if event == "removed" and not removal_is_supported(new_declarations, old_exp):
+            continue
         out.append(
             _emit_experimental_change(
                 event,
@@ -957,6 +979,9 @@ def detect_experimental_namespace_changes(
             "declaration",
             old_items=old_func_items,
             new_items=new_func_items,
+            new_declarations=declarations_by_qualified_name(
+                new, _qualified_function_name, _batch_demangle_public(new)
+            ),
         )
     )
     old_type_items = _type_index_items(old, experimental_namespaces)
@@ -1025,13 +1050,15 @@ def _looks_like_std_reexport(
 
 
 def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
-    """Return the set of qualified declared names of public functions in *snap*."""
-    from .model import Visibility
+    """Return the set of qualified declared names of public functions in *snap*.
 
+    Source axis (see :func:`_func_index_items`): a declaration still in the
+    header belongs here whether or not the binary still exports it.
+    """
     demangled = _batch_demangle_public(snap)
     out: set[str] = set()
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_source_surface(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
@@ -1040,14 +1067,17 @@ def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
 
 
 def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
-    """Demangle every public mangled name in *snap* in one batch call."""
-    from .demangle import demangle_batch
-    from .model import Visibility
+    """Demangle every public mangled name in *snap* in one batch call.
 
+    Membership matches :func:`_func_index_items`' own (source-axis) rule:
+    this is the cache those callers look names up in, so a narrower
+    predicate here would leave an indexed declaration without a spelling.
+    """
+    from .demangle import demangle_batch
     mangled = [
         f.mangled
         for f in snap.functions
-        if f.mangled.startswith("_Z") and f.visibility == Visibility.PUBLIC
+        if f.mangled.startswith("_Z") and in_source_surface(f)
     ]
     return demangle_batch(mangled) if mangled else {}
 
@@ -1090,15 +1120,14 @@ def detect_std_reexport_removed(
     declared name is in ``std::``, or when the mangled name does not
     demangle to ``std::``.
     """
-    from .model import Visibility
-
     demangled = _batch_demangle_public(old)
     new_declared = _collect_public_declared_names(new)
 
     changes: list[Change] = []
     seen: set[str] = set()
     for f in old.functions:
-        if f.visibility != Visibility.PUBLIC:
+        # Source axis, same as the index this detector compares against.
+        if not in_source_surface(f):
             continue
         declared = _qualified_function_name(f.name, f.mangled, demangled)
         if not declared or declared in seen or declared in new_declared:
@@ -1164,12 +1193,13 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     ``origin`` is ``ScopeOrigin.UNKNOWN``, so this degrades to the prior
     untagged behavior automatically, not a regression for the common case.
     """
-    from .model import ScopeOrigin, Visibility
+    from .model import ScopeOrigin
 
     demangled = _batch_demangle_public(snap)
     items: list[tuple[str, bool]] = []
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        # Source axis, same rule as `_func_index_items`.
+        if not in_source_surface(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:

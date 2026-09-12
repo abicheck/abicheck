@@ -27,7 +27,7 @@ from __future__ import annotations
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .model import AbiSnapshot, Function, Visibility
+from .model import AbiSnapshot, Function, in_exported_public_api
 from .model.change_catalog.kinds import ChangeKind
 
 # Canonical integer-width buckets. A change that moves a spelling from one
@@ -163,8 +163,8 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Windows/LLP64: ``long`` is 32-bit, so int<->long is NOT a model flip there.
     is_llp64 = "pe" in (old.platform, new.platform)
 
-    old_map = {f.mangled: f for f in old.functions if f.visibility == Visibility.PUBLIC}
-    new_map = {f.mangled: f for f in new.functions if f.visibility == Visibility.PUBLIC}
+    old_map = {f.mangled: f for f in old.functions if in_exported_public_api(f)}
+    new_map = {f.mangled: f for f in new.functions if in_exported_public_api(f)}
 
     flips, total, up, down = _scan_function_integer_flips(old_map, new_map, is_llp64)
     typedef_flips, typedef_up, typedef_down = _scan_typedef_integer_flips(old, new, is_llp64)

@@ -79,6 +79,16 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         'a brand-new virtual *method* added to a class that already exists across -- versions → grows/relayouts the vtable, breaking derived classes (and the -- vptr if the class had none). Catches the KDE "add a virtual to a non-leaf -- class" rule when the vtable array itself is not diff-able (DWARF/symbol-only -- snapshots), where it would otherwise be mistaken for a compatible func_added. -- → BREAKING',
     ),
     ("VAR_REMOVED", "var_removed", None),
+    (
+        "FUNC_EXPORT_REMOVED_STILL_DECLARED",
+        "func_export_removed_still_declared",
+        "the binary stopped exporting a function the public headers still declare -- the export axis of the declared/exported split (model/declaration_surface.py)",
+    ),
+    (
+        "VAR_EXPORT_REMOVED_STILL_DECLARED",
+        "var_export_removed_still_declared",
+        "the variable counterpart of FUNC_EXPORT_REMOVED_STILL_DECLARED",
+    ),
     ("VAR_ADDED", "var_added", None),
     ("VAR_TYPE_CHANGED", "var_type_changed", None),
     (

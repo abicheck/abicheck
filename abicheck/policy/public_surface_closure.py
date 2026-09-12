@@ -109,7 +109,8 @@ from ..compare.surface_graph import (
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
-from ..model.vocabulary import ScopeOrigin, Visibility
+from ..model.declaration_surface import in_exported_public_api
+from ..model.vocabulary import ScopeOrigin
 from .public_surface import (
     _DEMOTE_ORIGINS,
     PublicSurface,
@@ -269,7 +270,7 @@ def _seed_public_roots(
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
         _record_origin(surface, keys, getattr(fn, "origin", ScopeOrigin.UNKNOWN))
-        if fn.visibility == Visibility.PUBLIC:
+        if in_exported_public_api(fn):
             has_public = True
             surface.public_symbols |= keys
             if fn.params or _is_real_type(fn.return_type):
@@ -293,7 +294,7 @@ def _seed_public_roots(
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
         _record_origin(surface, keys, getattr(var, "origin", ScopeOrigin.UNKNOWN))
-        if var.visibility == Visibility.PUBLIC:
+        if in_exported_public_api(var):
             has_public = True
             surface.public_symbols |= keys
             if _is_real_type(var.type):

@@ -37,6 +37,8 @@ class ChangeKind(str, Enum):
     FUNC_VIRTUAL_REMOVED = 'func_virtual_removed'
     VIRTUAL_METHOD_ADDED = 'virtual_method_added'
     VAR_REMOVED = 'var_removed'
+    FUNC_EXPORT_REMOVED_STILL_DECLARED = 'func_export_removed_still_declared'
+    VAR_EXPORT_REMOVED_STILL_DECLARED = 'var_export_removed_still_declared'
     VAR_ADDED = 'var_added'
     VAR_TYPE_CHANGED = 'var_type_changed'
     TYPE_SIZE_CHANGED = 'type_size_changed'

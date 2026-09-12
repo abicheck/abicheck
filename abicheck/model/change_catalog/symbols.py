@@ -332,6 +332,18 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
        description_template="Parameters changed: {name}"),
     _E("func_removed", _B,
        impact="Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site."),
+    _E("func_export_removed_still_declared", _B,
+       impact="The binary no longer exports this symbol, but the public "
+              "headers still declare the function -- two independent facts "
+              "that `Visibility.PUBLIC` used to fold into one (see "
+              "`model/declaration_surface.py`). Source compatibility is "
+              "intact: a consumer recompiling against the new headers still "
+              "sees the declaration. Binary compatibility is not: an "
+              "already-linked consumer resolves this symbol at load time and "
+              "will fail to find it. Emitted in place of func_removed "
+              "precisely so the report does not claim the declaration was "
+              "removed from the API when it was not.",
+       description_template="Export removed, declaration retained: {name}"),
     _E("func_removed_elf_only", _B,
        impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence."),
     _E("func_return_changed", _B,
@@ -701,6 +713,13 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
        description_template="Variable no longer marked deprecated: {name}"),
     _E("var_lost_const", _B,
        impact="Variable no longer const; ODR violations possible if old code inlined the value."),
+    _E("var_export_removed_still_declared", _B,
+       impact="The variable counterpart of func_export_removed_still_declared: "
+              "the binary stopped exporting the object symbol while the "
+              "public headers still declare the variable. Recompiling "
+              "consumers are unaffected; already-linked ones fail to resolve "
+              "the symbol at load time.",
+       description_template="Export removed, declaration retained: {name}"),
     _E("var_removed", _B,
        impact="Old binaries reference a global variable that no longer exists; link or load failure.",
        description_template="Public variable removed: {name}"),

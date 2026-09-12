@@ -1797,7 +1797,7 @@ def _dump_macho(
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
-    _ast = parse_header_ast_fields(parser, producer=_ast_producer)
+    _ast = parse_header_ast_fields(parser, producer=_ast_producer, exported_dynamic=exported_dynamic, exported_static=exported_dynamic)  # Mach-O has one export set; the parse above is given it as both
     return closure_identity.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dylib_path.name,
         version=version,
@@ -1925,7 +1925,7 @@ def _dump_pe(
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
-    _ast = parse_header_ast_fields(parser, producer=_ast_producer)
+    _ast = parse_header_ast_fields(parser, producer=_ast_producer, exported_dynamic=exported_dynamic, exported_static=exported_static)
     return closure_identity.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dll_path.name,
         version=version,

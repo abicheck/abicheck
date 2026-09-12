@@ -39,7 +39,7 @@ file owns development procedure, not direction.
 
 Mechanically: pure Python (3.10+); reads ELF, PE/COFF, and Mach-O binaries
 plus optional debug info, public headers, build data, and sources (L0–L5);
-detects 402 ABI/API change types categorized into `BREAKING_KINDS`,
+detects 404 ABI/API change types categorized into `BREAKING_KINDS`,
 `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`);
 drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -376,6 +376,19 @@ Core pipeline (in order of data flow):
    - `diff_filtering.py` — deduplication and redundancy removal
    - `diff_versioning.py` — symbol version checks
    - `diff_sycl.py` — SYCL-specific diffs
+   - `model/declaration_surface.py` — ADR-071: the one place *declared in
+     source* and *dynamically exported* are read apart. `Visibility.PUBLIC`
+     conflates them ("declared in a parsed header AND exported"), which is
+     why a still-declared inline method that merely stopped being emitted
+     was reported as a source removal. `Function`/`Variable` carry
+     `declared_fact`/`exported_fact` (`Fact[bool]`, schema v46, stamped by
+     `extract/declaration_surface_stamp.py`); every predicate here is
+     evidence-first and falls back to the legacy `Visibility` comparison
+     when a snapshot carries no evidence, so a pre-v46 snapshot is
+     unchanged. Use `in_source_surface` where the question is about the
+     declaration (above all where the answer decides whether something
+     counts as *removed*), `in_exported_public_api` where it is genuinely
+     the conjunction — never a bare `visibility == Visibility.PUBLIC`
    - `finding_identity.py` — ADR-049 Phase 2: tiered canonical/normalized/
      reduced identity resolution for flat (L0-L2) findings
      (`resolve_function_identity`/`resolve_variable_identity`/
@@ -814,7 +827,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 402 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 404 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 

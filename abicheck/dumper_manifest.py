@@ -51,7 +51,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, replace as _dataclasses_replace
+from dataclasses import replace as _dataclasses_replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,11 +69,13 @@ from .dumper_toolchain import (
     _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind,
 )
+from .extract.declaration_surface_stamp import (
+    export_table_observed,
+    stamp_header_ast_surface,
+)
+from .extract.header_ast_result import ElfHeaderAstResult
 from .extract.manifest_semantic_ir import manifest_semantic_ir
 from .extract.semantic_normalizer import normalize_header_ast
-from .model import EnumType, Function, RecordType, Variable
-from .model.identity import EntityId
-from .model.semantic_ir import SemanticIR
 from .tu_fragment import (
     MergedTuFragments as MergedTuFragments,
     TuFragment as TuFragment,
@@ -602,41 +604,6 @@ def run_tu_loop(
     return _dataclasses_replace(merged, semantic_ir=manifest_semantic_ir(fragments))
 
 
-@dataclass(frozen=True)
-class ElfHeaderAstResult:
-    """The single result shape :func:`resolve_header_ast_result` returns for
-    both the legacy single-header path and a real manifest -- everything a
-    format handler's snapshot-assembly step needs, so it never has to know
-    which of the two actually ran.
-    """
-
-    functions: tuple[Function, ...]
-    variables: tuple[Variable, ...]
-    types: tuple[RecordType, ...]
-    enums: tuple[EnumType, ...]
-    typedefs: dict[str, str]
-    typedefs_qualified: dict[str, str]
-    constants: dict[str, str]
-    typedef_entity_ids: dict[str, EntityId]
-    constant_entity_ids: dict[str, EntityId]
-    ast_producer: str
-    ast_toolchain: dict[str, str]
-    ast_fallback_reason: str | None
-    ast_toolchain_supported: bool | None
-    ast_toolchain_unsupported_reasons: tuple[str, ...]
-    is_clang: bool
-    provenance_headers: tuple[Path, ...]
-    frontend_context_kind: str | None = None
-    # ADR-063 Phase 6 (second/third/fourth slices): the canonical SemanticIR
-    # projection of this same merged result -- computed once, here, so both
-    # the legacy single-TU dump (`_dump_elf`) and a real manifest dump share
-    # one normalizer call instead of each format handler recomputing it from
-    # `functions`/`variables`/`types`/`enums`/`typedefs_qualified`/
-    # `typedef_entity_ids`/`constants`/`constant_entity_ids` above. See
-    # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
-    semantic_ir: SemanticIR | None = None
-
-
 def resolve_header_ast_result(
     *,
     dump_manifest: DumpManifest | None,
@@ -759,6 +726,22 @@ def resolve_header_ast_result(
             frontend_context_kind=fragment.frontend_context_kind,
         )
         provenance_headers = tuple(headers)
+
+    # ADR-069 follow-up: the one place the ELF header-AST path knows both
+    # halves at once -- these declarations came out of a header parse, and
+    # the artifact's observed export sets are right here. Applied after the
+    # legacy/manifest branch join so both branches are stamped identically
+    # (see extract/declaration_surface_stamp.py for the derivation rule).
+    stamp_header_ast_surface(
+        merged.functions,
+        merged.variables,
+        observed_export_table=export_table_observed(
+            exported_dynamic,
+            exported_static,
+            no_binary_evidence=no_binary_evidence,
+        ),
+        producer=merged.ast_producer,
+    )
 
     return ElfHeaderAstResult(
         functions=merged.functions,

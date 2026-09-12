@@ -89,6 +89,12 @@ VALUE_INSENSITIVE = frozenset(
         "func_added",
         "func_deleted",
         "func_deleted_dwarf",
+        # ADR-069 follow-up: both carry visibility spellings, not type
+        # spellings, and both resolve through `_EQUIVALENT_CHANGE_CATEGORIES`
+        # (onto "func_removal"/"var_removal"), so identity does not vary
+        # with the value text at all.
+        "func_export_removed_still_declared",
+        "var_export_removed_still_declared",
         "func_removed",
         "func_removed_elf_only",
         "header_binary_context_mismatch",

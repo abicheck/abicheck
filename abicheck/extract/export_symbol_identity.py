@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import re
 
-from ..model import Function, Variable, Visibility
+from ..model import Fact, Function, Variable, Visibility
 from ..model.identity import entity_id_for_function, entity_id_for_variable
 
 __all__ = [
@@ -172,6 +172,13 @@ def itanium_export_function(name: str) -> Function:
         # confirmation), so the checker can distinguish a binary-only
         # removal as FUNC_REMOVED_ELF_ONLY.
         visibility=Visibility.ELF_ONLY,
+        # ADR-069 follow-up: this entry exists *because* the export table
+        # names it, so its export status is observed evidence. Its
+        # `declared_fact` deliberately stays at the constructor default
+        # (`Fact.not_collected()`): a headerless dump never looked at a
+        # source declaration, and "did not look" must not read as "not
+        # declared" (model/declaration_surface.py).
+        exported_fact=Fact.present(True),
         is_extern_c=is_extern_c,
         entity_id=entity_id_for_function(
             (),
@@ -190,6 +197,13 @@ def itanium_export_variable(name: str) -> Variable:
         mangled=name,
         type="?",
         visibility=Visibility.ELF_ONLY,
+        # ADR-069 follow-up: this entry exists *because* the export table
+        # names it, so its export status is observed evidence. Its
+        # `declared_fact` deliberately stays at the constructor default
+        # (`Fact.not_collected()`): a headerless dump never looked at a
+        # source declaration, and "did not look" must not read as "not
+        # declared" (model/declaration_surface.py).
+        exported_fact=Fact.present(True),
         entity_id=entity_id_for_variable(
             (),
             name,
@@ -242,6 +256,13 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
         mangled=sym,
         return_type="?",
         visibility=Visibility.ELF_ONLY,
+        # ADR-069 follow-up: this entry exists *because* the export table
+        # names it, so its export status is observed evidence. Its
+        # `declared_fact` deliberately stays at the constructor default
+        # (`Fact.not_collected()`): a headerless dump never looked at a
+        # source declaration, and "did not look" must not read as "not
+        # declared" (model/declaration_surface.py).
+        exported_fact=Fact.present(True),
         is_extern_c=is_extern_c,
         entity_id=entity_id_for_function(
             (),

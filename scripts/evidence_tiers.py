@@ -75,6 +75,11 @@ def tier_rank(tier: str) -> int:
 EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ── L0: visible in the exported symbol table / linker metadata alone ──
     "func_removed": "L0",
+    # L2: needs the header tier on the NEW side to establish that the
+    # declaration is still there -- L0 exports alone can only say the symbol
+    # went away, which is `func_removed`.
+    "func_export_removed_still_declared": "L2",
+    "var_export_removed_still_declared": "L2",
     "func_removed_elf_only": "L0",
     "func_added": "L0",
     "var_added": "L0",
