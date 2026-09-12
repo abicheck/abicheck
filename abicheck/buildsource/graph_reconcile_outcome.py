@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from ..model.graph_identity import (
     closure_location_free_identity,
-    closure_marker_files,
+    closure_marker_locations,
 )
 from .entity_identity import CanonicalIdentity
 
@@ -196,8 +196,8 @@ def _classify_outcome(
     # two sides' markers can be aligned; under an ordinary coordinate shift
     # equal counts are implied by the equal location-free keys, and under a
     # rename they are checked.
-    old_markers = closure_marker_files(old_qn) if old_qn else ()
-    new_markers = closure_marker_files(new_qn) if new_qn else ()
+    old_markers = closure_marker_locations(old_qn) if old_qn else ()
+    new_markers = closure_marker_locations(new_qn) if new_qn else ()
     # A PERMUTATION is not a move (Codex review, PR #1229): reordered
     # template arguments leave every marker naming the file it already
     # named, so the multiset is what carries "some marker now names a

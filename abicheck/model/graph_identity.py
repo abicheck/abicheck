@@ -413,7 +413,7 @@ def closure_location_free_identity(identity: str) -> str:
     return _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.sub(_replace, normalized)
 
 
-def closure_marker_files(identity: str) -> tuple[str, ...]:
+def closure_marker_locations(identity: str) -> tuple[tuple[str, str], ...]:
     """The declaring-file *basename* of every closure/anonymous-tag marker
     in *identity*, **in source order** (``"w<(lambda at /a/foo.h:4:37)>"``
     -> ``("foo.h",)``); empty for an identity carrying no marker.
@@ -442,6 +442,17 @@ def closure_marker_files(identity: str) -> tuple[str, ...]:
     Order matters because the comparison is positional: marker *i* on the
     old side is marker *i* on the new side.
 
+    Each marker's KIND is carried alongside its basename, not dropped
+    (Codex review, PR #1229): the consumer's permutation check compares
+    multisets, and a bare-basename multiset cannot tell "the two markers
+    swapped positions" from "two markers of DIFFERENT kinds each changed
+    file". ``Pair<(lambda at a.h:1:2),(unnamed struct at b.h:3:4)>`` ->
+    ``Pair<(lambda at b.h:1:2),(unnamed struct at a.h:3:4)>`` is the
+    second: neither marker moved position, both moved file. Keeping the
+    kind makes those two multisets differ, while a genuine reorder of
+    same-kind markers -- the case the permutation rule exists for, and the
+    one where no correspondence is recoverable at all -- still matches.
+
     Basenames, not paths: two independently-rooted checkouts spell the same
     unmoved header differently (``/old/checkout/foo.h`` vs
     ``/new/checkout/foo.h``), and comparing those would manufacture a move
@@ -462,7 +473,7 @@ def closure_marker_files(identity: str) -> tuple[str, ...]:
     # agree on which text IS a marker.
     quoted_spans = _quoted_spans(normalized)
     return tuple(
-        _basename(match.group(0).rsplit(":", 3)[-3])
+        (" ".join(match.group(1).split()), _basename(match.group(0).rsplit(":", 3)[-3]))
         for match in _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.finditer(normalized)
         if not any(start <= match.start() < end for start, end in quoted_spans)
     )

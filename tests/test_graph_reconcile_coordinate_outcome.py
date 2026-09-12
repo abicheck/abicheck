@@ -461,7 +461,7 @@ class TestMarkerCarriedLocationEvidence:
 
 
 class TestMixedMarkerSpellings:
-    """Codex review (PR #1229): `closure_marker_files` ran one scan per
+    """Codex review (PR #1229): `closure_marker_locations` ran one scan per
     accepted spelling and concatenated, so a mixed-spelling identity
     returned its markers grouped by which regex matched rather than in
     source order — and the raw form's own path group could run greedily
@@ -484,24 +484,25 @@ class TestMixedMarkerSpellings:
     )
 
     def test_every_spelling_extracts_the_same_ordered_basenames(self) -> None:
-        from abicheck.model.graph_identity import closure_marker_files
+        from abicheck.model.graph_identity import closure_marker_locations
 
         for spelling in self._SPELLINGS:
-            assert closure_marker_files(spelling) == ("a.h", "b.h"), spelling
+            assert closure_marker_locations(spelling) == (
+                ("lambda", "a.h"),
+                ("lambda", "b.h"),
+            ), spelling
 
     def test_order_is_source_order_not_scan_order(self) -> None:
         """The reversed identity must extract the reversed tuple — a
         grouped-by-regex result would return the same tuple for both."""
-        from abicheck.model.graph_identity import closure_marker_files
+        from abicheck.model.graph_identity import closure_marker_locations
 
-        assert closure_marker_files("Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>") == (
-            "a.h",
-            "b.h",
-        )
-        assert closure_marker_files("Pair<(lambda:b.h:3:4),(lambda at a.h:1:2)>") == (
-            "b.h",
-            "a.h",
-        )
+        assert closure_marker_locations(
+            "Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>"
+        ) == (("lambda", "a.h"), ("lambda", "b.h"))
+        assert closure_marker_locations(
+            "Pair<(lambda:b.h:3:4),(lambda at a.h:1:2)>"
+        ) == (("lambda", "b.h"), ("lambda", "a.h"))
 
     def test_mixed_spellings_of_one_unmoved_pair_are_not_a_move(self) -> None:
         """The consumer half: two coordinate-only versions referencing the
@@ -572,11 +573,11 @@ class TestQuotedMarkerLookalikes:
     )
 
     def test_quoted_lookalikes_carry_no_marker_evidence(self) -> None:
-        from abicheck.model.graph_identity import closure_marker_files
+        from abicheck.model.graph_identity import closure_marker_locations
 
         for old_qn, new_qn in self._QUOTED_ONLY:
-            assert closure_marker_files(old_qn) == (), old_qn
-            assert closure_marker_files(new_qn) == (), new_qn
+            assert closure_marker_locations(old_qn) == (), old_qn
+            assert closure_marker_locations(new_qn) == (), new_qn
 
     def test_a_rename_spelled_only_in_quotes_stays_a_rename(self) -> None:
         for old_qn, new_qn in self._QUOTED_ONLY:
@@ -589,11 +590,11 @@ class TestQuotedMarkerLookalikes:
     def test_a_real_marker_beside_a_quoted_lookalike_still_counts(self) -> None:
         """The negative control: protecting quoted spans must not blind the
         extraction to a real marker sharing the identity with one."""
-        from abicheck.model.graph_identity import closure_marker_files
+        from abicheck.model.graph_identity import closure_marker_locations
 
-        assert closure_marker_files(
+        assert closure_marker_locations(
             'Mix<(lambda at real.h:1:2),"lambda:fake.h:9:9">'
-        ) == ("real.h",)
+        ) == (("lambda", "real.h"),)
         outcome = _classify_outcome(
             _identity(
                 'Mix<(lambda at old.h:1:2),"lambda:fake.h:9:9">', "", "sig:x\x1fs"
@@ -611,7 +612,7 @@ class TestQuotedMarkerLookalikes:
         span is location evidence."""
         from abicheck.model.graph_identity import (
             closure_location_free_identity,
-            closure_marker_files,
+            closure_marker_locations,
         )
 
         for identity in (
@@ -622,7 +623,7 @@ class TestQuotedMarkerLookalikes:
             "ns::Widget",
         ):
             stripped = closure_location_free_identity(identity)
-            for basename in closure_marker_files(identity):
+            for _kind, basename in closure_marker_locations(identity):
                 assert basename not in stripped, (identity, basename, stripped)
 
 
@@ -675,6 +676,33 @@ class TestReorderedMarkersAreNotAMove:
             self._pair(f"Pair<{self._A},{self._B}>", f"Pair<{moved_b},{self._A}>")
             == OUTCOME_MOVED
         )
+
+    def test_markers_of_different_kinds_swapping_files_is_a_move(self) -> None:
+        """Codex review (PR #1229): the multiset has to carry each marker's
+        KIND, not only its basename. A lambda and an unnamed struct that
+        each change file leave the bare-basename multiset equal, so the
+        permutation rule absorbed a real two-marker move — and then claimed
+        the location-free name had changed instead.
+
+        Stated over every pair of distinct kinds the marker vocabulary
+        accepts, not the one reported pair, since the defect is "the
+        multiset element is too coarse", not "lambda vs unnamed struct"."""
+        kinds = ("lambda", "unnamed struct", "anonymous union", "unnamed enum")
+        for i, first in enumerate(kinds):
+            for second in kinds[i + 1 :]:
+                old_qn = f"Pair<({first} at a.h:1:2),({second} at b.h:3:4)>"
+                new_qn = f"Pair<({first} at b.h:1:2),({second} at a.h:3:4)>"
+                assert self._pair(old_qn, new_qn) == OUTCOME_MOVED, (old_qn, new_qn)
+
+    def test_same_kind_markers_swapping_positions_is_still_not_a_move(self) -> None:
+        """The must-stay-distinct complement, over the same kinds: when the
+        two markers share a kind there is no recoverable correspondence
+        between the sides, which is exactly the case the permutation rule
+        exists for — so carrying the kind must not turn every reorder into
+        a move."""
+        for kind in ("lambda", "unnamed struct", "anonymous union", "unnamed enum"):
+            a, b = f"({kind} at a.h:1:2)", f"({kind} at b.h:3:4)"
+            assert self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>") == OUTCOME_RECONCILED
 
     def test_a_repeated_marker_file_is_compared_as_a_multiset(self) -> None:
         """Two markers naming the same file, one of which moves, must
