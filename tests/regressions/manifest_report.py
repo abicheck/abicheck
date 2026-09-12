@@ -289,7 +289,17 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # on. Six findings on #1246 were this one shape, each fixed for
             # itself; the axis exists so the next admission rule without a
             # consumer fails a test instead of publishing COMPATIBLE.
-            "answerability": ("answered", "admitted_but_unanswerable"),
+            #
+            # Only these two states are *reachable*, which is the point rather
+            # than a gap (CodeRabbit review): on correct code no document is
+            # admitted-and-unanswerable, so naming that as a third state to
+            # exercise would describe a seed the matrix cannot contain. It is
+            # the state the invariant forbids, and it is reached only under
+            # mutation -- re-introducing three of the six historical findings
+            # produces it in 46, 48 and 8 generated documents respectively,
+            # which is how `TestAdmissionImpliesAnswerability` was verified to
+            # generalize rather than merely to pass.
+            "answerability": ("admitted_and_answered", "rejected"),
         },
         known_gaps=(
             KnownGap(

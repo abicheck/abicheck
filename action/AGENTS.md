@@ -310,6 +310,16 @@ Two predicates close that without weakening anything above:
   earlier one. **Add a consumer of the output path and resolve it through
   `_EFFECTIVE_OUTPUT_FILE`**, never `$OUTPUT_FILE`.
 
+  **Every spelling Click accepts for `--output` names the destination**, and
+  `_attached_output_value` is what recognizes the ones `_extra_args_options`
+  leaves opaque: `-oPATH`, `-voPATH`, `-vvoPATH`. It strips leading `v`s one at a
+  time rather than globbing `-v*o?*`, because that glob also accepts `-vHofoo` —
+  which Click reads as `-v -Hofoo`, a *header* value whose text merely contains
+  an `o`. Confirm a new spelling against the installed Click parser before
+  relying on it; the help text is not the parser. Two of these were separate
+  findings, which is why the tests state the whole spelling set rather than the
+  reported input.
+
   **`-oPATH` counts as naming the destination.** `_extra_args_options` leaves an
   *attached* short option an opaque bare token deliberately — that form consumes
   no following token, so "unexpanded" is the right answer for every other
