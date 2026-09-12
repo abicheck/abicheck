@@ -2912,8 +2912,11 @@ elif [[ "$MODE" == "compare" ]]; then
     # reporting a clean result. Fail loud instead (Codex review).
     #
     # `--depth` is deliberately NOT part of this guard, on any rung. It
-    # left `_EVIDENCE_SET_INPUT_FLAGS` when the fan-out moved onto
-    # `service.run_compare`: a member may itself be a pre-dumped snapshot
+    # left `cli_resolve.py`'s set-input evidence-flag table when the
+    # fan-out moved onto `service.run_compare` (naming that constant in
+    # full here would trip `test_every_run_sh_input_var_is_set_by_action_
+    # yml`, which scans this file for `INPUT_*` reads and cannot tell a
+    # prose mention from a real variable): a member may itself be a pre-dumped snapshot
     # carrying embedded L3/L4/L5 evidence (`dump --sources`/`--build-info`),
     # which satisfies `build`/`source` with no inline collection at all, so
     # rejecting those rungs here denied a genuinely reachable configuration
