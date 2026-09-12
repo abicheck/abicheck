@@ -357,7 +357,17 @@ class TestReleaseOperandConfigOverlayStaysSingular:
 #: a workflow-command forgery (a newline starting a `::error::` line of its
 #: own) and a shell-metacharacter payload whose side effect is observable
 #: as a file that must never appear.
-_FORGERY_PAYLOAD = "headers\n::error::PWNED"
+#: Newline-bearing payloads. `::add-mask::` and `::set-output` are chosen
+#: because `run.sh` never emits either legitimately, so their appearance is
+#: unambiguous -- unlike `::error::`/`::notice::`, which it emits for real
+#: reasons and which a case-transforming path can also disguise.
+_FORGERY_PAYLOADS = (
+    "headers\n::add-mask::secret",
+    "headers\n::set-output name=pwned::1",
+    "headers\n::error::PWNED",
+)
+#: Workflow commands `run.sh` never emits; matched case-insensitively.
+_NEVER_EMITTED_COMMANDS = ("::add-mask::", "::set-output", "::save-state")
 _SIDE_EFFECT_PAYLOAD_TEMPLATE = "headers; touch {canary}"
 _COMMAND_SUBSTITUTION_PAYLOAD_TEMPLATE = "headers$(touch {canary})"
 _BACKTICK_PAYLOAD_TEMPLATE = "headers`touch {canary}`"
@@ -407,19 +417,65 @@ class TestReleaseOperandHostileInputHasNoSideEffect:
     @pytest.mark.parametrize(
         "var", ["INPUT_DEPTH", "INPUT_SYSROOT", "INPUT_GCC_OPTIONS"]
     )
-    @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
+    # "single" is in this matrix deliberately: the mechanism (a value
+    # reaching `CMD` and then the "Command:" job-log line) is not specific
+    # to a release operand, and `depth` reached it on the single-pair path
+    # long before this change. A defense that held only for the shape this
+    # PR widened would be the narrow patch, not the fix.
+    @pytest.mark.parametrize("shape", ("single", *_RELEASE_OPERAND_SHAPES))
     def test_no_value_can_forge_a_workflow_command(
         self, tmp_path: Path, shape: str, var: str
     ) -> None:
-        result, _ = _run_compare_raw(
-            {var: _FORGERY_PAYLOAD, **_operand_env(shape, tmp_path)}, tmp_path
-        )
-        for line in result.stdout.splitlines():
-            assert not line.startswith("::error::PWNED"), (
-                f"{var} forged a workflow command on a {shape} operand:\n"
-                f"{result.stdout}"
+        """No input value may end the line it is printed inside.
+
+        The oracle is deliberately **not** the payload's own spelling. A
+        first version of this case asserted ``line.startswith("::error::
+        PWNED")`` and passed against a live forgery, because `run.sh`
+        lowercases `depth` on its way to `CMD` -- so the forged line read
+        `::error::pwned` and the assertion sailed past it (Codex review, PR
+        #1233, which demonstrated the escape with an `::add-mask::`
+        payload). What is asserted instead is the *class*: no line may
+        start with a workflow command this script never legitimately
+        emits, case-insensitively, whatever the payload was transformed
+        into on the way.
+        """
+        for index, payload in enumerate(_FORGERY_PAYLOADS):
+            # A fresh directory per payload: `_run_compare_raw` mints its
+            # own `fakebin` under the path it is given and cannot be
+            # called twice against the same one.
+            case_dir = tmp_path / f"case{index}"
+            case_dir.mkdir()
+            result, _ = _run_compare_raw(
+                {var: payload, **_operand_env(shape, case_dir)}, case_dir
             )
-            assert not line.startswith(("::set-output", "::add-mask")), result.stdout
+            for line in result.stdout.splitlines():
+                assert not line.lower().startswith(_NEVER_EMITTED_COMMANDS), (
+                    f"{var}={payload!r} forged a workflow command on a "
+                    f"{shape} operand:\n{result.stdout}"
+                )
+
+    @pytest.mark.parametrize("shape", ("single", *_RELEASE_OPERAND_SHAPES))
+    def test_an_unknown_depth_never_reaches_the_command_line(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        """`depth` is validated against the four accepted rungs before it is
+        forwarded or displayed, so a hostile value is rejected rather than
+        neutralized-and-passed-on.
+
+        Asserts the forwarded *value*, not just the absence of a forged
+        annotation: the first version of this validation ran inside a
+        `$(...)` command substitution, where its own `exit 1` ended only the
+        subshell -- the script continued and forwarded `--depth
+        ::error::mode:...` to the CLI. The annotation assertion above passes
+        either way; only looking at what reached `CMD` catches it.
+        """
+        result, captured = _run_compare_raw(
+            {"INPUT_DEPTH": "no-such-rung", **_operand_env(shape, tmp_path)}, tmp_path
+        )
+        assert result.returncode != 0
+        assert not captured.is_file(), (
+            "abicheck must never be invoked with an unvalidated depth"
+        )
 
     @pytest.mark.parametrize("shape", _RELEASE_OPERAND_SHAPES)
     def test_a_hostile_compile_context_value_stays_one_config_value(

@@ -71,6 +71,31 @@ _is_path_already_qualified() {
 # `mktemp` produced it -- the same form every pre-existing, working
 # invocation already relied on -- and only ever touches the genuinely
 # relative case this helper exists to fix.
+# Neutralize a workflow-controlled value before it is printed into a
+# GitHub annotation or job-log line. Annotations and workflow commands are
+# *line-delimited*, so any value carrying CR/LF ends the line it is printed
+# inside and everything after it is parsed as a NEW workflow command --
+# `depth: $'headers\n::add-mask::secret'` really did forge an `::add-mask::`
+# of its own through the "Command:" line below (reproduced, then fixed;
+# Codex review, PR #1233).
+#
+# The same helper, contract and escaping order as
+# `validate-inputs.sh`'s own `_sanitize_annotation` -- `%` first, then
+# CR/LF, matching `actions/toolkit`'s `escapeData`, because the runner
+# percent-decodes a workflow command's message data and a value carrying
+# the literal five characters `%0A::error::` would otherwise become a real
+# line break after this script is done with it. `printf`, never `echo`: an
+# `echo` under `xpg_echo` expands backslash escapes, turning a literal
+# `\n::error::` into a real newline after the CR/LF collapse has already
+# run.
+#
+# This sanitizes what is *displayed*. `CMD` itself keeps the exact bytes
+# the CLI must receive: argv is not line-delimited, so a newline inside one
+# argument is data there, not a command.
+_sanitize_annotation() {
+  printf '%s' "${1//%/%25}" | tr '\r\n' '  '
+}
+
 _mktemp_canonical() {
   if ! _is_path_already_qualified "$1"; then
     printf '%s\n' "$PWD/$1"
@@ -331,6 +356,52 @@ add_single_flag() {
   if [[ -n "$value" ]]; then
     CMD+=("$flag" "$value")
   fi
+}
+
+# The public evidence ladder, exactly as the CLI's own `DepthParam` accepts
+# it. `depth` is a raw, unvalidated workflow input and one of the few that
+# reach `CMD` as a *value* rather than a path, so it is validated here
+# rather than forwarded and left to the CLI: an unknown value is a usage
+# error there anyway (exit 64, after Python and dependency setup), and
+# anything off this list has no business being echoed into the job log.
+# `depth: $'headers\n::add-mask::secret'` really did forge a workflow
+# command of its own through the "Command:" line (reproduced, then fixed;
+# Codex review, PR #1233): `_sanitize_annotation` closes that for every
+# displayed value, and this closes it at the source for the one input the
+# newly-widened release path made reachable.
+#
+# Sets `_DEPTH_LC` to the lowercased rung -- the CLI's own `DepthParam` is
+# case-insensitive, so `depth: BUILD` is valid and must keep working -- or
+# fails loud. Used by every mode that forwards `--depth`, so the rung means
+# the same thing on all of them.
+#
+# Assigns a global rather than echoing its result, and callers must NOT
+# wrap it in `$(...)`: a command substitution runs the function in a
+# subshell, where `exit 1` ends only that subshell -- the script would sail
+# on with the *error message* captured as the depth value and forward
+# `--depth ::error::mode:...` to the CLI. (Caught by probing the forwarded
+# value while fixing the injection below, which is the only reason it
+# isn't still here: the annotation-forgery assertion alone passes either
+# way.)
+_DEPTH_LC=""
+_resolve_depth_lc() {
+  local raw="${1:-}"
+  _DEPTH_LC=""
+  if [[ -z "$raw" ]]; then
+    return 0
+  fi
+  # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
+  local lowered
+  lowered=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+  case "$lowered" in
+    binary | headers | build | source)
+      _DEPTH_LC="$lowered"
+      ;;
+    *)
+      printf '%s\n' "::error::mode: ${MODE} does not accept depth: $(_sanitize_annotation "$raw") -- it must be one of binary, headers, build, or source."
+      exit 1
+      ;;
+  esac
 }
 
 # Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1): --ast-frontend/
@@ -2706,7 +2777,8 @@ if [[ "$MODE" == "dump" ]]; then
   # check above, which exits before this command-assembly code ever runs
   # with a non-empty value) -- `.abicheck.yml`'s `build.targets` is the
   # only route left.
-  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  _resolve_depth_lc "${INPUT_DEPTH:-}"
+  add_single_flag "--depth" "$_DEPTH_LC"
   # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
   # deprecated no-op removed outright in CLI cleanup H1 -- the input stays
   # registered in action.yml for back-compat, but nothing is forwarded to
@@ -2893,16 +2965,14 @@ elif [[ "$MODE" == "compare" ]]; then
   # extension and cohort declarations are sourced only from
   # build-config's own .abicheck.yml `bundle:` block now, which --config
   # above already forwards unconditionally.
+  # Validated and lowercased once, for both operand shapes: the rung a
+  # workflow pins means the same thing either side of this branch, and an
+  # unknown value must reach neither `CMD` nor the job log on either. Not
+  # `local` -- this runs in the top-level script body, not a function.
+  _resolve_depth_lc "${INPUT_DEPTH:-}"
+  _depth_lc="$_DEPTH_LC"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
-    # review): INPUT_DEPTH is a raw, unvalidated Action input string, so a
-    # workflow spelling `depth: BUILD`/`BINARY`/etc. matches none of the
-    # case-sensitive comparisons a previous revision made here -- silently
-    # dropping the rung with no forwarding and no annotation either.
-    # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
-    # Not `local` -- this runs in the top-level script body, not a function.
-    _depth_lc=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
     # Inline build/source evidence is the one thing genuinely unservable
     # here: `cli_resolve._reject_evidence_flags_for_set_inputs` rejects
     # --sources/--build-info/--dump-manifest for a set input, because the
@@ -2942,7 +3012,7 @@ elif [[ "$MODE" == "compare" ]]; then
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
     add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-    add_single_flag "--depth" "${INPUT_DEPTH:-}"
+    add_single_flag "--depth" "$_depth_lc"
     # --since/--changed-path (ADR-068 Phase 2c) were previously silently
     # dropped in compare mode -- only the scan branch forwarded them,
     # despite this page's own docs already claiming `mode: compare` "takes
@@ -3241,7 +3311,7 @@ fi
 _EFFECTIVE_FORMAT="$(_effective_format)"
 
 echo "::group::abicheck $MODE"
-echo "Command: ${CMD[*]}"
+printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
 echo ""
 
 ABICHECK_EXIT=0
@@ -4863,7 +4933,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       if [[ -n "${INPUT_SOURCES:-}" ]]; then
         echo "| Sources | \`${INPUT_SOURCES}\` |"
       fi
-      echo "| Depth | ${INPUT_DEPTH:-headers} |"
+      printf '%s\n' "| Depth | $(_sanitize_annotation "${INPUT_DEPTH:-headers}") |"
     elif [[ "$MODE" == "compare" ]]; then
       echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
       echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"
