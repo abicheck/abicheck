@@ -57,7 +57,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "one by accident, and no test of either question alone can "
             "see it."
         ),
-        fixed_by=(),
+        fixed_by=(1241,),
         seed_tests=(
             "tests/test_declaration_surface_properties.py",
             "tests/test_declared_vs_exported_end_to_end.py",
