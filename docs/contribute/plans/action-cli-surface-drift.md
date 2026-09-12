@@ -541,7 +541,26 @@ would buy more than its cost even before the rest of Phase 5.
 ## Regression-test contract
 
 Bug class: **"a CLI fact copied into the Action layer goes stale with no
-failing check."** Candidate for a `tests/regressions/manifest.py`
-`BugClass` entry when Phase 2 lands; Phase 1's bidirectional union
-assertion is the executable invariant for the option-table half, generated
-from live Click introspection rather than any hand-listed expectation.
+failing check."** Registered as `cli_surface.copied_option_table_went_stale`
+in `tests/regressions/manifest_tool_surface.py` (landed with Phase 1, not
+deferred to Phase 2 as an earlier revision of this line said). Phase 1's
+bidirectional union assertion is its executable invariant for the
+option-table half, derived from live Click introspection rather than any
+hand-listed expectation.
+
+Two things that entry deliberately does *not* claim, both worth preserving
+when it is next edited:
+
+- `public_surfaces` is `()`. Its contract reserves `github-action` for a
+  real workflow/composite-action execution, and Phase 1's seed tests read
+  shell source and call individually sourced helpers instead. Phase 5 is
+  what earns it back.
+- Its remediation points at **Phase 3a's live CLI query**, not at a
+  committed generated artifact. The artifact was this plan's own first
+  (wrong) answer, written under the premise the top of this document now
+  refutes; a future audit reading the registry must not be sent back to it.
+
+The guard-reasoning half of the audit (A1, A4) belongs to the pre-existing
+`cli_surface.capability_guard_diverged_from_pipeline` class, not to this
+one — see that entry's own first known gap, which this audit partially
+discharges from the Action side.
