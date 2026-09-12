@@ -511,7 +511,11 @@ class TestMarkerCarriedLocationEvidence:
                 _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                 _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
             )
-            assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (old_file, new_file, outcome)
+            assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (
+                old_file,
+                new_file,
+                outcome,
+            )
 
     def test_only_the_declarations_own_marker_can_say_it_moved(self) -> None:
         """Codex review (PR #1229): "some marker names the recorded file"
@@ -542,7 +546,11 @@ class TestMarkerCarriedLocationEvidence:
                     _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                     _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
                 )
-                assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (old_qn, old_file, outcome)
+                assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (
+                    old_qn,
+                    old_file,
+                    outcome,
+                )
 
     def test_several_markers_naming_the_recorded_file_are_ambiguous(self) -> None:
         """Codex review (PR #1229): when more than one marker names the
@@ -573,7 +581,11 @@ class TestMarkerCarriedLocationEvidence:
                     _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                     _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
                 )
-                assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (old_qn, old_file, outcome)
+                assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (
+                    old_qn,
+                    old_file,
+                    outcome,
+                )
 
     def test_the_declarations_own_marker_changing_is_still_a_move(self) -> None:
         """The must-stay-distinct half: when the recorded file's OWN marker
@@ -863,7 +875,10 @@ class TestReorderedMarkersAreNotAMove:
         a move."""
         for kind in ("lambda", "unnamed struct", "anonymous union", "unnamed enum"):
             a, b = f"({kind} at a.h:1:2)", f"({kind} at b.h:3:4)"
-            assert self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>") == OUTCOME_RECONCILED_UNRESOLVED
+            assert (
+                self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>")
+                == OUTCOME_RECONCILED_UNRESOLVED
+            )
 
     def test_markers_from_one_header_swapping_places_is_still_a_permutation(
         self,
@@ -883,9 +898,13 @@ class TestReorderedMarkersAreNotAMove:
             a = f"({kind} at same.h:1:2)"
             b = f"({kind} at same.h:3:4)"
             c = f"({kind} at same.h:5:6)"
-            assert self._pair(f"P<{a},{b}>", f"P<{b},{a}>") == OUTCOME_RECONCILED_UNRESOLVED, kind
             assert (
-                self._pair(f"P<{a},{b},{c}>", f"P<{c},{a},{b}>") == OUTCOME_RECONCILED_UNRESOLVED
+                self._pair(f"P<{a},{b}>", f"P<{b},{a}>")
+                == OUTCOME_RECONCILED_UNRESOLVED
+            ), kind
+            assert (
+                self._pair(f"P<{a},{b},{c}>", f"P<{c},{a},{b}>")
+                == OUTCOME_RECONCILED_UNRESOLVED
             ), kind
 
     def test_a_reorder_that_also_shifts_coordinates_is_still_a_permutation(

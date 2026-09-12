@@ -100,7 +100,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "strongest claim in its vocabulary. Every outcome must be an "
             "affirmative classification whose claim is entailed by the "
             "inputs; a pair that cannot be placed gets its own explicit "
-            "\"cannot place\" outcome, never the label with the most "
+            '"cannot place" outcome, never the label with the most '
             "specific prose. The guard is a property over generated "
             "input pairs asserting entailment (an outcome claiming a "
             "name or location change may only be returned where the "

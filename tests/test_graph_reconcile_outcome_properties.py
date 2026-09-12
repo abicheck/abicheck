@@ -196,8 +196,7 @@ def test_a_claim_of_change_is_entailed_by_the_inputs(
         )
     if result.outcome in CLAIMS_LOCATION_CHANGE:
         assert old.source_relative != new.source_relative, (
-            f"{result.outcome} claims a location change for "
-            f"identical declaring files"
+            f"{result.outcome} claims a location change for identical declaring files"
         )
 
 
