@@ -111,6 +111,7 @@ from .frontends.cli.runtime import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .serialization import run_scoped_digest_cache
 from .service_render import ONELINE_FORMAT
 from .workflows.public_header_boundary import (
     project_config_public_header_dirs,
@@ -1017,6 +1018,7 @@ def _report_compare_result(
     )
 
 
+@run_scoped_digest_cache
 def run_compare(
     ctx: click.Context,
     *,

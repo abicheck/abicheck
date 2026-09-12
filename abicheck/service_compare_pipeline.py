@@ -64,6 +64,7 @@ from .policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
+from .serialization import run_scoped_digest_cache
 from .workflows import abi3_audit, gate as gate_workflow
 from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
@@ -514,6 +515,7 @@ def resolve_compare_request(
     )
 
 
+@run_scoped_digest_cache
 def classify_compare_pair(
     request: CompareRequest,
     pair: ResolvedComparePair,
