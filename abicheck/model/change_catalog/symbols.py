@@ -362,6 +362,23 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
               "declaration remains; an already-linked consumer that resolves "
               "it fails at load time, and nothing in the headers signals it.",
        description_template="Variable no longer exported by the binary: {name}"),
+    _E("func_export_added", _C, is_addition=True,
+       impact="An already-declared function gained a binary export -- a "
+              "version script, visibility attribute or link-map change now "
+              "emits a dynamic symbol for a declaration that was already "
+              "promised. Pure addition: every consumer that could bind "
+              "before still can, and one that could not now can. Reported "
+              "rather than dropped because the declaration is present on "
+              "both sides, so the pair matches and no added-symbol path "
+              "sees it -- leaving the run silent about a real, observed "
+              "change to the export table.",
+       description_template="Function now exported by the binary: {name}"),
+    _E("var_export_added", _C, is_addition=True,
+       impact="Data symbol gained a binary export while its declaration was "
+              "already present; the `func_export_added` counterpart for data "
+              "symbols. Pure addition, and reported for the same reason: a "
+              "matched pair reaches no added-symbol path.",
+       description_template="Variable now exported by the binary: {name}"),
     _E("hidden_friend_added", _C, is_addition=True,
        impact="A new in-class `friend` declaration was added. Pure "
               "addition: existing code keeps compiling, no symbol "

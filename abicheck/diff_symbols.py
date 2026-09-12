@@ -773,7 +773,7 @@ def _check_function_signature(
     changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
     changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
     changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
-    changes.extend(_export_transition.check_export_lost(mangled, f_old, f_new))
+    changes.extend(_export_transition.check_function(mangled, f_old, f_new))
     return changes
 
 
@@ -1212,7 +1212,7 @@ def _check_variable(
     # and must survive their early returns -- an unknown "?" type on a
     # stripped side says nothing about whether the symbol is still exported --
     # so it is folded in first (compare/export_transition.py).
-    changes += _export_transition.check_variable_export_lost(mangled, v_old, v_new)
+    changes += _export_transition.check_variable(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
         return changes

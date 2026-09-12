@@ -36,10 +36,35 @@ from ..model.surface_facts import (
 )
 
 __all__ = [
+    "check_export_gained",
     "check_export_lost",
+    "check_function",
+    "check_variable",
+    "check_variable_export_gained",
     "check_variable_export_lost",
     "deleted_declaration_is_public",
 ]
+
+
+def check_function(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Every finding this module has about a matched function pair's export.
+
+    The one entry point ``diff_symbols`` calls. Which *direction* a
+    transition went, and whether either direction has a finding at all, is
+    this module's question rather than the caller's -- a caller that lists
+    the directions itself has to be edited again the next time one is added,
+    and has no way to enforce that they stay mutually exclusive.
+    """
+    return check_export_lost(mangled, f_old, f_new) + check_export_gained(
+        mangled, f_old, f_new
+    )
+
+
+def check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:
+    """:func:`check_function` for data symbols."""
+    return check_variable_export_lost(mangled, v_old, v_new) + (
+        check_variable_export_gained(mangled, v_old, v_new)
+    )
 
 
 def deleted_declaration_is_public(new: Function | None, old: Function | None) -> bool:
@@ -74,6 +99,84 @@ def _export_was_lost(old: Function | Variable, new: Function | Variable) -> bool
     exists to close.
     """
     return is_binary_exported(old) and is_export_confirmed_absent(new)
+
+
+def _export_was_gained(old: Function | Variable, new: Function | Variable) -> bool:
+    """:func:`_export_was_lost` in the other direction.
+
+    Symmetric in the same way and for the same reason: both halves must be
+    *confirmed*, so "unknown before, exported now" stays a gap in this run's
+    evidence rather than becoming an observed addition.
+    """
+    return is_export_confirmed_absent(old) and is_binary_exported(new)
+
+
+def check_export_gained(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """A matched pair that gained an export while its declaration stayed.
+
+    The compatible mirror of :func:`check_export_lost`, and not optional
+    symmetry: before the three facts were split, a promised-but-unexported
+    declaration failed the old ``visibility in (PUBLIC, ELF_ONLY)`` filter
+    outright, so the old side was *absent* from the public index and the pair
+    never matched -- the run reported ``FUNC_ADDED``. Now that the declaration
+    keeps its place on both sides the pair matches, and without this the run
+    reports **nothing at all** for a version script that newly exports an
+    existing declaration (Codex review, P2).
+
+    That silence is the failure this closes. Trading one wrong finding for a
+    missing one is the same mistake the variable half of the loss side made,
+    and an addition that vanishes is precisely what "record before disposing"
+    forbids: an observed change to the export table is recorded, then
+    classified as the compatible thing it is -- never dropped because it
+    happened to be good news.
+    """
+    if not _export_was_gained(f_old, f_new):
+        return []
+    return [
+        make_change(
+            ChangeKind.FUNC_EXPORT_ADDED,
+            symbol=mangled,
+            name=f_new.name,
+            description=(
+                f"Function now exported by the binary, and already declared "
+                f"in the available headers: {f_new.name}"
+            ),
+            old_value=f_old.visibility.value,
+            new_value=f_new.visibility.value,
+            symbol_binding=f_new.elf_binding.value if f_new.elf_binding else None,
+            entity_id=f_new.entity_id or f_old.entity_id,
+            surface_facts=surface_fact_summary(f_new),
+        )
+    ]
+
+
+def check_variable_export_gained(
+    mangled: str, v_old: Variable, v_new: Variable
+) -> list[Change]:
+    """:func:`check_export_gained` for data symbols.
+
+    Present for the same reason its loss-side sibling is: nothing else in
+    ``_check_variable`` compares export presence, so a data symbol that
+    gained an export would otherwise produce no finding on either axis.
+    """
+    if not _export_was_gained(v_old, v_new):
+        return []
+    return [
+        make_change(
+            ChangeKind.VAR_EXPORT_ADDED,
+            symbol=mangled,
+            name=v_new.name,
+            description=(
+                f"Variable now exported by the binary, and already declared "
+                f"in the available headers: {v_new.name}"
+            ),
+            old_value=v_old.visibility.value,
+            new_value=v_new.visibility.value,
+            symbol_binding=v_new.elf_binding.value if v_new.elf_binding else None,
+            entity_id=v_new.entity_id or v_old.entity_id,
+            surface_facts=surface_fact_summary(v_new),
+        )
+    ]
 
 
 def check_export_lost(mangled: str, f_old: Function, f_new: Function) -> list[Change]:

@@ -72,22 +72,24 @@ __all__ = [
     "DERIVED_FROM_LEGACY",
     "SurfaceFactBearing",
     "binary_exported",
+    "declaration_confirmed_absent",
     "declared_in_headers",
     "headers_discarded_surface_facts",
-    "declaration_confirmed_absent",
     "in_public_contract",
     "in_public_surface",
     "in_source_declaration_index",
-    "public_header_contract_fact",
     "is_abi_visible",
     "is_binary_exported",
     "is_confirmed_false",
     "is_confirmed_true",
     "is_export_confirmed_absent",
     "is_export_table_only_record",
-    "is_legacy_derived",
     "is_header_declared",
+    "is_legacy_derived",
+    "is_public_export",
+    "is_public_export",
     "is_unknown",
+    "public_header_contract_fact",
     "surface_fact_summary",
 ]
 
@@ -154,15 +156,23 @@ def declared_in_headers(decl: SurfaceFactBearing) -> Fact[bool]:
     stored: Fact[bool] | None = getattr(decl, "declared_in_headers_fact", None)
     if stored is not None:
         return stored
-    vis = getattr(decl, "visibility", Visibility.PUBLIC)
-    if vis is Visibility.ELF_ONLY:
-        # The one legacy state that really did assert a *negative*: an
-        # export-table entry the header parse did not account for.
-        return Fact.partial(False, DERIVED_FROM_LEGACY)
     if _legacy_header_evidence(decl):
         return Fact.partial(True, DERIVED_FROM_LEGACY)
-    # PUBLIC/HIDDEN with no recorded header provenance: the legacy enum
-    # was answering the export question, not this one.
+    # No recorded header provenance. The legacy enum cannot close the gap
+    # for *any* of its members, `ELF_ONLY` included: both header-AST
+    # backends assign `ELF_ONLY` to a declaration they parsed **out of a
+    # header** whose symbol turned up in `.symtab` rather than the dynamic
+    # table (`extract/headers/castxml/location.visibility` and its clang
+    # sibling), so reading it as "not declared in any header" would state a
+    # negative about a declaration a header parse produced (Codex review,
+    # P2). The record's own header provenance above is the discriminator
+    # that actually answers this question -- a synthesized export-table
+    # entry (`extract/export_symbol_identity`) carries none, a parsed
+    # declaration does -- and it is consulted for every member alike.
+    #
+    # Which member it was remains a real question, just a *different* one:
+    # `is_export_table_only_record` answers it, and keeps the ELF-only
+    # removal kind and the stub-record consumers working off the enum.
     return Fact.not_collected(DERIVED_FROM_LEGACY)
 
 
@@ -298,6 +308,29 @@ def is_abi_visible(decl: SurfaceFactBearing) -> bool:
     promised, unexported inline declaration is (b) without (c).
     """
     return is_binary_exported(decl) or in_public_surface(decl)
+
+
+def is_public_export(decl: SurfaceFactBearing) -> bool:
+    """The *intersection* of (b) and (c): promised **and** confirmed exported.
+
+    The reading the old ``visibility is Visibility.PUBLIC`` test had, as
+    opposed to :func:`is_abi_visible`'s union of the same two facts. A
+    detector wants this one whenever its subject is a symbol a consumer can
+    actually bind to *and* that the library promises -- so both the
+    export-table-only entry (fails (b)) and the promised-but-unexported
+    inline declaration (fails (c)) are excluded, exactly as the single enum
+    member excluded ``ELF_ONLY`` and ``HIDDEN`` respectively.
+
+    That equivalence is the point: it keeps every pre-split snapshot's
+    answer identical, because the legacy bridge derives (c) true for
+    ``PUBLIC``/``ELF_ONLY`` and (b) true for ``PUBLIC`` alone. Reaching for
+    :func:`in_public_surface` where the old test said ``is PUBLIC`` is the
+    mistake this function exists to make unnecessary -- it silently widens
+    the subject to declarations the artifact never exported (Codex review,
+    P2, on ``diff_templates``' instantiation-survival index and
+    ``surface_graph``'s export-named counters).
+    """
+    return in_public_surface(decl) and is_binary_exported(decl)
 
 
 def in_source_declaration_index(decl: SurfaceFactBearing) -> bool:

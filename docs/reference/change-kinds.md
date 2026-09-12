@@ -60,6 +60,7 @@ These changes are immediately incompatible with existing compiled binaries.
 | `func_static_changed` | A method changed from static to non-static or vice versa. The calling convention changes (implicit `this` pointer added/removed). |
 | `func_cv_changed` | `const` or `volatile` qualifier on `this` changed. This changes the mangled name and the overload set — existing binaries resolve the wrong symbol. |
 | `func_visibility_changed` | Function visibility changed from default to hidden. The symbol disappears from the dynamic symbol table — callers get undefined symbol at link or load time. |
+| `func_export_added` | An already-declared function gained a binary export — a version script, visibility attribute or link-map change now emits a dynamic symbol for a declaration the headers already promised. Compatible: every consumer that could bind before still can. Reported because the declaration is present on both sides, so the pair matches and no added-symbol path would otherwise see it. |
 | `func_pure_virtual_added` | A virtual function became pure virtual. Any concrete class that does not implement it is now abstract — instantiation fails at link time. |
 | `func_virtual_became_pure` | A virtual method that had a default implementation is now pure. Derived classes that relied on the base implementation now fail to link. |
 | `func_deleted` | A function was marked `= delete`. Previously callable code now gets a link-time error (callers compiled against old header had no error). |
@@ -74,6 +75,7 @@ These changes are immediately incompatible with existing compiled binaries.
 | `var_removed` | Exported global variable removed. Callers crash at load time with an undefined symbol error. |
 | `var_type_changed` | Global variable type changed. Callers reading the variable will interpret memory incorrectly — wrong size, alignment, or layout. |
 | `var_visibility_changed` | An exported global variable is no longer exported by the binary while its declaration remains in the headers. The declaration still compiles, so nothing in the source signals it, but an already-linked consumer fails to resolve the symbol at load time. The counterpart of `func_visibility_changed` for data symbols. |
+| `var_export_added` | A global variable gained a binary export while its declaration was already present. The `func_export_added` counterpart for data symbols; compatible, and reported for the same reason. |
 | `var_became_const` | A non-const variable became const. The linker may move it to `.rodata` — existing binaries writing to it receive `SIGSEGV`. |
 | `var_lost_const` | A const variable lost its `const` qualifier. Callers may have inlined the value at compile time (ODR violation) — stale values or crashes. |
 

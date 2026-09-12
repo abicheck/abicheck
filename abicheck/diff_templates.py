@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
-from .model.surface_facts import in_public_surface
+from .model.surface_facts import in_public_surface, is_public_export
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function
@@ -1161,9 +1161,12 @@ def detect_missing_instantiations(
     never match a real instantiation (case79).
 
     Both the "still present" and "enclosing template survives" checks are
-    scoped to Visibility.PUBLIC functions: a header can still *declare* a
-    now-absent instantiation (e.g. via a stale ``extern template class``),
-    which the merge keeps as a Visibility.HIDDEN entry for cross-reference —
+    scoped to promised *and* confirmed-exported functions
+    (:func:`~abicheck.model.is_public_export`, the intersection — *not*
+    ``in_public_surface``, whose union of the same facts admits the stale
+    declaration below and suppresses the finding; Codex review, P2): a header
+    can still *declare* a now-absent instantiation (e.g. via a stale
+    ``extern template class``), which the merge keeps for cross-reference —
     counting that declaration-only entry as "surviving" would silently mask
     the exact removal this detector exists to catch.
     """
@@ -1171,18 +1174,18 @@ def detect_missing_instantiations(
     old.index()
     new.index()
     new_mangled = {
-        f.mangled for f in new.functions if in_public_surface(f)
+        f.mangled for f in new.functions if is_public_export(f)
     }
     findings: list[Change] = []
     surviving_stems: set[str] = set()
     for fn in new.functions:
-        if not in_public_surface(fn):
+        if not is_public_export(fn):
             continue
         qname = _qualified_function_name(fn.name, fn.mangled)
         if _looks_like_template_instantiation(qname):
             surviving_stems.add(_strip_template_args(qname))
     for fn in old.functions:
-        if not in_public_surface(fn):
+        if not is_public_export(fn):
             continue
         if fn.mangled in new_mangled:
             continue

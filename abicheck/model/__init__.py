@@ -94,6 +94,7 @@ from .surface_facts import (
     is_export_table_only_record as is_export_table_only_record,
     is_header_declared as is_header_declared,
     is_legacy_derived as is_legacy_derived,
+    is_public_export as is_public_export,
     is_unknown as is_unknown,
     surface_fact_summary as surface_fact_summary,
 )
@@ -150,6 +151,7 @@ __all__ = [
     "is_header_declared",
     "is_legacy_derived",
     "is_non_abi_surface_type",
+    "is_public_export",
     "is_unknown",
     "record_layout_facts",
     "replace_with_fact_sync",

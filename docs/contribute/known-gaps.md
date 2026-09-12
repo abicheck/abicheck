@@ -8471,17 +8471,57 @@ The three points the original entry named, and what each became:
    (`in_public_surface`), the binary union the old `(PUBLIC, ELF_ONLY)`
    tuples spelled out (`is_abi_visible`, replacing `diff_symbols._PUBLIC_VIS`
    and `diff_time64._ABI_VISIBLE`), export-table-only-ness
-   (`declaration_confirmed_absent`), a confirmed non-export
-   (`is_export_confirmed_absent`), or — for `diff_namespaces`' removal
+   (`is_export_table_only_record`), the *intersection* of (b) and (c) that
+   the single `is PUBLIC` test used to mean (`is_public_export`), a confirmed
+   non-export (`is_export_confirmed_absent`), or — for `diff_namespaces`' removal
    indexes, the site the report reproduced — the source-declaration
    population (`in_source_declaration_index`), which is blind to (c) by
    construction.
 
-`diff_symbols._check_export_lost` is the second finding the entry asked
-for: a matched pair whose export went away while the declaration stayed
-reports `FUNC_VISIBILITY_CHANGED` on the binary axis, gated on *confirmed*
-evidence on both sides so "exported before, unknown now" is never rendered
-as an observed transition. Every finding with one declaration behind it
+`compare/export_transition.py` is the second finding the entry asked for,
+and it is symmetric in both directions: a matched pair whose export went
+away while the declaration stayed reports `FUNC_VISIBILITY_CHANGED`/
+`VAR_VISIBILITY_CHANGED` on the binary axis, and one that *gained* an export
+reports the compatible `FUNC_EXPORT_ADDED`/`VAR_EXPORT_ADDED`. Both
+directions are gated on *confirmed* evidence on both sides, so "exported
+before, unknown now" (or its mirror) is never rendered as an observed
+transition.
+
+Three review findings on the fix are worth recording, because each is the
+same mistake in a different place — reaching for a predicate that answers a
+*neighbouring* question:
+
+- **The gain direction was missing at first.** Before the split a
+  promised-but-unexported declaration failed the old `(PUBLIC, ELF_ONLY)`
+  filter outright, so the pair never matched and a newly exported
+  declaration was reported as `FUNC_ADDED`. Once the declaration keeps its
+  place on both sides the pair matches — and with only a loss-side detector
+  the run reported *nothing at all*. Trading one wrong finding for a silent
+  diff is worse than the bug being fixed, and an addition that vanishes is
+  what "record before disposing" forbids. Hence the two compatible kinds,
+  and one entry point per owner (`check_function`/`check_variable`) so a
+  caller cannot enumerate the directions and miss the next one.
+- **A binary-symbol subject needs the intersection, not the union.**
+  Replacing a `visibility is Visibility.PUBLIC` test with
+  `in_public_surface` silently widens the subject to declarations the
+  artifact never exported. `diff_templates`' instantiation-survival index is
+  the sharp case: its own docstring says a stale `extern template`
+  declaration must not count as surviving, and that declaration is exactly a
+  promised-but-unexported entity, so the union admitted it and suppressed
+  `INSTANTIATION_MISSING_FROM_BINARY`. `is_public_export` is the named
+  intersection, and it reproduces the legacy enum test exactly (`PUBLIC`
+  true, `ELF_ONLY`/`HIDDEN` false).
+- **`Visibility.ELF_ONLY` cannot establish header absence.** The legacy
+  bridge originally read it as a confirmed "not declared in any header". It
+  is not: both header-AST backends assign `ELF_ONLY` to a declaration they
+  parsed *out of a header* whose symbol landed in `.symtab` rather than the
+  dynamic table, and a headerless pre-v46 snapshot reaches the same member
+  with no header parse at all. Fact (a) is now answered from the record's
+  own header provenance for every member alike; which member it was is a
+  different question, still answered by `is_export_table_only_record`, so
+  the ELF-only removal kind and the stub-record consumers are unaffected.
+
+Every finding with one declaration behind it
 carries a `surface_facts` block (report schema 4.4) stating all three as
 `"true"`/`"false"`/`"unknown"` — always complete when present, because an
 omitted key is what a reader mistakes for a negative.

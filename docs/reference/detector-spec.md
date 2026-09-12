@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (403 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (405 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -124,6 +124,7 @@ One row per `ChangeKind` (403 total). Columns fuse the verdict partition (`check
 | `func_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `func_deprecated_added` | [case205](examples/case205_public_function_marked_deprecated.md) |
 | `func_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `func_deprecated_removed` | — |
 | `func_exception_spec_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_exception_spec_changed` | — |
+| `func_export_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_export_added` | — |
 | `func_language_linkage_changed` | breaking | `BREAKING` | `error` | L0 | `func_language_linkage_changed` | [case66](examples/case66_language_linkage_changed.md) |
 | `func_likely_renamed` | breaking | `BREAKING` | `error` | unspecified | `func_likely_renamed` | — |
 | `func_lost_inline` | quality | `COMPATIBLE` | `warning` | unspecified | `func_lost_inline` | — |
@@ -385,6 +386,7 @@ One row per `ChangeKind` (403 total). Columns fuse the verdict partition (`check
 | `var_became_const` | breaking | `BREAKING` | `error` | L1 | `var_became_const` | [case39](examples/case39_var_const.md) |
 | `var_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `var_deprecated_added` | — |
 | `var_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `var_deprecated_removed` | — |
+| `var_export_added` | addition | `COMPATIBLE` | `warning` | L0 | `var_export_added` | — |
 | `var_lost_const` | breaking | `BREAKING` | `error` | unspecified | `var_lost_const` | — |
 | `var_removed` | breaking | `BREAKING` | `error` | L0 | `var_removed` | [case58](examples/case58_var_removed.md) |
 | `var_type_changed` | breaking | `BREAKING` | `error` | L1 | `var_type_changed` | [case11](examples/case11_global_var_type.md) |

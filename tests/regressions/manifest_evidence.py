@@ -49,7 +49,14 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "conclusion: a snapshot with no headers answers (a) unknown, "
             "never False, and discarding header evidence (an evidence-depth "
             "projection) returns it to unknown rather than asserting its "
-            "negation."
+            "negation. The axis is symmetric and complete in both "
+            "directions: an export that *appears* on an existing "
+            "declaration is recorded as a compatible addition, never "
+            "dropped because the matched pair reaches no added-symbol "
+            "path, and a detector whose subject is a binary symbol filters "
+            "on the *intersection* of (b) and (c) rather than their union, "
+            "so a promised-but-unexported declaration never stands in for "
+            "an export the artifact does not have."
         ),
         # Reported against a real comparison alongside the three
         # name-shape defects PR #1231 fixed; recorded as its own gap at the
@@ -60,6 +67,8 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         axes={
             "fact": ("declared_in_headers", "in_public_contract", "binary_exported"),
             "state": ("true", "false", "unknown"),
+            "direction": ("lost", "gained", "unchanged"),
+            "combination": ("union", "intersection", "single-fact"),
             "producer": ("header-ast", "debug-info", "export-table", "projection"),
         },
         known_gaps=(

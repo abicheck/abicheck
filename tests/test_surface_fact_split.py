@@ -34,7 +34,7 @@ import itertools
 
 import pytest
 
-from abicheck.checker import compare
+from abicheck.checker import Verdict, compare
 from abicheck.extract.surface_fact_producers import debug_info_surface_facts
 from abicheck.model import (
     AbiSnapshot,
@@ -45,11 +45,18 @@ from abicheck.model import (
     Variable,
     Visibility,
     binary_exported,
+    declaration_confirmed_absent,
     declared_in_headers,
     in_public_contract,
+    in_public_surface,
     in_source_declaration_index,
+    is_abi_visible,
+    is_binary_exported,
     is_confirmed_false,
     is_confirmed_true,
+    is_export_table_only_record,
+    is_header_declared,
+    is_public_export,
     is_unknown,
     surface_fact_summary,
 )
@@ -653,16 +660,21 @@ class TestAbsentHeadersProduceUnknown:
     def test_the_legacy_bridge_never_invents_header_evidence(
         self, visibility: Visibility
     ) -> None:
-        """A pre-split snapshot carries only the conflated enum. The bridge
-        may read a *negative* out of ``ELF_ONLY`` (a header parse did run
-        and did not account for the symbol) but must never read a positive
-        declaration out of "it was exported"."""
+        """A pre-split snapshot carries only the conflated enum, and no
+        member of it can establish fact (a) in either direction: not a
+        positive out of "it was exported", and -- the half this test
+        originally got wrong -- not a negative out of ``ELF_ONLY`` either.
+
+        That branch used to assert ``"false"`` here on the reasoning that a
+        header parse must have run and not accounted for the symbol. It need
+        not have: both header-AST backends assign ``ELF_ONLY`` to a
+        declaration they parsed *out of a header* whose symbol turned up in
+        ``.symtab`` rather than the dynamic table, and a headerless snapshot
+        reaches the same member with no header parse at all (Codex review,
+        P2). See ``TestLegacyElfOnlyKeepsHeaderEvidenceUnknown`` for the
+        counterexample and the exhaustive form of this invariant."""
         fn = _fn(visibility=visibility)
-        summary = surface_fact_summary(fn)
-        if visibility is Visibility.ELF_ONLY:
-            assert summary["declared_in_headers"] == "false"
-        else:
-            assert summary["declared_in_headers"] == "unknown"
+        assert surface_fact_summary(fn)["declared_in_headers"] == "unknown"
 
 
 class TestAccessorContract:
@@ -850,3 +862,293 @@ class TestLegacyBridgeIsBehaviourPreserving:
         loaded = load_snapshot(str(path))
         assert surface_fact_summary(loaded.functions[0]) == surface_fact_summary(fn)
         assert surface_fact_summary(loaded.variables[0]) == surface_fact_summary(var)
+
+
+class TestExportGainedIsRecordedNotDropped:
+    """The export axis is not a one-way axis.
+
+    Registered because the first revision of this split implemented the
+    transition detector for export *loss* only. Before the split, a
+    promised-but-unexported declaration failed the old
+    ``visibility in (PUBLIC, ELF_ONLY)`` filter outright, so the old side was
+    absent from the public index, the pair never matched, and a newly
+    exported declaration was reported as ``FUNC_ADDED``. Once the
+    declaration keeps its place on both sides the pair *matches* -- and with
+    no gain-side detector the run reported nothing at all for a version
+    script that newly exports an existing declaration. Codex review, P2.
+
+    An addition that vanishes is what "record before disposing" forbids; a
+    silent diff is a worse outcome than the wrong finding this split set out
+    to remove.
+    """
+
+    @staticmethod
+    def _decl(owner: str, exported: Fact[bool] | None) -> Function | Variable:
+        facts: dict[str, object] = {
+            "declared_in_headers_fact": _TRUE,
+            "in_public_contract_fact": _TRUE,
+            "binary_exported_fact": exported,
+        }
+        if owner == "variable":
+            return Variable(
+                name="g_registry",
+                mangled="_Z10g_registry",
+                type="int",
+                **facts,  # type: ignore[arg-type]
+            )
+        return _fn(**facts)
+
+    @staticmethod
+    def _pair(owner: str, old_decl: object, new_decl: object) -> tuple[object, object]:
+        old_snap, new_snap = _snap("1.0"), _snap("2.0")
+        for snap, decl in ((old_snap, old_decl), (new_snap, new_decl)):
+            if owner == "variable":
+                snap.variables = [decl]  # type: ignore[list-item]
+            else:
+                snap.functions = [decl]  # type: ignore[list-item]
+        return old_snap, new_snap
+
+    @pytest.mark.parametrize(
+        ("owner", "kind"),
+        [
+            ("function", ChangeKind.FUNC_EXPORT_ADDED),
+            ("variable", ChangeKind.VAR_EXPORT_ADDED),
+        ],
+    )
+    def test_a_gained_export_on_an_existing_declaration_is_reported(
+        self, owner: str, kind: ChangeKind
+    ) -> None:
+        old_snap, new_snap = self._pair(
+            owner, self._decl(owner, _FALSE), self._decl(owner, _TRUE)
+        )
+        result = compare(old_snap, new_snap)  # type: ignore[arg-type]
+        kinds = {c.kind for c in result.changes}
+        assert kind in kinds, [c.kind for c in result.changes]
+        # The whole point: the run is not silent.
+        assert result.changes
+        stamped = [c for c in result.changes if c.kind is kind]
+        assert stamped[0].surface_facts == {
+            "declared_in_headers": "true",
+            "in_public_contract": "true",
+            "binary_exported": "true",
+        }
+
+    @pytest.mark.parametrize(
+        ("owner", "kind"),
+        [
+            ("function", ChangeKind.FUNC_EXPORT_ADDED),
+            ("variable", ChangeKind.VAR_EXPORT_ADDED),
+        ],
+    )
+    def test_a_gained_export_is_compatible_not_breaking(
+        self, owner: str, kind: ChangeKind
+    ) -> None:
+        """Recording the change must not manufacture a break out of good
+        news: gaining an export takes nothing away from any consumer."""
+        from abicheck.checker_policy import ADDITION_KINDS, COMPATIBLE_KINDS
+
+        assert kind in COMPATIBLE_KINDS
+        assert kind in ADDITION_KINDS
+        old_snap, new_snap = self._pair(
+            owner, self._decl(owner, _FALSE), self._decl(owner, _TRUE)
+        )
+        result = compare(old_snap, new_snap)  # type: ignore[arg-type]
+        assert result.verdict is not Verdict.BREAKING
+        assert result.verdict is not Verdict.API_BREAK
+
+    @pytest.mark.parametrize("unknown", [f for f in _UNKNOWNS if f is not None])
+    @pytest.mark.parametrize("owner", ["function", "variable"])
+    def test_unknown_old_side_evidence_is_never_an_observed_gain(
+        self, owner: str, unknown: Fact[bool]
+    ) -> None:
+        """The exact mirror of the loss side's own rule: "unknown before,
+        exported now" is a gap in this run's evidence, not an observed
+        addition, across every real ``FactStatus`` that spells unknown."""
+        old_snap, new_snap = self._pair(
+            owner, self._decl(owner, unknown), self._decl(owner, _TRUE)
+        )
+        kinds = {c.kind for c in compare(old_snap, new_snap).changes}  # type: ignore[arg-type]
+        assert not kinds & {
+            ChangeKind.FUNC_EXPORT_ADDED,
+            ChangeKind.VAR_EXPORT_ADDED,
+        }
+
+    @pytest.mark.parametrize("owner", ["function", "variable"])
+    def test_the_two_directions_are_exclusive_and_exhaustive(
+        self, owner: str
+    ) -> None:
+        """Across the full confirmed×confirmed grid, exactly one of the two
+        transition findings fires, and only for a real transition.
+
+        The oracle is the pair of booleans this test itself constructed, not
+        either detector's own predicate.
+        """
+        gain = {ChangeKind.FUNC_EXPORT_ADDED, ChangeKind.VAR_EXPORT_ADDED}
+        loss = {ChangeKind.FUNC_VISIBILITY_CHANGED, ChangeKind.VAR_VISIBILITY_CHANGED}
+        for old_exported, new_exported in itertools.product((True, False), repeat=2):
+            old_snap, new_snap = self._pair(
+                owner,
+                self._decl(owner, Fact.present(old_exported)),
+                self._decl(owner, Fact.present(new_exported)),
+            )
+            kinds = {c.kind for c in compare(old_snap, new_snap).changes}  # type: ignore[arg-type]
+            expect_gain = (not old_exported) and new_exported
+            expect_loss = old_exported and not new_exported
+            assert bool(kinds & gain) is expect_gain, (old_exported, new_exported)
+            assert bool(kinds & loss) is expect_loss, (old_exported, new_exported)
+
+
+class TestLegacyElfOnlyKeepsHeaderEvidenceUnknown:
+    """``Visibility.ELF_ONLY`` cannot establish header *absence*.
+
+    Registered because the legacy bridge originally read ``ELF_ONLY`` as a
+    confirmed "not declared in any header". Both header-AST backends assign
+    ``ELF_ONLY`` to a declaration they parsed **out of a header** whose
+    symbol turned up in ``.symtab`` rather than the dynamic table
+    (``extract/headers/castxml/location.visibility`` and its clang sibling),
+    so that reading states a negative about a declaration a header parse
+    produced -- and a pre-v46 headerless snapshot reaches the same branch
+    with no header evidence at all. Codex review, P2.
+
+    The record's own header provenance is the discriminator that actually
+    answers fact (a), and it is consulted for every enum member alike.
+    """
+
+    def test_a_header_parsed_elf_only_declaration_is_header_declared(self) -> None:
+        """The counterexample that falsifies the enum-keyed reading: castxml
+        and clang both produce this for a static-only symbol."""
+        fn = _fn(visibility=Visibility.ELF_ONLY, source_header="lib.h")
+        assert is_header_declared(fn)
+        assert not declaration_confirmed_absent(fn)
+
+    def test_a_synthesized_export_table_entry_stays_unknown(self) -> None:
+        """No header provenance: unknown, never a confirmed negative -- the
+        user's own hard requirement for this split."""
+        fn = _fn(visibility=Visibility.ELF_ONLY)
+        assert is_unknown(declared_in_headers(fn))
+        assert not declaration_confirmed_absent(fn)
+        assert surface_fact_summary(fn)["declared_in_headers"] == "unknown"
+
+    @pytest.mark.parametrize("vis", list(Visibility))
+    def test_no_legacy_member_ever_claims_header_absence(
+        self, vis: Visibility
+    ) -> None:
+        """Exhaustive over the enum's whole domain, both with and without
+        header provenance: the bridge may answer true or unknown, never a
+        confirmed false. A confirmed false is a claim no ``Visibility`` value
+        carries the evidence to make."""
+        for header in (None, "lib.h"):
+            fn = _fn(visibility=vis, source_header=header)
+            assert not is_confirmed_false(declared_in_headers(fn)), (vis, header)
+
+    def test_the_producer_question_is_still_answerable(self) -> None:
+        """Removing the enum reading from fact (a) must not lose the
+        *different* question ``ELF_ONLY`` really does answer -- which is what
+        keeps the ELF-only removal kind and the stub-record consumers
+        working."""
+        assert is_export_table_only_record(_fn(visibility=Visibility.ELF_ONLY))
+        assert is_export_table_only_record(
+            _fn(visibility=Visibility.ELF_ONLY, source_header="lib.h")
+        )
+        assert not is_export_table_only_record(_fn(visibility=Visibility.PUBLIC))
+
+
+class TestExportNamedSubjectsNeedTheIntersection:
+    """A detector whose subject is a *binary* symbol wants (b) AND (c).
+
+    Registered because the split replaced several ``visibility is
+    Visibility.PUBLIC`` tests with :func:`in_public_surface` -- the *union* of
+    (b) and (c) -- which silently widened each subject to declarations the
+    artifact never exported. Codex review, P2, against
+    ``diff_templates``' instantiation-survival index, whose own docstring
+    says a stale ``extern template`` declaration must not count as
+    surviving: that declaration is precisely a promised-but-unexported
+    entity, so the union admitted it and suppressed the finding.
+    """
+
+    def test_is_public_export_never_admits_an_unconfirmed_export(self) -> None:
+        """Exhaustive over the whole (a)×(b)×(c) fact domain: the property
+        every calling detector actually depends on is that a *confirmed*
+        export is necessary, so no amount of contract or header evidence can
+        substitute for it.
+
+        Stated as a necessary condition on the fact this test itself
+        constructed rather than as a full truth table, deliberately: the
+        sufficient half is not a second copy of
+        :func:`in_public_surface`'s documented precedence chain (contract,
+        then export, then declaration), and restating that chain here would
+        make this test a mirror of the implementation instead of a check on
+        it. The chain's own behaviour is pinned by
+        ``TestThreeFactsStayThreeFacts``; the legacy equivalence that makes
+        this predicate a safe substitution is pinned below.
+        """
+        states = [f for f in _STATES if f is not None]
+        for declared, contract, exported in itertools.product(states, repeat=3):
+            fn = _fn(
+                declared_in_headers_fact=declared,
+                in_public_contract_fact=contract,
+                binary_exported_fact=exported,
+            )
+            if _expected_tri(exported) != "true":
+                assert not is_public_export(fn), (declared, contract, exported)
+            # And it is never broader than either half it intersects.
+            if is_public_export(fn):
+                assert is_binary_exported(fn)
+                assert in_public_surface(fn)
+                assert is_abi_visible(fn)
+
+    @pytest.mark.parametrize(
+        ("vis", "expected"),
+        [
+            (Visibility.PUBLIC, True),
+            (Visibility.ELF_ONLY, False),
+            (Visibility.HIDDEN, False),
+        ],
+    )
+    def test_it_reproduces_the_legacy_is_public_test_exactly(
+        self, vis: Visibility, expected: bool
+    ) -> None:
+        """The equivalence that makes this safe to substitute for every
+        ``visibility is Visibility.PUBLIC`` site: identical on every
+        pre-split snapshot, differing only for the state the enum could not
+        hold."""
+        assert is_public_export(_fn(visibility=vis)) is expected
+
+    def test_a_promised_unexported_declaration_is_the_one_difference(self) -> None:
+        assert not is_public_export(
+            _fn(
+                declared_in_headers_fact=_TRUE,
+                in_public_contract_fact=_TRUE,
+                binary_exported_fact=_FALSE,
+            )
+        )
+
+    def test_a_stale_extern_template_declaration_does_not_mask_the_removal(
+        self,
+    ) -> None:
+        """The reported case, end to end through ``compare``: the header
+        still declares the instantiation, the new binary no longer exports
+        it, and the enclosing template survives -- so the finding this
+        detector exists for must fire."""
+        mangled_old = "_ZN10descriptorIfE9thresholdEv"
+        surviving = "_ZN10descriptorIdE9thresholdEv"
+
+        def inst(mangled: str, exported: Fact[bool]) -> Function:
+            return _fn(
+                name="threshold",
+                mangled=mangled,
+                declared_in_headers_fact=_TRUE,
+                in_public_contract_fact=_TRUE,
+                binary_exported_fact=exported,
+            )
+
+        old_snap = _snap("1.0")
+        old_snap.functions = [inst(mangled_old, _TRUE), inst(surviving, _TRUE)]
+        new_snap = _snap("2.0")
+        # The stale `extern template` declaration: still in the headers,
+        # no longer emitted into the binary.
+        new_snap.functions = [inst(mangled_old, _FALSE), inst(surviving, _TRUE)]
+        kinds = {c.kind for c in compare(old_snap, new_snap).changes}
+        assert ChangeKind.INSTANTIATION_MISSING_FROM_BINARY in kinds, sorted(
+            k.value for k in kinds
+        )
