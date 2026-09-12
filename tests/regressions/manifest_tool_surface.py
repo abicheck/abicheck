@@ -1075,10 +1075,20 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "it exercises a real interpreter whose newline convention "
             "differs from the host's, because asserting the shell's "
             "parsing of hand-written text cannot observe what the "
-            "subprocess actually wrote."
+            "subprocess actually wrote. Stated over EVERY copy of the "
+            "derivation, not the one that was reported: the repository "
+            "carries two (`action/run.sh` and `actions/check-target/"
+            "action.yml`), both carried both defects, and the check-target "
+            "copy had a parity test that compared the derived *set* against "
+            "Click -- which a set built by splitting on the delimiter cannot "
+            "see either defect through -- so it passed while the lookup was "
+            "broken. A guard on one copy is how the other stayed broken."
         ),
-        fixed_by=(1234, 1239),
-        seed_tests=("tests/test_action_run_sh_option_table.py",),
+        fixed_by=(1234, 1239, 1249),
+        seed_tests=(
+            "tests/test_action_run_sh_option_table.py",
+            "tests/test_extra_args_is_value_option_completeness.py",
+        ),
         # Not earned: the seed sources `run.sh`'s own helper region and
         # drives it under a real bash, but that is the script's functions in
         # isolation, not an executed workflow/composite-action step.
@@ -1091,6 +1101,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "membership-test",
                 "short-cluster-expansion",
             ),
+            "copy": ("action/run.sh", "actions/check-target/action.yml"),
         },
     ),
 )

@@ -236,7 +236,40 @@ def bash_executable() -> str:
     ):
         if candidate and Path(candidate).exists():
             return candidate
+    # Last resort: a PATH lookup that *rejects* the launcher stub rather than
+    # returning a bare "bash" and letting the caller run it. Preferring the
+    # two Git-for-Windows paths above is not enough on its own -- a runner
+    # with Git installed anywhere else fell through to `"bash"`, which is the
+    # stub, and every test in the calling module then failed against UTF-16LE
+    # WSL prose with no stated reason (the windows-latest unit lane, where
+    # this is what `test_action_cli_surface_generated` and
+    # `test_extra_args_is_value_option_completeness` were actually hitting).
+    found = shutil.which("bash")
+    if found and not is_wsl_launcher_stub(found):
+        return found
     return "bash"
+
+
+def is_wsl_launcher_stub(path: str) -> bool:
+    """Is *path* Windows' WSL launcher rather than a real bash?
+
+    Identified by location, not by running it: the launcher is the
+    ``bash.exe`` Windows ships in ``%SystemRoot%\\System32`` (and its
+    ``SysWOW64``/``Sysnative`` aliases), and no real bash is installed
+    there. Executing it to find out would cost a subprocess per call and,
+    on a machine with a distro actually installed, would *succeed* -- which
+    is still not the bash these tests mean, since it would run the steps
+    inside WSL against Linux paths.
+    """
+    if os.name != "nt":
+        return False
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    resolved = Path(path).resolve()
+    return any(
+        resolved.is_relative_to(Path(system_root, sub).resolve())
+        for sub in ("System32", "SysWOW64", "Sysnative")
+        if Path(system_root, sub).exists()
+    )
 
 
 def run_step(
@@ -365,4 +398,9 @@ def have_bash() -> bool:
     name promises (CodeRabbit review).
     """
     candidate = bash_executable()
+    if is_wsl_launcher_stub(candidate):
+        # A stub is not a bash. Reporting True here is what turned "this
+        # machine cannot run shell steps" into a module-wide wall of
+        # failures against WSL's own error text instead of a clean skip.
+        return False
     return Path(candidate).is_file() or shutil.which(candidate) is not None
