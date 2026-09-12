@@ -139,16 +139,43 @@ def _write_deb(path: Path) -> Path:
     return path
 
 
-def _elf_with_sections(path: Path, section_names: list[str]) -> Path:
+def _elf_with_sections(
+    path: Path, section_names: list[str], *, build_id: str | None = None
+) -> Path:
     """A minimal, real 64-bit little-endian ELF carrying *section_names*.
 
     Hand-assembled rather than compiled so the debug-artifact classifier's
     contract can be stated in the fast unit lane: what it reads is the
-    section-header table, which is exactly what this builds.
+    section-header table, which is exactly what this builds. *build_id* adds
+    a real ``.note.gnu.build-id`` note section, so the identity check can be
+    exercised against `extract_build_id`'s actual parse rather than a stand-in.
     """
-    shstrtab = b"\x00" + b"".join(n.encode() + b"\x00" for n in section_names)
+    sections: list[tuple[str, int, bytes]] = [
+        (name, 1, b"\x00" * 16) for name in section_names
+    ]
+    if build_id is not None:
+        desc = bytes.fromhex(build_id)
+        note = (
+            struct.pack("<III", 4, len(desc), 3)  # namesz, descsz, NT_GNU_BUILD_ID
+            + b"GNU\x00"
+            + desc
+            + b"\x00" * (-len(desc) % 4)
+        )
+        sections.append((".note.gnu.build-id", 7, note))  # SHT_NOTE
+
+    shstrtab = b"\x00" + b"".join(n.encode() + b"\x00" for n, _t, _c in sections)
     ehsize, shentsize = 64, 64
-    sh_off = ehsize + len(shstrtab)
+
+    # Layout: ehdr | each section's content | shstrtab | section headers.
+    body = bytearray()
+    offsets: list[tuple[int, int]] = []
+    for _n, _t, content in sections:
+        offsets.append((ehsize + len(body), len(content)))
+        body += content
+    shstrtab_off = ehsize + len(body)
+    body += shstrtab
+    sh_off = ehsize + len(body)
+
     header = bytearray(ehsize)
     header[0:4] = b"\x7fELF"
     header[4] = 2  # ELFCLASS64
@@ -160,25 +187,25 @@ def _elf_with_sections(path: Path, section_names: list[str]) -> Path:
     header[40:48] = struct.pack("<Q", sh_off)
     header[52:54] = struct.pack("<H", ehsize)
     header[58:60] = struct.pack("<H", shentsize)
-    header[60:62] = struct.pack("<H", len(section_names) + 2)
-    header[62:64] = struct.pack("<H", len(section_names) + 1)
+    header[60:62] = struct.pack("<H", len(sections) + 2)
+    header[62:64] = struct.pack("<H", len(sections) + 1)
 
-    sections = [bytes(shentsize)]  # SHT_NULL
-    offset = 1
-    for name in section_names:
-        sections.append(
+    shdrs = [bytes(shentsize)]  # SHT_NULL
+    name_off = 1
+    for (name, sh_type, _c), (off, size) in zip(sections, offsets, strict=True):
+        shdrs.append(
             struct.pack(
-                "<IIQQQQIIQQ",
-                offset, 1, 0, 0, sh_off + shentsize * (len(section_names) + 2),
-                16, 0, 0, 1, 0,
+                "<IIQQQQIIQQ", name_off, sh_type, 0, 0, off, size, 0, 0, 1, 0
             )
         )
-        offset += len(name) + 1
+        name_off += len(name) + 1
     # The .shstrtab section itself, last, as the header's shstrndx says.
-    sections.append(
-        struct.pack("<IIQQQQIIQQ", 0, 3, 0, 0, ehsize, len(shstrtab), 0, 0, 1, 0)
+    shdrs.append(
+        struct.pack(
+            "<IIQQQQIIQQ", 0, 3, 0, 0, shstrtab_off, len(shstrtab), 0, 0, 1, 0
+        )
     )
-    path.write_bytes(bytes(header) + shstrtab + b"".join(sections) + b"\x00" * 16)
+    path.write_bytes(bytes(header) + bytes(body) + b"".join(shdrs))
     return path
 
 
@@ -526,39 +553,101 @@ class TestDetachedDebugResolution:
         artifact = resolve_debug_info(binary, debug_roots=[root], build_id=build_id)
         assert artifact is not None and artifact.dwarf_path == found
 
-    def test_a_mismatched_build_id_is_refused(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A sidecar that describes a *different* build is not this binary's
-        debug info, and using it would describe the wrong ABI."""
-        from abicheck.extract import detached_debug
+    def test_a_mismatched_build_id_is_refused(self, tmp_path: Path) -> None:
+        """A sidecar describing a *different* build is not this binary's
+        debug info, and using it would describe the wrong ABI.
 
-        binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"])
-        sidecar = _elf_with_sections(tmp_path / "other.debug", [".debug_info"])
-        resolver = detached_debug.DetachedDebugFileResolver()
-        # The synthetic sidecar carries no build-id note, so nothing is
-        # provable and it is accepted (absence is not a mismatch).
-        assert resolver.resolve(binary, build_id="ab" * 10, debug_roots=[sidecar])
-        # With a real, contradicting one, it is refused. `monkeypatch` so the
-        # staticmethod is restored as a staticmethod -- a hand-rolled
-        # save/restore rebinds it as an instance method and leaks into every
-        # later test in the session.
-        monkeypatch.setattr(
-            detached_debug.DetachedDebugFileResolver,
-            "_build_id_conflict",
-            staticmethod(lambda _b, _d, _i: True),
+        Against real ``.note.gnu.build-id`` notes on both sides, so what is
+        exercised is `extract_build_id`'s own parse and the comparison over
+        it -- an earlier version stubbed the check and therefore only tested
+        that its caller honours a `True`.
+        """
+        from abicheck.extract.detached_debug import DetachedDebugFileResolver
+
+        binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"], build_id="ab" * 10)
+        sidecar = _elf_with_sections(
+            tmp_path / "other", [".debug_info"], build_id="cd" * 10
         )
-        assert resolver.resolve(binary, build_id="0" * 40, debug_roots=[sidecar]) is None
+        resolver = DetachedDebugFileResolver()
+        assert resolver.resolve(binary, build_id="ab" * 10, debug_roots=[sidecar]) is None
+
+    def test_a_matching_build_id_is_accepted(self, tmp_path: Path) -> None:
+        """The negative control: the check refuses a mismatch, not everything."""
+        from abicheck.extract.detached_debug import DetachedDebugFileResolver
+
+        binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"], build_id="ab" * 10)
+        sidecar = _elf_with_sections(
+            tmp_path / "s", [".debug_info"], build_id="ab" * 10
+        )
+        resolved = DetachedDebugFileResolver().resolve(
+            binary, build_id="ab" * 10, debug_roots=[sidecar]
+        )
+        assert resolved is not None and resolved.dwarf_path == sidecar
 
     def test_absent_build_id_evidence_never_manufactures_a_mismatch(
         self, tmp_path: Path
     ) -> None:
+        """Neither side carrying a note proves nothing either way, so the
+        sidecar is used: this validates what it observes and never invents
+        a conflict out of missing evidence."""
         from abicheck.extract.detached_debug import DetachedDebugFileResolver
 
         binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"])
         sidecar = _elf_with_sections(tmp_path / "s", [".debug_info"])
         assert not DetachedDebugFileResolver._build_id_conflict(binary, sidecar, None)
         assert not DetachedDebugFileResolver._build_id_conflict(binary, sidecar, "zz")
+        # ...and the binary's id is known but the sidecar carries none.
+        assert not DetachedDebugFileResolver._build_id_conflict(
+            binary, sidecar, "ab" * 10
+        )
+
+    @pytest.mark.parametrize(
+        "shape", ["directory", "missing", "dangling-symlink", "empty", "truncated-elf"]
+    )
+    def test_classification_degrades_instead_of_raising(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        """A classifier runs on whatever the user typed, so every way an
+        operand can be unusable answers "not a debug artifact" rather than
+        propagating out of a classification step."""
+        from abicheck.extract.detached_debug import classify_detached_debug_file
+
+        target = tmp_path / shape
+        if shape == "directory":
+            target.mkdir()
+        elif shape == "empty":
+            target.touch()
+        elif shape == "truncated-elf":
+            target.write_bytes(b"\x7fELF\x02\x01\x01")
+        elif shape == "dangling-symlink":
+            target.symlink_to(tmp_path / "nothing-here")
+        assert classify_detached_debug_file(target) is None
+
+
+class TestDocumentClassificationDegradesGracefully:
+    """`--build-info`'s document sniff has the same obligation."""
+
+    @pytest.mark.parametrize(
+        "content", [b"", b"   \n\t ", b"\x7fELF", b"{not json", b"null", b"[]"]
+    )
+    def test_an_unusable_document_is_not_a_matrix(
+        self, tmp_path: Path, content: bytes
+    ) -> None:
+        path = tmp_path / "operand"
+        path.write_bytes(content)
+        assert (
+            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
+        )
+
+    def test_an_unopenable_document_is_not_a_matrix(self, tmp_path: Path) -> None:
+        """The OSError path, reached portably: a dangling symlink. (A
+        chmod-based fixture proves nothing in a root container, which is
+        what CI runs in.)"""
+        path = tmp_path / "operand"
+        path.symlink_to(tmp_path / "nothing-here")
+        assert (
+            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
+        )
 
 
 class TestUnconsumableTransportsAreRefused:
@@ -640,6 +729,50 @@ class TestUnconsumableTransportsAreRefused:
         assert res.exit_code != 64, res.output
 
 
+class TestContentSniffsDegradeGracefully:
+    """Every sniff `package.py` gained runs during *detection*, so an
+    unreadable or unsupported operand must answer "not this format" rather
+    than propagate out and abort dispatch to every other extractor."""
+
+    def test_an_unreadable_zip_yields_no_members(self, tmp_path: Path) -> None:
+        from abicheck.package import _zip_entry_names
+
+        broken = tmp_path / "broken"
+        broken.write_bytes(b"PK\x03\x04 truncated right here")
+        assert _zip_entry_names(broken) == []
+        assert not is_package(broken)
+
+    def test_a_corrupt_zstd_stream_is_not_a_tar(self, tmp_path: Path) -> None:
+        from abicheck.package import looks_like_tar_container, looks_like_zstd
+
+        path = tmp_path / "operand"
+        path.write_bytes(b"\x28\xb5\x2f\xfd" + b"garbage" * 8)
+        assert looks_like_zstd(path)
+        assert not looks_like_tar_container(path)
+        assert not is_package(path)
+
+    def test_a_real_zstd_tar_is_recognized_under_any_name(
+        self, tmp_path: Path
+    ) -> None:
+        """The negative control for the two above: the codec `tarfile` has
+        none for is still detected, and from content rather than `.tar.zst`."""
+        pytest.importorskip("zstandard")
+        from _package_fixtures import _write_zstd_tar
+
+        path = tmp_path / "evidence"
+        _write_zstd_tar(path)
+        assert is_package(path)
+        assert classify_debug_transport(path) is DebugTransport.PACKAGE
+
+    def test_magic_read_of_a_directory_is_not_a_crash(self, tmp_path: Path) -> None:
+        from abicheck.package import looks_like_zip, looks_like_zstd
+
+        d = tmp_path / "dir"
+        d.mkdir()
+        assert not looks_like_zip(d)
+        assert not looks_like_zstd(d)
+
+
 class TestClassificationHasNoPositionalWindow:
     """Neither role's classifier may make position part of the contract.
 
@@ -689,6 +822,9 @@ class TestClassificationHasNoPositionalWindow:
             encoding="utf-8",
         )
         assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
+
+
+# ── 5. the whole public invocation, under non-conventional names ─────────────
 
 
 # ── 5. the whole public invocation, under non-conventional names ─────────────
