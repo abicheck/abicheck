@@ -252,6 +252,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_action_report_query.py",
             "tests/test_action_unreadable_report_verdict.py",
+            # The generalized statement of the class, over a generated
+            # cross-product rather than the reported inputs: an admitted
+            # document must be answerable
+            # (`TestAdmissionImpliesAnswerability`). Verified to catch three of
+            # the six historical instances when each is reintroduced.
+            "tests/test_action_report_verdict_vocabulary.py",
+            "tests/test_action_report_destinations.py",
         ),
         public_surfaces=("github-action",),
         axes={
@@ -278,6 +285,11 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "several_write_json",
             ),
             "authorship": ("written_this_run", "pre_existing_and_rewritten", "stale"),
+            # Whether a document the reader ADMITS is one any consumer can act
+            # on. Six findings on #1246 were this one shape, each fixed for
+            # itself; the axis exists so the next admission rule without a
+            # consumer fails a test instead of publishing COMPATIBLE.
+            "answerability": ("answered", "admitted_but_unanswerable"),
         },
         known_gaps=(
             KnownGap(

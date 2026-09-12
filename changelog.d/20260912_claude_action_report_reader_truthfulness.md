@@ -30,6 +30,17 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **Two more admitted-but-unactionable shapes, and the invariant that closes the
+  class.** The real not-comparable document (`verdict: null` beside a `reason`
+  object) was admitted while no query consumed `reason`, and
+  `run_outcome.compatibility` holding an operational value like `ERROR` was
+  admitted as a compatibility tier; both left the exit-0 path at `COMPATIBLE`.
+  Both are fixed, and the underlying property is now stated executably over a
+  generated cross-product: a document the reader admits must be one some query
+  can answer. That test found two further defects nobody had reported —
+  `compat_verdict` returning junk from the legacy verdict slot, and disagreeing
+  with the Action's own helper about whether the canonical
+  `run_outcome.compatibility` field outranks it.
 - **The assurance-consistency check now runs on every requested destination.**
   It read whichever report the fallback chain settled on, so with several
   requested JSON artifacts a clean primary hid a self-contradictory secondary —

@@ -242,3 +242,125 @@ class TestALibraryArrayIsNotAVerdictSource:
                 "run_outcome": {"compatibility": "NO_CHANGE"},
             }
         )
+
+
+#: Every value the `verdict` slot has been observed or proposed to hold.
+_VERDICT_SLOTS = (
+    None,
+    "NO_CHANGE",
+    "COMPATIBLE",
+    "COMPATIBLE_WITH_RISK",
+    "API_BREAK",
+    "BREAKING",
+    "ERROR",
+    "not_comparable",
+    "unsupported",
+    "failed",
+    "UNKNOWN",
+    "write interrupted",
+    "",
+)
+
+#: Every `run_outcome` shape, including the malformed ones.
+_RUN_OUTCOMES = (
+    None,
+    {},
+    {"operational": "none"},
+    {"operational": "extraction_error"},
+    {"operational": "not_comparable"},
+    {"compatibility": "BREAKING"},
+    {"compatibility": "BREAKING", "operational": "none"},
+    {"compatibility": "ERROR"},
+    {"compatibility": "write interrupted"},
+    {"compatibility": None, "operational": "none"},
+)
+
+#: The structural extras that make a null verdict meaningful.
+_STRUCTURES = (
+    {},
+    {"reason": {"kind": "k", "message": "m"}},
+    {"no_baseline": True, "findings": [], "suppressed_findings": []},
+    {"no_baseline": True, "findings": [{"kind": "x"}], "suppressed_findings": []},
+    {"libraries": []},
+    {"libraries": [{"library": "libfoo", "verdict": "BREAKING"}]},
+)
+
+
+def _documents():
+    """The cross-product, as ``(label, document)`` pairs."""
+    for verdict in _VERDICT_SLOTS:
+        for outcome in _RUN_OUTCOMES:
+            for structure in _STRUCTURES:
+                doc: dict = {"report_schema_version": "4.4", **structure}
+                if verdict is not None or "reason" in structure:
+                    doc["verdict"] = verdict
+                if outcome is not None:
+                    doc["run_outcome"] = outcome
+                yield (f"v={verdict!r} ro={outcome!r} st={sorted(structure)}", doc)
+
+
+class TestAdmissionImpliesAnswerability:
+    """The one invariant behind every escape in this area: if the reader admits a
+    document as carrying a result, some query must be able to *say what*.
+
+    This is the generalization the incremental fixes kept missing. Five separate
+    review findings on this PR were all the same shape — a document
+    `_carries_a_result` accepted, whose result no query then returned, leaving
+    `_resolve_clean_exit_verdict` at its initial `COMPATIBLE`:
+
+    * any non-empty string in `verdict`;
+    * a `libraries` array nothing reads;
+    * a structural fallback keyed on a present rather than null `verdict`;
+    * an operational sentinel the exit-0 dispatcher did not handle;
+    * the real not-comparable shape, whose `reason` no query consumed;
+    * and `run_outcome.compatibility` holding an operational value.
+
+    Each was fixed for its own shape. None of those fixes could fail for the
+    *next* shape, because the property was never stated. It is stated here, over
+    a generated cross-product rather than the reported inputs, so the next
+    admission rule added without a matching consumer fails immediately.
+
+    Bug class: ``report.unestablished_result_reads_as_success``.
+    """
+
+    def _answers(self, document: dict) -> dict[str, str]:
+        return {
+            query: (rq.answer(document, query) or "")
+            for query in ("compat_verdict", "operational_verdict", "no_baseline_audit")
+        }
+
+    @pytest.mark.parametrize("label,document", list(_documents()), ids=lambda v: None)
+    def test_an_admitted_document_can_be_acted_on(
+        self, label: str, document: dict
+    ) -> None:
+        if not rq._carries_a_result(document):
+            return  # rejected: the dispatcher never reaches a verdict from it
+        answers = self._answers(document)
+        assert any(answers.values()), (
+            f"admitted but unanswerable, so the dispatcher would keep its "
+            f"initial COMPATIBLE: {label} -> {answers}"
+        )
+
+    @pytest.mark.parametrize("label,document", list(_documents()), ids=lambda v: None)
+    def test_a_clean_answer_requires_a_clean_tier(
+        self, label: str, document: dict
+    ) -> None:
+        # The other half: whatever `compat_verdict` answers must be a real
+        # compatibility tier. An operational sentinel arriving here is what made
+        # the dispatcher treat "nothing was compared" as a tier it could ignore.
+        answer = rq.answer(document, "compat_verdict") or ""
+        if not answer:
+            return
+        assert answer in rq.KNOWN_VERDICTS, (label, answer)
+        if answer in rq.OPERATIONAL_VERDICTS:
+            # Permitted only when the operational query names it too, so the
+            # dispatcher sees the operational fact rather than a bare tier.
+            assert rq.answer(document, "operational_verdict"), (label, answer)
+
+    def test_the_matrix_actually_exercises_both_outcomes(self) -> None:
+        # Without this the two tests above are vacuous if every generated
+        # document happened to be rejected (or every one admitted).
+        admitted = [d for _, d in _documents() if rq._carries_a_result(d)]
+        rejected = [d for _, d in _documents() if not rq._carries_a_result(d)]
+        assert admitted, "no document was admitted"
+        assert rejected, "no document was rejected"

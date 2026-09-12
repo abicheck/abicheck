@@ -184,6 +184,24 @@ Two predicates close that without weakening anything above:
   the option declaration in `frontends/cli/options/secondary_output.py`, not
   against either comment.
 
+  **Admission implies answerability — the invariant behind every finding here.**
+  Six separate review findings in this area were one shape: `_carries_a_result`
+  admitted a document, no query then returned its result, and
+  `_resolve_clean_exit_verdict` kept its initial `COMPATIBLE`. Each was fixed
+  for its own shape, and none of those fixes could fail for the next one.
+  `TestAdmissionImpliesAnswerability` states the property over a generated
+  cross-product of verdict slots × `run_outcome` shapes × structural extras: if
+  the reader admits a document, at least one of `compat_verdict`,
+  `operational_verdict`, `no_baseline_audit` must answer, and whatever
+  `compat_verdict` answers must be a real tier. **Add an admission rule and a
+  consumer in the same change**, or that test fails immediately. It found two
+  defects nobody had reported: `compat_verdict` handing back junk from the
+  legacy slot, and disagreeing with `_report_compat_verdict` about whether
+  ADR-063 D6's canonical `run_outcome.compatibility` outranks it (the reader's
+  precedence was wrong; the canonical field is now its fallback when the legacy
+  slot holds nothing usable, and stays a fallback so a release report's
+  operational sentinel is still the answer).
+
   **A known verdict is not automatically a compatibility result.**
   `OPERATIONAL_VERDICTS` is the subset of `KNOWN_VERDICTS` that reports an
   operational outcome instead — a crash, ADR-050 D2's comparability refusal, an

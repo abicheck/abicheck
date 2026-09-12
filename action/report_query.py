@@ -226,6 +226,21 @@ def _is_known_verdict(value: object) -> bool:
     return isinstance(value, str) and value in KNOWN_VERDICTS
 
 
+def _is_compatibility_verdict(value: object) -> bool:
+    """A known verdict that actually answers the compatibility question.
+
+    ``run_outcome.compatibility`` is a compatibility *tier* by construction --
+    ``_release_completed_compatibility_verdict`` excludes the operational
+    sentinels from it precisely so the two axes stay separate. A document
+    putting ``ERROR`` there is malformed, and admitting it on the strength of
+    ``KNOWN_VERDICTS`` alone let it reach the dispatcher, which reads
+    operational status from ``run_outcome.operational`` or the top-level
+    ``verdict`` -- neither of which such a document has -- and kept
+    ``COMPATIBLE`` (CodeRabbit review, Major).
+    """
+    return _is_known_verdict(value) and value not in OPERATIONAL_VERDICTS
+
+
 def _carries_a_result(document: dict[str, Any]) -> bool:
     """Whether a verdict can actually be read out of *document*.
 
@@ -236,7 +251,7 @@ def _carries_a_result(document: dict[str, Any]) -> bool:
         if _is_known_verdict(source.get("verdict")):
             return True
         outcome = source.get("run_outcome")
-        if isinstance(outcome, dict) and _is_known_verdict(
+        if isinstance(outcome, dict) and _is_compatibility_verdict(
             outcome.get("compatibility")
         ):
             return True
@@ -605,14 +620,56 @@ def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:
         # boundary's verdict reconstruction, and `_json_report_src` -- the
         # only source this reader is ever handed -- never yields a SARIF
         # document in the first place.
-        return str(_either("verdict", "") or "")
+        #
+        # Filtered to `KNOWN_VERDICTS`, so junk in the slot answers "cannot
+        # tell" rather than a string no consumer can act on. Found by
+        # `TestAdmissionImpliesAnswerability` rather than reported: a document
+        # admitted through a valid `run_outcome.compatibility` with junk in its
+        # root `verdict` had this query hand the junk back. `run.sh` prefers the
+        # canonical field and so never reached it, but a query that can return
+        # an unusable value is the latent form of every finding in this area.
+        _answer = str(_either("verdict", "") or "")
+        if _answer in KNOWN_VERDICTS:
+            return _answer
+        # The legacy slot holds nothing usable: fall back to ADR-063 D6's
+        # canonical field, which is what `run.sh`'s `_report_compat_verdict`
+        # consults *first*. The two disagreed about precedence and the reader's
+        # was wrong -- a document with junk (or "") in `verdict` and a real
+        # `run_outcome.compatibility` was admitted on the strength of the
+        # canonical field and then answered nothing here, which is exactly the
+        # admitted-but-unanswerable state that keeps the dispatcher at
+        # COMPATIBLE. Found by `TestAdmissionImpliesAnswerability`.
+        #
+        # Deliberately a *fallback*, not a new precedence: a release report's
+        # root `verdict` is its operational sentinel and stays the answer, which
+        # is what `_report_compat_verdict`'s own callers rely on for not
+        # escalating an operational failure into a compatibility break.
+        for source in (report, _nested(report)):
+            outcome = source.get("run_outcome")
+            if isinstance(outcome, dict) and _is_compatibility_verdict(
+                outcome.get("compatibility")
+            ):
+                return str(outcome["compatibility"])
+        return ""
     if query == "operational_verdict":
         # The report's verdict when it is an *operational* one rather than a
         # compatibility tier -- see `OPERATIONAL_VERDICTS`. Empty otherwise, so
         # a caller can branch on "did this report answer the compatibility
         # question at all" without keeping a second copy of the set.
         _verdict = str(_either("verdict", "") or "")
-        return _verdict if _verdict in OPERATIONAL_VERDICTS else ""
+        if _verdict in OPERATIONAL_VERDICTS:
+            return _verdict
+        # The not-comparable shape names its outcome *structurally* -- a null
+        # verdict beside a `reason` object (`report/not_comparable.py`) -- and a
+        # report with no `run_outcome` block has nowhere else to say it. Without
+        # this, that document was admitted as a result and then answered nothing:
+        # `operational_verdict`, `no_baseline_audit` and `compat_verdict` all
+        # returned empty and the dispatcher kept COMPATIBLE (Codex review, P2).
+        # A modern report carries `run_outcome.operational: not_comparable` too,
+        # which the caller checks first; this covers the rest.
+        if report.get("verdict") is None and isinstance(report.get("reason"), dict):
+            return "not_comparable"
+        return ""
     if query == "blocking_categories":
         return ", ".join(str(c) for c in (_severity().get("blocking_categories") or []))
     if query == "coverage_where":

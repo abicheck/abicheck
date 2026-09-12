@@ -641,15 +641,25 @@ class TestAnOperationalOutcomeIsNotACompatibilityResult:
         assert outputs.get("verdict") == expected, (operational, outputs)
 
     @pytest.mark.parametrize(
-        "verdict",
-        ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"),
+        "verdict,expected",
+        (
+            # `NO_CHANGE` and `COMPATIBLE` both publish COMPATIBLE; the other
+            # three are published as themselves.
+            ("NO_CHANGE", "COMPATIBLE"),
+            ("COMPATIBLE", "COMPATIBLE"),
+            ("COMPATIBLE_WITH_RISK", "COMPATIBLE_WITH_RISK"),
+            ("API_BREAK", "API_BREAK"),
+            ("BREAKING", "BREAKING"),
+        ),
     )
     def test_a_real_compatibility_tier_is_unaffected(
-        self, tmp_path: Path, verdict: str
+        self, tmp_path: Path, verdict: str, expected: str
     ) -> None:
-        # The control. Every real tier must still resolve to itself (or to
-        # COMPATIBLE for the two clean ones), or the operational branch has
-        # swallowed the ordinary path.
+        # The control, asserting the *exact* verdict rather than merely "not
+        # ERROR and not NOT_COMPARABLE" (CodeRabbit review): the looser form
+        # passed for REPORT_UNREADABLE and for a BREAKING silently mapped to
+        # COMPATIBLE, which are the two ways this control could have been
+        # satisfied while the ordinary path was broken.
         payload = json.dumps(
             {
                 "report_schema_version": "4.4",
@@ -659,10 +669,7 @@ class TestAnOperationalOutcomeIsNotACompatibilityResult:
         )
         bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
         outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
-        assert outputs.get("verdict") not in ("ERROR", "NOT_COMPARABLE"), (
-            verdict,
-            outputs,
-        )
+        assert outputs.get("verdict") == expected, (verdict, outputs)
 
     def test_operational_none_does_not_trigger_it(self, tmp_path: Path) -> None:
         # `none` is the ordinary value on every healthy modern report; treating
