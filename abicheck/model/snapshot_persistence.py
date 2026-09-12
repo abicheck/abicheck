@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 __all__ = [
     "RUNTIME_ONLY_FIELDS",
     "UNPERSISTED_FIELDS_BY_TYPE",
+    "persisted_field_value",
     "persisted_from_headers",
     "unpersisted_fields_for",
 ]
@@ -95,3 +96,29 @@ def unpersisted_fields_for(value: object) -> frozenset[str]:
     over-lax one claims two distinct captures are the same.
     """
     return UNPERSISTED_FIELDS_BY_TYPE.get(type(value).__name__, frozenset())
+
+
+#: Fields whose *persisted* value is derived rather than stored verbatim,
+#: keyed by class name then field name. ``SourceGraphSummary.to_dict``
+#: serializes ``graph_id or compute_graph_id()``, so an unset id and the
+#: computed one are the same persisted content -- and a STALE stored id is
+#: genuinely different content, which is why this normalizes rather than
+#: excluding the field (Codex review, PR #1229). Applied by duck typing:
+#: this module names the type but never imports it, so ``model`` keeps
+#: depending on nothing.
+_DERIVED_FIELD_FALLBACKS: dict[str, dict[str, str]] = {
+    "SourceGraphSummary": {"graph_id": "compute_graph_id"},
+}
+
+
+def persisted_field_value(owner: object, field_name: str, value: object) -> object:
+    """*value* as it would be persisted for ``owner.field_name``.
+
+    The identity for everything but the handful of derived fields above,
+    where an unset in-memory value is serialized as its computed form.
+    """
+    method = _DERIVED_FIELD_FALLBACKS.get(type(owner).__name__, {}).get(field_name)
+    if method is None or value:
+        return value
+    computed = getattr(owner, method, None)
+    return computed() if callable(computed) else value

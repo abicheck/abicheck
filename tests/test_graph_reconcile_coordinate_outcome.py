@@ -624,3 +624,72 @@ class TestQuotedMarkerLookalikes:
             stripped = closure_location_free_identity(identity)
             for basename in closure_marker_files(identity):
                 assert basename not in stripped, (identity, basename, stripped)
+
+
+class TestReorderedMarkersAreNotAMove:
+    """Codex review (PR #1229): with several same-kind markers, a
+    *reordering* left the location-free keys equal while the positional
+    tuples differed, so a template-argument swap was reported as
+    `declaration_moved` even though every marker still names the file it
+    already named.
+
+    The invariant is about the multiset: "some marker now names a
+    different file" is what a move means, and a permutation does not say
+    that. It is still a real difference the location-free key collapses,
+    so it is not a coordinate-only shift either."""
+
+    _A, _B = "(lambda at a.h:1:2)", "(lambda at b.h:3:4)"
+
+    def _pair(self, old_qn: str, new_qn: str, decl_file: str = "") -> str:
+        return _classify_outcome(
+            _identity(old_qn, decl_file, "sig:x\x1fs"),
+            _identity(new_qn, decl_file, "sig:x\x1fs"),
+        )
+
+    def test_a_permutation_is_not_a_move(self) -> None:
+        assert (
+            self._pair(f"Pair<{self._A},{self._B}>", f"Pair<{self._B},{self._A}>")
+            == OUTCOME_RECONCILED
+        )
+
+    def test_a_permutation_is_not_a_coordinate_only_shift_either(self) -> None:
+        """Reordered arguments are a real difference the location-free key
+        collapses, so the pair must not claim "no material identity
+        change" — asserted separately from the move question, since a fix
+        that only suppressed the move could land here instead."""
+        outcome = self._pair(f"Pair<{self._A},{self._B}>", f"Pair<{self._B},{self._A}>")
+        assert outcome != OUTCOME_COORDINATES_ONLY
+
+    def test_a_genuine_marker_move_among_several_is_still_a_move(self) -> None:
+        """The must-stay-distinct half: changing one marker's file while
+        the others hold is still a move, so the permutation rule cannot
+        degrade into "multi-marker names never move"."""
+        moved_b = "(lambda at c.h:3:4)"
+        assert (
+            self._pair(f"Pair<{self._A},{self._B}>", f"Pair<{self._A},{moved_b}>")
+            == OUTCOME_MOVED
+        )
+        # ... including when the move is itself spelled as a reordering of
+        # one marker plus a file change in another.
+        assert (
+            self._pair(f"Pair<{self._A},{self._B}>", f"Pair<{moved_b},{self._A}>")
+            == OUTCOME_MOVED
+        )
+
+    def test_a_repeated_marker_file_is_compared_as_a_multiset(self) -> None:
+        """Two markers naming the same file, one of which moves, must
+        still read as a move — a set-based comparison would lose that."""
+        assert (
+            self._pair(
+                f"Pair<{self._A},(lambda at a.h:5:6)>",
+                f"Pair<{self._A},(lambda at c.h:5:6)>",
+            )
+            == OUTCOME_MOVED
+        )
+        assert (
+            self._pair(
+                f"Pair<{self._A},(lambda at a.h:5:6)>",
+                "Pair<(lambda at a.h:7:8),(lambda at a.h:9:9)>",
+            )
+            == OUTCOME_COORDINATES_ONLY
+        )

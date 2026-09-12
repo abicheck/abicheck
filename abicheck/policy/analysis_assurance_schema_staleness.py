@@ -100,6 +100,7 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from ..model.snapshot_persistence import (
+    persisted_field_value,
     persisted_from_headers,
     unpersisted_fields_for,
 )
@@ -499,7 +500,10 @@ def _all_fields_equal(old: object, new: object) -> bool:
             # different content.
             skip.add("from_headers")
         return all(
-            _all_fields_equal(getattr(old, f.name), getattr(new, f.name))
+            _all_fields_equal(
+                persisted_field_value(old, f.name, getattr(old, f.name)),
+                persisted_field_value(new, f.name, getattr(new, f.name)),
+            )
             for f in dataclasses.fields(old)
             if f.name not in skip
         )

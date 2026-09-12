@@ -45,3 +45,11 @@
   `BuildSourcePack.root` is omitted by `to_embedded_dict`, so two snapshots
   whose packs were loaded from different directories no longer report
   degraded assurance.
+- **Reordered markers are no longer a move.** Several same-kind markers
+  swapping positions leaves every one naming the file it already named, so
+  the comparison is now over the multiset; the reordering is still a real
+  difference, so it is not reported as a coordinate-only shift either.
+- **A derived `SourceGraphSummary.graph_id` is compared as persisted.**
+  `to_dict` serializes `graph_id or compute_graph_id()`, so an unset id and
+  the computed one are the same content — while a stale stored id is
+  genuinely different, which is why it is normalized rather than excluded.

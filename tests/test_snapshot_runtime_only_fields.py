@@ -262,3 +262,39 @@ def test_unpersisted_fields_are_looked_up_per_type() -> None:
     )
     assert unpersisted_fields_for(object()) == frozenset()
     assert unpersisted_fields_for("a string") == frozenset()
+
+
+def test_a_derived_graph_id_is_compared_as_persisted() -> None:
+    """Codex review (PR #1229): `SourceGraphSummary.to_dict` serializes
+    `graph_id or compute_graph_id()`, so an unset in-memory id and the
+    computed one are the SAME persisted content — the walk compared the
+    raw field and called them different.
+
+    Normalized rather than excluded, because a *stale* stored id is
+    genuinely different persisted content; both directions are asserted
+    against the digest, since excluding the field would silently pass the
+    first and fail the second."""
+    import dataclasses
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.policy.analysis_assurance_schema_staleness import _same_content
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    finalized = SourceGraphSummary().finalize()
+    assert finalized.graph_id, "finalize() must set an id or this is vacuous"
+    unset = dataclasses.replace(finalized, graph_id="")
+    stale = dataclasses.replace(finalized, graph_id="sha256:stale-and-wrong")
+
+    def _snap(graph: SourceGraphSummary) -> AbiSnapshot:
+        snap = AbiSnapshot(version="1.0", library="libfoo.so.1")
+        pack = BuildSourcePack.empty(root="/p")
+        pack.source_graph = graph
+        snap.build_source = pack
+        return snap
+
+    a, b, c = _snap(finalized), _snap(unset), _snap(stale)
+    assert snapshot_content_digest(a) == snapshot_content_digest(b)
+    assert _same_content(a, b)
+    assert snapshot_content_digest(a) != snapshot_content_digest(c)
+    assert not _same_content(a, c)

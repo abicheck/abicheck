@@ -198,10 +198,21 @@ def _classify_outcome(
     # rename they are checked.
     old_markers = closure_marker_files(old_qn) if old_qn else ()
     new_markers = closure_marker_files(new_qn) if new_qn else ()
+    # A PERMUTATION is not a move (Codex review, PR #1229): reordered
+    # template arguments leave every marker naming the file it already
+    # named, so the multiset is what carries "some marker now names a
+    # different file". The reordering is still a real difference the
+    # location-free key collapses, so it disqualifies coordinate-only
+    # below -- it is simply not evidence of a *move*.
     markers_differ = (
         bool(old_markers)
         and len(old_markers) == len(new_markers)
+        and sorted(old_markers) != sorted(new_markers)
+    )
+    markers_reordered = (
+        bool(old_markers)
         and old_markers != new_markers
+        and sorted(old_markers) == sorted(new_markers)
     )
     has_two_sided_files = bool(old_file) and bool(new_file)
     moved = (old_file != new_file) if has_two_sided_files else markers_differ
@@ -245,10 +256,12 @@ def _classify_outcome(
         # An evidence conflict is not a coordinate-only shift: two-sided
         # declaring files saying "did not move" while the embedded markers
         # name different files means something beyond coordinates changed
-        # (a nested template argument's own declaring file), so the pair
-        # falls through rather than claiming no material identity change
+        # (a nested template argument's own declaring file, or a
+        # reordering of the arguments themselves), so the pair falls
+        # through rather than claiming no material identity change
         # (Codex review, PR #1229).
         and not markers_differ
+        and not markers_reordered
         and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
     return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
