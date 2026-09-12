@@ -297,21 +297,10 @@ def _run_dump_uncached(
             dumper_cache.ast_memoize_scope(),
             closure_identity.defer_closure_identity_renumbering(),
         ):
-            # `include_dependencies=True` on both sub-dumps, always, and
-            # deliberately not from `common_kwargs`: each intermediate must
-            # keep its FULL declaration surface so the outer wrapper can apply
-            # the caller's real scope request exactly once, to the merged
-            # result. Filtering here instead would be unrecoverable -- the
-            # outer wrapper cannot restore declarations a sub-dump already
-            # dropped, so an explicit `include_dependencies=True` would return
-            # a filtered surface still labelled `dependency_scope="full"`, and
-            # a snapshot that lies about its own scope compares "successfully"
-            # against a genuinely full one and can license a false
-            # compatibility conclusion. This used to hold only by accident:
-            # `run_dump`'s own default was `True`, so omitting the keyword did
-            # the right thing until that default was aligned with the CLI's
-            # `False` (Codex review, PR #1258). Stating it explicitly makes the
-            # sub-dumps independent of whatever that default becomes.
+            # NOT redundant: each sub-dump must keep its FULL surface so the
+            # outer wrapper scopes the merged result once. Filtering here is
+            # unrecoverable -- see PR #1258 (a filtered surface labelled
+            # `dependency_scope="full"`).
             castxml_snap = run_dump(
                 path,
                 binary_fmt,

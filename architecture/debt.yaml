@@ -2,6 +2,17 @@
   "schema_version": 1,
   "files": [
     {
+      "path": "abicheck/service_dump_native.py",
+      "baseline_lines": 806,
+      "target": "workflows (the hybrid two-backend sub-dump and merge is a dump-orchestration concern; extracting it would take this file back under the cap)",
+      "rule": "no_growth",
+      "disposition": "migrate",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "New entry, 800 -> 806. This file sat at exactly the 800-line production maximum, so any addition crosses it. The addition is a correctness fix, not new capability: the hybrid header backend recursively calls `run_dump` twice and merges the results, and it relied on `run_dump`'s own `include_dependencies` default being `True` to keep each sub-dump's full surface for the outer wrapper to scope once. Aligning that default to `False` (PR #1258, matching `dump --include-system-declarations`) made both sub-dumps filter, and the wrapper cannot restore dropped declarations -- so `include_dependencies=True` with `header_backend=\"hybrid\"` returned a filtered surface still labelled `dependency_scope=\"full\"` (measured: 10 functions instead of 7,682, on a real one-header C++ library). A snapshot that lies about its own scope compares \"successfully\" against a genuinely full one and can license a false compatibility conclusion, which is worse than the front-end divergence that PR set out to fix. Two lines are the fix itself (one explicit `include_dependencies=True` on each recursive call, deliberately not routed through `common_kwargs` so the sub-dumps are independent of whatever the default becomes); four are the comment recording why they are NOT redundant, which is the minimum that stops a future reader deleting them as dead weight and silently reintroducing the defect -- the full account lives in that PR and its commit message rather than here. The comment was cut from sixteen lines to four for exactly this reason before opening the entry. Nothing smaller exists: the keywords cannot be omitted without reintroducing the bug, and extracting the sub-dump/merge block to `workflows` is the real fix (recorded as this entry's target) but is a behaviour-preserving refactor of its own rather than part of a review-fix round.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/analysis_assurance.py",
       "baseline_lines": 1577,
       "target": "see ADR-061 ownership map",
