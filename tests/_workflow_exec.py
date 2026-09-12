@@ -413,6 +413,13 @@ def run_step(
     # `EOF\r`, so the heredoc never terminates, and `set -euo pipefail`-style
     # bodies break on the trailing CR (Codex review, PR #1230). The body must
     # reach bash byte-for-byte as the YAML holds it.
+    # Every path through this function runs bash -- there is no `shell: python`
+    # branch here -- so the guard belongs at the top rather than beside the
+    # call. Without it a consumer that never marks itself reaches
+    # `bash_executable()`'s documented `"bash"` fallback and executes the WSL
+    # launcher on a stub-only runner, which is what `_assurance_overlay_exec`
+    # was doing (Codex review, PR #1255).
+    require_bash()
     body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
     body.write_bytes(step["run"].encode("utf-8"))
     # Git Bash wants forward slashes, but a backslash is a legal *filename*

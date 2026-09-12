@@ -61,8 +61,6 @@ from _pytest.outcomes import Skipped
 
 TESTS_DIR = Path(__file__).resolve().parent
 
-#: The one module allowed to name the program literally: it *is* the resolver.
-_RESOLVER_MODULE = "_workflow_exec.py"
 
 #: Callables whose first positional argument is an argv sequence.
 _SUBPROCESS_ENTRY_POINTS = frozenset(
@@ -71,7 +69,17 @@ _SUBPROCESS_ENTRY_POINTS = frozenset(
 
 
 def _test_modules() -> list[Path]:
-    return sorted(p for p in TESTS_DIR.rglob("*.py") if p.name != _RESOLVER_MODULE)
+    """Every module under `tests/`, the resolver's own included.
+
+    An earlier revision exempted `_workflow_exec.py` wholesale on the grounds
+    that it *is* the resolver. That hid `run_step`, which shells out through
+    `bash_executable()` with no guard of its own, so every consumer that never
+    marked itself reached the WSL launcher (Codex review, P1). The resolver's
+    own literal `"bash"` spellings are returns, not subprocess argv, so no
+    exemption is needed for them: the rules are narrow enough to include the
+    module that defines them.
+    """
+    return sorted(TESTS_DIR.rglob("*.py"))
 
 
 def _argv_program(node: ast.Call) -> ast.expr | None:
@@ -123,14 +131,24 @@ def _literal_argvs(scope: ast.AST) -> dict[str, ast.expr]:
             and node is not scope
         ):
             continue
-        if not isinstance(node, ast.Assign) or not isinstance(
-            node.value, ast.List | ast.Tuple
-        ):
+        # An annotated binding (`cmd: list[str] = ["bash", ...]`) is the same
+        # binding with a type on it, and reading only `ast.Assign` left that
+        # especially natural form untraced (Codex review, P1).
+        if isinstance(node, ast.AnnAssign):
+            targets = [node.target] if node.target else []
+            value = node.value
+        elif isinstance(node, ast.Assign):
+            targets = list(node.targets)
+            value = node.value
+        else:
             continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and node.value.elts:
-                if _is_bare_bash(node.value.elts[0]):
-                    bound[target.id] = node.value
+        if not isinstance(value, ast.List | ast.Tuple) or not value.elts:
+            continue
+        if not _is_bare_bash(value.elts[0]):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                bound[target.id] = value
     return bound
 
 
@@ -318,6 +336,15 @@ class TestNoModuleSpellsBashItself:
                 'def f():\n    cmd = [exe, p]\n    cmd = ["bash", p]\n'
                 "    subprocess.run(cmd)",
                 id="bare-on-one-path-only",
+            ),
+            pytest.param(
+                'def f():\n    cmd: list[str] = ["bash", "-c", s]\n'
+                "    subprocess.run(cmd)",
+                id="annotated-binding",
+            ),
+            pytest.param(
+                'cmd: list[str] = ["bash"]\nsubprocess.run(cmd)',
+                id="annotated-at-module-scope",
             ),
         ],
     )
