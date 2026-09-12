@@ -1,7 +1,7 @@
 # Action-vs-CLI surface drift: audit and prevention
 
-**Status:** Audit complete (2026-09-12). Phase 1 landed; Phases 2-4 proposed,
-not started.
+**Status:** Audit complete (2026-09-12). Phases 1 and 3a landed; ADR-070
+drafted (Proposed). Phases 2, 3b, 4 and 5 proposed, not started.
 
 **Problem.** The composite GitHub Action (`action/`, `actions/check-target/`)
 is a hand-maintained adapter over the abicheck CLI. It encodes, in shell, a
@@ -496,32 +496,67 @@ efforts do not edit the same guards.
   `_UNSUPPORTED_OPTIONS` error is the answer, and it cannot go stale.
 - Write the ADR alongside.
 
-### Phase 3 — Derive the tokenizer tables; generate only what is pre-install
+### Phase 3a — Derive the tokenizer tables from the installed CLI *(landed)*
 
-Split in two, per the corrected premise:
+Both hand-maintained `case` lists are **deleted**. `action/run.sh`'s
+`_cli_value_options_init` and `actions/check-target/action.yml`'s
+`_ct_cli_value_options_init` query the installed abicheck once per run and
+cache the answer; `_extra_args_is_value_option` is a pure-bash substring test
+over it.
 
-**3a — tokenizers (no artifact).** Replace both `case` lists with one
-introspection call against the *installed* abicheck, made once per run and
-cached in a variable. Both call sites already run post-install. Delete the
-lists. Phase 1's bidirectional test then becomes a test of the derivation,
-and the version-skew case it cannot currently express (a workflow installing
-a different abicheck than this checkout) becomes correct for free.
+- **Scoped per command, not a union.** `run.sh` asks about whichever command
+  `MODE` selects (`_cli_command_path`). A union would reintroduce the
+  surplus-entry failure mode — `--compression` is real on `dump` and absent
+  from `compare`, so a union makes it swallow the next real flag under
+  `mode: compare`. check-target is fixed to `compare`, since that is the only
+  mode it forwards `extra-args` to.
+- **Derived once, at top level**, after the interpreter preflight establishes
+  `$_PY_BIN_HAS_ABICHECK` and `$MODE` is resolved, because every
+  `$(_extra_args_options)` is a command substitution: a subshell inherits the
+  cache but cannot populate it. The lazy call inside
+  `_extra_args_is_value_option` remains for direct invocation.
+- **Same isolation as every other abicheck-importing call** — `cd
+  "$_PY_SAFE_DIR"` with a cleared `PYTHONPATH`, since this imports a real
+  abicheck submodule and the checkout is untrusted on `pull_request`.
+- **The cluster-terminal set is derived too.** `_extra_args_expand_short_
+  clusters` asks `_extra_args_is_value_option "-$_last"` instead of listing
+  `H | I | o`, which is what had carried `j`.
+- **Fallback** (ADR-070 D3): when the interpreter cannot import abicheck, the
+  set stays empty — every token opaque, the under-recognition direction — with
+  one `::warning::` naming the cost. Deliberately *not* a small static list,
+  which is the drift this removes, reintroduced in the one path production
+  never exercises.
 
-- Fallback when `_PY_BIN` cannot import abicheck: `run.sh:2095` already warns
-  for exactly this case. Treat every token as opaque there — the
-  missing-entry direction, whose worst case is a false rejection the existing
-  guard messages already explain — and say so, rather than falling back to a
-  stale baked list.
+**What the tests had to become.** The Phase 1 test parsed the `case` bodies,
+so it could not survive their deletion — and replacing it mattered more than
+patching it. `tests/test_extra_args_is_value_option_completeness.py` now
+*executes* the shell functions and compares against live Click introspection:
+per-mode set equality, the command-scoping property stated separately, a
+roll-call of the twelve retired names, end-to-end tokenizer behaviour for both
+drift directions, the cluster terminals, and the fallback (new surface the
+lists never had). Two mutations were run to confirm the invariants bite:
+changing `dump`'s scoping to `compare` fails 3 tests; adding a baked fallback
+list fails 2.
 
-**3b — `validate-inputs.sh` (artifact, if anything).** Its format choice sets
-(`compare`'s seven, `deps`' three, `--compression`'s four) are the only CLI
-facts needed before install. They are small and they already AGREE (A3), so
-this is drift *prevention*, not a fix. A `scripts/gen_action_cli_surface.py
---check` emitting a flat `action/cli-surface.txt`, wired as a `Step` in
-`scripts/verify.py`'s catalog (and therefore the `ai-readiness` job, per
-`.github/AGENTS.md`), plus a `scripts/CLAUDE.md` inventory row. Defensible to
-defer: three `click.Choice` sets that have never drifted may not earn a
-generator and a gate.
+`tests/test_action_run_sh_helpers.py`'s harness needed extending. Its
+`_helpers_region()` stops at run.sh's `# Build the abicheck command` marker —
+*before* `$_PY_BIN`/`$_PY_SAFE_DIR`/`$_PY_BIN_HAS_ABICHECK` exist — so without
+a prelude supplying them every tokenizer test would silently have exercised
+the *fallback* path while appearing to test the real one. That is the
+"test takes a shortcut into the dependency" anti-pattern root `AGENTS.md`
+warns about, so `_cli_introspection_prelude()` was added and wired into all
+four script-assembly sites (one of which, `_run_predicate`, was missed on the
+first pass and caught by four failing tests).
+
+### Phase 3b — A generated artifact for the genuinely pre-install facts
+
+Unchanged and still open, deliberately small: `validate-inputs.sh`'s format
+choice sets (`compare`'s seven, `deps`' three, `--compression`'s four) are the
+only CLI facts needed before install. They already AGREE (A3), so this is
+drift *prevention*, not a fix — a `scripts/gen_action_cli_surface.py --check`
+emitting a flat `action/cli-surface.txt`, wired as a `Step` in
+`scripts/verify.py`'s catalog. **Defensible to defer:** three `click.Choice`
+sets that have never drifted may not earn a generator and a gate.
 
 ### Phase 4 — Pin guard justifications to CLI symbols (B4)
 

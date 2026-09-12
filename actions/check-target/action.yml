@@ -907,23 +907,50 @@ runs:
         # `tests/test_extra_args_is_value_option_completeness.py`, over every
         # command the Action invokes -- don't hand-edit this list without
         # running it.
+        # Value-taking CLI options, derived from the INSTALLED abicheck
+        # (ADR-070 D3). This was a hand-maintained `case` list kept "in sync
+        # with run.sh's by hand" -- and both copies drifted identically:
+        # twelve names the CLI had retired, four live ones missing. Neither
+        # was catchable by the test guarding them, which checked one
+        # direction against one command. See
+        # `docs/contribute/plans/action-cli-surface-drift.md` and ADR-070.
+        #
+        # This step runs after the workflow's own "Install abicheck" step, and
+        # `$PY`/`$_py_safe_dir` are already established earlier in this same
+        # step, so the query is available here exactly as in `action/run.sh`.
+        # Same `$_py_safe_dir`/cleared-`PYTHONPATH` isolation as every other
+        # abicheck-importing call in this step, for the same reason.
+        #
+        # Scoped to `compare`: check-target forwards `extra-args` to the root
+        # Action under `mode: compare` only, so unlike run.sh (which asks
+        # about whichever command `MODE` selects) the command is fixed here.
+        #
+        # Written as a one-line `-c` script on purpose: this file is YAML, so
+        # a multi-line inline script would have to sit inside the `run: |`
+        # block scalar's indentation, which Python would then reject as an
+        # IndentationError on its own first statement.
+        _ct_cli_value_options=""
+        _ct_cli_value_options_ready="false"
+        _ct_cli_value_options_init() {
+          [[ "$_ct_cli_value_options_ready" == "true" ]] && return 0
+          _ct_cli_value_options_ready="true"
+          if [[ -z "${PY:-}" || -z "${_py_safe_dir:-}" ]]; then
+            echo "::warning::cannot introspect the installed abicheck for its value-taking compare options (no usable interpreter resolved in this step) -- every extra-args token will be treated as opaque, so a real --config occurrence following another option's value may go unrecognized here. Deliberately not falling back to a baked option list, which is the drift this derivation removes (ADR-070 D3)." >&2
+            return 0
+          fi
+          local _ct_derived _ct_rc=0
+          _ct_derived=$( (cd "$_py_safe_dir" && PYTHONPATH= "$PY" -c 'import click; from abicheck.cli import main; print("\n".join(o for p in main.commands["compare"].params if isinstance(p, click.Option) and not p.is_flag and p.nargs != 0 for o in p.opts))') ) || _ct_rc=$?
+          if [[ "$_ct_rc" -ne 0 || -z "$_ct_derived" ]]; then
+            echo "::warning::introspecting the installed abicheck for compare's value-taking options failed (exit ${_ct_rc}) -- every extra-args token will be treated as opaque; see the note above." >&2
+            return 0
+          fi
+          _ct_cli_value_options="|$(printf '%s' "$_ct_derived" | tr '\n' '|')"
+        }
+
         _ct_extra_args_is_value_option() {
-          case "$1" in
-            --abi3 | --budget | --build-info | --bundle-facts-library-manifest | \
-            --bundle-facts-out | --changed-path | --compression | --config | \
-            --contract | --debug-info | --debug-root | --depth | --devel-pkg | \
-            --dump-manifest | --format | --header | --include | \
-            --instantiation-manifest | --ld-library-path | --max-findings-per-library | \
-            --new-root | --old-root | --output | --output-dir | --pack | --policy | \
-            --post-manifest | --probe-matrix | --provenance | --required-symbol | \
-            --search-path | --select | --select-required | --severity-preset | --since | \
-            --sources | --suppress | --sysroot | --use-cases | --used-by | \
-            --used-by-manifest | --variant | --version | --view | --write | -H | -I | \
-            -o)
-              return 0
-              ;;
-          esac
-          return 1
+          _ct_cli_value_options_init
+          [[ -n "$_ct_cli_value_options" ]] || return 1
+          [[ "$_ct_cli_value_options" == *"|$1|"* ]]
         }
         # Codex review (P2), fresh evidence, PR #1222: expand a Click-style
         # clustered short-option token (`-vH` for `-v -H`) into its
@@ -958,10 +985,12 @@ runs:
           esac
           _rest="${_tok#-}"
           _last="${_rest: -1}"
-          case "$_last" in
-            H | I | o) ;;
-            *) return 1 ;;
-          esac
+          # Derived, not listed (ADR-070 D3): a cluster is only worth
+          # expanding when its last character is a value-taking short option,
+          # which `_ct_extra_args_is_value_option` now answers from the
+          # installed CLI. The hand-listed form carried `j` long after
+          # `compare` lost `-j` with `jobs` (ADR-068 D5).
+          _ct_extra_args_is_value_option "-$_last" || return 1
           _flags="${_rest%?}"
           _n=${#_flags}
           for ((_k = 0; _k < _n; _k++)); do

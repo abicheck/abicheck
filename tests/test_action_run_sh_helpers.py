@@ -48,7 +48,9 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -64,6 +66,31 @@ def _helpers_region() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     idx = text.index(_MARKER)
     return text[:idx]
+
+
+def _cli_introspection_prelude() -> str:
+    """Shell establishing the three variables `_cli_value_options_init` needs.
+
+    `_helpers_region()` stops at run.sh's "Build the abicheck command" marker,
+    which is *before* the real script resolves `$_PY_BIN`, creates
+    `$_PY_SAFE_DIR` and sets `$_PY_BIN_HAS_ABICHECK`. Since ADR-070 D3 replaced
+    the hand-maintained value-option `case` list with a live query against the
+    installed CLI, a harness that omits those three would silently exercise
+    `_cli_value_options_init`'s *fallback* path -- where nothing is
+    value-taking -- so every tokenizer test would assert the behaviour of the
+    degraded mode while appearing to test the real one. That is precisely the
+    "test goes through a shortcut into the dependency" anti-pattern root
+    `AGENTS.md` warns about, so the harness supplies them instead.
+
+    Uses this interpreter (`sys.executable`), which is by construction the one
+    with abicheck importable when the test suite is running at all.
+    """
+    return (
+        f"\n_PY_BIN={shlex.quote(sys.executable)}\n"
+        '_PY_SAFE_DIR="$(mktemp -d)"\n'
+        "_PY_BIN_HAS_ABICHECK=true\n"
+        "trap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
+    )
 
 
 def _bash_executable() -> str:
@@ -127,6 +154,7 @@ def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
     """
     script = (
         _helpers_region()
+        + _cli_introspection_prelude()
         + "\nCMD=()\n"
         + harness
         # ${CMD[@]+"${CMD[@]}"} (not plain "${CMD[@]}"): pre-4.4 bash — macOS's
@@ -209,7 +237,11 @@ def _run_predicate(call: str) -> bool:
     """Source the real helper functions and evaluate a boolean-returning call
     (e.g. an ``_is_release_style_operand "path"`` invocation), returning
     whether it exited zero (true) or non-zero (false)."""
-    script = _helpers_region() + f"\nif {call}; then exit 0; else exit 1; fi\n"
+    script = (
+        _helpers_region()
+        + _cli_introspection_prelude()
+        + f"\nif {call}; then exit 0; else exit 1; fi\n"
+    )
     with tempfile.NamedTemporaryFile(
         "w",
         suffix=".sh",
@@ -664,7 +696,7 @@ def _run_value(call: str) -> str:
     """Source the real helper functions and return a value-printing call's
     stdout (e.g. an ``_effective_format`` invocation), stripped of the
     trailing newline `echo`/`printf` conventions may or may not add."""
-    script = _helpers_region() + f"\n{call}\n"
+    script = _helpers_region() + _cli_introspection_prelude() + f"\n{call}\n"
     with tempfile.NamedTemporaryFile(
         "w",
         suffix=".sh",
@@ -839,12 +871,12 @@ class TestExtraArgsExpandShortClusters:
         # .py`'s TestShortClusterTerminalsMatchTheCli owns the same invariant
         # on the shell source; this is its behavioural half.
         from test_extra_args_is_value_option_completeness import (
-            _compare_value_taking_options,
+            _value_taking_options,
         )
 
         chars = sorted(
             opt.lstrip("-")
-            for opt in _compare_value_taking_options()
+            for opt in _value_taking_options(("compare",))
             if not opt.startswith("--")
         )
         assert chars, "no short value-taking options found via introspection"
@@ -968,6 +1000,7 @@ class TestExtraArgsConfigCollisionGuard:
         )
         script = (
             _helpers_region()
+            + _cli_introspection_prelude()
             + f"\n{cmd_seed}\n"
             + _extra_args_config_guard_source()
             + '\nprintf "%s\\n" "${CMD[@]}"\n'
