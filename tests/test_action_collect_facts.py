@@ -39,29 +39,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_DIR = REPO_ROOT / "actions" / "collect-facts"
 RUN_SH = ACTION_DIR / "run.sh"
 _HELPERS_MARKER = "# ---------------------------------------------------------------------------\n# Resolve producer"
-
-
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale.
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 def _native_abspath(p: Path) -> str:
@@ -115,7 +98,7 @@ def _run_predicate(
     # wherever the real bash lives would make that lookup fail before the
     # script (which is what env_extra's PATH restriction is actually meant
     # to control) ever runs.
-    bash_exe = _bash_executable()
+    bash_exe = bash_executable()
     if env is not None and not os.path.isabs(bash_exe):
         resolved = shutil.which(bash_exe)
         if resolved:
@@ -161,7 +144,7 @@ def _run_action(
         **env_extra,
     }
     result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

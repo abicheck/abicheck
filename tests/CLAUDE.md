@@ -129,6 +129,13 @@ finishes in ~45 seconds.
   `StepResult.output_lines` exposes the raw records, so an *injected extra*
   `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
   `test_reusable_workflow_execution.py`.
+  It also owns `bash_executable()`, the **only** way a test in this suite may
+  name the bash it shells out to. A bare `["bash", ...]` argv resolves to the
+  WSL launcher stub on `windows-latest` and reddens the whole calling module
+  at once; the twenty-nine private `_bash_executable` clones that used to
+  encode this convention have been folded onto it, and
+  `test_subprocess_bash_is_resolved.py` now fails on a new clone or a new bare
+  `"bash"` program anywhere under `tests/`.
 ## What NOT to do
 
 - Don't change the marker scheme — CI gates depend on it.

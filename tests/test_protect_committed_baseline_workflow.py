@@ -39,6 +39,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable
 
 WORKFLOW_PATH = (
     Path(__file__).resolve().parents[1]
@@ -121,19 +122,6 @@ class TestStructure:
         assert "Rulesets" in text
 
 
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _check_script() -> str:
     step = _check_step(_load())
     return step["run"]
@@ -203,7 +191,7 @@ class TestCheckScriptBehavior:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(_check_script())
             return subprocess.run(
-                [_bash_executable(), path],
+                [bash_executable(), path],
                 capture_output=True,
                 text=True,
                 env=env,

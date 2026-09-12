@@ -38,28 +38,11 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
 VALIDATE_SH = ACTION_DIR / "validate-inputs.sh"
 RUN_SH = ACTION_DIR / "run.sh"
-
-
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale.
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 _VALIDATOR_INPUT_VARS = (
@@ -131,7 +114,7 @@ def _run_validate(
         env.pop(name, None)
     env.update(env_extra)
     return subprocess.run(
-        [_bash_executable(), *(bash_options or []), str(VALIDATE_SH)],
+        [bash_executable(), *(bash_options or []), str(VALIDATE_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -1190,7 +1173,7 @@ def _classify(fn_region: str, path: str) -> bool:
         script_path = f.name
     try:
         result = subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
         )

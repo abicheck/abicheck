@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable
 
 from abicheck.buildsource.project_targets import (
     DEFAULT_PROFILE_RUNNER_LABEL,
@@ -178,7 +179,7 @@ def _resolve_dependency_source(
     # cause — see the skipif above for the real one — but the relative form
     # is correct on its own merits, so it stays.)
     completed = subprocess.run(
-        ["bash", "resolve.sh"],
+        [bash_executable(), "resolve.sh"],
         cwd=tmp_path,
         env={
             **os.environ,

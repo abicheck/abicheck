@@ -43,25 +43,12 @@ from typing import Any
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable
 
 from abicheck.buildsource.baseline_publish import (
     accepted_main_cache_key,
     accepted_main_cache_restore_prefix,
 )
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
@@ -376,7 +363,7 @@ class TestAcceptedMainCacheKeyRotation:
             }
         )
         result = subprocess.run(
-            [_bash_executable(), "-c", step["run"]],
+            [bash_executable(), "-c", step["run"]],
             capture_output=True,
             text=True,
             env=env,

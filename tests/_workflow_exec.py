@@ -216,13 +216,13 @@ def bash_executable() -> str:
     substring assertion) and exits 1, which reads as every test in the file
     failing at once for no stated reason.
 
-    This is the canonical copy. Roughly two dozen ``test_action_*`` modules
-    still carry their own private ``_bash_executable``, each written before
-    there was a shared home for it -- a new module should import this one
-    rather than clone a twenty-fifth, which is exactly how
-    ``test_action_run_sh_build_info_conflict`` shipped with a bare ``bash``
-    and reddened the Windows lane. Migrating the existing copies is a
-    separate, mechanical change and deliberately not done here.
+    This is the *only* copy. The twenty-nine private ``_bash_executable``
+    clones that used to shadow it have been migrated onto this function, and
+    ``tests/test_subprocess_bash_is_resolved.py`` now fails on a new clone or
+    a new bare ``["bash", ...]`` argv anywhere under ``tests/`` -- the
+    convention was what kept failing (``test_action_run_sh_build_info_conflict``
+    and, later, ``test_extra_args_is_value_option_completeness`` each shipped a
+    bare ``bash`` and reddened the Windows lane), so it is a gate now.
 
     ``GIT_BASH_PATH`` is honoured first so a runner with Git installed
     somewhere unusual can point at it.
@@ -234,7 +234,7 @@ def bash_executable() -> str:
         r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
     ):
-        if candidate and Path(candidate).exists():
+        if candidate and Path(candidate).is_file():
             return candidate
     return "bash"
 

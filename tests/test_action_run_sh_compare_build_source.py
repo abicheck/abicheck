@@ -36,6 +36,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from _workflow_exec import bash_executable
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 
@@ -65,19 +67,6 @@ def _compile_overlay_from_cmd(cmd: str, tmp_path: Path) -> dict[str, Any]:
     with open(captured_config, encoding="utf-8") as f:
         doc = json.load(f)
     return doc.get("compile", {})
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 def _run_compare_raw(
@@ -136,7 +125,7 @@ def _run_compare_raw(
         **env_extra,
     }
     result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -611,7 +600,7 @@ def _run_baseline_compare_raw(
     if env.get("INPUT_OLD_LIBRARY") == "":
         del env["INPUT_OLD_LIBRARY"]
     result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

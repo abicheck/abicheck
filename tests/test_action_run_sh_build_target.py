@@ -42,6 +42,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
@@ -50,19 +51,6 @@ _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
 def _mode_branches_region() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     return text[: text.index(_END_MARKER)]
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
@@ -80,7 +68,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     env.update(env_extra)
     try:
         result = subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -110,7 +98,7 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
     env.update(env_extra)
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
     finally:

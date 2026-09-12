@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable
 from test_reusable_workflows import CHECK_PROJECT, _load, _steps
 
 
@@ -84,7 +85,7 @@ def test_precheck_script_threads_explicit_id_into_check_id(tmp_path: Path) -> No
         "GITHUB_OUTPUT": str(github_output),
     }
     result = subprocess.run(
-        ["bash", "-c", script],
+        [bash_executable(), "-c", script],
         cwd=tmp_path,
         env=env,
         capture_output=True,

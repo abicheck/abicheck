@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _workflow_exec import bash_executable
 
 from abicheck._compiler_options import split_gcc_options
 
@@ -280,25 +281,6 @@ def _compile_context_region(
     return text[start:end]
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 _FULL_ENV = {
     "INPUT_AST_FRONTEND": "clang",
     "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
@@ -342,7 +324,7 @@ def _run_bash_script(
         script_path = f.name
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=text,
             env=env,

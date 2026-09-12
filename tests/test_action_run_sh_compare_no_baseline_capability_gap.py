@@ -66,6 +66,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
+from _workflow_exec import bash_executable  # noqa: E402
 
 RUN_SH = _REPO / "action" / "run.sh"
 _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
@@ -109,7 +110,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
         **env_extra,
     }
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -329,7 +330,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     env.update(env_extra)
     try:
         result = subprocess.run(
-            ["bash", script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             encoding="utf-8",

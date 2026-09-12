@@ -60,6 +60,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _workflow_exec import bash_executable
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
@@ -170,24 +172,6 @@ def _write_fake_sitecustomize(root: Path) -> None:
     )
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale.
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_bash_script(
     script: str,
     *,
@@ -207,7 +191,7 @@ def _run_bash_script(
         script_path = f.name
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             cwd=cwd,
@@ -230,7 +214,7 @@ def _mark_executable(path: Path) -> None:
     letting the real system binary run instead of the fake one a test
     installs to stand in for it (Codex review, fresh evidence)."""
     result = subprocess.run(
-        [_bash_executable(), "-c", 'chmod +x "$1"', "_", str(path)],
+        [bash_executable(), "-c", 'chmod +x "$1"', "_", str(path)],
         capture_output=True,
         text=True,
         timeout=10,
@@ -564,7 +548,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
         exist" assertion pass vacuously either way, so only bash itself can
         answer this (Codex review, fresh evidence)."""
         result = subprocess.run(
-            [_bash_executable(), "-c", 'test -d "$1"', "_", created_dir],
+            [bash_executable(), "-c", 'test -d "$1"', "_", created_dir],
             capture_output=True,
             text=True,
             timeout=10,
@@ -597,7 +581,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
             assert self._bash_dir_exists(created_dir)
         finally:
             subprocess.run(
-                [_bash_executable(), "-c", 'rm -rf "$1"', "_", created_dir],
+                [bash_executable(), "-c", 'rm -rf "$1"', "_", created_dir],
                 timeout=10,
             )
 

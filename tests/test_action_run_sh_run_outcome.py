@@ -38,6 +38,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable
 
 ACTION_DIR = Path(__file__).resolve().parent.parent / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -90,7 +91,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
         }
     )
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

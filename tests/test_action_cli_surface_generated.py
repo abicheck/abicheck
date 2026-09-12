@@ -43,6 +43,7 @@ from pathlib import Path
 
 import click
 import pytest
+from _workflow_exec import bash_executable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SURFACE = REPO_ROOT / "action" / "cli-surface.txt"
@@ -75,7 +76,7 @@ def _run_validate(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     base = {"PATH": os.environ["PATH"]}
     base.update(env)
     return subprocess.run(
-        ["bash", str(VALIDATE)],
+        [bash_executable(), str(VALIDATE)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -242,7 +243,7 @@ class TestTheShellActuallyReadsIt:
         staged = tmp_path / "validate-inputs.sh"
         staged.write_text(VALIDATE.read_text(encoding="utf-8"), encoding="utf-8")
         result = subprocess.run(
-            ["bash", str(staged)],
+            [bash_executable(), str(staged)],
             capture_output=True,
             text=True,
             encoding="utf-8",

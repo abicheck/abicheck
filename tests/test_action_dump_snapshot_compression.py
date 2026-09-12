@@ -29,6 +29,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from _workflow_exec import bash_executable
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_START = 'if [[ "$MODE" == "dump" ]]; then'
@@ -57,25 +59,6 @@ def _dump_mode_region() -> str:
     return text[start:end] + "fi\n"
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_dump_region(env_extra: dict[str, str]) -> list[str]:
     # add_flag/add_single_flag are defined earlier in run.sh; redefine
     # minimal equivalents here since only the dump-mode region is
@@ -90,7 +73,7 @@ def _run_dump_region(env_extra: dict[str, str]) -> list[str]:
     script = harness + _dump_mode_region() + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     env = {**os.environ, "MODE": "dump", **env_extra}
     out = subprocess.run(
-        [_bash_executable(), "-c", script],
+        [bash_executable(), "-c", script],
         capture_output=True,
         text=True,
         env=env,

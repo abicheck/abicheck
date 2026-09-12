@@ -73,6 +73,7 @@ from pathlib import Path
 
 import click
 import pytest
+from _workflow_exec import bash_executable
 
 from abicheck.cli import main as abicheck_main
 
@@ -126,7 +127,7 @@ def _run_shell(body: str, *, prelude: str = "") -> str:
         path = handle.name
     try:
         return subprocess.run(
-            ["bash", path], capture_output=True, text=True, encoding="utf-8"
+            [bash_executable(), path], capture_output=True, text=True, encoding="utf-8"
         ).stdout
     finally:
         os.unlink(path)
@@ -326,7 +327,10 @@ class TestUndeterminedOptionTableFailsClosed:
             path = handle.name
         try:
             return subprocess.run(
-                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
             )
         finally:
             os.unlink(path)
@@ -423,7 +427,10 @@ class TestCheckTargetDerivesTheSameWay:
             path = handle.name
         try:
             out = subprocess.run(
-                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
             ).stdout
         finally:
             os.unlink(path)
@@ -473,7 +480,10 @@ class TestCheckTargetDerivesTheSameWay:
             path = handle.name
         try:
             return subprocess.run(
-                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
             )
         finally:
             os.unlink(path)

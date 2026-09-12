@@ -38,6 +38,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 CHECK_SINGLE = WORKFLOWS_DIR / "check-single.yml"
@@ -820,7 +821,7 @@ class TestPreCheckOperationalErrorReport:
             "GITHUB_OUTPUT": str(github_output),
         }
         result = subprocess.run(
-            ["bash", "-c", script],
+            [bash_executable(), "-c", script],
             cwd=tmp_path,
             env=env,
             capture_output=True,
@@ -1213,7 +1214,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
                 "GITHUB_OUTPUT": str(github_output),
             }
             result = subprocess.run(
-                ["bash", "-c", script],
+                [bash_executable(), "-c", script],
                 cwd=root,
                 env=env,
                 capture_output=True,
@@ -1626,7 +1627,7 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             "GITHUB_OUTPUT": str(github_output),
         }
         result = subprocess.run(
-            ["bash", "-c", self._resolver_script()],
+            [bash_executable(), "-c", self._resolver_script()],
             cwd=tmp_path,
             env=env,
             capture_output=True,

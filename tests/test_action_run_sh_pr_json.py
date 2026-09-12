@@ -38,6 +38,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _workflow_exec import bash_executable
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 #: The EXIT-trap line that cleans up STDERR_FILE/_STDOUT_JSON_FILE/PR_JSON/
 #: _BASELINE_CLEANUP -- extracted via regex (not hand-copied) so a future
@@ -92,25 +94,6 @@ def _fragment_region() -> str:
     return text[start:end]
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
     """Run the extracted function defs, then *harness* (which sets up
     PR_JSON/FORMAT/OUTPUT_FILE/CMD), then the extracted acquisition fragment
@@ -136,7 +119,7 @@ def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
     env = dict(os.environ, **(env_extra or {}))
     try:
         result = subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -230,7 +213,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
                 "TEST_PR_JSON": str(pr_json),
                 "TEST_EXTRA_WRITE_JSON": str(extra_write_json),
                 "TEST_STUB": str(stub),
-                "TEST_BASH": _bash_executable(),
+                "TEST_BASH": bash_executable(),
             },
         )
         assert pr_json.read_text(encoding="utf-8") == '{"source": "extra-args-write"}'
@@ -240,7 +223,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
         # wasn't pre-populated — falls all the way through to _build_json_cmd
         # and a rerun. Stub CMD[0]/[1] as `$TEST_BASH $TEST_STUB` — the same
         # resolved bash the harness itself uses (a bare "bash" can resolve to
-        # Windows' non-functional WSL stub, see _bash_executable) running a
+        # Windows' non-functional WSL stub, see bash_executable) running a
         # script with no shebang/executable-bit dependency — that writes a
         # sentinel to its last argument (where _build_json_cmd appends
         # "-o $PR_JSON") so the rerun's execution is directly observable.
@@ -259,7 +242,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added --for
             {
                 "TEST_PR_JSON": str(pr_json),
                 "TEST_STUB": str(stub),
-                "TEST_BASH": _bash_executable(),
+                "TEST_BASH": bash_executable(),
             },
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
@@ -315,7 +298,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --write "json=$TEST_PR_
             {
                 "TEST_PR_JSON": str(pr_json),
                 "TEST_STUB": str(stub),
-                "TEST_BASH": _bash_executable(),
+                "TEST_BASH": bash_executable(),
             },
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
@@ -354,7 +337,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format sarif -o "$TES
                 "TEST_PR_JSON": str(pr_json),
                 "TEST_OUTPUT_FILE": str(output_file),
                 "TEST_STUB": str(stub),
-                "TEST_BASH": _bash_executable(),
+                "TEST_BASH": bash_executable(),
             },
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
@@ -413,7 +396,7 @@ PR_JSON="$TEST_PR_JSON"
 true
 """
         result = subprocess.run(
-            [_bash_executable(), "-c", script],
+            [bash_executable(), "-c", script],
             capture_output=True,
             text=True,
             env=dict(
