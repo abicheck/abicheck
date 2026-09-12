@@ -1052,7 +1052,7 @@ class TestReportIdentityEnvelope:
         old, new = _breaking_pair()
         result = compare(old, new)
         result.check_id = "libfoo@profile#channel@binary"
-        payload = json.loads(reporter.to_json(result, stat=True))
+        payload = json.loads(reporter.to_stat_json(result))
         assert payload["check_id"] == "libfoo@profile#channel@binary"
 
     def test_leaf_mode_carries_identity_fields_too(self):
@@ -1124,7 +1124,7 @@ class TestSchemaVersion:
     def test_stat_mode_carries_version(self):
         """--stat JSON is a different shape but must still carry the version marker."""
         old, new = _breaking_pair()
-        payload = json.loads(reporter.to_json(compare(old, new), stat=True))
+        payload = json.loads(reporter.to_stat_json(compare(old, new)))
         assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
 
     def test_leaf_mode_carries_version(self):

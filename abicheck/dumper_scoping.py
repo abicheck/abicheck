@@ -1062,9 +1062,10 @@ def wrap_run_dump_with_dependency_scope(
     uncached_fn: Callable[..., AbiSnapshot],
 ) -> Callable[..., AbiSnapshot]:
     """Build ``service.run_dump`` from ``service._run_dump_uncached``: a
-    thin wrapper adding an *include_dependencies* keyword (default ``True``)
-    and applying :func:`apply_dependency_scope_to_run_dump_result` to the
-    result — see that function's own docstring.
+    thin wrapper adding an *include_dependencies* keyword (default ``False``,
+    matching the CLI flag and ``InputSpec.include_dependencies``) and applying
+    :func:`apply_dependency_scope_to_run_dump_result` to the result — see that
+    function's own docstring.
 
     ``functools.wraps`` copies ``__wrapped__`` from *uncached_fn*, which
     ``inspect.signature`` follows by default — silently hiding the new
@@ -1078,7 +1079,7 @@ def wrap_run_dump_with_dependency_scope(
     new_param = inspect.Parameter(
         "include_dependencies",
         kind=inspect.Parameter.KEYWORD_ONLY,
-        default=True,
+        default=False,  # must track the wrapper's own default below
         # A bare string, matching every other parameter's annotation here:
         # this module (like the rest of the codebase) has `from __future__
         # import annotations`, so `inspect.signature` on a real function
@@ -1104,8 +1105,9 @@ def wrap_run_dump_with_dependency_scope(
 
     @functools.wraps(uncached_fn)
     def run_dump(
-        *args: object, include_dependencies: bool = True, **kwargs: object
+        *args: object, include_dependencies: bool = False, **kwargs: object
     ) -> AbiSnapshot:
+        # Default matches the CLI flag and `InputSpec`; see that field's note.
         # A `True` request wants the full, unscoped declaration set -- the
         # opt-in streaming pruner (dumper_clang_streaming.py) has no
         # visibility into this parameter at all (it prunes deep inside the

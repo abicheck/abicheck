@@ -440,7 +440,9 @@ def resolve_input(
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
-    include_dependencies: bool = True,
+    # `False` matches the CLI flag, `InputSpec.include_dependencies` and
+    # `run_dump`; see that field's note for why every front end must agree.
+    include_dependencies: bool = False,
     public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.

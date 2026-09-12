@@ -2652,11 +2652,11 @@ class TestUsedByScoping:
     # (CLI cleanup phase two, PR 1): it exercised `--format json --stat`
     # (`to_stat_json`'s stale-summary-vs-recomputed-verdict contradiction),
     # a CLI combination that no longer exists -- `--stat` was removed, and
-    # the CLI never sets `stat=True` on any `reporter.to_json` call anywhere
-    # any more. `to_stat_json` itself is still directly reachable from a
-    # Tier-2 Python API caller via `abicheck.service_render.render_output(
-    # ..., stat=True)`'s own `fmt="json"` branch (the documented compat
-    # shim for the removed CLI flag) -- this comment is only about the CLI
+    # no `stat` keyword survives anywhere in the render chain (removed from
+    # `render_output`/`to_json`/`to_markdown`: a dispatch flag, not a
+    # rendering option). `to_stat_json` is still directly reachable from a
+    # Tier-2 caller, now by name -- re-exported from `abicheck.service`
+    # alongside `to_stat` -- so this comment is only about the CLI
     # surface, not about `to_stat_json` becoming unreachable altogether. The
     # bug class this test guarded against is provably unreachable from the
     # CLI now, not merely untested. The sibling non-stat case,

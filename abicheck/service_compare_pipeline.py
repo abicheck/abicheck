@@ -862,7 +862,10 @@ def run_compare(
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
-    include_dependencies: bool = True,
+    # `False` matches the CLI flag and every other typed surface; this one
+    # matters most, since it is written into *both* `InputSpec`s below and so
+    # overrides their own field default (Codex review, PR #1258).
+    include_dependencies: bool = False,
     contract_mode: str | None = None,
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,

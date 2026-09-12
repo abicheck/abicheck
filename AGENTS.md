@@ -396,9 +396,21 @@ Core pipeline (in order of data flow):
      produced under; `comparability.check_contracts_comparable` refuses
      (`ScopeMismatchError`) to compare two sides with a differing explicit
      value, and `service.run_dump`'s `include_dependencies` parameter
-     (default `True`, folded into the whole-snapshot disk cache key) is
+     (folded into the whole-snapshot disk cache key) is
      what lets `compare`'s own live-binary dumping filter consistently with
-     a `dump` baseline instead of always producing the unfiltered surface
+     a `dump` baseline instead of always producing the unfiltered surface.
+     **That parameter, `InputSpec.include_dependencies`, and the CLI flag all
+     default to `False`** (exclude toolchain/system declarations) — one
+     default across every front end. `run_dump`/`InputSpec` defaulted to
+     `True` until the defaults-alignment pass, which meant a typed-API caller
+     omitting the field got the *unfiltered* surface while the identical CLI
+     invocation got the filtered one (measured: 10 vs 5,597 functions on a
+     one-header C++ library), and — since the two are not comparable — a CLI
+     baseline could not be compared against a typed-API candidate at all
+     (`scope_mismatch`, no verdict). Note there are **three** places that
+     spell this default: the `InputSpec` field, `wrap_run_dump_with_
+     dependency_scope`'s wrapper keyword, and the synthetic `__signature__`
+     it builds for introspection; a test asserts the last two agree
 3. **Diffing** — compare two snapshots
    - `diff_symbols.py` — function/variable/parameter changes
    - `diff_types.py` — struct/enum/union/typedef changes

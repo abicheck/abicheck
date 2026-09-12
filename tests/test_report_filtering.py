@@ -541,7 +541,7 @@ class TestStatMode:
         result = _make_result(
             changes=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed")],
         )
-        text = to_markdown(result, stat=True)
+        text = to_stat(result)
         assert "BREAKING" in text
         assert "total" in text
 
@@ -549,7 +549,7 @@ class TestStatMode:
         result = _make_result(
             changes=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed")],
         )
-        text = to_json(result, stat=True)
+        text = to_stat_json(result)
         d = json.loads(text)
         assert "changes" not in d
 
