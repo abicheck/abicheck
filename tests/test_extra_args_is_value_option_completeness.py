@@ -31,6 +31,31 @@ therefore reject an otherwise-valid ``extra-args`` string outright (see
 ``TestAssuranceOverlayRecognizesUsedByManifestAsValueOption`` for the exact
 reported repro).
 
+A *surplus* entry -- a name the CLI no longer takes a value for -- is the
+opposite and worse failure: the list still reports it as consuming the
+following token, so the real flag after it is swallowed as its value.
+
+**This module originally checked only one of those two directions, and only
+against ``compare``.** A later Action-vs-CLI surface audit
+(``docs/contribute/plans/action-cli-surface-drift.md``) found both omissions
+load-bearing:
+
+* Twelve retired option names (``--ast-frontend``, ``--compiler*``,
+  ``--debug-format``, ``--debuginfod-url``, ``--frontend-context``,
+  ``--lang``, ``--manifest``, ``--max-findings``, ``--pdb-path``,
+  ``--public-header-dir``) survived in both lists across multiple merged
+  PRs, invisible to a ``real - list`` assertion by construction.
+* Four genuine value-taking options were missing because they belong to
+  ``dump`` (``--compression``, ``--provenance``) or ``deps compare``
+  (``--old-root``, ``--new-root``) rather than ``compare`` -- and the
+  tokenizer runs for every mode, not just ``compare``
+  (``_effective_format`` is evaluated after ``run.sh``'s mode dispatch).
+* ``_extra_args_expand_short_clusters``' cluster-terminal set listed ``j``
+  as a value-taking short option; ``compare`` has no ``-j`` at all.
+
+So the invariant here is now **bidirectional**, and its ground truth is the
+**union** over every command the Action invokes.
+
 ``--used-by-manifest`` was the ONE option Codex's review flagged -- but per
 root ``AGENTS.md``'s "fix the cause, not the instance" principle, the real
 bug class is "this hand-maintained enumeration can silently go stale," not
@@ -90,26 +115,70 @@ def _extract_case_options(text: str, function_name: str) -> set[str]:
     return set(_OPTION_TOKEN_RE.findall(body))
 
 
-def _compare_value_taking_options() -> set[str]:
-    """The ground truth: every option name (long and short) the REAL
-    ``compare`` Click command accepts that consumes a following token as its
-    own value (``nargs != 0`` and not a boolean flag) -- introspected
-    directly off ``abicheck.cli.main.commands["compare"]``, the same
-    mechanism each hand-maintained scanner's own docstring cites as its
-    (static, point-in-time) provenance. A ``--foo/--no-foo`` boolean toggle
-    (e.g. ``--scope-public-headers/--no-scope-public-headers``) is excluded
-    by the same ``is_flag`` check Click itself uses to render it without a
-    metavar in ``--help``.
+#: Every root command the Action's own mode dispatch can invoke
+#: (``action/run.sh``'s ``MODE`` cases: compare / dump / deps-tree /
+#: deps-compare). The tokenizer is NOT compare-only: ``_effective_format``
+#: is evaluated at ``action/run.sh:3199``, *after* the mode dispatch, so a
+#: ``dump``- or ``deps``-only value-taking option left out of the list is
+#: misread exactly the same way ``--used-by-manifest`` was.
+ACTION_INVOKED_COMMANDS: tuple[tuple[str, ...], ...] = (
+    ("compare",),
+    ("dump",),
+    ("deps", "tree"),
+    ("deps", "compare"),
+)
+
+
+def _resolve_command(path: tuple[str, ...]) -> click.Command:
+    """Walk *path* from ``abicheck.cli.main`` down to a concrete command."""
+    node: click.Command = abicheck_main
+    for segment in path:
+        assert isinstance(node, click.Group), f"{segment!r}: {path} is not a group path"
+        resolved = node.commands.get(segment)
+        assert resolved is not None, f"no such command: {' '.join(path)}"
+        node = resolved
+    return node
+
+
+def _value_taking_options(cmd: click.Command) -> set[str]:
+    """Every option name on *cmd* that consumes a following token as its own
+    value (``nargs != 0`` and not a boolean flag).
+
+    A ``--foo/--no-foo`` boolean toggle (e.g.
+    ``--scope-public-headers/--no-scope-public-headers``) is excluded by the
+    same ``is_flag`` check Click itself uses to render it without a metavar
+    in ``--help``.
     """
-    compare_cmd = abicheck_main.commands["compare"]
-    value_options: set[str] = set()
-    for param in compare_cmd.params:
-        if not isinstance(param, click.Option):
-            continue
-        if param.is_flag or param.nargs == 0:
-            continue
-        value_options.update(param.opts)
-    return value_options
+    return {
+        opt
+        for param in cmd.params
+        if isinstance(param, click.Option) and not param.is_flag and param.nargs != 0
+        for opt in param.opts
+    }
+
+
+def _compare_value_taking_options() -> set[str]:
+    """The ground truth: the **union** of value-taking options over every
+    command :data:`ACTION_INVOKED_COMMANDS` names -- introspected directly
+    off ``abicheck.cli.main``, the same mechanism each hand-maintained
+    scanner's own docstring cites as its (static, point-in-time) provenance.
+
+    The union, not ``compare`` alone, is the correct ground truth for two
+    independent reasons, and the original ``compare``-only form of this
+    helper was wrong on both counts:
+
+    * **Completeness.** The tokenizer runs for every mode (see
+      :data:`ACTION_INVOKED_COMMANDS`), so ``dump``'s ``--compression``/
+      ``--provenance`` and ``deps compare``'s ``--old-root``/``--new-root``
+      are as load-bearing as any ``compare`` option. All four were missing.
+    * **Surplus.** ``--sysroot`` is no longer a ``compare`` option at all --
+      it survives only on ``deps tree`` -- so a ``compare``-only ground
+      truth cannot tell a legitimately cross-command entry from a stale one.
+    """
+    options: set[str] = set()
+    for path in ACTION_INVOKED_COMMANDS:
+        options |= _value_taking_options(_resolve_command(path))
+    return options
 
 
 @pytest.fixture(scope="module")
@@ -121,9 +190,10 @@ def compare_value_options() -> set[str]:
     # surface actually shrinking that far -- fail loud instead of
     # vacuously passing an empty-set comparison below.
     assert len(options) > 30, (
-        f"only {len(options)} value-taking compare options found via "
-        "Click introspection -- suspiciously low, investigate before "
-        "trusting the completeness check below"
+        f"only {len(options)} value-taking options found via Click "
+        "introspection across "
+        f"{[' '.join(p) for p in ACTION_INVOKED_COMMANDS]} -- suspiciously "
+        "low, investigate before trusting the checks below"
     )
     return options
 
@@ -219,3 +289,86 @@ class TestExtraArgsIsValueOptionCompleteness:
             f"only in action.yml: {sorted(action_yml_options - run_sh_options)}; "
             f"only in run.sh: {sorted(run_sh_options - action_yml_options)}"
         )
+
+    def test_action_yml_lists_no_option_the_cli_does_not_take_a_value_for(
+        self, compare_value_options: set[str], action_yml_options: set[str]
+    ) -> None:
+        """The **other** direction, which this module originally did not check
+        at all -- and which is why twelve retired option names survived in
+        both lists for multiple merged PRs.
+
+        Its own docstring claimed a stale list "can only under-recognize a
+        value-taking option ... never mis-attribute some other option's value
+        as one". That is true of a *missing* entry and false of a *surplus*
+        one: a name the CLI no longer takes a value for is still treated here
+        as consuming the following token, so the token after it is swallowed
+        as a value instead of being recognized as the real flag it is. The
+        "safe by construction" direction both files document therefore only
+        ever held in one direction, and nothing asserted the other.
+        """
+        surplus = action_yml_options - compare_value_options
+        assert not surplus, (
+            "actions/check-target/action.yml's _ct_extra_args_is_value_option "
+            "lists options the CLI does not take a value for on any command "
+            f"the Action invokes: {sorted(surplus)}"
+        )
+
+    def test_run_sh_lists_no_option_the_cli_does_not_take_a_value_for(
+        self, compare_value_options: set[str], run_sh_options: set[str]
+    ) -> None:
+        """Same surplus invariant, `action/run.sh`'s own sibling scanner."""
+        surplus = run_sh_options - compare_value_options
+        assert not surplus, (
+            "action/run.sh's _extra_args_is_value_option lists options the "
+            "CLI does not take a value for on any command the Action "
+            f"invokes: {sorted(surplus)}"
+        )
+
+
+def _short_cluster_terminals(text: str, function_name: str) -> set[str]:
+    """The single-character terminal set *function_name*'s own
+    ``case "$_last" in H | I | o) ;;`` arm accepts."""
+    start = text.index(f"{function_name}() {{")
+    arm = text.index('case "$_last" in', start)
+    end = text.index(") ;;", arm)
+    return {
+        tok.strip()
+        for tok in text[text.index("\n", arm) : end].split("|")
+        if tok.strip()
+    }
+
+
+class TestShortClusterTerminalsMatchTheCli:
+    """``_extra_args_expand_short_clusters`` expands a clustered short-option
+    token (``-vH`` for ``-v -H``) only when its last character is one of a
+    hand-listed set of value-taking short options.
+
+    That set listed ``j`` as a fourth terminal alongside ``H``/``I``/``o``,
+    and both copies' comments asserted ``compare`` had "four value-taking"
+    short options. ``compare`` has no ``-j`` at all -- ``jobs``/``-j`` was
+    retired with ADR-068 D5 -- so a ``-vj`` token was expanded into an
+    option Click itself would reject. Same stale-snapshot class as the
+    option tables above, in a second place, with its own false comment; so
+    it gets the same derived-from-Click invariant rather than another
+    hand-checked comment.
+    """
+
+    def test_terminals_are_exactly_the_real_short_value_options(self) -> None:
+        expected = {
+            opt.lstrip("-")
+            for opt in _compare_value_taking_options()
+            if not opt.startswith("--")
+        }
+        for path, function_name in (
+            (RUN_SH, "_extra_args_expand_short_clusters"),
+            (ACTION_YML, "_ct_extra_args_expand_short_clusters"),
+        ):
+            actual = _short_cluster_terminals(
+                path.read_text(encoding="utf-8"), function_name
+            )
+            assert actual == expected, (
+                f"{path.name}'s {function_name} expands cluster terminals "
+                f"{sorted(actual)} but the real short value-taking options "
+                f"across {[' '.join(p) for p in ACTION_INVOKED_COMMANDS]} are "
+                f"{sorted(expected)}"
+            )

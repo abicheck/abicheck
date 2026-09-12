@@ -830,8 +830,31 @@ class TestExtraArgsExpandShortClusters:
         assert self._expand("-vvH") == "-v\n-v\n-H\n"
 
     def test_every_known_value_char_expands(self) -> None:
-        for char in ("H", "I", "o", "j"):
+        # Derived from the real Click parameter tables rather than hand-listed
+        # (Action-vs-CLI surface audit, docs/contribute/plans/
+        # action-cli-surface-drift.md): this case pinned a fourth char `j`,
+        # which `compare` has never had since `jobs`/`-j` was retired with
+        # ADR-068 D5 -- so it asserted the expander invented an option Click
+        # itself rejects. `tests/test_extra_args_is_value_option_completeness
+        # .py`'s TestShortClusterTerminalsMatchTheCli owns the same invariant
+        # on the shell source; this is its behavioural half.
+        from test_extra_args_is_value_option_completeness import (
+            _compare_value_taking_options,
+        )
+
+        chars = sorted(
+            opt.lstrip("-")
+            for opt in _compare_value_taking_options()
+            if not opt.startswith("--")
+        )
+        assert chars, "no short value-taking options found via introspection"
+        for char in chars:
             assert self._expand(f"-v{char}") == f"-v\n-{char}\n"
+
+    def test_a_retired_short_option_is_not_a_cluster_terminal(self) -> None:
+        """`-j` is gone from the CLI; expanding `-vj` would synthesize an
+        option the real parser rejects."""
+        assert self._expand("-vj") == ""
 
     def test_a_pure_boolean_cluster_is_not_expanded(self) -> None:
         # `-vv` has no trailing value-taking option, so there is nothing

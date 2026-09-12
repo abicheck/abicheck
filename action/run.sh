@@ -1623,31 +1623,40 @@ _is_release_style_operand() {
 #
 # This is a hand-maintained snapshot, not derived at run time (the Action
 # has no live `abicheck --help-all` to introspect before it even knows
-# which dependency-source install produced a `python`/`abicheck` on PATH) --
-# it can go stale if a future PR adds a new value-taking CLI option without
-# updating this list. That staleness is the same *safe* direction as the
-# rest of this tokenizer's own documented limits (see `_extra_args_options`
-# below): treating an unlisted value-taking option as a bare flag means its
-# value token is misread as a flag/unknown token of its own, which can only
-# cause a false positive in a caller checking for one specific flag name --
-# never a false negative that lets a real conflicting combination through
-# unnoticed.
+# which dependency-source install produced a `python`/`abicheck` on PATH).
+# It is the UNION over every command this Action's mode dispatch can invoke
+# (`compare`/`dump`/`deps tree`/`deps compare`), not `compare` alone --
+# `_effective_format` is evaluated after the mode dispatch, so the tokenizer
+# runs for every mode.
+#
+# **Both directions of staleness are real, and only one of them is safe.**
+# A *missing* entry is safe in the direction this comment used to claim for
+# staleness in general: treating an unlisted value-taking option as a bare
+# flag means its value token is misread as a flag/unknown token of its own,
+# which can only cause a false positive in a caller checking for one
+# specific flag name. A *surplus* entry -- a name the CLI no longer takes a
+# value for -- is NOT safe: this function still reports it as consuming the
+# following token, so the real flag after it is swallowed as a value and
+# goes unseen. Twelve retired option names survived here for multiple
+# merged PRs because the test guarding this list only ever checked the
+# missing direction.
+#
+# `tests/test_extra_args_is_value_option_completeness.py` now checks BOTH
+# directions against live Click introspection, over every invoked command.
+# Don't hand-edit this list without running it.
 _extra_args_is_value_option() {
   case "$1" in
-    --abi3 | --ast-frontend | --budget | \
-    --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
-    --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
-    --debug-format | --debug-info | --debug-root | --debuginfod-url | \
-    --depth | --devel-pkg | --dump-manifest | --format | \
-    --frontend-context | --header | --include | --instantiation-manifest | \
-    --lang | --ld-library-path | --manifest | --max-findings | \
-    --max-findings-per-library | --output | --output-dir | --pack | \
-    --pdb-path | --policy | --post-manifest | --probe-matrix | \
-    --public-header-dir | --required-symbol | \
-    --search-path | --select | --select-required | --severity-preset | --since | --sources | \
-    --suppress | --sysroot | --use-cases | --used-by | --used-by-manifest | \
-    --variant | --version | --view | \
-    --write | -H | -I | -o)
+    --abi3 | --budget | --build-info | --bundle-facts-library-manifest | \
+    --bundle-facts-out | --changed-path | --compression | --config | \
+    --contract | --debug-info | --debug-root | --depth | --devel-pkg | \
+    --dump-manifest | --format | --header | --include | \
+    --instantiation-manifest | --ld-library-path | --max-findings-per-library | \
+    --new-root | --old-root | --output | --output-dir | --pack | --policy | \
+    --post-manifest | --probe-matrix | --provenance | --required-symbol | \
+    --search-path | --select | --select-required | --severity-preset | --since | \
+    --sources | --suppress | --sysroot | --use-cases | --used-by | \
+    --used-by-manifest | --variant | --version | --view | --write | -H | -I | \
+    -o)
       return 0
       ;;
   esac
@@ -1659,11 +1668,14 @@ _extra_args_is_value_option() {
 # is exactly such a cluster; returns 1 (no output) otherwise, so the caller
 # falls through to treating the token as an ordinary opaque one.
 #
-# The only short options on compare are one boolean flag (`-v`)
-# and four value-taking ones (`-H`/`-I`/`-j`/`-o`, mirroring
+# The only short options across every command this Action invokes are one
+# boolean flag (`-v`) and three value-taking ones (`-H`/`-I`/`-o`, mirroring
 # `_extra_args_is_value_option` above) -- so the only cluster shape that
 # needs expanding is zero or more `v`s followed by exactly one of those
-# four, with nothing else after it. A cluster with anything else attached
+# three, with nothing else after it. (`-j` was listed here as a fourth until
+# the option-table audit: `compare` has no `-j` at all -- `jobs` was retired
+# with ADR-068 D5 -- so expanding a `-vj` cluster invented an option Click
+# itself would reject.) A cluster with anything else attached
 # after the value char (`-vHfoo`, an *attached* inline value) is left
 # unexpanded on purpose: Click parses that form as `-v -Hfoo`, which does
 # NOT consume a following token as `-H`'s value at all, so leaving the
@@ -1683,7 +1695,7 @@ _extra_args_expand_short_clusters() {
   _rest="${_tok#-}"
   _last="${_rest: -1}"
   case "$_last" in
-    H | I | o | j) ;;
+    H | I | o) ;;
     *) return 1 ;;
   esac
   _flags="${_rest%?}"

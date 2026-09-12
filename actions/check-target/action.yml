@@ -893,27 +893,30 @@ runs:
         # where `--config` is `--policy`'s value, not a flag) -- deliberately
         # duplicated rather than sourced, the same "this step doesn't source
         # run.sh" convention `_is_path_already_qualified` above already
-        # documents. Keeps this list in sync with run.sh's by hand; an
-        # unlisted value-taking option is misread as a bare flag, which can
-        # only under-recognize a `--config` occurrence -- never mis-attribute
-        # some other option's value as one (the same safe-by-construction
-        # direction run.sh's own docstring establishes).
+        # documents. Keeps this list in sync with run.sh's by hand.
+        #
+        # A *missing* entry is the safe direction (an unlisted value-taking
+        # option is misread as a bare flag, which can only under-recognize a
+        # `--config` occurrence). A *surplus* entry is not: a name the CLI no
+        # longer takes a value for still consumes the following token here,
+        # so a real `--config` after it is swallowed as its value. Both
+        # directions are now checked against live Click introspection by
+        # `tests/test_extra_args_is_value_option_completeness.py`, over every
+        # command the Action invokes -- don't hand-edit this list without
+        # running it.
         _ct_extra_args_is_value_option() {
           case "$1" in
-            --abi3 | --ast-frontend | --budget | \
-            --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
-            --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
-            --debug-format | --debug-info | --debug-root | --debuginfod-url | \
-            --depth | --devel-pkg | --dump-manifest | --format | \
-            --frontend-context | --header | --include | --instantiation-manifest | \
-            --lang | --ld-library-path | --manifest | --max-findings | \
-            --max-findings-per-library | --output | --output-dir | --pack | \
-            --pdb-path | --policy | --post-manifest | --probe-matrix | \
-            --public-header-dir | --required-symbol | \
-            --search-path | --select | --select-required | --severity-preset | --since | --sources | \
-            --suppress | --sysroot | --use-cases | --used-by | --used-by-manifest | \
-            --variant | --version | --view | \
-            --write | -H | -I | -o)
+            --abi3 | --budget | --build-info | --bundle-facts-library-manifest | \
+            --bundle-facts-out | --changed-path | --compression | --config | \
+            --contract | --debug-info | --debug-root | --depth | --devel-pkg | \
+            --dump-manifest | --format | --header | --include | \
+            --instantiation-manifest | --ld-library-path | --max-findings-per-library | \
+            --new-root | --old-root | --output | --output-dir | --pack | --policy | \
+            --post-manifest | --probe-matrix | --provenance | --required-symbol | \
+            --search-path | --select | --select-required | --severity-preset | --since | \
+            --sources | --suppress | --sysroot | --use-cases | --used-by | \
+            --used-by-manifest | --variant | --version | --view | --write | -H | -I | \
+            -o)
               return 0
               ;;
           esac
@@ -934,7 +937,7 @@ runs:
         #
         # Deliberately identical to action/run.sh's own
         # `_extra_args_expand_short_clusters` (same accepted shapes, same
-        # `H`/`I`/`o`/`j` value-taking terminal set, same "leave an attached
+        # `H`/`I`/`o` value-taking terminal set, same "leave an attached
         # inline value like `-vHfoo` unexpanded" carve-out) rather than a
         # re-derived approximation -- this step doesn't source run.sh (see
         # `_ct_extra_args_is_value_option` above), so the two copies are
@@ -953,7 +956,7 @@ runs:
           _rest="${_tok#-}"
           _last="${_rest: -1}"
           case "$_last" in
-            H | I | o | j) ;;
+            H | I | o) ;;
             *) return 1 ;;
           esac
           _flags="${_rest%?}"

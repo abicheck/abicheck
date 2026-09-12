@@ -405,6 +405,75 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="cli_surface.copied_option_table_went_stale",
+        invariant=(
+            "Where a surface outside the CLI must enumerate CLI options "
+            "before the CLI itself is available to ask (the composite "
+            "Action's `extra-args` tokenizer, which classifies tokens "
+            "pre-install), that enumeration is checked against live Click "
+            "introspection in BOTH directions and over EVERY command the "
+            "surface can invoke. A missing entry and a surplus entry are "
+            "different bugs, not two spellings of one: a missing entry "
+            "under-recognizes an option, while a surplus entry -- a name "
+            "the CLI no longer takes a value for -- still consumes the "
+            "following token, so the real flag after it is swallowed as a "
+            "value and the guard reading for it silently answers 'absent'. "
+            "A one-directional or single-command check is therefore not a "
+            "weaker form of this invariant; it is a check that cannot see "
+            "either of the two defects this class is about."
+        ),
+        # #1222 is where the first instance surfaced (Codex flagging one
+        # missing `--used-by-manifest`) and where the one-directional,
+        # `compare`-only guard this class's seed test now generalizes was
+        # written. The later bidirectional/multi-command widening, and the
+        # 17 discrepancies it found, are the same escape history continuing
+        # -- not a separate class.
+        fixed_by=(1222,),
+        seed_tests=(
+            "tests/test_extra_args_is_value_option_completeness.py",
+            "tests/test_action_run_sh_helpers.py",
+        ),
+        public_surfaces=("action",),
+        axes={
+            "direction": ("missing-entry", "surplus-entry"),
+            "command": ("compare", "dump", "deps tree", "deps compare"),
+            "spelling": ("long-option", "short-option", "short-cluster"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The enumeration is still a hand-maintained `case` list "
+                    "in two places (`action/run.sh`'s "
+                    "`_extra_args_is_value_option` and `actions/"
+                    "check-target/action.yml`'s `_ct_` twin) -- now checked "
+                    "bidirectionally rather than derived. Deriving it as a "
+                    "committed, versioned generated artifact both shells "
+                    "read (the `scripts/gen_changekind_stub.py --check` "
+                    "pattern) is Phase 3 of docs/contribute/plans/"
+                    "action-cli-surface-drift.md and would remove the "
+                    "duplication rather than testing it."
+                ),
+                reference="docs/contribute/plans/action-cli-surface-drift.md",
+            ),
+            KnownGap(
+                description=(
+                    "Scoped to option *tables*. The sibling class -- a guard "
+                    "whose prose reasoning about the CLI went stale -- is "
+                    "`cli_surface.capability_guard_diverged_from_pipeline`, "
+                    "and that entry's own first known gap (no sweep run "
+                    "beyond `compare`'s set-input guards) is what the "
+                    "Action-layer audit in the plan above partially "
+                    "discharges: it found two more stale guards, in "
+                    "`action/run.sh` rather than in the CLI, plus five "
+                    "justification comments citing deleted modules. Those "
+                    "fixes are owned separately and are NOT closed by this "
+                    "entry's seed tests."
+                ),
+                reference="docs/contribute/plans/action-cli-surface-drift.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="cli_surface.capability_guard_diverged_from_pipeline",
         invariant=(
             "A front-end guard may reject an input the pipeline behind it "
