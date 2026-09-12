@@ -216,7 +216,7 @@ if [[ "$VALIDATION" == "strict" ]]; then
   while IFS=$'\x1f' read -r name _artifact _header _include; do
     [[ -z "$name" ]] && continue
     snap="$OUTPUT_DIR/$name$SNAPSHOT_SUFFIX"
-    if ! abicheck compare "$snap" "$snap" --format json > /dev/null; then
+    if ! abicheck compare "$snap" "$snap" -o json=- > /dev/null; then
       _fail "self-compare failed for '$snap' -- the snapshot this run just wrote is not loadable/self-consistent. This should never happen; please report it."
     fi
   done < <(python3 -c '

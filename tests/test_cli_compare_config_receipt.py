@@ -86,8 +86,8 @@ def _context(tmp_path: Path, *args: str) -> dict:
             str(new_p),
             "--contract",
             "auto",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             *args,
         ],
     )
@@ -265,8 +265,8 @@ class TestProjectConfigOverridesReachTheReceipt:
                 str(new_p),
                 "--contract",
                 "auto",
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 *args,
             ],
         )
@@ -632,9 +632,7 @@ class TestWiringContract:
 
         monkeypatch.setattr(receipt, "resolve_and_apply", _spy)
         old_p, new_p = _write_pair(tmp_path)
-        CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
-        )
+        CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
         assert set(seen) == set(COMPARE_CONFIG_PARAMS)
 
     def test_a_resolution_usage_error_becomes_exit_64(self, tmp_path, monkeypatch):
@@ -657,8 +655,8 @@ class TestWiringContract:
                 str(new_p),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 64, result.output
@@ -722,8 +720,8 @@ class TestRequireCompleteAnalysisReceiptConsistency:
                 "auto",
                 "--config",
                 str(tmp_path / ".abicheck.yml"),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -756,8 +754,8 @@ class TestRequireCompleteAnalysisReceiptConsistency:
                 str(new_p),
                 "--contract",
                 "auto",
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -801,8 +799,8 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "auto",
                 "--config",
                 str(config_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -829,8 +827,8 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 str(new_p),
                 "--contract",
                 "auto",
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -862,8 +860,8 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "auto",
                 "--config",
                 str(config_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -899,8 +897,8 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "auto",
                 "--config",
                 str(config_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -952,8 +950,8 @@ class TestRequireCompleteAnalysisProvenanceIdentity:
                 "auto",
                 "--config",
                 str(config_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -998,8 +996,8 @@ class TestRequireCompleteAnalysisProvenanceIdentity:
                 "auto",
                 "--config",
                 str(config_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output

@@ -83,6 +83,12 @@ _NORMALIZED_DESTS: dict[str, tuple[str, ...]] = {
     "debug_info": ("debug_info1", "debug_info2"),
     "devel_pkg": ("devel_pkg1", "devel_pkg2"),
     "version": ("old_version", "new_version"),
+    # Plan slice 7m: the one `-o FORMAT=DESTINATION` export request reaches
+    # the callback as a single `exports` value and is expanded, before
+    # dispatch, into the dest names every downstream consumer threads --
+    # so each of those is separately either read here or declared
+    # unsupported, exactly as this table's other entries are.
+    "exports": ("fmt", "output", "secondary_writes", "output_dir"),
 }
 
 #: The raw names themselves, consumed before dispatch. Accounted for only

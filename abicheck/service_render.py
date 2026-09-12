@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from .workflows.gate import SeverityConfig
 
 #: ``fmt`` value for :func:`render_output` — a one-line human summary.
-#: A public ``--format oneline`` choice on ``compare`` (CLI cleanup phase
+#: A public ``-o oneline=...`` choice on ``compare`` (CLI cleanup phase
 #: two, PR 1 removed the old ``--stat`` boolean threaded through every
 #: renderer; this is its sole surviving replacement. It was reachable only
 #: via the built-in ``quick`` ``--profile`` injecting ``fmt="oneline"``

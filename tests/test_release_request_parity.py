@@ -102,7 +102,7 @@ class TestTheApiAndTheCliResolveTheSameRequest:
         old_dir, new_dir = _release_pair(tmp_path, libs=libs)
 
         cli_plan, result = _captured_cli_plan(
-            "compare", str(old_dir), str(new_dir), "--format", "json"
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
         )
         assert result[0] in (0, 2, 4), result[1]
 
@@ -131,8 +131,8 @@ class TestTheApiAndTheCliResolveTheSameRequest:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--severity-preset",
             "default",
         )

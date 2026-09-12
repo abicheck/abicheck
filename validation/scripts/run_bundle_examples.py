@@ -173,10 +173,10 @@ def _compare_release(build_dir: Path, case_name: str, entry: dict) -> tuple[dict
         "compare",
         str(old_dir),
         str(new_dir),
-        "--format",
-        "json",
-        "--output-dir",
-        str(report_dir),
+        "-o",
+        "json=-",
+        "-o",
+        f"json={report_dir}/",
     ]
     manifest_file = entry.get("manifest_file")
     if manifest_file:

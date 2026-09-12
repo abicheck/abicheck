@@ -177,7 +177,7 @@ If not, fix input parity and rerun.
 Run JSON output for detail:
 
 ```bash
-abicheck compare old.json new.json --format json -o result.json
+abicheck compare old.json new.json -o json=result.json
 python3 -c "import json; r=json.load(open('result.json')); print(r['verdict']); print(len(r['changes']))"
 ```
 
@@ -189,7 +189,7 @@ python3 -c "import json; r=json.load(open('result.json')); print(r['verdict']); 
 for source-level `API_BREAK` conditions.
 
 If you need an explicit `API_BREAK` verdict string in machine-readable output,
-use `abicheck compare --format json`.
+use `abicheck compare -o json=-`.
 
 ---
 
@@ -227,4 +227,4 @@ Open an issue with:
 - command line used
 - tool version (`abicheck --version`)
 - minimal header + `.so` pair
-- JSON output (`--format json`)
+- JSON output (`-o json=-`)

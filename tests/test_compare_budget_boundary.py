@@ -80,8 +80,13 @@ class TestBudgetBoundaryCheck:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--budget", "0s",
-                "--format", "json", "-o", str(out_p),
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--budget",
+                "0s",
+                "-o",
+                f"json={out_p}",
             ],
         )
         assert result.exit_code == 5, result.output
@@ -101,9 +106,15 @@ class TestBudgetBoundaryCheck:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--budget", "0s",
-                "--format", "json", "-o", str(primary_p),
-                "--write", f"junit={secondary_p}",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--budget",
+                "0s",
+                "-o",
+                f"json={primary_p}",
+                "-o",
+                f"junit={secondary_p}",
             ],
         )
         assert result.exit_code == 5, result.output
@@ -126,9 +137,15 @@ class TestBudgetBoundaryCheck:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--budget", "0s",
-                "--format", "markdown", "-o", str(md_p),
-                "--write", f"html={html_p}",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--budget",
+                "0s",
+                "-o",
+                f"markdown={md_p}",
+                "-o",
+                f"html={html_p}",
             ],
         )
         assert result.exit_code == 5, result.output
@@ -148,8 +165,13 @@ class TestBudgetBoundaryCheck:
         result = runner.invoke(
             main,
             [
-                "compare", str(old_p), str(new_p), "--budget", "0s",
-                "--format", "oneline", "-o", str(out_p),
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--budget",
+                "0s",
+                "-o",
+                f"oneline={out_p}",
             ],
         )
         assert result.exit_code == 5, result.output

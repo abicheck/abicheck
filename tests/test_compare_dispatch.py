@@ -27,6 +27,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from _package_fixtures import _make_tar_mode
 from click.testing import CliRunner
 
 from abicheck import cli_compare_release
@@ -982,8 +983,7 @@ class TestClassifier:
         assert classify_compare_operand(d) == "directory"
 
     def test_package(self, tmp_path: Path) -> None:
-        pkg = tmp_path / "foo.tar.gz"
-        pkg.write_bytes(b"\x1f\x8b\x08\x00")  # gzip magic; name suffix triggers detection
+        pkg = _make_tar_mode(tmp_path / "foo.tar.gz", "w:gz")  # content, not name (7n)
         assert classify_compare_operand(pkg) == "package"
 
     def test_pie_executable_is_app(self, tmp_path: Path) -> None:
@@ -1094,8 +1094,7 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
         write_path = tmp_path / "sec.json"
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--write", f"json={write_path}",
+            "compare", str(old_dir), str(new_dir), "-o", f"json={write_path}",
         )
         assert code == 0
         assert write_path.is_file()
@@ -1127,7 +1126,7 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         code, out, _ = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-"
         )
 
         assert code == 0
@@ -1154,8 +1153,7 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
 
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
-            "--format", "json",
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-",
         )
 
         assert code == 64
@@ -1343,30 +1341,32 @@ class TestCompareDispatch:
         assert "release.dso_only" in stderr
         assert "--dso-only" not in stderr
 
-    def test_max_findings_per_library_warns_on_single_file(
+    def test_a_directory_export_on_a_single_pair_is_rejected(
         self, tmp_path: Path
     ) -> None:
-        """CodeRabbit review ("Reject this option on the single-pair
-        path"): `--max-findings-per-library` only bites the directory/
-        package release fan-out's aggregate summary -- a single-pair
-        `compare` has no such summary to cap. Previously it reached the
-        single-pair path silently (neither applied nor reported); it now
-        warns the same way every other release-fanout-only flag does on a
-        single-file input."""
+        """Plan slice 7m: the per-component export is an *artifact* request,
+        so a single pair -- which has no components to fan out to -- is a
+        usage error rather than a warn-and-ignore.
+
+        This replaces the same claim about `--max-findings-per-library`,
+        which retired outright (it capped a summary a single pair does not
+        have). The other set-only knobs still warn: they promise nothing, so
+        ignoring one loses nothing, while ignoring an export loses an
+        artifact the user asked for -- which is what plan §Non-goals
+        forbids.
+        """
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
+        reports = tmp_path / "reports"
         result = CliRunner().invoke(
             main,
-            [
-                "compare", str(old_f), str(new_f),
-                "--max-findings-per-library", "1",
-            ],
+            ["compare", str(old_f), str(new_f), "-o", f"json={reports}/"],
         )
-        assert result.exit_code == 4
-        stderr = result.stderr or ""
-        assert "only apply to directory/package" in stderr
-        assert "--max-findings-per-library" in stderr
+        assert result.exit_code == 64, result.output
+        assert "per-component export" in result.output
+        assert not reports.exists(), "nothing may be written for a rejected export"
+
 
 
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────
@@ -1384,10 +1384,10 @@ class TestReleaseFanoutParity:
         _write_snap(new_dir / "libbar.json", _snap())
 
         rel = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"]
         )
         cmp = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"]
         )
         assert rel.exit_code == cmp.exit_code == 4
         assert json.loads(rel.output) == json.loads(cmp.output)
@@ -1402,8 +1402,7 @@ class TestReleaseFanoutParity:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
         code, _, _ = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--output-dir", str(out_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "-o", f"json={out_dir}/",
         )
         assert code == 4
         # Per-library reports were written under --output-dir (two-level output).

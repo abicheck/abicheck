@@ -242,7 +242,7 @@ topics:
     canonical_page: use/cli-usage.md
     fact_sources:
       - abicheck/cli.py
-      - abicheck/frontends/cli/options/secondary_output.py
+      - abicheck/frontends/cli/options/export.py
       - abicheck/cli_options.py
       - abicheck/frontends/cli/help.py
       - abicheck/frontends/cli/options/contract.py
@@ -495,7 +495,7 @@ topics:
 
   # GitHub Actions workflow-command annotations (stderr rendering) and,
   # since report schema 2.43, the same classification persisted as a
-  # `compare --format json` report field (CLI cleanup phase two, PR E) --
+  # `compare -o json=...` report field (CLI cleanup phase two, PR E) --
   # distinct from `github-actions-surface` (the Action's own inputs/wiring)
   # and `output-formats` (the report envelope in general).
   pr-annotations:
@@ -519,7 +519,7 @@ topics:
       - abicheck/sarif.py
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py
-      - abicheck/frontends/cli/options/secondary_output.py
+      - abicheck/frontends/cli/options/export.py
       - abicheck/finding_identity.py
       - abicheck/cli_compare_fold.py
       - abicheck/effective_config_digest.py

@@ -752,7 +752,7 @@ def _release_summary_effective_config_block(
     env_matrix_source_sha256: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
-    (the primary release JSON and ``--output-dir``'s ``summary.json``
+    (the primary release JSON and a per-component export's ``summary.json``
     alike) -- narrower than a per-library sidecar's own digest: this always
     resolves the *baseline* tier's field *shape* (see
     ``effective_config_digest.py``'s docstring for the two tiers), even
@@ -917,7 +917,8 @@ def _release_md_library_findings(
         # The presentation cap lives here, at render time, not in the
         # projection every format shares: a human summary may be bounded, a
         # machine document may not be silently truncated (see
-        # `cli_compare_release_matrix._release_findings_cap_is_explicit`).
+        # `report.release_display_limits`, which owns the one automatic cap
+        # since plan slice 7m retired every way of overriding it).
         shown = (
             all_findings if display_cap is None else all_findings[:display_cap]
         )
@@ -929,7 +930,7 @@ def _release_md_library_findings(
             )
             lines.extend(release_finding_detail_lines(f))
         if rendered_truncated or lib.get("findings_truncated"):
-            # `--format json` *is* a complete-list source now, unless this
+            # `-o json=...` *is* a complete-list source now, unless this
             # run explicitly asked for a cap (`--max-findings-per-library`
             # or the env var), which is what this note distinguishes. It
             # used not to be: the release JSON carried the identical capped
@@ -940,7 +941,7 @@ def _release_md_library_findings(
                 where = (
                     f"`{complete_report}`"
                     if complete_report
-                    else "`--output-dir` (or compare this library individually)"
+                    else "a per-component export (`-o json=DIR/`), or compare this library individually"
                 )
                 lines.append(
                     f"  - _...additional findings omitted; see {where} for "
@@ -949,7 +950,7 @@ def _release_md_library_findings(
             else:
                 lines.append(
                     "  - _...additional findings omitted from this summary; "
-                    "`--format json` carries the complete list._"
+                    "`-o json=...` carries the complete list._"
                 )
         if has_impact:
             # `--view impact`'s aggregate counterpart (Codex review, PR

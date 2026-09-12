@@ -282,9 +282,11 @@ is Phase 7's CONFIG surface (one-comparison-product.md §4.1/§4.2) — every
 field below has **no CLI spelling at all** on those two commands (ADR-040
 Lever 2 first demoted them to a config-key-with-override; Phase 7 removed
 the override itself, since this repo runs no deprecation window). The
-coarse per-run `--debug-root` stays a visible CLI flag on both commands —
+coarse per-run `--debug-info` stays a visible CLI flag on both commands —
 it is a per-run evidence input (ADR-068 D5 guard #3), not a stable project
-property.
+property. (It was spelled `--debug-root` until plan Phase 7n merged it into
+`--debug-info`, which now carries the whole role: a directory to search, a
+detached debug file, or — on `compare` — a debug package.)
 
 `format:` (`auto`/`dwarf`/`btf`/`ctf`, case-insensitive, default auto-pick)
 forces the ELF debug format for both sides (was `--debug-format`);
@@ -595,7 +597,7 @@ compile:
     - MYLIB_STATIC=0
   nostdinc: false
 
-# Separate-debug-file resolution (coarse --debug-root stays a CLI flag)
+# Separate-debug-file resolution (coarse --debug-info stays a CLI flag)
 debug:
   format: auto
   dwarf_only: false

@@ -215,13 +215,8 @@ def run_matrix(manifest: list[dict], *, ex_root: str = EX, out_dir: str = OUT) -
                 f"old={m['old_ver']}",
                 "--version",
                 f"new={m['new_ver']}",
-                "--format",
-                "json",
                 "-o",
-                jpath,
-                # --recommend removed (CLI cleanup phase two, PR 1) --
-                # --format json already carries release_recommendation
-                # unconditionally, which the read below already relies on.
+                f"json={jpath}",
             ]
             rc, _stdout, se, dt = run(cmd)
             data = None

@@ -477,7 +477,7 @@ def render_json_with_side_facts(
     facts to all four without growing the file by a net line, instead of
     each site carrying its own multi-line call (which would). ``to_stat_
     json`` joined the other three later (Codex review, fresh evidence) --
-    ``--stat --format json`` had been the one JSON mode still silently
+    ``--stat -o json=...`` had been the one JSON mode still silently
     omitting both facts, an oversight rather than a deliberate scope
     decision (it already carries several other side-fact-shaped blocks:
     ``severity``, ``analysis_assurance``, ``confidence``, the effective-

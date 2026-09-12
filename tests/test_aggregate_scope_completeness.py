@@ -274,10 +274,8 @@ class TestScopeCompletenessFromARealRelease:
                 str(new),
                 "--config",
                 str(cfg),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         expected_exit = 1 if policy == "block" else 0
@@ -306,10 +304,8 @@ class TestScopeCompletenessFromARealRelease:
                 "compare",
                 str(old),
                 str(new),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -465,10 +461,8 @@ class TestStoredDispatchShapeAndAcceptedGaps:
                 str(new),
                 "--config",
                 str(cfg),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         expected_exit = 1 if policy == "block" else 0
@@ -518,10 +512,8 @@ class TestIncompleteScopePolicyIsInTheDigest:
                     str(new),
                     "--config",
                     str(cfg),
-                    "--format",
-                    "json",
                     "-o",
-                    str(out),
+                    f"json={out}",
                 ],
             )
             docs[policy] = json.loads(out.read_text())
@@ -539,10 +531,8 @@ class TestIncompleteScopePolicyIsInTheDigest:
                 "compare",
                 str(new / "liba.so.json"),
                 str(new / "liba.so.json"),
-                "--format",
-                "json",
                 "-o",
-                str(single),
+                f"json={single}",
             ],
         )
         fields = json.loads(single.read_text())["effective_config_fields"]
@@ -585,10 +575,8 @@ class TestExtractionErrorSurvivesAggregation:
                 "compare",
                 str(old),
                 str(new_dir),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         assert result.exit_code == 4, result.output

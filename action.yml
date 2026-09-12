@@ -360,7 +360,7 @@ inputs:
       consumer is skipped and reported instead). Merged into the same
       scoping pipeline as used-by; every listed consumer counts toward the
       reported "N of M consumers affected" summary
-      (consumer_impact_summary in --format json). Mutually exclusive with
+      (consumer_impact_summary in a json export). Mutually exclusive with
       required-symbol/required-symbols. compare mode only. Requires a
       baseline (old-library or abi-baseline) -- rejected outright for the
       audit-only shape, same reason as used-by above.
@@ -665,7 +665,7 @@ inputs:
       row here: deciding it needs the document's own content (see the
       `old-library` input), and neither re-implementing that classifier in
       shell nor reading an untrusted document at preflight is acceptable, so
-      `--format junit` on this shape fails in the CLI instead. Tracked in
+      `-o junit=...` on this shape fails in the CLI instead. Tracked in
       docs/contribute/known-gaps.md. compare, audit-only shape (old-library/abi-baseline both
       omitted): json, markdown, sarif, junit, or oneline — html and review
       are two-sided-report renderers with no audit-only equivalent and are
@@ -934,7 +934,7 @@ outputs:
       through a non-zero exit code; here the tool claimed success and the report
       backing that claim is missing or unusable. "Requested" means format: json
       (whether it lands in output-file or on stdout) or your own extra-args
-      --write json=PATH; with a non-json format, the absence of this Action's
+      -o json=PATH; with a non-json format, the absence of this Action's
       own internal sidecar still yields COMPATIBLE, since exit 0 does establish
       that abicheck's gate passed even when the tier cannot be read. Previously
       every one of these states published COMPATIBLE).
@@ -1026,9 +1026,9 @@ outputs:
       PR-controlled build script the run's own evidence collection spawns
       -- see ADR-064 for the full account).
       Whether a JSON report also exists for this Action to read
-      (auto-injected `--write json=...` sidecar, extra-args naming one,
-      `format: json`, or extra-args overriding `--format` in either
-      direction, detected via `_effective_format`) still decides only
+      (auto-injected `-o json=...` sidecar, extra-args naming one, or
+      `format: json`; an extra-args export set replaces this Action's own,
+      detected via `_effective_format`) still decides only
       whether the sticky PR comment and JSON-consuming outputs have
       structured detail to show, not whether this verdict/exit-code
       publish at all), or ERROR.
@@ -1113,7 +1113,7 @@ outputs:
       Path to the generated report file. Set when output-file is provided,
       or auto-populated for SARIF format (defaults to abicheck-results.sarif).
       Withheld (empty) when format: sarif and upload-sarif: true were both
-      requested but extra-args overrode --format away from sarif -- the
+      requested but extra-args' own exports replaced it with a non-sarif format -- the
       real file exists but its content isn't SARIF, and this is the exact
       value the upload-sarif step below gates on, so withholding it skips
       that upload rather than feeding mismatched content to CodeQL.

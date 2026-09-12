@@ -95,7 +95,7 @@ class TestNoOpWithoutSuppress:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--view", "suppressions", "--format", "json"],
+            ["compare", str(old_p), str(new_p), "--view", "suppressions", "-o", "json=-"],
         )
         # A real BREAKING removal in _breaking_pair() -- the flag's absence
         # of a suppression file must not change that outcome.
@@ -164,8 +164,13 @@ class TestRejectedOnSetInputs:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_dir), str(new_dir),
-                "--view", "suppressions", "--format", "json",
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -185,9 +190,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -216,9 +227,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -249,9 +266,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -282,9 +305,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -318,9 +347,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -353,9 +388,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -388,9 +429,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -430,9 +477,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -457,9 +510,15 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -494,9 +553,17 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--policy", str(policy), "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "--policy",
+                str(policy),
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -523,8 +590,13 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -548,9 +620,17 @@ class TestJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json", "--view", report_mode,
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
+                "--view",
+                report_mode,
             ],
         )
         assert result.exit_code == 4, result.output
@@ -749,10 +829,17 @@ class TestUsedByScopedOnlyChange:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app),
-                "--suppress", str(suppress), "--view", "suppressions",
-                "--format", "json",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
             ],
         )
         # Workstream D-S1: old/new are identical, so the global comparison

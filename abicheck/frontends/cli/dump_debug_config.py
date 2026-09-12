@@ -88,11 +88,21 @@ def resolve_dump_debug_fields(
     *,
     build_config: Path | None,
     sources: Path | None,
+    debug_roots: tuple[Path, ...] = (),
 ) -> DumpDebugConfig:
     """*resolved_debug* verbatim when given (``compare``'s inline embed
     forwards its own already-resolved config); otherwise resolve this
     ``dump``'s own project config via :func:`resolve_dump_debug_config`.
+
+    Also validates the ``--debug-info`` operands the resolved config governs
+    (:func:`reject_debug_package_operands`) -- this is ``dump``'s one place
+    where its debug inputs are settled, so the transport check belongs beside
+    the rest of them rather than as a separate step a future caller of this
+    resolver could forget. Checked on both branches, including the inline
+    embed's: ``compare``'s embed forwards a config, never an operand set, so
+    a non-empty *debug_roots* there is still this command's own to validate.
     """
+    reject_debug_package_operands(debug_roots)
     if resolved_debug is not None:
         return resolved_debug
     return resolve_dump_debug_config(build_config, sources)
@@ -223,3 +233,38 @@ def resolve_stored_bundle_lang(
     else:
         lang_explicit = compile_lang is not None
     return lang, lang_explicit
+
+
+def reject_debug_package_operands(debug_roots: tuple[Path, ...]) -> None:
+    """Reject a ``dump --debug-info`` operand no extraction path reads (7n).
+
+    ``--debug-info`` carries one evidence role over three transports, and
+    ``dump`` resolves two of them: a directory to search and a detached
+    debug file both go straight to ``debug_resolver``'s chain. The third,
+    a debug package, is a release-comparison transport -- unpacking it is
+    ``prepare_release_inputs``' job, and ``dump``'s operand is a single
+    binary with no fan-out to unpack one for. So it is a usage error that
+    names where the capability lives, rather than a value the resolver
+    would search for a ``.build-id`` tree inside and silently find nothing
+    in (ADR-068 D4's "no silent no-op" rule, same as this module's
+    siblings). The same rule refuses a named PDB or DWARF-package file on
+    either command -- see
+    ``options/evidence_roles.unsupported_detached_debug``.
+    """
+    from ...frontends.cli.options.evidence_roles import (
+        reject_unsupported_detached_debug,
+        unsided_debug_packages,
+    )
+
+    reject_unsupported_detached_debug(debug_roots)
+    packages = unsided_debug_packages(debug_roots)
+    if not packages:
+        return
+    named = ", ".join(str(p) for p in packages)
+    raise click.UsageError(
+        f"--debug-info {named}: that is a debug package, and `dump` takes a "
+        "single binary operand with no package-extraction stage to unpack it. "
+        "Extract it yourself and pass the directory (or the detached debug "
+        "file) instead, or use `compare --debug-info` on the release "
+        "directories/packages, which does unpack it."
+    )

@@ -118,7 +118,7 @@ def _fold_scoped_compat_into_text(
     review, mirrors the identical ``sarif.to_sarif`` fix and
     ``apply_scoped_gate``'s own JSON-side use of the same parameter). Pass
     ``None`` (the default) for a render that is deliberately
-    always-unfiltered, e.g. the ``--write`` render, which ignores the
+    always-unfiltered, e.g. the ``-o`` render, which ignores the
     primary format's own ``--show-only``.
 
     *report_mode* ``"root-cause"`` skips the markdown/text
@@ -167,7 +167,7 @@ def _fold_scoped_compat_into_text(
     )
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
-    # ONELINE_FORMAT (`--format oneline`) falls through unchanged (workstream
+    # ONELINE_FORMAT (`-o oneline=...`) falls through unchanged (workstream
     # D-S1): the incoming `text` already states the full-library
     # verdict/counts the process actually exits on, and a supplied
     # consumer's own result no longer needs to replace it -- the one-line
@@ -214,7 +214,7 @@ class _ScopedFold:
 
     # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
     # prebuilt-consumer lifecycle"): `service_render.ONELINE_FORMAT`
-    # (`--format oneline`) is no longer replaced outright by
+    # (`-o oneline=...`) is no longer replaced outright by
     # a scoped one-liner -- the process's own exit code and verdict always
     # come from the full-library result, so the plain one-liner
     # `_fold_scoped_compat_into_text` was handed already states it correctly.
@@ -261,7 +261,7 @@ class _ScopedFold:
         Names the actual missing symbols/versions, not just their count (Codex
         review) -- a human reading the default text report otherwise has no way
         to tell *which* symbol broke this app without re-running with
-        ``--format json``.
+        ``-o json=...``.
         """
         if self.used_by is None:
             return []
@@ -410,7 +410,7 @@ class _ScopedFold:
 #: the three text-shaped formats get the section folded in by
 #: :func:`_fold_use_case_impact_into_text` below. sarif/junit/html render
 #: from the same attributed result and carry none of it. ``text`` is here
-#: because the fold accepts it, not because ``compare --format`` offers it.
+#: because the fold accepts it, not because ``compare -o`` offers it.
 _USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
 
 
@@ -419,7 +419,7 @@ def format_carries_use_case_impact(fmt: str | None) -> bool:
 
     Asked once per rendered output, so ``compare``'s preflight can reject
     ``--use-cases`` on the real condition -- *no* output carries it -- rather
-    than on the primary format alone. A ``--format html --write json=PATH``
+    than on the primary format alone. A ``-o html=... -o json=PATH``
     run renders the secondary from the same attributed result, at
     ``report_mode="full"``, so the attribution does reach the caller and
     rejecting it was arbitrary (Codex review); the primary's own error
@@ -580,7 +580,7 @@ def _fold_suppression_audit_into_text(
         # review, fresh evidence) -- the JSON branch above already names each
         # rule, so the default markdown/text/review report was the one place
         # a reader couldn't tell *which* rule needs action without switching
-        # to --format json.
+        # to -o json=....
         if audit.expired_rules:
             lines.append("")
             lines.append("Expired rules:")
@@ -621,7 +621,7 @@ def _report_not_comparable(
     ``checker.compare``'s gate raises before any ``diff_*`` module runs, so
     there is no ``DiffResult`` for any renderer to work with — unlike an
     ordinary verdict, this cannot be formatted the way a completed comparison
-    would be. ``--format json`` gets the schema-conformant ``{"verdict":
+    would be. ``-o json=...`` gets the schema-conformant ``{"verdict":
     null, "reason": {...}}`` document (schema 2.17,
     ``compare_report.schema.json``); ``sarif``/``junit`` get a real,
     spec-conformant document of their own (a failed-invocation SARIF run /
@@ -686,10 +686,10 @@ def _report_run_aborted(
     abort axis does not have to duplicate the format dispatch.
 
     *secondary_writes* (Codex review, fresh evidence, PR #1178): ``compare
-    --write fmt=path`` is repeatable and, on a normal run, every one of them
+    -o fmt=path`` is repeatable and, on a normal run, every one of them
     renders the same already-computed result -- an abort must do the same
     for every configured target, not just the primary ``fmt``/``output``,
-    or a ``--write json=report.json`` consumer silently gets no file at all
+    or a ``-o json=report.json`` consumer silently gets no file at all
     on exit 5 instead of the same structured refusal the primary format got.
 
     markdown/text/review/html (Codex review, fresh evidence, PR #1180,
@@ -741,7 +741,7 @@ def _report_run_aborted(
             _write_or_echo(target_output, _render_run_aborted_html(*refusal))
         elif target_fmt == _ONELINE_FORMAT:
             # Codex review, fresh evidence ("Render budget aborts in
-            # oneline format"): --format oneline is a real, separate
+            # oneline format"): -o oneline=... is a real, separate
             # primary format (service_render.ONELINE_FORMAT) the branch
             # above never matched -- same "must not stay silently absent"
             # reasoning, in oneline's own single-line shape.
@@ -806,14 +806,14 @@ def _exit_on_budget_overflow(
 
     Shared by every ``deadline.DeadlineExceeded`` catch site in
     ``cli_compare_helpers.run_compare`` (Codex review: a bare ``sys.exit(5)``
-    bypassed report rendering entirely, so ``--format json``/``-o``/
-    ``--write`` silently produced nothing on overflow -- the same generic
+    bypassed report rendering entirely, so ``-o json=...``/``-o``/
+    ``-o`` silently produced nothing on overflow -- the same generic
     aborted-run document :func:`_report_run_aborted` already gives the
     comparability-gate refusal). *label* is just the stderr message's own
     naming of what was being compared (raw operand paths before resolution,
     or the resolved library name after); *library*/*old_version*/
     *new_version* feed the structured report the same way. *secondary_writes*
-    (Codex review, fresh evidence, PR #1178) is ``--write``'s own repeatable
+    (Codex review, fresh evidence, PR #1178) is ``-o``'s own repeatable
     fmt/path pairs, forwarded so an abort renders to every configured target,
     not just the primary one.
     """

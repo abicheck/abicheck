@@ -26,7 +26,7 @@ without trimming anything to fit.
 The rule the tables encode is an inversion of Click's default: an option
 this path cannot honour is a **usage error** (exit 64), never a silent
 no-op. A dropped flag is how a CI job comes to believe a `--contract`, a
-`--write`, or a `--variant` took effect when nothing read it, and every
+`-o`, or a `--variant` took effect when nothing read it, and every
 entry below exists because some option did exactly that.
 
 ``tests/test_compare_no_baseline_options.py`` holds the exhaustiveness
@@ -97,9 +97,9 @@ def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
 _OLD_ONLY_DESTS: dict[str, str] = {
     "old_headers_only": "--header old=",
     "old_includes_only": "--include old=",
-    "debug_roots_old": "--debug-root old=",
+    "debug_roots_old": "--debug-info old=",
     "debug_info1": "--debug-info old=",
-    "devel_pkg1": "--devel-pkg old=",
+    "devel_pkg1": "--header old=",
 }
 
 #: Destinations that are inert here *by construction*, with the reason.
@@ -198,7 +198,7 @@ def _old_sided_message(spelling: str) -> str:
 #:
 #: This table exists because "accepted but never read" is the single defect
 #: this whole module has now produced four separate times -- ``--contract``,
-#: ``--sources``/``--build-info``/``--depth``/``--dry-run``, ``--write``,
+#: ``--sources``/``--build-info``/``--depth``/``--dry-run``, ``-o``,
 #: and ``--include-system-declarations`` (see ``docs/contribute/known-gaps.md``).
 #: Each was found by reading the code, never by a failing test, because a
 #: dropped option produces no output at all. Fixing them one at a time
@@ -276,15 +276,9 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "member selection applies to a directory/package operand",
     ),
     "output_dir": (
-        "--output-dir",
-        "per-library output applies to the release fan-out; use -o/--output "
-        "or --write for a single artifact",
-    ),
-    "max_findings_per_library": (
-        "--max-findings-per-library",
-        "the per-library findings cap applies to the release fan-out's "
-        "aggregate summary; a single-artifact audit has only one library "
-        "and no such summary to cap",
+        "--output <format>=<directory>/",
+        "a per-component export applies to the release fan-out; name a file "
+        "(or '-') for a single artifact",
     ),
     # -- applicable, simply not wired yet ---------------------------------
     "abi3": (
@@ -318,16 +312,24 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     ),
     # Keyed on the destinations `normalize_sided_options` *generates*, not on
     # the raw option names: `compare_cmd` normalizes before dispatching, so a
-    # guard keyed on `debug_info`/`devel_pkg`/`dump_manifest` would check a
+    # guard keyed on `debug_info`/`header`/`dump_manifest` would check a
     # key that never exists and never fire (Codex review, P1 -- the same hole
     # that let a bare `--dump-manifest` through as a silent no-op).
     "debug_info2": (
         "--debug-info",
         "separate debug-info resolution is not wired to this path yet",
     ),
+    # Named as the *transport*, not the bare flag: plain `-H/--header`
+    # headers are supported on this path, and only the development-package
+    # transport plan Phase 7n folded into it is not. A bare "--header" here
+    # would make every documented `--no-baseline -H include/` example read
+    # as rejected (`tests/test_docs_no_baseline_flag_examples.py` scans
+    # these spellings).
     "devel_pkg2": (
-        "--devel-pkg",
-        "development-package header discovery is not wired to this path yet",
+        "--header <development package>",
+        "development-package header discovery is not wired to this path yet "
+        "(a plain header file/directory is fine -- this is the package "
+        "transport plan Phase 7n folded into -H/--header)",
     ),
     "new_dump_manifest": (
         "--dump-manifest",
@@ -336,12 +338,14 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "was silently ignored before, so even an invalid manifest exited 0 "
         "while the audit analysed a different surface than requested",
     ),
+    # Same reason as `devel_pkg2` above: a plain `--build-info` compile
+    # context is supported on this path; a probe matrix is not.
     "probe_matrix_old": (
-        "--probe-matrix",
+        "--build-info <probe matrix>",
         "a build-configuration matrix is folded across two sides",
     ),
     "probe_matrix_new": (
-        "--probe-matrix",
+        "--build-info <probe matrix>",
         "a build-configuration matrix is folded across two sides",
     ),
 }

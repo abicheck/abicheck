@@ -99,7 +99,7 @@ A real invocation is a point in this space:
 | ID | Status | Current state |
 |---|---|---|
 | **G1** | ✅ closed | Native PE/Mach-O `compare` is validated in CI; MSVC+PDB has a dedicated non-blocking lane. |
-| **G2** | ✅ closed | Build matrices fold into `compare`/`compare-release` via `--probe-matrix old=/new=`; C++ floor and environment-dependent API findings are end-to-end tested. |
+| **G2** | ✅ closed | Build matrices fold into `compare`/`compare-release` via `--build-info old=<matrix>/new=<matrix>`; C++ floor and environment-dependent API findings are end-to-end tested. |
 | **G3** | ✅ closed | Workflow scenarios and Markdown/HTML report coverage are validated beyond single-pair `compare`. |
 | **G4** | planned | Header-only / inline-only libraries still need a libclang header-AST extractor. |
 | **G5** | ✅ closed | `plugin-check` and `check_plugin_host_contract` cover host↔plugin load contracts. |

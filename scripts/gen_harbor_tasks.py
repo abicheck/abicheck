@@ -697,7 +697,7 @@ def _solve_sh(scenario_id: str, scenario: dict) -> str:
             # Only the build lines -- the block's own compare invocation
             # (its `abicheck compare ...` line, plus any backslash-continued
             # follow-on lines carrying its trailing flags) is skipped here
-            # and re-run below with --format json instead of run twice; a
+            # and re-run below with a json export instead of run twice; a
             # BREAKING case's plain-text run also exits non-zero (exit 4),
             # which `set -e` would otherwise treat as this script failing
             # before it ever reaches the JSON rerun.
@@ -722,7 +722,7 @@ cd /workspace/library
 # The case's own documented build recipe, verbatim:
 {build_lines}
 
-# The case's own documented comparison, re-run with --format json so the
+# The case's own documented comparison, re-run exporting json so the
 # verdict can be read back programmatically. `compare`'s own exit code
 # encodes the verdict (e.g. 4 = BREAKING) -- non-zero is a real result,
 # not a failure, and `set -e` must not treat it as one; the report file
@@ -742,7 +742,7 @@ cd /workspace/library
 # invocation -- test or real trial -- its own path, closing the race at its
 # actual cause instead of only in the test harness that happened to expose it.
 report_json="$(mktemp)"
-{run_line} --format json -o "$report_json" || true
+{run_line} -o "json=$report_json" || true
 verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" "$report_json")
 cat > /workspace/final.md <<EOF
 Reference solution -- the documented command for this case:

@@ -1180,8 +1180,8 @@ class TestAggregateCLI:
             [
                 "--manifest",
                 str(self._manifest(tmp_path, LINUX)),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 str(tmp_path),
             ]
         )
@@ -1257,10 +1257,8 @@ class TestAggregateCLI:
             [
                 "--manifest",
                 str(self._manifest(tmp_path, LINUX)),
-                "--format",
-                "json",
                 "-o",
-                str(out),
+                f"json={out}",
                 str(reports),
             ]
         )

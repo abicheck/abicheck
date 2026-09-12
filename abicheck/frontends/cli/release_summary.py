@@ -154,7 +154,7 @@ def _write_release_summary_file(
     ).to_dict()
     record = terms.record
     # This sidecar is documented/contracted to always be full and
-    # unfiltered, mirroring a secondary `--write`'s own contract -- so the
+    # unfiltered, mirroring a secondary `-o`'s own contract -- so the
     # projection below is computed with `show_only=None` regardless of
     # whether the primary render was filtered (`_release_findings_for_
     # render`'s existing no-op-when-unfiltered behaviour), which also

@@ -300,8 +300,8 @@ def _run_compare_case(
         str(old),
         str(new),
         *spec.args,
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     ]
     return _validate_compare(
         case_id,
@@ -367,8 +367,8 @@ def _run_audit_case(
         "compare",
         "--no-baseline",
         str(snapshot),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     ]
     execution = _run_json_command(command, timeout)
     errors: list[str] = []
@@ -575,8 +575,8 @@ def _run_evidence_case(
         f"old={old_pack}",
         spec.option,
         f"new={new_pack}",
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     ]
     return _validate_compare(
         case_id,
@@ -644,8 +644,8 @@ def _run_python_case(
         "compare",
         str(old_binary),
         str(new_binary),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     ]
     if setup_error:
         execution = {

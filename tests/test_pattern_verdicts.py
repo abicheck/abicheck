@@ -747,10 +747,8 @@ def test_cli_explain_patterns(tmp_path) -> None:
             str(np),
             "--view",
             "patterns",
-            "--format",
-            "json",
             "-o",
-            str(out),
+            f"json={out}",
         ],
     )
     assert res.exit_code in (0, 2, 4), res.output

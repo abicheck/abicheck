@@ -282,10 +282,15 @@ class TestConsumerImpactSummary:
             MagicMock(side_effect=[_snap("1.0"), _snap("2.0")]),
         )
         result = _invoke(
-            "compare", str(old), str(new),
-            "--used-by", str(app1),
-            "--used-by-manifest", str(manifest),
-            "--format", "json",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app1),
+            "--used-by-manifest",
+            str(manifest),
+            "-o",
+            "json=-",
         )
         assert result.exit_code in (0, 2, 4), result.output
         # A missing-header warning may precede the JSON payload on stdout;

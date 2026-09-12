@@ -9,7 +9,7 @@ AGENTS.md``): :func:`compute_cross_source_evolution_summary` reads
 carrying a non-``None`` ``cross_source_evolution`` and returns a small frozen
 fact; :func:`render_cross_source_evolution_json` turns it into the JSON
 block. Neither computes anything the changes list does not already state,
-and neither depends on ``--format``/``--write``/demangling/any filter --
+and neither depends on ``--format``/``-o``/demangling/any filter --
 ADR-068 D4 (presentation never changes analysis).
 """
 

@@ -17,7 +17,7 @@
 Produces a Static Analysis Results Interchange Format (SARIF) document
 suitable for upload to GitHub Code Scanning via:
 
-    abicheck compare old.so new.so --format sarif > results.sarif
+    abicheck compare old.so new.so -o sarif=... > results.sarif
 
 GitHub Code Scanning docs:
   https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning

@@ -88,8 +88,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--header",
             f"old={old_header_dir}",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -109,8 +109,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--include",
             f"old={old_include_dir}",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -133,8 +133,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--ast-frontend",
             "old=clang",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -159,8 +159,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--view",
             "demangle",
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=-",
         )
 
         assert code == 64
@@ -179,8 +179,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=-",
         )
 
         assert code == 1, out
@@ -207,8 +207,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--view",
             "patterns",
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=-",
         )
 
         assert code == 64
@@ -230,8 +230,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=-",
         )
 
         assert code == 1, out
@@ -252,8 +252,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--view",
             "leaf",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -270,8 +270,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(facts_path),
             str(new_dir),
             "--show-filtered",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -308,8 +308,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(fake_deb),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code != 0
@@ -334,8 +334,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--config",
             str(config_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -359,8 +359,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--debug-info",
             f"old={old_debug_dir}",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -384,8 +384,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--devel-pkg",
             f"old={old_devel_pkg}",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -432,8 +432,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(new_dir),
             "--config",
             str(config_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 1, out
@@ -463,8 +463,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -489,8 +489,8 @@ class TestConfigDebugPdbPathRejected:
             str(new_dir),
             "--config",
             str(config_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -527,8 +527,8 @@ class TestDsoOnlyRejectedForSingleFileNewInput:
             str(new_file),
             "--config",
             str(config_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -551,8 +551,8 @@ class TestDsoOnlyRejectedForSingleFileNewInput:
             str(new_file),
             "--config",
             str(config_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -579,8 +579,8 @@ class TestDsoOnlyRejectedForSingleFileNewInput:
             str(new_dir),
             "--config",
             str(config_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         # Reaches a later, unrelated failure (no matching libraries) --

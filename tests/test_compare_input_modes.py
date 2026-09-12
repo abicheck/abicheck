@@ -609,7 +609,7 @@ class TestCompareMixed:
 
 
 class TestCompareSoOutputFormats:
-    def _run_with_format(self, tmp_path, monkeypatch, fmt, extra_args=None):
+    def _run_with_format(self, tmp_path, monkeypatch, fmt, destination="-"):
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
         hdr = tmp_path / "foo.h"
@@ -621,10 +621,15 @@ class TestCompareSoOutputFormats:
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
-        args = ["compare", str(old_elf), str(new_elf), "-H", str(hdr),
-                "--format", fmt]
-        if extra_args:
-            args.extend(extra_args)
+        args = [
+            "compare",
+            str(old_elf),
+            str(new_elf),
+            "-H",
+            str(hdr),
+            "-o",
+            f"{fmt}={destination}",
+        ]
 
         runner = CliRunner()
         return runner.invoke(main, args)
@@ -642,8 +647,7 @@ class TestCompareSoOutputFormats:
 
     def test_sarif_format(self, tmp_path, monkeypatch):
         out = tmp_path / "abi.sarif"
-        result = self._run_with_format(tmp_path, monkeypatch, "sarif",
-                                       ["-o", str(out)])
+        result = self._run_with_format(tmp_path, monkeypatch, "sarif", str(out))
         assert result.exit_code == 0
         assert out.exists()
 

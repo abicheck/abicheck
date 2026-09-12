@@ -141,7 +141,7 @@ case:
 - Symbol-only checks (`L0`) and, if you pass headers, the header AST (`L2`) still
   run — most critical breaks are still caught
 
-**Mitigation:** Use `--debug-root` to point abicheck at separate debug files
+**Mitigation:** Use `--debug-info` to point abicheck at separate debug files
 (distro debuginfo packages, build-id trees, or dSYM bundles). abicheck
 automatically searches for debug artifacts via a resolver chain. For
 Fedora/RHEL, set `.abicheck.yml`'s `debug.debuginfod: true` to fetch debug
@@ -196,7 +196,7 @@ report text uses ABICC-style phrasing rather than a bare `API_BREAK` verdict str
 Source-level-only breaks (e.g. `case31_enum_rename`, `case34_access_level`) will
 appear as warnings in the compat HTML/text report.
 
-Use `abicheck compare --format json` for precise machine-readable `API_BREAK` verdicts.
+Use `abicheck compare -o json=-` for precise machine-readable `API_BREAK` verdicts.
 
 ---
 

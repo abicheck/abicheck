@@ -783,7 +783,7 @@ each entry in `suppression.suppressed_changes[]` — a suppressed finding's
 is always present. SARIF carries the same two fields as `properties.reachabilityState`/
 `properties.impactAssessment`. JUnit does not carry the full object (a
 structured node/edge object is a poor fit for JUnit's `<properties>`
-text-value model) — but `--view root-cause --format junit` does add
+text-value model) — but `--view root-cause -o junit=...` does add
 additive `rootCauseId`/`rootCause` attributes to each `<failure>` element,
 without restructuring JUnit's per-symbol `<testcase>` tree; see
 [Root-cause grouping](../learn/impact-analysis.md#root-cause-grouping) below.

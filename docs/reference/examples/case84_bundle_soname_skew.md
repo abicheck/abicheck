@@ -44,7 +44,7 @@ No source changes — only the linked SONAME differs per library:
 bash examples/case84_bundle_soname_skew/gen_bundle.sh
 printf 'bundle:\n  cohorts: ["libonedal_"]\n' > /tmp/case84.abicheck.yml
 abicheck compare examples/case84_bundle_soname_skew/v1 examples/case84_bundle_soname_skew/v2 \
-    --config /tmp/case84.abicheck.yml --format json
+    --config /tmp/case84.abicheck.yml -o json=-
 ```
 
 ## Expected abicheck finding

@@ -28,7 +28,7 @@ only meaningful to a caller that has a stream in the first place, and
 ``service.run_compare_request`` never did -- it had to pass ``quiet=True``
 forever to suppress writes to a stream it does not own. A sink makes the
 default (no sink, no output) the correct one for an engine caller, and lets the
-CLI adapter decide that its sink writes to *stderr* so ``--format json``
+CLI adapter decide that its sink writes to *stderr* so ``-o json=...``
 stdout stays parseable.
 
 **The error contract is preserved, not tidied.** ``resolve_side_pack`` raises
@@ -438,7 +438,7 @@ def diff_embedded_build_source(
     are folded into the ordinary verdict pipeline as ``extra_changes`` and never
     override artifact-backed verdicts. The D7 coverage table is handed to
     ``on_output`` (the CLI adapter writes it to stderr, so it covers every
-    output format without polluting a ``--format json`` stdout) and also
+    output format without polluting a ``-o json=...`` stdout) and also
     returned as serialized rows so the JSON report can carry a structured
     ``layer_coverage`` block. With no ``on_output`` sink nothing is rendered;
     the returned/embedded data is unaffected either way.

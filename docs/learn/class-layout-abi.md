@@ -302,7 +302,7 @@ abicheck compare old.so new.so \
   --header old=include/v1/foo.h \
   --header new=include/v2/foo.h \
   --policy strict_abi \
-  --format sarif -o abi.sarif
+  -o sarif=abi.sarif
 ```
 
 - A stripped binary with no headers collapses toward symbol-only checking — you

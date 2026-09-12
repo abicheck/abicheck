@@ -478,21 +478,28 @@ class TestIsReleaseStyleOperand:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestExtraArgsHasWriteFlag:
-    """Codex review: injecting the Action's own internal ``--write`` ahead of
-    the user's ``extra-args`` passthrough is unsafe when the user's own
-    ``extra-args`` already requests one -- Click applies both and the *last*
-    wins, so the real run would silently honor the user's value instead of
-    the Action's, leaving the internal sidecar file empty and triggering an
-    unnecessary (and, for ``scan --depth build/source``, potentially
-    expensive) rerun anyway. ``_extra_args_has_write_flag`` detects that case
-    so the caller can skip its own injection instead.
+class TestExtraArgsHasExport:
+    """Whether ``extra-args`` states an export set of its own.
+
+    Plan slice 7m: ``abicheck`` has one report-output flag,
+    ``-o FORMAT=DESTINATION``, repeatable. The Action's ``format:``/
+    ``output-file:`` inputs are a convenience for stating *one* export; when
+    the caller reaches for ``extra-args -o`` they state the whole set, and
+    this script injects none of its own -- appending ours would either
+    duplicate a destination they named (a usage error under the new grammar,
+    not a silent last-wins override) or force a stdout report they did not
+    ask for.
+
+    This replaces ``_extra_args_has_write_flag``, whose question
+    (``--write``) no longer exists; the tokenizer cases below are the same
+    ones that mattered then, restated over the surviving spelling, because
+    each was a real defect: a YAML literal block's newlines, a tab, a
+    clustered short option, and a preceding option's *value* that merely
+    looks like a flag.
     """
 
     def _predicate(self, extra_args: str) -> bool:
-        return _run_predicate(
-            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_write_flag"
-        )
+        return _run_predicate(f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_export")
 
     def test_absent_extra_args(self) -> None:
         assert not self._predicate("")
@@ -500,14 +507,26 @@ class TestExtraArgsHasWriteFlag:
     def test_unrelated_extra_args(self) -> None:
         assert not self._predicate("--verbose --gate-api-break")
 
-    def test_write_space_separated(self) -> None:
-        assert self._predicate("--write text=out.txt")
+    def test_export_space_separated(self) -> None:
+        assert self._predicate("-o text=out.txt")
 
-    def test_write_equals_form(self) -> None:
-        assert self._predicate("--write=text=out.txt")
+    def test_export_equals_form(self) -> None:
+        assert self._predicate("--output=text=out.txt")
 
-    def test_write_flag_at_the_end_of_extra_args(self) -> None:
-        assert self._predicate("--verbose --write text=out.txt")
+    def test_export_long_spelling(self) -> None:
+        assert self._predicate("--output text=out.txt")
+
+    def test_export_attached_short_form(self) -> None:
+        assert self._predicate("-otext=out.txt")
+
+    def test_export_at_the_end_of_extra_args(self) -> None:
+        assert self._predicate("--verbose -o text=out.txt")
+
+    def test_stdout_export_counts(self) -> None:
+        # `-o json=-` names no file, but it is still an export the caller
+        # stated -- and the one that most needs to suppress this script's
+        # own, since two documents cannot share stdout.
+        assert self._predicate("-o json=-")
 
     def _predicate_ansi_c(self, escaped: str) -> bool:
         """Like :meth:`_predicate`, but *escaped* is passed through bash's
@@ -517,93 +536,44 @@ class TestExtraArgsHasWriteFlag:
         and inside bash single quotes that stays two characters -- so the
         plain helper cannot express the very input these cases are about.
         """
-        return _run_predicate(
-            f"INPUT_EXTRA_ARGS=$'{escaped}' _extra_args_has_write_flag"
-        )
+        return _run_predicate(f"INPUT_EXTRA_ARGS=$'{escaped}' _extra_args_has_export")
 
-    def test_write_after_a_newline(self) -> None:
+    def test_export_after_a_newline(self) -> None:
         # `extra-args: |` (a YAML literal block) is ordinary Action usage and
         # puts a newline between arguments. `CMD+=($INPUT_EXTRA_ARGS)` splits
-        # on IFS -- space, tab AND newline -- so this really is a `--write`
+        # on IFS -- space, tab AND newline -- so this really is an `-o`
         # token on the command line; a literal-space substring check did not
-        # see it, injected ours anyway, and lost to the user's (Codex review).
-        assert self._predicate_ansi_c(r"--verbose\n--write text=out.txt")
+        # see it, injected ours anyway, and collided with the user's.
+        assert self._predicate_ansi_c(r"--verbose\n-o text=out.txt")
 
-    def test_write_after_a_tab(self) -> None:
-        assert self._predicate_ansi_c(r"--verbose\t--write text=out.txt")
+    def test_export_after_a_tab(self) -> None:
+        assert self._predicate_ansi_c(r"--verbose\t-o text=out.txt")
 
-    def test_write_as_the_only_arg_with_surrounding_newlines(self) -> None:
+    def test_export_as_the_only_arg_with_surrounding_newlines(self) -> None:
         # A literal block usually ends with a trailing newline too.
-        assert self._predicate_ansi_c(r"\n--write text=out.txt\n")
+        assert self._predicate_ansi_c(r"\n-o text=out.txt\n")
 
-    def test_newline_separated_without_a_write_is_still_false(self) -> None:
-        # The negative control for the same splitting: newlines must not make
-        # the guard fire on their own.
-        assert not self._predicate_ansi_c(r"--verbose\n--gate-api-break")
-
-    def test_does_not_false_positive_on_a_substring(self) -> None:
-        # A flag merely containing "write" as a substring (not a real
-        # standalone token) must not trip the detector.
-        assert not self._predicate("--not-a-write-flag")
-
-    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
-        # A fourth Codex review round (fresh evidence): `extra-args:
-        # --output --write` means "write a file literally named --write"
-        # -- `--output` is the value-taking option here, so it consumes
-        # the literal token "--write" as its own filename, and there is no
-        # real `--write` flag in this invocation at all. Injecting the
-        # internal JSON sidecar on top of a false "the user already has a
-        # --write" belief would have left `_coverage_gated`/
-        # `_assurance_gated`/`_severity_gate_categories` without evidence
-        # for no reason.
-        assert not self._predicate("--output --write")
-
-    def test_write_consumed_as_a_clustered_short_options_value_is_not_a_flag(
+    def test_export_after_a_clustered_bare_boolean_short_option_is_still_a_flag(
         self,
     ) -> None:
-        # A fifth Codex review round (P1, fresh evidence): `extra-args:
-        # -vH --write` means "-v, then -H with a header literally named
-        # --write" -- Click parses a clustered bare short option (`-vH`)
-        # exactly like `-v -H`, and `-H` is the value-taking option here,
-        # consuming the literal token "--write" as its own value. There is
-        # no real `--write` flag in this invocation at all; failing to
-        # recognize the cluster left the literal "--write" unconsumed and
-        # wrongly classified as a real flag, silently suppressing the
-        # internal JSON sidecar injection (the unsafe direction, unlike the
-        # sibling false-positive class this file documents as accepted).
-        assert not self._predicate("-vH --write")
+        # `-vH -o text=out.txt`: the cluster expands to `-v -H`, `-H`
+        # consumes `-o`... no: `-H` takes the *next* token, so the export is
+        # what follows. Written with a real header value so the export is
+        # unambiguously its own token.
+        assert self._predicate("-vH foo.h -o text=out.txt")
 
-    def test_write_after_a_clustered_bare_boolean_short_option_is_still_a_flag(
+    def test_an_export_attached_to_a_clustered_short_option_value_is_not_one(
         self,
     ) -> None:
-        # The negative control: `-vv` is a cluster of two boolean flags
-        # only (no value-taking option at the end), so it consumes nothing
-        # from the following token -- a real `--write` right after it is
-        # still a real flag.
-        assert self._predicate("-vv --write")
+        # `-vHo` is `-v -Ho`: a header value spelled "o", not an export.
+        assert not self._predicate("-vHo")
 
-    def test_write_attached_to_a_clustered_short_option_value_is_not_a_flag(
+    def test_a_preceding_options_value_that_looks_like_an_export_is_not_one(
         self,
     ) -> None:
-        # `-vHabc` is `-v` plus `-H` with an *attached* value ("abc") --
-        # Click does not consume a following token for this form at all,
-        # so a real `--write` right after it is unaffected either way; this
-        # pins that the attached-value form is left opaque rather than
-        # mis-expanded into consuming the next token.
-        assert self._predicate("-vHabc --write")
-
-    def test_a_preceding_options_value_that_looks_like_a_cluster_is_not_expanded(
-        self,
-    ) -> None:
-        # A sixth Codex review round (P1, fresh evidence): `-H -vH --write`
-        # means "-H with a header literally named -vH", then a real
-        # `--write` -- `-vH` here is `-H`'s own already-claimed value, not a
-        # cluster to expand. Expanding every raw token up front (rather than
-        # only once confirmed not already claimed as a preceding value)
-        # corrupted this ordinary value into extra synthetic options and
-        # could flip the following real `--write` either way; this pins
-        # that a value token is left untouched regardless of its shape.
-        assert self._predicate("-H -vH --write")
+        # `-H -o` means "a header file literally named -o", not an export:
+        # `-H` is the value-taking option and consumes the token.
+        assert not self._predicate("-H -o")
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -702,20 +672,24 @@ def _run_value(call: str) -> str:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestEffectiveFormat:
-    """ADR-064's "effective-format-override" gap: `extra-args: --format json`
-    under `format: text`/`markdown` makes the real `abicheck` invocation emit
-    JSON, since Click keeps only the *last* `--format` occurrence -- but every
-    JSON-detection site that checked the Action's own nominal `$FORMAT`
+    """ADR-064's "effective-format-override" gap, under the one export request.
+
+    `extra-args: -o json=-` under `format: text`/`markdown` makes the real
+    `abicheck` invocation emit JSON, because a caller-stated export set
+    replaces this script's own (plan slice 7m -- see `_effective_exports`).
+    Every JSON-detection site that checked the Action's own nominal `$FORMAT`
     variable instead of what the command actually ran with silently missed
-    that override. `_effective_format` resolves the real value the same way
-    `_extra_args_has_write_flag`/`_extra_args_write_json_path` resolve their
-    own `extra-args` overrides: by splitting `INPUT_EXTRA_ARGS` the same way
-    the real command line is built and keeping the last match.
+    that. `_effective_format` resolves the real value from the same parse
+    every other extra-args helper here uses.
+
+    The primary is the export that goes to stdout when there is one -- that
+    is the report this script captures and reads -- else the first requested.
     """
 
     def _value(self, format_: str, extra_args: str) -> str:
         return _run_value(
-            f"FORMAT={format_!r} INPUT_EXTRA_ARGS={extra_args!r} _effective_format"
+            f"FORMAT={format_!r} OUTPUT_FILE= INPUT_EXTRA_ARGS={extra_args!r} "
+            "_effective_format"
         )
 
     def test_no_extra_args_falls_back_to_nominal_format(self) -> None:
@@ -726,73 +700,104 @@ class TestEffectiveFormat:
         assert self._value("markdown", "--verbose --gate-api-break") == "markdown"
 
     def test_extra_args_overrides_to_json_space_separated(self) -> None:
-        assert self._value("text", "--format json") == "json"
+        assert self._value("text", "-o json=-") == "json"
 
     def test_extra_args_overrides_to_json_equals_form(self) -> None:
-        assert self._value("text", "--format=json") == "json"
+        assert self._value("text", "--output=json=-") == "json"
 
     def test_extra_args_overrides_away_from_json(self) -> None:
         # The reverse direction matters too: a `format: json` step whose own
-        # extra-args forces text must not still be treated as JSON.
-        assert self._value("json", "--format text") == "text"
+        # exports name text must not still be treated as JSON.
+        assert self._value("json", "-o text=-") == "text"
 
-    def test_last_format_occurrence_wins(self) -> None:
-        # Click keeps only the last repeated option -- this helper must
-        # agree, not the first.
-        assert self._value("text", "--format json --format markdown") == "markdown"
+    def test_the_stdout_export_is_the_primary_among_several(self) -> None:
+        # Not "the last one wins" (the retired `--format`'s rule) and not
+        # "the first": with several exports the one on stdout is the report
+        # this script captures, so it is the effective format whatever its
+        # position.
+        assert self._value("text", "-o json=a.json -o markdown=-") == "markdown"
+        assert self._value("text", "-o markdown=- -o json=a.json") == "markdown"
+
+    def test_with_no_stdout_export_the_first_is_the_primary(self) -> None:
+        assert self._value("text", "-o junit=a.xml -o json=b.json") == "junit"
 
     def test_format_after_a_newline(self) -> None:
         # Same YAML-literal-block splitting concern as
-        # `_extra_args_has_write_flag`'s own newline test.
+        # `_extra_args_has_export`'s own newline test.
         assert (
             _run_value(
-                r"FORMAT=text INPUT_EXTRA_ARGS=$'--verbose\n--format json' "
+                r"FORMAT=text OUTPUT_FILE= INPUT_EXTRA_ARGS=$'--verbose\n-o json=-' "
                 r"_effective_format"
             )
             == "json"
         )
 
-    def test_does_not_false_positive_on_a_substring(self) -> None:
-        assert self._value("text", "--not-a-format-flag") == "text"
+    def test_a_directory_export_is_a_fan_out_not_the_primary_report(self) -> None:
+        """A destination ending in `/` is the per-component fan-out.
 
-    def test_format_consumed_as_an_output_option_value_is_not_an_override(
+        It is not a document this script can read, and the CLI answers a
+        caller who names only directory exports by prepending its own
+        default document export to stdout. Reading `reports/` as the
+        primary handed a directory to `report_query.py`, which classifies
+        one as unreadable -- so a successful comparison published
+        REPORT_UNREADABLE (Codex review, P1).
+        """
+        assert self._value("text", "-o json=reports/") == "markdown"
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE= INPUT_EXTRA_ARGS='-o json=reports/' "
+                "_effective_output_file"
+            )
+            == ""
+        )
+
+    def test_a_directory_export_beside_a_document_leaves_the_document_primary(
         self,
     ) -> None:
-        # Same tokenizer, same class of bug as the sibling write/dry-run
-        # helpers: `--output --format` means "write a file literally named
-        # --format", not a `--format` override -- `--output` is the
-        # value-taking option here and consumes the literal token.
-        assert self._value("markdown", "--output --format") == "markdown"
+        assert self._value("text", "-o json=reports/ -o junit=a.xml") == "junit"
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE= "
+                "INPUT_EXTRA_ARGS='-o json=reports/ -o junit=a.xml' "
+                "_effective_output_file"
+            )
+            == "a.xml"
+        )
 
-    def test_format_after_an_unrelated_option_value_still_overrides(self) -> None:
-        assert self._value("markdown", "--output out.md --format json") == "json"
+    def test_does_not_false_positive_on_a_substring(self) -> None:
+        assert self._value("text", "--not-an-export-flag") == "text"
+
+    def test_an_export_consumed_as_another_options_value_is_not_an_export(
+        self,
+    ) -> None:
+        # Same tokenizer, same class of bug as the sibling helpers: `-H -o`
+        # means "a header path literally named -o", not an export -- `-H` is
+        # the value-taking option and consumes the token.
+        assert self._value("markdown", "-H -o") == "markdown"
+
+    def test_an_export_after_an_unrelated_option_value_still_applies(self) -> None:
+        assert self._value("markdown", "-H foo.h -o json=-") == "json"
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestExtraArgsWriteJsonPath:
-    """``--write`` is **repeatable**, so every ``json=`` occurrence is real.
+    """``-o`` is **repeatable**, so every ``json=`` destination is real.
 
-    This class previously asserted the opposite -- that ``--write`` is a scalar
-    Click option resolving to the last occurrence whatever its format, so that
-    a later non-JSON ``--write`` "un-discovers" an earlier JSON path (Codex
-    review, P2, PR #1071). That premise is false for ``compare``, which
-    declares the option with ``multiple=True``
-    (``frontends/cli/options/secondary_output.py``'s ``deco_multi``, ADR-068
-    D4's "one analysis, several artifacts"), with
-    ``--write json=a.json --write markdown=b.md`` as its own help text's
-    example. Both artifacts are written.
+    This class once asserted the opposite of its own subject -- that the
+    (then-separate) ``--write`` was a scalar Click option resolving to the
+    last occurrence whatever its format, so that a later non-JSON occurrence
+    "un-discovered" an earlier JSON path (Codex review, P2, PR #1071). That
+    premise was false then and is structurally impossible now: plan slice
+    7m's one export request is declared ``multiple=True``, and every named
+    artifact is written. The clearing it pinned was a real defect: the
+    combination below reported no requested JSON path, so a missing
+    ``a.json`` left an exit-0 run publishing COMPATIBLE.
 
-    The tree carried both claims at once -- this class and
-    ``test_a_non_json_user_write_no_longer_suppresses_the_internal_one``
-    contradicted each other -- and the contradiction was settled against the
-    option declaration rather than either comment. The clearing it pinned was a
-    real defect: the combination above reported no requested JSON path, so a
-    missing ``a.json`` left an exit-0 run publishing COMPATIBLE (Codex review,
-    P2, a later round).
-
-    ``_extra_args_write_json_paths`` now answers all of them, newline-separated;
-    the singular ``_extra_args_write_json_path`` answers the first, which is all
-    ``_json_report_src`` needs (it wants *a* readable report, not every one).
+    ``_extra_args_write_json_paths`` answers all of them, newline-separated;
+    the singular ``_extra_args_write_json_path`` answers the first, which is
+    all ``_json_report_src`` needs (it wants *a* readable report, not every
+    one). A stdout destination (``-o json=-``) is deliberately not among
+    them: there is no path there for anyone to read.
     """
 
     def _value(self, extra_args: str) -> str:
@@ -803,46 +808,52 @@ class TestExtraArgsWriteJsonPath:
     def test_absent_extra_args(self) -> None:
         assert self._value("") == ""
 
-    def test_single_write_json(self) -> None:
-        assert self._value("--write json=out.json") == "out.json"
+    def test_single_json_export(self) -> None:
+        assert self._value("-o json=out.json") == "out.json"
 
     def _all(self, extra_args: str) -> str:
         return _run_value(
             f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_write_json_paths"
         )
 
-    def test_two_json_writes_both_count(self) -> None:
+    def test_two_json_exports_both_count(self) -> None:
         # Repeatable: both artifacts are written, so both are requested. The
         # singular helper answers the first; the plural one answers both.
-        both = "--write json=first.json --write json=second.json"
+        both = "-o json=first.json -o json=second.json"
         assert self._value(both) == "first.json"
         assert self._all(both).split() == ["first.json", "second.json"]
 
-    def test_a_later_non_json_write_does_not_erase_an_earlier_json_one(self) -> None:
-        # The defect this class used to pin: `markdown=` following `json=` does
-        # not un-write the JSON artifact, so the path stays discoverable.
-        combo = "--write json=out.json --write markdown=out.md"
+    def test_a_later_non_json_export_does_not_erase_an_earlier_json_one(self) -> None:
+        # The defect this class used to pin: `markdown=` following `json=`
+        # does not un-write the JSON artifact, so the path stays discoverable.
+        combo = "-o json=out.json -o markdown=out.md"
         assert self._value(combo) == "out.json"
         assert self._all(combo).split() == ["out.json"]
 
-    def test_a_later_json_write_after_a_non_json_one_counts(self) -> None:
-        assert self._value("--write text=out.txt --write json=out.json") == "out.json"
+    def test_a_later_json_export_after_a_non_json_one_counts(self) -> None:
+        assert self._value("-o text=out.txt -o json=out.json") == "out.json"
 
-    def test_no_json_write_answers_nothing(self) -> None:
-        assert self._value("--write markdown=out.md") == ""
-        assert self._all("--write markdown=out.md") == ""
+    def test_no_json_export_answers_nothing(self) -> None:
+        assert self._value("-o markdown=out.md") == ""
+        assert self._all("-o markdown=out.md") == ""
+
+    def test_a_stdout_json_export_names_no_path(self) -> None:
+        assert self._value("-o json=-") == ""
+        assert self._all("-o json=-") == ""
 
     def test_unrelated_extra_args(self) -> None:
         assert self._value("--verbose --gate-api-break") == ""
 
     def test_equals_form(self) -> None:
-        assert self._value("--write=json=out.json") == "out.json"
+        assert self._value("--output=json=out.json") == "out.json"
 
-    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
-        # Same tokenizer, same class of bug as the sibling helpers: `--output
-        # --write` means "write a file literally named --write", not a real
-        # `--write` flag.
-        assert self._value("--output --write") == ""
+    def test_attached_short_form(self) -> None:
+        assert self._value("-ojson=out.json") == "out.json"
+
+    def test_an_export_consumed_as_another_options_value_is_not_one(self) -> None:
+        # Same tokenizer, same class of bug as the sibling helpers: `-H -o`
+        # means "a header path literally named -o", not an export.
+        assert self._value("-H -o") == ""
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")

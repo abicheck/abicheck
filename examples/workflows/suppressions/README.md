@@ -80,7 +80,7 @@ not skip past:
 
 A suppression rule changes what CI *gates on*, never what actually
 happened: the underlying ABI break is still real, and the report's
-`suppression` block (`--format json`) always records what was suppressed,
+`suppression` block (`-o json=...`) always records what was suppressed,
 by which rule, and why — "100 removals detected, 100 suppressed by rule X"
 never silently disappears. See [Suppressions](../../../docs/use/suppressions.md)
 for the full rule syntax (regex/glob selectors, `namespace`, `expires`,
@@ -95,6 +95,6 @@ for the full rule syntax (regex/glob selectors, `namespace`, `expires`,
   suppress → severity → exit code) — see [CI Gating](../../../docs/use/ci-gating.md)
   for how they combine with `--policy` reclassification and
   `--severity-preset`.
-- Want machine-readable output for CI? Add `--format json` — every
+- Want machine-readable output for CI? Add `-o json=-` — every
   suppressed finding is listed under `suppression.suppressed_changes`, so a
   dashboard can still show what was silenced even though it didn't gate.

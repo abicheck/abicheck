@@ -486,7 +486,7 @@ def _fold_findings_into_stat_summary(
 ) -> None:
     """Add a supplied consumer's own scoped-only findings to a ``--stat`` summary.
 
-    Codex review: `--format json --stat` (to_stat_json) emits a
+    Codex review: `-o json=... --stat` (to_stat_json) emits a
     summary-only payload with no `changes` array at all, so the branch
     above -- gated on `isinstance(changes_list, list)` -- never runs for it.
     There's no per-change list to recompute bucket counts from here, so

@@ -233,6 +233,6 @@ def test_verdict_in_output_formats(tmp_path: Path, fmt: str) -> None:
     _write_snap(old_path, _snap("1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]))
     _write_snap(new_path, _snap("2.0", funcs=[_fn("compute", "_Z7computei")]))
 
-    result = runner.invoke(main, ["compare", str(old_path), str(new_path), "--format", fmt])
+    result = runner.invoke(main, ["compare", str(old_path), str(new_path), "-o", f"{fmt}=-"])
     assert result.exit_code == 4
     assert "BREAKING" in result.output

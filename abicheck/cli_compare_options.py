@@ -87,7 +87,7 @@ def _reject_set_input_flags(
 
     ``--pack`` is not one of these -- its own, separate resolution (CLI
     cleanup phase two, "PR B" slice 1) decides what to accept or reject.
-    ``--write`` (``secondary_fmt``/``secondary_output``) is not one of these
+    ``-o`` (``secondary_fmt``/``secondary_output``) is not one of these
     either, as of CLI cleanup phase two, PR E: the release engine now
     supports it directly (``compare_release_cmd``'s own
     ``secondary_output_options``/``reject_incoherent_secondary_output``
@@ -336,7 +336,7 @@ def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> N
     baseline artifact, and a single-pair compare has no library map to
     build one from -- silently accepting it would report success while
     leaving automation believing a baseline was written when none was,
-    unlike ``--dso-only``/``--output-dir``, which are merely
+    unlike ``--dso-only``/a per-component export, which are merely
     inert conveniences here.
     """
     if bundle_facts_out is not None:
@@ -373,7 +373,7 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     per-format default.
 
     Shared by the primary render (:func:`_normalize_compare_options`) and
-    the ``--write`` render in :func:`run_compare`, each resolved
+    the ``-o`` render in :func:`run_compare`, each resolved
     against its own format — a machine primary format paired with a text
     secondary format (or vice versa) must not inherit the other's default.
     """
@@ -404,6 +404,37 @@ def _reject_debug_format_for_non_elf(
                 f"only supported for ELF binaries, but the {side} input is "
                 f"{bfmt.upper()}."
             )
+
+
+def _set_input_flags_used(ctx: click.Context, flags: dict[str, str]) -> list[str]:
+    """Which of *flags* this directory/package invocation actually typed.
+
+    The membership half of ``cli_resolve._reject_evidence_flags_for_set_
+    inputs``, with one exception it owns: since plan Phase 7n merged
+    ``--probe-matrix`` into ``--build-info``, that flag carries two kinds of
+    evidence and only one of them is inadmissible on a release comparison.
+    The fan-out collects no inline build/source evidence (the rule the guard
+    exists for), but it has always run its own release-global
+    build-configuration comparison -- so a ``--build-info`` naming only
+    probe matrices is *not* "used" here, and the capability the merge
+    absorbed survives it.
+
+    The exception is decided from each operand's content, by the same
+    classifier the sided split uses (``workflows.evidence_transport``), so
+    the guard and the split cannot form two opinions about one operand. It
+    has to run on the raw Click values, before ``normalize_sided_options``
+    separates them -- which is why this reads ``ctx.params`` rather than the
+    per-side destinations.
+    """
+    from .workflows.evidence_transport import all_probe_matrices
+
+    matrices_only = all_probe_matrices(p for _side, p in (ctx.params.get("build_info") or ()))
+    return [
+        flag
+        for dest, flag in flags.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+        and not (dest == "build_info" and matrices_only)
+    ]
 
 
 def _resolve_debug_roots(

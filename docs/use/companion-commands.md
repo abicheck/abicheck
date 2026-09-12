@@ -125,7 +125,7 @@ companion-command consolidation this page describes; see the
 
 ```bash
 abicheck deps tree ./build/libfoo.so
-abicheck deps tree /usr/bin/myapp --format json -o deps.json
+abicheck deps tree /usr/bin/myapp -o json=deps.json
 abicheck deps tree ./app --sysroot /path/to/container/rootfs
 ```
 
@@ -136,7 +136,7 @@ Exit codes: `0` all dependencies resolved, `1` missing dependencies/symbols.
 ```bash
 abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
 abicheck deps compare usr/lib/libfoo.so.1 \
-  --old-root ./image-v1 --new-root ./image-v2 --format json
+  --old-root ./image-v1 --new-root ./image-v2 -o json=-
 ```
 
 `--old-root`/`--new-root` (each default `/`) point at the two sysroots to
@@ -164,10 +164,19 @@ update scripts before upgrading.
 | `--old-sources src1 --new-sources src2` | `--sources old=src1 --sources new=src2` |
 | `--old-build-info b1 --new-build-info b2` | `--build-info old=b1 --build-info new=b2` |
 | `--old-pdb-path a.pdb --new-pdb-path b.pdb` | `--pdb-path old=a.pdb --pdb-path new=b.pdb` |
-| `--debug-root1 d1 --debug-root2 d2` | `--debug-root old=d1 --debug-root new=d2` |
+| `--debug-root1 d1 --debug-root2 d2` | `--debug-info old=d1 --debug-info new=d2` |
 | `--debug-info1 x --debug-info2 y` | `--debug-info old=x --debug-info new=y` |
-| `--devel-pkg1 p --devel-pkg2 q` | `--devel-pkg old=p --devel-pkg new=q` |
-| `--probe-matrix-old m1 --probe-matrix-new m2` | `--probe-matrix old=m1 --probe-matrix new=m2` |
+| `--devel-pkg1 p --devel-pkg2 q` | `-H old=p -H new=q` |
+| `--probe-matrix-old m1 --probe-matrix-new m2` | `--build-info old=m1 --build-info new=m2` |
+
+The last three rows changed target in plan Phase 7n, which gave each
+evidence *role* one input: a debug directory, a detached debug file and a
+debug package are three transports of `--debug-info`; a development package
+is one of `-H/--header`'s; and a probe-matrix snapshot is one of
+`--build-info`'s. The old spellings `--debug-root`, `--devel-pkg` and
+`--probe-matrix` exit 64 with no alias. Which transport an operand is comes
+from its *content* — a package under a name with no suffix, or a matrix
+snapshot called `build.json`, is still recognised.
 
 Notes:
 
@@ -233,8 +242,9 @@ config value. A script that still passes one of the removed flags exits 64
 key in `.abicheck.yml` instead. `--show-redundant` was retired the same way
 earlier and has no CLI spelling left either.
 
-**Not demoted (still visible flags):** `--debug-root` (the coarse per-run
-debug-tree override, now side-aware, see the table above); and
+**Not demoted (still visible flags):** `--debug-info` (the coarse per-run
+debug-artifact override, side-aware, and since Phase 7n the whole
+separate-debug-info role — see the table above); and
 `--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
 switch for public-surface scoping). `scan` is unaffected by any row in the
 table above — it keeps every one of these flags as a real CLI option.
@@ -245,10 +255,10 @@ table above — it keeps every one of these flags as a real CLI option.
 defaults into one token. It was removed outright (ADR-068 D5 / plan
 Phase 7e): it bundled evidence depth, report rendering, and CI gate policy
 behind one word, and a rendering choice may never carry a gate setting.
-There is no direct config-key replacement — state `--depth`, `--format`,
+There is no direct config-key replacement — state `--depth`, `-o`,
 and `--severity-preset` (or `.abicheck.yml`'s `severity:` block)
 independently. `quick`'s one-line summary survives as the first-class
-`--format oneline` choice; see [Output Formats](output-formats.md).
+`-o oneline=...` choice; see [Output Formats](output-formats.md).
 
 ### GitHub Action
 

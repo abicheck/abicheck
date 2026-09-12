@@ -239,7 +239,6 @@ def _finalize_release_output(
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
-    max_findings: int | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -251,7 +250,7 @@ def _finalize_release_output(
 
     *show_only* (Codex review, PR #1154 second follow-up): this function is
     only ever called for the **primary** ``--format`` render (the secondary
-    ``--write`` render is a separate call in ``cli_compare_release.py`` that
+    ``-o`` render is a separate call in ``cli_compare_release.py`` that
     never passes it), so it is the one caller allowed to forward the
     release's ``--view show=`` selection into the rendered text.
     """
@@ -285,9 +284,6 @@ def _finalize_release_output(
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
         require_complete_analysis=require_complete_analysis,
-        # The Markdown render applies the *resolved* per-library cap, so the
-        # run's own `--max-findings-per-library` has to reach it.
-        max_findings=max_findings,
     )
     _write_or_echo(output, text)
 
@@ -351,10 +347,10 @@ def _finalize_release_output(
     # Action's PR-comment JSON rerun never fires) can still tell the axis
     # fired. The release path folds the same contribution into its exit code
     # unconditionally (`_exit_compare_release`) but, unlike single-pair
-    # `compare`, never said so anywhere except `--format json`'s own
+    # `compare`, never said so anywhere except `-o json=...`'s own
     # `contract_coverage_exit_contribution` field -- so a markdown-format
     # release run gave no visible reason for an exit code coverage alone
-    # raised. Only `--format json` already states it; every other format
+    # raised. Only `-o json=...` already states it; every other format
     # gets this one line.
     #
     # Gated on *failure count*, not exit contribution (Codex review,
@@ -392,7 +388,7 @@ def _finalize_release_output(
                 "domain in: "
                 + ", ".join(_affected)
                 + f". {_effect} (ADR-049 contract-coverage axis). See "
-                "contract_coverage_failure_count in --format json output "
+                "contract_coverage_failure_count in -o json=... output "
                 "for per-library detail.",
                 err=True,
             )
@@ -477,25 +473,19 @@ def _validate_suppression_early(
         )
 
 
-#: Both values now live in the ``report.release_display_limits`` leaf, so
-#: the Markdown renderer that applies the cap can read it without importing
-#: this module -- a function-local import between the two was a real new
-#: import cycle. Re-exported here under their original private names for
-#: every existing importer, tests included.
+#: The one remaining display cap lives in the ``report.release_display_limits``
+#: leaf, so the Markdown renderer that applies it can read it without
+#: importing this module -- a function-local import between the two was a
+#: real new import cycle. Re-exported here under its original private name
+#: for every existing importer, tests included. Plan slice 7m retired the two
+#: resolvers that used to sit beside it (the flag and env-var overrides they
+#: read are gone), so there is nothing left to resolve: the cap is a
+#: constant, and a machine document is never capped at all.
 from .report import release_display_limits as _display_limits  # noqa: E402
 
-# Plain assignments (mypy's `no_implicit_reexport`), for the same reason the
-# release-input re-exports below give. The two *resolvers* live in that leaf
-# too, not here: the Markdown renderer applies the resolved cap and reaching
-# back into this module for it was a real import cycle.
+# Plain assignment (mypy's `no_implicit_reexport`), for the same reason the
+# release-input re-exports below give.
 _MAX_RELEASE_FINDINGS_PER_LIBRARY = _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY
-_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = (
-    _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR
-)
-_release_findings_cap_is_explicit = _display_limits.release_findings_cap_is_explicit
-_resolve_max_release_findings_per_library = (
-    _display_limits.resolve_max_release_findings_per_library
-)
 
 
 
@@ -667,18 +657,16 @@ def _release_finding_dicts(
     diff: DiffResult,
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
-    max_findings: int | None = None,
     *,
     uncapped: bool = False,
 ) -> tuple[list[dict[str, object]], list[str]]:
     """Project a library's gating findings into small, capped dicts.
 
     *uncapped* builds the **complete** projection instead, and returns no
-    cut kinds -- nothing was cut. Used for the machine documents when no
-    cap was actually requested (see
-    :func:`_release_findings_cap_is_explicit`): a truncated JSON/JUnit
-    document nobody asked to truncate is not a summary, it is a lossy
-    result, and this release schema has no per-library findings array
+    cut kinds -- nothing was cut. That is what every machine document gets
+    (plan slice 7m: complete machine data is never truncated): a truncated
+    JSON/JUnit document nobody asked to truncate is not a summary, it is a
+    lossy result, and this release schema has no per-library findings array
     elsewhere for a consumer to fall back to.
 
     Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
@@ -700,11 +688,6 @@ def _release_finding_dicts(
     show) -- applied before the cap, so a filtered-out finding never
     occupies one of the cap's slots a displayed one needed.
 
-    *max_findings* (``compare-release --max-findings-per-library``) is
-    resolved via :func:`_resolve_max_release_findings_per_library` --
-    ``None`` falls back to the env var, then the built-in default, exactly
-    like ``cli_scan_baseline``'s identical knob.
-
     Each dict also carries ``reclassified_by`` (schema 2.31) when a
     ``reclassify:`` rule decided the change's effective verdict, via
     :func:`abicheck.reporter.release_finding_entry` -- the identical
@@ -720,11 +703,7 @@ def _release_finding_dicts(
     from .reporter import release_finding_entry
     from .reporter_markdown import apply_show_only
 
-    cap = (
-        _resolve_max_release_findings_per_library(max_findings)
-        if not uncapped
-        else None
-    )
+    cap = None if uncapped else _MAX_RELEASE_FINDINGS_PER_LIBRARY
     findings: list[dict[str, object]] = []
     cut_kinds: list[str] = []
     for bucket_name, bucket_changes in _release_display_buckets(diff, severity_config):
@@ -759,7 +738,6 @@ def _strip_diff_results_and_adjust_verdict(
     needs_annotations: bool = True,
     show_only: str | None = None,
     show_impact: bool = False,
-    max_findings: int | None = None,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -780,7 +758,7 @@ def _strip_diff_results_and_adjust_verdict(
     *needs_annotations* gates whether the uncapped ``annotations`` array
     (unlike ``findings`` above, deliberately unbounded -- see its own
     comment) is built at all (Codex review, fresh evidence): only a JSON
-    render (primary ``--format json`` or a secondary ``--write
+    render (primary ``-o json=...`` or a secondary ``--write
     json=...``) ever reads it, but every entry in ``library_results`` is
     held until the whole release finishes, so building it unconditionally
     grew peak memory by every library's full finding set even for a
@@ -797,8 +775,8 @@ def _strip_diff_results_and_adjust_verdict(
     ``findings_view_truncated`` keys, consumed (and stripped) by
     :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
     only for whichever renderer is the *primary* (``--format``) one -- a
-    secondary ``--write`` report is documented/contracted to always be full
-    (mirroring single-pair ``compare``'s own ``--write`` behaviour), so it
+    secondary ``-o`` report is documented/contracted to always be full
+    (mirroring single-pair ``compare``'s own ``-o`` behaviour), so it
     must never see this filtered view. Computing the view here rather than
     re-filtering ``entry["findings"]`` downstream is deliberate: the
     severity dimension of ``--view show=`` resolves through
@@ -819,24 +797,26 @@ def _strip_diff_results_and_adjust_verdict(
     computed the same way :func:`_release_finding_dicts`'s ``findings_view``
     is -- consumed and stripped by
     :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
-    for whichever renderer is primary, never for a secondary ``--write``.
+    for whichever renderer is primary, never for a secondary ``-o``.
 
-    *max_findings* (``compare-release --max-findings-per-library`` /
-    ``$ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY``) overrides the default
-    per-library cap -- see :func:`_resolve_max_release_findings_per_library`.
-    Whenever a library's ``findings``/``findings_view`` is truncated, the
-    kinds cut are also accumulated into ``findings_truncated_kinds``/
-    ``findings_view_truncated_kinds`` (kind -> count cut), mirroring
-    ``cli_scan_baseline``'s identical ``findings_truncated_kinds`` ledger.
+    ``entry["findings"]``/``entry["findings_view"]`` are always the
+    **complete** projections (plan slice 7m -- there is no longer any way to
+    ask for a truncated machine document, so ``uncapped`` below is
+    unconditional). The presentation cap is applied at Markdown render time
+    instead (``_release_md_library_findings``), which is also where the
+    ``findings_truncated_kinds``/``findings_view_truncated_kinds`` (kind ->
+    count cut) disclosure of what a human summary omitted is produced.
 
     Returns the (possibly updated) *worst_verdict* string.
     """
-    cap = _resolve_max_release_findings_per_library(max_findings)
     # `entry["findings"]` feeds every renderer, and only the human ones want
-    # a cap. Left complete unless this run actually asked for truncation, so
-    # a machine document is complete by default; `_release_md_library_
-    # findings` applies the presentation cap at render time instead.
-    uncapped = not _release_findings_cap_is_explicit(max_findings)
+    # a cap -- so it is always complete here and `_release_md_library_
+    # findings` applies the presentation cap at render time instead. Plan
+    # slice 7m: with `--max-findings-per-library` and its env var retired,
+    # "this run asked for truncation" is no longer expressible, and the
+    # branch that used to answer it is gone rather than left permanently
+    # false.
+    uncapped = True
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -844,16 +824,11 @@ def _strip_diff_results_and_adjust_verdict(
         if isinstance(diff, DiffResult):
             display_buckets = _release_display_buckets(diff, severity_config)
             total_gating = sum(len(cat_changes) for _, cat_changes in display_buckets)
-            findings, cut_kinds = _release_finding_dicts(
-                diff, severity_config, None, max_findings, uncapped=uncapped
+            findings, _cut_kinds = _release_finding_dicts(
+                diff, severity_config, None, uncapped=uncapped
             )
             if findings:
                 entry["findings"] = findings
-                if not uncapped and total_gating > cap:
-                    entry["findings_truncated"] = True
-                    _accumulate_release_kind_counts(
-                        entry, "findings_truncated_kinds", cut_kinds
-                    )
             # Codex review, fresh evidence ("Count uncapped findings in
             # release filter totals"): the uncapped pool size behind
             # `findings` above -- `len(entry["findings"])` alone
@@ -884,21 +859,16 @@ def _strip_diff_results_and_adjust_verdict(
                     )
                     for _, cat_changes in display_buckets
                 )
-                findings_view, cut_kinds_view = _release_finding_dicts(
-                    diff, severity_config, show_only, max_findings, uncapped=uncapped
+                findings_view, _cut_kinds_view = _release_finding_dicts(
+                    diff, severity_config, show_only, uncapped=uncapped
                 )
                 entry["findings_view"] = findings_view
-                if not uncapped and total_gating_view > cap:
-                    entry["findings_view_truncated"] = True
-                    _accumulate_release_kind_counts(
-                        entry, "findings_view_truncated_kinds", cut_kinds_view
-                    )
                 # The filtered counterpart of `findings_total_count` above --
                 # same rationale, same private/popped contract.
                 entry["findings_total_count_view"] = total_gating_view
             # CLI cleanup phase two, PR E: the uncapped, always-classified
             # counterpart to the capped `findings` list above -- the exact
-            # same shape single-library `compare --format json` persists at
+            # same shape single-library `compare -o json=...` persists at
             # its own top-level `annotations` (schema 2.43,
             # `annotations.annotation_report_entries`), reused verbatim so
             # the two can never disagree. This is what lets the Action's own

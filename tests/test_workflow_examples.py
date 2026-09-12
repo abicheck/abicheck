@@ -387,7 +387,7 @@ def _json_step(**overrides):
         "run": "abicheck compare a.so b.so",
         "argv": ("abicheck", "compare", "a.so", "b.so"),
         "exit_code": 4,
-        "json_variant": ("--format", "json"),
+        "json_variant": ("-o", "json=-"),
         "expect_json": {"verdict": "BREAKING", "change_kinds": ["func_removed"]},
     }
     return workflow_examples.Step(**{**defaults, **overrides})

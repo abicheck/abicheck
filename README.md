@@ -245,10 +245,10 @@ abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
 abicheck compare baseline.json ./build/libfoo.so --header new=include/foo.h
 ```
 
-Pick an output format with `--format markdown|json|sarif|html|junit`:
+Ask for exports with `-o FORMAT=DESTINATION` (`-` is stdout, repeatable):
 
 ```bash
-abicheck compare old.so new.so -H foo.h --format sarif -o report.sarif
+abicheck compare old.so new.so -H foo.h -o sarif=report.sarif
 ```
 
 Inputs can be shared libraries, JSON snapshots, release directories, or packages (`.rpm`, `.deb`, `.tar`, conda, wheel), mixed freely. Full walkthrough: [Getting Started](https://abicheck.github.io/abicheck/start/getting-started/). Decision guide by artifact and CI policy: [Choose Your Workflow](https://abicheck.github.io/abicheck/start/choose-your-workflow/).

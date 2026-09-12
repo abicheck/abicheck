@@ -425,7 +425,7 @@ def reject_bundle_facts_out_collision(
     *secondary_outputs: Path | None,
 ) -> None:
     """Reject ``--bundle-facts-out`` naming the same file as ``--output``/
-    ``--write`` (G38 Phase 2).
+    ``-o`` (G38 Phase 2).
 
     A command-specific extra check, deliberately not
     ``reject_incoherent_secondary_output()``'s job (see that leaf module's
@@ -433,9 +433,9 @@ def reject_bundle_facts_out_collision(
     result.json`` silently overwrites the requested baseline with the
     report while still reporting success (Codex review).
 
-    *secondary_outputs* is variadic because ``--write`` is repeatable: every
+    *secondary_outputs* is variadic because ``-o`` is repeatable: every
     requested artifact's PATH is checked, not just the first. Checking one
-    let ``--write json=a.json --write markdown=b.md --bundle-facts-out
+    let ``-o json=a.json -o markdown=b.md --bundle-facts-out
     b.md`` through.
     """
     if bundle_facts_out is None:
@@ -457,11 +457,11 @@ def reject_bundle_facts_out_dir_collision(
     output_dir: Path | None,
     old_map: dict[str, Path],
 ) -> None:
-    """Reject ``--bundle-facts-out`` naming a path ``--output-dir`` will
+    """Reject ``--bundle-facts-out`` naming a path a per-component export will
     also write (G38 Phase 2, Codex review, fresh evidence).
 
     ``reject_bundle_facts_out_collision()`` above only knows about
-    ``--output``/``--write`` -- it can't see ``--output-dir``'s own
+    the export set -- it can't see a per-component export's own
     ``summary.json`` or per-library ``<stem>.json`` files, since those
     paths depend on *output_dir* and (for the per-library case) the
     resolved OLD-side library map, neither known at that earlier
@@ -474,8 +474,8 @@ def reject_bundle_facts_out_dir_collision(
     summary_path = output_dir / "summary.json"
     if resolved == summary_path.resolve():
         raise click.UsageError(
-            "--bundle-facts-out's PATH must differ from --output-dir's own "
-            "summary.json: writing both to the same file would silently "
+            "--bundle-facts-out's PATH must differ from the per-component "
+            "export's own summary.json: writing both to the same file would silently "
             "overwrite the requested bundle-facts baseline with the "
             "per-library summary report."
         )
@@ -483,8 +483,8 @@ def reject_bundle_facts_out_dir_collision(
         lib_path = output_dir / f"{old_path.stem}.json"
         if resolved == lib_path.resolve():
             raise click.UsageError(
-                f"--bundle-facts-out's PATH must differ from --output-dir's "
-                f"own per-library report for {name!r} ({lib_path}): writing "
+                f"--bundle-facts-out's PATH must differ from the per-component "
+                f"export's own report for {name!r} ({lib_path}): writing "
                 "both to the same file would silently overwrite whichever "
                 "was written second."
             )
@@ -834,9 +834,9 @@ def _release_findings_for_render(
     ``--format``'s own selection), it swaps ``findings``/
     ``findings_truncated`` for the filtered view; either way it strips the
     private ``findings_view``/``findings_view_truncated`` keys so they never
-    leak into a rendered report. A secondary ``--write`` report calls this
+    leak into a rendered report. A secondary ``-o`` report calls this
     with ``show_only=None`` (its own contract: always full/unfiltered,
-    mirroring single-pair ``compare``'s own ``--write`` behaviour), which
+    mirroring single-pair ``compare``'s own ``-o`` behaviour), which
     still routes through here so the private keys are stripped from *that*
     render too.
 
@@ -930,7 +930,6 @@ def _format_release_summary(
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
-    max_findings: int | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
 
@@ -958,7 +957,7 @@ def _format_release_summary(
     view (per-library findings, and the release-global bundle/matrix
     findings) rather than to a shared upstream projection, so a caller that
     reaches this function once for the primary ``--format`` and once more
-    for a secondary ``--write`` (passing ``show_only=None`` for the latter,
+    for a secondary ``-o`` (passing ``show_only=None`` for the latter,
     per that render's own "always full" contract) gets two independently
     correct renders from the same already-computed ``library_results``/
     ``bundle_result``/``matrix_result``.
@@ -1016,7 +1015,6 @@ def _format_release_summary(
         severity_config=severity_config,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
-        max_findings=max_findings,
     )
     if demangle:
         from .demangle import demangle_text
@@ -1076,7 +1074,7 @@ def _format_release_junit(
     is deliberately **not** a parameter here at all, matching single-pair
     ``compare``'s own already-shipped behaviour: ``service_render.
     render_output``'s ``fmt == "junit"`` branch never receives or forwards
-    ``show_impact`` either, so ``compare --format junit --view impact`` on
+    ``show_impact`` either, so ``compare -o junit=... --view impact`` on
     a single old/new pair already renders ordinary JUnit XML with no
     impact representation, silently, today -- this is not a release-only
     gap this function introduced, it is the release engine agreeing with
@@ -1251,7 +1249,7 @@ def _format_release_json(
     *show_only* (Codex review, PR #1154 second follow-up) is applied here,
     at render time, to three independent things -- never by mutating
     *library_results* itself, so this function's own caller can also use it
-    unfiltered (a secondary ``--write`` passes ``show_only=None``): the
+    unfiltered (a secondary ``-o`` passes ``show_only=None``): the
     embedded per-library ``"findings"`` (via
     :func:`_release_findings_for_render`), and the release-global
     ``bundle_findings``/``matrix_findings`` lists below (filtered directly,
@@ -1561,7 +1559,6 @@ def _format_release_markdown(
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
-    max_findings: int | None = None,
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1589,7 +1586,7 @@ def _format_release_markdown(
     `report/AGENTS.md`'s renderer contract forbids the ``report``-classified
     renderer itself from calling either filter function. *library_results*
     itself is never mutated, so this function's caller can also render an
-    unfiltered (``show_only=None``) secondary ``--write`` from the same data.
+    unfiltered (``show_only=None``) secondary ``-o`` from the same data.
 
     When *show_only* is active, the document also gets a ``> Filtered by:
     ...`` note (Codex review, fresh evidence: "Disclose active filters in
@@ -1706,21 +1703,16 @@ def _format_release_markdown(
     lines += _release_md_evidence_contract(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     # The human summary stays bounded even though the shared projection is
-    # now complete -- the cap is a presentation choice, applied here. It is
-    # the **resolved** cap, not the built-in default: `--max-findings-per-
-    # library 20` (or the env var) is documented to control how much the
-    # aggregate summary itemizes, and slicing at the constant ignored it
-    # (Codex review, PR #1238, P2). `resolve_max_release_findings_per_library`
-    # is the one resolver every other consumer of this cap already calls
-    # (it lives in the leaf, so reading it here is not an import cycle), so
-    # the Markdown render cannot disagree with them.
-    from .report.release_display_limits import (
-        resolve_max_release_findings_per_library,
-    )
+    # complete -- the cap is a presentation choice, applied here, and since
+    # plan slice 7m it is *automatic*: `--max-findings-per-library` and its
+    # environment variable are retired, so there is one cap and no resolver
+    # for the Markdown render to disagree with anyone about (the constant
+    # lives in the leaf, so reading it here is not an import cycle).
+    from .report.release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
 
     lines += _release_md_library_findings(
         display_library_results,
-        display_cap=resolve_max_release_findings_per_library(max_findings),
+        display_cap=MAX_RELEASE_FINDINGS_PER_LIBRARY,
     )
     lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)
     lines += _release_md_matrix_findings(matrix_result, display_matrix_changes)

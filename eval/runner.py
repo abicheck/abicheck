@@ -126,7 +126,7 @@ def scan_one(entry: dict) -> dict:
         rec["old_funcs"] = _defined_export_funcs(oso)
         rec["new_funcs"] = _defined_export_funcs(nso)
         rec["snap_kb"] = (osnap.stat().st_size + nsnap.stat().st_size) // 1024
-        tc, pc = _run(["abicheck", "compare", str(osnap), str(nsnap), "--format", "json"])
+        tc, pc = _run(["abicheck", "compare", str(osnap), str(nsnap), "-o", "json=-"])
         rec["compare_s"] = tc
         rec["legacy_rc"] = pc.returncode
         d = json.loads(pc.stdout)
@@ -287,7 +287,7 @@ def scan_source_one(entry: dict) -> dict:
         rec["old_coverage"] = ocov
         rec["new_coverage"] = ncov
         rec["build_s"] = round(ot + nt, 2)
-        tc, pc = _run(["abicheck", "compare", str(osnap), str(nsnap), "--format", "json"])
+        tc, pc = _run(["abicheck", "compare", str(osnap), str(nsnap), "-o", "json=-"])
         rec["compare_s"] = tc
         if pc.stdout:
             d = json.loads(pc.stdout)

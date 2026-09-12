@@ -109,7 +109,7 @@ def contract_options(f: F) -> F:
     ``--audit-suppressions`` used to live here too. ADR-068 D4 /
     one-comparison-product.md Phase 5 (§4.1's AUTO row) removed it: the
     audit is computed on every run that was given ``--suppress`` and
-    carried in ``--format json``/sarif/junit/html unconditionally, so the
+    carried in ``-o json=...``/sarif/junit/html unconditionally, so the
     flag only ever chose whether the markdown/text/review render echoed it
     -- a rendering selector, which is what ``--view suppressions`` is for
     (:mod:`abicheck.frontends.cli.options.view`).
@@ -135,10 +135,10 @@ def contract_options(f: F) -> F:
         "Each finding is stamped with a contract_relevance (IN_CONTRACT/"
         "PROVEN_OUT_OF_CONTRACT/UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/"
         "NOT_APPLICABLE), a contract_reason_code and -- when resolved -- "
-        "a contract_assurance, rendered per finding in --format json/"
+        "a contract_assurance, rendered per finding in -o json=.../"
         "markdown, in sarif/junit properties, and as an html badge; "
-        "--format review's compact digest renders it only in the "
-        "--used-by/--required-symbol scoped-gate appendix. --format json "
+        "-o review=...'s compact digest renders it only in the "
+        "--used-by/--required-symbol scoped-gate appendix. -o json=... "
         "additionally carries contract_evidence_refs per finding (which "
         "evidence records the decision rests on) and a top-level "
         "contract_context block (observed provider evidence, resolved "

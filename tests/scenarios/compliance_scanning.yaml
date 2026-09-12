@@ -42,7 +42,7 @@ scenarios:
       as confident compatibility). This is the "don't overclaim" companion to
       SC-PUBLIC-SURFACE-SCOPE.
     flow:
-      - abicheck compare old.json new.json --scope-public-headers --format json
+      - abicheck compare old.json new.json --scope-public-headers -o json=-
       - abicheck compare old.json new.json --scope-public-headers --view filtered
     expected:
       exit_code: 4   # fallback keeps the break, so the gate still fires

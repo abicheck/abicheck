@@ -137,7 +137,7 @@ def _embedded_source_graph(data: dict[str, Any]) -> SourceGraphSummary | None:
 
 
 def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:
-    """Resolve a symbol from a `compare --format json` report finding.
+    """Resolve a symbol from a `compare -o json=...` report finding.
 
     ``finding_id`` may be a 0-based index into the report's changes, or a symbol
     substring to match. Returns the matched change's ``symbol`` (or "").

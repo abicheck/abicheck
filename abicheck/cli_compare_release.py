@@ -86,7 +86,6 @@ from .cli_compare_release_pairwise import (
 from .cli_options import (
     include_dependencies_option,
     lang_option,
-    output_options,
     policy_options,
     release_input_options,
     scope_options,
@@ -94,10 +93,6 @@ from .cli_options import (
     verbose_option,
 )
 from .errors import SnapshotError
-from .frontends.cli.options import (
-    reject_incoherent_secondary_writes,
-    secondary_output_options,
-)
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model import AbiSnapshot
 from .model.release_selection import ReleaseSelection
@@ -127,6 +122,10 @@ if TYPE_CHECKING:
     from .pack_application import PackApplication
 
 
+#: The formats the release fan-out actually produces.
+_ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
+
+
 # NOTE: not registered on `main` — the user-facing `compare-release` command was
 # removed (ADR-037 D7 clean removal). This stays a standalone Click command so
 # `compare`'s directory/package dispatch can `ctx.invoke` it as the fan-out engine.
@@ -137,17 +136,35 @@ if TYPE_CHECKING:
 # the user-facing --header/--include collapse (ADR-040 L1) lives on `compare`.
 @release_input_options
 @lang_option
-@output_options(
-    ["json", "markdown", "junit", "oneline"],
-    output_help="Output file for summary report (default: stdout).",
+# Plan slice 7m: this engine is never registered on `main` and is only ever
+# called through `compare`'s own already-parsed export set (see
+# `frontends/cli/options/export.expand_export_kwargs`), so it declares its
+# three destination parameters as plain internal Click options rather than
+# reaching for a user-facing option factory. There is no `--format`/
+# `-o`/`--output-dir` surface here to keep in sync with `compare`'s any
+# more -- only the three dest names that set carries.
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(_ENGINE_FORMATS),
+    default="markdown",
+    hidden=True,
 )
-@secondary_output_options(["json", "markdown", "junit", "oneline"], multiple=True)
+@click.option(
+    "-o",
+    "--output",
+    "output",
+    type=click.Path(path_type=Path),
+    default=None,
+    hidden=True,
+)
+@click.option("--write", "secondary_writes", multiple=True, hidden=True)
 @click.option(
     "--output-dir",
     "output_dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Directory to write per-library reports.",
+    hidden=True,
 )
 # Policy + suppression family (ADR-037 D3); strict/justification stay inline.
 @policy_options
@@ -227,20 +244,6 @@ if TYPE_CHECKING:
     is_flag=True,
     default=False,
     help="Include private (non-public) shared objects from non-standard paths.",
-)
-@click.option(
-    "--max-findings-per-library",
-    "max_findings_per_library",
-    type=click.IntRange(min=1),
-    default=None,
-    help="Cap on findings embedded in each library's findings/findings_view "
-    "lists in the release summary (default 10, or "
-    "$ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY when set). Raising it never "
-    "changes the verdict/exit code -- only how much of each library's diff "
-    "the aggregate release summary itemizes; --output-dir remains the way "
-    "to see every library's full, unfiltered report unconditionally. When "
-    "truncated, findings_truncated_kinds/findings_view_truncated_kinds "
-    "still report a kind -> count breakdown of what was cut.",
 )
 @verbose_option
 @click.option(
@@ -422,7 +425,7 @@ def compare_release_cmd(
     # (unresolved against any one format) -- this command's own body
     # resolves it separately against `fmt`/`secondary_fmt`, mirroring
     # single-pair `compare`'s own `demangle_explicit` split for its
-    # `--write` render.
+    # `-o` render.
     show_only: str | None = None,
     demangle: bool | None = None,
     explain_patterns: bool = False,
@@ -466,7 +469,6 @@ def compare_release_cmd(
     # default) is a true no-op: every library is compared exactly as it was
     # before this parameter existed.
     project_policy_overrides: dict[Any, Any] | None = None,
-    max_findings_per_library: int | None = None,
     # ADR-020b / ADR-068 D5: resolved once by the caller
     # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
     # same place `collapse_versioned_symbols`/`public_header_dirs` above are
@@ -559,15 +561,11 @@ def compare_release_cmd(
         except ValueError as exc:
             raise click.UsageError(str(exc)) from exc
 
-    # CLI cleanup phase two, PR E: shared with `compare` so it can't drift.
-    # CLI cleanup phase two, PR E, generalized: `--write` is repeatable
-    # here now, exactly as it already is on `compare` -- one analysis, several
-    # artifacts (ADR-068 D4). Shared coherence check, so the two cannot drift.
-    reject_incoherent_secondary_writes(
-        dry_run=False,
-        output=output,
-        secondary_writes=secondary_writes,
-    )
+    # Plan slice 7m: no export-vs-export collision check here any more --
+    # every destination this engine receives came from one already-validated
+    # export set (`frontends.cli.options.export`), which checks collisions
+    # across all targets before any work starts. `--bundle-facts-out` is not
+    # part of that set, so its own collision check stays.
     reject_bundle_facts_out_collision(
         bundle_facts_out, output, *(path for _, path in secondary_writes)
     )
@@ -1124,7 +1122,6 @@ def compare_release_cmd(
                 needs_annotations=(fmt == "json" or "json" in secondary_formats),
                 show_only=show_only,
                 show_impact=show_impact,
-                max_findings=max_findings_per_library,
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).
@@ -1170,20 +1167,23 @@ def compare_release_cmd(
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
             for secondary_fmt, secondary_output in secondary_writes:
-                # CLI cleanup phase two, PR E, generalized: `--write` is
+                # CLI cleanup phase two, PR E, generalized: `-o` is
                 # repeatable for a directory/package (release) compare, the
                 # same as on `compare`. Every artifact is rendered from the
                 # exact same already-computed library_results/diff_pairs/
                 # bundle_result/matrix_result -- one analysis, several
                 # artifacts, no second per-library comparison pass.
                 #
-                # `show_only` is deliberately NOT forwarded here (Codex
-                # review, PR #1154 second follow-up: "Apply release show
-                # filters inside each renderer") -- a secondary `--write`
-                # report is always full/unfiltered, the same contract
-                # single-pair `compare`'s own `--write` already honours; only
-                # the primary `--format` render below (`_finalize_release_
-                # output`) receives the release's `--view show=` selection.
+                # Plan slice 7m: `show_only` IS forwarded here now. It used
+                # not to be -- a `-o` artifact was contracted to be
+                # full/unfiltered while the `--format` one honoured
+                # `--view show=` -- but that asymmetry only had an answer
+                # while the two were different flags. Under one repeatable
+                # export request there is no principled way to say which of
+                # two `-o` targets is the unfiltered one, so a display
+                # selector now means the same thing for every export, here
+                # exactly as in single-pair `compare`
+                # (`cli_compare_helpers._report_compare_result`).
                 secondary_text = _format_release_summary(
                     secondary_fmt,
                     worst_verdict,
@@ -1211,9 +1211,9 @@ def compare_release_cmd(
                     scope_terms=scope_terms,
                     assurance_terms=assurance_terms,
                     demangle=_resolve_demangle(secondary_fmt, demangle),
+                    show_only=show_only,
                     env_matrix_source_sha256=env_matrix_source_sha256,
                     require_complete_analysis=require_complete_analysis,
-                    max_findings=max_findings_per_library,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1249,7 +1249,6 @@ def compare_release_cmd(
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,
                 require_complete_analysis=require_complete_analysis,
-                max_findings=max_findings_per_library,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)

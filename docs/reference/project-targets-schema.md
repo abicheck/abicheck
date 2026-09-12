@@ -528,7 +528,7 @@ $ abicheck project validate .abicheck.yml
 project-targets validation: .abicheck.yml
 OK — no errors.
 
-$ abicheck project validate .abicheck.yml --format json
+$ abicheck project validate .abicheck.yml -o json=-
 {
   "ok": true,
   "errors": [],

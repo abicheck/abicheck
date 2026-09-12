@@ -109,7 +109,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", "tree", str(binary), "--format", "json"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
         assert parsed["root_binary"] == str(binary)
@@ -126,7 +126,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", "tree", str(binary), "--format", "markdown"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "markdown=-"])
         assert result.exit_code == 0, result.output
         assert "# Stack Report:" in result.output
         assert "Loadability" in result.output
@@ -144,7 +144,7 @@ class TestDepsCommand:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["deps", "tree", str(binary), "--format", "json", "-o", str(outfile)],
+            main, ["deps", "tree", str(binary), "-o", f"json={outfile}"],
         )
         assert result.exit_code == 0, result.output
         assert outfile.exists()
@@ -164,7 +164,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", "tree", str(binary), "--format", "json"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 1
 
     def test_deps_sysroot_and_search_path(self, tmp_path, monkeypatch):
@@ -188,10 +188,15 @@ class TestDepsCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "tree", str(binary),
-            "--sysroot", str(sysroot),
-            "--search-path", str(search_dir),
-            "--format", "json",
+            "deps",
+            "tree",
+            str(binary),
+            "--sysroot",
+            str(sysroot),
+            "--search-path",
+            str(search_dir),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 0, result.output
         assert captured_kwargs["sysroot"] == sysroot
@@ -237,10 +242,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
@@ -267,10 +277,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "markdown",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "markdown=-",
         ])
         assert result.exit_code == 0, result.output
         assert "# Stack Report:" in result.output
@@ -293,11 +308,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
-            "-o", str(outfile),
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            f"json={outfile}",
         ])
         assert result.exit_code == 0, result.output
         assert outfile.exists()
@@ -323,10 +342,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 4
 
@@ -349,10 +373,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 4
 
@@ -387,10 +416,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 5
 
@@ -413,10 +447,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 1
 
@@ -439,10 +478,15 @@ class TestStackCheckCommand:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "deps", "compare", binary_rel,
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-            "--format", "json",
+            "deps",
+            "compare",
+            binary_rel,
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+            "-o",
+            "json=-",
         ])
         assert result.exit_code == 0
 

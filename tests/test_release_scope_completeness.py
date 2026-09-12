@@ -144,7 +144,7 @@ def _invoke_json(*args: str) -> tuple[int, dict[str, object]]:
     (``Unsupported: ...``) are interleaved into ``result.output``."""
     from abicheck.cli import main
 
-    result = CliRunner().invoke(main, [*args, "--format", "json"])
+    result = CliRunner().invoke(main, [*args, "-o", "json=-"])
     return result.exit_code, json.loads(result.stdout)
 
 
@@ -266,7 +266,7 @@ class TestMixedMatrix:
         assert doc["run_outcome"]["operational"] == "none"
         assert doc["exit"]["reasons"] == ["clean"]
         # Every view names the unchecked member.
-        _, md = _invoke("compare", str(old), str(new), "--format", "markdown")
+        _, md = _invoke("compare", str(old), str(new), "-o", "markdown=-")
         assert "Comparison Scope" in md
         assert "libb.json" in md and "unsupported" in md
         assert "scope incompletely checked" in md
@@ -330,7 +330,7 @@ class TestZeroPairRelease:
         assert "no_comparison_completed" in doc["exit"]["reasons"]
         assert doc["comparison_scope"]["no_comparison_completed"] is True
         assert doc["comparison_scope"]["no_comparison_completed_exit_contribution"] == 1
-        _, md = _invoke("compare", str(old), str(new), "--format", "markdown")
+        _, md = _invoke("compare", str(old), str(new), "-o", "markdown=-")
         assert "no comparison completed" in md
 
     def test_every_member_unsupported_is_also_no_comparison(
@@ -1144,8 +1144,8 @@ class TestJunitScopeProjection:
                 "compare",
                 str(old),
                 str(new),
-                "--format",
-                "junit",
+                "-o",
+                "junit=-",
                 "--config",
                 str(cfg),
             ],
@@ -1201,8 +1201,8 @@ class TestJunitScopeProjection:
                     "compare",
                     str(old),
                     str(new),
-                    "--format",
-                    "junit",
+                    "-o",
+                    "junit=-",
                     "--config",
                     str(cfg),
                 ],

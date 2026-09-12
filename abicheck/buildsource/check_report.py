@@ -186,8 +186,8 @@ def derive_effective_depth(
 
     Reads the depth the underlying ``compare``/``scan`` run *actually*
     achieved straight from its own JSON output -- ``old_evidence_depth``/
-    ``new_evidence_depth`` (``compare``, always present for ``--format
-    json`` via ``cli_compare_helpers._fold_evidence_depth_into_json``) or
+    ``new_evidence_depth`` (``compare``, always present for a ``json``
+    export via ``cli_compare_helpers._fold_evidence_depth_into_json``) or
     ``level.depth`` (``scan``, ``ScanOutcome.to_dict``) -- rather than
     inferring it from which collect-facts producer step ran. This is the
     authoritative signal: it's correct for every way a caller can supply
@@ -225,7 +225,7 @@ def derive_effective_depth(
             achieved, source = audit_result
     if achieved is None:
         # Neither signal is present -- shouldn't happen for real compare/scan
-        # --format json output, but trust the request rather than silently
+        # -o json=... output, but trust the request rather than silently
         # guessing "complete" for whatever this report actually is.
         return requested_depth, {
             "state": "unknown",

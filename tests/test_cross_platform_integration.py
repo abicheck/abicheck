@@ -254,9 +254,16 @@ class TestMachoIntegration:
 
             # Compare
             cmp = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "compare",
-                 str(td_path / "old.json"), str(td_path / "new.json"),
-                 "--format", "markdown"],
+                [
+                sys.executable,
+                "-m",
+                "abicheck.cli",
+                "compare",
+                str(td_path / "old.json"),
+                str(td_path / "new.json"),
+                "-o",
+                "markdown=-",
+            ],
                 capture_output=True, text=True, check=False,
             )
 
@@ -428,9 +435,16 @@ class TestPeIntegration:
             # encoding="utf-8" so the *parent* decodes the pipe correctly.
             env = {**subprocess.os.environ, "PYTHONUTF8": "1"}
             cmp = subprocess.run(
-                [sys.executable, "-m", "abicheck.cli", "compare",
-                 str(td_path / "old.json"), str(td_path / "new.json"),
-                 "--format", "markdown"],
+                [
+                sys.executable,
+                "-m",
+                "abicheck.cli",
+                "compare",
+                str(td_path / "old.json"),
+                str(td_path / "new.json"),
+                "-o",
+                "markdown=-",
+            ],
                 capture_output=True, encoding="utf-8", check=False, env=env,
             )
 

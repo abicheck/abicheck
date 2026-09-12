@@ -91,7 +91,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Output & reporting",
             "options": [
                 "--output",
-                "--format",
                 "--view",
                 "--config",
                 "--verbose",
@@ -116,8 +115,11 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             # The format/debuginfod/dwarf-only knobs are config-only now (the
             # `debug:` config block, ADR-040 L2) -- their hidden CLI spellings
             # were removed outright in ADR-068 D5 / Phase 7a; only the coarse
-            # per-run --debug-root override stays a visible flag.
-            "options": ["--debug-root"],
+            # per-run override stays a visible flag, and since Phase 7n it is
+            # the whole role: --debug-info covers a directory, a detached
+            # debug file, and a debug package (--debug-root merged into it,
+            # which is also why it left the Release panel below).
+            "options": ["--debug-info"],
         },
         {
             "name": "Build & source evidence (--depth build/source)",
@@ -137,12 +139,10 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--version",
             ],
         },
-        {
-            "name": "Build-config matrix & idioms",
-            "options": [
-                "--probe-matrix",
-            ],
-        },
+        # Phase 7n: the "Build-config matrix & idioms" panel is gone --
+        # a probe-matrix snapshot is one of --build-info's operands now, so
+        # it shows up in the build-evidence panel above with the compile
+        # context it may be supplied alongside.
         {
             # Phase 7d (one-comparison-product.md §4.1): --dso-only/
             # --fail-on-removed-library/--include-private-dso/
@@ -152,11 +152,16 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             # their only source now, no surviving CLI override. --keep-
             # extracted/--no-bundle-analysis are gone too, with no config
             # replacement (ADR-068 D5 -- neither survives its three guards).
+            # Phase 7n: --debug-info moved to the "Debug info" panel (it is
+            # the whole debug role now) and --devel-pkg is gone -- a devel
+            # package is one of -H/--header's transports, so it appears in
+            # the Inputs panel with the headers it carries.
             "name": "Release (directory/package inputs)",
+            # Plan slice 7m: --output-dir is gone from this panel -- the
+            # per-component fan-out is a destination shape inside --output's
+            # own export request (`-o json=reports/`), so it is documented
+            # where every other export is.
             "options": [
-                "--output-dir",
-                "--debug-info",
-                "--devel-pkg",
                 "--instantiation-manifest",
             ],
         },
@@ -179,10 +184,11 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             # Phase 7c: --dwarf-only/--debug-format/--debuginfod/
             # --debuginfod-url/--pdb-path are gone too (debug: config block
-            # only); only the coarse per-run --debug-root override stays a
-            # visible flag, matching compare's own "Debug info" panel.
+            # only); only the coarse per-run --debug-info override stays a
+            # visible flag (Phase 7n renamed it from --debug-root), matching
+            # compare's own "Debug info" panel.
             "name": "Debug info",
-            "options": ["--debug-root"],
+            "options": ["--debug-info"],
         },
         {
             "name": "Build & source evidence (--depth build/source)",
@@ -300,7 +306,8 @@ def configure_rich_help() -> None:
 # help screen changes.
 #
 # Dest names (``click.Option.name``), not flag strings: a few options share
-# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``--view``,
+# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``-o``,
+# ``--view``,
 # ADR-068 D4/Phase 5's collapse of --report-mode/--show-only/--demangle/
 # --no-demangle/--explain-patterns into one dest) where only one dest exists
 # either way.
@@ -311,9 +318,10 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "include",
         # --lang has no Click dest here any more (Phase 7: compile.lang
         # config-only, one-comparison-product.md §4.1).
-        # Output & reporting
-        "output",
-        "fmt",
+        # Output & reporting -- one dest ("exports") for the whole export
+        # request since plan slice 7m; the retired "fmt" was the other half
+        # of the pair it replaced.
+        "exports",
         "view",
         # Policy & severity
         "config",
@@ -338,7 +346,7 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # format/debuginfod/dwarf-only knobs are config-only now (the `debug:`
         # config block, ADR-040 L2) -- their hidden CLI spellings were removed
         # outright in ADR-068 D5 / Phase 7a.
-        "debug_root",
+        "debug_info",
         # Per-side overrides -- version labelling is routine for bare .so
         # inputs (--pdb-path is gone: debug.pdb_path config only, Phase 7).
         "version",
@@ -497,12 +505,12 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Project config
         "build_config",
         # Debug info -- the coarse per-run override stays visible on `dump`
-        # too, same as on `compare` above (whose own dest is the singular
-        # `debug_root`, split into sided paths by `cli_options.py`; `dump`
-        # binds this flag straight to the plural `debug_roots` multiple=True
-        # parameter -- CodeRabbit review, PR #1146, finding #4: this name
-        # was missing here, so plain `dump --help` never showed a real,
-        # still-supported flag).
+        # too, same as on `compare` above (whose own dest is `debug_info`,
+        # split into sided per-transport destinations by
+        # `options/evidence_roles.py`; `dump` binds `--debug-info` straight
+        # to the plural `debug_roots` multiple=True parameter -- CodeRabbit
+        # review, PR #1146, finding #4: this name was missing here, so plain
+        # `dump --help` never showed a real, still-supported flag).
         "debug_roots",
         # Output
         "output",

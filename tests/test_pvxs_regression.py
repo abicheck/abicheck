@@ -207,10 +207,8 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
             f"new={new_dir / 'pvxs.h'}",
             "--config",
             str(compare_cfg),
-            "--format",
-            "json",
             "-o",
-            str(out_json),
+            f"json={out_json}",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -316,10 +314,8 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
             f"new={new_dir / 'pvxs.h'}",
             "--config",
             str(compare_cfg),
-            "--format",
-            "json",
             "-o",
-            str(out_json),
+            f"json={out_json}",
         ],
     )
     assert result.exit_code == 0, result.output
