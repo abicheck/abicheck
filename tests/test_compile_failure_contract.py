@@ -124,6 +124,12 @@ def test_failure_diagnostics_survive_any_stderr(stderr: bytes) -> None:
     assert "clang -shared -o x.so" in message
     assert _SRC in message
     assert "exited 1" in message
+    # The stderr itself, which is the whole point of the promise and the one
+    # thing the earlier version of this test did not check (Codex review,
+    # PR #1252): without this, a helper that dropped or truncated stderr
+    # passed every parameter above. Compared against an independent decode of
+    # the same bytes, not against whatever the helper produced.
+    assert stderr.decode(errors="replace") in message
 
 
 def test_skip_reason_names_the_optional_feature() -> None:
