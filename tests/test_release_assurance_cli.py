@@ -487,3 +487,71 @@ class TestReleaseAssuranceThroughTheCli:
             gated_docs[0]["effective_config_digest"]
             != ungated_doc["effective_config_digest"]
         )
+
+    def test_the_stored_bundle_facts_driver_publishes_the_gate_too(
+        self, bundle: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """ADR-070 D8/D9 on the *other* driver, end to end.
+
+        `compare_bundle_facts.dispatch` is a separate renderer and a separate
+        set of writes from the live release fan-out, and Codex (P1) found it
+        resolving the fold only *after* `_render` and every per-library write --
+        so it exited 1 while its own report and each `--output-dir` file read 0
+        to `aggregate`/the Action's deferred gate. Same invariant as
+        `test_every_report_the_run_writes_agrees_with_the_real_exit`, asserted
+        on this driver because sharing the fold function does not mean sharing
+        the publishing path.
+        """
+        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+
+        facts = tmp_path / "old.bundlefacts.json"
+        captured = _compare(
+            str(bundle["v1"]),
+            str(bundle["v1"]),
+            "--bundle-facts-out",
+            str(facts),
+            bundle=bundle,
+            require=False,
+        )
+        assert facts.exists(), captured.stdout + captured.stderr
+
+        out = tmp_path / "stored_od"
+        run = _compare(
+            str(facts),
+            str(bundle["v1_nodebug"]),
+            "--output-dir",
+            str(out),
+            bundle=bundle,
+        )
+        assert run.returncode == 1, run.stdout + run.stderr
+        primary = json.loads(run.stdout)
+        assert _analysis_assurance_exit(primary) == 1
+        assert primary["analysis_assurance"]["status"] != "complete"
+        written = sorted(out.glob("*.json"))
+        assert written, "the stored driver wrote no per-library reports"
+        for path in written:
+            doc = json.loads(path.read_text())
+            assert _analysis_assurance_exit(doc) == 1, path.name
+
+    def test_the_stored_driver_is_clean_when_nothing_fell_short(
+        self, bundle: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Negative control for the stored driver: comparing a stored capture
+        against the very tree it was captured from leaves nothing short, so the
+        same reader must see `0` everywhere."""
+        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+
+        facts = tmp_path / "same.bundlefacts.json"
+        _compare(
+            str(bundle["v1"]),
+            str(bundle["v1"]),
+            "--bundle-facts-out",
+            str(facts),
+            bundle=bundle,
+            require=False,
+        )
+        assert facts.exists()
+        run = _compare(str(facts), str(bundle["v1"]), bundle=bundle)
+        doc = json.loads(run.stdout)
+        assert _analysis_assurance_exit(doc) == 0
+        assert run.returncode == 0, run.stdout + run.stderr

@@ -8485,17 +8485,22 @@ left out, each for a stated reason rather than for effort:
    pattern. **Do not add a fourth `0`/`1` release axis by copying this one;**
    land that convergence first.
 
-4. **The stored-`BundleFacts` operand's JSON carries no assurance block.** It
-   folds the axis and exits on it identically (D8), and its stderr notice names
-   the short members — but that driver's `--format json` document has no `exit`
-   block at all, so unlike the live release report there is nowhere for the
-   fold's own section to hang without first giving that document an `exit`
-   block. Nothing *contradicts* anything as a result (the failure mode would be
-   a published `exit.code` disagreeing with the process status, and there is no
-   published one here); a consumer of that JSON simply learns the verdict and
-   not the assurance. Giving that driver a real `exit` block is its own change,
-   and the right one — it would close this and several adjacent asymmetries at
-   once, rather than bolting one block onto a document with no exit contract.
+4. **The stored-`BundleFacts` operand's JSON carries no `exit` block.** It
+   folds the axis, exits on it, and — since a Codex P1 on this PR — publishes
+   the canonical top-level `analysis_assurance_exit_contribution` and the fold
+   section in its own report and in every `--output-dir` file, so the gate is
+   no longer lost to `aggregate` or a deferred gate. What it still lacks is an
+   `exit` block of its own, unlike the live release document: a consumer
+   reading `exit.code` from this driver's JSON finds nothing, and has to read
+   the verdict and the individual axis keys instead.
+
+   An earlier revision of this entry used that missing `exit` block to excuse
+   omitting the fold entirely, on the grounds that the section had "nowhere to
+   hang". That was wrong about the half that mattered: the gate-bearing key is
+   a plain top-level scalar and needs no `exit` block at all, which is exactly
+   why the omission was a real gate bypass rather than a cosmetic gap. Giving
+   that driver a real `exit` block remains its own change, and the right one —
+   it would close several adjacent asymmetries at once.
 
 5. **`--depth binary` is not projected onto a stored-`BundleFacts` OLD side,
    so that operand is stricter than a live one.** `compare_bundle_facts.

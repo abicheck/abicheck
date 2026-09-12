@@ -219,9 +219,16 @@ included without a second list to keep in sync.
 `exit.code: 0` for a member that floored the run; and the
 `effective_config_fields`/digest receipt, which must name
 `gate.require_complete_analysis` or a gated run is indistinguishable from an
-ungated one. Each of these was a real loss found in review, and all four share
-one shape — an orthogonal axis reaching some consumers and not others — which
-is why they are stated here as one rule rather than four fixes.
+ungated one. And all of it again on the stored-`BundleFacts`
+driver, which is a *separate* renderer and a separate set of writes: sharing
+the fold function is not sharing the publishing path, and that driver resolved
+its decision only after rendering, so it published the same clean-looking
+reports for a run it exited `1` on.
+
+Each of these was a real loss found in review, and they all share one shape —
+an orthogonal axis reaching some consumers and not others — which is why this
+is stated here as one rule rather than five fixes: **resolve the decision
+before anything is rendered or written, and carry it into every document.**
 
 `run_outcome.gate` deliberately stays `none` for a run this axis floors, and
 that is **not** an omission: `gate` is a *compatibility* category

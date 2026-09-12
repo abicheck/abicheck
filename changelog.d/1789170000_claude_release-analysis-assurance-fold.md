@@ -31,7 +31,8 @@
   per-library `{library}.json` under `--output-dir`, and the
   `effective_config_fields`/digest receipt, which names
   `gate.require_complete_analysis` so a gated run is distinguishable from an
-  ungated one. No new policy
+  ungated one — on the stored-`BundleFacts` driver as well as the live fan-out,
+  which is a separate renderer with its own writes. No new policy
   setting and no new exit number — `assurance.require_complete` defaults
   `false`, so every pre-existing release invocation's exit code, report bytes,
   and stderr are unchanged.
