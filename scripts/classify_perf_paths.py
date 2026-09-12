@@ -213,6 +213,33 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/storage/**",
     "abicheck/comparability.py",
     "abicheck/snapshot_io.py",
+    # The L2 *extraction* layer. Omitting it was a real hole in the extension
+    # above, which covered the frontend, renderer, orchestration and storage
+    # paths but not the stage that actually produces L2 evidence: a PR touching
+    # only `extract/semantic_normalizer.py` or `dumper_manifest.py` classified as
+    # not-perf-sensitive, so none of the perf jobs -- including the full-CLI L2
+    # gate, whose whole subject is this path -- would have measured it.
+    #
+    # Verified against the real import graph rather than assumed from the
+    # directory name: `dumper.py` imports `extract.export_symbol_identity`,
+    # `extract.header_ast_backend` and `extract.header_ast_fields` at module
+    # scope, and resolves `dumper_manifest.resolve_header_ast_result` and
+    # `dumper_hybrid.run_hybrid_dump` lazily on the dump path.
+    "abicheck/extract/**",
+    # Every `dumper_*` sibling `dumper.py` actually imports. Six of these were
+    # missing and were found by deriving the set from `dumper.py`'s own imports in
+    # `tests/test_classify_perf_paths.py` rather than listing them by hand --
+    # which is the same omission, one layer down, that the extract/ hole was.
+    # That test now fails if `dumper.py` starts importing a sibling no pattern
+    # here covers.
+    "abicheck/dumper_manifest.py",
+    "abicheck/dumper_hybrid.py",
+    "abicheck/dumper_castxml_probe.py",
+    "abicheck/dumper_contract.py",
+    "abicheck/dumper_debug.py",
+    "abicheck/dumper_elf_fallback.py",
+    "abicheck/dumper_elf_symbols.py",
+    "abicheck/dumper_layout_backfill.py",
 )
 
 

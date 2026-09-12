@@ -1,10 +1,8 @@
 {
-  "schema": "abicheck-perf-receipt/1",
+  "schema": "abicheck-perf-receipt/2",
   "profile": "pvxs",
   "identity": {
     "harness": "manual-pvxs-profile-run",
-    "product_sha": "70c7e846b3d4c764d69214a97ef78332a7e69775",
-    "product_dirty": true,
     "python_version": "3.13.12",
     "python_implementation": "CPython",
     "platform": "Linux-6.18.44-fc-v32-x86_64-with-glibc2.39",
@@ -37,7 +35,16 @@
     "system_packages": [
       "libevent-dev"
     ],
-    "rss_interval_seconds": 0.05
+    "rss_interval_seconds": 0.05,
+    "harness_sha": "70c7e846b3d4c764d69214a97ef78332a7e69775",
+    "harness_dirty": true,
+    "measured_product": {
+      "version": "0.5.0",
+      "location": "/home/user/abicheck/abicheck",
+      "sha": "70c7e846b3d4c764d69214a97ef78332a7e69775",
+      "dirty": true,
+      "unavailable_reason": null
+    }
   },
   "effective_thresholds": {},
   "scenarios": [
@@ -142,6 +149,7 @@
     "The ~10x spread between the two libraries is the size of their public header surfaces (client.h+data.h+server.h vs. one iochooks.h).",
     "sampled_peak_tree_bytes is a sampled lower bound on concurrent process-tree RSS at a 0.05s interval, not an exact peak; ru_maxrss_bytes is the separate per-process kernel high-water mark and is shared across both rows because it is cumulative over the measuring process's reaped children.",
     "EPICS base and both pvxs revisions were built as SETUP, outside every measured window. Preparation also needed libevent-dev, which EPICS base does not require but pvxs does.",
-    "Reproduce: scripts/l2_real_profiles.py's prepare_script(PVXS), then a compare per library with per-side labelled include roots (--include old:ctxN=... / new:ctxN=...). Note that mixing a labelled side-scoped include with unlabelled global ones did NOT apply the global roots; every root must be given per side."
+    "Reproduce: scripts/l2_real_profiles.py's prepare_script(PVXS), then a compare per library with per-side labelled include roots (--include old:ctxN=... / new:ctxN=...). Note that mixing a labelled side-scoped include with unlabelled global ones did NOT apply the global roots; every root must be given per side.",
+    "Re-stamped to receipt schema 2, which splits the harness's own revision from the measured product's. For this run they are the same checkout (an editable install measuring itself); the split matters for the PR-vs-base lane, where one harness measures two products."
   ]
 }

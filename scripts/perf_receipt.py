@@ -63,7 +63,6 @@ import hashlib
 import json
 import os
 import platform
-import resource
 import shutil
 import signal
 import subprocess
@@ -74,10 +73,27 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+try:  # pragma: no cover - platform-dependent
+    import resource
+except ModuleNotFoundError:  # Windows has no `resource`
+    # Guarded because the Windows unit-test matrix *collects* this module's test
+    # files, and a module-scope import error fails that lane during collection --
+    # before any `requires_linux` skip can apply. The harness itself is
+    # Linux/ELF-scoped and refuses to run elsewhere, but "refuses to run" and
+    # "cannot be imported" are different failures, and only the first is the one
+    # intended.
+    resource = None  # type: ignore[assignment]
+
 #: Receipt schema. Bump on any field removal or meaning change; a purely
 #: additive field does not need one, which is why consumers must tolerate
 #: unknown keys.
-RECEIPT_SCHEMA = "abicheck-perf-receipt/1"
+#:
+#: ``2`` splits the single ``product_sha`` into ``harness_sha`` (the measuring
+#: code) and ``measured_product`` (the installed ``abicheck`` the numbers are
+#: about). They are genuinely different in the one lane that matters: a PR-vs-base
+#: run measures two products with one harness, and the old single field recorded
+#: the harness's revision for both.
+RECEIPT_SCHEMA = "abicheck-perf-receipt/2"
 
 #: The only environment variables recorded, and why each matters to a timing:
 #: they change how much work runs or how it is scheduled. An allowlist rather
@@ -225,7 +241,7 @@ def memory_limit() -> dict[str, Any]:
     return out
 
 
-def _git(*args: str) -> str | None:
+def _git(*args: str, cwd: Path | None = None) -> str | None:
     try:
         return subprocess.run(
             ["git", *args],
@@ -233,10 +249,60 @@ def _git(*args: str) -> str | None:
             text=True,
             timeout=20,
             check=True,
-            cwd=Path(__file__).resolve().parent.parent,
+            cwd=cwd or Path(__file__).resolve().parent.parent,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def measured_product() -> dict[str, Any]:
+    """Identity of the ``abicheck`` actually being measured, not of this harness.
+
+    These are two different things and the receipt has to keep them apart. The
+    PR-vs-base lane deliberately runs **HEAD's harness** against **BASE's
+    installed package** -- that is the only way the two numbers are comparable.
+    But ``_git()`` resolves metadata from the directory holding *this file*, so
+    both receipts recorded the same head SHA as ``product_sha`` and the
+    persisted provenance could not say which product produced which timing.
+
+    So the product is identified from the *installed* package: its version, its
+    resolved filesystem location, and -- when that location happens to sit inside
+    a git checkout (an editable install, which is how both lanes install) -- that
+    checkout's own SHA. ``harness_sha`` stays separate, as the identity of the
+    measuring code.
+    """
+    info: dict[str, Any] = {
+        "version": None,
+        "location": None,
+        "sha": None,
+        "dirty": None,
+        "unavailable_reason": None,
+    }
+    try:
+        import abicheck
+    except ImportError as exc:
+        info["unavailable_reason"] = f"abicheck is not importable: {exc}"
+        return info
+    info["version"] = getattr(abicheck, "__version__", None)
+    package_file = getattr(abicheck, "__file__", None)
+    if package_file is None:
+        info["unavailable_reason"] = "the abicheck package has no __file__"
+        return info
+    root = Path(package_file).resolve().parent
+    info["location"] = str(root)
+    # An editable install leaves the package inside its checkout, so git can
+    # identify it. A wheel install cannot be identified this way, and says so
+    # rather than silently inheriting the harness's SHA.
+    sha = _git("rev-parse", "HEAD", cwd=root)
+    if sha is None:
+        info["unavailable_reason"] = (
+            "the installed abicheck is not inside a git checkout (a non-editable "
+            "install), so no revision can be attributed to it"
+        )
+        return info
+    info["sha"] = sha
+    info["dirty"] = bool(_git("status", "--porcelain", cwd=root))
+    return info
 
 
 def tool_version(tool: str) -> str | None:
@@ -276,8 +342,14 @@ def run_identity(
     """Product/harness SHA, toolchain, interpreter, OS and resource facts."""
     identity: dict[str, Any] = {
         "harness": harness,
-        "product_sha": _git("rev-parse", "HEAD"),
-        "product_dirty": bool(_git("status", "--porcelain")),
+        # The MEASURING code's own revision. Distinct from measured_product
+        # below, and deliberately so: the PR-vs-base lane runs one harness
+        # against two products, so a single "product_sha" field cannot be
+        # correct for both receipts.
+        "harness_sha": _git("rev-parse", "HEAD"),
+        "harness_dirty": bool(_git("status", "--porcelain")),
+        # The thing whose performance the numbers describe.
+        "measured_product": measured_product(),
         "python_version": platform.python_version(),
         "python_implementation": platform.python_implementation(),
         "platform": platform.platform(),
@@ -632,7 +704,11 @@ def run_measured(
     abandoned.
     """
     sampler = TreeRssSampler(rss_interval) if sample_rss else None
-    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    # None, not zero, where `resource` is unavailable: a CPU figure of 0.0 would
+    # read as a real measurement of a process that used no CPU.
+    before = (
+        resource.getrusage(resource.RUSAGE_CHILDREN) if resource is not None else None
+    )
     start = time.perf_counter()
     proc = subprocess.Popen(
         argv,
@@ -668,18 +744,30 @@ def run_measured(
     wall = time.perf_counter() - start
     if sampler is not None:
         sampler.stop()
-    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    after = (
+        resource.getrusage(resource.RUSAGE_CHILDREN) if resource is not None else None
+    )
     rss = None
     if sampler is not None:
         # ru_maxrss is in KiB on Linux.
-        rss = sampler.result(ru_maxrss_bytes=after.ru_maxrss * 1024 or None)
+        rss = sampler.result(
+            ru_maxrss_bytes=(after.ru_maxrss * 1024 or None) if after else None
+        )
     return CommandRun(
         argv=list(argv),
         exit_code=proc.returncode,
         wall_seconds=wall,
-        user_cpu_seconds=after.ru_utime - before.ru_utime,
-        system_cpu_seconds=after.ru_stime - before.ru_stime,
-        cpu_scope="waited_children_delta",
+        user_cpu_seconds=(
+            after.ru_utime - before.ru_utime if before and after else None
+        ),
+        system_cpu_seconds=(
+            after.ru_stime - before.ru_stime if before and after else None
+        ),
+        cpu_scope=(
+            "waited_children_delta"
+            if before and after
+            else "unavailable: no `resource` module on this platform"
+        ),
         timed_out=timed_out,
         stdout=stdout or "",
         stderr=stderr or "",

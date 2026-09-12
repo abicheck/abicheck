@@ -23,6 +23,7 @@ run at all.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -392,3 +393,54 @@ class TestWorkflowWiring:
         assert "labeled" not in line
         assert "github.event_name" not in line
         assert "&&" not in line and "||" not in line
+
+
+class TestL2ExtractionPathsAreClassified:
+    """The stage that produces L2 evidence must mark a PR perf-sensitive.
+
+    The first extension of this list covered the CLI, renderer, orchestration and
+    storage paths but not the extraction layer -- so a PR touching only
+    `extract/semantic_normalizer.py` or `dumper_manifest.py` classified as
+    not-sensitive, and every perf job (including the full-CLI L2 gate, whose whole
+    subject is that path) was skipped for it.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "abicheck/extract/semantic_normalizer.py",
+            "abicheck/extract/header_ast_fields.py",
+            "abicheck/extract/header_ast_backend.py",
+            "abicheck/extract/export_symbol_identity.py",
+            "abicheck/dumper_manifest.py",
+            "abicheck/dumper_hybrid.py",
+        ],
+    )
+    def test_an_l2_extraction_module_is_perf_sensitive(self, path):
+        assert classify.changed_files_are_perf_sensitive([path])
+
+    def test_every_real_dumper_import_target_is_covered(self):
+        # Derived from dumper.py's actual imports rather than a hand-listed set,
+        # so a module it starts importing later is caught here instead of silently
+        # dropping out of perf coverage.
+        source = (_PATH.resolve().parent.parent / "abicheck" / "dumper.py").read_text(
+            encoding="utf-8"
+        )
+        targets = set(
+            re.findall(r"from \.(extract\.[a-z_]+|dumper_[a-z_]+) import", source)
+        )
+        targets |= set(re.findall(r"from \.(dumper_[a-z_]+) import", source))
+        assert targets, "dumper.py should import at least one such module"
+        uncovered = [
+            t
+            for t in sorted(targets)
+            if not classify.changed_files_are_perf_sensitive(
+                [f"abicheck/{t.replace('.', '/')}.py"]
+            )
+        ]
+        assert uncovered == [], uncovered
+
+    def test_an_unrelated_model_module_stays_unclassified(self):
+        # The extension must not widen to the point where every PR is
+        # perf-sensitive; model/ is mostly data shapes.
+        assert not classify.changed_files_are_perf_sensitive(["abicheck/model/fact.py"])

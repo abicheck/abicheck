@@ -897,7 +897,11 @@ class TestRealL2Execution:
         assert rc == 0
         receipt = json.loads(out.read_text())
         assert receipt["schema"] == receipt_mod.RECEIPT_SCHEMA
-        assert receipt["identity"]["product_sha"]
+        # Both identities, separately: the harness's own revision and the product
+        # the numbers describe (receipt schema 2 -- see
+        # test_perf_receipt.TestMeasuredProductIsDistinctFromTheHarness).
+        assert receipt["identity"]["harness_sha"]
+        assert receipt["identity"]["measured_product"]["location"]
         assert receipt["effective_thresholds"]["wall_seconds"]["tolerance"]
         measured = {s["id"].split("[", 1)[0] for s in receipt["scenarios"]}
         assert set(harness.REQUIRED_PR_SHAPES) <= measured

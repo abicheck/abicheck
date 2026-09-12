@@ -58,7 +58,11 @@ class TestRunIdentity:
     def test_it_records_what_a_comparison_needs(self):
         identity = pr.run_identity(harness="t")
         for key in (
-            "product_sha",
+            # harness_sha and measured_product rather than a single product_sha:
+            # see TestMeasuredProductIsDistinctFromTheHarness for why the two
+            # cannot be one field.
+            "harness_sha",
+            "measured_product",
             "python_version",
             "platform",
             "cpu_quota",
@@ -90,6 +94,107 @@ class TestRunIdentity:
     def test_an_unavailable_memory_limit_states_a_reason_rather_than_zero(self):
         limit = pr.memory_limit()
         assert limit["cgroup_limit_bytes"] is not None or limit["unavailable_reason"]
+
+
+class TestImportableWithoutResource:
+    """The module must import on a platform with no ``resource``.
+
+    The Windows unit-test matrix *collects* this file and
+    ``test_l2_cli_perf_gate.py``, and a module-scope ``import resource`` fails
+    that lane during collection -- before any ``requires_linux`` skip can apply.
+    The harness is Linux/ELF-scoped and refuses to *run* elsewhere, but "refuses
+    to run" and "cannot be imported" are different failures and only the first is
+    intended.
+
+    Tested by genuinely blocking the import via a meta-path finder rather than by
+    checking the source for a ``try``, so the claim is about behaviour.
+    """
+
+    def _reimport_without_resource(self):
+        import importlib.abc
+
+        class Block(importlib.abc.MetaPathFinder):
+            def find_spec(self, name, path=None, target=None):
+                if name == "resource":
+                    raise ModuleNotFoundError(f"No module named {name!r}")
+                return None
+
+        saved_resource = sys.modules.pop("resource", None)
+        blocker = Block()
+        sys.meta_path.insert(0, blocker)
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "perf_receipt_noresource", _SCRIPTS / "perf_receipt.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["perf_receipt_noresource"] = module
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            sys.meta_path.remove(blocker)
+            sys.modules.pop("perf_receipt_noresource", None)
+            if saved_resource is not None:
+                sys.modules["resource"] = saved_resource
+
+    def test_the_module_imports(self):
+        module = self._reimport_without_resource()
+        assert module.resource is None
+
+    def test_run_measured_still_works(self):
+        module = self._reimport_without_resource()
+        run = module.run_measured([sys.executable, "-c", "pass"], timeout=60)
+        assert run.exit_code == 0
+        assert run.wall_seconds > 0
+
+    def test_cpu_time_is_none_with_a_stated_scope_not_zero(self):
+        # 0.0 would read as a real measurement of a process that used no CPU.
+        module = self._reimport_without_resource()
+        run = module.run_measured([sys.executable, "-c", "pass"], timeout=60)
+        assert run.user_cpu_seconds is None
+        assert run.system_cpu_seconds is None
+        assert "no `resource` module" in run.cpu_scope
+
+    def test_a_receipt_can_still_be_built(self):
+        module = self._reimport_without_resource()
+        receipt = module.build_receipt(harness="t", profile="pr", scenarios=[])
+        assert receipt["schema"] == module.RECEIPT_SCHEMA
+
+
+class TestMeasuredProductIsDistinctFromTheHarness:
+    """The receipt must say which *product* a timing describes.
+
+    The PR-vs-base lane deliberately runs HEAD's harness against BASE's installed
+    package -- the only way the two numbers are comparable. A single
+    ``product_sha`` derived from the harness's own directory therefore recorded
+    the head revision in *both* receipts, so the persisted provenance could not
+    tell them apart.
+    """
+
+    def test_the_two_identities_are_separate_fields(self):
+        identity = pr.run_identity(harness="t")
+        assert "harness_sha" in identity
+        assert "measured_product" in identity
+        # The conflated field is gone, so a consumer cannot keep reading it and
+        # silently get the harness's revision.
+        assert "product_sha" not in identity
+
+    def test_the_measured_product_is_identified_from_the_installed_package(self):
+        product = pr.measured_product()
+        assert product["location"], product
+        # This checkout is an editable install, so the location is inside it.
+        assert "abicheck" in product["location"]
+
+    def test_an_unidentifiable_product_states_a_reason(self, monkeypatch):
+        # A wheel install is not inside a git checkout and must say so rather than
+        # inheriting the harness's revision.
+        monkeypatch.setattr(pr, "_git", lambda *a, **k: None)
+        product = pr.measured_product()
+        assert product["sha"] is None
+        assert product["unavailable_reason"]
+
+    def test_the_schema_version_records_the_split(self):
+        # A consumer reading the old shape must be able to detect the change.
+        assert pr.RECEIPT_SCHEMA.endswith("/2")
 
 
 class TestDigestPaths:
