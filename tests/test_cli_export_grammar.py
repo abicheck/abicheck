@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import re
 from pathlib import Path
 
@@ -56,6 +57,7 @@ from abicheck.frontends.cli.options.export import (
 )
 
 _EXIT_USAGE_ERROR = 64
+
 
 #: Every command carrying the export request, with the formats it declares.
 #: Read off Click rather than restated, so a command added to (or dropped
@@ -179,7 +181,9 @@ class TestOperandGrammar:
         "dest", ["-", "report.out", "nested/dir/report.out", "with=equals.out"]
     )
     def test_format_and_destination_round_trip(self, fmt: str, dest: str) -> None:
-        target = parse_export_operand(f"{fmt}={dest}", ["json", "markdown", "sarif", "junit"])
+        target = parse_export_operand(
+            f"{fmt}={dest}", ["json", "markdown", "sarif", "junit"]
+        )
         assert target.fmt == fmt
         if dest == "-":
             assert target.to_stdout
@@ -291,9 +295,7 @@ class TestOperandGrammar:
         import click
 
         with pytest.raises(click.BadParameter, match="names a directory"):
-            build_export_set(
-                ["json=reports/"], ["json"], default_format="json"
-            )
+            build_export_set(["json=reports/"], ["json"], default_format="json")
 
     def test_directory_destination_rejects_a_format_the_fan_out_cannot_produce(
         self,
@@ -360,9 +362,7 @@ class TestGrammarAcrossEveryExportingCommand:
     ) -> None:
         if len(formats) < 2:  # pragma: no cover - every command has two today
             pytest.skip("command declares one format")
-        message = _parse_error(
-            path, ["-o", f"{formats[0]}=-", "-o", f"{formats[1]}=-"]
-        )
+        message = _parse_error(path, ["-o", f"{formats[0]}=-", "-o", f"{formats[1]}=-"])
         assert "standard output" in message
 
 
@@ -370,7 +370,9 @@ class TestRetiredSpellings:
     """Every retired spelling exits 64, with no alias, on every command."""
 
     @pytest.mark.parametrize("path,_formats", EXPORT_COMMANDS)
-    @pytest.mark.parametrize("flag", ["--format", "--write", "--output-dir", "--max-findings-per-library"])
+    @pytest.mark.parametrize(
+        "flag", ["--format", "--write", "--output-dir", "--max-findings-per-library"]
+    )
     def test_retired_flag_is_gone(
         self, path: tuple[str, ...], _formats: tuple[str, ...], flag: str
     ) -> None:
@@ -467,9 +469,7 @@ class TestExportsAreOneAnalysis:
         old, new = snapshot_pair
         destinations = {fmt: tmp_path / f"all-{fmt}.out" for fmt in RENDERABLE}
         args = [
-            arg
-            for fmt, dest in destinations.items()
-            for arg in ("-o", f"{fmt}={dest}")
+            arg for fmt, dest in destinations.items() for arg in ("-o", f"{fmt}={dest}")
         ]
         result = _run(["compare", str(old), str(new), *args])
         assert result.exit_code == 4, result.output
@@ -539,7 +539,14 @@ class TestDryRunAndExports:
     ) -> None:
         old, new = snapshot_pair
         result = _run(
-            ["compare", str(old), str(new), "--dry-run", "-o", f"json={tmp_path / 'x.json'}"]
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--dry-run",
+                "-o",
+                f"json={tmp_path / 'x.json'}",
+            ]
         )
         assert result.exit_code == _EXIT_USAGE_ERROR, result.output
         assert "--dry-run" in result.output
@@ -621,3 +628,147 @@ def test_export_set_is_hashable_and_frozen() -> None:
     exports = ExportSet(targets=(ExportTarget(fmt="json", destination=None),))
     with pytest.raises(AttributeError):
         exports.targets = ()  # type: ignore[misc]
+
+
+class TestDirectoryExportOwnsItsTree:
+    """A directory export claims *everything* under it, not just its own path.
+
+    The fan-out generates one report per component plus ``summary.json``
+    there, and those names come from the operand's inventory -- unknowable
+    at parse time. So the contract is containment, stated here over
+    generated nestings rather than over the one reported operand pair
+    (``-o json=reports/ -o markdown=reports/libfoo.json``), which was
+    accepted and let the Markdown document overwrite the per-library JSON.
+
+    The oracle is deliberately a second derivation -- a resolved-posix string
+    prefix -- not the ``Path.parents`` containment the implementation folds
+    over.
+    """
+
+    #: (directory operand, file destination) pairs. Half land inside the
+    #: directory at varying depth, half are near-misses chosen to catch a
+    #: prefix test that forgot the separator (``reports2``) or that treated
+    #: an ancestor as containment.
+    _DESTINATIONS = (
+        "reports/libfoo.json",
+        "reports/summary.json",
+        "reports/nested/deep/out.json",
+        "reports/./libfoo.json",
+        "reports/../reports/libfoo.json",
+        "reports2/libfoo.json",
+        "reportsx.json",
+        "elsewhere/libfoo.json",
+        "out.json",
+        "../sibling.json",
+    )
+
+    @staticmethod
+    def _oracle_is_inside(root: Path, destination: Path) -> bool:
+        root_text = root.resolve().as_posix().rstrip("/") + "/"
+        return destination.resolve().as_posix().startswith(root_text)
+
+    @pytest.mark.parametrize("destination", _DESTINATIONS)
+    @pytest.mark.parametrize("directory_first", [True, False])
+    def test_containment_decides_regardless_of_order(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        destination: str,
+        directory_first: bool,
+    ) -> None:
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        monkeypatch.chdir(workdir)
+
+        operands = [f"json=reports{os.sep}", f"markdown={destination}"]
+        if not directory_first:
+            operands.reverse()
+
+        inside = self._oracle_is_inside(Path("reports"), Path(destination))
+        if inside:
+            with pytest.raises(click.BadParameter) as excinfo:
+                build_export_set(
+                    operands,
+                    ["json", "markdown"],
+                    default_format="markdown",
+                    supports_directory=True,
+                    directory_formats=["json"],
+                )
+            assert "per-component reports" in str(excinfo.value)
+        else:
+            exports = build_export_set(
+                operands,
+                ["json", "markdown"],
+                default_format="markdown",
+                supports_directory=True,
+                directory_formats=["json"],
+            )
+            assert len(exports.targets) == 2
+
+    def test_the_oracle_is_not_vacuous(self) -> None:
+        """Guard the guard: an oracle stuck at one answer would make every
+        case above pass while asserting nothing."""
+        answers = {
+            self._oracle_is_inside(Path("reports"), Path(d)) for d in self._DESTINATIONS
+        }
+        assert answers == {True, False}
+
+    def test_stdout_export_is_never_inside_a_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``-`` has no path, so the containment rule must skip it rather
+        than resolving it as the relative file named ``-``."""
+        monkeypatch.chdir(tmp_path)
+        exports = build_export_set(
+            [f"json=reports{os.sep}", "markdown=-"],
+            ["json", "markdown"],
+            default_format="markdown",
+            supports_directory=True,
+            directory_formats=["json"],
+        )
+        assert exports.primary.to_stdout
+
+
+def test_no_export_operand_was_committed_as_a_repository_file() -> None:
+    """An export written to the *raw* operand text (``-o json=-`` creating a
+    file literally named ``json=-``) is what an unfaithful test stub
+    produces, and eight such artifacts reached a commit on this branch
+    before review caught them. Named as a class rather than as those eight
+    paths: any tracked file whose name is a bare format or carries the
+    ``FORMAT=`` prefix is this mistake, wherever in the tree it lands.
+    """
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parent.parent
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+
+    formats = {
+        "json",
+        "markdown",
+        "sarif",
+        "html",
+        "junit",
+        "review",
+        "oneline",
+        "text",
+    }
+    offenders = [
+        path
+        for path in tracked
+        if path
+        and (
+            Path(path).name in formats
+            or Path(path).name.split("=", 1)[0] in formats
+            and "=" in Path(path).name
+        )
+    ]
+    assert offenders == [], (
+        "these tracked files look like an export operand written verbatim as a "
+        f"filename rather than parsed into FORMAT and DESTINATION: {offenders}"
+    )

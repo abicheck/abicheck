@@ -245,7 +245,9 @@ def parse_export_operand(
     fmt, sep, raw_destination = value.partition("=")
     if not sep:
         raise click.BadParameter(
-            _grammar_error(value, formats, "missing '=' between FORMAT and DESTINATION."),
+            _grammar_error(
+                value, formats, "missing '=' between FORMAT and DESTINATION."
+            ),
             param=param,
         )
     if not fmt:
@@ -266,9 +268,9 @@ def parse_export_operand(
     if raw_destination == STDOUT_DESTINATION:
         return ExportTarget(fmt=fmt, destination=None, spelling=value)
 
-    looks_like_directory = raw_destination.endswith(("/", os.sep)) or Path(
-        raw_destination
-    ).is_dir()
+    looks_like_directory = (
+        raw_destination.endswith(("/", os.sep)) or Path(raw_destination).is_dir()
+    )
     if looks_like_directory:
         if not supports_directory:
             raise click.BadParameter(
@@ -360,6 +362,35 @@ def build_export_set(
             )
         seen[resolved] = target
 
+    # An exact-path match is not the whole collision class (Codex review, P1,
+    # reproduced): a directory export *owns* everything the fan-out generates
+    # underneath it -- one report per component plus ``summary.json`` -- and
+    # those names are not knowable here, since they come from the operand's
+    # own inventory, resolved long after parse time. So the rule is
+    # containment, not name prediction: any other export writing anywhere
+    # inside that tree races with generated content, and the observed failure
+    # (``-o json=reports/ -o markdown=reports/libfoo.json`` exiting 0 after
+    # the Markdown document overwrote the per-library JSON) is one member of
+    # it, not the shape of it. Checked in both directions for the same
+    # reason a single directory export is allowed at all -- which target was
+    # spelled first says nothing about which one clobbers the other.
+    for directory in directory_targets:
+        assert directory.destination is not None
+        root = directory.destination.resolve()
+        for target in targets:
+            if target is directory or target.destination is None:
+                continue
+            if root not in target.destination.resolve().parents:
+                continue
+            raise click.BadParameter(
+                f"{target.spelling!r} writes inside {root}, which "
+                f"{directory.spelling!r} already claims for its per-component "
+                "reports: the fan-out generates one report per component plus "
+                "summary.json there, so either export could overwrite the "
+                "other's document. Send it somewhere outside that directory.",
+                param=param,
+            )
+
     if not any(t.is_document for t in targets):
         # Only directory exports were requested. The fan-out's own summary
         # document still needs somewhere to go, and the retired --output-dir
@@ -395,9 +426,7 @@ def export_options(
     """
     allowed = list(formats)
     if default_format not in allowed:  # pragma: no cover - programming error
-        raise ValueError(
-            f"default_format {default_format!r} is not one of {allowed!r}"
-        )
+        raise ValueError(f"default_format {default_format!r} is not one of {allowed!r}")
     dir_formats = list(directory_formats)
 
     def _callback(

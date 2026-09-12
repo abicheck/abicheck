@@ -2274,10 +2274,19 @@ _effective_format() {
 # file -- and a working run published REPORT_UNREADABLE. And when both are
 # given, the destination inventory validated the superseded path while the
 # real report landed elsewhere.
+# The primary is chosen by exactly the rule `_effective_format` applies --
+# a stdout target wins over any file, otherwise the first export -- so the
+# two are always answering about the *same* target (Codex review, P1,
+# reproduced): returning the first *file* destination unconditionally made
+# `-o json=- -o markdown=report.md` report format `json` with path
+# `report.md`, so `_caller_json_destinations` validated the Markdown
+# document as JSON and published REPORT_UNREADABLE for a run that had
+# succeeded. Empty whenever the primary goes to stdout, which is what the
+# stdout-shaped validation downstream keys on.
 _effective_output_file() {
   local _fmt _dest _first=""
   while IFS=$'\t' read -r _fmt _dest; do
-    [[ "$_dest" != "-" ]] || continue
+    [[ "$_dest" != "-" ]] || return 0
     [[ -n "$_first" ]] || _first="$_dest"
   done <<<"$(_effective_exports)"
   printf '%s' "$_first"
