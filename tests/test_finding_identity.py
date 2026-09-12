@@ -46,6 +46,11 @@ class TestIsRealMangledName:
         assert is_real_mangled_name(_ITANIUM_MANGLED, "foo") is True
 
     def test_extern_c_bare_name_in_mangled_field_is_not_real(self) -> None:
+        # A genuinely non-mangled name riding in both fields (real extern
+        # "C" linkage) must degrade -- only a value that independently
+        # looks like a real mangling overrides the equality check, which is
+        # what test_fallback_dumper_mangled_equal_to_name_is_still_real
+        # below covers from the other side.
         assert is_real_mangled_name("foo", "foo") is False
 
     def test_missing_mangled_is_not_real(self) -> None:
@@ -59,13 +64,6 @@ class TestIsRealMangledName:
         # equality must not be mistaken for extern "C" here (Codex review).
         assert is_real_mangled_name(_ITANIUM_MANGLED, _ITANIUM_MANGLED) is True
         assert is_real_mangled_name("?foo@@YAHXZ", "?foo@@YAHXZ") is True
-
-    def test_bare_name_equal_to_itself_is_still_not_real(self) -> None:
-        # A genuinely non-mangled name riding in both fields (real extern
-        # "C" linkage) must still degrade -- only a value that
-        # independently looks like a real mangling overrides the equality
-        # check.
-        assert is_real_mangled_name("foo", "foo") is False
 
 
 class TestLooksLikeItaniumEncoding:

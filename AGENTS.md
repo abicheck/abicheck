@@ -1121,6 +1121,70 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   `test_gzip_round_trip_at_production_scale` (same chokepoints/scale, no known incident to
   reproduce, added purely to keep this bullet true for every supported algorithm) for the
   pattern to follow for the next storage/serialization boundary.
+- **A differential test must prove both of its configurations actually ran.** A
+  test whose claim is "configuration A and configuration B agree" (pruning
+  off vs. on, one backend vs. another, cache cold vs. warm) asserts nothing
+  if B was served A's cached result — it then compares A with itself and
+  passes no matter what B would have done. This is not hypothetical: both
+  double-`dump()` tests in `tests/test_clang_header_backend_integration.py`
+  derived their "fresh" AST-cache root from the same `tmp_path`, so the
+  second run hit the first's on-disk cache, the streaming pruner never
+  parsed anything, and the equivalence and method-count assertions were
+  vacuously true. A *sibling* test proving the mechanism can engage on the
+  same repro does not repair this — it says nothing about whether this
+  comparison engaged it. So: give each configuration a genuinely distinct
+  cache root (and clear any in-process memo alongside it — a disk-cache miss
+  alone does not force a reparse), and assert **within the same test** that
+  the path under comparison executed, by observing the mechanism rather than
+  its output (`_PruneSpy` there wraps the real loader and records its call
+  count and reported prune count). The same rule applies before sharing an
+  expensive fixture between two configurations: sharing immutable *inputs* is
+  fine, sharing the *output* whose equivalence is the claim is the bug above.
+- **An autouse fixture's cost is charged to every test, so its allocation
+  must be O(1).** `tests/conftest.py`'s `_isolate_snapshot_cache` is autouse;
+  it originally allocated a pytest *numbered* directory, which enumerates
+  every existing sibling to choose the next number — so a worker that had run
+  N tests paid a scan of N entries to start test N+1, roughly quadratic over
+  a session, charged even to tests that only compare two enum values. Measured
+  two ways: the allocator alone costs 5.8ms vs. 0.07ms per call against a
+  directory holding 8000 siblings, and end to end a 1107-test subset runs in
+  1.7-2.2s instead of 2.3-2.9s (0/8000/20000 pre-existing siblings) — the
+  allocator's own margin is larger than the end-to-end one, so read the
+  end-to-end figure as the claim. It now uses `tempfile.mkdtemp` inside
+  pytest's own base temp dir: the same guarantee (a distinct, empty,
+  test-owned directory, under pytest's retention policy) from an atomic
+  random name. The isolation itself is **not** the thing to economize on —
+  `tests/test_conftest_cache_isolation.py` states that contract as
+  invariants specifically so the next round of "make this faster" cannot
+  reach for a shared session-wide cache directory, whose cross-test cache
+  hits would surface as unrelated mystery failures.
+- **A matrix test needs an oracle, not just a type check.** A parametrized
+  sweep asserting only that the result is *one of* the valid enum members
+  pins nothing: `TestExhaustiveMatrix` in
+  `tests/test_policy_override_matrix.py` emitted 1,608 such cases that an
+  implementation returning `COMPATIBLE` for every input — and one returning
+  `BREAKING` for every input — both passed in full (verified by
+  substitution). Nor is a test that asserts `A & B ⊆ A` about policy; it is
+  set algebra, true for any two sets including two wrong ones (four such
+  tests were removed). Write the expectation as an *independent second
+  derivation* of the documented behavior (`_expected_verdict` there derives
+  from the intrinsic `*_KINDS` partitions and the two named downgrade sets,
+  deliberately **not** from `policy_kind_sets`, which is what the function
+  under test folds over), batch the sweep so a failure names every
+  disagreeing case at once, and add a vacuity guard on the oracle itself —
+  an oracle accidentally reduced to a constant makes the whole matrix pass
+  while asserting nothing, which is the original failure in a new place.
+- **Don't re-run the whole repository to test argument dispatch.** A check
+  that scans every first-party file has exactly one owner — for the
+  readiness gate, the dedicated `ai-readiness` CI job, which runs
+  `verify.py --profile pr --only ai-readiness` with no skips. A unit test
+  that drove nearly that whole registry over the live tree in order to
+  assert `main()` returns 0 cost ~5m in a measured run and added no signal
+  the owning job did not already have. `tests/test_ai_readiness_main_dispatch.py`
+  keeps `main()`'s own contract (selection, `--only`/`--skip` composition,
+  error-vs-warning exit codes, JSON agreeing with the human report) against
+  the *real* `main()` over a small instrumented registry, and each check's
+  own live-tree test stays in `tests/test_ai_readiness.py`, where it belongs.
 
 ## Line-coverage floor
 

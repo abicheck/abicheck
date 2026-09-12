@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -83,9 +84,22 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
     # the production default remains fail-closed.
     monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
 
-    monkeypatch.setattr(
-        snapshot_cache, "_CACHE_DIR", tmp_path_factory.mktemp("snapshot_cache")
+    # ``tmp_path_factory.mktemp`` allocates a *numbered* directory, which
+    # means enumerating every existing sibling to pick the next number. This
+    # fixture is autouse, so a worker that has executed N tests pays that
+    # enumeration on entry to test N+1 -- roughly quadratic total work over a
+    # session, charged even to tests that only compare two enum values and
+    # never touch the cache at all. ``mkdtemp`` gets the same guarantee
+    # (a distinct, empty, test-owned directory) from an atomic random name,
+    # with no scan of the base directory. Keep it inside pytest's own base
+    # temp dir so pytest's existing retention/cleanup policy still applies.
+    cache_dir = Path(
+        tempfile.mkdtemp(
+            prefix="snapshot_cache-",
+            dir=tmp_path_factory.getbasetemp(),
+        )
     )
+    monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", cache_dir)
 
 
 @pytest.fixture(autouse=True)

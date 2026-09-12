@@ -15,6 +15,11 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import (
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    PLUGIN_ABI_DOWNGRADED_KINDS,
+    RISK_KINDS,
+    SDK_VENDOR_COMPAT_KINDS,
     compute_verdict,
     policy_kind_sets,
 )
@@ -125,6 +130,13 @@ class TestVerdictComputation:
 _strict_api_break = policy_kind_sets("strict_abi")[1]
 _vendor_compatible = policy_kind_sets("sdk_vendor")[2]
 SDK_VENDOR_DOWNGRADED = _strict_api_break & _vendor_compatible
+# Note: there are deliberately no tests here asserting that every member of
+# this set is API_BREAK in strict and COMPATIBLE in sdk_vendor. It is defined
+# as the intersection of exactly those two sets, so such a test asserts
+# `A & B <= A` -- true for any two sets, including two wrong ones. What is
+# worth checking is that the *verdict function* agrees with that membership,
+# which `test_sdk_vendor_verdict_for_downgraded_kind` below does, and that the
+# set is non-empty, which `test_some_kinds_are_downgraded` does.
 
 
 class TestSdkVendorPolicy:
@@ -133,18 +145,6 @@ class TestSdkVendorPolicy:
     def test_some_kinds_are_downgraded(self):
         """sdk_vendor should downgrade at least some kinds."""
         assert len(SDK_VENDOR_DOWNGRADED) > 0
-
-    def test_downgraded_kinds_are_api_break_in_strict(self):
-        """These kinds should be API_BREAK in strict_abi."""
-        _, api_break, _, _ = policy_kind_sets("strict_abi")
-        for kind in SDK_VENDOR_DOWNGRADED:
-            assert kind in api_break, f"{kind} not in strict_abi API_BREAK"
-
-    def test_downgraded_kinds_are_compatible_in_sdk_vendor(self):
-        """These kinds should be COMPATIBLE in sdk_vendor."""
-        _, _, compatible, _ = policy_kind_sets("sdk_vendor")
-        for kind in SDK_VENDOR_DOWNGRADED:
-            assert kind in compatible, f"{kind} not in sdk_vendor COMPATIBLE"
 
     @pytest.mark.parametrize("kind", sorted(SDK_VENDOR_DOWNGRADED, key=lambda k: k.value))
     def test_sdk_vendor_verdict_for_downgraded_kind(self, kind):
@@ -163,6 +163,9 @@ class TestSdkVendorPolicy:
 _strict_breaking = policy_kind_sets("strict_abi")[0]
 _plugin_compatible = policy_kind_sets("plugin_abi")[2]
 PLUGIN_ABI_DOWNGRADED = _strict_breaking & _plugin_compatible
+# As with SDK_VENDOR_DOWNGRADED above: no "members of this intersection are in
+# its own operands" tests, which are set-algebra tautologies rather than
+# statements about policy.
 
 
 class TestPluginAbiPolicy:
@@ -171,18 +174,6 @@ class TestPluginAbiPolicy:
     def test_some_kinds_are_downgraded(self):
         """plugin_abi should downgrade at least some kinds."""
         assert len(PLUGIN_ABI_DOWNGRADED) > 0
-
-    def test_downgraded_kinds_are_breaking_in_strict(self):
-        """These kinds should be BREAKING in strict_abi."""
-        breaking, _, _, _ = policy_kind_sets("strict_abi")
-        for kind in PLUGIN_ABI_DOWNGRADED:
-            assert kind in breaking, f"{kind} not in strict_abi BREAKING"
-
-    def test_downgraded_kinds_are_compatible_in_plugin_abi(self):
-        """These kinds should be COMPATIBLE in plugin_abi."""
-        _, _, compatible, _ = policy_kind_sets("plugin_abi")
-        for kind in PLUGIN_ABI_DOWNGRADED:
-            assert kind in compatible, f"{kind} not in plugin_abi COMPATIBLE"
 
     @pytest.mark.parametrize("kind", sorted(PLUGIN_ABI_DOWNGRADED, key=lambda k: k.value))
     def test_plugin_abi_verdict_for_downgraded_kind(self, kind):
@@ -199,35 +190,148 @@ class TestPluginAbiPolicy:
 _ALL_POLICIES = ["strict_abi", "sdk_vendor", "plugin_abi"]
 
 
-class TestExhaustiveMatrix:
-    """Every (ChangeKind, policy) pair produces a valid verdict."""
+_SEVERITY_ORDER = {
+    Verdict.COMPATIBLE: 0,
+    Verdict.COMPATIBLE_WITH_RISK: 1,
+    Verdict.API_BREAK: 2,
+    Verdict.BREAKING: 3,
+}
 
-    @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
+
+def _expected_verdict(kind: ChangeKind, policy: str) -> Verdict:
+    """The verdict each policy is *documented* to produce for a lone change.
+
+    This is the oracle the matrix below is checked against, and it is written
+    to be derivable from the documented policy semantics rather than from the
+    code under test:
+
+    * ``strict_abi`` is the intrinsic registration -- the bucket the kind's
+      own ``ChangeKindMeta.default_verdict`` placed it in.
+    * ``sdk_vendor`` differs from strict in exactly one way: the
+      source-level-only kinds named by ``SDK_VENDOR_COMPAT_KINDS`` read
+      COMPATIBLE.
+    * ``plugin_abi`` differs in exactly two: the calling-convention kinds
+      named by ``PLUGIN_ABI_DOWNGRADED_KINDS`` read COMPATIBLE, and there is
+      no risk band at all -- a deployment-floor increase can stop a plugin
+      loading, so it is BREAKING rather than COMPATIBLE_WITH_RISK.
+
+    Deliberately built from the four intrinsic ``*_KINDS`` partitions and the
+    two named downgrade sets, *not* from ``policy_kind_sets`` -- which is the
+    composition ``compute_verdict`` itself folds over. An oracle that called
+    that function would restate the implementation and pass no matter what it
+    returned; this one is an independent second derivation, so the two
+    disagreeing is a real signal.
+    """
+    if kind in BREAKING_KINDS:
+        strict = Verdict.BREAKING
+    elif kind in API_BREAK_KINDS:
+        strict = Verdict.API_BREAK
+    elif kind in RISK_KINDS:
+        strict = Verdict.COMPATIBLE_WITH_RISK
+    else:
+        strict = Verdict.COMPATIBLE
+
+    if policy == "sdk_vendor":
+        if kind in SDK_VENDOR_COMPAT_KINDS:
+            return Verdict.COMPATIBLE
+        return strict
+    if policy == "plugin_abi":
+        if kind in PLUGIN_ABI_DOWNGRADED_KINDS:
+            return Verdict.COMPATIBLE
+        if strict is Verdict.COMPATIBLE_WITH_RISK:
+            return Verdict.BREAKING
+        return strict
+    return strict
+
+
+class TestExhaustiveMatrix:
+    """Every (ChangeKind, policy) pair produces the verdict its policy promises.
+
+    This class previously emitted 1,608 parametrized cases whose only
+    assertions were that the result was *one of the four* Verdict members and
+    that strict was at least as severe as vendor. Neither pins behaviour: an
+    implementation that returned ``COMPATIBLE`` for every input, and one that
+    returned ``BREAKING`` for every input, both satisfy all 1,608 (verified by
+    substituting each in turn). They also cost far more in fixture setup than
+    in assertion.
+
+    They are replaced by batched checks against ``_expected_verdict``, an
+    independently-derived oracle, with every disagreeing kind named in the
+    failure message rather than one kind per test id.
+    """
+
     @pytest.mark.parametrize("policy", _ALL_POLICIES)
-    def test_every_kind_policy_produces_valid_verdict(self, kind, policy):
-        """Each ChangeKind under each policy should produce a recognized Verdict."""
-        result = compute_verdict([_FakeChange(kind)], policy=policy)
-        assert result in (
-            Verdict.BREAKING,
-            Verdict.API_BREAK,
-            Verdict.COMPATIBLE_WITH_RISK,
-            Verdict.COMPATIBLE,
+    def test_every_kind_gets_the_verdict_its_policy_promises(self, policy):
+        """The whole ChangeKind x policy matrix, against the documented oracle."""
+        mismatches = {
+            kind.value: (actual, expected)
+            for kind in ChangeKind
+            for actual, expected in [
+                (
+                    compute_verdict([_FakeChange(kind)], policy=policy),
+                    _expected_verdict(kind, policy),
+                )
+            ]
+            if actual is not expected
+        }
+        assert not mismatches, (
+            f"{len(mismatches)} kind(s) disagree with the documented {policy} "
+            f"semantics (kind: got != expected): {mismatches}"
         )
 
-    @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
-    def test_strict_verdict_at_least_as_severe_as_vendor(self, kind):
-        """strict_abi should be at least as severe as sdk_vendor for every kind."""
-        severity = {
-            Verdict.COMPATIBLE: 0,
-            Verdict.COMPATIBLE_WITH_RISK: 1,
-            Verdict.API_BREAK: 2,
-            Verdict.BREAKING: 3,
+    @pytest.mark.parametrize("policy", _ALL_POLICIES)
+    def test_every_kind_produces_a_recognized_verdict(self, policy):
+        """A lone change never yields NO_CHANGE or a non-Verdict value.
+
+        Kept as its own (now batched) assertion because it is a different
+        claim from the oracle above: it holds even for a kind the oracle has
+        no opinion about, e.g. one added to the enum but not yet registered.
+        """
+        unrecognized = {
+            kind.value: compute_verdict([_FakeChange(kind)], policy=policy)
+            for kind in ChangeKind
+            if compute_verdict([_FakeChange(kind)], policy=policy)
+            not in _SEVERITY_ORDER
         }
-        strict = compute_verdict([_FakeChange(kind)], policy="strict_abi")
-        vendor = compute_verdict([_FakeChange(kind)], policy="sdk_vendor")
-        assert severity[strict] >= severity[vendor], (
-            f"{kind}: strict_abi={strict}, sdk_vendor={vendor} — "
-            "strict should be at least as severe"
+        assert not unrecognized, f"unrecognized verdicts under {policy}: {unrecognized}"
+
+    def test_strict_verdict_at_least_as_severe_as_vendor(self):
+        """sdk_vendor only ever *relaxes* strict_abi -- it may never call a
+        kind worse than strict does. The named-policy counterpart of the
+        monotonicity rule the tier-accuracy gate states for evidence levels."""
+        regressions = {
+            kind.value: (strict, vendor)
+            for kind in ChangeKind
+            for strict, vendor in [
+                (
+                    compute_verdict([_FakeChange(kind)], policy="strict_abi"),
+                    compute_verdict([_FakeChange(kind)], policy="sdk_vendor"),
+                )
+            ]
+            if _SEVERITY_ORDER[strict] < _SEVERITY_ORDER[vendor]
+        }
+        assert not regressions, (
+            "sdk_vendor is more severe than strict_abi for "
+            f"{len(regressions)} kind(s) (kind: strict, vendor): {regressions}"
+        )
+
+    def test_the_oracle_is_not_vacuous(self):
+        """Guard on the oracle itself: it must actually distinguish policies
+        and span more than one verdict, or the matrix above would pass while
+        asserting nothing. Without this, an oracle accidentally reduced to a
+        constant would make every check above vacuously true -- the exact
+        failure mode that motivated replacing the old matrix."""
+        for policy in _ALL_POLICIES:
+            spanned = {_expected_verdict(k, policy) for k in ChangeKind}
+            assert len(spanned) > 1, f"oracle is constant under {policy}"
+        assert any(
+            _expected_verdict(k, "strict_abi") is not _expected_verdict(k, "sdk_vendor")
+            for k in ChangeKind
+        )
+        assert any(
+            _expected_verdict(k, "strict_abi")
+            is not _expected_verdict(k, "plugin_abi")
+            for k in ChangeKind
         )
 
 
