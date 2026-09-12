@@ -219,7 +219,11 @@ included without a second list to keep in sync.
 `exit.code: 0` for a member that floored the run; and the
 `effective_config_fields`/digest receipt, which must name
 `gate.require_complete_analysis` or a gated run is indistinguishable from an
-ungated one. And all of it again on the stored-`BundleFacts`
+ungated one. The fold block's own `notes` key, flat and
+member-attributed, because that is the shape the composite Action's
+`assurance_notes` query reads to say *what* fell short — a section exposing only
+`incomplete_members[].notes` reported the verdict without the reasons where a
+scalar run reported both. And all of it again on the stored-`BundleFacts`
 driver, which is a *separate* renderer and a separate set of writes: sharing
 the fold function is not sharing the publishing path, and that driver resolved
 its decision only after rendering, so it published the same clean-looking

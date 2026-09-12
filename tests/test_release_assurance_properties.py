@@ -592,3 +592,40 @@ class TestReleaseExitFoldCarriesTheAxis:
         assert spoken is not None
         if base >= decision.code:
             assert "floored to" not in spoken
+
+    @settings(max_examples=300)
+    @given(_statuses)
+    def test_the_section_carries_flat_attributed_notes(
+        self, statuses: list[str]
+    ) -> None:
+        """The section must expose `notes` in the scalar block's own shape.
+
+        The composite Action's `assurance_notes` query reads
+        `analysis_assurance.notes` -- one flat list of strings -- to name *what*
+        fell short in its `ANALYSIS_INCOMPLETE` job-summary line, and falls back
+        to a bare "see the JSON report" when it is empty. A release section
+        exposing only `incomplete_members[].notes` therefore reported the verdict
+        without the reasons where a scalar run reported both: the same
+        axis-reaches-some-consumers problem, one notch quieter.
+
+        Two properties, both of which a naive flatten would break: every short
+        member is represented (so the list cannot silently omit a member that
+        had no notes of its own), and every line names its member (so a release
+        reader can act on it at all).
+        """
+        from abicheck.report.release_assurance import build_release_assurance_section
+
+        members = _members(statuses)
+        decision = resolve_release_assurance_decision(members, require_complete=True)
+        notes = build_release_assurance_section(decision)["notes"]
+        assert isinstance(notes, list)
+        assert all(isinstance(line, str) for line in notes)
+        short = decision.incomplete_members
+        # Every short member appears at least once, notes or not.
+        for member in short:
+            assert any(line.startswith(f"{member.name}: ") for line in notes), member
+        # And nothing else does: a complete member contributes no line.
+        complete_names = {m.name for m in members} - {m.name for m in short}
+        for line in notes:
+            assert line.split(":", 1)[0] not in complete_names
+        assert (len(notes) == 0) == (len(short) == 0)

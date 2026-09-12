@@ -123,8 +123,40 @@ def build_release_assurance_section(
         "member_count": len(decision.members),
         "incomplete_member_count": decision.incomplete_member_count,
         "exit_contribution": decision.exit_contribution,
+        # The same key, with the same meaning, a scalar `AnalysisAssurance`
+        # block carries -- so a consumer reading `analysis_assurance.notes` to
+        # say *what* fell short works on a release report too. Without it the
+        # composite Action's own `ANALYSIS_INCOMPLETE` job-summary line fell
+        # through to its "see the JSON report" wording for a release while
+        # naming the reasons for a scalar run: a quieter instance of exactly
+        # the axis-reaches-some-consumers problem D9 exists to stop. Each note
+        # is prefixed with its member, which a release needs and a scalar block
+        # cannot have -- "two members are partial" is not actionable without
+        # knowing which.
+        "notes": member_attributed_notes(decision),
         "incomplete_members": [m.to_dict() for m in decision.incomplete_members],
     }
+
+
+def member_attributed_notes(decision: ReleaseAssuranceDecision) -> list[str]:
+    """Every short member's notes, each prefixed with the member it came from.
+
+    Flat, because that is the shape the scalar ``analysis_assurance.notes`` key
+    has and what its readers expect; attributed, because a release's notes mean
+    nothing unless you know which member produced them. A member that fell
+    short with no notes of its own still gets a line naming its status, so the
+    short-member count and the length of this list cannot disagree in a way that
+    hides one.
+    """
+    lines: list[str] = []
+    for member in decision.incomplete_members:
+        if member.notes:
+            lines.extend(f"{member.name}: {note}" for note in member.notes)
+        else:
+            lines.append(
+                f"{member.name}: {member.status} (no further detail recorded)"
+            )
+    return lines
 
 
 def release_assurance_notice(

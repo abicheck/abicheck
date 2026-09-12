@@ -91,7 +91,11 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       composite Action's ``gate_mode: deferred`` path read. Emitting the
 #:       floor only inside ``exit``/``analysis_assurance`` left both reading
 #:       ``0`` for a run whose real exit was ``1`` (Codex security review,
-#:       P1). Unlike 1.1's unconditional field, all of these are present
+#:       P1). The fold block carries ``notes`` -- one flat, member-attributed
+#:       list in the same shape a scalar ``analysis_assurance.notes`` has --
+#:       because that is the key the composite Action's ``assurance_notes``
+#:       query reads to name what fell short; without it a release run reported
+#:       ``ANALYSIS_INCOMPLETE`` with no reasons where a scalar one named them. Unlike 1.1's unconditional field, all of these are present
 #:       ONLY when ``assurance.require_complete`` was in effect -- the same
 #:       "present only when active" convention the ``severity`` and
 #:       ``contract_coverage_*`` blocks already follow, and what keeps every
