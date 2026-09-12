@@ -45,36 +45,28 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from .build_query import ABICHECK_BUILD_DIR
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
+
+# Re-exported unchanged for importers that predate the discovery/scanning split
+# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
+# public names did not.
+from .pattern_facts_files import (
+    _DIRECT_ROOT_LICENCE,
+    SOURCE_SUFFIXES as SOURCE_SUFFIXES,
+    iter_source_files as iter_source_files,
+    resolve_expected_source_inputs,
+)
+from .source_inputs import (
+    SourceInput,
+    SourceInputDisposition,
+    SourceInputSet,
+    SourceReadLicence,
+)
 
 #: Pattern-scan fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning"); bumped on any
 #: breaking change to the emitted ``PatternFact``/``PatternFactsResult`` layout.
 PATTERN_FACTS_VERSION: int = 1
-
-#: File suffixes the lexical scanner treats as C/C++ source or headers. Headers
-#: without a suffix (the libstdc++ ``<vector>`` style) are not on disk under a
-#: project tree, so an extension allowlist is sufficient and keeps the walk cheap.
-SOURCE_SUFFIXES: frozenset[str] = frozenset(
-    {
-        ".h",
-        ".hh",
-        ".hpp",
-        ".hxx",
-        ".h++",
-        ".inl",
-        ".inc",
-        ".ipp",
-        ".tpp",
-        ".tcc",
-        ".c",
-        ".cc",
-        ".cpp",
-        ".cxx",
-        ".c++",
-    }
-)
 
 
 class PatternCategory(str, Enum):
@@ -378,6 +370,27 @@ class PatternFactsResult:
     files_scanned: int = 0
     files_skipped: int = 0
     version: int = PATTERN_FACTS_VERSION
+    #: The complete account of the scan's *expected* inputs (see
+    #: :mod:`abicheck.buildsource.source_inputs`). The two tallies above only
+    #: ever described files the discovery walk actually found, so a declared
+    #: root that did not exist contributed to neither and the scan read as
+    #: fully covered -- consult :attr:`sufficient`, never the tallies, before
+    #: drawing an *absence* conclusion.
+    inputs: SourceInputSet = field(default_factory=SourceInputSet)
+
+    @property
+    def sufficient(self) -> bool:
+        """True only when an *absence* claim over this scan is established.
+
+        Presence needs no sufficiency — an observed hit is observed. Absence
+        needs every expected input accounted for: see
+        :attr:`SourceInputSet.sufficient`.
+        """
+        return self.inputs.sufficient
+
+    @property
+    def insufficiency_reason(self) -> str:
+        return self.inputs.insufficiency_reason()
 
     @property
     def escalation_triggers(self) -> list[EscalationTrigger]:
@@ -410,6 +423,25 @@ class PatternFactsResult:
         """True if any located construct warrants a deeper source-ABI scan."""
         return any(fact.escalates for fact in self.facts)
 
+    def merged(self, other: PatternFactsResult) -> PatternFactsResult:
+        """Combine two scans of the same side run under *different* licences.
+
+        A side's roots can come from two evidence sources with independent
+        provenance (see ``workflows/pattern_preprocessor_scan.py``), and only
+        one of them may be licensed. Running the scan once per source and
+        merging keeps each source's licence honest while still reporting one
+        result: facts and tallies add, and the expected-input accounts merge
+        (:meth:`SourceInputSet.merged`), so the unlicensed source's roots stay
+        visible as ``not_licensed`` gaps that keep :attr:`sufficient` false.
+        """
+        return PatternFactsResult(
+            facts=[*self.facts, *other.facts],
+            files_scanned=self.files_scanned + other.files_scanned,
+            files_skipped=self.files_skipped + other.files_skipped,
+            version=self.version,
+            inputs=self.inputs.merged(other.inputs),
+        )
+
     def counts_by_kind(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for fact in self.facts:
@@ -419,9 +451,25 @@ class PatternFactsResult:
     def coverage(self) -> LayerCoverage:
         """The mandatory ADR-033 D6 coverage row for this always-on tier."""
         status = CoverageStatus.PRESENT
+        # A result built without an expected-input account (a hand-constructed
+        # legacy result, or a caller that only reported tallies) keeps the
+        # original tally-driven rows; only a real account can say more.
+        accounted = bool(self.inputs.inputs)
+        if accounted and not self.inputs.licence.permitted:
+            # Not "nothing found" but "not permitted to look": a stored
+            # snapshot's recorded paths are provenance, not a licence.
+            return LayerCoverage(
+                layer="pattern_scan",
+                status=CoverageStatus.NOT_COLLECTED,
+                confidence=LayerConfidence.UNKNOWN,
+                detail=(
+                    "lexical pattern scan (S3) not possible: "
+                    f"{self.inputs.licence.reason}"
+                ),
+            )
         if self.files_scanned == 0:
             status = CoverageStatus.NOT_COLLECTED
-        elif self.files_skipped:
+        elif self.files_skipped or (accounted and not self.sufficient):
             status = CoverageStatus.PARTIAL
         detail = (
             f"lexical pattern scan (S3), {self.files_scanned} file(s), "
@@ -429,6 +477,8 @@ class PatternFactsResult:
         )
         if self.files_skipped:
             detail += f", {self.files_skipped} unreadable skipped"
+        elif accounted and not self.sufficient and self.files_scanned:
+            detail += f", {self.insufficiency_reason}"
         return LayerCoverage(
             layer="pattern_scan",
             status=status,
@@ -442,6 +492,8 @@ class PatternFactsResult:
             "version": self.version,
             "files_scanned": self.files_scanned,
             "files_skipped": self.files_skipped,
+            "sufficient": self.sufficient,
+            "inputs": self.inputs.to_dict(),
             "facts": [f.to_dict() for f in self.facts],
             "escalation_triggers": [t.to_dict() for t in self.escalation_triggers],
             "counts_by_kind": self.counts_by_kind(),
@@ -691,135 +743,6 @@ def scan_text(text: str, path: str = "") -> list[PatternFact]:
     return facts
 
 
-#: Directory names whose contents are never part of a library's source surface.
-#: VCS metadata holds packed/loose blobs and indexes (a shallow clone's
-#: ``.git/index`` is a multi-hundred-KB binary file) that the extensionless
-#: heuristic below would otherwise feed to every regex rule. Pruned from the walk.
-#: ``ABICHECK_BUILD_DIR`` is included because zero-config cmake inference writes a
-#: configure tree under ``sources/.abicheck-build``; without pruning it the lexical
-#: pre-scan would flag generated build output (config.h / CMakeFiles) as project
-#: source (review).
-_PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset(
-    {".git", ".hg", ".svn", ABICHECK_BUILD_DIR}
-)
-
-#: Size ceiling for the **extensionless** heuristic only. A genuine extensionless
-#: C++ header (``include/mylib/Core``) is small; multi-MB extensionless files are
-#: build/test *data* (e.g. oneDNN's ``tests/benchdnn/inputs/...`` option sets,
-#: several MB each) or VCS blobs — never headers. Files with a known C/C++
-#: suffix are *not* capped (a real ``dnnl.hpp`` is legitimately large).
-_EXTENSIONLESS_MAX_BYTES = 256 * 1024
-
-
-def _looks_binary(path: Path) -> bool:
-    """Heuristic: a NUL byte in the first 8 KiB marks a non-text (binary) file.
-
-    Unreadable files are treated as binary so they fall out of the scan set
-    (``find_pattern_facts`` would skip them anyway).
-    """
-    try:
-        with open(path, "rb") as fh:
-            return b"\x00" in fh.read(8192)
-    except OSError:
-        return True
-
-
-def _is_scannable(path: Path) -> bool:
-    """True if a directory-walked file should be lexically scanned.
-
-    Known C/C++ suffixes are always scannable. **Extensionless** files are
-    accepted too — many C++ libraries ship extensionless public headers
-    (``include/mylib/Core``), and the D2 scope is "changed + public headers", not
-    "files with a C/C++ extension" — but only when they are small *text* files:
-    an oversized or binary extensionless file is build/test data or a VCS blob,
-    not a header, and scanning it is pure cost with no ABI signal (ADR-035 D2;
-    the pre-scan is advisory, so a missed exotic giant header is harmless).
-    Files with a different, explicit extension (``.md``, ``.txt``, ``.bin``) are
-    skipped.
-    """
-    suffix = path.suffix.lower()
-    if suffix in SOURCE_SUFFIXES:
-        return True
-    if suffix != "":
-        return False
-    try:
-        if path.stat().st_size > _EXTENSIONLESS_MAX_BYTES:
-            return False
-    except OSError:
-        return False
-    return not _looks_binary(path)
-
-
-def iter_source_files(
-    roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None = None,
-) -> list[Path]:
-    """Collect C/C++ source/header files under ``roots`` (files or directories).
-
-    A ``root`` that is a **file** is honored regardless of suffix — the caller
-    pointed at it directly. A ``root`` that is a **directory** is walked (with
-    VCS metadata dirs pruned, see :data:`_PRUNED_DIR_SEGMENTS`) and filtered by
-    :func:`_is_scannable` (known suffixes + small text extensionless headers).
-    When ``changed_paths`` is given, the result is intersected with it (by
-    suffix-matching the path tail), implementing the ADR-035 D2 "changed +
-    public" scope: callers pass public roots and the PR's changed paths. The
-    walk is deterministic (sorted) for reproducible reports.
-    """
-    changed_suffixes: set[str] | None = None
-    if changed_paths is not None:
-        changed_suffixes = {str(p).replace("\\", "/") for p in changed_paths}
-
-    collected: set[Path] = set()
-    for root in roots:
-        rp = Path(root)
-        if rp.is_file():
-            candidates = [(rp, True)]  # explicit file: honor regardless of suffix
-        elif rp.is_dir():
-            candidates = []
-            for dirpath, dirnames, filenames in os.walk(rp):
-                # Prune VCS metadata dirs *in place* so os.walk never descends
-                # into them — a large `.git` tree is never stat'd/scanned, not
-                # merely filtered out after the fact (Codex review).
-                dirnames[:] = [d for d in dirnames if d not in _PRUNED_DIR_SEGMENTS]
-                base = Path(dirpath)
-                # Only regular files: os.walk lists FIFOs/sockets/devices and
-                # broken symlinks under filenames too, and opening a named pipe
-                # would block the pre-scan forever (Codex review). `is_file()`
-                # follows symlinks and is False for non-regular entries.
-                candidates.extend(
-                    (p, False) for fn in filenames if (p := base / fn).is_file()
-                )
-        else:
-            continue
-        for cand, explicit in candidates:
-            if not explicit and not _is_scannable(cand):
-                continue
-            if changed_suffixes is not None and not _path_changed(
-                cand, changed_suffixes
-            ):
-                continue
-            collected.add(cand)
-    return sorted(collected)
-
-
-def _path_changed(candidate: Path, changed: set[str]) -> bool:
-    """True if ``candidate`` tail-matches any of the changed-path strings.
-
-    The changed list usually holds repo-relative paths (``include/foo.h``)
-    while ``candidate`` may be absolute or rooted elsewhere, so a suffix match
-    in either direction is the robust join; a bare filename in the changed list
-    matches by basename.
-    """
-    norm = str(candidate).replace("\\", "/")
-    for ch in changed:
-        c = ch.replace("\\", "/")
-        if norm == c or norm.endswith("/" + c) or c.endswith("/" + norm):
-            return True
-        if "/" not in c and candidate.name == c:
-            return True
-    return False
-
-
 #: File-count floor below which the parallel path is never used — process-pool
 #: spawn/pickle overhead dwarfs the work on small trees (and keeps the fast unit
 #: tests, which use tiny fixtures, on the deterministic serial path). A
@@ -878,28 +801,54 @@ def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
     return scan_text(text, path=path_str), True
 
 
-def _find_pattern_facts_serial(files: list[Path]) -> PatternFactsResult:
+def _find_pattern_facts_serial(
+    files: list[Path], inputs: SourceInputSet | None = None
+) -> PatternFactsResult:
     """Scan ``files`` one at a time (the serial path / parallel fallback).
 
-    Unreadable files are counted as skipped rather than raising — the pre-scan
-    is best-effort advisory (ADR-035 D2/D3).
+    An unreadable file is recorded as ``UNREADABLE`` rather than raising — the
+    pre-scan is best-effort advisory (ADR-035 D2/D3) — but it is a coverage
+    *gap*, so it keeps the result insufficient for any absence claim.
     """
     facts: list[PatternFact] = []
-    scanned = 0
-    skipped = 0
+    outcomes: dict[str, bool] = {}
     for f in files:
         rfacts, ok = _scan_one_file(str(f))
+        outcomes[str(f)] = ok
         if not ok:
-            skipped += 1
             continue
         facts.extend(rfacts)
-        scanned += 1
-    return PatternFactsResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
+    return _assemble(facts, outcomes, inputs, files)
+
+
+def _assemble(
+    facts: list[PatternFact],
+    outcomes: dict[str, bool],
+    inputs: SourceInputSet | None,
+    files: list[Path],
+) -> PatternFactsResult:
+    """Build the result, resolving read outcomes into the input account."""
+    if inputs is None:
+        inputs = SourceInputSet(
+            inputs=tuple(
+                SourceInput(path=str(f), disposition=SourceInputDisposition.SELECTED)
+                for f in files
+            ),
+            licence=_DIRECT_ROOT_LICENCE,
+        )
+    return PatternFactsResult(
+        facts=facts,
+        files_scanned=sum(1 for ok in outcomes.values() if ok),
+        files_skipped=sum(1 for ok in outcomes.values() if not ok),
+        inputs=inputs.with_read_outcomes(outcomes),
+    )
 
 
 def find_pattern_facts(
     roots: Iterable[str | Path],
     changed_paths: Iterable[str] | None = None,
+    *,
+    licence: SourceReadLicence = _DIRECT_ROOT_LICENCE,
 ) -> PatternFactsResult:
     """Run the lexical pre-scan over the in-scope files and aggregate facts.
 
@@ -912,30 +861,47 @@ def find_pattern_facts(
     concatenated in that order. Any executor failure falls back to serial so a
     constrained sandbox never turns a scan into an error.
     """
-    files = iter_source_files(roots, changed_paths)
+    inputs = resolve_expected_source_inputs(roots, changed_paths, licence=licence)
+    if not licence.permitted:
+        # Nothing was stat'd and nothing will be read: the paths were
+        # provenance, not a licence. The result says the evaluation was not
+        # possible instead of describing the current runner's filesystem.
+        return PatternFactsResult(inputs=inputs)
+    files = [
+        Path(i.path)
+        for i in inputs.inputs
+        if i.disposition is SourceInputDisposition.SELECTED
+    ]
     jobs = _resolve_scan_jobs(len(files))
     if jobs <= 1:
-        return _find_pattern_facts_serial(files)
+        return _find_pattern_facts_serial(files, inputs)
 
     from concurrent.futures import ProcessPoolExecutor
 
     facts: list[PatternFact] = []
-    scanned = 0
-    skipped = 0
+    outcomes: dict[str, bool] = {}
     chunk = max(1, len(files) // (jobs * 4))
     try:
         with ProcessPoolExecutor(max_workers=jobs) as ex:
             # map preserves input order → deterministic, sorted-by-path facts.
-            for rfacts, ok in ex.map(
-                _scan_one_file, [str(f) for f in files], chunksize=chunk
+            for index, (rfacts, ok) in enumerate(
+                ex.map(_scan_one_file, [str(f) for f in files], chunksize=chunk)
             ):
+                # `map` yields one result per input, in order. A surplus result
+                # (only an executor stub produces one) has no path to attribute
+                # it to, so it is recorded under a synthetic key: it still
+                # counts as an unreadable input rather than being dropped.
+                key = (
+                    str(files[index])
+                    if index < len(files)
+                    else f"<unattributed:{index}>"
+                )
+                outcomes[key] = ok
                 if not ok:
-                    skipped += 1
                     continue
                 facts.extend(rfacts)
-                scanned += 1
     except (OSError, RuntimeError, ImportError, AssertionError):
         # BrokenProcessPool, no-fork sandbox, or a daemonic process that slipped
         # past the _resolve_scan_jobs guard (AssertionError) → serial fallback.
-        return _find_pattern_facts_serial(files)
-    return PatternFactsResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
+        return _find_pattern_facts_serial(files, inputs)
+    return _assemble(facts, outcomes, inputs, files)

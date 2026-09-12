@@ -57,6 +57,12 @@ from typing import TYPE_CHECKING, Any, cast
 from .. import deadline, process_resources
 from ..parallel_probe import OrderedDiagnostics, run_parallel_probes
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
+from .preprocessor_probe_families import (
+    HEADER_PROBES,
+    MACRO_PROBES,
+    ProbeTallies,
+    apply_probe_cap,
+)
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit
@@ -71,7 +77,7 @@ _log = logging.getLogger(__name__)
 #:     ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap. ``0`` (the default,
 #:     same as an unset field) when nothing was truncated, so an ordinary
 #:     scan's payload is unchanged from version 1 (Codex review).
-PREPROCESSOR_FACTS_VERSION: int = 2
+PREPROCESSOR_FACTS_VERSION: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -160,19 +166,6 @@ def _preprocessor_scan_jobs(n_items: int) -> int:
 #: Default cap on the number of *distinct* compile-context probes attempted
 #: per ``capture_macros``/``capture_header_includes`` call.
 _DEFAULT_MAX_PROBES = 512
-
-
-def _preprocessor_scan_max_probes() -> int:
-    """Max distinct probes attempted (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``)."""
-    env = os.environ.get("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "").strip()
-    if env:
-        try:
-            value = int(env)
-        except ValueError:
-            value = 0
-        if value > 0:
-            return value
-    return _DEFAULT_MAX_PROBES
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +390,9 @@ class PreprocessorFactsResult:
     attempted: int = 0  # total clang -E invocations attempted
     succeeded: int = 0  # invocations that returned usable output
     probes_truncated: int = 0  # compile units / public headers skipped (cap)
+    #: Per-probe-family tallies (``preprocessor_probe_families.py``) -- the
+    #: basis for a per-check sufficiency answer, unlike the aggregates above.
+    probe_tallies: ProbeTallies = field(default_factory=ProbeTallies)
     diagnostics: list[str] = field(default_factory=list)
     abi_macros: dict[str, dict[str, str]] = field(
         default_factory=dict
@@ -474,6 +470,7 @@ class PreprocessorFactsResult:
             "attempted": self.attempted,
             "succeeded": self.succeeded,
             "probes_truncated": self.probes_truncated,
+            **self.probe_tallies.to_dict(),
             "all_failed": self.all_failed,
             "divergences": [d.to_dict() for d in self.divergences],
             "leaks": [leak.to_dict() for leak in self.leaks],
@@ -554,10 +551,15 @@ class ClangPreprocessorExtractor:
     clang_bin: str = "clang++"
     runs_attempted: int = 0
     runs_ok: int = 0
-    #: Distinct compile-context probes skipped by the
-    #: ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap (never silent — folded
-    #: into the coverage detail by ``PreprocessorFactsResult.coverage()``).
-    probes_truncated: int = 0
+
+    #: Per-probe-family tallies (``preprocessor_probe_families.py``).
+    probe_tallies: ProbeTallies = field(default_factory=ProbeTallies)
+
+    @property
+    def probes_truncated(self) -> int:
+        """Probes the cap skipped, over every family (derived, see above)."""
+        return sum(self.probe_tallies.truncated.values())
+
     #: Set once an active scan --budget deadline is found already exhausted
     #: (P0 SVS follow-up). Read by capture_macros/capture_header_includes to
     #: stop iterating the remaining compile units/headers instead of calling
@@ -619,16 +621,9 @@ class ClangPreprocessorExtractor:
 
         units: list[CompileUnit] = [cu for cu in build.compile_units if cu.source]
 
-        max_probes = _preprocessor_scan_max_probes()
-        if len(units) > max_probes:
-            truncated = len(units) - max_probes
-            self.probes_truncated += truncated
-            units = units[:max_probes]
-            self.diagnostics.append(
-                f"preprocessor macro scan capped at {max_probes} compile "
-                f"unit(s); {truncated} skipped "
-                "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
-            )
+        units, capped = apply_probe_cap(units, MACRO_PROBES, self.probe_tallies)
+        if capped:
+            self.diagnostics.append(capped)
 
         def _probe(cu: CompileUnit) -> tuple[CompileUnit, dict[str, str]]:
             if self.deadline_exhausted:
@@ -649,6 +644,7 @@ class ClangPreprocessorExtractor:
             ]
             cwd = unredact_home(cu.directory) if cu.directory else None
             text = self._run(cmd, cwd, cu.id)
+            self.probe_tallies.record(MACRO_PROBES, ok=text is not None)
             # Parse to the small {macro: value} map INSIDE the worker, not
             # after collecting -- pool.map() (via _run_probes) materializes
             # its whole result list before capture_macros sees any of it, so
@@ -765,16 +761,9 @@ class ClangPreprocessorExtractor:
         run_cwd = unredact_home(cwd) if cwd else None
         headers = [h for h in public_headers if h]
 
-        max_probes = _preprocessor_scan_max_probes()
-        if len(headers) > max_probes:
-            truncated = len(headers) - max_probes
-            self.probes_truncated += truncated
-            headers = headers[:max_probes]
-            self.diagnostics.append(
-                f"preprocessor header-leak scan capped at {max_probes} "
-                f"public header(s); {truncated} skipped "
-                "(set ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES to raise)"
-            )
+        headers, capped = apply_probe_cap(headers, HEADER_PROBES, self.probe_tallies)
+        if capped:
+            self.diagnostics.append(capped)
 
         def _probe(hdr: str) -> tuple[str, list[str]]:
             if self.deadline_exhausted:
@@ -793,6 +782,7 @@ class ClangPreprocessorExtractor:
                 header_arg,
             ]
             text = self._run(cmd, run_cwd, hdr)
+            self.probe_tallies.record(HEADER_PROBES, ok=text is not None)
             # Parse to the small include-path list INSIDE the worker, not
             # after collecting -- same memory reasoning as capture_macros'
             # own _probe (Codex review).
@@ -883,6 +873,7 @@ def collect_preprocessor_facts(
     result.attempted = extractor.runs_attempted
     result.succeeded = extractor.runs_ok
     result.probes_truncated = extractor.probes_truncated
+    result.probe_tallies = extractor.probe_tallies.snapshot()
     result.diagnostics = list(extractor.diagnostics)
     result.ran = True
     return result

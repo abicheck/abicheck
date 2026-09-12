@@ -28,16 +28,21 @@ import pytest
 
 from abicheck.buildsource.model import CoverageStatus, LayerConfidence
 from abicheck.buildsource.pattern_facts import (
-    _EXTENSIONLESS_MAX_BYTES,
     PATTERN_FACTS_VERSION,
     PatternCategory,
     PatternFactsResult,
     PatternKind,
-    _is_scannable,
     _resolve_scan_jobs,
     find_pattern_facts,
     iter_source_files,
     scan_text,
+)
+
+# File discovery lives in its own module since the discovery/scanning split
+# (see `pattern_facts_files.py`'s docstring).
+from abicheck.buildsource.pattern_facts_files import (
+    _EXTENSIONLESS_MAX_BYTES,
+    _is_scannable,
 )
 
 
@@ -578,7 +583,7 @@ def test_resolve_scan_jobs_auto_and_invalid(monkeypatch) -> None:
 
 
 def test_looks_binary(tmp_path: Path) -> None:
-    import abicheck.buildsource.pattern_facts as ps
+    import abicheck.buildsource.pattern_facts_files as ps
 
     text = tmp_path / "t"
     text.write_text("struct S {};")
@@ -608,7 +613,9 @@ def test_scan_files_serial_counts_unreadable_as_skipped(tmp_path: Path) -> None:
 
     good = tmp_path / "a.hpp"
     good.write_text("struct S { virtual void f(); };")
-    result = ps._find_pattern_facts_serial([good, tmp_path])  # tmp_path: a dir → skipped
+    result = ps._find_pattern_facts_serial(
+        [good, tmp_path]
+    )  # tmp_path: a dir → skipped
     assert result.files_scanned == 1
     assert result.files_skipped == 1
 

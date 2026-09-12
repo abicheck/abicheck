@@ -80,6 +80,13 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     d.pop("_type_by_name", None)
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
+    # Runtime-only source-read licence — never persisted, by design. Writing it
+    # would let a stored snapshot grant itself permission to re-read whatever
+    # now lives at the ``source_header`` paths it records, which is exactly the
+    # defect ``buildsource/source_inputs.py``'s contract forbids: a recorded
+    # path is provenance, not a licence. A loaded snapshot therefore always
+    # comes back with the field at its deny-by-default ``False``.
+    d.pop("live_source_evidence", None)
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
     # so a reload re-runs the same inference and re-marks it inferred, rather
