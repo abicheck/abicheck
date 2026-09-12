@@ -1295,7 +1295,7 @@ class DetectNamespacePatterns:
             detect_namespace_patterns,
         )
 
-        namespaces = self._experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
+        namespaces = self._experimental_namespaces or ctx.experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
         new_findings = detect_namespace_patterns(
             ctx.old,
             ctx.new,
@@ -1688,6 +1688,10 @@ class PostProcessingPipeline:
         # ADR-067 C-S1: appended last for the same positional-safety reason
         # the note above records.
         disposition_ledger: DispositionLedger | None = None,
+        # ADR-069: likewise appended, not slotted next to `internal_namespaces`
+        # where it reads better -- doing that rebound a positional
+        # `disposition_ledger` to this parameter (Codex review, PR #1231).
+        experimental_namespaces: tuple[str, ...] | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1696,6 +1700,7 @@ class PostProcessingPipeline:
             suppression=suppression,
             frozen_namespaces=list(frozen_namespaces or []),
             internal_namespaces=internal_namespaces,
+            experimental_namespaces=experimental_namespaces,
             scope_to_public_surface=scope_to_public_surface,
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,

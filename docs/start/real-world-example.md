@@ -87,20 +87,32 @@ noisy, at LOW confidence:
 | **Verdict**   | ❌ `BREAKING` |   | Confidence    | LOW |
 | Breaking      | 6 |               | Evidence tier | elf_only |
 
-> ℹ️ 5 of 6 breaking findings are internal/RTTI churn — likely a missing
-> `-fvisibility=hidden`, not public-API breaks. Genuine public breaks: 1.
+> ℹ️ **Breaking findings by symbol shape:** 4 RTTI/vtable artifact(s), 1 in an
+> internal-namespace-by-convention, 1 other, of 6 total.
+>
+> This is how the symbols are *spelled*, not what is in the public contract — a
+> vtable or typeinfo change for a public, user-derivable class is a genuine
+> public ABI break, and the internal-namespace count assumes a convention this
+> library may not follow. Churn here *can* mean a missing
+> `-fvisibility=hidden`, but this breakdown alone does not establish that; run
+> with `--contract` to classify findings against a resolved contract instead.
 ```
 
-**With** headers, the internal churn is scoped out, leaving the real change at
-HIGH confidence:
+Note what that note does **not** say: it does not tell you the 5 RTTI/internal
+findings are safe to ignore. Symbol shape is not contract membership (ADR-069)
+— a vtable layout change on a public base class is a real break for every
+consumer that derives from it. What narrows the set here is *evidence*, not
+spelling: **with** headers, abicheck can see which declarations are actually in
+the public surface and scopes the rest out, at HIGH confidence:
 
 ```text
 | **Verdict**   | ❌ `BREAKING` |   | Confidence    | HIGH |
 | Breaking      | 1 |               | Evidence tier | header_aware |
 ```
 
-Same binaries, same verdict label — headers cut 6 findings to the 1 that matters
-and raised confidence `LOW → HIGH`.
+Same binaries, same verdict label — headers cut 6 findings to 1 and raised
+confidence `LOW → HIGH`. That reduction is trustworthy because it rests on the
+header surface, which is exactly the evidence the binary-only run lacked.
 
 ---
 

@@ -63,6 +63,12 @@ class PipelineContext:
     # DetectNamespacePatterns's experimental_namespaces — a different, unrelated
     # convention (see PolicyFile.internal_namespaces's docstring).
     internal_namespaces: tuple[str, ...] | None = None
+    # The `experimental::` graduation convention, threaded in from
+    # PolicyFile.experimental_namespaces. None means "not configured" --
+    # DetectNamespacePatterns falls back to DEFAULT_EXPERIMENTAL_NAMESPACES.
+    # A separate field from `internal_namespaces` above on purpose: the two
+    # name unrelated conventions (implementation detail vs. not-yet-stable).
+    experimental_namespaces: tuple[str, ...] | None = None
     # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
     # not on the public-header-scoped ABI surface to ``out_of_surface``.
     scope_to_public_surface: bool = False

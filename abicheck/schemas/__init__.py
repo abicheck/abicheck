@@ -895,7 +895,18 @@ _ARTIFACT_NAMES = frozenset(
 #:       contract. The ``--no-baseline`` audit report's
 #:       ``NO_BASELINE_REPORT_SCHEMA_VERSION`` gains the identical field
 #:       under this same name for the same reason.
-REPORT_SCHEMA_VERSION = "4.2"  #: 4.2 -- see the comment immediately above.
+#: 4.3 -- additive ``effective_config_fields["surface.experimental_namespaces"]``
+#:       and its contribution to ``effective_config_digest`` (ADR-069, Codex
+#:       review): the ``experimental_namespaces:`` policy key changes which
+#:       namespace-pattern findings a run emits, so two comparisons differing
+#:       only in it must not fingerprint identically. Additive in the key set,
+#:       but the *digest value* changes for every run -- ``EFFECTIVE_CONFIG_
+#:       FIELD_KEYS`` is hashed positionally, so a new key shifts the input
+#:       even when its value is the empty string. Comparing a digest across
+#:       this boundary is therefore meaningless, which is exactly what the
+#:       version bump exists to signal; the per-field ``effective_config_
+#:       fields`` dict beside it stays attributable as before.
+REPORT_SCHEMA_VERSION = "4.3"  #: 4.3 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

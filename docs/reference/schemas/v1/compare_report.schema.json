@@ -1647,7 +1647,7 @@
     },
     "effective_config_fields": {
       "type": "object",
-      "description": "schema 2.45: the named field dict effective_config_digest was hashed from, so a mismatch between two runs' digests can be attributed to a specific field instead of read as an opaque hash -- mirrors the profile_fields/scope_fields precedent in comparability.py. _tier is \"contract\" (a full CompatibilityEvaluationConfig was resolved, under --contract/--pack) or \"baseline\" (the policy/gate fields every comparison resolves regardless); the two tiers are not cross-comparable, since the contract tier also covers axes (contract.mode, real pack identities) a baseline-tier run never resolved. Every key effective_config_digest.EFFECTIVE_CONFIG_FIELD_KEYS names is always present (as an empty string when the active tier does not resolve that axis), so a reader can rely on the full key set rather than only _tier. Schema-optional -- see effective_config_digest above.",
+      "description": "schema 2.45: the named field dict effective_config_digest was hashed from, so a mismatch between two runs' digests can be attributed to a specific field instead of read as an opaque hash -- mirrors the profile_fields/scope_fields precedent in comparability.py. _tier is \"contract\" (a full CompatibilityEvaluationConfig was resolved, under --contract/--pack) or \"baseline\" (the policy/gate fields every comparison resolves regardless); the two tiers are not cross-comparable, since the contract tier also covers axes (contract.mode, real pack identities) a baseline-tier run never resolved. Every key effective_config_digest.EFFECTIVE_CONFIG_FIELD_KEYS names is always present (as an empty string when the active tier does not resolve that axis), so a reader can rely on the full key set rather than only _tier. schema 4.3 adds surface.experimental_namespaces (ADR-069): the experimental_namespaces: policy key changes which namespace-pattern findings a run emits, so it has to be fingerprinted; because the key set is hashed positionally, adding it changes every run's digest value, which is why 4.3 is a version bump rather than a silent addition. Schema-optional -- see effective_config_digest above.",
       "required": [
         "_tier",
         "policy.base",
@@ -1660,6 +1660,7 @@
         "policy.env_matrix",
         "policy.reconcile_build_context",
         "surface.internal_namespaces",
+        "surface.experimental_namespaces",
         "surface.explicit_scope",
         "surface.scope_to_public_surface",
         "surface.scope_to_public_surface_requested",
@@ -1694,6 +1695,7 @@
         "policy.env_matrix": { "type": "string" },
         "policy.reconcile_build_context": { "type": "string" },
         "surface.internal_namespaces": { "type": "string" },
+        "surface.experimental_namespaces": { "type": "string" },
         "surface.explicit_scope": { "type": "string" },
         "surface.scope_to_public_surface": { "type": "string" },
         "surface.scope_to_public_surface_requested": { "type": "string" },

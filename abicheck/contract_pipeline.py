@@ -240,6 +240,8 @@ class ContractEvaluationStage:
         policy_file: PolicyFile | None,
         suppression: SuppressionList | None,
         internal_namespaces: tuple[str, ...],
+        experimental_namespaces: tuple[str, ...] = (),
+        experimental_namespaces_stated: bool = False,
     ) -> PersistedContractContext:
         """Assemble ADR-049 Phase 4's persisted context for this comparison.
 
@@ -279,6 +281,8 @@ class ContractEvaluationStage:
             internal_namespaces_stated=bool(
                 policy_file is not None and policy_file.internal_namespaces_stated
             ),
+            experimental_namespaces=experimental_namespaces,
+            experimental_namespaces_stated=experimental_namespaces_stated,
             # Keyed by the ChangeKind *slug*, which is what the typed config's
             # `overrides` field takes (and what a persisted receipt must carry
             # -- a `ChangeKind` member is not JSON).

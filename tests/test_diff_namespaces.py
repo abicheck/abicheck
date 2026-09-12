@@ -1085,10 +1085,9 @@ class TestCombinedEntryPoint:
         assert ChangeKind.EXPERIMENTAL_GRADUATED in kinds
         assert ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT in kinds
 
-    def test_default_namespaces_include_preview_and_v0(self) -> None:
+    def test_default_namespaces_include_experimental_and_preview(self) -> None:
         assert "experimental" in DEFAULT_EXPERIMENTAL_NAMESPACES
         assert "preview" in DEFAULT_EXPERIMENTAL_NAMESPACES
-        assert "v0" in DEFAULT_EXPERIMENTAL_NAMESPACES
 
 
 # ---------------------------------------------------------------------------

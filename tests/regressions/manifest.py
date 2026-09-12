@@ -108,6 +108,111 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="api.positional_slot_rebinding",
+        invariant=(
+            "The positional parameter order of a long-lived entry point -- a "
+            "public dataclass's fields, a pipeline method's signature -- is "
+            "append-only. Inserting a parameter or field mid-signature, where "
+            "every trailing parameter already has a default, silently rebinds "
+            "every existing positional caller one slot to the left: nothing "
+            "raises, nothing fails to type-check, and the caller's argument "
+            "lands on a different field. A new parameter is appended, or "
+            "better, made keyword-only."
+        ),
+        fixed_by=(1231,),
+        seed_tests=(
+            "tests/test_positional_signature_stability.py",
+            "tests/test_policy_experimental_namespaces.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Registered because two independent instances landed in "
+                    "one change (PR #1231) and both were caught in review, "
+                    "not by any test -- `PolicyFile` (an 8th positional "
+                    "argument for `source_only_findings` binding to "
+                    "`experimental_namespaces`, dropping the evidence policy) "
+                    "and `PostProcessingPipeline.run` (a positional "
+                    "`disposition_ledger` binding to `experimental_"
+                    "namespaces`, disabling auditing and handing a "
+                    "non-iterable ledger to a namespace consumer). Both "
+                    "signatures already carried comments warning about "
+                    "exactly this, so prose in the file demonstrably does not "
+                    "prevent it. The seed test pins those two signatures' "
+                    "whole positional order, which catches any future "
+                    "mid-signature insertion into *them*. What it does not do "
+                    "is enumerate every other long-lived entry point in the "
+                    "codebase: there is no automatic discovery of "
+                    "\"signatures whose order is load-bearing\", and a naive "
+                    "sweep over every public callable would pin churn-prone "
+                    "internal helpers and be deleted within a release. "
+                    "Extending coverage means adding a signature to the seed "
+                    "test when a call site is found to pass it positionally."
+                ),
+                reference="PR #1231",
+            ),
+        ),
+    ),
+    BugClass(
+        id="classification.name_shape_as_contract_membership",
+        invariant=(
+            "A symbol's spelling answers how it is *represented* and what "
+            "convention it follows -- never whether it is in the "
+            "compatibility contract. Two corollaries the report layer must "
+            "honour: (a) a name-derived bucket (RTTI/vtable, "
+            "internal-namespace-by-convention, version segment) may be "
+            "counted and described, but never presented as evidence that a "
+            "finding is not a public break -- a vtable change on a public, "
+            "user-derivable class is one, and a `vN` segment states an API "
+            "version, not a stability promise; (b) when a name *is* parsed "
+            "for a scope-convention answer, only the scope that OWNS the "
+            "entity counts. A mangled name embeds its parameter types, so a "
+            "whole-string scan attributes a parameter's namespace to the "
+            "function, and an entity merely named like a convention "
+            "namespace is not in one."
+        ),
+        fixed_by=(1231,),
+        seed_tests=(
+            "tests/test_symbol_origin_ownership_properties.py",
+            "tests/test_surface_breakdown.py",
+            "tests/test_policy_experimental_namespaces.py",
+            "tests/test_diff_namespaces.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Corollary (b) is now structural (the real Itanium "
+                    "nested-name parser resolves the owner) and generated "
+                    "against an independent oracle -- the seed test builds "
+                    "each mangled name from known components with its own "
+                    "encoder rather than re-deriving the answer through the "
+                    "parser under test. Two residual gaps. First, the "
+                    "fallback for shapes that parser does not model "
+                    "(constructors, destructors, operators) is still a "
+                    "textual scan of the region before the first `E`; it errs "
+                    "safe (a template argument's own `E` truncates it early, "
+                    "under-detecting rather than over-detecting) and is "
+                    "covered only by enumerated sibling cases -- teaching the "
+                    "structural parser those productions is the real fix. "
+                    "Second, and larger: corollary (a) is enforced only by "
+                    "making the report stop *claiming* membership it cannot "
+                    "establish. The positive half -- classifying these "
+                    "findings against a resolved contract -- is ADR-049's "
+                    "`--contract` machinery, which the surface breakdown does "
+                    "not consult at all; the JSON `abi_surface_breakdown` "
+                    "block still uses the `rtti_churn`/`internal_churn` key "
+                    "names, kept for report-schema stability and now "
+                    "contradicted by the prose beside them. A third, adjacent "
+                    "defect from the same report is tracked separately in "
+                    "docs/contribute/known-gaps.md: `Visibility.PUBLIC` used "
+                    "as a proxy for declaration presence, which is an "
+                    "evidence-selection problem rather than a naming one."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="policy.public_surface_reachability",
         invariant=(
             "A declaration's public/private classification is a function "

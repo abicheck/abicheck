@@ -138,6 +138,10 @@ from .policy.disposition_ledger import (
     record_suppressed_change,
 )
 from .policy.evidence_status import EvidenceTier, is_cross_source_resolved
+from .policy.policy_file_namespaces import (
+    experimental_namespaces as _experimental_namespaces,
+    internal_namespaces as _internal_namespaces,
+)
 from .policy_file import PolicyFile
 
 if TYPE_CHECKING:
@@ -571,6 +575,7 @@ def _run_post_processing(
 
     frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
     internal_ns = _internal_namespaces(policy_file) or None
+    experimental_ns = _experimental_namespaces(policy_file) or None
     pp_ctx = DEFAULT_PIPELINE.run(
         changes,
         old,
@@ -578,6 +583,7 @@ def _run_post_processing(
         suppression=suppression,
         frozen_namespaces=frozen_ns,
         internal_namespaces=internal_ns,
+        experimental_namespaces=experimental_ns,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
         collapse_versioned_symbols=collapse_versioned_symbols,
@@ -692,22 +698,6 @@ def _compute_scope_confidence(
         surf_old=pp_ctx.surf_old,
         surf_new=pp_ctx.surf_new,
     )
-
-
-def _internal_namespaces(policy_file: PolicyFile | None) -> tuple[str, ...]:
-    """The policy file's internal-namespace hints, or an empty tuple.
-
-    One derivation shared by post-processing's own ``internal_namespaces``
-    argument and the persisted evaluation context's ``surface`` hints
-    (CodeRabbit review: the two had independent copies, so a change to the
-    resolution rule would have silently applied to only one of them).
-    Post-processing wants ``None`` for "none configured" and converts at its
-    own call site; this returns the empty tuple, which is what the typed
-    config field takes.
-    """
-    if policy_file is None or not policy_file.internal_namespaces:
-        return ()
-    return tuple(policy_file.internal_namespaces)
 
 
 def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
@@ -1316,6 +1306,10 @@ def compare(
             policy_file=policy_file,
             suppression=suppression,
             internal_namespaces=_internal_namespaces(policy_file),
+            experimental_namespaces=_experimental_namespaces(policy_file),
+            experimental_namespaces_stated=bool(
+                policy_file is not None and policy_file.experimental_namespaces_stated
+            ),
         )
 
     # E-S3: `[]` (never omitted) when the stage ran and found nothing;

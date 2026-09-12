@@ -376,7 +376,13 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 if config.surface.explicit_scope is not None
                 else None
             ),
-            "hints": {"internal_namespaces": list(config.surface.internal_namespaces)},
+            "hints": {
+                "internal_namespaces": list(config.surface.internal_namespaces),
+                # ADR-069; always emitted, so "absent" never means "empty".
+                "experimental_namespaces": list(
+                    config.surface.experimental_namespaces
+                ),
+            },
         },
         "assurance": {"require_evidence": config.assurance.require_evidence},
         "policy": {
@@ -522,6 +528,12 @@ def resolved_config_from_dict(
                 _digested_from_dict(explicit_scope)
                 if explicit_scope is not None
                 else None
+            ),
+            experimental_namespaces=tuple(
+                _sequence(
+                    hints.get("experimental_namespaces"),
+                    what="experimental_namespaces",
+                )
             ),
             internal_namespaces=tuple(
                 _sequence(hints.get("internal_namespaces"), what="internal_namespaces")

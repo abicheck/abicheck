@@ -81,6 +81,10 @@ from .policy.acknowledgment_policy import (
     built_in_default_acknowledgment_policy,
 )
 from .policy.classification import Verdict, compute_verdict, policy_kind_sets
+from .policy.policy_file_namespaces import (
+    parse_experimental_namespaces,
+    parse_internal_namespaces,
+)
 from .policy.policy_file_top_level import (
     parse_base_policy as _parse_base_policy,
     reject_unknown_top_level_keys,
@@ -429,23 +433,6 @@ def _parse_frozen_namespaces(frozen_raw: Any) -> list[str]:
     return result
 
 
-def _parse_internal_namespaces(raw: Any) -> list[str]:
-    """Validate and parse the ``internal_namespaces`` list of namespace tokens."""
-    if not isinstance(raw, list):
-        raise PolicyError(
-            "'internal_namespaces' must be a YAML list of namespace tokens, got "
-            + type(raw).__name__
-        )
-    result: list[str] = []
-    for i, token in enumerate(raw):
-        if not isinstance(token, str):
-            raise PolicyError(
-                f"internal_namespaces[{i}]: expected string, got {type(token).__name__}"
-            )
-        result.append(token)
-    return result
-
-
 # Severity ordering used for frozen-namespace floor comparisons.
 _VERDICT_ORDER: list[Verdict] = [
     Verdict.NO_CHANGE,
@@ -626,6 +613,15 @@ class PolicyFile:
     # False, so nothing that builds one in code starts claiming a statement it
     # never made.
     internal_namespaces_stated: bool = False
+    # The `experimental::` graduation convention, threaded into
+    # DetectNamespacePatterns via PipelineContext.experimental_namespaces.
+    # Distinct from `internal_namespaces` above: that marks implementation
+    # detail, this marks "declared, but not yet promised stable". Empty list =
+    # use DEFAULT_EXPERIMENTAL_NAMESPACES. See ADR-069, docs/use/policies.md.
+    # kw_only like `reclassify`/`versioning`: a positional field here would
+    # rebind every later positional argument (Codex, PR #1231).
+    experimental_namespaces: list[str] = field(default_factory=list, kw_only=True)
+    experimental_namespaces_stated: bool = field(default=False, kw_only=True)
     # ADR-066 D4/S2 -- versioning policy; `versioning_stated` mirrors `internal_namespaces_stated`.
     # `kw_only=True` for the same reason `reclassify` above is (CodeRabbit review; see its comment).
     versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
@@ -696,7 +692,10 @@ class PolicyFile:
         overrides = _parse_overrides(raw.get("overrides", {}), path)
         reclassify = _parse_reclassify(raw.get("reclassify", []), path)
         frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
-        internal_namespaces = _parse_internal_namespaces(raw.get("internal_namespaces", []))
+        internal_namespaces = parse_internal_namespaces(raw.get("internal_namespaces", []))
+        experimental_namespaces = parse_experimental_namespaces(
+            raw.get("experimental_namespaces", [])
+        )
         source_only, build_drift, graph_risk, require_evidence = _parse_evidence_policy(
             raw.get("evidence_policy", {}), path
         )
@@ -722,6 +721,8 @@ class PolicyFile:
             frozen_namespaces=frozen_namespaces,
             internal_namespaces=internal_namespaces,
             internal_namespaces_stated="internal_namespaces" in raw,
+            experimental_namespaces=experimental_namespaces,
+            experimental_namespaces_stated="experimental_namespaces" in raw,
             versioning=versioning,
             versioning_stated=versioning_stated,
             acknowledgment_policy=acknowledgment_policy,

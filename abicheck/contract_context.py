@@ -188,6 +188,8 @@ def build_evaluation_context(
     policy_from_file: bool = False,
     internal_namespaces: Iterable[str] = (),
     internal_namespaces_stated: bool = False,
+    experimental_namespaces: Iterable[str] = (),
+    experimental_namespaces_stated: bool = False,
     policy_overrides: Mapping[str, Verdict] | None = None,
     suppressions: SuppressionConfig | None = None,
     overlays: OverlaySelection | None = None,
@@ -237,6 +239,7 @@ def build_evaluation_context(
 
     overlays = overlays or OverlaySelection(selectors=(), scope=None)
     resolved_namespaces = tuple(internal_namespaces)
+    resolved_experimental = tuple(experimental_namespaces)
     provenance = {
         "contract.mode": mode_provenance or _api_provenance("contract_mode"),
         # A policy file's own `base_policy` *overrides* the `policy` argument
@@ -248,6 +251,10 @@ def build_evaluation_context(
     }
     if resolved_namespaces or internal_namespaces_stated:
         provenance["surface.internal_namespaces"] = _api_provenance("policy_file")
+    # ADR-069: same rule, same file -- an explicit empty list is a statement,
+    # so `_stated` alone earns a provenance row.
+    if resolved_experimental or experimental_namespaces_stated:
+        provenance["surface.experimental_namespaces"] = _api_provenance("policy_file")
     if policy_overrides:
         provenance["policy.overrides"] = _api_provenance("policy_file")
     if suppressions is not None:
@@ -261,6 +268,7 @@ def build_evaluation_context(
         evidence=EvidenceConfig(),
         surface=SurfaceConfig(
             internal_namespaces=resolved_namespaces,
+            experimental_namespaces=resolved_experimental,
             explicit_scope=overlays.scope,
         ),
         assurance=AssuranceConfig(),
@@ -821,6 +829,8 @@ def build_persisted_context(
     policy_from_file: bool = False,
     internal_namespaces: Iterable[str] = (),
     internal_namespaces_stated: bool = False,
+    experimental_namespaces: Iterable[str] = (),
+    experimental_namespaces_stated: bool = False,
     policy_overrides: Mapping[str, Verdict] | None = None,
     suppressions: SuppressionConfig | None = None,
     changes: Sequence[Change] = (),
@@ -836,6 +846,8 @@ def build_persisted_context(
             policy_from_file=policy_from_file,
             internal_namespaces=internal_namespaces,
             internal_namespaces_stated=internal_namespaces_stated,
+            experimental_namespaces=experimental_namespaces,
+            experimental_namespaces_stated=experimental_namespaces_stated,
             policy_overrides=policy_overrides,
             suppressions=suppressions,
             overlays=overlay_selection(evidence),

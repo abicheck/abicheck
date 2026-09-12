@@ -281,6 +281,40 @@ segment, but not `acme::privhelpers::Widget`). An empty (or omitted) list
 keeps every detector's own built-in default — existing policy files are
 unaffected.
 
+### Which namespaces are "not yet promised stable" (`experimental_namespaces`)
+
+A separate, unrelated convention: `internal_namespaces` marks
+*implementation detail*, while these mark declarations that are public but
+**not yet covered by a stability promise**. Removing one adds an
+`EXPERIMENTAL_*` finding **alongside** the ordinary break — it is an overlay,
+not a substitute, so the plain `func_removed` is still reported and still
+drives the verdict. The default set is `experimental`/`preview`:
+
+```yaml
+experimental_namespaces:
+  - experimental
+  - preview
+  - v0          # only if your project really means v0 that way
+```
+
+Matching works exactly like `internal_namespaces` above — whole `::`-joined
+segments, no globbing — and an omitted list keeps the default.
+
+**`v0` is not in the default set.** A *version* segment says which version of
+the API a declaration belongs to; it says nothing about what is promised
+about it. Inline-versioned public APIs (`namespace v0 { … }`, re-exported via
+an inline namespace so callers write the unversioned spelling) are a common
+way to spell a library's *current public* API, and treating that segment as
+experimental described a fully supported API as never having been promised.
+If your project does use `v0` to mean experimental, list it as above — the
+behaviour is then identical to the old default.
+
+Because the `EXPERIMENTAL_*` finding is an overlay, dropping `v0` from the
+default cannot hide anything: a removal under `v0` still reports
+`func_removed` and still yields a `BREAKING` verdict and the same exit code.
+What the default no longer does is add an annotation asserting the removal was
+*expected*. See [ADR-069](../contribute/adr/069-name-shape-is-not-contract-membership.md).
+
 ---
 
 ## Exit Codes
