@@ -89,7 +89,7 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
 
         assert code == 64, out
         assert "debug.pdb_path" in out
-        assert "--debug-root" in out
+        assert "--debug-info" in out
 
     def test_accepted_with_one_stored_snapshot_and_one_live_pe(
         self, tmp_path: Path
@@ -113,7 +113,7 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
 
         # Never the pdb_path usage error; the run may still fail for
         # unrelated reasons (no real PE parse of the 64-byte stub above),
-        # but not with exit 64 naming debug.pdb_path/--debug-root.
+        # but not with exit 64 naming debug.pdb_path/--debug-info.
         assert not (code == 64 and "debug.pdb_path" in out), out
 
     def test_accepted_without_pdb_path_configured(self, tmp_path: Path) -> None:

@@ -357,7 +357,11 @@ def test_unsupported_options_table_is_non_empty() -> None:
     assert "--abi3" in _UNSUPPORTED_SPELLINGS
     assert "--budget" in _UNSUPPORTED_SPELLINGS
     assert "--since" in _UNSUPPORTED_SPELLINGS
-    assert len(_OLD_SIDED_SPELLINGS) >= 8
+    # 7, not 8: plan Phase 7n merged `--devel-pkg` into `-H/--header`, so
+    # its old=-scoped spelling is now the same string as `--header old=`.
+    # The floor tracks the real set size; it exists to catch an emptied
+    # table, not to pin a count.
+    assert len(_OLD_SIDED_SPELLINGS) >= 7
     assert "--header old=" in _OLD_SIDED_SPELLINGS
     assert "--sources old=" in _OLD_SIDED_SPELLINGS
     assert "--version old=" in _OLD_SIDED_SPELLINGS

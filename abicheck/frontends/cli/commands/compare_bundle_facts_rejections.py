@@ -298,7 +298,8 @@ def reject_unsupported_options(
         # this dispatch never loads or forwards probe_matrix_old/
         # probe_matrix_new -- silently never folded.
         raise click.UsageError(
-            "--probe-matrix is not supported together with a stored-bundle-facts OLD_INPUT."
+            "A --build-info build-configuration matrix is not supported together "
+            "with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("post_manifest_path") is not None:
         # Codex review: --post-manifest's public_surface_allowlist is
@@ -342,7 +343,8 @@ def reject_unsupported_options(
         # to feed at all -- OLD_FACTS is already a resolved, stored
         # snapshot -- so it was silently discarded rather than applied.
         raise click.UsageError(
-            "--devel-pkg old=... is not supported together with a stored-bundle-facts OLD_INPUT."
+            "A --header old=... development package is not supported together with "
+            "a stored-bundle-facts OLD_INPUT."
         )
     # The `--pdb-path` CLI-flag rejection that used to sit here is gone with
     # the flag itself (one-comparison-product.md Phase 7, §4.1's CONFIG row):
@@ -385,7 +387,7 @@ def reject_unsupported_options(
         # them to check here at all. The equivalent config-set case is
         # rejected below, by the debug: config-block check.
         raise click.UsageError(
-            "--debug-root is not supported together with a stored-bundle-facts OLD_INPUT."
+            "--debug-info is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone as a flag (it's
     # unconditional everywhere else on `compare` now) -- nothing left to
@@ -678,7 +680,7 @@ def _reject_new_side_extraction_options_for_stored_pair(
         )
     if kwargs.get("devel_pkg2") is not None:
         raise click.UsageError(
-            "--devel-pkg new=... is not supported when both OLD_INPUT and "
+            "A --header new=... development package is not supported when both OLD_INPUT and "
             "NEW_INPUT are stored BundleFacts documents: there is no live "
             "NEW-side package to extract a devel companion package's "
             "headers into."

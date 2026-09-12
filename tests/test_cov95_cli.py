@@ -886,13 +886,13 @@ class TestCompareCommand:
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
-        m = tmp_path / "m.json"
-        m.write_text("{}")
+        m = tmp_path / "m.json"  # a real matrix: 7n routes on content, not name
+        m.write_text(json.dumps({"library": "l", "version": "1", "spec_name": "t"}))
         result = _invoke(
             "compare",
             str(old_f),
             str(new_f),
-            "--probe-matrix",
+            "--build-info",
             "old=" + str(m),
         )
         assert result.exit_code != 0

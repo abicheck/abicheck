@@ -27,6 +27,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from _package_fixtures import _make_tar_mode
 from click.testing import CliRunner
 
 from abicheck import cli_compare_release
@@ -982,8 +983,7 @@ class TestClassifier:
         assert classify_compare_operand(d) == "directory"
 
     def test_package(self, tmp_path: Path) -> None:
-        pkg = tmp_path / "foo.tar.gz"
-        pkg.write_bytes(b"\x1f\x8b\x08\x00")  # gzip magic; name suffix triggers detection
+        pkg = _make_tar_mode(tmp_path / "foo.tar.gz", "w:gz")  # content, not name (7n)
         assert classify_compare_operand(pkg) == "package"
 
     def test_pie_executable_is_app(self, tmp_path: Path) -> None:

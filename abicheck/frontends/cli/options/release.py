@@ -45,7 +45,6 @@ import click
 from .params import (
     DEPTH_PARAM,
     SIDED_BUILD_INFO_PARAM,
-    SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
     SIDED_STR_PARAM,
@@ -58,8 +57,9 @@ def release_options(func: F) -> F:
     """Directory/package (release) comparison knobs, folded onto ``compare``.
 
     The release-only options the removed ``compare-release`` command exposed:
-    package extraction (``--debug-info*``/``--devel-pkg*``) and the ADR-023
-    instantiation-manifest analysis. They bite only when ``compare``'s
+    the ADR-023 instantiation-manifest analysis and the release summary's
+    finding cap (package extraction's own two inputs left this group in
+    Phase 7n -- see the comment below). They bite only when ``compare``'s
     operands are directories or packages (the per-library fan-out); on
     single-file inputs they are inert. Declared once here so ``compare`` and
     the internal release engine share one surface (ADR-037 D7). Applied
@@ -156,24 +156,15 @@ def release_options(func: F) -> F:
         "a real release fan-out, at which point this becomes a duplicate "
         "spelling of that capability rather than the only one.",
     )(func)
-    func = click.option(
-        "--devel-pkg",
-        "devel_pkg",
-        multiple=True,
-        type=SIDED_EXISTING_PATH_PARAM,
-        help="Development package with headers, scoped per side with an "
-        "'old='/'new=' prefix (e.g. --devel-pkg old=a-dev.rpm --devel-pkg "
-        "new=b-dev.rpm). Directory/package inputs only (ADR-040).",
-    )(func)
-    func = click.option(
-        "--debug-info",
-        "debug_info",
-        multiple=True,
-        type=SIDED_EXISTING_PATH_PARAM,
-        help="Debug info package (RPM/Deb/tar), scoped per side with an "
-        "'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info "
-        "new=b-dbg.rpm). Directory/package inputs only (ADR-040).",
-    )(func)
+    # one-comparison-product.md Phase 7n: ``--devel-pkg`` and this group's
+    # own ``--debug-info`` are gone from *here*. Neither capability is: a
+    # development package is a carrier of **header** evidence, so it is one
+    # of ``-H/--header``'s transports now, and a debug package is one of
+    # ``--debug-info``'s three (see ``debug_resolution_options`` below,
+    # which owns that flag now that it covers the whole debug role). Both
+    # still reach ``prepare_release_inputs``' ``devel_pkg1``/``devel_pkg2``/
+    # ``debug_info1``/``debug_info2`` parameters unchanged -- the merge is
+    # in the flags, not in the extraction path (``options/evidence_roles``).
     func = click.option(
         "--max-findings-per-library",
         "max_findings_per_library",
@@ -207,11 +198,27 @@ def release_options(func: F) -> F:
 
 
 def debug_resolution_options(func: F) -> F:
-    """Separate-debug-file resolution (ADR-021a): roots.
+    """The whole separate-debug-info role, one input (ADR-021a + 7n).
 
-    Currently a ``compare``-only family — it resolves *local* ELF debug
-    artifacts, which the package-oriented (``compare-release``) and
-    snapshot-oriented (``appcompat``) commands do not take. It
+    one-comparison-product.md Phase 7n: this family used to be "roots only"
+    (``--debug-root``) while a debug *package* arrived through
+    ``release_options``' own ``--debug-info``. A detached debug file, a
+    directory of them, and a debug package are three transports of one
+    evidence role, so they are one input -- ``--debug-info`` -- routed on
+    each operand's content (``options/evidence_roles`` ->
+    ``workflows.evidence_transport``). Each transport keeps exactly the
+    destination and validation it had: a package still reaches
+    ``prepare_release_inputs``' ``debug_info1``/``debug_info2`` extraction,
+    a directory still reaches ``debug_resolver``'s build-id-tree/path-mirror
+    search, and a named file is resolved by
+    ``extract.detached_debug.DetachedDebugFileResolver``, which rejects a
+    sidecar whose build-id contradicts the binary's rather than describing a
+    different build.
+
+    Currently a ``compare``-only family — the package-oriented
+    (``compare-release``) and snapshot-oriented (``appcompat``) commands do
+    not take it, and ``dump`` declares its own single-sided ``--debug-info``
+    (no release fan-out, so no package transport there). It
     lives here so the moment a second command needs it there is one definition to
     compose, not a copy to drift (ADR-037 D3).
 
@@ -225,14 +232,18 @@ def debug_resolution_options(func: F) -> F:
     remain the only way to set them for ``compare``.
     """
     func = click.option(
-        "--debug-root",
-        "debug_root",
+        "--debug-info",
+        "debug_info",
         multiple=True,
         type=SIDED_PATH_PARAM,
-        help="Directory containing separate debug files (build-id trees, "
-        "path-mirror, dSYM bundles). Applies to both sides; scope to one with an "
-        "'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040).",
+        help="Separate debug info for a side, in any of its three transports: "
+        "a directory to search (build-id tree, path mirror, dSYM bundles), a "
+        "detached DWARF debug file (a .debug sidecar), or a debug "
+        "package (RPM/Deb/tar; directory/package inputs only). Which one an "
+        "operand is comes from its content, not its name. Applies to both "
+        "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
+        "per side (e.g. --debug-info old=dbg1 --debug-info new=b-dbg.rpm). "
+        "Repeatable (ADR-040).",
     )(func)
     return func
 
@@ -430,8 +441,14 @@ def evidence_options(func: F) -> F:
         "build_info",
         multiple=True,
         type=SIDED_BUILD_INFO_PARAM,
-        help="Out-of-band build context: a build dir, a compile_commands.json, "
-        "or a pack, overriding embedded. Applies to both sides; scope to one "
+        help="Out-of-band build evidence: a build dir, a compile_commands.json "
+        "or a pack (compile context, overriding embedded), or a probe-matrix "
+        "snapshot (build-configuration observations). Which one an operand is "
+        "comes from the document, not its name, and both kinds may be given "
+        "for one side -- a matrix on both sides folds CXX_STANDARD_FLOOR_RAISED"
+        "/API_DEPENDS_ON_CONSUMER_ENV/BEHAVIOURAL_DEFAULT_CHANGED into this "
+        "comparison's verdict and report (G2: probe -> compare). Applies to "
+        "both sides; scope to one "
         "with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --build-info old=b1 --build-info new=b2) (ADR-040).",
     )(func)

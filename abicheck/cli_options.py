@@ -30,6 +30,11 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 import click
 
 from .frontends.cli.options import secondary_output_options as _secondary_output_options
+from .frontends.cli.options.evidence_roles import (
+    split_build_evidence,
+    split_debug_evidence,
+    split_header_evidence,
+)
 from .frontends.cli.options.params import (
     BUILTIN_POLICY_PROFILES,
     DEFAULT_POLICY_PROFILE,
@@ -190,17 +195,23 @@ def _split_sided_frontend(
 
 def normalize_sided_options(kwargs: dict[str, object]) -> None:
     """Translate the sided ``header``/``include``/``sources``/``build_info``/
-    ``debug_root``/``pdb``/``probe_matrix``/``version``/``ast-frontend`` dests
-    into the per-side kwargs the command bodies consume, in place (ADR-040 L1).
+    ``debug_info``/``pdb``/``version``/``ast-frontend`` dests into the
+    per-side kwargs the command bodies consume, in place (ADR-040 L1).
 
     Absent keys are left untouched, so this is safe to call on any command that
     composes only a subset of the sided families.
+
+    Three of these inputs carry more than one evidence *transport* since
+    one-comparison-product plan Phase 7n -- ``header`` also accepts a
+    development package, ``debug_info`` a debug package or a detached debug
+    file, ``build_info`` a probe-matrix snapshot -- so their split is
+    content-routed and lives in
+    :mod:`abicheck.frontends.cli.options.evidence_roles`. Every destination
+    this function produces is unchanged: the merge is in the flags, not in
+    what the command bodies read.
     """
     if "header" in kwargs:
-        both, old, new = split_sided_paths(kwargs.pop("header"))  # type: ignore[arg-type]
-        kwargs["headers"] = both
-        kwargs["old_headers_only"] = old
-        kwargs["new_headers_only"] = new
+        kwargs.update(split_header_evidence(kwargs.pop("header")))  # type: ignore[arg-type]
     if "dump_manifest" in kwargs:
         old_dm, new_dm = _split_sided_single(kwargs.pop("dump_manifest"))  # type: ignore[arg-type]
         kwargs["old_dump_manifest"] = old_dm
@@ -213,31 +224,14 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         kwargs["old_includes_only"] = old
         kwargs["new_includes_only"] = new
         kwargs["include_labels"] = labels
-    if "debug_root" in kwargs:
-        both, old, new = split_sided_paths(kwargs.pop("debug_root"))  # type: ignore[arg-type]
-        kwargs["debug_roots"] = both
-        kwargs["debug_roots_old"] = old
-        kwargs["debug_roots_new"] = new
+    if "debug_info" in kwargs:
+        kwargs.update(split_debug_evidence(kwargs.pop("debug_info")))  # type: ignore[arg-type]
     if "sources" in kwargs:
         old_s, new_s = _split_sided_single(kwargs.pop("sources"))  # type: ignore[arg-type]
         kwargs["old_sources"] = old_s
         kwargs["new_sources"] = new_s
     if "build_info" in kwargs:
-        old_b, new_b = _split_sided_single(kwargs.pop("build_info"))  # type: ignore[arg-type]
-        kwargs["old_build_info"] = old_b
-        kwargs["new_build_info"] = new_b
-    if "probe_matrix" in kwargs:
-        old_p, new_p = _split_sided_single(kwargs.pop("probe_matrix"))  # type: ignore[arg-type]
-        kwargs["probe_matrix_old"] = old_p
-        kwargs["probe_matrix_new"] = new_p
-    if "debug_info" in kwargs:
-        old_di, new_di = _split_sided_single(kwargs.pop("debug_info"))  # type: ignore[arg-type]
-        kwargs["debug_info1"] = old_di
-        kwargs["debug_info2"] = new_di
-    if "devel_pkg" in kwargs:
-        old_dp, new_dp = _split_sided_single(kwargs.pop("devel_pkg"))  # type: ignore[arg-type]
-        kwargs["devel_pkg1"] = old_dp
-        kwargs["devel_pkg2"] = new_dp
+        kwargs.update(split_build_evidence(kwargs.pop("build_info")))  # type: ignore[arg-type]
     if "pdb" in kwargs:
         base_p, old_pp, new_pp = _split_sided_base(kwargs.pop("pdb"))  # type: ignore[arg-type]
         kwargs["pdb_path"] = base_p
@@ -323,7 +317,10 @@ def two_sided_input_options(func: F) -> F:
         "header",
         multiple=True,
         type=SIDED_PATH_PARAM,
-        help="Public header file or directory. Applies to both sides; scope to "
+        help="Public header file or directory -- or a development package "
+        "carrying them (RPM/Deb/tar; directory/package inputs only), which is "
+        "recognised from the operand's content rather than its name. Applies "
+        "to both sides; scope to "
         "one side with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
         "Recommended for full ABI analysis; without headers, abicheck uses whatever "

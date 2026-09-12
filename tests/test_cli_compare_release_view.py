@@ -333,8 +333,8 @@ class TestReleaseViewShowOnly:
 
         result = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
+            "--build-info", f"old={matrix_old}",
+            "--build-info", f"new={matrix_new}",
             "--format", "json", "--view", "show=breaking",
         )
         assert result.exit_code == 4, result.output
@@ -1104,8 +1104,8 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
 
         result = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
+            "--build-info", f"old={matrix_old}",
+            "--build-info", f"new={matrix_new}",
             "--format", "json", "--view", "show=api-break",
         )
         assert result.exit_code == 4, result.output
@@ -1123,8 +1123,8 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
 
         json_result = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
+            "--build-info", f"old={matrix_old}",
+            "--build-info", f"new={matrix_new}",
             "--format", "json", "--view", "show=breaking",
         )
         assert json_result.exit_code == 4, json_result.output
@@ -1136,8 +1136,8 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
 
         md_result = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
+            "--build-info", f"old={matrix_old}",
+            "--build-info", f"new={matrix_new}",
             "--view", "show=breaking",
         )
         assert md_result.exit_code == 4, md_result.output
@@ -1150,8 +1150,8 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
 
         result = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
+            "--build-info", f"old={matrix_old}",
+            "--build-info", f"new={matrix_new}",
             "--format", "json",
         )
         assert result.exit_code == 4, result.output

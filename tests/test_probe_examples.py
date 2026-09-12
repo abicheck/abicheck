@@ -112,8 +112,8 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     json_res = runner.invoke(
         main,
         ["compare", str(old_so), str(new_so),
-         "--probe-matrix", "old=" + str(old_matrix),
-         "--probe-matrix", "new=" + str(new_matrix),
+         "--build-info", "old=" + str(old_matrix),
+         "--build-info", "new=" + str(new_matrix),
          "--format", "json"],
     )
     assert json_res.exit_code in (2, 4), json_res.output
@@ -124,8 +124,8 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     sarif_res = runner.invoke(
         main,
         ["compare", str(old_so), str(new_so),
-         "--probe-matrix", "old=" + str(old_matrix),
-         "--probe-matrix", "new=" + str(new_matrix),
+         "--build-info", "old=" + str(old_matrix),
+         "--build-info", "new=" + str(new_matrix),
          "--format", "sarif"],
     )
     assert "cxx_standard_floor_raised" in sarif_res.stdout
@@ -172,8 +172,8 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     res = runner.invoke(
         main,
         ["compare", str(old_dir), str(new_dir),
-         "--probe-matrix", "old=" + str(old_matrix),
-         "--probe-matrix", "new=" + str(new_matrix),
+         "--build-info", "old=" + str(old_matrix),
+         "--build-info", "new=" + str(new_matrix),
          "--format", "json"],
     )
     # Floor-raised is a source-level break → API_BREAK → release exit 2.
@@ -254,8 +254,8 @@ def test_feature_macro_api_depends_reaches_mainline_compare(tmp_path: Path) -> N
     res = CliRunner().invoke(
         main,
         ["compare", str(old_so), str(new_so),
-         "--probe-matrix", "old=" + str(old_matrix),
-         "--probe-matrix", "new=" + str(new_matrix),
+         "--build-info", "old=" + str(old_matrix),
+         "--build-info", "new=" + str(new_matrix),
          "--format", "json"],
     )
     data = json.loads(res.stdout)

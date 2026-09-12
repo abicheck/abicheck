@@ -395,7 +395,8 @@ def _load_probe_matrix_changes(
         return None
     if probe_matrix_old is None or probe_matrix_new is None:
         raise click.UsageError(
-            "--probe-matrix needs both sides: --probe-matrix old=… --probe-matrix new=…"
+            "a build-configuration matrix needs both sides: --build-info old=<matrix> "
+            "--build-info new=<matrix>"
         )
     from ...workflows.findings import diff_matrix, load_matrix_snapshot
 

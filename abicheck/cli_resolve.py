@@ -734,15 +734,12 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
     from .cli_compare_options import (
         _reject_single_pair_flags_for_set_inputs,
         _resolve_depth_for_set_inputs,
+        _set_input_flags_used,
     )
 
     _reject_single_pair_flags_for_set_inputs(ctx)  # ADR-068 Phase 2c/2d
 
-    used = [
-        flag
-        for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()
-        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
-    ]
+    used = _set_input_flags_used(ctx, _EVIDENCE_SET_INPUT_FLAGS)
     if used:
         raise click.UsageError(
             ", ".join(sorted(used))
@@ -751,7 +748,9 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
             + " not supported for directory/package (release) comparisons: the "
             "per-library fan-out does not collect inline build/source evidence. "
             "Compare the libraries individually (or pre-dump snapshots with "
-            "`dump --sources/--build-info`) to collect L3-L5 evidence."
+            "`dump --sources/--build-info`) to collect L3-L5 evidence. (A "
+            "--build-info probe matrix is unaffected -- the release fan-out "
+            "runs its own build-configuration comparison.)"
         )
     return _resolve_depth_for_set_inputs(ctx)
 

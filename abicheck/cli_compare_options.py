@@ -406,6 +406,37 @@ def _reject_debug_format_for_non_elf(
             )
 
 
+def _set_input_flags_used(ctx: click.Context, flags: dict[str, str]) -> list[str]:
+    """Which of *flags* this directory/package invocation actually typed.
+
+    The membership half of ``cli_resolve._reject_evidence_flags_for_set_
+    inputs``, with one exception it owns: since plan Phase 7n merged
+    ``--probe-matrix`` into ``--build-info``, that flag carries two kinds of
+    evidence and only one of them is inadmissible on a release comparison.
+    The fan-out collects no inline build/source evidence (the rule the guard
+    exists for), but it has always run its own release-global
+    build-configuration comparison -- so a ``--build-info`` naming only
+    probe matrices is *not* "used" here, and the capability the merge
+    absorbed survives it.
+
+    The exception is decided from each operand's content, by the same
+    classifier the sided split uses (``workflows.evidence_transport``), so
+    the guard and the split cannot form two opinions about one operand. It
+    has to run on the raw Click values, before ``normalize_sided_options``
+    separates them -- which is why this reads ``ctx.params`` rather than the
+    per-side destinations.
+    """
+    from .workflows.evidence_transport import all_probe_matrices
+
+    matrices_only = all_probe_matrices(p for _side, p in (ctx.params.get("build_info") or ()))
+    return [
+        flag
+        for dest, flag in flags.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+        and not (dest == "build_info" and matrices_only)
+    ]
+
+
 def _resolve_debug_roots(
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],

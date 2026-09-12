@@ -1019,6 +1019,19 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_cli_project_validate_dispatch.py",
             "tests/test_build_output.py",
+            # The second surface to route on content: plan Phase 7n's one
+            # input per evidence role (`--debug-info`, `-H/--header`,
+            # `--build-info`). Its own escape would have been one layer
+            # further down than #1242's -- `package.detect_extractor`
+            # answering `None` for a real package under a name with no
+            # known suffix, so the front end's content routing produced
+            # "Unrecognized package format". Its end-to-end matrix is
+            # mutation-verified against exactly that: the package
+            # transport's evidence is that the *extractor* got to speak,
+            # not that the run completed (a misclassified package falls
+            # through to another transport and the comparison completes
+            # anyway, which is how this class hides).
+            "tests/test_evidence_transport_roles.py",
         ),
         # Earned: the seed's name-independence matrix runs real `CliRunner`
         # invocations of `abicheck project validate` end to end, which is
@@ -1030,6 +1043,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "build-output",
                 "use-case-manifest",
                 "empty-document",
+                # Phase 7n's evidence transports, on the same axis: each is
+                # a kind of operand a front end must recognise from content.
+                "debug-package",
+                "debug-directory",
+                "detached-debug-file",
+                "devel-package",
+                "probe-matrix",
+                "compile-database",
             ),
             "operand_shape": ("directory", "named-manifest-file"),
             "filename": (
@@ -1039,6 +1060,9 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "run-42.json",
                 "config.yaml",
                 "NOTES",
+                "libfoo-dbg.rpm",
+                "libfoo.so.debug",
+                "compile_commands.json",
             ),
         },
     ),

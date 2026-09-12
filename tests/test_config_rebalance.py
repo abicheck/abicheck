@@ -803,8 +803,9 @@ class TestRemovedConfigDuplicates:
         hidden debug-resolution flags are gone from `compare` entirely --
         neither hidden nor visible -- since this repo runs no deprecation
         window. `.abicheck.yml`'s `debug:` block is their only surviving
-        spelling. `--debug-root` (a per-run evidence input, ADR-068 D5
-        guard #3) is unaffected and stays visible."""
+        spelling. The coarse per-run debug-artifact input (ADR-068 D5
+        guard #3) is unaffected and stays visible -- spelled `--debug-info`
+        since plan Phase 7n merged `--debug-root` into it."""
         cmd = main.commands["compare"]
         hidden = self._option_spellings(cmd, hidden_only=True)
         visible = self._option_spellings(cmd, hidden_only=False)
@@ -818,7 +819,8 @@ class TestRemovedConfigDuplicates:
         ):
             assert flag not in hidden, f"{flag} should be deleted outright, not hidden"
             assert flag not in visible, f"{flag} should be deleted outright"
-        assert "--debug-root" in visible
+        assert "--debug-info" in visible
+        assert "--debug-root" not in visible and "--debug-root" not in hidden
 
     @pytest.mark.parametrize(
         "flag",
@@ -904,14 +906,14 @@ class TestRemovedConfigDuplicates:
             "--view",
             "--depth",
             "--scope-public-headers",
-            # ADR-040 Lever 2 carve-out: the coarse debug-root
-            # override stays visible.
-            "--debug-root",
+            # ADR-040 Lever 2 carve-out: the coarse debug-artifact
+            # override stays visible (`--debug-root` merged into it, 7n).
+            "--debug-info",
         ):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
         # Phase 7 (one-comparison-product.md §4.1): the toolchain family
         # (--compiler/--compiler-prefix/--compiler-option/--sysroot/
-        # --nostdinc/--ast-frontend), unlike --debug-root, is now CONFIG-only
+        # --nostdinc/--ast-frontend), unlike --debug-info, is now CONFIG-only
         # with no CLI spelling at all -- neither hidden nor visible.
         hidden = self._option_spellings(cmd, hidden_only=True)
         for flag in ("--compiler", "--sysroot", "--ast-frontend", "--nostdinc"):
