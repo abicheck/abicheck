@@ -223,6 +223,40 @@ def test_digest_string_is_unchanged_by_memoization(tmp_path: Path) -> None:
     assert snapshot_content_digest(snap) == expected
 
 
+def test_same_persisted_content_short_circuits_on_object_identity() -> None:
+    """The `old is new` fast path, asserted rather than argued.
+
+    One object trivially has the same persisted content as itself, and the
+    serializer is a pure function of the snapshot, so the digest comparison
+    this replaces could only ever have returned `True`. The load-bearing
+    half is the second assertion: it must answer `True` *without*
+    serializing anything, or it is not a short-circuit at all -- which is
+    the whole reason it is here, since a self-compare is exactly the shape
+    that pays the digest cost twice for no information.
+    """
+    from abicheck.serialization import snapshot_from_dict
+    from abicheck.storage.snapshot_encode import same_persisted_content
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        snap = snapshot_from_dict(json.loads((_FIXTURES / "v5.json").read_text()))
+
+    calls: list[int] = []
+    original = snapshot_encode._uncached_snapshot_content_digest
+
+    def counting(s: Any) -> str:
+        calls.append(id(s))
+        return original(s)
+
+    snapshot_encode._uncached_snapshot_content_digest = counting
+    try:
+        assert same_persisted_content(snap, snap) is True
+    finally:
+        snapshot_encode._uncached_snapshot_content_digest = original
+
+    assert calls == [], "the identity short-circuit serialized something"
+
+
 def test_memo_does_not_survive_its_own_scope(tmp_path: Path) -> None:
     """A scope is the memo's whole lifetime.
 

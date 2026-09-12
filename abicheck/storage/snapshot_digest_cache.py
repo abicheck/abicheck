@@ -61,7 +61,6 @@ __all__ = [
     "digest_scope",
     "memoized_digest",
     "run_scoped_digest_cache",
-    "scope_is_active",
 ]
 
 # id(snapshot) -> (the snapshot itself, its digest). The snapshot is kept
@@ -91,11 +90,6 @@ def digest_scope() -> Iterator[None]:
         yield
     finally:
         _SCOPE.reset(token)
-
-
-def scope_is_active() -> bool:
-    """Whether a :func:`digest_scope` is currently open."""
-    return _SCOPE.get() is not None
 
 
 def memoized_digest(snap: AbiSnapshot, compute: Callable[[AbiSnapshot], str]) -> str:
