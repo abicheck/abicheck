@@ -3569,6 +3569,78 @@ if [[ -n "$_extra_write_json_path" ]]; then
   _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
 fi
 
+# Every JSON report destination the *caller* named, one per line, in request
+# order. `_json_report_expected` answers *whether* a JSON report was asked
+# for; this answers *where*, which is the question the validation in
+# `_resolve_clean_exit_verdict` actually needs.
+#
+# The distinction is load-bearing. `_json_report_src` is a *fallback chain*:
+# it returns the first destination that arrived, which is exactly right for
+# "give me a report to read" and exactly wrong for "prove every report the
+# caller asked for arrived". With `format: json` writing `output-file` plus an
+# `extra-args --write json=secondary.json`, a missing or truncated primary
+# fell through to the valid secondary, so the step published a compatibility
+# verdict while the output the caller actually requested never arrived (Codex
+# review, P2, reproduced with an exit-0 stub that wrote only the secondary).
+# `compare --help-all` is explicit that `--write` names a second, independent
+# artifact whose path must differ from `-o`, so one can never stand in for the
+# other.
+#
+# Stdout mode (`format: json` with no `output-file`) names no file at all and
+# so prints nothing here -- its report is only ever readable through
+# `_json_report_src`'s `$_STDOUT_JSON_FILE` branch, and the caller asked for
+# it on stdout, not at a path.
+_caller_json_destinations() {
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" ]]; then
+    printf '%s\n' "$OUTPUT_FILE"
+  fi
+  _extra_args_write_json_paths
+}
+
+# (mtime, size) before `${CMD[@]}` ran, for *every* destination above --
+# `<fingerprint>\t<path>` per line, the fingerprint empty when the path did
+# not exist yet.
+#
+# The two scalars above cover only `OUTPUT_FILE` and the *first* `--write
+# json=` destination, because that is all `_json_report_src`'s chain ever
+# reads. Freshness is a property every requested destination needs, not just
+# the ones that can become the verdict source: a second `--write json=b.json`
+# that this run never wrote leaves a stale, possibly PR-committed document in
+# place, and validating it for parseability alone reported it as a report this
+# run had produced (Codex review, P2). Same threat model as the scalars'
+# own docstring above, same non-destructive remedy.
+_json_dest_pre_fps=""
+_json_dest_fps_recorded=""
+while IFS= read -r _json_dest_line; do
+  [[ -n "$_json_dest_line" ]] || continue
+  _json_dest_pre_fps+="$(_file_fingerprint "$_json_dest_line")	$_json_dest_line
+"
+done <<<"$(_caller_json_destinations)"
+_json_dest_fps_recorded=true
+
+# Did THIS invocation write the document now at $1?
+#
+# True when the recorded pre-run fingerprint differs from the current one, or
+# when the path did not exist before the run. Deliberately degrades to true
+# ("make no freshness claim") when the pre-run bookkeeping never ran at all --
+# the isolated snippet-extraction tests that source these helpers without the
+# `${CMD[@]}` section never assign the map, and the same reasoning as
+# `_json_report_src`'s `${_output_file_pre_fp+x}` test applies: the real script
+# always records it first, so production behaviour is unaffected.
+_json_dest_is_fresh() {
+  local _path="$1" _line _pre=""
+  [[ -n "${_json_dest_fps_recorded:-}" ]] || return 0
+  while IFS= read -r _line; do
+    [[ "${_line#*	}" == "$_path" ]] || continue
+    _pre="${_line%%	*}"
+    break
+  done <<<"$_json_dest_pre_fps"
+  # Absent from the map, or absent from disk before the run: nothing stale to
+  # mistake for this run's own output.
+  [[ -n "$_pre" ]] || return 0
+  [[ "$(_file_fingerprint "$_path")" != "$_pre" ]]
+}
+
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
   "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
@@ -4242,6 +4314,60 @@ ADVISORY_BREAK=false
 # The compatibility tier the *gate* follows. Empty means "same as VERDICT" —
 # only an escalation (see `_escalate_verdict_to_report`) makes the two differ.
 GATE_TIER=""
+# One requested JSON destination, one answer: usable (return 0) or not (set
+# VERDICT=REPORT_UNREADABLE, emit the diagnostic, return 1).
+#
+# $1 is a `report_validity` token from `report_query.py`, or the synthetic
+# `stale` for a document that predates this invocation -- the freshness
+# question has no answer inside the document, but its consequence is identical
+# ("no report arrived here"), so one function owns every message rather than
+# leaving a second copy of them beside the freshness check.
+# $2 names the destination for the diagnostic.
+_reject_unusable_report() {
+  local _validity="${1:-}" _where="${2:-}"
+  case "$_validity" in
+    ok)
+      return 0
+      ;;
+    ""|absent|unreadable)
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is missing or unreadable -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+      ;;
+    stale)
+      # Not a corruption: a readable document that this invocation did not
+      # write. A previous step's leftover, or one a PR author committed into
+      # the checked-out tree -- `extra-args` and its `--write` path are
+      # PR-controlled per this file's threat model -- so reading it as this
+      # run's own result is the forgery the fingerprint bookkeeping exists to
+      # prevent.
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is unchanged since before the run -- so this invocation never wrote it and its contents are some earlier run's, not this one's. This step will not report a result from it."
+      ;;
+    empty)
+      # `{}` is a *known* artifact rather than a corruption -- a PR-comment
+      # re-run can leave one behind when the primary run wrote no report -- so
+      # it gets its own message rather than being lumped in above. It is still
+      # not a result.
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report requested at ${_where} is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
+      ;;
+    no_result)
+      # Parsed, non-empty, and still carries no abicheck result -- a
+      # `{"error": ...}` a wrapper wrote, or a lone `report_schema_version`
+      # from an interrupted write. Its own message because "could not be read"
+      # would misdescribe a document that read perfectly well and simply
+      # answers nothing (Codex review, P2).
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, and the JSON report requested at ${_where} parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
+      ;;
+    *)
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} could not be read (${_validity}) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
+      ;;
+  esac
+  return 1
+}
+
 _resolve_clean_exit_verdict() {
   local _v _no_baseline_audit _validity _dest _dest_validity
   VERDICT="COMPATIBLE"
@@ -4302,55 +4428,49 @@ _resolve_clean_exit_verdict() {
   # truncated, non-object or `{}` report.json published "No binary ABI break
   # detected" for a run whose result nothing had read.
   if _json_report_expected; then
-    _validity=$(_report_validity)
-    if [[ -z "$_validity" ]]; then
-      # No source to classify at all: the "died between the exit code and the
-      # report" shape, which no valid-JSON fixture can stand in for and which
-      # is the likeliest of these to occur in practice.
-      VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
-      return
-    fi
-    if [[ "$_validity" == "empty" ]]; then
-      # `{}` is a *known* artifact rather than a corruption -- a PR-comment
-      # re-run can leave one behind when the primary run wrote no report -- so
-      # it gets its own message rather than being lumped in below. It is still
-      # not a result.
-      VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested via format: json is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
-      return
-    fi
-    if [[ "$_validity" == "no_result" ]]; then
-      # Parsed, non-empty, and still carries no abicheck result -- a
-      # `{"error": ...}` a wrapper wrote, or a lone `report_schema_version`
-      # from an interrupted write. Its own message because "could not be read"
-      # would misdescribe a document that read perfectly well and simply
-      # answers nothing (Codex review, P2).
-      VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, and the JSON report requested via format: json parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
-      return
-    fi
-    if [[ "$_validity" != "ok" ]]; then
-      VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested could not be read ($_validity) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
-      return
+    # Every destination the caller named, judged independently, BEFORE any
+    # branch below can default to COMPATIBLE. Two review findings converged on
+    # one root cause here (Codex review, P2, both reproduced): this validation
+    # used to ask "is there a readable report somewhere" -- via
+    # `_report_validity`, which follows `_json_report_src`'s fallback chain --
+    # when the question it owes the caller is "did this invocation produce a
+    # usable report at every destination it was asked for". The chain masked a
+    # missing primary behind a valid `--write` secondary, and the per-`--write`
+    # loop that followed checked parseability without freshness, so a stale
+    # pre-existing document read as one this run had written.
+    #
+    # Both are the same class as the original defect this whole block exists
+    # to close: every remaining reader here (`no_baseline_audit`,
+    # `_report_compat_verdict`) answers empty for a report that never arrived
+    # and falls through to the initial COMPATIBLE above, which is how a
+    # truncated, non-object or `{}` report published "No binary ABI break
+    # detected" for a run whose result nothing had read.
+    while IFS= read -r _dest; do
+      [[ -n "$_dest" ]] || continue
+      if ! _json_dest_is_fresh "$_dest"; then
+        _reject_unusable_report stale "$_dest" || return
+      fi
+      _dest_validity=$(_report_query "$_dest" report_validity)
+      _reject_unusable_report "$_dest_validity" "$_dest" || return
+    done <<<"$(_caller_json_destinations)"
+    # Stdout mode names no destination above (`format: json` with no
+    # `output-file`), so its report can only be reached through
+    # `_json_report_src`. Asked only in that case: with a real destination the
+    # loop has already judged it, and re-asking through the fallback chain is
+    # what let one destination answer for another.
+    if [[ -z "$(_caller_json_destinations)" ]]; then
+      _validity=$(_report_validity)
+      if [[ -z "$_validity" ]]; then
+        # No source to classify at all: the "died between the exit code and the
+        # report" shape, which no valid-JSON fixture can stand in for and which
+        # is the likeliest of these to occur in practice.
+        VERDICT="REPORT_UNREADABLE"
+        echo "::error::abicheck exited 0, but the JSON report this run requested is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+        return
+      fi
+      _reject_unusable_report "$_validity" "format: json on stdout" || return
     fi
   fi
-  # Every caller-named `--write json=` destination, each independently. The
-  # discovered-source check above reads whichever one `_json_report_src`
-  # happened to settle on; with a repeatable `--write` a caller can name
-  # several, and a missing or unusable one is just as much a report that never
-  # arrived (Codex review, P2). Checked after the block above so the more
-  # specific messages there win for the common single-destination case.
-  while IFS= read -r _dest; do
-    [[ -n "$_dest" ]] || continue
-    _dest_validity=$(_report_query "$_dest" report_validity)
-    if [[ -z "$_dest_validity" || "$_dest_validity" != "ok" ]]; then
-      VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested via extra-args --write json=${_dest} is missing or unusable (${_dest_validity:-unreadable}) -- so nothing read this run's result from it, and this step will not report one."
-      return
-    fi
-  done <<<"$(_extra_args_write_json_paths)"
   # A readable report whose assurance key pair is broken, checked HERE rather
   # than only at the FINAL_EXIT fold below (Codex review, P2, reproduced):
   # that fold runs after the verdict output, the job summary and the PR comment

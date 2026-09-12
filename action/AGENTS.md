@@ -184,6 +184,30 @@ Two predicates close that without weakening anything above:
   the option declaration in `frontends/cli/options/secondary_output.py`, not
   against either comment.
 
+  **Validate destinations, never the fallback chain.** `_json_report_src` is a
+  *fallback chain* — it answers "give me a report to read" by returning the
+  first destination that arrived. `_caller_json_destinations` answers the
+  different question this validation owes the caller: "where was a report
+  asked for", every one of them. Routing the validation through the chain let a
+  missing `format: json` primary be masked by a valid `extra-args --write
+  json=secondary.json` (`--write` names an independent artifact whose path must
+  differ from `-o`, so it can never satisfy the primary request). Each
+  destination is asked `report_validity` on its own path, and stdout mode — the
+  one shape naming no destination — is the only case that falls back to the
+  chain.
+
+  **A requested destination must also be *fresh*.** Parseability alone says a
+  document is there, not that this invocation wrote it; a leftover from an
+  earlier step or one a PR author committed satisfies the former and not the
+  latter. `_json_dest_is_fresh` compares each destination's pre-run (mtime,
+  size) against its current one, and `_reject_unusable_report` handles the
+  resulting synthetic `stale` token beside the real validity tokens so the
+  messages cannot drift apart. The two pre-run scalars
+  (`_output_file_pre_fp`/`_extra_write_json_pre_fp`) remain for
+  `_json_report_src`'s own chain; the map covers *every* destination, because
+  freshness is a property each requested artifact needs and not only the ones
+  that can become the verdict source.
+
   **Each report shape's version key gets its own threshold.** Three sequences
   reach the reader — `report_schema_version` (2.40),
   `audit_report_schema_version` (1.1) and `release_schema_version` (1.3) — and
@@ -200,8 +224,11 @@ Two predicates close that without weakening anything above:
   the contradiction from the schema version alone fails ordinary green runs,
   which an earlier draft of this check did.
 
-Either one publishes `verdict: REPORT_UNREADABLE` and fails the step
-unconditionally; no `fail-on-*` input waives it.
+At exit 0, either one publishes `verdict: REPORT_UNREADABLE` and fails the
+step unconditionally; no `fail-on-*` input waives it. At a nonzero exit neither
+one replaces the verdict: the dispatch's own compatibility result (`BREAKING`,
+`API_BREAK`, ...) stands and only `FINAL_EXIT` is forced to `1` — see the next
+paragraph for why that asymmetry is deliberate rather than an oversight.
 
 **The contradiction check's verdict is scoped to exit 0, and that is deliberate.**
 `_resolve_clean_exit_verdict` runs only there, so at a nonzero exit a

@@ -241,7 +241,14 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # `VERDICT="COMPATIBLE"` as the fallthrough for "the report did not
         # say" -- survived both, which is what makes this a class rather than
         # three incidents.
-        fixed_by=(1016, 1210),
+        # #1246 added two more members, both found by review rather than in
+        # production, each reaching the fallthrough by a route the earlier
+        # fixes did not model: the validation resolved the report through a
+        # *fallback chain*, so a destination that did arrive answered for a
+        # requested one that did not; and it judged a document by content
+        # alone, so one left behind by an earlier run (or committed by a PR
+        # author) read as this run's own output.
+        fixed_by=(1016, 1210, 1246),
         seed_tests=(
             "tests/test_action_report_query.py",
             "tests/test_action_unreadable_report_verdict.py",
@@ -260,8 +267,36 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             "report_schema_version": ("absent", "pre_2_40", "2_40", "post_2_40"),
             "report_shape": ("compare_root", "nested_diff", "audit_exit_axes"),
+            # Where a report was asked for, and whether *this* run produced it.
+            # A reader that resolves one destination for the whole request is
+            # the same defect wearing a different hat: one artifact arriving
+            # answers for another that never did.
+            "requested_destination": (
+                "primary_output_file",
+                "stdout",
+                "extra_args_write_json",
+                "several_write_json",
+            ),
+            "authorship": ("written_this_run", "pre_existing_and_rewritten", "stale"),
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "Freshness is established from a (mtime, size) "
+                    "fingerprint taken before the run, which cannot "
+                    "distinguish 'not rewritten' from 'rewritten with "
+                    "byte-identical content in the same nanosecond'. The "
+                    "second is not reachable by an attacker who must also "
+                    "make the run write that content, and the alternative "
+                    "(unlinking a caller-supplied path before Click has "
+                    "validated the invocation) was tried and reverted for "
+                    "destroying real inputs -- see `action/run.sh`'s own "
+                    "note. Recorded because it is a real limit of the "
+                    "authorship axis above, not because a fix is pending."
+                ),
+                reference="action/run.sh",
+                canary_test=None,
+            ),
             KnownGap(
                 description=(
                     "Scoped to a JSON report the caller explicitly requested "

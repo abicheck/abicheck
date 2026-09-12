@@ -791,3 +791,171 @@ class TestADryRunIsNotAMissingReport:
         outputs = self._dry_run(tmp_path)
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
+
+
+#: Every way one named destination can fail to hold a usable report *this run*
+#: produced. `stale` is the odd one out and the point of the enumeration: the
+#: document is valid, parses, carries a real verdict, and was written by some
+#: earlier run — indistinguishable from a good report by content alone.
+UNUSABLE_DESTINATION_STATES = (
+    "absent",
+    "zero bytes",
+    "empty object",
+    "no result",
+    "truncated",
+    "stale",
+)
+
+_GOOD_REPORT = json.dumps({"report_schema_version": "4.4", "verdict": "COMPATIBLE"})
+
+_STATE_PAYLOADS = {
+    "zero bytes": "",
+    "empty object": "{}",
+    "no result": '{"error": "write interrupted"}',
+    "truncated": '{"verdict": "COMPATIBLE"',
+}
+
+
+class TestEveryRequestedDestinationIsJudgedOnItsOwn:
+    """A requested destination must hold a report *this invocation* produced.
+
+    Two review findings (Codex, P2, both reproduced) with one root cause: the
+    validation asked "is there a readable report somewhere" rather than "did
+    this run produce a usable report at every destination it was asked for".
+
+    * `_report_validity` followed `_json_report_src`, which is a *fallback
+      chain* — so a missing `format: json` primary was masked by a valid
+      `extra-args --write json=secondary.json`, and the step published a
+      compatibility verdict though the requested output never arrived.
+    * the per-`--write` loop checked parseability without freshness — so a
+      leftover document (or one a PR author committed, `extra-args` being
+      PR-controlled) read as one this run had written.
+
+    The invariant, stated over the cross-product rather than the two reported
+    inputs: *for any single requested destination left in any unusable state,
+    with every other destination valid and freshly written, the step must
+    publish REPORT_UNREADABLE and fail.* One destination arriving never
+    answers for another, and content alone never establishes authorship.
+    """
+
+    def _paths(self, tmp_path: Path) -> tuple[Path, Path]:
+        return tmp_path / "primary.json", tmp_path / "secondary.json"
+
+    def _stub(self, tmp_path: Path, writes: dict[Path, str]) -> Path:
+        """An abicheck writing exactly *writes* (destination -> literal text)."""
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        lines = ["#!/usr/bin/env bash"]
+        for index, (dest, text) in enumerate(sorted(writes.items())):
+            # Via a file, so no payload text has to survive shell quoting.
+            blob = tmp_path / f"blob{index}.bin"
+            blob.write_text(text, encoding="utf-8")
+            lines.append(f'cp "{blob}" "{dest}"')
+        lines.append("exit 0")
+        stub = bindir / "abicheck"
+        stub.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return bindir
+
+    def _env(self, tmp_path: Path, primary: Path, secondary: Path) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(primary),
+            "INPUT_EXTRA_ARGS": f"--write json={secondary}",
+        }
+
+    def _arrange(
+        self, tmp_path: Path, broken: str, state: str
+    ) -> tuple[Path, dict[str, str]]:
+        """Set up so *broken* ("primary"/"secondary") is in *state*, the other good."""
+        primary, secondary = self._paths(tmp_path)
+        target = primary if broken == "primary" else secondary
+        other = secondary if broken == "primary" else primary
+        writes = {other: _GOOD_REPORT}
+        if state == "stale":
+            # Pre-exists with perfectly valid content this run never wrote.
+            target.write_text(_GOOD_REPORT, encoding="utf-8")
+        elif state != "absent":
+            writes[target] = _STATE_PAYLOADS[state]
+        return self._stub(tmp_path, writes), self._env(tmp_path, primary, secondary)
+
+    @pytest.mark.parametrize("broken", ("primary", "secondary"))
+    @pytest.mark.parametrize("state", UNUSABLE_DESTINATION_STATES)
+    def test_one_unusable_destination_is_never_masked_by_the_other(
+        self, tmp_path: Path, broken: str, state: str
+    ) -> None:
+        bindir, env = self._arrange(tmp_path, broken, state)
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", (broken, state, outputs)
+        assert outputs["_exit"] == 1, (broken, state, outputs)
+
+    @pytest.mark.parametrize("broken", ("primary", "secondary"))
+    @pytest.mark.parametrize("state", UNUSABLE_DESTINATION_STATES)
+    def test_the_diagnostic_names_the_destination_that_failed(
+        self, tmp_path: Path, broken: str, state: str
+    ) -> None:
+        # A verdict alone leaves the user hunting; and naming the *other*
+        # destination is exactly the confusion the fallback chain caused.
+        #
+        # Scoped to the `::error::` annotations, not to stdout as a whole: every
+        # destination path also appears in the echoed command line, so a
+        # substring search over all output passes even when no diagnostic was
+        # emitted at all (caught by mutation-testing this assertion).
+        bindir, env = self._arrange(tmp_path, broken, state)
+        outputs = _run_action(tmp_path, env, bindir)
+        primary, secondary = self._paths(tmp_path)
+        named = primary if broken == "primary" else secondary
+        other = secondary if broken == "primary" else primary
+        errors = [
+            line
+            for line in outputs["_stdout"].splitlines()
+            if line.startswith("::error::")
+        ]
+        blamed = [line for line in errors if str(named) in line]
+        assert blamed, (broken, state, errors)
+        assert not [line for line in errors if str(other) in line], (
+            broken,
+            state,
+            errors,
+        )
+
+    def test_both_destinations_freshly_written_is_compatible(
+        self, tmp_path: Path
+    ) -> None:
+        # The control that keeps every assertion above from being satisfiable
+        # by rejecting any multi-destination invocation outright.
+        primary, secondary = self._paths(tmp_path)
+        bindir = self._stub(tmp_path, {primary: _GOOD_REPORT, secondary: _GOOD_REPORT})
+        outputs = _run_action(tmp_path, self._env(tmp_path, primary, secondary), bindir)
+        assert outputs.get("verdict") == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_pre_existing_destination_the_run_overwrites_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        # Freshness must key on "did this run write it", not "did it pre-exist":
+        # re-running a workflow step over an existing report.json is ordinary.
+        primary, secondary = self._paths(tmp_path)
+        primary.write_text(json.dumps({"verdict": "BREAKING"}), encoding="utf-8")
+        secondary.write_text(json.dumps({"verdict": "BREAKING"}), encoding="utf-8")
+        bindir = self._stub(tmp_path, {primary: _GOOD_REPORT, secondary: _GOOD_REPORT})
+        outputs = _run_action(tmp_path, self._env(tmp_path, primary, secondary), bindir)
+        assert outputs.get("verdict") == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_stale_destination_is_not_read_as_this_runs_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        # The forgery the freshness check exists to stop, stated as its own
+        # case: a PR-committed report claiming COMPATIBLE must not be able to
+        # answer for a run that wrote nothing at all.
+        primary, secondary = self._paths(tmp_path)
+        primary.write_text(_GOOD_REPORT, encoding="utf-8")
+        secondary.write_text(_GOOD_REPORT, encoding="utf-8")
+        bindir = self._stub(tmp_path, {})
+        outputs = _run_action(tmp_path, self._env(tmp_path, primary, secondary), bindir)
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs

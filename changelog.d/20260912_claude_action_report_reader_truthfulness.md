@@ -17,6 +17,19 @@
   `report.unestablished_result_reads_as_success` bug class; closing it needs a
   verdict value distinguishing "accepted, tier unverified" from "accepted,
   compatible", which is an output-contract change.
+- **Every requested JSON destination is validated on its own, and must have
+  been written by the run that reports it.** The validation above resolved the
+  report through `_json_report_src`, a *fallback chain* that returns the first
+  destination to arrive -- so a `format: json` run whose `output-file` never
+  arrived was covered by a valid `extra-args --write json=secondary.json` and
+  still published a compatibility verdict, even though `--write` names an
+  independent artifact that cannot satisfy the primary request. Each
+  caller-named destination is now asked for its own validity. Separately, a
+  destination is judged not only on whether it parses but on whether *this*
+  invocation produced it: a readable report left behind by an earlier step, or
+  committed into the checked-out tree, is rejected rather than read as the
+  run's own result. The pre-run (mtime, size) bookkeeping that already guarded
+  the verdict *source* now covers every requested destination.
 - **A self-contradictory report no longer reads as a passing assurance check.**
   A report claiming schema 2.40 or newer that carries an `analysis_assurance`
   block while omitting the `analysis_assurance_exit_contribution` emitted
