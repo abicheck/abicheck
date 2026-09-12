@@ -906,7 +906,16 @@ _ARTIFACT_NAMES = frozenset(
 #:       this boundary is therefore meaningless, which is exactly what the
 #:       version bump exists to signal; the per-field ``effective_config_
 #:       fields`` dict beside it stays attributable as before.
-#: 4.4 -- additive ``pattern_preprocessor_scan.coverage``: per-check,
+#: 4.4 -- additive per-finding ``surface_facts`` block: the three facts
+#:       ``Visibility`` used to conflate (``declared_in_headers`` /
+#:       ``in_public_contract`` / ``binary_exported``), each
+#:       ``"true"``/``"false"``/``"unknown"``. Present only on a finding
+#:       that has one declaration behind it, and always complete when
+#:       present -- ``"unknown"`` is spelled out rather than omitted,
+#:       since an absent key is what a reader takes for a negative. See
+#:       ``model/surface_facts.py`` and the ``Visibility.PUBLIC`` entry in
+#:       ``docs/contribute/known-gaps.md``.
+#: 4.5 -- additive ``pattern_preprocessor_scan.coverage``: per-check,
 #:       per-side sufficiency (``{check: {"old"|"new": {"established",
 #:       "reason"}}}``) for the three checks that block folds. Each side's
 #:       ``pattern.old``/``pattern.new`` object additionally gains
@@ -922,10 +931,10 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``escalation_evolution``/``macro_divergence_evolution``/
 #:       ``header_leak_evolution`` change for a stored snapshot: a side whose
 #:       recorded source paths may no longer be re-read reports
-#:       ``not_evaluated`` where a pre-4.4 run reported ``introduced``/
+#:       ``not_evaluated`` where a pre-4.5 run reported ``introduced``/
 #:       ``resolved`` from the current runner's filesystem. No verdict,
 #:       severity, or exit code moves -- this block never reached any of them.
-REPORT_SCHEMA_VERSION = "4.4"  #: 4.4 -- see the comment immediately above.
+REPORT_SCHEMA_VERSION = "4.5"  #: 4.5 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

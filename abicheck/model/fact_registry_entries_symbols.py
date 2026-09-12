@@ -422,4 +422,95 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "elf_binding_fact needs."
         ),
     ),
+    # ── The three surface facts ``Visibility`` conflated ───────────────
+    _E(
+        owner="Function",
+        field="declared_in_headers",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "(a) of the three facts Visibility conflated: a header this run parsed declares this entity. No legacy scalar sibling -- the legacy value is `visibility`, which model/surface_facts.py's bridge derives all three from when the fields are unset. A producer with no header evidence (DWARF/BTF/CTF, an export-table-only entry, an evidence-depth projection) leaves this unknown, never False. See model/surface_facts.py."
+        ),
+    ),
+    _E(
+        owner="Function",
+        field="in_public_contract",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "(b) of the three facts Visibility conflated: this declaration belongs to the promised public contract for the run's scope/contract selection. Answered positively by provenance.tag_provenance from a real public-header set, or by a confirmed export; never asserted *negatively* from origin alone, since origin-based exclusion is its own separately-controlled scoping decision. See model/surface_facts.py."
+        ),
+    ),
+    _E(
+        owner="Function",
+        field="binary_exported",
+        value_type="bool",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "(c) of the three facts Visibility conflated: the artifact's export table carries a symbol for this entity. Unknown -- not False -- for a header-only dump, which has no export table to have been absent from. See model/surface_facts.py."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="declared_in_headers",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "(a) of the three facts Visibility conflated: a header this run parsed declares this entity. No legacy scalar sibling -- the legacy value is `visibility`, which model/surface_facts.py's bridge derives all three from when the fields are unset. A producer with no header evidence (DWARF/BTF/CTF, an export-table-only entry, an evidence-depth projection) leaves this unknown, never False. See model/surface_facts.py."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="in_public_contract",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "(b) of the three facts Visibility conflated: this declaration belongs to the promised public contract for the run's scope/contract selection. Answered positively by provenance.tag_provenance from a real public-header set, or by a confirmed export; never asserted *negatively* from origin alone, since origin-based exclusion is its own separately-controlled scoping decision. See model/surface_facts.py."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="binary_exported",
+        value_type="bool",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "(c) of the three facts Visibility conflated: the artifact's export table carries a symbol for this entity. Unknown -- not False -- for a header-only dump, which has no export table to have been absent from. See model/surface_facts.py."
+        ),
+    ),
 ]

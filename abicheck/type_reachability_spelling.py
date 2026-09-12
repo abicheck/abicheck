@@ -35,7 +35,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
-from .model import ScopeOrigin, Visibility
+from .model import ScopeOrigin
 from .model.namespace_spelling import (
     # Re-exported (`as`-aliased) by value -- moved to `model/` (ADR-063
     # Track 2, 5B closure) so `compare/vtable_evidence.py` can depend on it
@@ -46,6 +46,7 @@ from .model.namespace_spelling import (
     # module docstring for the full accounting.
     _namespace_suffix_spellings as _namespace_suffix_spellings,
 )
+from .model.surface_facts import in_public_surface
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -757,7 +758,7 @@ def _is_public_non_stdlib_declaration(
     """
     if decl.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return False
-    if decl.visibility != Visibility.PUBLIC:
+    if not in_public_surface(decl):
         return False
     if decl.origin in _NON_PUBLIC_ORIGINS:
         return False

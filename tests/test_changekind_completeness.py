@@ -82,6 +82,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FIELD_LOST_VOLATILE,
     ChangeKind.FIELD_RENAMED,
     ChangeKind.FUNC_ADDED,
+    # tests/test_surface_fact_split.py::TestExportGainedIsRecordedNotDropped
+    # asserts this kind's finding, its compatible verdict, and that it is the
+    # thing reported where the pre-split run reported FUNC_ADDED.
+    ChangeKind.FUNC_EXPORT_ADDED,
     ChangeKind.FUNC_CV_CHANGED,
     ChangeKind.FUNC_DELETED,
     ChangeKind.FUNC_NOEXCEPT_ADDED,
@@ -227,6 +231,13 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VAR_ACCESS_CHANGED,
     ChangeKind.VAR_ACCESS_WIDENED,
     ChangeKind.VAR_ADDED,
+    # tests/test_surface_fact_split.py::
+    # TestExportLossIsDetectedForEveryDeclarationKind asserts this kind's
+    # finding, its surface_facts stamp, and that it is not reported as a
+    # removal, for both declaration kinds.
+    ChangeKind.VAR_VISIBILITY_CHANGED,
+    # Same test class, data-symbol half.
+    ChangeKind.VAR_EXPORT_ADDED,
     ChangeKind.VAR_BECAME_CONST,
     ChangeKind.VAR_LOST_CONST,
     ChangeKind.VAR_REMOVED,

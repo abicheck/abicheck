@@ -8380,15 +8380,17 @@ green required lane red for a capability removed upstream in PR #1211.
 That is a maintainer call about blocking on the follow-up, not a
 repair-PR decision.
 
-## `Visibility.PUBLIC` is used as a proxy for "declared in the public API", conflating source presence with dynamic export
+## `Visibility.PUBLIC` used to be a proxy for "declared in the public API", conflating source presence with dynamic export — **fixed**
 
 Reported against a real comparison, alongside the three defects the
 "stop inferring public-contract membership from symbol name shape" change
-fixed. This one is **not fixed** — it needs a model change and an ADR, and
-is recorded here rather than patched at one call site.
+fixed. **This one is now fixed too** — by the model/schema change it always
+needed, not by a call-site patch. The account below is kept because the
+shape of the conflation, and the reasoning about what a fix had to do, is
+the load-bearing part; what changed is the last section.
 
 `model/vocabulary.py`'s `Visibility` has three states, and its own comments
-show the conflation:
+showed the conflation:
 
 ```python
 PUBLIC = "public"      # default visibility / exported
@@ -8396,56 +8398,144 @@ HIDDEN = "hidden"      # __attribute__((visibility("hidden")))
 ELF_ONLY = "elf_only"  # present in ELF symbol table, not in headers
 ```
 
-`PUBLIC` means *both* "declared in a public header" and "dynamically
-exported"; `ELF_ONLY` means "exported but not declared". There is no state
+`PUBLIC` meant *both* "declared in a public header" and "dynamically
+exported"; `ELF_ONLY` meant "exported but not declared". There was no state
 for the fourth, entirely ordinary combination: **declared in a public header
 and not dynamically exported** — an inline member, a function the optimizer
 fully inlined away, or one a `-fvisibility=hidden`/version-script change
-stopped exporting. Detectors then use `f.visibility != Visibility.PUBLIC:
+stopped exporting. Detectors then used `f.visibility != Visibility.PUBLIC:
 continue` as if it answered "is this declaration part of the public API",
-which it does not.
+which it did not.
 
-`diff_namespaces.py` shows the consequence (`_func_index_items`,
-`_collect_public_declared_names`, `_batch_demangle_public` all filter this
+`diff_namespaces.py` showed the consequence (`_func_index_items`,
+`_collect_public_declared_names`, `_batch_demangle_public` all filtered this
 way): the removal *event* is "absent from the new-side index", and a
 declaration that is still present in the header — byte-identical, still
-compiling for consumers of both header sets — drops out of that index purely
-because its emission changed. The run then reports a source-API removal for
-an API that was not removed. The reported case was a build whose default and
-public-only artifacts had **byte-identical headers** and differed only in
-whether one method was dynamically exported; the two sides classified as
-`PUBLIC` and `ELF_ONLY` respectively, and the surviving overload was reported
-as removed.
+compiling for consumers of both header sets — dropped out of that index
+purely because its emission changed. The run then reported a source-API
+removal for an API that was not removed. The reported case was a build whose
+default and public-only artifacts had **byte-identical headers** and differed
+only in whether one method was dynamically exported; the two sides classified
+as `PUBLIC` and `ELF_ONLY` respectively, and the surviving overload was
+reported as removed.
 
-The fix is not to ignore export changes for inline functions: a disappearing
+The fix was not to ignore export changes for inline functions: a disappearing
 dynamic export can still break an already-linked binary. The two facts are
-independent and both matter, so the result should read as two findings, not
-one wrong one:
+independent and both matter, so the result reads as two findings, not one
+wrong one:
 
 - source declaration — still present, no removal;
 - binary export — changed, evaluated on the binary-contract axis.
 
-What that needs, and why it is not a one-call-site patch:
+### How it was fixed
 
-1. `Visibility` (or a successor pair of facts on `Function`/`Variable`)
-   has to separate *declared* from *exported*, which is an
-   `AbiSnapshot` schema change inside the ADR-050 comparability contract.
-2. Both header-AST backends and the ELF/PE/Mach-O extractors have to
-   populate the new fact, and "we could not tell" has to stay
-   distinguishable from "not exported" (AGENTS.md: weaker evidence narrows
-   conclusions — a headerless snapshot must not start claiming every symbol
-   is undeclared).
-3. Every existing `visibility != Visibility.PUBLIC` guard has to be audited
-   for which of the two questions it actually meant. `diff_namespaces.py`
-   is the site the report reproduces, but it is not the only one, and
-   changing it alone would leave the same ambiguity everywhere else.
+`model/surface_facts.py` owns the split. `Function` and `Variable` each
+carry three `Fact[bool]` siblings — `declared_in_headers_fact`,
+`in_public_contract_fact`, `binary_exported_fact` (schema v46,
+`storage/fact_codec.py`) — and that module's accessors are the only
+supported way to read them, each named for the question it answers
+(`declared_in_headers`, `in_public_contract`, `binary_exported`, plus the
+consumer-shaped `in_public_surface`, `is_abi_visible`,
+`in_source_declaration_index`, `declaration_confirmed_absent`,
+`is_export_confirmed_absent`). There is deliberately no fourth merged
+boolean. Because they are real `Fact[...]` fields, the
+`fact-detector-misuse` AI-readiness gate covers every reader.
 
-Until then, treat an `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT` (or any
-`diff_namespaces` removal event) on a library whose export set changed as
-unproven: check the header before believing it. Bug class
-`classification.name_shape_as_contract_membership` covers the sibling
-name-shape defects; this one is about *evidence* selection, not naming, so
-it is deliberately recorded as its own gap.
+The three points the original entry named, and what each became:
+
+1. **The model change.** Done as above; `AbiSnapshot`'s `SCHEMA_VERSION`
+   went to 46. A pre-v46 snapshot has no such keys, and
+   `model/surface_facts.py`'s legacy bridge derives all three from the
+   stored `visibility` value, marked `PARTIAL` with a
+   `derived-from-legacy-visibility` diagnostic — so a stored baseline
+   classifies exactly as it did before (pinned by
+   `tests/test_surface_fact_split.py::TestLegacyBridgeIsBehaviourPreserving`)
+   and the weaker provenance stays visible rather than being laundered into
+   a producer's own claim. No enum member establishes (a) in either
+   direction: not a positive out of "it was exported", and not a negative
+   out of `ELF_ONLY` either, since both header backends assign `ELF_ONLY` to
+   a declaration they parsed *out of a header* whose symbol landed in
+   `.symtab`. The record's own header provenance is what answers (a) — a
+   positive when it is present, unknown when it is absent — and it is
+   consulted for every member alike.
+2. **Producers answer only what they observed**
+   (`extract/surface_fact_producers.py`). A header-AST backend asserts (a);
+   it asserts (c) only when a real export table was consulted, and leaves it
+   unknown for a header-only dump. DWARF/BTF/CTF leave (a) unknown — debug
+   info is not header evidence. An export-table-only entry leaves (a) unknown
+   unless headers were actually parsed. `provenance.tag_provenance` adds the
+   scope-aware half: a declaration whose defining header is in the supplied
+   public set is positive evidence for (b) — and only ever a positive, since
+   origin-based *exclusion* is already its own separately controlled scoping
+   decision and asserting the negative here would apply it twice, silently.
+   An evidence-depth projection returns both header-derived facts to unknown
+   (`headers_discarded_surface_facts`) instead of asserting their negation.
+3. **The guards were audited.** Every `visibility != Visibility.PUBLIC`
+   filter now names its question: public-surface membership
+   (`in_public_surface`), the binary union the old `(PUBLIC, ELF_ONLY)`
+   tuples spelled out (`is_abi_visible`, replacing `diff_symbols._PUBLIC_VIS`
+   and `diff_time64._ABI_VISIBLE`), export-table-only-ness
+   (`is_export_table_only_record`), the *intersection* of (b) and (c) that
+   the single `is PUBLIC` test used to mean (`is_public_export`), a confirmed
+   non-export (`is_export_confirmed_absent`), or — for `diff_namespaces`' removal
+   indexes, the site the report reproduced — the source-declaration
+   population (`in_source_declaration_index`), which is blind to (c) by
+   construction.
+
+`compare/export_transition.py` is the second finding the entry asked for,
+and it is symmetric in both directions: a matched pair whose export went
+away while the declaration stayed reports `FUNC_VISIBILITY_CHANGED`/
+`VAR_VISIBILITY_CHANGED` on the binary axis, and one that *gained* an export
+reports the compatible `FUNC_EXPORT_ADDED`/`VAR_EXPORT_ADDED`. Both
+directions are gated on *confirmed* evidence on both sides, so "exported
+before, unknown now" (or its mirror) is never rendered as an observed
+transition.
+
+Three review findings on the fix are worth recording, because each is the
+same mistake in a different place — reaching for a predicate that answers a
+*neighbouring* question:
+
+- **The gain direction was missing at first.** Before the split a
+  promised-but-unexported declaration failed the old `(PUBLIC, ELF_ONLY)`
+  filter outright, so the pair never matched and a newly exported
+  declaration was reported as `FUNC_ADDED`. Once the declaration keeps its
+  place on both sides the pair matches — and with only a loss-side detector
+  the run reported *nothing at all*. Trading one wrong finding for a silent
+  diff is worse than the bug being fixed, and an addition that vanishes is
+  what "record before disposing" forbids. Hence the two compatible kinds,
+  and one entry point per owner (`check_function`/`check_variable`) so a
+  caller cannot enumerate the directions and miss the next one.
+- **A binary-symbol subject needs the intersection, not the union.**
+  Replacing a `visibility is Visibility.PUBLIC` test with
+  `in_public_surface` silently widens the subject to declarations the
+  artifact never exported. `diff_templates`' instantiation-survival index is
+  the sharp case: its own docstring says a stale `extern template`
+  declaration must not count as surviving, and that declaration is exactly a
+  promised-but-unexported entity, so the union admitted it and suppressed
+  `INSTANTIATION_MISSING_FROM_BINARY`. `is_public_export` is the named
+  intersection, and it reproduces the legacy enum test exactly (`PUBLIC`
+  true, `ELF_ONLY`/`HIDDEN` false).
+- **`Visibility.ELF_ONLY` cannot establish header absence.** The legacy
+  bridge originally read it as a confirmed "not declared in any header". It
+  is not: both header-AST backends assign `ELF_ONLY` to a declaration they
+  parsed *out of a header* whose symbol landed in `.symtab` rather than the
+  dynamic table, and a headerless pre-v46 snapshot reaches the same member
+  with no header parse at all. Fact (a) is now answered from the record's
+  own header provenance for every member alike; which member it was is a
+  different question, still answered by `is_export_table_only_record`, so
+  the ELF-only removal kind and the stub-record consumers are unaffected.
+
+Every finding with one declaration behind it
+carries a `surface_facts` block (report schema 4.4) stating all three as
+`"true"`/`"false"`/`"unknown"` — always complete when present, because an
+omitted key is what a reader mistakes for a negative.
+
+Bug class: `evidence.export_presence_as_declaration_presence`
+(`tests/regressions/manifest.py`), whose one registered residual is that the
+generalized test builds its snapshots in-process; a live castxml/clang dump
+of two builds differing only in a version script is owned by the
+`integration` lane. The sibling name-shape defects stay under
+`classification.name_shape_as_contract_membership`.
 
 ## `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
 

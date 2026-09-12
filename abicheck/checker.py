@@ -89,7 +89,6 @@ from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
-from .diff_symbols import _PUBLIC_VIS
 from .diff_time64 import (  # noqa: F401 — triggers detector registration
     _diff_time64_abi,
 )
@@ -124,6 +123,7 @@ from .dwarf_advanced import (
 )
 from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import is_abi_visible
 from .policy.classification import (
     API_BREAK_KINDS as _API_BREAK_KINDS,
     BREAKING_KINDS as _BREAKING_KINDS,
@@ -703,8 +703,8 @@ def _compute_scope_confidence(
 
 def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
     """Return the count of public-visibility symbols in *old*, or None if zero."""
-    count = sum(1 for f in old.functions if f.visibility in _PUBLIC_VIS) + sum(
-        1 for v in old.variables if v.visibility in _PUBLIC_VIS
+    count = sum(1 for f in old.functions if is_abi_visible(f)) + sum(
+        1 for v in old.variables if is_abi_visible(v)
     )
     return count if count > 0 else None
 

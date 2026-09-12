@@ -37,7 +37,7 @@ from .appcompat_consumer_impact import (
 from .checker import Change, DiffResult
 from .diff_helpers import make_change
 from .impact.engine import assess_change
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
 from .model.consumer_spec import (
     ConsumerAppInput,
@@ -45,6 +45,7 @@ from .model.consumer_spec import (
     as_consumer_spec,
     verify_digest,
 )
+from .model.surface_facts import is_binary_exported
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import (
     close_consumer_scope,
@@ -1438,15 +1439,6 @@ def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:
     return {name}
 
 
-#: Visibilities that correspond to a symbol actually exported from the binary.
-#: PUBLIC is the header/DWARF-aware default; ELF_ONLY is how a symbols-only dump
-#: (a stripped binary with no headers/DWARF — the common `plugin-check old.so
-#: new.so` case) represents an exported `.dynsym` entry. HIDDEN is not exported.
-_EXPORTED_VISIBILITIES: frozenset[Visibility] = frozenset(
-    {Visibility.PUBLIC, Visibility.ELF_ONLY}
-)
-
-
 def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     """Linker-symbol names a host could resolve from a plugin via ``dlsym``.
 
@@ -1455,16 +1447,26 @@ def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     equals the mangled name. A demangled C++ name is deliberately excluded so a
     contract listing it is reported as *missing*, matching ``dlsym`` reality.
 
-    Both header/DWARF-aware (``PUBLIC``) and symbols-only (``ELF_ONLY``) exports
-    count: running ``plugin-check`` on real stripped binaries without headers is
-    the common case, and there every export is ``ELF_ONLY``.
+    Both header/DWARF-aware and symbols-only exports count: running
+    ``plugin-check`` on real stripped binaries without headers is the common
+    case, and there every entry is an export-table one.
+
+    Keyed on the *export* fact alone (``is_binary_exported``), never on
+    public-contract membership: ``dlsym`` resolves what the export table
+    carries and nothing else, so a declaration the headers promise but the
+    artifact does not export (a public inline function, or one a version
+    script stopped exporting) must read as *missing* here -- counting it
+    would let a required entrypoint no consumer can bind to pass as
+    satisfied (Codex review, P1). This is the split's whole point: the
+    question decides the fact, and this question is (c). See
+    ``model/surface_facts.py``.
     """
     names: set[str] = set()
     for fn in snap.functions:
-        if fn.visibility in _EXPORTED_VISIBILITIES:
+        if is_binary_exported(fn):
             names |= _resolvable_symbol_names(fn.name, fn.mangled)
     for var in snap.variables:
-        if var.visibility in _EXPORTED_VISIBILITIES:
+        if is_binary_exported(var):
             names |= _resolvable_symbol_names(var.name, getattr(var, "mangled", None))
     return names
 

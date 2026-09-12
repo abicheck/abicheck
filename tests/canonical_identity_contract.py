@@ -232,6 +232,19 @@ UNVERIFIED = frozenset(
         "func_virtual_removed",
         "func_visibility_changed",
         "func_visibility_protected_changed",
+        # Same bucket as its `func_visibility_changed` sibling directly
+        # above, and for the same reason: the call site *has* been read (it
+        # is new in this change -- compare/export_transition.py), and its
+        # values are a closed vocabulary (`Visibility` members), so the
+        # spelling is backend-stable by construction rather than by
+        # canonicalization or by an `_EQUIVALENT_CHANGE_CATEGORIES` entry.
+        # Neither of the other two buckets states that, so it sits here with
+        # the sibling whose situation is identical.
+        "var_visibility_changed",
+        # The two export-gain mirrors: identity does not vary with the
+        # `Visibility` spellings they carry, same as the loss pair above.
+        "func_export_added",
+        "var_export_added",
         "generated_file_dependency_unstable",
         "generated_header_changed",
         "generated_header_reaches_public_api",

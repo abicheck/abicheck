@@ -103,3 +103,13 @@ _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 41
 # about it looked wrong by inspection). Guarded by
 # AbiSnapshot.param_kind_facts_reliable.
 _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45
+
+# The schema_version ``Function``/``Variable``'s three surface facts
+# (``declared_in_headers_fact``/``in_public_contract_fact``/
+# ``binary_exported_fact``) started being persisted at -- the split of the
+# three questions ``Visibility`` conflated, see ``model/surface_facts.py``.
+# Below this, a document simply has no such key, and returning ``None``
+# here is what lets that module's own legacy bridge derive each fact from
+# the stored ``visibility`` value (marked ``PARTIAL``) instead of reading a
+# missing key as a confirmed negative.
+_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS = 46

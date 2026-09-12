@@ -41,7 +41,7 @@ from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
     make_change,
 )
-from .diff_symbols import _PUBLIC_VIS, _public_variables
+from .diff_symbols import _public_variables
 from .diff_types_surface import (
     _RESERVED_FIELD_RE,
     _directly_referenced,
@@ -49,6 +49,7 @@ from .diff_types_surface import (
 )
 from .model import AbiSnapshot, Function, TypeField, stdlib_namespaces_excluded
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import is_abi_visible
 
 
 @registry.detector("var_values")
@@ -224,8 +225,8 @@ def _diff_const_overloads(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     existed in old, but only the non-const version remains in new.
     """
     changes: list[Change] = []
-    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
-    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    old_funcs = [f for f in old.functions if is_abi_visible(f)]
+    new_funcs = [f for f in new.functions if is_abi_visible(f)]
 
     # Group by (name, param_signature) to find const/non-const pairs
     _ParamSig = tuple[str, int, str]  # (type, pointer_depth, kind)

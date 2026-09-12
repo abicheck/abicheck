@@ -58,6 +58,7 @@ import re
 
 from ..model import Function, Variable, Visibility
 from ..model.identity import entity_id_for_function, entity_id_for_variable
+from .surface_fact_producers import export_table_surface_facts
 
 __all__ = [
     "itanium_export_function",
@@ -172,6 +173,10 @@ def itanium_export_function(name: str) -> Function:
         # confirmation), so the checker can distinguish a binary-only
         # removal as FUNC_REMOVED_ELF_ONLY.
         visibility=Visibility.ELF_ONLY,
+        # No headers were parsed on this path at all, so "declared in the
+        # available headers" is *unknown*, not False -- the distinction
+        # model/surface_facts.py exists to keep.
+        **export_table_surface_facts(),
         is_extern_c=is_extern_c,
         entity_id=entity_id_for_function(
             (),
@@ -190,6 +195,10 @@ def itanium_export_variable(name: str) -> Variable:
         mangled=name,
         type="?",
         visibility=Visibility.ELF_ONLY,
+        # No headers were parsed on this path at all, so "declared in the
+        # available headers" is *unknown*, not False -- the distinction
+        # model/surface_facts.py exists to keep.
+        **export_table_surface_facts(),
         entity_id=entity_id_for_variable(
             (),
             name,
@@ -242,6 +251,10 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
         mangled=sym,
         return_type="?",
         visibility=Visibility.ELF_ONLY,
+        # No headers were parsed on this path at all, so "declared in the
+        # available headers" is *unknown*, not False -- the distinction
+        # model/surface_facts.py exists to keep.
+        **export_table_surface_facts(),
         is_extern_c=is_extern_c,
         entity_id=entity_id_for_function(
             (),

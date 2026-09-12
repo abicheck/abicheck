@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .errors import SnapshotError, ValidationError
+from .extract.surface_fact_producers import export_table_surface_facts
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 
 if TYPE_CHECKING:
@@ -167,6 +168,9 @@ def _dump_pe(
             mangled=(exp.name or f"ordinal:{exp.ordinal}"),
             return_type="?",
             visibility=Visibility.PUBLIC,
+            # An export-table entry: (c) confirmed, (a)/(b) never looked at
+            # on this path -- see model/surface_facts.py.
+            **export_table_surface_facts(),
             is_extern_c=not (exp.name or "").startswith("?"),
         )
         for exp in pe_meta.exports
@@ -263,6 +267,9 @@ def _dump_macho(
             mangled=exp.name,
             return_type="?",
             visibility=Visibility.PUBLIC,
+            # An export-table entry: (c) confirmed, (a)/(b) never looked at
+            # on this path -- see model/surface_facts.py.
+            **export_table_surface_facts(),
             is_extern_c=not exp.name.startswith("_Z"),
         )
         for exp in macho_meta.exports

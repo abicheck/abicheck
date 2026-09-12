@@ -62,7 +62,6 @@ from .diff_types import _RESERVED_FIELD_RE
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
-    Visibility,
     cv_qualifiers_only_differ,
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
@@ -70,6 +69,7 @@ from .model import (
 from .model.binary_naming import strip_vendor_hash
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
+from .model.surface_facts import is_binary_exported, is_export_confirmed_absent
 from .name_classification import RTTI_DATA_PREFIXES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -1101,16 +1101,15 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     single diagnostic instead of hundreds of individual add/remove reports.
     """
     changes: list[Change] = []
-    old_map = {
-        f.mangled: f
-        for f in old.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
-    }
-    new_map = {
-        f.mangled: f
-        for f in new.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
-    }
+    # Confirmed exports only, not the exported-or-promised union: these two
+    # maps diagnose a *mangling* change across two export tables, so a
+    # promised-but-unexported declaration (a public inline, or one a version
+    # script hides) has no mangled symbol in either table to have churned
+    # (Codex review, P2). `is_binary_exported` is also exactly what the
+    # `(PUBLIC, ELF_ONLY)` tuple this replaced meant. See
+    # model/surface_facts.py.
+    old_map = {f.mangled: f for f in old.functions if is_binary_exported(f)}
+    new_map = {f.mangled: f for f in new.functions if is_binary_exported(f)}
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1158,16 +1157,15 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     function signature is otherwise identical.
     """
     changes: list[Change] = []
-    old_map = {
-        f.mangled: f
-        for f in old.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
-    }
-    new_map = {
-        f.mangled: f
-        for f in new.functions
-        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
-    }
+    # Confirmed exports only, not the exported-or-promised union: these two
+    # maps diagnose a *mangling* change across two export tables, so a
+    # promised-but-unexported declaration (a public inline, or one a version
+    # script hides) has no mangled symbol in either table to have churned
+    # (Codex review, P2). `is_binary_exported` is also exactly what the
+    # `(PUBLIC, ELF_ONLY)` tuple this replaced meant. See
+    # model/surface_facts.py.
+    old_map = {f.mangled: f for f in old.functions if is_binary_exported(f)}
+    new_map = {f.mangled: f for f in new.functions if is_binary_exported(f)}
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1960,7 +1958,7 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
         # (BREAKING) for the binary-level concern.
 
         # Skip if function moved to hidden visibility — FUNC_VISIBILITY_CHANGED handles it
-        if getattr(f_new, "visibility", None) == Visibility.HIDDEN:
+        if is_export_confirmed_absent(f_new):
             continue
 
         # Symbol disappeared from ELF without explicit annotation — likely deleted
