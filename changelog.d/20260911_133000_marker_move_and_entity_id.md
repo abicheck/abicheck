@@ -36,3 +36,12 @@
   `AbiSnapshot.index()` on one side no longer makes two content-identical
   snapshots report degraded assurance; `from_headers`' conditional
   persistence is modelled explicitly.
+- **Recorded declaring files outrank the marker fallback.** When both sides
+  record a declaring file, that two-sided evidence decides whether the
+  declaration moved; a marker inside the name may describe a nested
+  template argument's location rather than the declaration's own. Markers
+  disagreeing with it is an evidence conflict, not a coordinate-only shift.
+- **A build-source pack's load directory is not persisted content.**
+  `BuildSourcePack.root` is omitted by `to_embedded_dict`, so two snapshots
+  whose packs were loaded from different directories no longer report
+  degraded assurance.

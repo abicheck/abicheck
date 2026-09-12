@@ -394,20 +394,54 @@ class TestMarkerCarriedLocationEvidence:
                 new_id, old_id
             ), label
 
-    def test_real_declaring_file_evidence_still_wins_where_present(self) -> None:
-        """The fallback is a fallback: a pair with real two-sided declaring
-        files must decide from those, not from the marker text."""
+    def test_real_declaring_file_evidence_wins_over_the_marker(self) -> None:
+        """Marker evidence is a fallback, not an override (Codex review,
+        PR #1229): two-sided declaring files are the stronger evidence
+        about where the DECLARATION lives, and a marker inside the name may
+        describe a nested template argument's location instead --
+        `Wrapper<(lambda at old.h:1:2)>` and `Wrapper<(lambda at
+        new.h:9:9)>` both declared in `wrapper.h` did not move.
+
+        Nor is it a coordinate-only shift: the markers naming different
+        files means something beyond coordinates changed, so the pair
+        falls through rather than claiming no material identity change."""
         old_qn, new_qn = _MARKER_MOVE_CASES["paren_at_spelling"]
-        # Real evidence says the declaring file did NOT change; the marker
-        # text disagrees. The marker fallback must not manufacture a move
-        # out of a disagreement real evidence already settles... but it is
-        # still a file change *somewhere*, so the honest answer is never
-        # the compatible coordinate-only kind.
         outcome = _classify_outcome(
-            _identity(old_qn, "a.h", f"sig:{old_qn}\x1fs"),
-            _identity(new_qn, "a.h", f"sig:{new_qn}\x1fs"),
+            _identity(old_qn, "wrapper.h", f"sig:{old_qn}\x1fs"),
+            _identity(new_qn, "wrapper.h", f"sig:{new_qn}\x1fs"),
         )
-        assert outcome in (OUTCOME_MOVED, OUTCOME_RECONCILED), outcome
+        assert outcome == OUTCOME_RECONCILED, outcome
+
+    def test_two_sided_files_decide_the_move_in_both_directions(self) -> None:
+        """The complement: when the declaring files themselves differ, that
+        is the move — with or without a marker disagreeing."""
+        stable_qn = "w<(lambda at f.h:1:2)>"
+        shifted_qn = "w<(lambda at f.h:9:9)>"
+        assert (
+            _classify_outcome(
+                _identity(stable_qn, "a.h", f"sig:{stable_qn}\x1fs"),
+                _identity(shifted_qn, "b.h", f"sig:{shifted_qn}\x1fs"),
+            )
+            == OUTCOME_MOVED
+        )
+        assert (
+            _classify_outcome(
+                _identity(stable_qn, "a.h", f"sig:{stable_qn}\x1fs"),
+                _identity(shifted_qn, "a.h", f"sig:{shifted_qn}\x1fs"),
+            )
+            == OUTCOME_COORDINATES_ONLY
+        )
+
+    def test_one_sided_file_evidence_falls_back_to_the_marker(self) -> None:
+        """The fallback boundary: one recorded declaring file is not a
+        two-sided comparison, so the marker still speaks."""
+        old_qn, new_qn = _MARKER_MOVE_CASES["paren_at_spelling"]
+        for old_file, new_file in (("wrapper.h", ""), ("", "wrapper.h")):
+            outcome = _classify_outcome(
+                _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
+                _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
+            )
+            assert outcome == OUTCOME_MOVED, (old_file, new_file, outcome)
 
     def test_a_marker_move_never_reports_coordinate_evidence(self) -> None:
         """`coordinate_evidence` answers None for anything that is not a

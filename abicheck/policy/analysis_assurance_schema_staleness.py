@@ -99,7 +99,10 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
-from ..model.snapshot_persistence import RUNTIME_ONLY_FIELDS, persisted_from_headers
+from ..model.snapshot_persistence import (
+    persisted_from_headers,
+    unpersisted_fields_for,
+)
 from .analysis_assurance_degraded_facts import degraded_reliability_facts
 
 if TYPE_CHECKING:
@@ -487,7 +490,7 @@ def _all_fields_equal(old: object, new: object) -> bool:
         # come from `AbiSnapshot.RUNTIME_ONLY_FIELDS`, declared beside the
         # fields themselves and pinned against `snapshot_to_dict`'s own pop
         # list by `tests/test_snapshot_runtime_only_fields.py`.
-        skip = set(RUNTIME_ONLY_FIELDS) if _is_snapshot(old) else set()
+        skip = set(unpersisted_fields_for(old))
         if _is_snapshot(old):
             # Compared through `persisted_from_headers` below instead: its
             # in-memory value is not its persisted value (the codec drops

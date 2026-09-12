@@ -178,25 +178,33 @@ def _classify_outcome(
     # equal location-free keys imply it, since the key collapses every
     # marker to its bare form.
     #
-    # Deliberately NOT gated on `not renamed` (Codex review, PR #1229): a
-    # declaration whose ordinary name AND declaring file both changed is
-    # the catalog's combined case, OUTCOME_RECONCILED -- disabling the only
-    # available move evidence during a rename emitted it as a bare
-    # OUTCOME_RENAMED instead, losing half of what the pair shows. Equal
-    # marker COUNTS are what makes the positional comparison meaningful,
-    # so the claim is made only when the two sides' markers can be aligned;
-    # under an ordinary coordinate shift equal counts are implied by the
-    # equal location-free keys, and under a rename they are checked.
+    # Marker evidence is a FALLBACK, not an override (Codex review, PR
+    # #1229): when both sides record a declaring file, that is the
+    # stronger, two-sided evidence about where the DECLARATION lives, and
+    # a marker inside the name may describe a nested template argument's
+    # location rather than the declaration's own -- `Wrapper<(lambda at
+    # old.h:1:2)>` and `Wrapper<(lambda at new.h:9:9)>` both declared in
+    # `wrapper.h` did not move. So the marker only speaks when the
+    # declaring-file comparison is unavailable.
+    #
+    # Deliberately NOT gated on `not renamed`: a declaration whose ordinary
+    # name AND declaring file both changed is the catalog's combined case,
+    # OUTCOME_RECONCILED -- disabling the only available move evidence
+    # during a rename emitted it as a bare OUTCOME_RENAMED instead, losing
+    # half of what the pair shows. Equal marker COUNTS are what makes the
+    # positional comparison meaningful, so the claim is made only when the
+    # two sides' markers can be aligned; under an ordinary coordinate shift
+    # equal counts are implied by the equal location-free keys, and under a
+    # rename they are checked.
     old_markers = closure_marker_files(old_qn) if old_qn else ()
     new_markers = closure_marker_files(new_qn) if new_qn else ()
-    moved_by_marker = (
+    markers_differ = (
         bool(old_markers)
         and len(old_markers) == len(new_markers)
         and old_markers != new_markers
     )
-    moved = (
-        bool(old_file) and bool(new_file) and old_file != new_file
-    ) or moved_by_marker
+    has_two_sided_files = bool(old_file) and bool(new_file)
+    moved = (old_file != new_file) if has_two_sided_files else markers_differ
     if renamed and not moved:
         return OUTCOME_RENAMED
     if moved and not renamed:
@@ -234,6 +242,13 @@ def _classify_outcome(
         and bool(new_qn)
         and old_qn != new_qn
         and same_sig
+        # An evidence conflict is not a coordinate-only shift: two-sided
+        # declaring files saying "did not move" while the embedded markers
+        # name different files means something beyond coordinates changed
+        # (a nested template argument's own declaring file), so the pair
+        # falls through rather than claiming no material identity change
+        # (Codex review, PR #1229).
+        and not markers_differ
         and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
     return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED

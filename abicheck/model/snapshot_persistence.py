@@ -38,7 +38,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
 
-__all__ = ["RUNTIME_ONLY_FIELDS", "persisted_from_headers"]
+__all__ = [
+    "RUNTIME_ONLY_FIELDS",
+    "UNPERSISTED_FIELDS_BY_TYPE",
+    "persisted_from_headers",
+    "unpersisted_fields_for",
+]
 
 
 #: Fields ``snapshot_to_dict`` drops unconditionally: the three lazy
@@ -66,3 +71,27 @@ def persisted_from_headers(snap: AbiSnapshot) -> bool | None:
     in-memory field agrees.
     """
     return None if snap.from_headers_inferred else snap.from_headers
+
+
+#: The same rule for the nested objects a snapshot embeds, keyed by class
+#: name so a consumer can look one up without importing every owning
+#: module. ``BuildSourcePack.root`` is where the pack was *loaded from*, and
+#: ``to_embedded_dict`` deliberately embeds only the normalized facts (see
+#: its own docstring, ADR-028 D4) -- so two snapshots whose packs came from
+#: different directories are the same persisted content, and comparing
+#: ``root`` made assurance turn on a load path (Codex review, PR #1229).
+UNPERSISTED_FIELDS_BY_TYPE: dict[str, frozenset[str]] = {
+    "AbiSnapshot": RUNTIME_ONLY_FIELDS,
+    "BuildSourcePack": frozenset({"root"}),
+}
+
+
+def unpersisted_fields_for(value: object) -> frozenset[str]:
+    """Which of *value*'s fields never reach persisted content.
+
+    Empty for anything not listed, so an unrecognized nested object is
+    compared in full -- the safe direction, since an over-strict compare
+    reports `degraded` for a pair that persists identically while an
+    over-lax one claims two distinct captures are the same.
+    """
+    return UNPERSISTED_FIELDS_BY_TYPE.get(type(value).__name__, frozenset())

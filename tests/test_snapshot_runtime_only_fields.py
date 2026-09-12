@@ -218,3 +218,47 @@ def test_no_unlisted_scalar_field_is_digest_irrelevant() -> None:
         "RUNTIME_ONLY_FIELDS, so _same_content compares what the digest "
         f"ignores: {sorted(unlisted)}"
     )
+
+
+def test_nested_pack_root_is_not_persisted_content() -> None:
+    """Codex review (PR #1229): the same rule applies to the nested objects
+    a snapshot embeds. `BuildSourcePack.root` is where the pack was
+    *loaded from*, and `to_embedded_dict` embeds only the normalized facts
+    (ADR-028 D4) — so two snapshots whose packs came from different
+    directories are the same persisted content, and comparing `root` made
+    assurance turn on a load path.
+
+    Checked against the digest in both directions, so the exclusion cannot
+    become "pack differences never count"."""
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.policy.analysis_assurance_schema_staleness import _same_content
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    a = AbiSnapshot(version="1.0", library="libfoo.so.1")
+    b = AbiSnapshot(version="1.0", library="libfoo.so.1")
+    a.build_source = BuildSourcePack.empty(root="/one/checkout/pack")
+    b.build_source = BuildSourcePack.empty(root="/another/checkout/pack")
+
+    assert a.build_source.root != b.build_source.root
+    assert snapshot_content_digest(a) == snapshot_content_digest(b)
+    assert _same_content(a, b)
+
+    # The must-stay-distinct half: a difference in the pack's own persisted
+    # content is still a difference.
+    b.build_source.manifest.abicheck_version = "9.9.9-different"
+    assert snapshot_content_digest(a) != snapshot_content_digest(b)
+    assert not _same_content(a, b)
+
+
+def test_unpersisted_fields_are_looked_up_per_type() -> None:
+    """An unrecognized nested object is compared in full — the safe
+    direction, since an over-strict compare reports `degraded` for a pair
+    that persists identically, while an over-lax one claims two distinct
+    captures are the same."""
+    from abicheck.model.snapshot_persistence import unpersisted_fields_for
+
+    assert unpersisted_fields_for(AbiSnapshot(version="1.0", library="l")) == (
+        RUNTIME_ONLY_FIELDS
+    )
+    assert unpersisted_fields_for(object()) == frozenset()
+    assert unpersisted_fields_for("a string") == frozenset()
