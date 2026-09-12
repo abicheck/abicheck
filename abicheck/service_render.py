@@ -306,10 +306,14 @@ def _project_review(envelope: ReportEnvelope) -> str:
 def _project_markdown(envelope: ReportEnvelope) -> str:
     """The full Markdown report (and its ``md`` alias).
 
-    ``show_recommendation`` stays this projection's own presentation option
-    with its pre-removal Tier-2 default of ``False`` (CLI cleanup phase two,
-    PR 1) -- ``cli._render_output`` passes ``True`` explicitly, which is why
-    the CLI's output is unconditional without this default changing.
+    ``show_recommendation`` stays this projection's own presentation option,
+    read off the envelope. It defaults to ``True`` in both
+    :class:`~abicheck.report.envelope.RenderOptions` and ``render_output``
+    above, so building an envelope directly and calling ``render_output``
+    with the option omitted produce byte-identical output -- the two used to
+    disagree (``False`` here, ``True`` there), which meant a direct Tier-2
+    envelope caller silently lost the Release Recommendation section that
+    every real consumer gets.
 
     Gap-C disposition for Markdown's own remaining facts: ``severity_groups``'
     headed-section grouping is **presentation** over already-classified

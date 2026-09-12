@@ -193,13 +193,19 @@ class TestResolveInput:
             resolve_input(p, is_elf=True, include_dependencies=False)
         assert mock.call_args.kwargs["include_dependencies"] is False
 
-    def test_include_dependencies_defaults_true(self, tmp_path):
+    def test_include_dependencies_defaults_to_the_filtered_surface(self, tmp_path):
+        # PR #1258: every typed entry point agrees with the CLI's own
+        # dependency-scoping default, so an omitted option cannot yield a
+        # `full` snapshot here and a `filtered` one from `abicheck dump`
+        # (which is a ScopeMismatchError with no verdict at compare time).
+        # The cross-surface invariant lives in
+        # tests/test_front_end_default_parity.py; this pins the one call.
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with patch("abicheck.workflows.input_resolution.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
-        assert mock.call_args.kwargs["include_dependencies"] is True
+        assert mock.call_args.kwargs["include_dependencies"] is False
 
     def test_resolve_input_no_longer_accepts_header_graph_kwargs(self, tmp_path):
         # G29 Phase A: header_graph/header_graph_includes are no longer

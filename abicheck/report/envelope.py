@@ -105,7 +105,7 @@ class RenderOptions:
     show_impact: bool = False
     demangle: bool = False
     follow_deps: bool = False
-    show_recommendation: bool = False
+    show_recommendation: bool = True
     require_complete_analysis: bool = False
     contract_evaluation: bool = False
 
