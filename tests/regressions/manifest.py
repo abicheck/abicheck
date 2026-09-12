@@ -108,6 +108,52 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="api.positional_slot_rebinding",
+        invariant=(
+            "The positional parameter order of a long-lived entry point -- a "
+            "public dataclass's fields, a pipeline method's signature -- is "
+            "append-only. Inserting a parameter or field mid-signature, where "
+            "every trailing parameter already has a default, silently rebinds "
+            "every existing positional caller one slot to the left: nothing "
+            "raises, nothing fails to type-check, and the caller's argument "
+            "lands on a different field. A new parameter is appended, or "
+            "better, made keyword-only."
+        ),
+        fixed_by=(1231,),
+        seed_tests=(
+            "tests/test_positional_signature_stability.py",
+            "tests/test_policy_experimental_namespaces.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Registered because two independent instances landed in "
+                    "one change (PR #1231) and both were caught in review, "
+                    "not by any test -- `PolicyFile` (an 8th positional "
+                    "argument for `source_only_findings` binding to "
+                    "`experimental_namespaces`, dropping the evidence policy) "
+                    "and `PostProcessingPipeline.run` (a positional "
+                    "`disposition_ledger` binding to `experimental_"
+                    "namespaces`, disabling auditing and handing a "
+                    "non-iterable ledger to a namespace consumer). Both "
+                    "signatures already carried comments warning about "
+                    "exactly this, so prose in the file demonstrably does not "
+                    "prevent it. The seed test pins those two signatures' "
+                    "whole positional order, which catches any future "
+                    "mid-signature insertion into *them*. What it does not do "
+                    "is enumerate every other long-lived entry point in the "
+                    "codebase: there is no automatic discovery of "
+                    "\"signatures whose order is load-bearing\", and a naive "
+                    "sweep over every public callable would pin churn-prone "
+                    "internal helpers and be deleted within a release. "
+                    "Extending coverage means adding a signature to the seed "
+                    "test when a call site is found to pass it positionally."
+                ),
+                reference="PR #1231",
+            ),
+        ),
+    ),
+    BugClass(
         id="classification.name_shape_as_contract_membership",
         invariant=(
             "A symbol's spelling answers how it is *represented* and what "

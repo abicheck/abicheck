@@ -1685,10 +1685,13 @@ class PostProcessingPipeline:
         # for scope_to_public_surface would instead bind `True` here and
         # leave scoping disabled, with no error).
         internal_namespaces: tuple[str, ...] | None = None,
-        experimental_namespaces: tuple[str, ...] | None = None,
         # ADR-067 C-S1: appended last for the same positional-safety reason
         # the note above records.
         disposition_ledger: DispositionLedger | None = None,
+        # ADR-069: likewise appended, not slotted next to `internal_namespaces`
+        # where it reads better -- doing that rebound a positional
+        # `disposition_ledger` to this parameter (Codex review, PR #1231).
+        experimental_namespaces: tuple[str, ...] | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
