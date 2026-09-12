@@ -243,6 +243,25 @@ from .workflows.compare_policy import (  # noqa: E402,F401
     load_suppression_and_policy,
 )
 
+# ADR-061 gap D, closed: the directory/package release fan-out's
+# pre-execution resolution is one typed request/plan pair, reachable from
+# this Tier-2 surface with no Click context. It was previously resolvable
+# only through `compare-release`'s own Click command, because the chain it
+# calls was `frontends`/flat-`cli_*`-classified and raised `click` errors
+# from inside the resolution -- both of which the `engine-cli-boundary`
+# gate forbids an engine module from depending on. That chain is
+# `workflows.release_inputs` now and raises the typed
+# `errors.ReleaseOperandContentError`/`ReleaseOperandUsageError`; the CLI
+# translates both at its own boundary, back into the two `click` types that
+# produce the two exit codes this command always produced, so no
+# user-visible message or exit code changed.
+from .workflows.release_request import (  # noqa: E402,F401
+    ReleaseComparePlan as ReleaseComparePlan,
+    ReleaseCompareRequest as ReleaseCompareRequest,
+    cleanup_release_compare_plan as cleanup_release_compare_plan,
+    resolve_release_compare_plan as resolve_release_compare,
+)
+
 # Explicit re-export (mypy strict / no_implicit_reexport): the scan engine moved
 # to the leaf module ``dry_run_estimate`` but its public names must still resolve as
 # ``from abicheck.service import ...``.
@@ -254,8 +273,11 @@ __all__ = [
     "DumpRequest",
     "InputSpec",
     "OutputSpec",
+    "ReleaseComparePlan",
+    "ReleaseCompareRequest",
     "ResolvedComparePair",
     "classify_compare_pair",
+    "cleanup_release_compare_plan",
     "collect_metadata",
     "compare_snapshots",
     "detect_binary_format",
@@ -265,6 +287,7 @@ __all__ = [
     "render_output",
     "resolve_compare_request",
     "resolve_input",
+    "resolve_release_compare",
     "run_compare",
     "run_compare_request",
     "run_dump",

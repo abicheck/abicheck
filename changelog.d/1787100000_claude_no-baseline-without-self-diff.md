@@ -62,3 +62,37 @@
   still sets `findings_truncated`/`findings_truncated_kinds`, and -- under
   `--output-dir` -- now names the member's complete artifact in a new
   per-library `complete_report` field.
+
+### Added
+
+- **`abicheck.service.resolve_release_compare`** -- the directory/package
+  release fan-out's pre-execution resolution (input discovery, ADR-065
+  scope/inventory evidence, the scope plan, the resolved gate, each side's
+  degraded-member markers) as one typed request/plan pair on the Python API,
+  alongside `ReleaseCompareRequest`/`ReleaseComparePlan`/
+  `cleanup_release_compare_plan`. It was previously reachable only through
+  `compare`'s own Click command: the chain it calls was classified
+  `frontends`, and parts of it raised `click.UsageError` from inside the
+  resolution, so a Python caller got an undocumented exception type. That
+  chain is `abicheck.workflows.release_inputs` now and raises the typed
+  `errors.ReleaseOperandError`; the CLI translates it at its own boundary,
+  so no user-visible message or exit code changed (ADR-061 gap D, closed
+  for the resolution half).
+- **`compare --format oneline` (and `--write oneline=...`) works for a
+  directory/package operand.** It is a count summary and needs no
+  per-member `DiffResult`, so nothing about it depended on cardinality
+  except the rejection; the release line folds the per-library counts
+  through the same `format_stat_line` a single-pair `compare` renders, so
+  the two cannot drift. `sarif`/`html`/`review` remain single-pair-only --
+  each genuinely needs one `DiffResult` -- and what each would take is
+  recorded in `docs/contribute/known-gaps.md` rather than left implied by a
+  usage error.
+- **Two typed release-operand errors, not one.**
+  `errors.ReleaseOperandContentError` (exit `1` -- a fact about the operand's
+  content: an unrecognized package format, a directory holding nothing
+  readable) and `errors.ReleaseOperandUsageError` (exit `64` -- a fact about
+  what the caller asked for: an ambiguous or unselectable stored-package
+  variant), both subclasses of `ReleaseOperandError`. The two exit codes were
+  already distinct before the resolution moved engine-side, and keeping them
+  in the hierarchy is what lets the CLI reproduce both without the engine
+  knowing about `click`.

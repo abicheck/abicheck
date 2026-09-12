@@ -136,10 +136,10 @@ if TYPE_CHECKING:
 @release_input_options
 @lang_option
 @output_options(
-    ["json", "markdown", "junit"],
+    ["json", "markdown", "junit", "oneline"],
     output_help="Output file for summary report (default: stdout).",
 )
-@secondary_output_options(["json", "markdown", "junit"], multiple=True)
+@secondary_output_options(["json", "markdown", "junit", "oneline"], multiple=True)
 @click.option(
     "--output-dir",
     "output_dir",

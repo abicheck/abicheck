@@ -92,7 +92,10 @@ from ..runtime import (
 )
 from .dump import dump_cmd
 
-_RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
+#: `oneline` joined the set once `report/release_oneline.py` gave it a real
+#: aggregate render (it needs no per-member `DiffResult`, unlike the three
+#: still missing -- see `docs/contribute/known-gaps.md`).
+_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
 
 
 def reject_release_incompatible_view_mode(

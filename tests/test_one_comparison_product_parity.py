@@ -440,3 +440,63 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
         assert complete.is_file(), lib
         full = json.loads(complete.read_text(encoding="utf-8"))
         assert len(full["changes"]) > len(lib["findings"])
+
+
+# ---------------------------------------------------------------------------
+# 4. One analysis, several artifacts -- at release cardinality
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseArtifactsDoNotDependOnCardinality:
+    """``--write`` and ``--format oneline`` for a directory operand."""
+
+    def test_write_is_repeatable(self, tmp_path: Path) -> None:
+        """A second ``--write`` used to be a usage error for a release
+        operand ("the per-library release engine does not yet support
+        multiple secondary artifacts"), while `compare` accepted it for a
+        single pair -- so the input shape decided how many artifacts one
+        analysis could produce."""
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=3)
+        first = tmp_path / "a.json"
+        second = tmp_path / "b.md"
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "oneline",
+            "--write",
+            f"json={first}",
+            "--write",
+            f"markdown={second}",
+        )
+        assert result.exit_code == 4, result.output
+        assert json.loads(first.read_text(encoding="utf-8"))["libraries"]
+        assert "libfoo" in second.read_text(encoding="utf-8")
+
+    def test_oneline_renders_for_a_release_and_agrees_with_the_summary(
+        self, tmp_path: Path
+    ) -> None:
+        """The format existed for a single pair and was refused for a
+        directory. Checked against the JSON summary's own counts rather than
+        against a literal string, so the two renders of one analysis cannot
+        disagree."""
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=3)
+        summary = tmp_path / "s.json"
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "oneline",
+            "--write",
+            f"json={summary}",
+        )
+        assert result.exit_code == 4, result.output
+        line = result.output.strip()
+        libraries = json.loads(summary.read_text(encoding="utf-8"))["libraries"]
+        breaking = sum(lib["breaking"] for lib in libraries)
+        assert (
+            f"{len(libraries)} library" in line or f"{len(libraries)} libraries" in line
+        )
+        assert f"{breaking} breaking" in line, line

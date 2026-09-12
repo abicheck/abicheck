@@ -690,7 +690,7 @@ class TestCompareFormatAllowlistMatchesCli:
 
     def test_release_style_allowlist_matches_cli_constant(self) -> None:
         validator_formats = self._extract_allowlist(
-            "only 'json', 'markdown', and 'junit' are available"
+            "only 'json', 'markdown', 'junit', and 'oneline' are available"
         )
         # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
         cmd = "abicheck/frontends/cli/commands/compare.py"
