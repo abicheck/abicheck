@@ -273,8 +273,8 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
 # storage.bundle_facts_codec` cycle `scripts/check_ai_readiness.py`'s
 # `import-cycle-growth` check flags via a full `ast.walk` (so even a
 # function-scoped `from ... import ...` counts) -- the same reason
-# `abicheck.cli`'s own `__getattr__` resolves its moved names through
-# `abicheck.frontends.cli.moved` instead of importing them back. Unlike that
+# `buildsource/source_graph.py` resolves `diff_source_graph_findings` through
+# a lazy `__getattr__` instead of importing it back. Unlike that
 # facade, these are real typed `def`s rather than a blanket module
 # `__getattr__`: these four names are called with real argument/return types
 # by other first-party modules (`cli_compare_release_helpers.py`, ...), and

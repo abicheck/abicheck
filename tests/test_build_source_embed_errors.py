@@ -99,7 +99,7 @@ def test_bad_build_config_is_a_usage_error(
 
 def test_usage_errors_map_to_64_at_the_process_boundary() -> None:
     """Pin the mapping the test above rests on, so a change to it is visible here."""
-    from abicheck.cli import _EXIT_USAGE_ERROR
+    from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR
 
     assert _EXIT_USAGE_ERROR == 64
     assert click.UsageError("x").exit_code == 2

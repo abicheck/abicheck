@@ -17,7 +17,8 @@
 The `probe run`/`probe compare` CLI commands (`cli_probe.py`) were deleted in
 the pre-1.0 CLI reset (ADR-043) — `probe_harness.py`/`diff_build_config.py`
 are unchanged and still power `compare --probe-matrix-old`/
-`--probe-matrix-new` internally (see `abicheck.cli._load_probe_matrix_changes`).
+`--probe-matrix-new` internally (see
+`abicheck.frontends.cli.runtime._load_probe_matrix_changes`).
 Their old CLI-level test coverage here was either:
   - pure CLI-command orchestration (incomplete-matrix rejection, confidence
     marking, `--out`/stderr summary rendering) with no surviving library

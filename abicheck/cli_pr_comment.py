@@ -30,7 +30,7 @@ from pathlib import Path
 
 import click
 
-from .cli import _write_or_echo
+from .frontends.cli.runtime import _write_or_echo
 
 
 @click.command("pr-comment")

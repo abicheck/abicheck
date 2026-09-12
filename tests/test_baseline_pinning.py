@@ -103,7 +103,7 @@ class TestSchemaV4:
 
 class TestStampProvenance:
     def test_stamp_sets_created_at(self):
-        from abicheck.cli import _stamp_provenance
+        from abicheck.frontends.cli.runtime import _stamp_provenance
 
         snap = _sample_snap()
         _stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
@@ -112,7 +112,7 @@ class TestStampProvenance:
         assert "T" in snap.created_at
 
     def test_stamp_sets_git_tag_and_build_id(self):
-        from abicheck.cli import _stamp_provenance
+        from abicheck.frontends.cli.runtime import _stamp_provenance
 
         snap = _sample_snap()
         _stamp_provenance(snap, git_tag="v1.0", build_id="run-99", no_git=True)
@@ -120,7 +120,7 @@ class TestStampProvenance:
         assert snap.build_id == "run-99"
 
     def test_stamp_auto_detects_git_commit(self):
-        from abicheck.cli import _stamp_provenance
+        from abicheck.frontends.cli.runtime import _stamp_provenance
 
         snap = _sample_snap()
         fake_result = mock.Mock(returncode=0, stdout="abc1234\n", stderr="")
@@ -136,7 +136,7 @@ class TestStampProvenance:
         )
 
     def test_stamp_no_git_skips_detection(self):
-        from abicheck.cli import _stamp_provenance
+        from abicheck.frontends.cli.runtime import _stamp_provenance
 
         snap = _sample_snap()
         with mock.patch("subprocess.run") as m:
@@ -145,7 +145,7 @@ class TestStampProvenance:
         assert snap.git_commit is None
 
     def test_stamp_git_not_found_graceful(self):
-        from abicheck.cli import _stamp_provenance
+        from abicheck.frontends.cli.runtime import _stamp_provenance
 
         snap = _sample_snap()
         with mock.patch("subprocess.run", side_effect=FileNotFoundError):
@@ -153,7 +153,7 @@ class TestStampProvenance:
         assert snap.git_commit is None
 
     def test_stamp_git_timeout_graceful(self):
-        from abicheck.cli import _stamp_provenance
+        from abicheck.frontends.cli.runtime import _stamp_provenance
 
         snap = _sample_snap()
         with mock.patch(

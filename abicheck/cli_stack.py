@@ -29,8 +29,10 @@ from pathlib import Path
 
 import click
 
-from .cli import _detect_binary_format, _safe_write_output, _setup_verbosity, main
+from .cli import main
 from .cli_options import verbose_option
+from .cli_resolve import _detect_binary_format
+from .frontends.cli.runtime import _safe_write_output, _setup_verbosity
 from .stack_checker import under_sysroot
 
 

@@ -9,20 +9,20 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
-from abicheck.cli import (
-    _build_match_map,
-    _canonical_library_key,
-    _is_supported_compare_input,
-    _version_sort_key,
-    main,
-)
+from abicheck.cli import main
 from abicheck.cli_compare_release import (
     _discover_include_roots,
     _extract_if_package,
     _format_release_json,
     _prepare_compare_release_inputs,
 )
-from abicheck.cli_helpers_compare import strip_vendor_hash
+from abicheck.cli_helpers_compare import (
+    _build_match_map,
+    _canonical_library_key,
+    _version_sort_key,
+    strip_vendor_hash,
+)
+from abicheck.cli_resolve import _is_supported_compare_input
 from abicheck.model import (
     AbiSnapshot,
     Function,

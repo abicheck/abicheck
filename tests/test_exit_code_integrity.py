@@ -80,7 +80,7 @@ def test_compare_release_flow_matches_canonical(worst: str) -> None:
 
 
 def test_compare_flow_matches_canonical() -> None:
-    from abicheck.cli import _exit_with_severity_or_verdict
+    from abicheck.frontends.cli.runtime import _exit_with_severity_or_verdict
 
     old = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[_fn("a"), _fn("b")])
     new = AbiSnapshot(library="libfoo.so.1", version="2.0", functions=[_fn("a")])

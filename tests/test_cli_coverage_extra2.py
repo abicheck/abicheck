@@ -28,14 +28,16 @@ from pathlib import Path
 import click
 import pytest
 
-from abicheck.cli import (
+from abicheck.cli_buildsource import _write_snapshot_output
+from abicheck.cli_resolve import (
     _detect_binary_format,
     _expand_header_inputs,
+    _sniff_text_format,
+)
+from abicheck.frontends.cli.runtime import (
     _safe_write_output,
     _setup_verbosity,
-    _sniff_text_format,
     _stamp_provenance,
-    _write_snapshot_output,
 )
 from abicheck.model import AbiSnapshot
 
@@ -451,7 +453,7 @@ class TestClassifyMissingLayers:
     """The absent-vs-ran-but-empty split behind the accurate coverage warning."""
 
     def test_none_pack_defaults_all_absent(self) -> None:
-        from abicheck.cli import _classify_missing_layers
+        from abicheck.cli_buildsource import _classify_missing_layers
 
         absent, ran_empty = _classify_missing_layers(None, ["L4_source_abi"])
         assert absent == ["L4_source_abi"]
@@ -464,7 +466,7 @@ class TestClassifyMissingLayers:
             LayerCoverage,
         )
         from abicheck.buildsource.pack import BuildSourcePack
-        from abicheck.cli import _classify_missing_layers
+        from abicheck.cli_buildsource import _classify_missing_layers
 
         pack = BuildSourcePack(root="")
         # L4 ran (PARTIAL row) but linked nothing; L5 has no row at all.

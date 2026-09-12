@@ -47,10 +47,11 @@ import click
 
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
-from .cli import _normalize_binary_input, _safe_write_output
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import member_error_entry
+from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
 from .reporter import to_json
 from .workflows.contracts import CompareResult

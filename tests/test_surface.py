@@ -1919,7 +1919,7 @@ class TestWideningOverlay:
 
 
 def test_collect_force_public_symbols_no_file():
-    from abicheck.cli import _collect_force_public_symbols
+    from abicheck.cli_helpers_compare import _collect_force_public_symbols
 
     assert _collect_force_public_symbols((), None) == set()
     assert _collect_force_public_symbols(("a", " ", "b"), None) == {"a", "b"}

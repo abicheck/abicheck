@@ -506,7 +506,7 @@ def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
     # The dump CLI seam: _write_snapshot_output(..., inputs_pack=pack) folds the
     # pack and serializes an embedded build_source (single-artifact UX), so a plain
     # `dump <binary> --inputs pack/` needs no follow-up merge.
-    from abicheck.cli import _write_snapshot_output
+    from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.model import AbiSnapshot, Function
 
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])

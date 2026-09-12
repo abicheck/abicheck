@@ -151,7 +151,7 @@ class TestBug3OutputDirCreation:
     """_safe_write_output must emit a visible warning when creating dirs."""
 
     def test_creates_dirs_with_stderr_message(self, tmp_path: Path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         target = tmp_path / "deep" / "nested" / "output.json"
         # Capture stderr via CliRunner
         _safe_write_output(target, '{"test": true}')
@@ -160,7 +160,7 @@ class TestBug3OutputDirCreation:
         assert (tmp_path / "deep" / "nested").is_dir()
 
     def test_existing_dir_no_error(self, tmp_path: Path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         target = tmp_path / "output.json"
         _safe_write_output(target, '{"test": true}')
         assert target.exists()

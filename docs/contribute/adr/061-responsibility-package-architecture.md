@@ -1132,9 +1132,12 @@ state (gap D).
 **Landed.** `abicheck/frontends/` exists and holds the CLI: commands
 (`frontends/cli/commands/{dump,compare}.py`), runtime (verbosity, output,
 provenance, the exit decision), the option cluster
-(`frontends/cli/options/*`), and `frontends/cli/moved.py`'s historical
-import surface. Root `cli.py` went from 1,959 lines to a 140-line
-registration facade. Classifying the whole `cli_*` family `frontends`
+(`frontends/cli/options/*`). Root `cli.py` went from 1,959 lines to a
+~120-line registration facade. It briefly also carried
+`frontends/cli/moved.py`, a lazy alias table keeping ~80 private helpers
+importable from `abicheck.cli` after they moved; that was retired once every
+caller was migrated to the owning module, taking the table, the
+`__getattr__` resolving it and the module-class assignment guard with it. Classifying the whole `cli_*` family `frontends`
 surfaced 47 real direction violations — the CLI reaching past the engine
 into `policy`, `compare`, and `extract` — and all 47 were closed rather
 than suppressed, each routed through a `workflows` re-export surface
