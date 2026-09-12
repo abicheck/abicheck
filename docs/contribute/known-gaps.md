@@ -32,6 +32,48 @@ looked like the obvious fix and wasn't.
 
 ## Known gaps — acknowledged remaining work
 
+- **A `kind: bundle` check still cannot run at `depth: headers`: only the
+  *baseline* half of per-member header staging is wired (2026-09-12).**
+  `abicheck/buildsource/bundle_member_snapshots.py` now resolves and stages
+  each bundle member's own historical baseline snapshot -- the per-member
+  header evidence `actions/baseline` already dumps from the baseline
+  checkout -- into a clean, one-snapshot-per-member directory usable as a
+  directory-`compare` old-side operand, and reports per member whether that
+  snapshot genuinely carries header-derived evidence
+  (`AbiSnapshot.from_headers`), exposed by `actions/resolve-baseline` as the
+  `member-snapshots-dir`/`member-header-evidence` outputs
+  (`stage-member-snapshots: true`). `BUNDLE_CHECK_DEPTHS` and
+  `actions/check-target/validate-inputs.sh` are deliberately **unchanged**:
+  the restriction is a false-clean guard, and two parts of the evidence path
+  are still missing, either of which alone would re-create the very
+  silent-miss it prevents.
+  (a) **`check-target` still routes the bundle compare at `binaries-dir`.**
+  Switching it to the staged snapshots directory is not a one-line change,
+  because the cross-library bundle graph (`abicheck/bundle.py`'s
+  `build_bundle_snapshot()`) builds from real ELF binaries and skips
+  snapshots -- so the old side would gain header evidence and lose its
+  bundle-graph evidence, trading one silent narrowing for another. The
+  likely shape is a baseline-time bundle-facts document staged alongside the
+  member snapshots (the auto-classified `BundleFacts` operand already
+  exists), so both kinds of old-side evidence survive; that is a separate
+  slice.
+  (b) **The candidate side still has no per-member header selection.**
+  `check-project.yml` carries one project-wide `header:` input, and the
+  release fan-out resolves headers run-wide
+  (`cli_compare_release_helpers._resolve_release_headers`, threaded to every
+  pair) rather than per member. A bundle whose members have disjoint public
+  header sets would therefore parse each member's candidate side against
+  the union.
+  Until both land, a bundle check stays binary-depth, and staging is
+  additive: it changes no existing outcome, and every pre-existing
+  invocation (which does not pass `stage-member-snapshots`) is unaffected.
+  Covered by `tests/test_bundle_member_baseline_staging.py`, whose central
+  test proves executably -- over generated member sets, against an oracle
+  independent of every abicheck detector -- that a header-derived change
+  *is* detected per member once the old side comes from the staged
+  baseline, and *is not* when both sides come from the candidate (today's
+  behavior).
+
 - **`unversioned_exported_symbol` (ADR-035 D8) fires on a real library's
   base/default-version-bound symbols — real, by-design, not fixed here
   (2026-09-07, cross-source-stage-automatic PR).** Found once ADR-068 §3
