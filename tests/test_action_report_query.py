@@ -171,6 +171,14 @@ INVALID_DOCUMENTS = (
     ("bom then garbage", b"\xef\xbb\xbfnot json"),
     ("empty object", b"{}"),
     ("empty object with whitespace", b"  {}  \n"),
+    # Parsed, non-empty, and still carrying no result. The generalization of
+    # the `{}` case: "the document parsed" and "the document holds a result"
+    # are different questions, and only the second one licenses a verdict
+    # (Codex review, P2).
+    ("error object from a wrapper", b'{"error": "write interrupted"}'),
+    ("schema version alone", b'{"report_schema_version": "4.4"}'),
+    ("unrelated json object", b'{"name": "abicheck", "version": "1.0"}'),
+    ("nested but resultless", b'{"diff": {"note": "nothing here"}}'),
 )
 
 
@@ -246,6 +254,7 @@ class TestNoResultNeverReadsAsSuccess:
             rq.VALIDITY_UNPARSEABLE,
             rq.VALIDITY_NOT_OBJECT,
             rq.VALIDITY_EMPTY,
+            rq.VALIDITY_NO_RESULT,
         }
         _, out = _ask(tmp_path, payload, "report_validity")
         token = out.strip()
@@ -614,3 +623,81 @@ class TestScopeWhereCannotBreakOutOfItsMarkdownSpan:
         assert "\n" not in answer and "\r" not in answer, f"{name!r}: newline survived"
         assert not any(ord(c) < 0x20 or ord(c) == 0x7F for c in answer), f"{name!r}"
         assert answer, f"{name!r}: flattened to nothing instead of a placeholder"
+
+
+class TestARecognizedResultIsRequired:
+    """ "Parsed" is not "carries a result" -- and only the second licenses a verdict.
+
+    ``classify_document`` used to answer ``ok`` for any non-empty mapping, so
+    ``{"error": "write interrupted"}`` was treated as a readable report: every
+    verdict reader then answered empty and the caller fell back to a clean
+    claim. Exactly the defect the ``empty`` token was added for, one step up
+    (Codex review, P2).
+
+    The risk here runs the other way too -- a missing recognizer fails a
+    *working* run -- so both directions are pinned.
+    """
+
+    @pytest.mark.parametrize(
+        "key",
+        sorted(rq.RESULT_KEYS),
+    )
+    def test_any_single_recognized_key_makes_a_document_a_result(
+        self, tmp_path: Path, key: str
+    ) -> None:
+        # Presence alone, with a null value: `verdict` is legitimately `null` on
+        # an audit-only or not-comparable report, so keying on truthiness would
+        # reject two real shapes.
+        _, out = _ask(tmp_path, {key: None}, "report_validity")
+        assert out.strip() == rq.VALIDITY_OK, f"{key}: rejected a real report shape"
+
+    @pytest.mark.parametrize("key", sorted(rq.RESULT_KEYS))
+    def test_a_recognized_key_under_diff_also_counts(
+        self, tmp_path: Path, key: str
+    ) -> None:
+        # The nested shape reaches every other query through `_either`; the
+        # recognizer has to look in the same two places or it would reject a
+        # document those queries can read perfectly well.
+        _, out = _ask(tmp_path, {"diff": {key: None}}, "report_validity")
+        assert out.strip() == rq.VALIDITY_OK, f"diff.{key}: rejected"
+
+    @pytest.mark.parametrize(
+        "document",
+        (
+            {"error": "write interrupted"},
+            {"report_schema_version": "4.4"},
+            {"name": "abicheck"},
+            {"diff": {"note": "x"}},
+            {"diff": "not even a mapping"},
+            {"unrelated": {"verdict": "COMPATIBLE"}},
+        ),
+    )
+    def test_a_resultless_document_is_not_ok(
+        self, tmp_path: Path, document: dict
+    ) -> None:
+        _, out = _ask(tmp_path, document, "report_validity")
+        assert out.strip() == rq.VALIDITY_NO_RESULT, f"{document}"
+
+    def test_a_nested_verdict_one_level_too_deep_is_not_a_result(
+        self, tmp_path: Path
+    ) -> None:
+        # The recognizer must not be a recursive search: a `verdict` buried
+        # under an arbitrary key is not the report's own verdict, and treating
+        # it as one would admit any document that happens to mention the word.
+        _, out = _ask(
+            tmp_path,
+            {"wrapper": {"diff": {"verdict": "COMPATIBLE"}}},
+            "report_validity",
+        )
+        assert out.strip() == rq.VALIDITY_NO_RESULT
+
+    def test_a_resultless_document_still_answers_axis_queries_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        # The document is deliberately still handed to the axis queries, exactly
+        # as `{}` is: this classification adds a fact for `run.sh`, it does not
+        # change what any query answers. Otherwise the exit-1 dispatch would
+        # take a different branch for these documents than it did before.
+        code, out = _ask(tmp_path, {"error": "x"}, "severity_exit")
+        assert code == 0
+        assert out.strip() == "0"

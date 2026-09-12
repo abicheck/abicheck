@@ -143,6 +143,7 @@ UNUSABLE_PAYLOADS = (
     ("bare string", b'"COMPATIBLE"'),
     ("json null", b"null"),
     ("empty object", b"{}"),
+    ("parsed but resultless", b'{"error": "write interrupted"}'),
 )
 
 
@@ -431,5 +432,98 @@ class TestTheScopeOfTheCheckIsDeliberate:
         # separately against a different stub.
         bindir = _stub_abicheck(tmp_path, exit_code=0, payload=None)
         outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
+
+
+def _stub_stdout_only(tmp_path: Path, *, stdout: str) -> Path:
+    """An abicheck that writes nothing to ``-o`` and prints *stdout* instead.
+
+    The documented `format: json` stdout mode -- no `output-file` at all, the
+    report goes to stdout. An empty *stdout* is the failure this shape can
+    reach.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    stub = bindir / "abicheck"
+    body = "#!/usr/bin/env bash\n"
+    if stdout:
+        blob = tmp_path / "stdout.txt"
+        blob.write_text(stdout, encoding="utf-8")
+        body += f'cat "{blob}"\n'
+    body += "exit 0\n"
+    stub.write_text(body, encoding="utf-8")
+    stub.chmod(0o755)
+    return bindir
+
+
+class TestEveryCallerRequestedJsonModeIsCovered:
+    """`format: json` is the request; where the report lands is a separate choice.
+
+    The predicate keyed on `format: json` **plus** `output-file`, which left two
+    modes the caller had explicitly asked JSON for uncovered -- the documented
+    stdout mode, and a caller-supplied `extra-args --write json=PATH`. In both,
+    an exit-0 run that produced nothing still published COMPATIBLE (Codex
+    review, P2). The internal `--write json=` sidecar the Action injects for
+    itself stays excluded; `TestTheScopeOfTheCheckIsDeliberate` pins that half.
+    """
+
+    def _env(self, tmp_path: Path, **extra: str) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            **extra,
+        }
+
+    def test_json_to_stdout_with_no_output_is_caught(self, tmp_path: Path) -> None:
+        bindir = _stub_stdout_only(tmp_path, stdout="")
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, INPUT_FORMAT="json"), bindir
+        )
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
+
+    def test_json_to_stdout_carrying_a_real_report_still_passes(
+        self, tmp_path: Path
+    ) -> None:
+        # The negative control for the case above: the same mode, a real report,
+        # must still publish its verdict -- otherwise the fix breaks stdout mode
+        # outright.
+        bindir = _stub_stdout_only(
+            tmp_path,
+            stdout=json.dumps(
+                {"report_schema_version": "4.4", "verdict": "COMPATIBLE"}
+            ),
+        )
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, INPUT_FORMAT="json"), bindir
+        )
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_json_to_stdout_that_is_resultless_is_caught(self, tmp_path: Path) -> None:
+        bindir = _stub_stdout_only(tmp_path, stdout='{"error": "write interrupted"}')
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, INPUT_FORMAT="json"), bindir
+        )
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
+
+    def test_a_caller_supplied_write_json_path_is_caught(self, tmp_path: Path) -> None:
+        # `format: markdown` plus the caller's own `--write json=` -- the JSON
+        # request arrives through the passthrough, which makes it no less the
+        # caller's. The stub honors neither, so nothing arrives.
+        target = tmp_path / "caller.json"
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=None)
+        outputs = _run_action(
+            tmp_path,
+            self._env(
+                tmp_path,
+                INPUT_FORMAT="markdown",
+                INPUT_EXTRA_ARGS=f"--write json={target}",
+            ),
+            bindir,
+        )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs

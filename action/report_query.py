@@ -39,7 +39,8 @@ invokes its own ``report_envelope.py``.
 **Answer contract (exit codes).** ``run.sh``'s callers depend on these:
 
 * ``0`` -- the query is answered; the answer is on stdout (possibly empty,
-  when empty *is* the answer).
+  when empty *is* the answer). ``report_validity`` always takes this path,
+  whatever it finds.
 * ``1`` -- "cannot tell": the field is absent, or this report shape does
   not carry the axis at all. Every caller treats this as "no signal" and
   falls back to its own derivation. **Unchanged from the heredoc**, on
@@ -96,6 +97,42 @@ VALIDITY_NOT_OBJECT = "not_object"
 #: dropping an axis the dispatch had already announced (see
 #: ``scope_contribution``'s own comment in this file).
 VALIDITY_EMPTY = "empty"
+#: A non-empty JSON object that carries no abicheck result at all --
+#: ``{"error": "write interrupted"}``, or a lone ``report_schema_version``.
+#: The generalization of ``empty``: "the document parsed" and "the document
+#: holds a result" are different questions, and treating a non-empty mapping
+#: as a result meant every verdict reader answered empty and the caller fell
+#: back to a clean claim -- the same defect ``empty`` was added for, one step
+#: up (Codex review, P2).
+VALIDITY_NO_RESULT = "no_result"
+
+#: Keys whose *presence* (value irrelevant -- ``verdict`` is legitimately
+#: ``null`` on an audit-only or not-comparable report) marks a document as
+#: carrying an abicheck result. Checked at the root and under ``diff``.
+#:
+#: Deliberately broad rather than minimal. Every emitter writes a top-level
+#: ``verdict`` (``reporter.py``, ``report/no_baseline.py``,
+#: ``report/not_comparable.py``, the release envelope), so that one key would
+#: do -- but the cost of being wrong is asymmetric. A missing recognizer fails
+#: a *working* run, which is the direction that has already produced one false
+#: positive in this file's history (inferring a contradictory assurance pair
+#: from the schema version alone). Extra recognizers only ever admit a
+#: document; they cannot mask a missing result, because a document carrying
+#: any of these is report-shaped by construction.
+RESULT_KEYS = frozenset(
+    {
+        "verdict",
+        "run_outcome",
+        "no_baseline",
+        "libraries",
+        "exit_axes",
+        "exit",
+        "severity",
+        "findings",
+        "changes",
+        "reason",
+    }
+)
 
 #: ``report_schema_version`` first carried a top-level
 #: ``analysis_assurance_exit_contribution`` at 2.40 (see
@@ -168,7 +205,23 @@ def classify_document(path: str) -> tuple[str, dict[str, Any] | None]:
         # through `report_validity` alone, which is what `run.sh` uses to
         # refuse to publish a verdict it cannot support.
         return VALIDITY_EMPTY, document
+    if not _carries_a_result(document):
+        # Same treatment, and for the same reason: the document is returned so
+        # every axis query answers exactly what it answered before, and the
+        # "no result" fact travels through `report_validity` alone.
+        return VALIDITY_NO_RESULT, document
     return VALIDITY_OK, document
+
+
+def _carries_a_result(document: dict[str, Any]) -> bool:
+    """Whether *document* holds an abicheck result at all.
+
+    Presence-only, at the root or under ``diff`` -- see :data:`RESULT_KEYS` for
+    why the recognizer set is broad rather than minimal.
+    """
+    if RESULT_KEYS & document.keys():
+        return True
+    return bool(RESULT_KEYS & _nested(document).keys())
 
 
 def _nested(report: dict[str, Any]) -> dict[str, Any]:

@@ -3915,7 +3915,7 @@ _assurance_gated() {
 
 # Why the JSON report this run was supposed to produce could not be read, as
 # one token from `report_query.py`'s own vocabulary: ok / absent / unreadable
-# / unparseable / not_object / empty. Prints nothing when the report source
+# / unparseable / not_object / empty / no_result. Prints nothing when the source
 # itself could not be located at all (no `$_json_report_src`), which is a
 # *fifth* state -- "nothing to classify" -- and the one the dry-run and
 # no-JSON-output paths legitimately reach.
@@ -3945,14 +3945,26 @@ _report_validity() {
 # very different situations at exit 0: the run produced no JSON where the user
 # asked for one, versus the run was never asked for JSON at all.
 #
-# Deliberately narrow: this is the caller's own `format: json` plus an
-# `output-file`, and nothing else. In particular it is NOT the internal
-# `$PR_JSON` sidecar, which this script injects for its own PR-comment and
-# annotation rendering whenever the primary format is not json. That sidecar is
-# an implementation detail of this Action, it already has its own diagnostic
-# when it turns up missing ("no JSON report is available"), and treating its
-# absence as "this run established no result" conflates a convenience artifact
-# with the comparison's outcome.
+# Every mode in which the *caller* asked for JSON, and only those:
+#
+#   * `format: json` -- whether it lands in `output-file` or on stdout. Keying
+#     on `$OUTPUT_FILE` as well left the documented stdout mode uncovered, so
+#     an exit-0 run that printed nothing still published COMPATIBLE (Codex
+#     review, P2, reproduced). Requesting json *is* the request; where it lands
+#     is a separate choice.
+#   * `extra-args --write json=PATH` -- a caller-supplied destination, no less
+#     requested for arriving through the passthrough.
+#
+# The one exclusion is the internal `$PR_JSON` sidecar, which this script
+# injects for its own PR-comment and annotation rendering whenever the primary
+# format is not json. That sidecar is an implementation detail of this Action,
+# it already has its own diagnostic when it turns up missing ("no JSON report
+# is available"), and treating its absence as "this run established no result"
+# conflates a convenience artifact with the comparison's outcome.
+#
+# Note this cannot key on `$_STDOUT_JSON_FILE`: that variable is only set when
+# stdout actually *started with* `{`, so it is empty in precisely the failure
+# case this predicate exists to catch.
 #
 # The narrowing matters for a second reason, which is why it is stated here
 # rather than left to the call site: at exit 0 the process exit code is itself
@@ -3965,7 +3977,8 @@ _report_validity() {
 # the run's acceptance unknown. Only a JSON report the user explicitly
 # requested and did not get is an operational failure of this step.
 _json_report_expected() {
-  [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" ]]
+  [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" ]] \
+    || [[ -n "${_extra_write_json_path:-}" ]]
 }
 
 # The analysis-assurance axis's own four-way answer (see `report_query.py`'s
@@ -4263,7 +4276,7 @@ _resolve_clean_exit_verdict() {
       # report" shape, which no valid-JSON fixture can stand in for and which
       # is the likeliest of these to occur in practice.
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested via format: json / output-file is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+      echo "::error::abicheck exited 0, but the JSON report this run requested is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
       return
     fi
     if [[ "$_validity" == "empty" ]]; then
@@ -4272,12 +4285,22 @@ _resolve_clean_exit_verdict() {
       # it gets its own message rather than being lumped in below. It is still
       # not a result.
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested via format: json / output-file is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
+      echo "::error::abicheck exited 0, but the JSON report requested via format: json is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
+      return
+    fi
+    if [[ "$_validity" == "no_result" ]]; then
+      # Parsed, non-empty, and still carries no abicheck result -- a
+      # `{"error": ...}` a wrapper wrote, or a lone `report_schema_version`
+      # from an interrupted write. Its own message because "could not be read"
+      # would misdescribe a document that read perfectly well and simply
+      # answers nothing (Codex review, P2).
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, and the JSON report requested via format: json parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
       return
     fi
     if [[ "$_validity" != "ok" ]]; then
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested via format: json / output-file could not be read ($_validity) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
+      echo "::error::abicheck exited 0, but the JSON report this run requested could not be read ($_validity) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
       return
     fi
   fi

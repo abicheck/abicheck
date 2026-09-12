@@ -62,9 +62,25 @@ def _compare_argv(
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
     stub = fake_bin / "abicheck"
+    # Honors `--write json=PATH` the way a real abicheck does, in addition to
+    # capturing argv. It used to only echo a report to stdout, which left a
+    # requested JSON destination empty -- and `run.sh` now reports a
+    # caller-requested JSON report that never arrived as REPORT_UNREADABLE
+    # (exit 1), so the unfaithful stub failed these argv tests for a reason
+    # unrelated to argv. A real abicheck exiting 0 always honors `--write`.
     stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        'for _a in "$@"; do\n'
+        '  case "$_a" in\n'
+        # Both documented spellings: `--write json=PATH` arrives as a separate
+        # `json=PATH` token, `--write=json=PATH` as one. A stub handling only
+        # the first leaves the second's destination unwritten, which is exactly
+        # the parametrized pair these tests exist to distinguish.
+        '    json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#json=}" ;;\n'
+        '    --write=json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#--write=json=}" ;;\n'
+        "  esac\n"
+        "done\n"
         'echo \'{"verdict":"COMPATIBLE"}\'\n'
         "exit 0\n",
         encoding="utf-8",

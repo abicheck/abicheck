@@ -914,18 +914,22 @@ outputs:
       BREAKING, REMOVED_LIBRARY (directory/package
       operands with fail-on-removed-library set), ERROR, or
       REPORT_UNREADABLE (abicheck itself exited 0, but the JSON report you
-      requested via format: json / output-file was absent, truncated,
-      unparseable, not a JSON object, or an empty one -- so nothing read this
-      run's result. Fails the step unconditionally and is never waived by a
-      fail-on-* input: none of those is a statement that an unread result
-      should be reported as a pass. Distinct from ERROR, which is abicheck
-      reporting its own failure through a non-zero exit code; here the tool
-      claimed success and the report backing that claim is missing. Applies
-      only to a JSON report you asked for -- with a non-json format, the
-      absence of this Action's own internal sidecar still yields COMPATIBLE,
-      since exit 0 does establish that abicheck's gate passed even when the
-      tier cannot be read. Previously every one of these states published
-      COMPATIBLE).
+      requested was absent, truncated, unparseable, not a JSON object, an empty
+      one, or a document that parsed cleanly while carrying no abicheck result
+      at all (no verdict, no run_outcome, no findings) -- so nothing read this
+      run's result. Also covers a report whose analysis_assurance block has no
+      analysis_assurance_exit_contribution beside it on a schema that emits the
+      two together, which makes it internally inconsistent rather than passing.
+      Fails the step unconditionally and is never waived by a fail-on-* input:
+      none of those is a statement that an unread result should be reported as a
+      pass. Distinct from ERROR, which is abicheck reporting its own failure
+      through a non-zero exit code; here the tool claimed success and the report
+      backing that claim is missing or unusable. "Requested" means format: json
+      (whether it lands in output-file or on stdout) or your own extra-args
+      --write json=PATH; with a non-json format, the absence of this Action's
+      own internal sidecar still yields COMPATIBLE, since exit 0 does establish
+      that abicheck's gate passed even when the tier cannot be read. Previously
+      every one of these states published COMPATIBLE).
       For compare's audit-only shape (old-library and abi-baseline both
       omitted -- the replacement for a baseline-less mode: scan/audit: true
       request, ADR-068): COVERAGE_INCOMPLETE (with --contract via

@@ -149,11 +149,18 @@ report published "No binary ABI break detected" having established nothing.
 Two predicates close that without weakening anything above:
 
 - `_report_validity` asks `report_query.py` to classify the document itself
-  (`ok` / `absent` / `unreadable` / `unparseable` / `not_object` / `empty`),
-  and `_json_report_expected` asks whether the *caller* requested a JSON report
-  (`format: json` plus `output-file`) — because "no report arrived where one was
-  asked for" and "no report was requested" are different, and only the first is
-  a failure of this step.
+  (`ok` / `absent` / `unreadable` / `unparseable` / `not_object` / `empty` /
+  `no_result`), and `_json_report_expected` asks whether the *caller* requested
+  a JSON report — because "no report arrived where one was asked for" and "no
+  report was requested" are different, and only the first is a failure of this
+  step. **Requested** means `format: json` (wherever it lands — `output-file`
+  or stdout; asking for json *is* the request) or a caller-supplied
+  `extra-args --write json=PATH`. It does not include the internal sidecar.
+  `no_result` is the generalization of `empty`: a document can parse, be
+  non-empty, and still carry no result (`{"error": "write interrupted"}`, a
+  lone `report_schema_version`), which every verdict reader answers empty for —
+  so validity requires one of `report_query.py`'s `RESULT_KEYS` at the root or
+  under `diff`, not merely a non-empty mapping.
 - `_assurance_axis_contradictory` catches the one absence that *is* provably
   wrong: an `analysis_assurance` block on a schema ≥ 2.40 with no
   `analysis_assurance_exit_contribution` beside it. `reporter.py` emits those
@@ -166,6 +173,16 @@ Either one publishes `verdict: REPORT_UNREADABLE` and fails the step
 unconditionally; no `fail-on-*` input waives it. **Don't "simplify" this by
 making the axis predicates fail closed instead** — that is the forgeable-prose
 path this section rules out, reached from the other direction.
+
+**Decide it in `_resolve_clean_exit_verdict`, never only at the `FINAL_EXIT`
+fold.** That fold runs after the verdict output, the job summary and the PR
+comment are published, so a gate applied only there fails the step while
+publishing `verdict=COMPATIBLE` and "No binary ABI break detected" — exit 1
+beside a false clean result, which a workflow branching on the output (or under
+`continue-on-error`) reads as a pass. The contradictory-assurance check shipped
+with exactly that bug and was moved; when adding a condition here, assert the
+**verdict output, the summary text and the exit code separately** in its test.
+Asserting one and assuming the others agree is how they came to disagree.
 
 ### The residual: exit 0 with no JSON report requested
 
