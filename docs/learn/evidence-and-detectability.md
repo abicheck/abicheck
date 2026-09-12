@@ -665,6 +665,53 @@ contracts](concurrency-and-initialization.md) (thread-safety and init order).
 
 ---
 
+## 6. Stored snapshots answer from stored evidence
+
+A snapshot records where each declaration came from — a `source_header` per
+function, type and variable, and (at L3) the source file of each compile unit.
+Those recorded paths are **provenance**, not a licence to re-read the current
+filesystem.
+
+That distinction matters because the usual CI shape is *stored baseline versus
+live build*: the OLD side is a `.json` snapshot published weeks ago, from a
+checkout that no longer exists on the runner. If a source-derived check
+re-opened the paths that snapshot names, it would characterise the historical
+side from whatever happens to sit at the same path today — a different branch,
+an edited header, or an unrelated file. Every answer it produced would be a
+statement about the present dressed as history.
+
+So abicheck reads a side's recorded source paths only when it is entitled to:
+
+| Side | What happens |
+|---|---|
+| Extracted in this run (you pointed at a binary and headers on disk) | Read normally — those paths are today's paths |
+| Loaded from a stored snapshot | **Not read at all.** The check reports that the historical evaluation was not possible |
+| Loaded, with an explicitly supplied and verified source context | Read, on the caller's stated provenance |
+
+The consequence you will see in a report: the lexical `pattern` and
+`preprocessor` pre-scan blocks of a stored-versus-stored (or
+stored-versus-live) comparison state their coverage as *not established* for
+the stored side, and every construct they track reads `not_evaluated` rather
+than `introduced` or `resolved`. That is the honest answer. `introduced` is a
+claim that the construct was *absent* before, and an absence claim needs
+evidence about the OLD side — not an inference from a file the runner happens
+to be holding.
+
+The same rule governs coverage generally. Sufficiency for an absence claim is
+computed from the set of inputs a check *expected*, with every one of them
+accounted for — scanned, missing, unreadable, unsupported, deliberately
+excluded, or not licensed — and any gap leaves the absence unestablished. A
+declared input that no longer exists is a gap, never silent full coverage.
+Presence is the asymmetric case: a construct the scan actually saw is there,
+whatever else the scan failed to read, so `persistent` survives partial
+coverage where `introduced` and `resolved` do not.
+
+If you need the historical side genuinely re-characterised, re-dump it from a
+checkout of its own commit; comparing two snapshots will not silently do it for
+you.
+
+---
+
 ## Removed scan axes
 
 Earlier releases selected evidence with `--source-method s0…s6`, `--mode`

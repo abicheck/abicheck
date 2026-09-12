@@ -147,7 +147,14 @@ __all__ = [
 #:   ``suppressed: 0``: the rule-attributed ``suppressed`` list was already
 #:   on this document, but nothing folded it into the one block every other
 #:   report shape's own fan-in reads (Codex review, fresh evidence).
-AUDIT_REPORT_SCHEMA_VERSION = "1.4"
+#: ``1.5``: the ``pattern_preprocessor_scan`` block gains the additive
+#:   ``coverage`` object (per-check, per-side sufficiency) and each pattern
+#:   side gains ``sufficient``/``inputs``, mirroring the compare report's own
+#:   ``4.4``. Additive only here: an audit's candidate side is a live
+#:   extraction, so it keeps its source-read licence and no existing value
+#:   moves -- unlike a stored-snapshot ``compare``, which now honestly
+#:   declines to re-derive (see ``buildsource/source_inputs.py``).
+AUDIT_REPORT_SCHEMA_VERSION = "1.5"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.

@@ -45,11 +45,11 @@ entirely from what each snapshot already recorded:
 - **Pattern-scan roots** (:func:`_pattern_scan_roots`): every declared
   entity's own ``source_header`` (functions/variables/records/enums --
   ADR-015 provenance, schema v6) plus every compile unit's ``source`` file
-  from an embedded ``build_source.build_evidence`` (ADR-029 L3), if any. A
-  path that no longer exists on disk (a stored baseline snapshot dumped
-  elsewhere, or one the working tree has since restructured) is silently
-  skipped by ``find_pattern_facts``/``iter_source_files`` itself, not raised.
-- **Preprocessor-scan build context**: the same embedded
+  from an embedded ``build_source.build_evidence`` (ADR-029 L3), if any.
+
+- **Preprocessor-scan build context** (only under a licence -- ``clang -E``
+  resolves ``#include``s against the *current* filesystem, so an unlicensed
+  side is never probed): the same embedded
   ``build_source.build_evidence``, verbatim -- ``None`` when the snapshot
   carries no L3 evidence, which ``collect_preprocessor_facts`` already reports
   as its own honest ``ran=False``/``skipped_reason`` coverage row rather
@@ -64,6 +64,28 @@ a second collection pass -- this module runs no dumper and reads no CLI
 input directly, keeping the ADR-061 ``workflows -> model, storage, extract,
 compare, policy`` import direction intact (``buildsource`` is ``extract``-
 classified).
+
+**The source-read licence (the P1 fix).** Those roots are *paths a snapshot
+recorded*, and until this module gained :func:`snapshot_source_licence` it
+simply ``read_text()``-ed them. For a stored OLD snapshot that meant the
+historical side was re-derived from whatever lives at the same path on
+today's runner -- a different checkout, a since-edited header, or an
+unrelated file that happens to share the path. The contract now, stated in
+``buildsource/source_inputs.py`` and enforced here:
+
+    **Comparing stored snapshots uses stored facts. A path recorded in a
+    snapshot is provenance, not a licence to re-read the current filesystem
+    for historical facts.**
+
+A side is read only under a :class:`~abicheck.buildsource.source_inputs.
+SourceReadLicence`: granted when the snapshot came from a live extraction in
+this run (``AbiSnapshot.live_source_evidence``, a runtime-only flag the
+storage codec never writes, so a loaded snapshot cannot claim it), or when
+the caller supplies an explicit, provenance-verified one. Otherwise nothing
+is stat'd or opened for that side and the result says the historical
+evaluation was **not possible** -- every identity folds to ``not_evaluated``
+rather than being characterised against a same-looking path on the current
+runner.
 """
 
 from __future__ import annotations
@@ -76,6 +98,10 @@ from ..buildsource.preprocessor_facts import (
     PreprocessorFactsResult,
     collect_preprocessor_facts,
 )
+from ..buildsource.source_inputs import (
+    WITHHELD_FOR_STORED_SNAPSHOT,
+    SourceReadLicence,
+)
 from ..model import AbiSnapshot, ScopeOrigin
 from ..policy.evidence_status import CrossSourceEvolution
 
@@ -83,6 +109,52 @@ from ..policy.evidence_status import CrossSourceEvolution
 #: Independent of every other schema version in this codebase (see
 #: ``buildsource/CLAUDE.md`` "Versioning").
 PATTERN_PREPROCESSOR_SCAN_VERSION: int = 1
+
+
+#: The three checks this module folds, each with its own evidence and so its
+#: own sufficiency answer (requirement: sufficiency is answered per
+#: check-or-area, never by one global ``files_scanned > 0``).
+CHECK_PATTERN_ESCALATION = "pattern_escalation"
+CHECK_MACRO_DIVERGENCE = "macro_divergence"
+CHECK_HEADER_LEAK = "header_leak"
+
+
+@dataclass(frozen=True)
+class Sufficiency:
+    """Whether one side's evidence for one check supports an *absence* claim.
+
+    ``established`` false does not mean "nothing was found" -- it means the
+    question could not be answered, and :attr:`reason` says why (no licence to
+    read a stored snapshot's paths, a declared root that is gone, a clang
+    probe that failed, a probe cap that truncated the unit set).
+    """
+
+    established: bool
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"established": self.established, "reason": self.reason}
+
+
+def snapshot_source_licence(
+    snapshot: AbiSnapshot, override: SourceReadLicence | None = None
+) -> SourceReadLicence:
+    """The licence under which *snapshot*'s recorded source paths may be read.
+
+    Deny-by-default. ``override`` is the "explicitly supplied,
+    provenance-verified context" escape hatch: a caller that has independently
+    established that the recorded tree is the one on disk (a CI job that just
+    checked the baseline's own commit out, a test harness) passes
+    :meth:`SourceReadLicence.verified_context`. Everything else gets a licence
+    only from ``AbiSnapshot.live_source_evidence`` -- set by ``dumper.dump``
+    for an extraction performed in this run, never written by the storage
+    codec, so a snapshot loaded from disk cannot grant itself one.
+    """
+    if override is not None:
+        return override
+    if getattr(snapshot, "live_source_evidence", False):
+        return SourceReadLicence.live_extraction()
+    return WITHHELD_FOR_STORED_SNAPSHOT
 
 
 @dataclass(frozen=True)
@@ -110,6 +182,13 @@ class PatternPreprocessorScanResult:
     preprocessor_new: dict[str, Any] = field(default_factory=dict)
     macro_divergence_evolution: dict[str, str] = field(default_factory=dict)
     header_leak_evolution: dict[str, str] = field(default_factory=dict)
+    #: Per-check, per-side sufficiency: ``{check: {"old": Sufficiency,
+    #: "new": Sufficiency}}``. There is deliberately no single global
+    #: "the scan was complete" flag -- the three checks answer to different
+    #: evidence (a lexical file set, per-TU macro probes, per-header include
+    #: probes), so one aggregate would report the weakest as the verdict for
+    #: all three. See :func:`_check_coverage`.
+    coverage: dict[str, dict[str, Sufficiency]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +203,10 @@ class PatternPreprocessorScanResult:
                 "new": self.preprocessor_new,
                 "macro_divergence_evolution": dict(self.macro_divergence_evolution),
                 "header_leak_evolution": dict(self.header_leak_evolution),
+            },
+            "coverage": {
+                check: {side: suf.to_dict() for side, suf in sides.items()}
+                for check, sides in self.coverage.items()
             },
         }
 
@@ -172,11 +255,35 @@ def _pattern_scan_roots(snapshot: AbiSnapshot) -> list[str]:
     return sorted(roots)
 
 
-def _run_pattern_scan(snapshot: AbiSnapshot) -> PatternFactsResult:
-    return find_pattern_facts(_pattern_scan_roots(snapshot))
+def _run_pattern_scan(
+    snapshot: AbiSnapshot, licence: SourceReadLicence
+) -> PatternFactsResult:
+    """Run the lexical pre-scan for one side, under *licence*.
+
+    Without a licence ``find_pattern_facts`` stats nothing and opens nothing:
+    the roots are accounted for as ``not_licensed`` and the result reports the
+    scan as not possible (see :mod:`abicheck.buildsource.source_inputs`).
+    """
+    return find_pattern_facts(_pattern_scan_roots(snapshot), licence=licence)
 
 
-def _run_preprocessor_scan_for(snapshot: AbiSnapshot) -> PreprocessorFactsResult:
+def _run_preprocessor_scan_for(
+    snapshot: AbiSnapshot, licence: SourceReadLicence
+) -> PreprocessorFactsResult:
+    """Run the S2 preprocessor pre-scan for one side, under *licence*.
+
+    ``clang -E`` resolves the recorded compile units' ``#include``s against the
+    filesystem it is run on, so it is exactly as unlicensed as the lexical
+    scan for a stored snapshot -- and worse, since an include that resolves
+    differently today produces a *different macro value*, not merely a missing
+    file. An unlicensed side is therefore never probed at all; it returns the
+    primitive's own honest ``ran=False`` shape with the licence's reason.
+    """
+    if not licence.permitted:
+        return PreprocessorFactsResult(
+            ran=False,
+            skipped_reason=(f"S2 preprocessor pre-scan not possible: {licence.reason}"),
+        )
     build_source = snapshot.build_source
     build = build_source.build_evidence if build_source is not None else None
     public_headers = sorted(_declared_source_headers(snapshot, public_only=True))
@@ -185,119 +292,173 @@ def _run_preprocessor_scan_for(snapshot: AbiSnapshot) -> PreprocessorFactsResult
 
 def _fold_evolution(
     *,
-    old_evaluated: bool,
-    new_evaluated: bool,
+    old: Sufficiency,
+    new: Sufficiency,
     old_keys: set[str],
     new_keys: set[str],
 ) -> dict[str, str]:
-    """Fold one primitive's OLD/NEW identity sets into an evolution map.
+    """Fold one check's OLD/NEW identity sets into an evolution map.
 
-    Per-identity logic (ADR-068 D3's four states): evaluated on both sides
-    decides ``PERSISTENT``/``INTRODUCED``/``RESOLVED``; whenever *either*
-    side is incomplete, every identity either side flagged folds to
-    ``NOT_EVALUATED`` -- the correctness crux that keeps a pre-existing
-    construct from reading as newly introduced (or resolved) merely
-    because one side (e.g. a snapshot with no embedded build evidence)
-    lacked the evidence to confirm or deny it.
+    The four ADR-068 D3 states are decided **per identity**, from what is
+    *established* for that identity on each side -- not from one global
+    "the scan was complete" flag:
 
-    CodeRabbit review, fresh evidence: an earlier revision folded
-    ``NOT_EVALUATED`` only when the *hit itself* was on the evaluated
-    side (``new_hit and not old_evaluated`` / ``old_hit and not
-    new_evaluated``) -- the reverse orientation (a hit only on the
-    *incomplete* side, with the evaluated side silent) fell through to a
-    bare ``continue`` and the identity vanished from the result entirely,
-    silently discarding evidence instead of reporting the honest
-    "can't tell" state. Since incompleteness on either side already
-    means neither PERSISTENT/INTRODUCED/RESOLVED can be trusted for any
-    identity in the union, this is now unconditional: every key in
-    ``old_keys | new_keys`` folds to ``NOT_EVALUATED`` whenever the two
-    sides aren't both fully evaluated, regardless of which side (or
-    both) actually flagged it. An identity absent on both sides never
-    appears in the result at all, since it never enters the union.
+    - **Presence is established by observation.** A construct the OLD side
+      actually flagged is present in OLD whatever else that side failed to
+      read; an incomplete scan cannot un-see a hit.
+    - **Absence is established only by sufficiency.** "This side does not have
+      it" is a claim about everything that side was supposed to look at, so it
+      needs :attr:`Sufficiency.established` for that side and that check.
+
+    That distinction is the P1 fix. ``INTRODUCED`` asserts absence in OLD, so
+    it now requires OLD's coverage *for that identity* to be established --
+    a missing, unreadable, or unlicensed OLD input can no longer let a
+    long-standing construct read as newly introduced. ``RESOLVED``
+    symmetrically asserts absence in NEW. ``PERSISTENT`` asserts presence on
+    both sides, which both observations already establish, so it needs no
+    sufficiency at all -- the strongest statement this fold can make from the
+    weakest evidence, and the one it is always safe to make. Anything not
+    established folds to ``NOT_EVALUATED``: an honest "could not tell", never
+    a silent drop (an identity absent on both sides never enters the union and
+    so never appears at all).
     """
     result: dict[str, str] = {}
     for key in sorted(old_keys | new_keys):
-        if old_evaluated and new_evaluated:
-            old_hit = key in old_keys
-            new_hit = key in new_keys
-            if old_hit and new_hit:
-                evolution = CrossSourceEvolution.PERSISTENT
-            elif new_hit:
-                evolution = CrossSourceEvolution.INTRODUCED
-            else:
-                evolution = CrossSourceEvolution.RESOLVED
-        else:
+        old_hit = key in old_keys
+        new_hit = key in new_keys
+        # Presence: observed. Absence: needs this side's sufficiency.
+        old_known = old_hit or old.established
+        new_known = new_hit or new.established
+        if not (old_known and new_known):
             evolution = CrossSourceEvolution.NOT_EVALUATED
+        elif old_hit and new_hit:
+            evolution = CrossSourceEvolution.PERSISTENT
+        elif new_hit:
+            evolution = CrossSourceEvolution.INTRODUCED
+        else:
+            evolution = CrossSourceEvolution.RESOLVED
         result[key] = evolution.value
     return result
 
 
-def _pattern_scan_fully_covered(result: PatternFactsResult) -> bool:
-    """True only when *result* scanned at least one file and skipped none.
+def _pattern_sufficiency(result: PatternFactsResult) -> Sufficiency:
+    """Sufficiency of one side's lexical pattern scan.
 
-    ``files_scanned > 0`` alone (the pre-CodeRabbit-review check) also holds
-    when some files were skipped as unreadable -- a real, if partial, scan
-    ran, but a pattern kind absent from that partial result could simply be
-    hiding in the unscanned files, not genuinely absent. Folding that as
-    evaluated let ``pattern_escalation_evolution`` report ``introduced``/
-    ``resolved`` from incomplete evidence; requiring zero skips makes an
-    incomplete side fold as ``not_evaluated`` instead, per
-    :func:`_fold_evolution`'s own completeness contract.
+    Delegates to the expected-input set rather than to ``files_scanned > 0 and
+    files_skipped == 0``. The old signal was computed from what the discovery
+    walk *found*: a declared root that no longer existed was silently skipped,
+    contributing to neither tally, so a side whose headers had all been
+    relocated could still report full coverage off one surviving file. The
+    expected-input set accounts for every declared root, so ``missing``,
+    ``unreadable``, ``unsupported`` and ``not_licensed`` are each a gap that
+    keeps the side insufficient (see :class:`~abicheck.buildsource.
+    source_inputs.SourceInputSet`).
     """
-    return result.files_scanned > 0 and result.files_skipped == 0
-
-
-def _preprocessor_scan_fully_covered(result: PreprocessorFactsResult) -> bool:
-    """True only when *result* ran with every probe attempted, succeeding,
-    and none truncated by the probe-count cap.
-
-    ``ran and not all_failed`` alone (the pre-CodeRabbit-review check) also
-    holds when some -- but not all -- clang invocations failed, or when the
-    probe cap (``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``) truncated the unit
-    set: real coverage gaps a divergence/leak could simply be missing from,
-    not genuinely absent on that side. Requiring full success with no
-    truncation makes a partially-covered side fold as ``not_evaluated``
-    instead of ``introduced``/``resolved``, matching
-    :func:`_pattern_scan_fully_covered`'s same completeness contract for the
-    sibling primitive.
-    """
-    return (
-        result.ran
-        and not result.all_failed
-        and result.succeeded == result.attempted
-        and result.probes_truncated == 0
+    return Sufficiency(
+        established=result.sufficient, reason=result.insufficiency_reason
     )
 
 
+def _preprocessor_probe_gaps(result: PreprocessorFactsResult) -> str:
+    """The gaps common to both preprocessor-derived checks, or ``""``."""
+    if not result.ran:
+        return result.skipped_reason or "S2 preprocessor pre-scan did not run"
+    if result.all_failed:
+        return "every clang -E invocation failed"
+    if result.succeeded != result.attempted:
+        return (
+            f"{result.attempted - result.succeeded} of {result.attempted} "
+            "clang -E invocations failed"
+        )
+    if result.probes_truncated:
+        return (
+            f"{result.probes_truncated} probe(s) truncated by "
+            "ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES"
+        )
+    return ""
+
+
+def _macro_divergence_sufficiency(result: PreprocessorFactsResult) -> Sufficiency:
+    """Sufficiency for the macro-divergence check specifically.
+
+    Macro divergence is established by the *per-TU* probes, so it additionally
+    needs at least one translation unit to have been captured -- a run that
+    probed only public headers says nothing about macro values.
+    """
+    gaps = _preprocessor_probe_gaps(result)
+    if gaps:
+        return Sufficiency(established=False, reason=gaps)
+    if result.tus_scanned == 0:
+        return Sufficiency(
+            established=False, reason="no translation unit was probed for macros"
+        )
+    return Sufficiency(established=True)
+
+
+def _header_leak_sufficiency(result: PreprocessorFactsResult) -> Sufficiency:
+    """Sufficiency for the private-header-leak check specifically.
+
+    Leaks are established by the *per-public-header* include probes. Splitting
+    this from :func:`_macro_divergence_sufficiency` is the point of answering
+    sufficiency per check: a run with compile units but no declared public
+    headers can fully establish macro divergence while establishing nothing
+    about leaks, and the single global predicate this replaces reported one
+    answer for both.
+    """
+    gaps = _preprocessor_probe_gaps(result)
+    if gaps:
+        return Sufficiency(established=False, reason=gaps)
+    if result.headers_scanned == 0:
+        return Sufficiency(
+            established=False, reason="no public header was probed for includes"
+        )
+    return Sufficiency(established=True)
+
+
 def compute_pattern_preprocessor_scan(
-    old: AbiSnapshot, new: AbiSnapshot
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    old_source_licence: SourceReadLicence | None = None,
+    new_source_licence: SourceReadLicence | None = None,
 ) -> PatternPreprocessorScanResult:
     """Run the pattern + preprocessor pre-scans on *old*/*new* independently
-    and fold each into an evolution-stated summary (see module docstring)."""
-    old_pattern = _run_pattern_scan(old)
-    new_pattern = _run_pattern_scan(new)
-    pattern_evaluated_old = _pattern_scan_fully_covered(old_pattern)
-    pattern_evaluated_new = _pattern_scan_fully_covered(new_pattern)
+    and fold each into an evolution-stated summary (see module docstring).
+
+    Each side is read only under its own licence, resolved by
+    :func:`snapshot_source_licence`; ``old_source_licence``/
+    ``new_source_licence`` are the explicit, provenance-verified override. A
+    side without one is not read at all and folds to ``not_evaluated``.
+    """
+    old_licence = snapshot_source_licence(old, old_source_licence)
+    new_licence = snapshot_source_licence(new, new_source_licence)
+
+    old_pattern = _run_pattern_scan(old, old_licence)
+    new_pattern = _run_pattern_scan(new, new_licence)
+    pattern_old_suf = _pattern_sufficiency(old_pattern)
+    pattern_new_suf = _pattern_sufficiency(new_pattern)
     pattern_evolution = _fold_evolution(
-        old_evaluated=pattern_evaluated_old,
-        new_evaluated=pattern_evaluated_new,
+        old=pattern_old_suf,
+        new=pattern_new_suf,
         old_keys={f.kind.value for f in old_pattern.facts if f.escalates},
         new_keys={f.kind.value for f in new_pattern.facts if f.escalates},
     )
 
-    old_preproc = _run_preprocessor_scan_for(old)
-    new_preproc = _run_preprocessor_scan_for(new)
-    preproc_evaluated_old = _preprocessor_scan_fully_covered(old_preproc)
-    preproc_evaluated_new = _preprocessor_scan_fully_covered(new_preproc)
+    old_preproc = _run_preprocessor_scan_for(old, old_licence)
+    new_preproc = _run_preprocessor_scan_for(new, new_licence)
+    macro_old_suf = _macro_divergence_sufficiency(old_preproc)
+    macro_new_suf = _macro_divergence_sufficiency(new_preproc)
     macro_evolution = _fold_evolution(
-        old_evaluated=preproc_evaluated_old,
-        new_evaluated=preproc_evaluated_new,
+        old=macro_old_suf,
+        new=macro_new_suf,
         old_keys={d.macro for d in old_preproc.divergences},
         new_keys={d.macro for d in new_preproc.divergences},
     )
+    leak_old_suf = _header_leak_sufficiency(old_preproc)
+    leak_new_suf = _header_leak_sufficiency(new_preproc)
     leak_evolution = _fold_evolution(
-        old_evaluated=preproc_evaluated_old,
-        new_evaluated=preproc_evaluated_new,
+        old=leak_old_suf,
+        new=leak_new_suf,
         old_keys={
             f"{leak.public_header}|{leak.leaked_header}" for leak in old_preproc.leaks
         },
@@ -314,4 +475,9 @@ def compute_pattern_preprocessor_scan(
         preprocessor_new=new_preproc.to_dict(),
         macro_divergence_evolution=macro_evolution,
         header_leak_evolution=leak_evolution,
+        coverage={
+            CHECK_PATTERN_ESCALATION: {"old": pattern_old_suf, "new": pattern_new_suf},
+            CHECK_MACRO_DIVERGENCE: {"old": macro_old_suf, "new": macro_new_suf},
+            CHECK_HEADER_LEAK: {"old": leak_old_suf, "new": leak_new_suf},
+        },
     )

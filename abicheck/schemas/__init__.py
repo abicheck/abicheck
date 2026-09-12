@@ -906,7 +906,20 @@ _ARTIFACT_NAMES = frozenset(
 #:       this boundary is therefore meaningless, which is exactly what the
 #:       version bump exists to signal; the per-field ``effective_config_
 #:       fields`` dict beside it stays attributable as before.
-REPORT_SCHEMA_VERSION = "4.3"  #: 4.3 -- see the comment immediately above.
+#: 4.4 -- additive ``pattern_preprocessor_scan.coverage``: per-check,
+#:       per-side sufficiency (``{check: {"old"|"new": {"established",
+#:       "reason"}}}``) for the three checks that block folds. Each side's
+#:       ``pattern.old``/``pattern.new`` object additionally gains
+#:       ``sufficient`` and an ``inputs`` account (the expected-input set's
+#:       licence, per-disposition counts, and the individual gap entries).
+#:       Additive in the key set, but note the *values* already carried in
+#:       ``escalation_evolution``/``macro_divergence_evolution``/
+#:       ``header_leak_evolution`` change for a stored snapshot: a side whose
+#:       recorded source paths may no longer be re-read reports
+#:       ``not_evaluated`` where a pre-4.4 run reported ``introduced``/
+#:       ``resolved`` from the current runner's filesystem. No verdict,
+#:       severity, or exit code moves -- this block never reached any of them.
+REPORT_SCHEMA_VERSION = "4.4"  #: 4.4 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

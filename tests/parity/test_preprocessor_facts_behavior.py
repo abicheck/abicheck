@@ -114,56 +114,89 @@ def _widget_build_source(
     return build_source, public
 
 
+def _widget_snapshots(tmp_path: Path):
+    from abicheck.model import AbiSnapshot, Function, ScopeOrigin
+
+    old_build, old_public = _widget_build_source(tmp_path, "old", leaks=False)
+    new_build, new_public = _widget_build_source(tmp_path, "new", leaks=True)
+
+    def _snap(version: str, public: Path, build) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libwidget.so",
+            version=version,
+            functions=[
+                Function(
+                    name="widget_get",
+                    mangled="widget_get",
+                    return_type="int",
+                    source_header=str(public),
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            build_source=build,
+        )
+
+    old = _snap("1.0", old_public, old_build)
+    new = _snap("2.0", new_public, new_build)
+    leak_key = f"{new_public}|{new_public.parent / 'widget_impl.h'}"
+    return old, new, leak_key
+
+
 @pytest.mark.integration
-def test_compare_surfaces_a_preprocessor_scan_leak_introduced_in_new(
+def test_live_sides_surface_a_preprocessor_scan_leak_as_introduced(
     tmp_path: Path,
 ) -> None:
     """The same leak the direct `collect_preprocessor_facts` test above proves,
     now reached through `compare()`'s own automatic pipeline stage: OLD's
     header does not leak, NEW's does, and both sides carry real, evaluable
-    build evidence -- so the fold reads `introduced`, not `not_evaluated`."""
+    build evidence *and* were extracted from the tree they name -- so the fold
+    reads `introduced`, not `not_evaluated`."""
     if not ClangPreprocessorExtractor().available():
         pytest.skip("clang++ not on PATH")
 
-    from abicheck.model import AbiSnapshot, Function, ScopeOrigin
+    from abicheck.workflows.pattern_preprocessor_scan import (
+        compute_pattern_preprocessor_scan,
+    )
+
+    old, new, leak_key = _widget_snapshots(tmp_path)
+    old.live_source_evidence = True
+    new.live_source_evidence = True
+
+    result = compute_pattern_preprocessor_scan(old, new)
+    assert result.header_leak_evolution.get(leak_key) == "introduced"
+    assert (
+        result.to_dict()["preprocessor"]["header_leak_evolution"][leak_key]
+        == "introduced"
+    )
+
+
+@pytest.mark.integration
+def test_compare_of_stored_snapshots_never_probes_the_current_filesystem(
+    tmp_path: Path,
+) -> None:
+    """`clang -E` resolves a recorded compile unit's ``#include``s against the
+    filesystem it runs on, so probing a *stored* snapshot's units would answer
+    the historical question with today's headers -- and a macro that resolves
+    differently today yields a different *value*, not merely a missing file.
+
+    This test asserted ``introduced`` from two `.json` operands until the
+    source-read licence landed, which was the P1 defect. A stored side is now
+    not probed at all, and says so."""
+    if not ClangPreprocessorExtractor().available():
+        pytest.skip("clang++ not on PATH")
+
     from abicheck.serialization import snapshot_to_json
 
-    old_build, old_public = _widget_build_source(tmp_path, "old", leaks=False)
-    new_build, new_public = _widget_build_source(tmp_path, "new", leaks=True)
-
-    old_fn = Function(
-        name="widget_get",
-        mangled="widget_get",
-        return_type="int",
-        source_header=str(old_public),
-        origin=ScopeOrigin.PUBLIC_HEADER,
-    )
-    new_fn = Function(
-        name="widget_get",
-        mangled="widget_get",
-        return_type="int",
-        source_header=str(new_public),
-        origin=ScopeOrigin.PUBLIC_HEADER,
-    )
-    old = AbiSnapshot(
-        library="libwidget.so",
-        version="1.0",
-        functions=[old_fn],
-        build_source=old_build,
-    )
-    new = AbiSnapshot(
-        library="libwidget.so",
-        version="2.0",
-        functions=[new_fn],
-        build_source=new_build,
-    )
-
+    old, new, _ = _widget_snapshots(tmp_path)
     old_path = tmp_path / "old.abi.json"
     new_path = tmp_path / "new.abi.json"
     old_path.write_text(snapshot_to_json(old), encoding="utf-8")
     new_path.write_text(snapshot_to_json(new), encoding="utf-8")
 
-    report = compare_json(old_path, new_path)
-    block = report["pattern_preprocessor_scan"]
-    leak_key = f"{new_public}|{new_public.parent / 'widget_impl.h'}"
-    assert block["preprocessor"]["header_leak_evolution"].get(leak_key) == "introduced"
+    block = compare_json(old_path, new_path)["pattern_preprocessor_scan"]
+    assert block["preprocessor"]["header_leak_evolution"] == {}
+    assert block["preprocessor"]["macro_divergence_evolution"] == {}
+    for side in ("old", "new"):
+        assert block["preprocessor"][side]["ran"] is False
+        assert "provenance" in block["preprocessor"][side]["skipped_reason"]
+        assert block["coverage"]["header_leak"][side]["established"] is False
