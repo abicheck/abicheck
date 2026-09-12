@@ -54,7 +54,7 @@ def _write_zstd_tar(archive_path: Path) -> None:
     archive_path.write_bytes(zstandard.ZstdCompressor().compress(buf.getvalue()))
 
 
-def _make_wheel(archive_path: Path, files: dict[str, bytes]) -> None:
+def _make_wheel(archive_path: Path, files: dict[str, bytes]) -> Path:
     """Create a real wheel: a zip carrying PEP 427's `dist-info/WHEEL`.
 
     That member is what `WheelExtractor.detect` reads since plan Phase 7n
@@ -64,12 +64,14 @@ def _make_wheel(archive_path: Path, files: dict[str, bytes]) -> None:
         zf.writestr("test-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
         for name, content in files.items():
             zf.writestr(name, content)
+    return archive_path
 
 
-def _make_conda_v2(archive_path: Path, files: dict[str, bytes]) -> None:
+def _make_conda_v2(archive_path: Path, files: dict[str, bytes]) -> Path:
     """Create a real `.conda` v2 container: metadata.json + a zstd payload."""
     with zipfile.ZipFile(archive_path, "w") as zf:
         zf.writestr("metadata.json", "{}")
         zf.writestr("pkg-test-1.0.tar.zst", "\x28\xb5\x2f\xfd")
         for name, content in files.items():
             zf.writestr(name, content)
+    return archive_path

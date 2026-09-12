@@ -7316,6 +7316,38 @@ performs (`--used-by`, `--used-by-manifest`, `--required-symbol`,
 `--instantiation-manifest`, `--follow-deps` and its search-path siblings,
 `--debug-info`, `--devel-pkg`). That last family is recorded here rather
 than left as an accepted no-op precisely so it is a visible decision.
+### A resolved PDB/DWP/dSYM artifact reaches no dump path
+
+`debug_resolver`'s chain can resolve four kinds of artifact, and only one
+of them is consumed. `service_dump_native._dump_elf` reads
+`DebugArtifact.dwarf_path` and nothing else -- a `dwp_path`, a `dwo_dir` or
+a `dsym_path` is resolved, logged, and dropped -- and the PE branch of
+`_run_dump_uncached` never passes `debug_roots` to `_dump_pe` at all, so a
+PDB found in a debug root is dropped too (the PE path's only PDB input is
+`debug.pdb_path`, via `locate_pdb(pdb_path_override=...)`).
+
+**Pre-existing, and predates plan Phase 7n** -- `--debug-root` had the same
+shape. What 7n changed is that the gap became *sayable*: merging the debug
+role into one input meant naming a detached artifact directly, which would
+have resolved a PDB/DWP and then silently ignored it, and (first review
+round) made the resolver return one *ahead* of `EmbeddedDwarfResolver`, so
+a binary carrying perfectly good DWARF would have been compared with none.
+Both are closed: `extract/detached_debug.DetachedDebugFileResolver` is
+DWARF-only and yields to the rest of the chain, and naming a PDB/DWP file
+is a usage error naming `debug.pdb_path` (the spelling that *is* read).
+
+The *directory* form is deliberately still accepted, because rejecting it
+would break the case that works -- a build-id tree or path mirror of ELF
+`.debug` sidecars, which is what the input is mostly for. So a directory
+that happens to hold PDBs still resolves to an artifact nobody reads. That
+is this gap, unchanged; do not "fix" it by rejecting directories.
+
+Closing it properly means threading `debug_roots` into `_dump_pe` and
+teaching `_dump_elf` to consume `dwp_path`/`dwo_dir`/`dsym_path` -- real
+capability work on the extraction paths, not a CLI change, which is why
+ADR-068's flag-topology slices leave it alone. Found by Codex review on
+PR #1253.
+
 **Update (plan Phase 7n):** `--debug-root`, `--devel-pkg` and
 `--probe-matrix` no longer exist as flags -- each merged into the one input
 for its evidence role (`--debug-info`, `-H/--header`, `--build-info`). The

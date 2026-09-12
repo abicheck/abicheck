@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _package_fixtures import _make_wheel
 from _workflow_exec import bash_executable, require_bash
 from test_action_run_sh_compare_build_source import _run_compare_raw
 
@@ -131,13 +132,17 @@ def _operand_env(shape: str, tmp_path: Path) -> dict[str, str]:
         target = tmp_path / "old-bundle"
         target.mkdir(exist_ok=True)
         return {"INPUT_OLD_LIBRARY": str(target)}
+    # Real archives, not empty files carrying a package-shaped name: since
+    # plan Phase 7n, `run.sh` asks the installed abicheck's own
+    # `is_package()` (content-based) rather than a suffix table, so a
+    # zero-byte `libfoo.rpm` is correctly *not* a release operand and these
+    # fixtures would have been testing the fallback, not the real path.
     if shape == "rpm-new":
         target = tmp_path / "libfoo.rpm"
-        target.write_text("", encoding="utf-8")
+        target.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 64)
         return {"INPUT_NEW_LIBRARY": str(target)}
     if shape == "whl-new":
-        target = tmp_path / "foo-1.0.whl"
-        target.write_text("", encoding="utf-8")
+        target = _make_wheel(tmp_path / "foo-1.0.whl", {"foo/__init__.py": b""})
         return {"INPUT_NEW_LIBRARY": str(target)}
     raise AssertionError(f"unknown operand shape {shape!r}")
 
@@ -225,7 +230,7 @@ class TestReleaseOperandGetsTheSinglePairCompileContext:
         version of this guard would produce is a workflow failing before
         dependency install for a comparison the run itself would serve."""
         pkg = tmp_path / "libfoo.rpm"
-        pkg.write_text("", encoding="utf-8")
+        pkg.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 64)  # real RPM lead magic
         result = _run_validate(
             {
                 "INPUT_OLD_LIBRARY": "old.so",

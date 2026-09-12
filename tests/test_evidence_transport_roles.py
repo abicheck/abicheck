@@ -764,6 +764,75 @@ class TestContentSniffsDegradeGracefully:
         assert is_package(path)
         assert classify_debug_transport(path) is DebugTransport.PACKAGE
 
+    def test_a_prefixed_zip_is_still_a_wheel(self, tmp_path: Path) -> None:
+        """The ZIP format permits arbitrary bytes before the first local
+        file header -- that is how a self-extracting archive works -- and
+        every real zip reader, `ZipFile` included, accepts one. A magic
+        check at offset 0 rejected wheels the extractor behind it would
+        have opened fine (Codex review, PR #1253)."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("foo-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
+            zf.writestr("foo/_core.so", "elf")
+        path = tmp_path / "prefixed"
+        path.write_bytes(b"#!/bin/sh\n# self-extracting stub\n" * 4 + buf.getvalue())
+        assert is_package(path)
+        assert type(detect_extractor(path)).__name__ == "WheelExtractor"
+        assert classify_header_transport(path) is HeaderTransport.PACKAGE
+
+    def test_the_legacy_conda_sniff_cost_is_independent_of_archive_size(
+        self, tmp_path: Path
+    ) -> None:
+        """Detection must be cheaper than extraction, not a way around its
+        bounds: this sniff runs on every tar-shaped operand now, so reading
+        the whole member list before deciding would let a large or
+        adversarial archive be fully walked before the extraction limits
+        ever applied (Codex review, PR #1253).
+
+        Stated as the invariant rather than a magic number: the members
+        touched must not grow with the archive. Two archives an order of
+        magnitude apart in member count must cost the same, and neither
+        carries the `info/` marker, so the scan cannot stop for the other
+        reason. A fixed ceiling would be brittle (the surrounding format
+        sniffs read a header or two of their own) and would not actually
+        say "bounded".
+        """
+        import tarfile as _tarfile
+
+        from abicheck.package import CondaExtractor
+
+        def _touched(members: int) -> int:
+            path = tmp_path / f"tar-{members}"
+            with _tarfile.open(path, "w") as tf:
+                for i in range(members):
+                    tf.addfile(_tarfile.TarInfo(name=f"payload/{i}"), io.BytesIO(b""))
+            count = 0
+            real_next = _tarfile.TarFile.next
+
+            def counting_next(self: _tarfile.TarFile):  # type: ignore[no-untyped-def]
+                nonlocal count
+                count += 1
+                return real_next(self)
+
+            _tarfile.TarFile.next = counting_next  # type: ignore[method-assign]
+            try:
+                assert not CondaExtractor().detect(path)
+            finally:
+                _tarfile.TarFile.next = real_next  # type: ignore[method-assign]
+            return count
+
+        small = CondaExtractor._SNIFF_MEMBERS * 2
+        assert _touched(small) == _touched(small * 10)
+
+    def test_a_real_legacy_conda_package_is_still_detected(
+        self, tmp_path: Path
+    ) -> None:
+        """The negative control: bounding the sniff did not blind it."""
+        from abicheck.package import CondaExtractor
+
+        path = _write_tar(tmp_path / "pkg", {"info/index.json": b"{}"}, mode="w:bz2")
+        assert CondaExtractor().detect(path)
+
     def test_magic_read_of_a_directory_is_not_a_crash(self, tmp_path: Path) -> None:
         from abicheck.package import looks_like_zip, looks_like_zstd
 

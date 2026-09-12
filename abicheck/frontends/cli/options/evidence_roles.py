@@ -194,9 +194,12 @@ def unsupported_detached_debug(paths: Iterable[Path]) -> tuple[tuple[Path, str],
     Named here so the CLI can refuse it and say where the capability *does*
     live, rather than let it through as a silent no-op (ADR-068 D4).
 
-    The directory form is unaffected: ``--debug-info old=<dir>`` still
-    reaches ``PDBResolver``/``SplitDwarfResolver``, exactly as
-    ``--debug-root`` always did.
+    The directory form is unaffected *as an input* -- ``--debug-info
+    old=<dir>`` still reaches ``PDBResolver``/``SplitDwarfResolver``
+    exactly as ``--debug-root`` always did -- but note that what those
+    resolvers return is itself dropped further down for these two kinds,
+    which is a pre-existing gap this slice does not close and therefore
+    must not recommend as a workaround (see the error text below).
     """
     out: list[tuple[Path, str]] = []
     for path in paths:
@@ -216,12 +219,32 @@ def reject_unsupported_detached_debug(paths: Iterable[Path]) -> None:
     if not unsupported:
         return
     named = ", ".join(f"{p} ({kind.upper()})" for p, kind in unsupported)
+    kinds = {kind for _p, kind in unsupported}
+    # Name only a spelling that is actually *consumed*. `debug.pdb_path` is,
+    # via `locate_pdb(pdb_path_override=...)` on the PE dump path. A
+    # directory is NOT, for either kind: `_dump_pe` is never passed
+    # `debug_roots` at all, and `_dump_elf` uses only
+    # `DebugArtifact.dwarf_path`, so a PDB or DWP the resolver finds in a
+    # root is dropped just as silently (Codex review, PR #1253 -- the first
+    # version of this message recommended exactly that dead end). See
+    # known-gaps.md, "A resolved PDB/DWP/dSYM artifact reaches no dump path".
+    remedy = (
+        " Set debug.pdb_path in .abicheck.yml instead, which the PE dump path "
+        "does read."
+        if kinds == {"pdb"}
+        else (
+            " abicheck has no input that feeds a DWARF package to the dump "
+            "path today; build without split DWARF, or link the .dwo files "
+            "back in, to compare with debug evidence."
+            if kinds == {"dwp"}
+            else " Set debug.pdb_path in .abicheck.yml for the PDB; a DWARF "
+            "package has no consuming input today."
+        )
+    )
     raise click.UsageError(
         f"--debug-info {named}: naming a PDB or DWARF-package file directly is "
         "not supported -- no extraction path reads one, so it would be accepted "
-        "and silently ignored. Pass the directory holding it instead "
-        "(--debug-info <dir>), which the resolver already searches, or set "
-        "debug.pdb_path in .abicheck.yml for a PDB."
+        "and silently ignored." + remedy
     )
 
 
