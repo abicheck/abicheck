@@ -1271,12 +1271,7 @@ class TestDeclaredEvidenceSharingScope:
 
 
 class TestBuildOutputCLI:
-    """``abicheck project validate DIRECTORY`` (G30 P1.1, ADR-054).
-
-    Since plan Phase 7p one ``project validate`` covers all three
-    project-integration documents; a build output is recognized by its own
-    ``build-output.json`` schema tag, not by a dedicated subcommand.
-    """
+    """``abicheck project validate DIRECTORY`` (G30 P1.1, ADR-054; one command over all three kinds since Phase 7p, routed by ``schema:``)."""
 
     def _run(self, args):
         from abicheck.cli import main

@@ -101,21 +101,24 @@ class TestClassifierProperties:
         assert kind is ValidationInputKind.BUILD_OUTPUT
         assert target == directory
 
-    def test_a_named_build_output_manifest_resolves_to_its_directory(
+    def test_a_named_build_output_manifest_is_passed_through(
         self, tmp_path: Path
     ) -> None:
-        # The one case where the returned path differs from the input:
-        # the build-output validator takes the directory around the
-        # manifest, so a caller may name either.
+        # The manifest path is handed to the validator as given, never
+        # swapped for its parent directory: the validator resolves a
+        # build output from either spelling, and substituting the
+        # directory would send it looking for the conventional
+        # `build-output.json` beside a manifest that is legitimately
+        # called something else.
         directory = tmp_path / "abicheck-build"
         directory.mkdir()
-        manifest = directory / "build-output.json"
+        manifest = directory / "run-42.json"
         manifest.write_text(
             json.dumps({"schema": BUILD_OUTPUT_SCHEMA}), encoding="utf-8"
         )
         assert classify_validation_input(manifest) == (
             ValidationInputKind.BUILD_OUTPUT,
-            directory,
+            manifest,
         )
 
     def test_the_schema_tag_outranks_a_mapping_default(self, tmp_path: Path) -> None:
@@ -230,6 +233,71 @@ class TestValidateCli:
     def test_the_retired_spellings_are_gone(self, tmp_path: Path, retired: str) -> None:
         res = CliRunner().invoke(main, ["project", retired, str(tmp_path)])
         assert res.exit_code == 64
+
+
+class TestNameIndependenceEndToEnd:
+    """The whole invocation, not just the classification step.
+
+    This class exists because proving the classifier is name-independent
+    proved nothing about the pipeline behind it: the first revision
+    resolved an explicitly named manifest to its *parent directory*, and
+    `validate_build_output` then looked for the conventional
+    `build-output.json` beside it — so a valid `run-42.json` exited 64
+    while every classifier test passed (CodeRabbit review, PR #1242).
+    Registered as `cli_surface.name_independent_dispatch_undone_downstream`
+    in `tests/regressions/manifest.py`.
+
+    The oracle is the document's content, stated independently: a
+    well-formed document of each kind validates (exit 0) under *any*
+    name, and reaches the validator its content names.
+    """
+
+    #: The header each kind's validator prints — the evidence that the
+    #: right one ran, not merely that something exited 0.
+    EXPECTED_HEADER = {
+        ValidationInputKind.PROJECT_CONFIG: "project validation",
+        ValidationInputKind.USE_CASE_MANIFEST: "use-case manifest validation",
+        ValidationInputKind.BUILD_OUTPUT: "build-output validation",
+        ValidationInputKind.EMPTY_DOCUMENT: "project validation",
+    }
+
+    @pytest.mark.parametrize(
+        ("kind", "name"), list(itertools.product(DOCUMENTS, MISLEADING_NAMES))
+    )
+    def test_a_valid_document_validates_under_any_name(
+        self, tmp_path: Path, kind: ValidationInputKind, name: str
+    ) -> None:
+        path = tmp_path / name
+        path.write_text(DOCUMENTS[kind], encoding="utf-8")
+        res = _run(str(path))
+        assert res.exit_code == 0, res.output
+        assert self.EXPECTED_HEADER[kind] in res.output
+
+    @pytest.mark.parametrize("name", MISLEADING_NAMES)
+    def test_a_named_manifest_resolves_its_own_artifacts(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        # The parent-directory substitution also decided where relative
+        # artifact paths resolve from, so the fix has to keep that right:
+        # the root is the directory holding the manifest, whatever the
+        # manifest is called.
+        directory = tmp_path / "out"
+        directory.mkdir()
+        binary = directory / "libfoo.so"
+        binary.write_bytes(b"\x7fELF fake")
+        (directory / name).write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [{"id": "foo", "binary": "libfoo.so"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        res = _run(str(directory / name))
+        # The binary resolves (no "does not exist" error); whatever else
+        # the validator reports about it is not this test's subject.
+        assert "does not exist" not in res.output, res.output
 
 
 class TestDispatchConsequences:

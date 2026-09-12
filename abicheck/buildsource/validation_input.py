@@ -89,10 +89,11 @@ class ValidationInputError(ValueError):
 def classify_validation_input(path: Path) -> tuple[ValidationInputKind, Path]:
     """Classify *path*, returning its kind and the path its validator wants.
 
-    The second element differs from *path* only for a build-output
-    manifest named directly (``abicheck-build/build-output.json``), whose
-    validator takes the containing directory — so a caller never has to
-    know which of the two spellings this build's tooling produced.
+    The second element is the path that kind's validator should be given.
+    It is *path* itself in every case today; it stays in the return type
+    because the two build-output spellings (a directory, or a manifest
+    file under any name) are both legal operands and a future kind may
+    need the same freedom.
 
     Raises :class:`ValidationInputError` with a message naming what was
     found and what the three recognized shapes are. It never raises for a
@@ -124,9 +125,14 @@ def classify_validation_input(path: Path) -> tuple[ValidationInputKind, Path]:
         return ValidationInputKind.USE_CASE_MANIFEST, path
     if isinstance(document, dict):
         if document.get("schema") == BUILD_OUTPUT_SCHEMA:
-            # A build-output manifest named directly; its validator reads
-            # the directory around it.
-            return ValidationInputKind.BUILD_OUTPUT, path.parent
+            # A build-output manifest named directly, under any name. The
+            # path is passed through rather than replaced by its parent:
+            # substituting the directory makes the validator look for the
+            # conventional ``build-output.json`` beside it, which turns a
+            # valid ``artifacts/run-42.json`` into "no manifest here" —
+            # a filename dependency re-introduced one layer down from the
+            # dispatch that just refused to make one.
+            return ValidationInputKind.BUILD_OUTPUT, path
         return ValidationInputKind.PROJECT_CONFIG, path
 
     raise ValidationInputError(
