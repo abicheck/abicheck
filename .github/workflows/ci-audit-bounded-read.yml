@@ -1,0 +1,78 @@
+name: CI audit bounded snapshot read
+on:
+  push:
+    branches: ['ci-audit/2026-09-11-experiments']
+    paths: ['.github/workflows/ci-audit-bounded-read.yml']
+permissions:
+  contents: read
+concurrency:
+  group: ci-audit-bounded-read-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  experiment:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Baseline, temporary implementation change, and regressions
+        shell: python
+        run: |
+          import difflib, json, os, pathlib, platform, subprocess, sys, time
+          out=pathlib.Path('ci-bounded-read-output'); out.mkdir(exist_ok=True)
+          subprocess.run(['git','archive','--format=tar.gz','-o',str(out/'source.tar.gz'),'HEAD'],check=True)
+          target='tests/test_cli_compare_release_project_snapshot_package.py::TestStoredVersusLiveReleaseParity::test_stored_stored_matches_live_live'
+          rows=[]
+          def run(label, tests, timeout=240):
+              command=[sys.executable,'-m','pytest',*tests,'-q','-o','addopts=','-m','not slow and not integration and not libabigail and not abicc','--durations=15','--junitxml='+str(out/(label+'.xml'))]
+              start=time.perf_counter()
+              try:
+                  p=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=timeout)
+                  text=p.stdout; code=p.returncode
+              except subprocess.TimeoutExpired as exc:
+                  text=exc.stdout or ''; text=text.decode(errors='replace') if isinstance(text,bytes) else text; code='timeout'
+              elapsed=time.perf_counter()-start
+              (out/(label+'.log')).write_text(text,encoding='utf-8')
+              rows.append({'label':label,'seconds':elapsed,'exit_code':code,'command':command})
+              print('MEASUREMENT',label,round(elapsed,3),code); print(text[-20000:])
+          run('baseline',[target])
+          source=pathlib.Path('abicheck/snapshot_io.py')
+          original=source.read_text(encoding='utf-8')
+          old='        raw = prefix + f.read(cap + 1 - len(prefix))'
+          new='\n'.join([
+              '        remaining = cap + 1 - len(prefix)',
+              '        chunks = [prefix]',
+              '        while remaining > 0:',
+              '            chunk = f.read(min(1024 * 1024, remaining))',
+              '            if not chunk:',
+              '                break',
+              '            chunks.append(chunk)',
+              '            remaining -= len(chunk)',
+              '        raw = b"".join(chunks)',
+          ])
+          assert original.count(old)==1, 'Source changed: refusing speculative patch'
+          changed=original.replace(old,new)
+          source.write_text(changed,encoding='utf-8')
+          patch=''.join(difflib.unified_diff(original.splitlines(True),changed.splitlines(True),fromfile='a/abicheck/snapshot_io.py',tofile='b/abicheck/snapshot_io.py'))
+          (out/'bounded-read.patch').write_text(patch,encoding='utf-8')
+          run('bounded-read',[target])
+          run('package-regressions',['tests/test_cli_compare_release_project_snapshot_package.py'])
+          security=sorted({str(p) for pattern in ['test_snapshot_compression*.py','test_snapshot_io*.py'] for p in pathlib.Path('tests').glob(pattern)})
+          assert security, 'No snapshot safety regression tests found'
+          run('snapshot-safety-regressions',security,timeout=300)
+          (out/'experiment.json').write_text(json.dumps({'platform':platform.platform(),'python':sys.version,'cpu_count':os.cpu_count(),'source_sha':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'temporary_patch_only':True,'measurements':rows},indent=2),encoding='utf-8')
+          source.write_text(original,encoding='utf-8')
+          if any(r['exit_code'] != 0 for r in rows): raise SystemExit('An experiment failed; inspect uploaded evidence')
+      - name: Upload reproducible evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-audit-bounded-read-windows
+          path: ci-bounded-read-output/
+          retention-days: 3
+          if-no-files-found: error
