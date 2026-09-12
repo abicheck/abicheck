@@ -136,8 +136,8 @@ code honour it — the same demote-don't-delete contract as A4.
 Every `compare` always emits aggregate, informational `COMPATIBLE`
 roll-ups — `public_surface_grew` / `public_surface_shrank` and
 `undocumented_export_ratio_increased` — computed from the same
-`compute_surface_metrics()` used above (unconditional, ADR-068 D4/Phase 5;
-the `--surface-metrics` flag still exists but is now a no-op, accepted only
-for backward compatibility). They never drive a verdict on their own (the
+`compute_surface_metrics()` used above (unconditional, ADR-068 D4/Phase 5,
+which also removed the `--surface-metrics` flag outright -- passing it is a
+usage error, not an accepted no-op). They never drive a verdict on their own (the
 individual additions/removals are reported per-symbol); they are a trendable
 signal for CI dashboards and release notes.

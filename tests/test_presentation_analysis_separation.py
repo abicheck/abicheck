@@ -159,21 +159,36 @@ class TestF19OutputFormatInvariance:
     """F-19: the canonical result is byte-identical across --format/--write/
     --view/rendering-filter permutations; the exit code is identical too."""
 
-    def test_exit_code_identical_across_every_rendering_permutation(
-        self, tmp_path: Path
+    #: The one expected exit code for `_write_pair`'s fixture: it removes a
+    #: public function, which is a real ABI break. Stated as an exact oracle
+    #: rather than "all 192 permutations agree", because agreement alone is
+    #: satisfied by a CLI that returns 0 everywhere -- the sweep then compares
+    #: the bug with itself and passes (AGENTS.md, "A matrix test needs an
+    #: oracle, not just a type check"). A constant expectation across every
+    #: item is also strictly stronger than the old cross-permutation equality
+    #: it replaces, which is what lets the sweep be split across items.
+    _EXPECTED_EXIT_CODE = 4
+
+    #: Split on --format only: the 192 combinations below are unchanged, but
+    #: they run as six pytest items of 32 CLI invocations instead of one
+    #: indivisible item, so xdist can spread the most expensive block in this
+    #: module instead of serializing it behind one worker.
+    @pytest.mark.parametrize(
+        "fmt", ("json", "markdown", "sarif", "html", "junit", "review")
+    )
+    def test_exit_code_is_the_breaking_verdict_for_every_rendering_permutation(
+        self, tmp_path: Path, fmt: str
     ) -> None:
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(tmp_path)
 
-        exit_codes: set[int] = set()
+        seen: list[tuple[tuple[str, ...], int]] = []
         for (
-            fmt,
             view_demangle,
             audit_flag,
             view_patterns,
             view_mode,
         ) in itertools.product(
-            ("json", "markdown", "sarif", "html", "junit", "review"),
             ("demangle", "no-demangle"),
             (True, False),
             (True, False),
@@ -197,13 +212,14 @@ class TestF19OutputFormatInvariance:
             if view_patterns:
                 args += ["--view", "patterns"]
             result = CliRunner().invoke(main, args)
-            assert result.exit_code in (0, 4), (fmt, result.output)
-            exit_codes.add(result.exit_code)
+            seen.append((tuple(args[3:]), result.exit_code))
 
-        # One real BREAKING removal: every permutation above must agree on
-        # the same exit code -- none of format/--view tokens/
-        # audit-suppressions may change *whether* the run gates.
-        assert len(exit_codes) == 1, exit_codes
+        # Batched: a disagreement names every offending permutation at once
+        # rather than stopping at the first.
+        wrong = [entry for entry in seen if entry[1] != self._EXPECTED_EXIT_CODE]
+        assert not wrong, wrong
+        # Vacuity guard: the loop really ran its whole 32-permutation share.
+        assert len(seen) == 32
 
     def test_json_canonical_facts_identical_across_demangle_audit_explain(
         self, tmp_path: Path

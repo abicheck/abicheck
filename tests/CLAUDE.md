@@ -129,6 +129,38 @@ finishes in ~45 seconds.
   `StepResult.output_lines` exposes the raw records, so an *injected extra*
   `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
   `test_reusable_workflow_execution.py`.
+  It also owns `bash_executable()`/`require_bash()`, together the **only**
+  sanctioned way a test in this suite shells out: resolve the program, and ask
+  first whether this machine has a real bash at all. A bare `["bash", ...]`
+  argv resolves to the WSL launcher stub on `windows-latest` and reddens the
+  whole calling module at once, and resolving without the guard reaches the
+  same stub by the resolver's own documented fallback. The twenty-nine private
+  `_bash_executable` clones that used to encode half of this — each a copy
+  predating the resolver's stub detection — have been folded onto it, and
+  `test_subprocess_bash_is_resolved.py` fails on a new clone, a new bare
+  `"bash"` program, or a resolved call site with no `require_bash()`, anywhere
+  under `tests/`.
+- `schema_validation.py` — `validate_instance(instance, schema)`, a drop-in
+  replacement for `jsonschema.validate` that checks the *schema* once per
+  distinct schema content instead of on every call (which is what the library
+  does, and what it documents against when the schema is already known good).
+  **Use it instead of `jsonschema.validate` in new tests**: this suite
+  validates many reports against a handful of packaged schemas, so the
+  per-call schema check is pure repeated work. The cache is keyed on the
+  schema's canonical JSON, never a path or a dict's identity, so a test that
+  edits a schema between calls is not served a stale validator.
+  `test_schema_validation_helper.py` states the equivalence against the real
+  library as the oracle.
+- `test_cross_platform_integration.py`'s `_require_compile_success` — the
+  three-state rule every fixture-building helper owes: platform/tool missing
+  is a marker-level skip, a *named* optional compiler feature may skip, and a
+  configured compiler that ran and failed is a **failure** with command, source
+  and stderr attached. A generic helper that turns any nonzero exit into
+  `pytest.skip` produces a green lane that proved less than it claims — the
+  `ABICHECK_MIN_EXECUTED` silent-skip guard cannot see it, because the sibling
+  fixtures that still build satisfy the floor. Bug class
+  `guard.absent_capability_vs_real_failure`; contract in
+  `test_compile_failure_contract.py`.
 ## What NOT to do
 
 - Don't change the marker scheme — CI gates depend on it.

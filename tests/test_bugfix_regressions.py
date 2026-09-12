@@ -155,7 +155,7 @@ class TestBug3MetadataCollection:
     """_collect_metadata must return None for JSON/Perl snapshots."""
 
     def test_binary_file_returns_metadata(self):
-        from abicheck.cli import _collect_metadata
+        from abicheck.frontends.cli.runtime import _collect_metadata
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             content = b"fake binary content"
             f.write(content)
@@ -170,7 +170,7 @@ class TestBug3MetadataCollection:
             path.unlink()
 
     def test_json_snapshot_returns_none(self):
-        from abicheck.cli import _collect_metadata
+        from abicheck.frontends.cli.runtime import _collect_metadata
         with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
             json.dump({"library": "lib.so", "version": "1.0"}, f)
             path = Path(f.name)
@@ -181,7 +181,7 @@ class TestBug3MetadataCollection:
             path.unlink()
 
     def test_perl_dump_returns_none(self):
-        from abicheck.cli import _collect_metadata
+        from abicheck.frontends.cli.runtime import _collect_metadata
         with tempfile.NamedTemporaryFile(suffix=".dump", mode="w", delete=False) as f:
             f.write("$VAR1 = { 'library' => 'lib.so' };")
             f.flush()
@@ -272,20 +272,20 @@ class TestBug5SafeWriteOutput:
     """_safe_write_output creates parent directories and handles errors."""
 
     def test_creates_parent_dirs(self, tmp_path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         out = tmp_path / "deeply" / "nested" / "report.txt"
         _safe_write_output(out, "hello")
         assert out.read_text() == "hello"
 
     def test_overwrites_existing_file(self, tmp_path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         out = tmp_path / "report.txt"
         out.write_text("old")
         _safe_write_output(out, "new")
         assert out.read_text() == "new"
 
     def test_bad_path_raises_click_exception(self, tmp_path):
-        from abicheck.cli import _safe_write_output
+        from abicheck.frontends.cli.runtime import _safe_write_output
         # Create a regular file, then try to write inside it as if it were a
         # directory — fails on every OS because mkdir will raise OSError.
         blocker = tmp_path / "blocker"

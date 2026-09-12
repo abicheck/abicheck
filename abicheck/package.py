@@ -396,16 +396,114 @@ def _drain_reader_queue(
     reader_thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
+#: Zstandard frame magic (RFC 8478 §3.1.1) -- the one compressed tar codec
+#: ``tarfile`` cannot open transparently, so it is the only one this module
+#: has to recognise for itself.
+_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+#: Local-file-header and end-of-central-directory magics: a zip container
+#: (``.whl``, a ``.conda`` v2 package, or a plain zip).
+_ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x06\x06")
+
+
+def _magic(path: Path, size: int = 8) -> bytes:
+    """The first *size* bytes of *path*, or ``b""`` when unreadable.
+
+    A detection step must never abort dispatch to every other detector on an
+    unreadable or non-regular operand -- the same degrade-to-"not this
+    format" rule ``CondaExtractor.detect``'s own archive peek already
+    follows.
+    """
+    try:
+        with open(path, "rb") as f:
+            return f.read(size)
+    except OSError:
+        return b""
+
+
+def looks_like_zstd(path: Path) -> bool:
+    """Whether *path*'s content is a zstd frame, regardless of its name."""
+    return _magic(path, 4) == _ZSTD_MAGIC
+
+
+def looks_like_zip(path: Path) -> bool:
+    """Whether *path*'s content is a zip container, regardless of its name."""
+    return _magic(path, 4) in tuple(m[:4] for m in _ZIP_MAGICS)
+
+
+def _zip_entry_names(path: Path) -> list[str]:
+    """Every member name of a zip container; ``[]`` if unreadable.
+
+    Deliberately uncapped. An earlier revision read only the first 200
+    names, which made detection depend on where a builder happened to place
+    the metadata directory: wheel tools commonly append `*.dist-info/` after
+    the package payload, so a large wheel's own marker fell outside the
+    window and the archive was rejected (Codex review, PR #1253). The whole
+    list is the zip's already-parsed central directory -- bounded by member
+    count, not by uncompressed size -- so there is nothing to bound here.
+    """
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return zf.namelist()
+    except (OSError, zipfile.BadZipFile, ValueError):
+        return []
+
+
+def _zstd_tar_header(path: Path) -> bytes:
+    """The first tar block of a zstd-compressed stream, or ``b""``.
+
+    Bounded to one 512-byte tar block: this is a format sniff, never a
+    decompression, so a malicious ratio cannot be amplified through it.
+    """
+    try:
+        import zstandard
+    except ImportError:
+        return b""
+    try:
+        with open(path, "rb") as f:
+            return zstandard.ZstdDecompressor().stream_reader(f).read(512)
+    except (OSError, EOFError, ValueError, zstandard.ZstdError):
+        return b""
+
+
+def _is_tar_block(block: bytes) -> bool:
+    """Whether *block* is a POSIX/GNU tar header block (``ustar`` at 257)."""
+    return len(block) >= 265 and block[257:262] == b"ustar"
+
+
+def looks_like_tar_container(path: Path) -> bool:
+    """Whether *path*'s content is a tar archive, compressed or not.
+
+    Content-only, by design: ``--debug-info``/``-H``/``--build-info`` route
+    on what an operand *is* (plan Phase 7n), so a debug tarball a CI job
+    named ``debug-evidence`` must be recognised exactly as one named
+    ``debug.tar.gz``. ``tarfile.is_tarfile`` already answers this for plain,
+    gzip, bzip2 and xz streams from content alone; zstd is added here
+    because ``tarfile`` has no codec for it.
+    """
+    if looks_like_zstd(path):
+        return _is_tar_block(_zstd_tar_header(path))
+    try:
+        return tarfile.is_tarfile(path)
+    # EOFError alongside the rest: a *truncated* compressed stream (a
+    # four-byte gzip header and nothing else) surfaces as EOFError from the
+    # decompressor, not as a TarError -- and a format sniff must answer
+    # "not this format" for it, never propagate out of detection.
+    except (OSError, EOFError, tarfile.TarError, ValueError):
+        return False
+
+
 class TarExtractor:
-    """Extract tar, tar.gz, tar.xz, tar.bz2, and .tgz archives."""
+    """Extract tar, tar.gz, tar.xz, tar.bz2, .tar.zst and .tgz archives."""
 
     def detect(self, pkg_path: Path) -> bool:
-        name = pkg_path.name.lower()
-        return name.endswith((".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz"))
+        return looks_like_tar_container(pkg_path)
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting tar archive: %s", pkg_path)
-        if pkg_path.name.lower().endswith(".tar.zst"):
+        # Content, not name: a zstd-compressed tar reaches this extractor
+        # whatever it is called, and picking the codec off the suffix would
+        # hand the whole stream to `tarfile`, which has none for zstd.
+        if looks_like_zstd(pkg_path):
             self._safe_extract_zst_tar(pkg_path, target_dir)
         else:
             self._safe_extract(pkg_path, target_dir)
@@ -654,10 +752,9 @@ class RpmExtractor:
     """Extract RPM packages using rpm2cpio + cpio."""
 
     def detect(self, pkg_path: Path) -> bool:
-        name = pkg_path.name.lower()
-        if name.endswith(".rpm"):
-            return True
-        # Check magic bytes
+        # Magic only (plan Phase 7n): an `.rpm` suffix over non-RPM content
+        # used to answer True here, so a detached debug file a CI job named
+        # `libfoo-dbg.rpm` dispatched to the RPM extractor and failed.
         try:
             with open(pkg_path, "rb") as f:
                 return f.read(4) == _RPM_MAGIC
@@ -773,9 +870,7 @@ class DebExtractor:
     """Extract Debian packages using ar + tar."""
 
     def detect(self, pkg_path: Path) -> bool:
-        name = pkg_path.name.lower()
-        if name.endswith(".deb"):
-            return True
+        # Magic only, same reason as `RpmExtractor.detect` above.
         try:
             with open(pkg_path, "rb") as f:
                 return f.read(8) == _DEB_MAGIC
@@ -889,36 +984,56 @@ class CondaExtractor:
     Legacy .tar.bz2 conda packages are plain bzip2-compressed tarballs.
     """
 
+    @staticmethod
+    def _is_conda_v2_zip(pkg_path: Path) -> bool:
+        """A ``.conda`` v2 container, recognised from its own members.
+
+        The format's own contract (``metadata.json`` beside a
+        ``pkg-*``/``info-*`` zstd payload), so a ``.conda`` package a
+        release job renamed still dispatches here rather than to the plain
+        wheel/zip path -- plan Phase 7n's content-routing rule.
+        """
+        if not looks_like_zip(pkg_path):
+            return False
+        names = _zip_entry_names(pkg_path)
+        return "metadata.json" in names and any(
+            n.startswith(("pkg-", "info-")) and n.endswith(".tar.zst") for n in names
+        )
+
+    @staticmethod
+    def _is_legacy_conda_tar(pkg_path: Path) -> bool:
+        """A legacy conda tarball, recognised by its own ``info/`` marker."""
+        try:
+            with tarfile.open(pkg_path, tarinfo=_BoundedTarInfo) as tf:
+                names = tf.getnames()
+                return any(n.startswith("info/") for n in names[:50])
+        # ExtractionSecurityError alongside tarfile's own exceptions: a
+        # _BoundedTarInfo rejection during this mere format-sniff peek
+        # should degrade to "not detected as this format" the same way
+        # a malformed archive already does here, not propagate out of
+        # a detection step and abort dispatch to every other detector.
+        except (tarfile.TarError, OSError, EOFError, ValueError, ExtractionSecurityError):
+            return False
+
     def detect(self, pkg_path: Path) -> bool:
-        name = pkg_path.name.lower()
-        if name.endswith(".conda"):
+        if self._is_conda_v2_zip(pkg_path):
             return True
-        # Legacy conda packages end with .tar.bz2 but we need to distinguish
-        # from generic tar.bz2.  Check for conda-style naming:
-        # <name>-<version>-<build>.tar.bz2
-        if name.endswith(".tar.bz2") and name.count("-") >= 2:
-            # Peek inside for info/ directory (conda marker)
-            try:
-                with tarfile.open(pkg_path, "r:bz2", tarinfo=_BoundedTarInfo) as tf:
-                    names = tf.getnames()
-                    return any(n.startswith("info/") for n in names[:50])
-            # ExtractionSecurityError alongside tarfile's own exceptions: a
-            # _BoundedTarInfo rejection during this mere format-sniff peek
-            # should degrade to "not detected as this format" the same way
-            # a malformed archive already does here, not propagate out of
-            # a detection step and abort dispatch to every other detector.
-            except (tarfile.TarError, OSError, ExtractionSecurityError):
-                return False
+        # A legacy conda package is a bzip2 tarball whose only distinguishing
+        # feature is its `info/` tree -- so the peek is what decides, and the
+        # `.tar.bz2`/`<name>-<version>-<build>` name pattern that used to gate
+        # it is gone: it made an identical archive dispatch to the plain tar
+        # path purely because of its filename.
+        if looks_like_tar_container(pkg_path) and not looks_like_zstd(pkg_path):
+            return self._is_legacy_conda_tar(pkg_path)
         return False
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting conda package: %s", pkg_path)
-        name = pkg_path.name.lower()
 
-        if name.endswith(".conda"):
+        if looks_like_zip(pkg_path):
             self._extract_v2(pkg_path, target_dir)
         else:
-            # Legacy .tar.bz2 format
+            # Legacy tarball format
             TarExtractor._safe_extract(pkg_path, target_dir)
 
         return ExtractResult(lib_dir=target_dir, container_complete=True)
@@ -984,7 +1099,16 @@ class WheelExtractor:
     """
 
     def detect(self, pkg_path: Path) -> bool:
-        return pkg_path.name.lower().endswith(".whl")
+        # PEP 427's own container contract: a zip carrying a `*.dist-info/`
+        # metadata directory. Content, not name (plan Phase 7n) -- a wheel a
+        # build job staged under a bare name is still a wheel, and a plain
+        # zip that is not one still falls through. Keyed on the directory
+        # rather than on `WHEEL` specifically: `METADATA` is equally
+        # mandatory, and requiring one named member would misread a real
+        # wheel whose entries this sniff happens not to reach.
+        if not looks_like_zip(pkg_path):
+            return False
+        return any(".dist-info/" in n for n in _zip_entry_names(pkg_path))
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting wheel: %s", pkg_path)
@@ -1029,26 +1153,23 @@ def detect_extractor(path: Path) -> PackageExtractor | None:
 
 
 def is_package(path: Path) -> bool:
-    """Return True if path is a recognized package format (not a plain directory)."""
+    """Return True if path is a recognized package format (not a plain directory).
+
+    Exactly "some archive extractor claims it", asked of the extractors
+    themselves rather than re-stated as a second suffix/magic table beside
+    them: the two answers used to be able to disagree, and after plan Phase
+    7n made every extractor's own ``detect`` content-capable, a separate
+    name-keyed copy here would have been the one remaining place a debug or
+    devel package under a non-conventional name still read as "not a
+    package". :class:`DirExtractor` is excluded because a directory is the
+    one operand shape this predicate answers ``False`` for by contract --
+    a release directory proves no container completeness (ADR-065 D2).
+    """
     if path.is_dir():
         return False
-    name = path.name.lower()
-    if name.endswith((
-        ".rpm", ".deb", ".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz",
-        ".conda", ".whl",
-    )):
-        return True
-    # Check magic bytes for RPM / Deb
-    try:
-        with open(path, "rb") as f:
-            magic = f.read(8)
-        if magic[:4] == _RPM_MAGIC:
-            return True
-        if magic[:8] == _DEB_MAGIC:
-            return True
-    except OSError:
-        pass
-    return False
+    return any(
+        not isinstance(ext, DirExtractor) and ext.detect(path) for ext in _EXTRACTORS
+    )
 
 
 # ── Binary discovery ─────────────────────────────────────────────────────────

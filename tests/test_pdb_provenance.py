@@ -387,7 +387,7 @@ class TestParsePdbEndToEnd:
     def test_cli_apply_native_provenance(self) -> None:
         # The CLI wrapper threads a PE/Mach-O snapshot through apply_provenance
         # (lifting the old ELF-only restriction).
-        from abicheck.cli import _apply_native_provenance
+        from abicheck.cli_resolve import _apply_native_provenance
         from abicheck.model import AbiSnapshot
 
         meta = DwarfMetadata(has_dwarf=True)
@@ -416,7 +416,7 @@ class TestParsePdbEndToEnd:
         reached only transitively through PE/Mach-O's own ``-I`` (never
         itself named as a ``-H`` root) stayed ``PRIVATE_HEADER`` and could
         be excluded from the public surface, on these two formats only."""
-        from abicheck.cli import _apply_native_provenance
+        from abicheck.cli_resolve import _apply_native_provenance
         from abicheck.model import AbiSnapshot
 
         meta = DwarfMetadata(has_dwarf=True)

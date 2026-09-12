@@ -41,6 +41,7 @@ from abicheck.checker import DiffResult, Verdict
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
+from tests.schema_validation import validate_instance
 
 # ADR-049 Phase 3 -- app-usage scoping requires real library binaries (not
 # JSON snapshots), so --used-by tests stub `dumper.dump` the same way
@@ -172,7 +173,7 @@ class TestEndToEndJsonReport:
         accepted-but-undeclared one -- the exact gap that let the
         ``suppression_audit`` key ship undeclared (schema 2.24).
         """
-        jsonschema = pytest.importorskip("jsonschema")
+        pytest.importorskip("jsonschema")
         from abicheck.schemas import load_compare_report_schema
 
         old_p, new_p = _write_pair(tmp_path)
@@ -191,7 +192,7 @@ class TestEndToEndJsonReport:
         assert result.exit_code == 4, result.output
         payload = json.loads(result.output)
         schema = load_compare_report_schema()
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
         assert "contract_context" in schema["properties"]
         assert "contract_evidence_refs" in schema["$defs"]["change"]["properties"]
 

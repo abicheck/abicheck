@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -205,25 +206,6 @@ def _compile_context_region(
     return text[start:end]
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_bash_script(
     script: str,
     env: dict[str, str] | None = None,
@@ -237,6 +219,7 @@ def _run_bash_script(
     inline ``-c`` argument -- see
     ``test_action_compile_context_parity._run_bash_script``'s identical
     docstring for the full windows-latest rationale this mirrors."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
@@ -244,7 +227,7 @@ def _run_bash_script(
         script_path = f.name
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=text,
             env=env,

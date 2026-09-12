@@ -39,6 +39,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _workflow_exec import bash_executable, require_bash
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "_baseline_unavailable() {"
 _END_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
@@ -50,25 +52,6 @@ def _baseline_region() -> str:
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start)
     return text[start:end]
-
-
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
 
 
 _FAILING_GH_STUB = "gh() { return 1; }\n"
@@ -88,12 +71,13 @@ def _run_bash_script(
     via a file runs cleanly). A temp-file invocation has no such
     command-line-length ceiling on any platform.
     """
+    require_bash()
     fd, path = tempfile.mkstemp(suffix=".sh")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(script)
         return subprocess.run(
-            [_bash_executable(), path],
+            [bash_executable(), path],
             capture_output=True,
             text=True,
             env=env,

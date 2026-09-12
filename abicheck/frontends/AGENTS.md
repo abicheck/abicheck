@@ -46,19 +46,19 @@ lazy compatibility shim. Everything else lives in this package:
 | `cli/commands/dump.py` | `dump`'s ~30 Click parameters → one `DumpRequest`, resolved once and consumed by both the dry run and the real run |
 | `cli/commands/compare.py` | The single-pair compare, the release fan-out, and inline build-source embedding |
 | `cli/runtime.py` | Verbosity, output writing, provenance stamping, and the process-exit decision |
-| `cli/moved.py` | The historical `abicheck.cli` import surface → its current owner |
 
-Two things about that shim are worth knowing before adding to it. It exists
-because `abicheck.cli` has long been the documented import path for a list of
-private helpers, and it resolves through `importlib.import_module` at *access*
-time — a runtime call, not a static import edge — so `cli.py` never grows a
-top-level dependency on the packages that import back into it. But a
-`monkeypatch.setattr` against a name resolved through it **rebinds nothing the
-real caller reads**: patch the owner. `tests/test_cli_moved_surface.py`
-resolves every entry and separately checks that the map covers what the tree
-actually imports, because a lazy shim is exactly the sort of compatibility
-layer that rots silently — a stale entry raises only when someone imports that
-one name.
+**`abicheck.cli` re-exports nothing. Import from the owner above, and patch
+the owner.** It used to: a `cli/moved.py` table mapped ~80 private helpers to
+the module that now owns each, a lazy `__getattr__` on `cli.py` resolved them
+at access time, and a custom module class rejected assignment to any of them.
+That last part was not decoration — a `monkeypatch.setattr` against a
+lazily-resolved alias froze it, so every later caller read a stale function
+and every later patch of the real owner was silently ignored, which had
+already surfaced as an order-dependent CI failure two test files away from
+its cause. All three were removed once every call site imported from the
+owner; `getattr(cli, "_safe_write_output")` now raises the ordinary
+`AttributeError`. The root module's own budget (`__all__ == ["main"]`, under
+150 lines) is pinned by `tests/test_cli_root_surface.py`.
 
 The move required classifying the whole `cli_*` family as `frontends`, which
 surfaced ~47 real direction violations (the CLI reaching past the engine into

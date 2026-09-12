@@ -29,9 +29,11 @@ from pathlib import Path
 
 import click
 
-from .cli import _detect_binary_format, _setup_verbosity, emit_export_set, main
+from .cli import main
 from .cli_options import export_options, verbose_option
+from .cli_resolve import _detect_binary_format
 from .frontends.cli.options.export import ExportSet, reject_dry_run_with_exports
+from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .stack_checker import under_sysroot
 
 

@@ -193,7 +193,7 @@ class TestDebugFormatSelector:
         assert "--debug-format" not in out
         out_all = CliRunner().invoke(main, ["compare", "--help-all"]).output
         assert "--debug-format" not in out_all
-        assert "--debug-root" in out  # the coarse per-run override stays visible
+        assert "--debug-info" in out  # the coarse per-run override stays visible
 
     def test_dump_hides_debug_format_too(self):
         # Phase 7c: --debug-format is deleted outright from `dump` too --

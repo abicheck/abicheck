@@ -148,9 +148,8 @@ class TestCompareHelpAllDisclosure:
         out = CliRunner().invoke(main, ["compare", "--help"]).output
         # A representative long-tail option from each folded panel.
         for advanced_flag in (
-            "--compiler",
-            "--ast-frontend",
-            "--probe-matrix",
+            "--dump-manifest",
+            "--post-manifest",
             "--diagnostic-comparison",
         ):
             assert advanced_flag not in out, (
@@ -177,13 +176,14 @@ class TestCompareHelpAllDisclosure:
         ):
             assert common_flag in out, f"{common_flag} missing from curated --help"
 
-    def test_dump_curated_help_keeps_debug_root(self) -> None:
-        """CodeRabbit review, PR #1146, finding #4: `dump` binds --debug-root
-        to the plural `debug_roots` parameter, but DUMP_COMMON_OPTION_NAMES
-        omitted that name -- so plain `dump --help` never showed a real,
-        still-supported flag."""
+    def test_dump_curated_help_keeps_the_debug_artifact_input(self) -> None:
+        """CodeRabbit review, PR #1146, finding #4: `dump` binds its debug
+        flag to the plural `debug_roots` parameter, but
+        DUMP_COMMON_OPTION_NAMES omitted that name -- so plain `dump --help`
+        never showed a real, still-supported flag. Spelled `--debug-info`
+        since plan Phase 7n merged `--debug-root` into it."""
         out = CliRunner().invoke(main, ["dump", "--help"]).output
-        assert "--debug-root" in out
+        assert "--debug-info" in out
 
     def test_curated_help_reports_hidden_count_and_points_to_help_all(self) -> None:
         result = CliRunner().invoke(main, ["compare", "--help"])
@@ -232,9 +232,14 @@ class TestCompareHelpAllDisclosure:
         # are gone from compare's CLI entirely (compile.* config only), and
         # CLI flag consolidation 5-7 removed -j/--jobs too, so none of the
         # three belong in this "still renders somewhere" list any more.
+        # Phase 7n took --probe-matrix out too (a probe matrix is one of
+        # --build-info's operands now), and 7m took --write/--output-dir
+        # (one -o export request). The three below replace them: each is
+        # still a real compare option that the curated view folds away.
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--probe-matrix",
+            "--dump-manifest",
+            "--post-manifest",
             "--diagnostic-comparison",
         ):
             assert advanced_flag in out
@@ -296,7 +301,7 @@ _HELP_ALL_COMMANDS: list[
         # Phase 7c (one-comparison-product.md §4.2): --sysroot/--ast-frontend/
         # --pdb-path are gone from dump's CLI entirely (compile:/debug:
         # config only), so they no longer belong in this "still renders
-        # somewhere" list. --debug-root moved to the common list below
+        # somewhere" list. --debug-info moved to the common list below
         # (CodeRabbit review, PR #1146, finding #4): it is a real,
         # still-supported flag that plain `dump --help` must show, not one
         # that only appears via --help-all.
@@ -309,7 +314,7 @@ _HELP_ALL_COMMANDS: list[
             "--build-info",
             "--output",
             "--verbose",
-            "--debug-root",
+            "--debug-info",
         ),
     ),
 ]

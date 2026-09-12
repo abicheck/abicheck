@@ -193,11 +193,11 @@ class TestStoredPairEarlyRejections:
         devel_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path), "--devel-pkg", f"new={devel_dir}"
+            "compare", str(old_path), str(new_path), "-H", f"new={devel_dir}"
         )
 
         assert code == 64
-        assert "--devel-pkg" in out
+        assert "--header new=" in out
 
     def test_bundle_facts_library_manifest_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)

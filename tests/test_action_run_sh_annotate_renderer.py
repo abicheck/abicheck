@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _REAL_ABICHECK = shutil.which("abicheck")
@@ -37,6 +37,7 @@ def _run_compare(
     stub_report: dict[str, Any] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run compare mode; *stub_report* becomes the fake abicheck's stdout."""
+    require_bash()
     old_json = tmp_path / "old.json"
     new_json = tmp_path / "new.json"
     old_json.write_text("{}", encoding="utf-8")
@@ -374,6 +375,7 @@ class TestAnnotateRendererReadsThePersistedReport:
         user's own ``--write`` destination held a perfectly good report.
         ``_extra_args_write_json_path`` now recovers that path directly.
         """
+        require_bash()
         old_json = tmp_path / "old.json"
         new_json = tmp_path / "new.json"
         old_json.write_text("{}", encoding="utf-8")
@@ -450,6 +452,7 @@ class TestAnnotateRendererReadsThePersistedReport:
         satisfy both at once: the stale content survives on disk,
         unmodified, and is never rendered as this run's annotations.
         """
+        require_bash()
         old_json = tmp_path / "old.json"
         new_json = tmp_path / "new.json"
         old_json.write_text("{}", encoding="utf-8")
@@ -513,6 +516,7 @@ class TestRealAbicheckAnnotationsReachTheActionLog:
     """
 
     def test_a_real_breaking_change_is_annotated(self, tmp_path: Path) -> None:
+        require_bash()
         from abicheck.model import AbiSnapshot, Function, Visibility
         from abicheck.serialization import snapshot_to_json
 
@@ -579,6 +583,7 @@ class TestAnnotateNotSupportedOnAuditOnlyShape:
     def test_annotate_on_audit_only_emits_a_not_supported_notice(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         new_json = tmp_path / "new.json"
         new_json.write_text("{}", encoding="utf-8")
 

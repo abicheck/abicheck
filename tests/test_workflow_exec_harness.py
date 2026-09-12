@@ -40,9 +40,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import _workflow_exec
 import pytest
 import yaml
-from _workflow_exec import REPO_ROOT, have_bash, make_workspace, run_step
+from _workflow_exec import (
+    REPO_ROOT,
+    _is_under_windows_system_dir,
+    bash_executable,
+    have_bash,
+    is_wsl_launcher_stub,
+    make_workspace,
+    require_bash,
+    run_step,
+    select_real_bash,
+)
 
 pytestmark = pytest.mark.skipif(not have_bash(), reason="bash not available")
 
@@ -248,3 +259,123 @@ def test_run_step_executes_under_an_awkward_parent_directory(
     )
     assert result.returncode == 0, result.stderr
     assert result.outputs["size"] == "256"
+
+
+class TestBashResolutionNeverFallsBackToWhatItRejected:
+    """Bug class: a resolver that rejects a candidate must not then return it.
+
+    `bash_executable()` rejects Windows' WSL launcher stub -- and an earlier
+    revision then returned the bare string `"bash"` anyway, which every direct
+    caller resolved straight back to the stub it had just rejected, while
+    `have_bash()` reported True because `is_wsl_launcher_stub("bash")` is
+    False for an unresolved name and `shutil.which("bash")` then found the
+    stub (Codex review, P2). The reject was decorative: nothing downstream
+    changed, so the migrated modules still failed instead of skipping.
+
+    Exercised through `select_real_bash`, the pure half of the decision,
+    against real directories built under `tmp_path`. Deliberately not by
+    monkeypatching `os.name` to "nt": `pathlib.Path()` picks its flavour from
+    exactly that, so the patch makes every `Path(...)` in the function under
+    test raise instead of running -- the test would be exercising the patch.
+    """
+
+    @staticmethod
+    def _layout(tmp_path: Path, *, stub: bool, real: bool) -> tuple[str, list[str]]:
+        """A fake `%SystemRoot%` plus the bash candidates PATH would yield."""
+        system_root = tmp_path / "Windows"
+        system32 = system_root / "System32"
+        system32.mkdir(parents=True)
+        git_bin = tmp_path / "Git" / "bin"
+        git_bin.mkdir(parents=True)
+        candidates = []
+        if stub:
+            (system32 / "bash.exe").write_text("stub", encoding="utf-8")
+            candidates.append(str(system32 / "bash.exe"))
+        if real:
+            (git_bin / "bash.exe").write_text("real", encoding="utf-8")
+            candidates.append(str(git_bin / "bash.exe"))
+        return str(system_root), candidates
+
+    def test_a_stub_only_machine_resolves_to_nothing(self, tmp_path: Path) -> None:
+        """The half that made whole modules fail instead of skip: the answer
+        must be an explicit "none", never the stub under another name."""
+        root, candidates = self._layout(tmp_path, stub=True, real=False)
+        assert select_real_bash(candidates, system_root=root) is None
+
+    def test_a_real_bash_after_the_stub_is_still_found(self, tmp_path: Path) -> None:
+        """`shutil.which` answers with the first match only, so rejecting it
+        used to end the search rather than continue past it."""
+        root, candidates = self._layout(tmp_path, stub=True, real=True)
+        chosen = select_real_bash(candidates, system_root=root)
+        assert chosen is not None and chosen.endswith(
+            "Git/bin/bash.exe".replace("/", os.sep)
+        )
+
+    def test_a_real_bash_before_the_stub_is_found_too(self, tmp_path: Path) -> None:
+        """Order-independence, so the case above cannot pass by accident of
+        the order the fixture happens to build."""
+        root, candidates = self._layout(tmp_path, stub=True, real=True)
+        chosen = select_real_bash(list(reversed(candidates)), system_root=root)
+        assert chosen is not None
+        assert not _is_under_windows_system_dir(chosen, root)
+
+    def test_no_candidates_at_all_resolve_to_nothing(self, tmp_path: Path) -> None:
+        root, _ = self._layout(tmp_path, stub=False, real=False)
+        assert select_real_bash([], system_root=root) is None
+
+    @pytest.mark.parametrize("sub", ["System32", "SysWOW64", "Sysnative"])
+    def test_every_system_directory_alias_is_recognized(
+        self, tmp_path: Path, sub: str
+    ) -> None:
+        """All three spellings of the same launcher, not just the one the
+        report named."""
+        system_root = tmp_path / "Windows"
+        directory = system_root / sub
+        directory.mkdir(parents=True)
+        stub = directory / "bash.exe"
+        stub.write_text("stub", encoding="utf-8")
+        assert _is_under_windows_system_dir(str(stub), str(system_root)) is True
+        assert select_real_bash([str(stub)], system_root=str(system_root)) is None
+
+    def test_a_real_bash_is_never_mistaken_for_the_stub(self, tmp_path: Path) -> None:
+        """The other direction, so a rule that rejected everything -- which
+        would also make `have_bash()` always False -- fails here."""
+        root, candidates = self._layout(tmp_path, stub=False, real=True)
+        assert _is_under_windows_system_dir(candidates[0], root) is False
+        assert select_real_bash(candidates, system_root=root) == candidates[0]
+
+    def test_the_two_public_functions_agree_on_this_machine(self) -> None:
+        """The invariant the defect broke, on whatever platform runs this:
+        `have_bash()` is true exactly when what `bash_executable()` returns is
+        a real bash. Their disagreement was the whole finding."""
+        require_bash()
+        assert have_bash() is (not is_wsl_launcher_stub(bash_executable()))
+
+
+class TestRequireBashSkipsRatherThanRunsTheStub:
+    """`bash_executable()` still returns a `str` on a machine with no bash --
+    every call site hands it straight to `subprocess` -- so a caller that
+    shells out has to ask `have_bash()` and skip. Without that, the resolver
+    can be perfectly correct and the calling module still fails against the
+    WSL launcher's own error text (Codex review, P2: the migrated modules had
+    the resolver fixed under them but no guard of their own).
+    """
+
+    def test_it_skips_when_no_real_bash_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_workflow_exec, "have_bash", lambda: False)
+        with pytest.raises(BaseException) as excinfo:
+            require_bash()
+        # `pytest.skip` raises `Skipped`, which is a BaseException subclass --
+        # caught by type name so this does not depend on the private import
+        # path of pytest's outcome classes.
+        assert type(excinfo.value).__name__ == "Skipped"
+
+    def test_it_does_not_skip_when_a_real_bash_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other direction, so a guard that always skipped -- which would
+        silently empty every shell-based module -- fails here."""
+        monkeypatch.setattr(_workflow_exec, "have_bash", lambda: True)
+        require_bash()

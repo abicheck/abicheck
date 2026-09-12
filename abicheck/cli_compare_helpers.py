@@ -1593,8 +1593,9 @@ def run_compare(
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
     # script) drives format detection, metadata, and dependency analysis.
-    # Through the ``cli`` module so a monkeypatch on ``abicheck.cli._normalize_binary_input``
-    # is honoured (pre-split resolution semantics); the name is re-exported there.
+    # ``cli_resolve`` owns this name; patch it there. (The comment here used to
+    # claim the call went through ``abicheck.cli`` for monkeypatch reasons -- it
+    # did not, and that alias table no longer exists.)
     old_input, old_fmt = cli_resolve._normalize_binary_input(old_input)
     new_input, new_fmt = cli_resolve._normalize_binary_input(new_input)
     # Same linker-script resolution for the paths --used-by/--required-symbol

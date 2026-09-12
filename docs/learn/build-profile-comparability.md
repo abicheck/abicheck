@@ -257,7 +257,7 @@ each side was built under, so the build-configuration findings are
 reported as such rather than mistaken for library changes:
 
 ```bash
-abicheck compare old.so new.so --probe-matrix old=probes-old.yaml --probe-matrix new=probes-new.yaml
+abicheck compare old.so new.so --build-info old=probes-old.json --build-info new=probes-new.json
 ```
 
 Producing the matrix is owned by the [Probe Harness](../use/probe-harness.md).

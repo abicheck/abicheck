@@ -43,12 +43,22 @@ from __future__ import annotations
 import http.client
 import logging
 import os
-import re
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlparse
+
+# Re-exported: the artifact value and the build-id primitives live in a leaf
+# both this module and `extract.detached_debug` depend on, so plan Phase 7n's
+# named-artifact resolver could join this chain without the two importing
+# each other (see that module's docstring). Every existing
+# `from abicheck.debug_resolver import DebugArtifact` call site is unchanged.
+from .extract.debug_artifact import (
+    _BUILD_ID_RE as _BUILD_ID_RE,
+    DebugArtifact as DebugArtifact,
+    _is_valid_build_id as _is_valid_build_id,
+    extract_build_id as extract_build_id,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -58,57 +68,8 @@ _DEFAULT_DEBUG_ROOTS = [
     Path("/usr/lib/debug/usr"),
 ]
 
-# Strict hex pattern for build-id validation
-_BUILD_ID_RE = re.compile(r"^[0-9a-f]+$")
-
 # Maximum size for debuginfod downloads (512 MiB)
 _MAX_DEBUGINFOD_SIZE = 512 * 1024 * 1024
-
-
-@dataclass
-class DebugArtifact:
-    """Resolved debug artifact location (ADR-021a)."""
-
-    dwarf_path: Path | None = None
-    dwp_path: Path | None = None
-    dwo_dir: Path | None = None
-    pdb_path: Path | None = None
-    dsym_path: Path | None = None
-    source: str = ""
-
-    @property
-    def has_dwarf(self) -> bool:
-        return self.dwarf_path is not None
-
-    @property
-    def has_pdb(self) -> bool:
-        return self.pdb_path is not None
-
-    @property
-    def has_dsym(self) -> bool:
-        return self.dsym_path is not None
-
-    @property
-    def has_split_dwarf(self) -> bool:
-        return self.dwp_path is not None or self.dwo_dir is not None
-
-    @property
-    def description(self) -> str:
-        """Human-readable summary of what was found."""
-        parts: list[str] = []
-        if self.dwarf_path:
-            parts.append(f"DWARF from {self.dwarf_path}")
-        if self.dwp_path:
-            parts.append(f"DWP from {self.dwp_path}")
-        if self.dwo_dir:
-            parts.append(f"DWO files in {self.dwo_dir}")
-        if self.pdb_path:
-            parts.append(f"PDB from {self.pdb_path}")
-        if self.dsym_path:
-            parts.append(f"dSYM from {self.dsym_path}")
-        if not parts:
-            return "no debug info found"
-        return "; ".join(parts)
 
 
 class DebugResolverBackend(Protocol):
@@ -125,48 +86,6 @@ class DebugResolverBackend(Protocol):
         Returns a DebugArtifact if found, None otherwise.
         """
         ...
-
-
-def _is_valid_build_id(build_id: str | None) -> bool:
-    """Validate that a build-id is a strict lowercase hex string."""
-    return build_id is not None and bool(_BUILD_ID_RE.fullmatch(build_id))
-
-
-# ---------------------------------------------------------------------------
-# Build-id extraction
-# ---------------------------------------------------------------------------
-
-def extract_build_id(binary_path: Path) -> str | None:
-    """Extract the build-id from an ELF binary's .note.gnu.build-id section.
-
-    Returns the build-id as a lowercase hex string, or None if not found.
-    """
-    try:
-        from elftools.common.exceptions import ELFError
-        from elftools.elf.elffile import ELFFile
-        from elftools.elf.sections import NoteSection
-    except ImportError:
-        _logger.debug("pyelftools not available; cannot extract build-id")
-        return None
-
-    try:
-        with open(binary_path, "rb") as f:
-            elf = ELFFile(f)  # type: ignore[no-untyped-call]
-            for section in elf.iter_sections():  # type: ignore[no-untyped-call]
-                if not isinstance(section, NoteSection):
-                    continue
-                for note in section.iter_notes():  # type: ignore[no-untyped-call]
-                    if note["n_type"] == "NT_GNU_BUILD_ID":
-                        desc = note["n_desc"]
-                        if isinstance(desc, str):
-                            return desc.lower()
-                        if isinstance(desc, bytes):
-                            return desc.hex().lower()
-                        return str(desc).lower()
-    except (OSError, ValueError, KeyError, ELFError) as exc:
-        _logger.debug("Failed to extract build-id from %s: %s", binary_path, exc)
-
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -684,7 +603,17 @@ def resolve_debug_info(
     if build_id is None:
         build_id = extract_build_id(binary_path)
 
-    resolvers: list[DebugResolverBackend] = list(_DEFAULT_RESOLVERS)
+    # An artifact the caller named *directly* outranks every search strategy
+    # below -- that is what naming it means (plan Phase 7n). Imported here,
+    # not at module scope: `extract.detached_debug` imports this module's own
+    # `DebugArtifact`/build-id primitives, so a top-level import either way
+    # would be a cycle.
+    from .extract.detached_debug import DetachedDebugFileResolver
+
+    resolvers: list[DebugResolverBackend] = [
+        DetachedDebugFileResolver(),
+        *_DEFAULT_RESOLVERS,
+    ]
     if enable_debuginfod:
         resolvers.append(
             DebuginfodResolver(

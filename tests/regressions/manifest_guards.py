@@ -205,4 +205,119 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="guard.platform_convention_without_a_gate",
+        invariant=(
+            "A platform-portability rule that every call site must follow "
+            "-- resolve the interpreter, quote the path, state the "
+            "encoding -- is enforced by a repository-wide scan for the "
+            "banned *shape*, not by a shared helper other modules are "
+            "expected to remember to import. A convention with no gate "
+            "regresses on the next module written by someone who did not "
+            "read the helper, and it regresses on the lane that is not the "
+            "author's own, so the failure surfaces in CI rather than "
+            "locally. Two corollaries the bash instance made concrete. "
+            "First, a clone is not merely untidy: it freezes the rule at "
+            "the moment it was copied, so a later fix to the shared helper "
+            "reaches every importer and none of the copies -- the twenty-"
+            "nine clones here all predated the resolver learning to reject "
+            "the stub, and each kept handing it to subprocess afterwards. "
+            "Second, the gate must cover the whole rule and not its most "
+            "visible half: banning the literal while allowing a resolved "
+            "call with no availability guard moves the defect rather than "
+            "removing it, since the resolver's own documented fallback is "
+            "the banned value. The scan must be structural (an AST walk "
+            "that distinguishes a real call site from the same token in "
+            "prose, a comment, or an availability probe) and must itself "
+            "be shown non-vacuous: one assertion per rule that it fires on "
+            "the banned shape, and one that each helper it points at "
+            "really does something other than the banned value."
+        ),
+        # The Windows unit lane: `bash_executable()` had existed for many
+        # PRs and was the documented convention, yet twenty-nine modules
+        # carried private `_bash_executable` clones of it and several more
+        # spelled a bare `["bash", ...]` argv, which resolves to the WSL
+        # launcher stub on windows-latest -- it prints UTF-16LE text and
+        # exits 1, so the whole calling module fails at once with no
+        # bash-level diagnostic. Two modules
+        # (`test_extra_args_is_value_option_completeness`,
+        # `test_action_cli_surface_generated`) were red on main for exactly
+        # this, having been written after the convention existed; #1250
+        # repaired those two by hand and hardened the resolver, which is
+        # what made the twenty-nine unrepaired copies of the old rule the
+        # remaining exposure and the gate the actual fix.
+        fixed_by=(1250, 1255),
+        seed_tests=("tests/test_subprocess_bash_is_resolved.py",),
+        # A test-suite portability rule: it reaches no shipped CLI or
+        # Python-API surface, so this stays empty per the field's rule.
+        public_surfaces=(),
+        axes={
+            "call_shape": (
+                "literal_argv",
+                "private_clone",
+                "resolved_unguarded",
+                "resolved_guarded",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Stated and swept for one convention (bash "
+                    "resolution) over one tree (`tests/`). The sibling "
+                    "conventions with the same shape -- the encoding rule "
+                    "`test_repo_text_reads_state_their_encoding.py` "
+                    "already gates, and the POSIX-shell `pytestmark` an "
+                    "`action/run.sh` harness consumer must apply, which "
+                    "is still a convention with no scan -- are each "
+                    "guarded (or not) on their own. One shared "
+                    "banned-shape harness parameterized by convention is "
+                    "the real remaining work, not a third hand-written "
+                    "scan."
+                ),
+                reference="PR #1255",
+            ),
+        ),
+    ),
+    BugClass(
+        id="guard.absent_capability_vs_real_failure",
+        invariant=(
+            "A test-support helper may report 'skipped' only for a capability "
+            "that is genuinely absent (no platform, no tool, an explicitly "
+            "named optional feature). A tool that is present, was configured, "
+            "was actually run, and then failed is a test FAILURE with the "
+            "command, input and stderr attached -- for every nonzero exit "
+            "status, signal-kill included, and whatever the stderr's encoding. "
+            "The rule generalizes past compilers: the failure mode is any "
+            "helper that widens 'this environment cannot do X' to cover "
+            "'doing X went wrong', because the silent-skip guard "
+            "(ABICHECK_MIN_EXECUTED) cannot see it -- the sibling fixtures "
+            "that still build satisfy the floor while the broken ones vanish."
+        ),
+        fixed_by=(1252,),
+        seed_tests=("tests/test_compile_failure_contract.py",),
+        public_surfaces=(),
+        axes={
+            "exit_status": ("zero", "nonzero", "signal"),
+            "optional_feature": ("named", "absent"),
+            "stderr": ("empty", "large", "non_utf8"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only `tests/test_cross_platform_integration.py`'s two "
+                    "fixture-building helpers are migrated to the contract. "
+                    "A repo-wide grep finds roughly thirty other "
+                    "`if result.returncode != 0: pytest.skip(...)` sites "
+                    "across the integration/parity suites; each needs its own "
+                    "reading (several are genuine optional-feature probes -- "
+                    "a -gdwarf-5 or BTF-capable toolchain -- where a skip is "
+                    "the right answer), so they are not converted "
+                    "mechanically. No structural gate rejects a new site yet; "
+                    "the structural half of the seed test pins only the two "
+                    "migrated helpers."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
 )

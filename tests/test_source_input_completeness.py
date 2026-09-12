@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import itertools
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +73,53 @@ from abicheck.workflows.pattern_preprocessor_scan import (
     _macro_divergence_sufficiency,
     compute_pattern_preprocessor_scan,
 )
+
+
+def _chmod_can_deny_directory_read() -> bool:
+    """Can ``chmod(0o000)`` actually make a directory unreadable here?
+
+    Asked of the filesystem rather than assumed from the platform. The
+    premise fails for at least three independent reasons -- running as root
+    (which bypasses the permission check entirely), Windows (where
+    ``os.chmod`` only toggles the read-only flag, and not for directories at
+    all, so the "locked" directory stays fully listable and the scan reads
+    the header it was supposed to be denied), and a mount or filesystem that
+    does not enforce Unix modes. Naming the platforms would have to be
+    revisited for each new one; asking directly is true wherever it is true.
+
+    Probes the filesystem only, never the code under test: where chmod does
+    deny, the test runs exactly as before, so this cannot quietly turn a real
+    regression into a skip on an ordinary non-root Linux runner.
+    """
+    try:
+        probe = Path(tempfile.mkdtemp())
+    except OSError:
+        return False
+    locked = probe / "locked"
+    try:
+        locked.mkdir()
+        (locked / "probe.hpp").write_text("int probe(void);\n", encoding="utf-8")
+        locked.chmod(0o000)
+        try:
+            list(locked.iterdir())
+        except PermissionError:
+            return True
+        return False
+    except OSError:
+        # Any failure to even set the probe up is itself "cannot demonstrate a
+        # denial here". This runs while `pytest.mark.skipif` is evaluated --
+        # at *collection* -- so an escaping OSError fails the whole module's
+        # collection instead of skipping one test, which is the same
+        # module-wide-failure shape this probe exists to avoid (CodeRabbit
+        # review). `Path.chmod` is the likeliest raiser, and on Windows it
+        # can reject a directory outright.
+        return False
+    finally:
+        try:
+            locked.chmod(0o755)
+        except OSError:
+            pass
+        shutil.rmtree(probe, ignore_errors=True)
 
 
 class TestExpectedInputSetReplacesDiscoveryDerivedCompleteness:
@@ -328,8 +377,11 @@ class TestDirectoryTraversalFailureIsAGap:
         assert folded.coverage[CHECK_PATTERN_ESCALATION]["old"].established is False
 
     @pytest.mark.skipif(
-        hasattr(os, "geteuid") and os.geteuid() == 0,
-        reason="root bypasses directory permissions, so chmod 000 denies nothing",
+        not _chmod_can_deny_directory_read(),
+        reason=(
+            "chmod cannot deny a directory read here, so this test's own "
+            "premise (a real EACCES from the kernel) does not hold"
+        ),
     )
     def test_real_unreadable_directory_is_recorded(self, tmp_path: Path) -> None:
         """The same invariant through a real `EACCES` from the kernel, not an
@@ -584,7 +636,7 @@ class TestAnUnexaminableCandidateIsAGapNotAFilteredFile:
             real_open = builtins.open
 
             def _open(file: Any, *a: Any, **kw: Any) -> Any:
-                if str(file).endswith("Core"):
+                if Path(file).name == "Core":
                     raise PermissionError(13, "Permission denied")
                 return real_open(file, *a, **kw)
 
@@ -631,7 +683,7 @@ class TestAnUnexaminableCandidateIsAGapNotAFilteredFile:
         real_open = builtins.open
 
         def _open(file: Any, *a: Any, **kw: Any) -> Any:
-            if str(file).endswith("/Core"):
+            if Path(file).name == "Core":
                 raise PermissionError(13, "Permission denied")
             return real_open(file, *a, **kw)
 

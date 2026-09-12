@@ -3673,7 +3673,7 @@ class TestRenderOutput:
         the library default), so its own markdown output stays
         unconditional even though `render_output`'s own default flipped
         back to `False` in this round's fix."""
-        from abicheck.cli import _render_output
+        from abicheck.frontends.cli.runtime import _render_output
 
         cli_markdown = _render_output("markdown", diff_result, snap)
         default_markdown = render_output("markdown", diff_result, snap)
@@ -4894,7 +4894,7 @@ class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
 
     def test_cli_pe_forwards_headers(self, tmp_path):
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4905,7 +4905,7 @@ class TestCliNativeBinaryHeaderWiring:
         assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
 
     def test_cli_macho_forwards_headers(self, tmp_path):
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
@@ -4917,7 +4917,7 @@ class TestCliNativeBinaryHeaderWiring:
     def test_cli_pe_wraps_abicheck_error_as_click(self, tmp_path):
         import click
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4928,7 +4928,7 @@ class TestCliNativeBinaryHeaderWiring:
     def test_cli_macho_wraps_abicheck_error_as_click(self, tmp_path):
         import click
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)

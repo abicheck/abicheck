@@ -131,7 +131,7 @@ class TestDumpUsesResolvedDebugArtifact:
         out = tmp_path / "with_debug_root.json"
         result = CliRunner().invoke(
             main,
-            ["dump", str(so_path), "--debug-root", str(debug_root), "-o", str(out)],
+            ["dump", str(so_path), "--debug-info", str(debug_root), "-o", str(out)],
         )
         assert result.exit_code == 0, result.output
         assert "Debug info:" in result.output
@@ -178,9 +178,9 @@ class TestCompareUsesResolvedDebugArtifacts:
                 "compare",
                 str(old_so),
                 str(new_so),
-                "--debug-root",
+                "--debug-info",
                 f"old={old_debug_root}",
-                "--debug-root",
+                "--debug-info",
                 f"new={new_debug_root}",
                 "-o",
                 f"json={out}",

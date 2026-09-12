@@ -40,9 +40,10 @@ from pathlib import Path
 
 import click
 
-from .cli import _setup_verbosity, emit_export_set, main
+from .cli import main
 from .cli_options import export_options, verbose_option
 from .frontends.cli.options.export import ExportSet
+from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .report.aggregate import render_aggregate_json, render_aggregate_text
 from .workflows.aggregate import (
     DEFAULT_REPORT_PREFIX,

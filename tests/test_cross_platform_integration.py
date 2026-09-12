@@ -43,8 +43,45 @@ skip_unless_windows = pytest.mark.skipif(
 )
 
 
+def _require_compile_success(
+    tool: str,
+    cmd: list[str],
+    src: str,
+    result: subprocess.CompletedProcess[bytes],
+    *,
+    optional_feature: str | None,
+) -> None:
+    """Turn a *configured* compiler's failure into a test failure, not a skip.
+
+    Three states are deliberately kept apart (see AGENTS.md, "Decision-making
+    principles" — a generic helper must not launder a real error into an
+    absence of capability):
+
+    * the platform or the compiler is missing  -> the module-level
+      ``skip_unless_*`` markers already skip, before any process is spawned;
+    * a *named* optional compiler feature is being probed -> the individual
+      test passes ``optional_feature=...`` and accepts a skip;
+    * the configured compiler ran and rejected the build -> **failure**, with
+      the full command, source and stderr, because that is a broken fixture or
+      a broken toolchain configuration and it must not be green.
+    """
+    if result.returncode == 0:
+        return
+    stderr = result.stderr.decode(errors="replace")
+    detail = (
+        f"{tool} exited {result.returncode}\n"
+        f"command: {' '.join(cmd)}\n"
+        f"source:\n{src}\n"
+        f"stderr:\n{stderr}"
+    )
+    if optional_feature is not None:
+        pytest.skip(f"optional compiler feature {optional_feature!r} unavailable: {detail}")
+    pytest.fail(f"{tool} failed to build the test fixture:\n{detail}")
+
+
 def _compile_dylib(src: str, name: str, tmp: Path,
-                   extra_flags: list[str] | None = None) -> Path:
+                   extra_flags: list[str] | None = None,
+                   optional_feature: str | None = None) -> Path:
     """Compile C source to a macOS dynamic library (.dylib)."""
     out = tmp / name
     cmd = [
@@ -53,13 +90,13 @@ def _compile_dylib(src: str, name: str, tmp: Path,
         *(extra_flags or []),
     ]
     result = subprocess.run(cmd, input=src.encode(), capture_output=True)
-    if result.returncode != 0:
-        pytest.skip(f"clang failed: {result.stderr.decode()[:200]}")
+    _require_compile_success("clang", cmd, src, result, optional_feature=optional_feature)
     return out
 
 
 def _compile_dll(src: str, name: str, tmp: Path,
-                 extra_flags: list[str] | None = None) -> Path:
+                 extra_flags: list[str] | None = None,
+                 optional_feature: str | None = None) -> Path:
     """Compile C source to a Windows DLL using MinGW gcc."""
     out = tmp / name
     cmd = [
@@ -68,8 +105,7 @@ def _compile_dll(src: str, name: str, tmp: Path,
         *(extra_flags or []),
     ]
     result = subprocess.run(cmd, input=src.encode(), capture_output=True)
-    if result.returncode != 0:
-        pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
+    _require_compile_success("gcc", cmd, src, result, optional_feature=optional_feature)
     return out
 
 

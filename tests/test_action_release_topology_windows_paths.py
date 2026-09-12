@@ -22,12 +22,12 @@ Split out of ``test_action_release_topology_config.py`` (a `debt.yaml`
 `file-size` gate's test-module line cap -- this class and its two
 dedicated helpers (``_base_source_absolutize_source``, ``_bash_pwd``) are
 fully self-contained modulo the small set of bash-harness primitives
-(``RUN_SH``, ``_path_qualified_helper_source``, ``_bash_executable``,
+(``RUN_SH``, ``_path_qualified_helper_source``, ``bash_executable``,
 ``_run_bash_script``) this file re-extracts verbatim rather than importing
 from its sibling, mirroring every other bash-harness test module in this
 directory's own established convention of not cross-importing test code
 (``test_action_compile_context_parity.py`` duplicates the identical
-``_bash_executable``/``_run_bash_script`` pair rather than importing them).
+``bash_executable``/``_run_bash_script`` pair rather than importing them).
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -84,19 +86,6 @@ def _base_source_absolutize_source() -> str:
     return text[start:end]
 
 
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _bash_pwd(cwd: Path) -> str:
     """The real ``$PWD`` bash itself reports for *cwd* -- not ``str(cwd)``
     (mirrors ``test_action_run_sh_severity_summary.py::TestReportPathAnchoring
@@ -107,8 +96,9 @@ def _bash_pwd(cwd: Path) -> str:
     would compare two different path *representations* of the same
     directory, not two different directories. A no-op on POSIX hosts, where
     both forms already coincide)."""
+    require_bash()
     result = subprocess.run(
-        [_bash_executable(), "-c", "printf '%s' \"$PWD\""],
+        [bash_executable(), "-c", "printf '%s' \"$PWD\""],
         capture_output=True,
         text=True,
         cwd=cwd,
@@ -127,6 +117,7 @@ def _run_bash_script(
     """Run *script* via a real bash from a temp file (Windows argv-quoting
     safety, matching test_action_compile_context_parity.py's own
     _run_bash_script -- see that module's docstring for the exact reason)."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
@@ -135,7 +126,7 @@ def _run_bash_script(
     env = {**os.environ, **(env_extra or {})}
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             env=env,

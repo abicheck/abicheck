@@ -12,7 +12,8 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.binary_utils import detect_archive, detect_binary_format
-from abicheck.cli import _resolve_input, main
+from abicheck.cli import main
+from abicheck.cli_resolve import _resolve_input
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
@@ -213,7 +214,7 @@ class TestLinkerScriptInput:
     follow it to the real shared library instead of failing."""
 
     def test_follows_input_directive(self, tmp_path):
-        from abicheck.cli import _resolve_linker_script
+        from abicheck.cli_resolve import _resolve_linker_script
         target = _write_fake_elf(tmp_path / "libfoo.so.1")
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
@@ -222,7 +223,7 @@ class TestLinkerScriptInput:
         assert resolved == target
 
     def test_follows_group_with_comment_and_as_needed(self, tmp_path):
-        from abicheck.cli import _resolve_linker_script
+        from abicheck.cli_resolve import _resolve_linker_script
         target = _write_fake_elf(tmp_path / "libbar.so.6")
         script = tmp_path / "libbar.so"
         script.write_text(
@@ -234,7 +235,7 @@ class TestLinkerScriptInput:
         assert resolved == target
 
     def test_follows_absolute_path_target(self, tmp_path):
-        from abicheck.cli import _resolve_linker_script
+        from abicheck.cli_resolve import _resolve_linker_script
         target = _write_fake_elf(tmp_path / "libabs.so.2")
         script = tmp_path / "libabs.so"
         script.write_text(f"INPUT({target})\n", encoding="utf-8")
@@ -243,7 +244,7 @@ class TestLinkerScriptInput:
         assert resolved == target
 
     def test_plain_text_is_not_a_linker_script(self, tmp_path):
-        from abicheck.cli import _resolve_linker_script
+        from abicheck.cli_resolve import _resolve_linker_script
         p = tmp_path / "notes.txt"
         p.write_text("this is just text, not a script", encoding="utf-8")
         resolved, is_ld = _resolve_linker_script(p)
@@ -251,7 +252,7 @@ class TestLinkerScriptInput:
         assert resolved is None
 
     def test_maybe_follow_returns_original_for_non_script(self, tmp_path):
-        from abicheck.cli import _maybe_follow_linker_script
+        from abicheck.cli_resolve import _maybe_follow_linker_script
         p = _write_fake_elf(tmp_path / "real.so.1")
         assert _maybe_follow_linker_script(p) == p
 
@@ -277,7 +278,7 @@ class TestLinkerScriptInput:
     def test_normalize_binary_input_follows_script_and_reports_elf(self, tmp_path):
         # Resolving at the caller is what lets downstream metadata/dependency
         # analysis use the real DSO instead of the text script.
-        from abicheck.cli import _normalize_binary_input
+        from abicheck.cli_resolve import _normalize_binary_input
         _write_fake_elf(tmp_path / "libn.so.1")
         script = tmp_path / "libn.so"
         script.write_text("INPUT(libn.so.1)\n", encoding="utf-8")
@@ -286,12 +287,12 @@ class TestLinkerScriptInput:
         assert fmt == "elf"
 
     def test_normalize_binary_input_passthrough_for_elf(self, tmp_path):
-        from abicheck.cli import _normalize_binary_input
+        from abicheck.cli_resolve import _normalize_binary_input
         p = _write_fake_elf(tmp_path / "plain.so.1")
         assert _normalize_binary_input(p) == (p, "elf")
 
     def test_normalize_binary_input_unknown_text(self, tmp_path):
-        from abicheck.cli import _normalize_binary_input
+        from abicheck.cli_resolve import _normalize_binary_input
         p = tmp_path / "notes.txt"
         p.write_text("just prose", encoding="utf-8")
         assert _normalize_binary_input(p) == (p, None)

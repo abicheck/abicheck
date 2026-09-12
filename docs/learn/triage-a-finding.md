@@ -43,7 +43,7 @@ option is repeatable and one token scopes one side:
 
 ```bash
 abicheck compare old/libfoo.so new/libfoo.so -H include/ \
-  --debug-root old=old/debug --debug-root new=new/debug
+  --debug-info old=old/debug --debug-info new=new/debug
 ```
 
 A `.abicheck.yml` `debug.debuginfod: true` fetches by build-id when a server

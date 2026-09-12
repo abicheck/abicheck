@@ -51,6 +51,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
+from _workflow_exec import bash_executable, require_bash  # noqa: E402
 
 RUN_SH = _REPO / "action" / "run.sh"
 _REAL_ABICHECK = shutil.which("abicheck")
@@ -81,6 +82,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
     """Run the real ``action/run.sh`` (real ``abicheck`` on ``PATH``, no
     stub) and return its ``GITHUB_OUTPUT`` key/value pairs plus the raw
     process result."""
+    require_bash()
     github_output = tmp_path / "github_output"
     github_output.write_text("", encoding="utf-8")
     github_step_summary = tmp_path / "github_step_summary"
@@ -100,7 +102,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
         **env_extra,
     }
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

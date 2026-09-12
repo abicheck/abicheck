@@ -273,7 +273,7 @@ resolvable at runtime via a `debuginfod` server; macOS ships the equivalent as a
     itself is unstripped, or on directory/package inputs you feed a
     package-level split-debug pair with `compare`'s side-aware
     `--debug-info old=<pkg> --debug-info new=<pkg>` (resolved by build-id).
-    `dump`/`compare`'s `--debug-root` (or a `.abicheck.yml` `debug.debuginfod:
+    `dump`/`compare`'s `--debug-info` (or a `.abicheck.yml` `debug.debuginfod:
     true`) — for a bare stripped `.so` plus a separate `.debug` file, not a
     package — currently locate that debug file and print where they found it,
     but do not yet feed it into the DWARF parse — see [Stripped Production

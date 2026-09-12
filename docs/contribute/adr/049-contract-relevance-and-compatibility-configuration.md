@@ -35,8 +35,11 @@ given**: `abicheck/contract_pipeline.py`'s `ContractEvaluationStage` runs
 *before* `checker._compute_verdict_for`, so a finding labelled
 `PROVEN_OUT_OF_CONTRACT` is excluded from scoring rather than merely
 annotated after the fact — every call site that computes or recomputes a
-verdict (including the `--surface-metrics`/`--pattern-verdicts` follow-on
-passes) routes through the same stage. `aggregate` already folds the
+verdict routes through the same stage, including the surface-metric and
+pattern-verdict follow-on passes that append findings after the first one
+(ADR-068 D4/Phase 5 later removed the `--surface-metrics`/`--pattern-verdicts`
+flags and made both computations unconditional; the passes themselves, and
+their need to re-classify, are unchanged). `aggregate` already folds the
 coverage ledger into its own exit axis
 (`workflows/aggregate/fold.py`'s `contract_coverage_exit`). **Still
 open:** flipping `--contract` (a resolved contract mode) on by default for
@@ -44,19 +47,35 @@ every run — see `docs/contribute/plans/public-contract-default.md`'s
 "Work breakdown" for per-phase detail. Without `--contract`,
 `contract_evaluation` stays `False` and `compare()`'s behavior is
 unchanged, same as before Phase 7.
-**Verified:** main@3930cfce on 2026-09-09
+**Verified:** main@21428eff on 2026-09-12
 
-Re-read against the seven commits `check_ai_readiness.py`'s
-`adr-status-sync` flagged since the prior receipt (a24d6745, 29d8d8a8,
-cb2ba6fe, 97766656, 578c2264, 280f5d3b, d101661d): all are additive work
-layered on the Phases 0-7 machinery this Status paragraph already describes
-(a versioning-policy model, ADR-067's disposition ledger extended past
-scalar `compare`, three new multi-source contract-conflict cases reusing
-`export_surface.ExportSurface`, CLI-flag consolidation) — none contradicts a
-claim above. The prior receipt's own sha (`12a5c927`) was itself the defect
-this entry fixes: it named a commit on the branch that added it, which is
-not reachable from `origin/main` after that branch merged — record the
-actual `origin/main` commit you verified against, never a branch-local one.
+Re-read against the code at that commit, claim by claim. Every module this
+paragraph names exists (`contract_relevance_types.py`, the five
+`compatibility_evaluation_*.py`, `finding_identity.py`,
+`contract_evaluation.py`, `export_surface.py`,
+`contract_evidence_collect.py`, `contract_context.py`,
+`contract_replay.py`, `cli_compare_receipt.py`,
+`contract_coverage_ledger.py`, `pack_application.py`,
+`contract_coverage_exit.py`, `contract_pipeline.py`); `mcp_compare_receipt.py`
+is gone, as claimed. Phase 2's wiring holds — `diff_filtering.py` resolves
+through `resolve_change_identity` and `diff_symbols.py` joins through
+`SymbolIdentityIndex`. The standalone `--contract-evaluation` switch is
+absent from the CLI and `cli_options.resolve_contract_evaluation` still
+resolves (re-exported from `frontends/cli/options/contract.py`, where the
+implementation now lives). `workflows/aggregate/fold.py` still exposes
+`contract_coverage_exit`. The "Still open" claim holds: `--contract` remains
+opt-in, and `compare --help` still documents the without-`--contract` case as
+unchanged. One drift was found and corrected in the paragraph above rather
+than certified: it named `--surface-metrics`/`--pattern-verdicts`, two flags
+ADR-068 D4/Phase 5 removed.
+
+**Recording the sha correctly is the recurring defect here — this is the
+third receipt and the first two both got it wrong.** `12a5c927` and then
+`3930cfce` each named a commit on the branch that added the receipt, which
+stops being reachable from `origin/main` once that branch merges, turning a
+required job permanently red on `main`. Record the `origin/main` commit whose
+tree you actually read, never a branch-local one; `git merge-base
+--is-ancestor <sha> origin/main` before committing is the whole check.
 **Decision maker:** napetrov
 
 ## Context

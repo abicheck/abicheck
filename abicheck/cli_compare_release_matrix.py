@@ -51,19 +51,6 @@ import click
 
 from .bundle import BundleDiffResult
 from .checker import Change, DiffResult
-
-# Several names imported below are no longer used by this module: release
-# input resolution moved to `workflows.release_inputs` (see the re-export
-# note further down). They stay imported because `cli_compare_release.py`
-# re-exports them *from here* and direct tests import them by those names --
-# deleting them would be an import break for no gain, so the blocks are
-# marked rather than trimmed.
-from .cli import (  # noqa: F401
-    _build_match_map,
-    _collect_release_inputs,
-    _safe_write_output,
-    _write_or_echo,
-)
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _debian_symbols_warning,
@@ -74,6 +61,14 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_headers,
     debian_symbols_release_conflict_lines as _debian_symbols_release_conflict_lines,
 )
+
+# Several names imported below are no longer used by this module: release
+# input resolution moved to `workflows.release_inputs` (see the re-export
+# note further down). They stay imported because `cli_compare_release.py`
+# re-exports them *from here* and direct tests import them by those names --
+# deleting them would be an import break for no gain, so the blocks are
+# marked rather than trimmed.
+from .cli_helpers_compare import _build_match_map, _collect_release_inputs  # noqa: F401
 from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
     _load_suppression_and_policy,
@@ -84,6 +79,7 @@ from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
 from .frontends.cli.release_variant_operand import (  # noqa: F401
     _resolve_release_package_side,
 )
+from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F401
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms

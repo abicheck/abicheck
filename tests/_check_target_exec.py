@@ -35,6 +35,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from _workflow_exec import bash_executable, require_bash
+
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "check-target"
 RUN_SH = ACTION_DIR / "run.sh"
 VALIDATE_SH = ACTION_DIR / "validate-inputs.sh"
@@ -54,26 +56,14 @@ _BASE_IDENTITY = {
 }
 
 
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run(
     script: Path, env_extra: dict[str, str], cwd: Path
 ) -> subprocess.CompletedProcess[str]:
+    require_bash()
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env = {**base_env, "ACTION_PATH": str(ACTION_DIR), **env_extra}
     return subprocess.run(
-        [_bash_executable(), str(script)],
+        [bash_executable(), str(script)],
         capture_output=True,
         text=True,
         env=env,

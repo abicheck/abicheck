@@ -528,9 +528,9 @@ def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
         n,
         "-o",
         "json=-",
-        "--probe-matrix",
+        "--build-info",
         "old=" + om,
-        "--probe-matrix",
+        "--build-info",
         "new=" + nm,
     )
     assert res.exit_code == 2  # API_BREAK from the build-config finding
@@ -836,9 +836,9 @@ def test_sc_cxx_std_floor(tmp_path: Path) -> None:
         n,
         "-o",
         "json=-",
-        "--probe-matrix",
+        "--build-info",
         "old=" + om,
-        "--probe-matrix",
+        "--build-info",
         "new=" + nm,
     )
     assert res.exit_code == 2

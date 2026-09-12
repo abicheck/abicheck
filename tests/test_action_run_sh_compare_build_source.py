@@ -36,6 +36,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from _workflow_exec import bash_executable, require_bash
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 
@@ -67,19 +69,6 @@ def _compile_overlay_from_cmd(cmd: str, tmp_path: Path) -> dict[str, Any]:
     return doc.get("compile", {})
 
 
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_compare_raw(
     env_extra: dict[str, str], tmp_path: Path
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
@@ -87,6 +76,7 @@ def _run_compare_raw(
     $PATH that records its own argv; returns the raw result plus the path
     the argv would have been captured to (may not exist if run.sh exited
     before ever invoking the stub)."""
+    require_bash()
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
@@ -136,7 +126,7 @@ def _run_compare_raw(
         **env_extra,
     }
     result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -560,6 +550,7 @@ def _run_baseline_compare_raw(
     result, the captured-argv path, and the captured-config path (mirrors
     ``_compile_overlay_from_cmd``'s own "snapshot the overlay file's
     content while run.sh is still running" rationale)."""
+    require_bash()
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
@@ -611,7 +602,7 @@ def _run_baseline_compare_raw(
     if env.get("INPUT_OLD_LIBRARY") == "":
         del env["INPUT_OLD_LIBRARY"]
     result = subprocess.run(
-        [_bash_executable(), str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,

@@ -44,9 +44,11 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from abicheck.cli import compare_cmd, dump_cmd, main
+from abicheck.cli import main
 from abicheck.cli_options import compile_context_options, sided_frontend_explicit
 from abicheck.dry_run_estimate import CompileContext
+from abicheck.frontends.cli.commands.compare import compare_cmd
+from abicheck.frontends.cli.commands.dump import dump_cmd
 from abicheck.model import AbiSnapshot
 
 #: The dest names the compile-context family contributes (dump↔scan parity).

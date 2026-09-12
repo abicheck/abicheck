@@ -30,7 +30,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.cli import compare_cmd, dump_cmd
+from abicheck.frontends.cli.commands.compare import compare_cmd
+from abicheck.frontends.cli.commands.dump import dump_cmd
 
 _DOCS = Path(__file__).resolve().parent.parent / "docs"
 _DOC_FILES = (

@@ -408,7 +408,7 @@ The number is a consequence of the model, not the goal.
 > itemized, per flag, every option standing between them and the targets —
 > see its own table in §6 Phase 7. Read that, not this, for where the
 > surface actually is: as of that slice `compare` was at **50** (from 78 at
-> the original audit, 56 at the start of the slice) and `dump` at **21**; live today, after Phase 6, **47** and **18** (Phase 7l)
+> the original audit, 56 at the start of the slice) and `dump` at **21**; live today, after Phase 7n, **44** and **18** (7l measured 47/18 before that merge)
 > (from 39 / 24). Both targets remain reachable, and every residual option
 > has a named owner and a named blocker; two of them are *deliberate keeps*
 > that the targets below predate.
@@ -1599,7 +1599,7 @@ can no longer grow unruled. **Counts after 7k: `compare` 50, `dump` 21**
 (unchanged from 7j). Both numbers are the *pre-Phase-6* surface: `scan`'s
 retirement took `--env-matrix`, `--require-complete-analysis` and
 `--build-target` with it, so the live, Click-introspected counts are
-**`compare` 47, `dump` 18** — see Phase 7l.
+**`compare` 44, `dump` 18** — 47/18 at Phase 7l, then 7n's evidence-role merge took three off `compare`.
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
@@ -1697,13 +1697,15 @@ mechanism* first and an option count second:
      `run.sh` injects nothing when the caller states exports — which also
      collapsed its three separate extra-args scanners (`--format`,
      `--write`, `-o`) into one.
-- **7n — evidence transports, one input per evidence *role*.**
-  `--debug-root` merges into `--debug-info` (a detached debug file, a
+- **7n — evidence transports, one input per evidence *role*. Done.**
+  `--debug-root` merged into `--debug-info` (a detached debug file, a
   directory of them, and a debug package are three transports of one
-  role); `--devel-pkg` merges into `-H` (a development package is a
-  carrier of header evidence); `--probe-matrix` merges into a typed
+  role); `--devel-pkg` merged into `-H` (a development package is a
+  carrier of header evidence); `--probe-matrix` merged into a typed
   `--build-info` (probe observations and compile context stay distinct
-  *internally* and may be supplied together). **Net −3.** The bar for
+  *internally* and may be supplied together). **Net −3 on `compare`**,
+  independent of 7m's own −4; the two landed separately and the count
+  table below states where `compare` sits with both applied. The bar for
   each is that the merged input keeps the schema, side ownership, and
   binary/debug identity validation it has today — accepting more filename
   extensions is not the deliverable. **Explicitly not merged:
@@ -1712,6 +1714,51 @@ mechanism* first and an option count second:
   together; an `--evidence` grammar there would trade a flag for a type
   vocabulary the user must learn and for harder ambiguity diagnosis. That
   boundary is the audit's own, and this plan endorses it.
+
+  **`dump` is 18 → 18, not 17** — this section's own arithmetic was
+  wrong and is corrected here rather than met by deleting an unrelated
+  flag. `dump` never had a `--debug-info`: the count assumed
+  `--debug-root` disappearing, without noticing that the role it carries
+  has to keep a spelling on that command. On `dump` this slice is
+  therefore a *rename* plus the detached-file transport, net zero. §4.5's
+  `dump` ≤16 target is unchanged and still needs the rulings named in
+  the table below, not this slice.
+
+  **Where the work landed, and the one thing worth not rediscovering.**
+  Routing is content-only: `workflows/evidence_transport.py` answers what
+  each operand *is* (a package extractor's own format contract, an ELF's
+  debug sections or PDB magic, a probe matrix's `schema`/required-key
+  contract), and `frontends/cli/options/evidence_roles.py` splits each
+  role's sided values back into the per-transport destinations the command
+  bodies already consume — nothing downstream of
+  `normalize_sided_options` learns that the flags merged. Two consequences
+  the slice forced:
+
+  1. **The pipeline had to become name-independent too**, which is bug
+     class `cli_surface.name_independent_dispatch_undone_downstream`
+     one layer below where #1242 found it. Every extractor in
+     `abicheck/package.py` detected its format from the *filename*
+     (`.rpm`, `.tar.gz`, `.whl`, `.conda`, with a magic-byte fallback only
+     for RPM/Deb), so a front end classifying a suffix-less debug package
+     correctly would still have hit "Unrecognized package format". All of
+     them now read magic bytes and container members; `is_package` is
+     defined as "some archive extractor claims it" rather than a second
+     suffix table beside them. The seed test drives the whole public
+     invocation under non-conventional names, and its evidence that the
+     package transport engaged is that the *extractor* got to speak — a
+     misclassified package falls through to another transport and the
+     comparison completes anyway, so "the run succeeded" proves nothing
+     (mutation-verified: the assertion that survives a name-keyed
+     `detect_extractor` is exactly the one that proves nothing).
+  2. **A detached debug file is now resolvable at all.** `--debug-root`
+     only ever searched *inside* a directory, so "a bare `.debug` file"
+     had no spelling: the closest thing was naming its parent directory
+     and hoping the path-mirror layout matched.
+     `extract/detached_debug.py` adds the missing transport, first in the
+     resolver chain (an artifact the caller named directly outranks what
+     the binary happens to carry), with build-id validation that refuses
+     a contradicting sidecar and accepts one that carries no build-id —
+     absent evidence never manufactures a mismatch.
 - **7o — `--view`'s internal grammar.** 7i/7k ruled `--view` a keep and
   never looked inside it. It now carries report mode, a
   severity/entity/action display filter with its own AND/OR rules across
@@ -1791,12 +1838,17 @@ mechanism* first and an option count second:
 **Adopted as re-rulings of existing entries** (`rulings.py` changes from
 `per_run_operand` to `deferred`, with the named blocker, when the slice
 above lands — not before, since a deferral needs a real prerequisite):
-`--debug-root`, `--devel-pkg`, `--probe-matrix` (7n). 7m's own four
-entries never needed the intermediate `deferred` state: the slice landed
-in one step, so `--format`, `--write`, `--output-dir` and
-`--max-findings-per-library` are simply *gone* from `rulings.py`
-(registered in `scripts/retired_surfaces.py` instead), and `--output`'s
-own ruling is rewritten around the new grammar.
+Neither 7m's four entries nor 7n's three needed the intermediate
+`deferred` state, and for the same reason: each slice landed in one step,
+so `--format`, `--write`, `--output-dir`, `--max-findings-per-library`
+(7m) and `--debug-root`, `--devel-pkg`, `--probe-matrix` (7n) are simply
+*gone* from `rulings.py` rather than re-ruled — the retired export
+spellings registered in `scripts/retired_surfaces.py` instead, and the
+three surviving evidence inputs (`--debug-info`, `--header`,
+`--build-info`) re-ruled to state the whole role each now carries, as
+`--output`'s own ruling is rewritten around the new export grammar. A
+deferral would have been the wrong record for either: there is no blocker
+left to name.
 
 **Declined, with the reason recorded** — each was already measured or
 already decided, and the audit did not have the measurement:
@@ -1875,7 +1927,9 @@ simplification, and does not satisfy 7m–7r.
 
 **Counts if 7m–7r land:** `compare` 47 → **40** (7m −4, 7n −3), which is
 §4.5's target reached without touching the five `deferred` entries;
-`dump` 18 → **17** (7n's `--debug-root` merge), with `--build-target`
+`dump` stays **18** (7n's `--debug-root` merge is a rename there, not a
+removal — see that slice for the corrected arithmetic), with
+`--build-target`
 already gone with `scan` and §4.5's ≤16 target reachable only through one
 further ruling, not through this audit.
 
@@ -1889,8 +1943,8 @@ listed beside it so the gap is legible rather than averaged away:
 
 | Command | Today | After 7m–7r | Audit's end state | The gap, named |
 |---|---|---|---|---|
-| `compare` | 43 (was 47; 7m landed) | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
-| `dump` | 18 | **17** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
+| `compare` | 41 (was 47; 7m and 7n both landed) | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
+| `dump` | 19 | **17** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
 | `aggregate` | 5 (7m landed) | **4** | 4 | — (7q + 7m's shared export) |
 | `deps tree` | 6 (7m landed) | **6** | 6 | — (7m) |
 | `deps compare` | 7 (7m landed) | **7** | 7 | — (7m) |
@@ -1899,12 +1953,11 @@ listed beside it so the gap is legible rather than averaged away:
 | `project validate` | 3 (7m landed) | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
 | `project validate-build` | 3 | **0** | folded | **done (7p)** |
 | `project validate-use-cases` | 3 | **0** | folded | **done (7p)** |
-| **Native total** | **93** (109 before 7p/7m) | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** |
-| `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
+| **Native total** | **92** (109 before 7p/7m/7n) | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** || `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
 
 Read the last column as this phase's actual position: **on six of the ten
 native commands the audit's end state and ours are identical**, and the
-entire 87-vs-68 difference is the contract/capture-config question this
+entire 88-vs-68 difference is the contract/capture-config question this
 plan has already gated (Phase 9, G42, P5) or ruled against with a
 measurement. There is no third, unexamined bucket. `--format`/`-o`
 converging on one export request is what moves every command except

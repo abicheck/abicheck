@@ -1019,6 +1019,19 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_cli_project_validate_dispatch.py",
             "tests/test_build_output.py",
+            # The second surface to route on content: plan Phase 7n's one
+            # input per evidence role (`--debug-info`, `-H/--header`,
+            # `--build-info`). Its own escape would have been one layer
+            # further down than #1242's -- `package.detect_extractor`
+            # answering `None` for a real package under a name with no
+            # known suffix, so the front end's content routing produced
+            # "Unrecognized package format". Its end-to-end matrix is
+            # mutation-verified against exactly that: the package
+            # transport's evidence is that the *extractor* got to speak,
+            # not that the run completed (a misclassified package falls
+            # through to another transport and the comparison completes
+            # anyway, which is how this class hides).
+            "tests/test_evidence_transport_roles.py",
         ),
         # Earned: the seed's name-independence matrix runs real `CliRunner`
         # invocations of `abicheck project validate` end to end, which is
@@ -1030,6 +1043,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "build-output",
                 "use-case-manifest",
                 "empty-document",
+                # Phase 7n's evidence transports, on the same axis: each is
+                # a kind of operand a front end must recognise from content.
+                "debug-package",
+                "debug-directory",
+                "detached-debug-file",
+                "devel-package",
+                "probe-matrix",
+                "compile-database",
             ),
             "operand_shape": ("directory", "named-manifest-file"),
             "filename": (
@@ -1039,6 +1060,9 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "run-42.json",
                 "config.yaml",
                 "NOTES",
+                "libfoo-dbg.rpm",
+                "libfoo.so.debug",
+                "compile_commands.json",
             ),
         },
     ),
@@ -1075,10 +1099,20 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "it exercises a real interpreter whose newline convention "
             "differs from the host's, because asserting the shell's "
             "parsing of hand-written text cannot observe what the "
-            "subprocess actually wrote."
+            "subprocess actually wrote. Stated over EVERY copy of the "
+            "derivation, not the one that was reported: the repository "
+            "carries two (`action/run.sh` and `actions/check-target/"
+            "action.yml`), both carried both defects, and the check-target "
+            "copy had a parity test that compared the derived *set* against "
+            "Click -- which a set built by splitting on the delimiter cannot "
+            "see either defect through -- so it passed while the lookup was "
+            "broken. A guard on one copy is how the other stayed broken."
         ),
-        fixed_by=(1234, 1239),
-        seed_tests=("tests/test_action_run_sh_option_table.py",),
+        fixed_by=(1234, 1239, 1249),
+        seed_tests=(
+            "tests/test_action_run_sh_option_table.py",
+            "tests/test_extra_args_is_value_option_completeness.py",
+        ),
         # Not earned: the seed sources `run.sh`'s own helper region and
         # drives it under a real bash, but that is the script's functions in
         # isolation, not an executed workflow/composite-action step.
@@ -1091,6 +1125,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "membership-test",
                 "short-cluster-expansion",
             ),
+            "copy": ("action/run.sh", "actions/check-target/action.yml"),
         },
     ),
 )

@@ -141,7 +141,7 @@ case:
 - Symbol-only checks (`L0`) and, if you pass headers, the header AST (`L2`) still
   run — most critical breaks are still caught
 
-**Mitigation:** Use `--debug-root` to point abicheck at separate debug files
+**Mitigation:** Use `--debug-info` to point abicheck at separate debug files
 (distro debuginfo packages, build-id trees, or dSYM bundles). abicheck
 automatically searches for debug artifacts via a resolver chain. For
 Fedora/RHEL, set `.abicheck.yml`'s `debug.debuginfod: true` to fetch debug

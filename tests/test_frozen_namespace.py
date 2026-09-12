@@ -265,7 +265,7 @@ class TestFrozenNamespaceBlocksDowngrade:
             policy_file=r.policy_file,
         ) == 4
 
-        from abicheck.cli import _exit_with_severity_or_verdict
+        from abicheck.frontends.cli.runtime import _exit_with_severity_or_verdict
 
         with pytest.raises(SystemExit) as excinfo:
             _exit_with_severity_or_verdict(r, PRESET_DEFAULT, True)

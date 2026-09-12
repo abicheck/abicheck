@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .cli import _setup_verbosity, _write_or_echo
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
@@ -94,6 +93,7 @@ from .cli_options import (
     verbose_option,
 )
 from .errors import SnapshotError
+from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model import AbiSnapshot
 from .model.release_selection import ReleaseSelection
 from .model.scope_acquisition import AcquisitionState

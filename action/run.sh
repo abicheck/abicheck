@@ -3485,8 +3485,15 @@ elif [[ "$MODE" == "compare" ]]; then
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
     add_sided_flag "--debug-info" "new" "${INPUT_DEBUG_INFO2:-}"
-    add_sided_flag "--devel-pkg" "old" "${INPUT_DEVEL_PKG1:-}"
-    add_sided_flag "--devel-pkg" "new" "${INPUT_DEVEL_PKG2:-}"
+    # one-comparison-product.md Phase 7n: the CLI's own --devel-pkg is gone --
+    # a development package is one of -H/--header's transports now, recognised
+    # from the operand's own package content rather than its name. The
+    # Action's devel-pkg1/devel-pkg2 *inputs* are unchanged (an Action input
+    # name is its own contract, ADR-068's Action-input-lifecycle amendment);
+    # only their translation to the CLI moves, the same shape as
+    # required-symbols above.
+    add_sided_flag "--header" "old" "${INPUT_DEVEL_PKG1:-}"
+    add_sided_flag "--header" "new" "${INPUT_DEVEL_PKG2:-}"
 
     # Phase 7d: --dso-only/--include-private-dso/--fail-on-removed-library
     # are gone from the CLI -- synthesized into a --config overlay instead

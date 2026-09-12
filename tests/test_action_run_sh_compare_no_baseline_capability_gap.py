@@ -66,6 +66,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO / "scripts"))
 import example_catalog  # noqa: E402
+from _workflow_exec import bash_executable, require_bash  # noqa: E402
 
 RUN_SH = _REPO / "action" / "run.sh"
 _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
@@ -90,6 +91,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
     ``action/run.sh`` end to end and returns its ``GITHUB_OUTPUT`` pairs
     plus the raw process result. Tolerates a nonzero exit (the whole point
     of the rejection tests below)."""
+    require_bash()
     github_output = tmp_path / "github_output"
     github_output.write_text("", encoding="utf-8")
     github_step_summary = tmp_path / "github_step_summary"
@@ -109,7 +111,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
         **env_extra,
     }
     proc = subprocess.run(
-        ["bash", str(RUN_SH)],
+        [bash_executable(), str(RUN_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -311,6 +313,7 @@ _CMD_MARKER = "__ABICHECK_TEST_CMD_START__"
 
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+    require_bash()
     script = (
         _mode_branches_region()
         + f"\nprintf '%s' '{_CMD_MARKER}'"
@@ -329,7 +332,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     env.update(env_extra)
     try:
         result = subprocess.run(
-            ["bash", script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             encoding="utf-8",
