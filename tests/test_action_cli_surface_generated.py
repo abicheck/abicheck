@@ -43,6 +43,7 @@ from pathlib import Path
 
 import click
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SURFACE = REPO_ROOT / "action" / "cli-surface.txt"
@@ -72,10 +73,11 @@ def _click_choices(path: tuple[str, ...], spelling: str) -> tuple[str, ...]:
 
 def _run_validate(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run the real validate-inputs.sh with a minimal environment."""
+    require_bash()
     base = {"PATH": os.environ["PATH"]}
     base.update(env)
     return subprocess.run(
-        ["bash", str(VALIDATE)],
+        [bash_executable(), str(VALIDATE)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -239,10 +241,11 @@ class TestTheShellActuallyReadsIt:
         """The packaging-mistake case. Treating an unreadable surface file as
         "accept everything" would turn a broken Action into silently skipped
         validation -- the exact class this ADR exists to remove."""
+        require_bash()
         staged = tmp_path / "validate-inputs.sh"
         staged.write_text(VALIDATE.read_text(encoding="utf-8"), encoding="utf-8")
         result = subprocess.run(
-            ["bash", str(staged)],
+            [bash_executable(), str(staged)],
             capture_output=True,
             text=True,
             encoding="utf-8",

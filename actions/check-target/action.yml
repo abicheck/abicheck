@@ -952,7 +952,22 @@ runs:
             _ct_cli_value_options_derived="false"
             return 0
           fi
-          _ct_cli_value_options="|$(printf '%s' "$_ct_derived" | tr '\n' '|')"
+          # Both fixes are `run.sh`'s `_cli_value_options_init`, verbatim in
+          # intent, because this is the second copy of that derivation and it
+          # carried both of that copy's defects (bug class
+          # `cli_surface.derived_table_lost_in_its_own_encoding`):
+          #
+          # `tr -d '\r'` -- on windows-latest `$PY` is a native python.exe
+          # whose text-mode stdout translates each "\n" to os.linesep, so every
+          # spelling arrives as "--config\r" and NOTHING matches the
+          # fully-delimited lookup below. `_ct_cli_value_options_derived` still
+          # reads "true", so `_ct_require_cli_value_options_or_fail` never
+          # fires and the step silently takes the unsafe branch.
+          #
+          # The trailing `|` -- `$(...)` strips the derivation's trailing
+          # newline, so `tr '\n' '|'` leaves the LAST spelling undelimited and
+          # that one option never matched, on every platform.
+          _ct_cli_value_options="|$(printf '%s' "$_ct_derived" | tr -d '\r' | tr '\n' '|')|"
           _ct_cli_value_options_derived="true"
         }
 
