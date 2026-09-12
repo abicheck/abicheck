@@ -373,6 +373,33 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow("Function", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
     FactRow(
         "Function",
+        "declared_in_headers_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            'The three facts `Visibility` used to conflate, split (see `abicheck/model/surface_facts.py`): this one is "a header this run parsed declares this entity". Both header-AST backends assert it (`extract/surface_fact_producers.header_ast_surface_facts`); a producer with no header evidence leaves it unknown, never False.'
+        ),
+    ),
+    FactRow(
+        "Function",
+        "in_public_contract_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "\"Belongs to the promised public contract for this run's scope selection.\" Both backends assert it positively from a confirmed export; the stronger, scope-aware evidence is added by `provenance.tag_provenance` from a real public-header set, which is another layer's contribution, and a non-public origin is never written as a confirmed negative."
+        ),
+    ),
+    FactRow(
+        "Function",
+        "binary_exported_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            '"The artifact\'s export table carries a symbol for this entity." Both backends resolve it from the same export-table lookup their `visibility` already used; unknown -- not False -- for a header-only dump, which has no export table to have been absent from.'
+        ),
+    ),
+    FactRow(
+        "Function",
         "elf_binding_fact",
         _OTHER,
         _OTHER,
@@ -551,6 +578,33 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note=("Same shape as Function.deprecated_fact -- see that row's own note."),
     ),
     FactRow("Variable", "elf_binding", _OTHER, _OTHER, note=_DYNSYM),
+    FactRow(
+        "Variable",
+        "declared_in_headers_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            'The three facts `Visibility` used to conflate, split (see `abicheck/model/surface_facts.py`): this one is "a header this run parsed declares this entity". Both header-AST backends assert it (`extract/surface_fact_producers.header_ast_surface_facts`); a producer with no header evidence leaves it unknown, never False.'
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "in_public_contract_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            "\"Belongs to the promised public contract for this run's scope selection.\" Both backends assert it positively from a confirmed export; the stronger, scope-aware evidence is added by `provenance.tag_provenance` from a real public-header set, which is another layer's contribution, and a non-public origin is never written as a confirmed negative."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "binary_exported_fact",
+        _OTHER,
+        _OTHER,
+        note=(
+            '"The artifact\'s export table carries a symbol for this entity." Both backends resolve it from the same export-table lookup their `visibility` already used; unknown -- not False -- for a header-only dump, which has no export table to have been absent from.'
+        ),
+    ),
     FactRow(
         "Variable",
         "elf_binding_fact",

@@ -130,10 +130,12 @@ class TestFieldDefaultsToNone:
         `disambiguator`, `cross_source_evolution` (ADR-068 D3 / plan P2)
         immediately after `evolution`, `candidate_side_enrichment` (ADR-068
         D3 / plan §6 Phase 2d) immediately after `cross_source_evolution`,
-        and `demangled_symbol` (Codex review, item 8) is the newest field,
-        appended immediately after `candidate_side_enrichment` -- all seven
-        must stay keyword-only, and `demangled_symbol` must stay last until
-        some still-newer field is appended after it in turn."""
+        `demangled_symbol` (Codex review, item 8) immediately after
+        `candidate_side_enrichment`, and `surface_facts` (the three split
+        surface facts -- see `model/surface_facts.py`) is the newest field,
+        appended immediately after `demangled_symbol` -- all eight must stay
+        keyword-only, and `surface_facts` must stay last until some
+        still-newer field is appended after it in turn."""
         import dataclasses
 
         by_name = {f.name: f for f in dataclasses.fields(Change)}
@@ -144,10 +146,14 @@ class TestFieldDefaultsToNone:
         assert by_name["cross_source_evolution"].kw_only is True
         assert by_name["candidate_side_enrichment"].kw_only is True
         assert by_name["demangled_symbol"].kw_only is True
+        assert by_name["surface_facts"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
-        assert all_names[-1] == "demangled_symbol", (
-            "demangled_symbol must be the last-declared field on Change"
+        assert all_names[-1] == "surface_facts", (
+            "surface_facts must be the last-declared field on Change"
         )
+        assert (
+            all_names.index("surface_facts") == all_names.index("demangled_symbol") + 1
+        ), "surface_facts must be appended immediately after demangled_symbol"
         assert (
             all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
         ), "entity_id must be appended immediately after evidence_provenance"

@@ -238,23 +238,15 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     old_funcs = _exported_elf_symbol_names(old, symbol_types=FUNCTION_SYMBOL_TYPES)
     new_funcs = _exported_elf_symbol_names(new, symbol_types=FUNCTION_SYMBOL_TYPES)
     if not old_funcs or not new_funcs:
-        old_funcs = {
-            k for k, v in old.function_map.items() if is_abi_visible(v)
-        }
-        new_funcs = {
-            k for k, v in new.function_map.items() if is_abi_visible(v)
-        }
+        old_funcs = {k for k, v in old.function_map.items() if is_abi_visible(v)}
+        new_funcs = {k for k, v in new.function_map.items() if is_abi_visible(v)}
     if old_funcs:
         return len(old_funcs & new_funcs) / len(old_funcs) >= 0.9
     old_vars = _exported_elf_symbol_names(old, symbol_types=VARIABLE_SYMBOL_TYPES)
     new_vars = _exported_elf_symbol_names(new, symbol_types=VARIABLE_SYMBOL_TYPES)
     if not old_vars or not new_vars:
-        old_vars = {
-            k for k, v in old.variable_map.items() if is_abi_visible(v)
-        }
-        new_vars = {
-            k for k, v in new.variable_map.items() if is_abi_visible(v)
-        }
+        old_vars = {k for k, v in old.variable_map.items() if is_abi_visible(v)}
+        new_vars = {k for k, v in new.variable_map.items() if is_abi_visible(v)}
     if not old_vars:
         return True  # no exported surface to corroborate; absence of types is just stripping
     return len(old_vars & new_vars) / len(old_vars) >= 0.9

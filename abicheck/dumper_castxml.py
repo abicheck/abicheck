@@ -561,9 +561,7 @@ class _CastxmlParser:
                     mangled=mangled,
                     type=type_name,
                     visibility=vis,
-                    **header_ast_surface_facts(
-                        exported=exported_, producer="castxml"
-                    ),
+                    **header_ast_surface_facts(exported=exported_, producer="castxml"),
                     is_const=is_const,
                     # G31: reuses `_access_level` (already used for `Field`).
                     access=self._access_level(el),

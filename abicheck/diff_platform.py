@@ -1101,16 +1101,8 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     single diagnostic instead of hundreds of individual add/remove reports.
     """
     changes: list[Change] = []
-    old_map = {
-        f.mangled: f
-        for f in old.functions
-        if is_abi_visible(f)
-    }
-    new_map = {
-        f.mangled: f
-        for f in new.functions
-        if is_abi_visible(f)
-    }
+    old_map = {f.mangled: f for f in old.functions if is_abi_visible(f)}
+    new_map = {f.mangled: f for f in new.functions if is_abi_visible(f)}
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1158,16 +1150,8 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     function signature is otherwise identical.
     """
     changes: list[Change] = []
-    old_map = {
-        f.mangled: f
-        for f in old.functions
-        if is_abi_visible(f)
-    }
-    new_map = {
-        f.mangled: f
-        for f in new.functions
-        if is_abi_visible(f)
-    }
+    old_map = {f.mangled: f for f in old.functions if is_abi_visible(f)}
+    new_map = {f.mangled: f for f in new.functions if is_abi_visible(f)}
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())

@@ -864,11 +864,7 @@ def _match_old_function(
     # reporting the same symbol. The castxml-deleted path keeps such functions
     # in new_map and is matched above; this aligns the deleted_from_dwarf path.
     f_new_all = new_all.get(mangled)
-    if (
-        f_new_all is not None
-        and f_new_all.is_deleted
-        and is_abi_visible(f_new_all)
-    ):
+    if f_new_all is not None and f_new_all.is_deleted and is_abi_visible(f_new_all):
         return []
 
     # Fallback by plain name when either side uses extern "C". Only join when
