@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (405 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (407 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -61,7 +61,9 @@ One row per `ChangeKind` (405 total). Columns fuse the verdict partition (`check
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |
 | `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` | — |
 | `declaration_coordinates_shifted` | quality | `COMPATIBLE` | `warning` | L5 | `declaration_coordinates_shifted` | — |
-| `declaration_identity_reconciled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled` | [case197](examples/case197_header_graph_identity_reconciled.md) |
+| `declaration_identity_reconciled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled` | — |
+| `declaration_identity_reconciled_unresolved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `declaration_identity_reconciled_unresolved` | [case197](examples/case197_header_graph_identity_reconciled.md) |
+| `declaration_identity_unchanged` | quality | `COMPATIBLE` | `warning` | unspecified | `declaration_identity_unchanged` | — |
 | `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | [case196](examples/case196_header_graph_move_reconciled.md) |
 | `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | [case194](examples/case194_header_graph_rename_reconciled.md) |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |

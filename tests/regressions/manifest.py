@@ -1383,6 +1383,63 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="classification.default_branch_asserts_more_than_inputs",
+        invariant=(
+            "A classifier's final, unguarded `return` may not be the "
+            "strongest claim in its vocabulary. Every outcome must be an "
+            "affirmative classification whose claim is entailed by the "
+            "inputs; a pair that cannot be placed gets its own explicit "
+            "\"cannot place\" outcome, never the label with the most "
+            "specific prose. The guard is a property over generated "
+            "input pairs asserting entailment (an outcome claiming a "
+            "name or location change may only be returned where the "
+            "names or locations actually differ), not a fixed example "
+            "per branch \u2014 and it must hold for the *catalog* text and "
+            "verdict tier of the kind emitted, not only for the rendered "
+            "sentence, since a render-time rewrite leaves the claim "
+            "standing everywhere else."
+        ),
+        # v19 oneAPI scan: `graph_reconcile_outcome.classify` fell through
+        # to OUTCOME_RECONCILED ("both the qualified name and the
+        # declaring-file evidence changed together", severity risk) for
+        # every pair that was neither renamed, moved, nor coordinate-only.
+        # All 234 of a oneTBB header graph's reconciled calls were
+        # `source_decl` pairs whose qualified name, source_relative and
+        # two-sided declaring file were byte-identical; 13 findings had
+        # `old_value == new_value`. PR #1232 corrected the rendered prose
+        # for that population and the claim survived in the ChangeKind's
+        # own `impact` text and RISK verdict, which is why prose was not
+        # the fix.
+        fixed_by=(1232,),
+        seed_tests=(
+            "tests/test_graph_reconcile_outcome_properties.py",
+            "tests/test_graph_reconcile_coordinate_outcome.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "name_evidence": ("identical", "coordinates_only", "renamed"),
+            "location_evidence": (
+                "identical",
+                "differing",
+                "absent_both",
+                "absent_one",
+            ),
+            "kind": ("type", "source_decl"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The entailment property is stated for this one "
+                    "classifier. No mechanical sweep finds other "
+                    "classifiers whose final branch returns the "
+                    "strongest label in their vocabulary; a second "
+                    "instance elsewhere would still be found by hand."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="perf.pure_content_digest_recomputed_per_consumer",
         invariant=(
             "A pure, expensive, content-derived value reached by several "

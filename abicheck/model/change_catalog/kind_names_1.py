@@ -488,4 +488,14 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "declaration_coordinates_shifted",
         "graph-reconciled: neither name nor declaring-file evidence changed after location-free normalization -- pure :line:col churn → COMPATIBLE",
     ),
+    (
+        "DECLARATION_IDENTITY_UNCHANGED",
+        "declaration_identity_unchanged",
+        "graph-reconciled through non-name evidence with NO identity dimension differing at all -- not even a coordinate shift → COMPATIBLE",
+    ),
+    (
+        "DECLARATION_IDENTITY_RECONCILED_UNRESOLVED",
+        "declaration_identity_reconciled_unresolved",
+        "graph-reconciled with SOME identity evidence differing that the classifier cannot attribute to a rename or a move → COMPATIBLE_WITH_RISK",
+    ),
 )
