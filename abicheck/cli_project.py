@@ -59,18 +59,16 @@ from .buildsource.build_output import (
     load_build_output,
     validate_build_output,
 )
-from .buildsource.project_targets import (
-    ProjectTargetsConfig,
-    validate_project_targets,
-)
+from .buildsource.project_targets import ProjectTargetsConfig, validate_project_targets
 from .buildsource.run_plan import generate_run_plan
 from .buildsource.validation_input import (
     ValidationInputError,
     ValidationInputKind,
     classify_validation_input,
 )
-from .cli import _safe_write_output, _setup_verbosity, main
+from .cli import main
 from .cli_options import output_options, verbose_option
+from .frontends.cli.runtime import _safe_write_output, _setup_verbosity
 from .workflows.extraction import (
     BindingsFile,
     BindingsFileError,

@@ -647,7 +647,7 @@ class TestParseMachoMetadata:
 
 class TestCliIntegration:
     def test_detect_binary_format_pe(self, tmp_path):
-        from abicheck.cli import _detect_binary_format
+        from abicheck.cli_resolve import _detect_binary_format
         p = tmp_path / "test.dll"
         data = bytearray(0x84 + 4)
         data[0:2] = b"MZ"
@@ -657,20 +657,20 @@ class TestCliIntegration:
         assert _detect_binary_format(p) == "pe"
 
     def test_detect_binary_format_macho(self, tmp_path):
-        from abicheck.cli import _detect_binary_format
+        from abicheck.cli_resolve import _detect_binary_format
         data = _build_macho_64_le()
         p = tmp_path / "lib.dylib"
         p.write_bytes(data)
         assert _detect_binary_format(p) == "macho"
 
     def test_detect_binary_format_elf(self, tmp_path):
-        from abicheck.cli import _detect_binary_format
+        from abicheck.cli_resolve import _detect_binary_format
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         assert _detect_binary_format(p) == "elf"
 
     def test_detect_binary_format_unknown(self, tmp_path):
-        from abicheck.cli import _detect_binary_format
+        from abicheck.cli_resolve import _detect_binary_format
         p = tmp_path / "data.txt"
         p.write_text("hello")
         assert _detect_binary_format(p) is None
@@ -679,7 +679,7 @@ class TestCliIntegration:
         """Exercise _dump_native_binary for PE format (mocked parse)."""
         from unittest.mock import patch as mock_patch
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
         from abicheck.pe_metadata import PeExport, PeMetadata
 
         pe_meta = PeMetadata(
@@ -702,7 +702,7 @@ class TestCliIntegration:
         """Exercise _dump_native_binary for Mach-O format (mocked parse)."""
         from unittest.mock import patch as mock_patch
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
         from abicheck.macho_metadata import MachoExport, MachoMetadata
 
         macho_meta = MachoMetadata(exports=[MachoExport(name="macho_func")])
@@ -725,7 +725,7 @@ class TestCliIntegration:
         import click
         import pytest
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
         from abicheck.pe_metadata import PeMetadata
 
         f = tmp_path / "empty.dll"
@@ -743,7 +743,7 @@ class TestCliIntegration:
         import click
         import pytest
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
         from abicheck.macho_metadata import MachoMetadata
 
         f = tmp_path / "empty.dylib"
@@ -758,7 +758,7 @@ class TestCliIntegration:
         import click
         import pytest
 
-        from abicheck.cli import _dump_native_binary
+        from abicheck.cli_resolve import _dump_native_binary
 
         f = tmp_path / "test.bin"
         f.write_bytes(b"fake")

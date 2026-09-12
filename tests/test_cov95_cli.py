@@ -33,23 +33,7 @@ from click.testing import CliRunner
 
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.cli import (
-    _announce_exit_scheme,
-    _collect_additions,
-    _collect_release_inputs,
-    _exit_with_severity_or_verdict,
-    _expand_header_inputs,
-    _load_probe_matrix_changes,
-    _load_suppression_and_policy,
-    _merge_gcc_options,
-    _resolve_linker_script,
-    _resolve_per_side_options,
-    _safe_write_output,
-    _sniff_text_format,
-    _warn_ignored_flags,
-    _write_or_echo,
-    main,
-)
+from abicheck.cli import main
 from abicheck.cli_compare_release import (
     _exit_compare_release,
     _fold_release_global_severity,
@@ -60,7 +44,27 @@ from abicheck.cli_compare_release import (
     _resolve_release_headers,
     _resolve_release_severity_config,
 )
+from abicheck.cli_helpers_compare import (
+    _collect_additions,
+    _collect_release_inputs,
+    _merge_gcc_options,
+    _resolve_per_side_options,
+    _warn_ignored_flags,
+)
+from abicheck.cli_resolve import (
+    _expand_header_inputs,
+    _resolve_linker_script,
+    _sniff_text_format,
+)
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.frontends.cli.options.params import _load_suppression_and_policy
+from abicheck.frontends.cli.runtime import (
+    _announce_exit_scheme,
+    _exit_with_severity_or_verdict,
+    _load_probe_matrix_changes,
+    _safe_write_output,
+    _write_or_echo,
+)
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 from tests.schema_validation import validate_instance
@@ -315,7 +319,7 @@ class TestSmallHelpers:
         from types import SimpleNamespace
 
         from abicheck.buildsource.model import CoverageStatus, DataLayer
-        from abicheck.cli import _missing_requested_evidence_layers
+        from abicheck.cli_buildsource import _missing_requested_evidence_layers
 
         # Non-empty payload stand-ins, one per layer key.
         _full_be = SimpleNamespace(targets=["t"], compile_units=["cu"])
@@ -2745,7 +2749,7 @@ class TestUsedByScopingWithSnapshotInputs:
 
 class TestLogDebugResolution:
     def test_non_binary_no_droots_noop(self, tmp_path, capsys) -> None:
-        from abicheck.cli import _log_one_side_debug
+        from abicheck.frontends.cli.runtime import _log_one_side_debug
 
         f = tmp_path / "snap.json"
         f.write_text("{}")
@@ -2754,7 +2758,7 @@ class TestLogDebugResolution:
         assert capsys.readouterr().err == ""
 
     def test_resolution_skipped_when_nothing_requested(self, tmp_path, capsys) -> None:
-        from abicheck.cli import _log_debug_resolution
+        from abicheck.frontends.cli.runtime import _log_debug_resolution
 
         old = tmp_path / "old.json"
         new = tmp_path / "new.json"

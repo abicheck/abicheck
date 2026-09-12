@@ -175,7 +175,7 @@ def dump_source_only(
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.
     """
-    from .cli import _stamp_provenance
+    from .frontends.cli.runtime import _stamp_provenance
     from .model import AbiSnapshot
     from .workflows.extraction import resolve_source_frontend_clang_bin
 
@@ -218,9 +218,9 @@ def dump_source_only(
 # *is* the step that folds this module's own ``embed_build_source`` /
 # ``embed_inputs_pack`` payloads in and then enforces the requested evidence
 # depth, and ``embed_build_source``'s caller here already imported
-# ``_write_snapshot_output`` back out of ``cli``. ``cli`` re-exports all three
-# names, so ``abicheck.cli._write_snapshot_output`` -- which several tests and
-# ``dump_cmd`` itself use -- keeps resolving unchanged. This module, not a new
+# ``_write_snapshot_output`` back out of ``cli``. All three names are owned by
+# this module and imported from it directly; ``abicheck.cli`` no longer
+# re-exports anything. This module, not a new
 # one: a *new* module reaching ``service``/``buildsource`` would join the
 # allowlisted CLI import-cycle SCC, which CLAUDE.md "M1-3" forbids extending.
 # ---------------------------------------------------------------------------
@@ -459,20 +459,15 @@ def _write_snapshot_output(
         # prominently instead of leaving it buried in the coverage rows. Permissive
         # by design (a warning, not an error): --collection-mode strict on
         # `collect` remains the hard-fail path (ADR-028 D3).
-        # Through the ``cli`` module (which re-exports both) so a monkeypatch on
-        # ``abicheck.cli._missing_requested_evidence_layers`` /
-        # ``._classify_missing_layers`` is still honoured after the relocation --
-        # the same resolution the neighbouring ``cli._normalize_binary_input``
-        # calls use, and what several existing tests patch.
-        from . import cli as _cli
-
-        missing = _cli._missing_requested_evidence_layers(
-            snap.build_source, collect_mode
-        )
+        # Both helpers are defined in this module (above); call them directly.
+        # This used to route through ``abicheck.cli``'s lazy alias table so a
+        # monkeypatch on ``abicheck.cli._missing_requested_evidence_layers``
+        # would be honoured -- i.e. this module reached its own two functions
+        # through a facade, for no reason other than a patch target. The table
+        # is gone; patch these names here, where they live.
+        missing = _missing_requested_evidence_layers(snap.build_source, collect_mode)
         if missing:
-            absent, ran_empty = _cli._classify_missing_layers(
-                snap.build_source, missing
-            )
+            absent, ran_empty = _classify_missing_layers(snap.build_source, missing)
             parts: list[str] = []
             if absent:
                 # Genuinely absent: no extractor / no compile DB / layer never ran.

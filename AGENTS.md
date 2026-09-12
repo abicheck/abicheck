@@ -237,11 +237,15 @@ isn't available in your environment (add `,docs,dist` for full parity).
 
 Entry points:
 - `abicheck/cli.py` — Click CLI **root only**: the root group, its
-  `--version`/SIGTERM wiring, the side-effect registration imports, and the
-  lazy `__getattr__` compatibility shim (see `frontends/cli/moved.py`).
-  ~140 lines, no product logic — ADR-061 Phase 4 moved every command body,
+  `--version`/SIGTERM wiring, and the side-effect registration imports.
+  ~120 lines, no product logic — ADR-061 Phase 4 moved every command body,
   shared runtime helper, and process-exit decision to
-  `abicheck/frontends/cli/`. Add a command there, not here. (This line read
+  `abicheck/frontends/cli/`. Add a command there, not here. It carried a
+  lazy `__getattr__` alias table (`frontends/cli/moved.py`) keeping ~80
+  private helpers importable from `abicheck.cli` after they moved; every
+  caller now imports from the owner, so the table, the resolver and the
+  assignment guard that protected it are deleted. **Import from the owner,
+  and patch the owner** — `abicheck.cli` re-exports nothing. (This entry read
   "large file, at the 2000-line hard cap" long after that stopped being
   true — exactly the drift the "don't trust hard-coded line counts" warning
   below is about.)

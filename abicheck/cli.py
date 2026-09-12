@@ -21,21 +21,19 @@ group, its `--version`/SIGTERM wiring, the registration imports whose only
 purpose is the ``@main.command(...)`` side effect, and one lazy
 compatibility shim.
 
-That shim is the reason this file can be short without breaking anyone.
-``abicheck.cli`` has been the documented import path for a long list of
-private helpers -- sibling ``cli_*`` modules and the test suite both reach for
-them there -- so every one stays resolvable at its historical name through a
-module-level ``__getattr__`` (PEP 562). It resolves through
-``importlib.import_module`` at *access* time, which is a runtime call rather
-than a static import edge, so this module never grows a top-level dependency
-on the packages that import back into it. New code should import from the
-owner named in ``_MOVED`` below.
+``abicheck.cli`` was for a long time the documented import path for ~80
+private helpers that had physically moved to sibling modules, kept resolvable
+by a lazy ``__getattr__`` (PEP 562) over a name-to-owner table, plus a custom
+module class that raised on assignment to any of those names -- since a
+``monkeypatch.setattr`` against a lazily-resolved alias froze it and silently
+defeated every later patch of the real owner. Every caller now imports from
+the owner directly, so the table, the resolver and the assignment guard are
+all gone. Import from the owner; patch the owner.
 """
 
 from __future__ import annotations
 
 import sys
-from typing import Any
 
 import click
 
@@ -49,7 +47,6 @@ import click
 from . import __version__ as _abicheck_version, deadline
 from .compat.cli import compat_group
 from .frontends.cli import help as cli_help
-from .frontends.cli.moved import MOVED, install_facade_guard
 from .frontends.cli.runtime import _AbicheckGroup
 
 __all__ = ["main"]
@@ -76,22 +73,6 @@ def main() -> None:
 # ABICC-compatible subcommands. Eagerly imported above, deliberately: every
 # consumer of `abicheck.cli` must get them registered.
 main.add_command(compat_group)
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve a name this module used to define, from its current owner.
-
-    See :mod:`abicheck.frontends.cli.moved` for the map and why it is lazy.
-    """
-    owner = MOVED.get(name)
-    if owner is not None:
-        import importlib
-
-        return getattr(importlib.import_module(owner), name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-install_facade_guard(sys.modules[__name__])
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from abicheck.cli import _provenance_timestamp
+from abicheck.cli_helpers_compare import _provenance_timestamp
 
 
 def test_source_date_epoch_fixed() -> None:

@@ -679,7 +679,7 @@ class TestCompatGroupStructure:
 
     def test_compat_no_subcommand_shows_usage(self):
         """'abicheck compat' without a subcommand shows usage."""
-        from abicheck.cli import _EXIT_USAGE_ERROR
+        from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR
 
         runner = CliRunner()
         result = runner.invoke(main, ["compat"])

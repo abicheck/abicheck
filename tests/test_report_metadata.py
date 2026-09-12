@@ -346,7 +346,7 @@ class TestHtmlEnrichments:
 
 class TestCliMetadataCollection:
     def test_collect_metadata(self):
-        from abicheck.cli import _collect_metadata
+        from abicheck.frontends.cli.runtime import _collect_metadata
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             f.write(b"fake ELF content for testing")
             f.flush()
@@ -362,7 +362,7 @@ class TestCliMetadataCollection:
             path.unlink()
 
     def test_collect_metadata_large_file(self):
-        from abicheck.cli import _collect_metadata
+        from abicheck.frontends.cli.runtime import _collect_metadata
         content = b"x" * 100_000
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             f.write(content)

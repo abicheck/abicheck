@@ -40,8 +40,9 @@ from pathlib import Path
 
 import click
 
-from .cli import _safe_write_output, _setup_verbosity, main
+from .cli import main
 from .cli_options import output_options, verbose_option
+from .frontends.cli.runtime import _safe_write_output, _setup_verbosity
 from .report.aggregate import render_aggregate_json, render_aggregate_text
 from .workflows.aggregate import (
     DEFAULT_REPORT_PREFIX,

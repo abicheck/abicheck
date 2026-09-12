@@ -51,12 +51,14 @@ CLI-surface-dump scripts used by the CI gate) and ``test_cli_contract.py``
 
 from __future__ import annotations
 
+import pathlib
 import subprocess
 import sys
 
 import pytest
 from click.testing import CliRunner
 
+from abicheck import cli
 from abicheck.cli import main
 
 _PUBLIC_COMMANDS = frozenset(
@@ -208,3 +210,28 @@ def test_python_dash_m_abicheck_cli_matches_python_dash_m_abicheck() -> None:
     for cmd in _PUBLIC_COMMANDS:
         assert cmd in via_package
         assert cmd in via_module
+
+
+def test_root_module_declares_all_and_stays_small() -> None:
+    """ADR-061 Phase 4's acceptance for the root facade, as an executable check.
+
+    Moved here when ``tests/test_cli_moved_surface.py`` was retired: that file
+    existed to prove ~80 lazily-resolved compatibility aliases still resolved,
+    and every caller now imports from the owner instead, so the aliases, the
+    ``__getattr__`` resolving them and the module class guarding them are gone.
+    This one assertion was the only behavioral claim in it and outlives them.
+
+    Deliberately pinned here rather than by adding ``abicheck.cli`` to
+    ``architecture/modules.yaml``'s ``facades`` list. That gate's ``facade``
+    rule means something narrower than the ADR's prose does: it permits only
+    imports, inert assignments and a ``TYPE_CHECKING`` block, so *any* module
+    defining a Click root group fails it -- ``main`` is a ``FunctionDef``, and
+    ``configure_rich_help()`` is an executable expression. Both are
+    registration, not product logic, which is what the acceptance criterion
+    actually asks about. Widening that gate to admit this file would weaken it
+    for the pure re-export modules it was written for, so the budget is
+    enforced here instead.
+    """
+    source = pathlib.Path(cli.__file__).read_text(encoding="utf-8")
+    assert cli.__all__ == ["main"]
+    assert len(source.splitlines()) < 150

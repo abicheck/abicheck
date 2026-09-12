@@ -224,7 +224,7 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
 
 def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     """A `collect` pack (manifest.json present) is distinguished from a raw tree."""
-    from abicheck.cli import _source_is_pack
+    from abicheck.frontends.cli.commands.compare import _source_is_pack
 
     tree = tmp_path / "checkout"
     tree.mkdir()
@@ -281,7 +281,7 @@ def test_inputs_pack_routes_to_out_of_band_loader_not_dropped(tmp_path: Path) ->
         "created_by": "test",
     }))
 
-    from abicheck.cli import _source_is_pack
+    from abicheck.frontends.cli.commands.compare import _source_is_pack
 
     assert _source_is_pack(inputs)  # classified as a pack, not raw source to collect
     pack = _load_side_pack_input(inputs)  # so the out-of-band loader accepts it

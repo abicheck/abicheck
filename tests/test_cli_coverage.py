@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.cli import _resolve_input, _sniff_text_format, main
+from abicheck.cli import main
+from abicheck.cli_resolve import _resolve_input, _sniff_text_format
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import snapshot_to_json
 
