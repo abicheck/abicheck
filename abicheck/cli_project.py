@@ -116,9 +116,9 @@ def project_group() -> None:
 # ``validate-use-cases``): one question over three schemas, each with its
 # own copy of --format/-o/-v. Dispatch is by validated schema discriminator
 # or recognized directory contract, never by filename — buildsource/
-# validation_input.py owns it and says why that distinction is
-# load-bearing. Recognizing a document authorizes nothing:
-# --toolchain-bindings stays explicitly supplied.
+# validation_input.py owns it and says why that is load-bearing.
+# Recognizing a document authorizes nothing: --toolchain-bindings stays
+# explicitly supplied.
 # --------------------------------------------------------------------------
 
 
@@ -144,8 +144,7 @@ def project_group() -> None:
         "declared profiles.<id>.compile.binding (and consumer_compile.binding) "
         "resolves, and — when compiler_family/compiler_version/target is also "
         "declared — that the resolved executable's probed identity actually "
-        "matches. Loaded only from this explicit path — never auto-"
-        "discovered, per the untrusted-config trust boundary "
+        "matches. Loaded only from this explicit path — never auto-discovered, per the untrusted-config trust boundary "
         "ProfileCompileSpec.binding documents. Applies to a project config; "
         "supplying it with any other INPUT is a usage error."
     ),
@@ -200,9 +199,9 @@ def project_validate_cmd(
     **Use-case manifest.** Structure only: a well-formed YAML list of use
     cases, where a non-mapping entry, an unrecognized field, or a
     missing/blank ``use_case`` name is a usage error. Attributing a real
-    comparison's findings to the use cases that reach them is
-    ``abicheck compare --use-cases MANIFEST`` — reported beside every
-    other finding, not a second diffing surface inside a validator.
+    comparison's findings to the use cases that reach them is ``abicheck
+    compare --use-cases MANIFEST`` — reported beside every other finding,
+    not a second diffing surface inside a validator.
 
     \b
     Exit codes: 0 valid (warnings may still be present) · 1 validation
@@ -265,6 +264,7 @@ def _validate_project_config(
     config: Path,
     toolchain_bindings: Path | None,
 ) -> tuple[bool, dict[str, object], str]:
+    """Validate a project config's targets/bundles/profiles/baseline block."""
     try:
         parsed = _load_project_targets_config(config)
     except click.UsageError as exc:
@@ -299,6 +299,7 @@ def _validate_project_config(
 
 
 def _validate_build_output(directory: Path) -> tuple[bool, dict[str, object], str]:
+    """Validate a build output: a directory, or a manifest under any name."""
     try:
         report = validate_build_output(directory)
     except (FileNotFoundError, ValueError) as exc:
@@ -309,6 +310,7 @@ def _validate_build_output(directory: Path) -> tuple[bool, dict[str, object], st
 
 
 def _validate_use_case_manifest(manifest: Path) -> tuple[bool, dict[str, object], str]:
+    """Validate an impact-use-cases.yaml manifest's own structure."""
     from .errors import UseCaseManifestError
     from .impact.use_cases import load_use_case_manifest
 
@@ -346,11 +348,10 @@ def _validate_empty_document(
 
     YAML cannot distinguish an empty mapping from an empty list, and both
     superseded commands accepted one: an ``.abicheck.yml`` declaring no
-    targets (whose *config* validation still has warnings worth printing —
-    "no targets declared" is the whole point of running it) and a manifest
-    declaring zero use cases. So the config validation actually runs, and
-    the other readings are stated beside it. Picking one silently would
-    lose whichever the caller meant.
+    targets (whose config validation still has warnings worth printing) and
+    a manifest declaring zero use cases. So the config validation actually
+    runs and the other readings are stated beside it; picking one silently
+    would lose whichever the caller meant.
     """
     ok, payload, text = _validate_project_config(path, toolchain_bindings)
     payload = {**payload, "kind": "empty-document", "use_case_count": 0}

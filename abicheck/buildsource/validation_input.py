@@ -164,6 +164,9 @@ def _parse_document(path: Path) -> Any:
 
 
 def _describe(document: Any) -> str:
-    if document is None:
-        return "an empty document"
+    """Name the shape a document turned out to have, for the error message.
+
+    ``None`` never reaches here — an empty document is its own kind — so
+    only the genuinely unroutable shapes (a scalar) are described.
+    """
     return f"a {type(document).__name__}"

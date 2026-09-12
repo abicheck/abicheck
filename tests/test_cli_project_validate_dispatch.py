@@ -155,6 +155,24 @@ class TestClassifierProperties:
             classify_validation_input(directory)
         assert "build-output.json" in str(exc.value)
 
+    def test_an_unreadable_document_is_a_classification_error(
+        self, tmp_path: Path
+    ) -> None:
+        # Click's exists=True only proves the path was there at argument
+        # parsing time. A file that cannot be *read as text* (here, bytes
+        # that are not UTF-8) has to surface as a usage error naming the
+        # file, not as a bare UnicodeDecodeError traceback.
+        path = tmp_path / "binary.yml"
+        path.write_bytes(b"\xff\xfe\x00not utf-8 at all\x80\x81")
+        with pytest.raises(ValidationInputError) as exc:
+            classify_validation_input(path)
+        assert "cannot read" in str(exc.value)
+        assert str(path) in str(exc.value)
+
+        res = _run(str(path))
+        assert res.exit_code == 64
+        assert "cannot read" in res.output
+
     def test_unparseable_yaml_is_a_classification_error_not_a_crash(
         self, tmp_path: Path
     ) -> None:
