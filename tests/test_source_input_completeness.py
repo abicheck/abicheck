@@ -91,16 +91,28 @@ def _chmod_can_deny_directory_read() -> bool:
     deny, the test runs exactly as before, so this cannot quietly turn a real
     regression into a skip on an ordinary non-root Linux runner.
     """
-    probe = Path(tempfile.mkdtemp())
-    locked = probe / "locked"
-    locked.mkdir()
-    (locked / "probe.hpp").write_text("int probe(void);\n", encoding="utf-8")
     try:
+        probe = Path(tempfile.mkdtemp())
+    except OSError:
+        return False
+    locked = probe / "locked"
+    try:
+        locked.mkdir()
+        (locked / "probe.hpp").write_text("int probe(void);\n", encoding="utf-8")
         locked.chmod(0o000)
         try:
             list(locked.iterdir())
         except PermissionError:
             return True
+        return False
+    except OSError:
+        # Any failure to even set the probe up is itself "cannot demonstrate a
+        # denial here". This runs while `pytest.mark.skipif` is evaluated --
+        # at *collection* -- so an escaping OSError fails the whole module's
+        # collection instead of skipping one test, which is the same
+        # module-wide-failure shape this probe exists to avoid (CodeRabbit
+        # review). `Path.chmod` is the likeliest raiser, and on Windows it
+        # can reject a directory outright.
         return False
     finally:
         try:
