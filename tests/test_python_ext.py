@@ -693,7 +693,7 @@ def test_scan_abi3_json_output_carries_finding(tmp_path: object) -> None:
     snap = _ext_snapshot("2.0", ["PyList_New", "_PyObject_LookupSpecial"])
     path = _write_snapshot(tmp_path, snap)
 
-    result = _compare_abi3(path, "--abi3", "3.9", "--format", "json")
+    result = _compare_abi3(path, "--abi3", "3.9", "-o", "json=-")
     assert result.exit_code == 0, result.output
     data = _json.loads(result.stdout)
     # The finding names the offending symbol in its own description, so a CI

@@ -92,7 +92,7 @@ class TestCompareJson:
     def test_json_output(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"])
+        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert "verdict" in parsed
@@ -167,7 +167,7 @@ class TestCompareHtml:
             str(old_p),
             str(new_p),
             "-o",
-            "markdown=html=-",
+            "html=-",
         ])
         assert result.exit_code == 0
         assert "<html" in result.output.lower()
@@ -292,9 +292,12 @@ class TestCompareWrite:
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
         assert parsed["verdict"] == "BREAKING"
 
-    def test_secondary_format_ignores_show_only_filter(self, tmp_path):
-        # The secondary render always emits the full, unfiltered report even
-        # when the primary format's --show-only narrows the display.
+    def test_every_export_sees_the_same_display_filter(self, tmp_path):
+        # Plan slice 7m: a display selector means the same thing for every
+        # export. The retired `--write` rendered unfiltered whatever
+        # `--format` asked for -- an asymmetry with no answer once both
+        # artifacts come from one repeatable operand. Nothing is hidden:
+        # the machine projection still states the filter and its totals.
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
@@ -311,13 +314,13 @@ class TestCompareWrite:
         ])
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
-        assert parsed["changes"]
+        assert parsed["show_only_filter"] == "added"
+        assert "filtered_summary" in parsed
 
-    def test_secondary_format_ignores_primary_report_mode(self, tmp_path):
-        # The secondary render always uses report_mode="full", not the
-        # primary's --report-mode leaf — a --write consumer
-        # expects the same full shape regardless of how the primary format
-        # groups its own display (Codex review, PR #557).
+    def test_every_export_uses_the_same_report_mode(self, tmp_path):
+        # Same rule as the display filter above, for the other half of
+        # `--view`: the report mode applies to every export. A consumer who
+        # wants the full shape asks for it by not selecting `leaf`.
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
@@ -334,8 +337,7 @@ class TestCompareWrite:
         ])
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
-        assert "leaf_changes" not in parsed
-        assert parsed["changes"]
+        assert "leaf_changes" in parsed
 
     def test_secondary_format_resolves_own_demangle_default(self, tmp_path):
         # demangle is resolved per-format (markdown/review default ON, json/
@@ -418,37 +420,40 @@ class TestCompareWrite:
         # question needed measured, not assumed.
         assert any(n > 1 for n in per_change_counts.values())
 
-    def test_write_rejects_a_half_given_operand(self, tmp_path):
-        """``--write``'s FORMAT=PATH operand cannot be half-given.
+    def test_an_export_operand_cannot_be_half_given(self, tmp_path):
+        """``-o``'s FORMAT=DESTINATION operand cannot be half-given.
 
-        The ``--secondary-format``/``--secondary-output`` pair it replaced
-        needed a check in each direction, because either alone was silently
-        useless -- no artifact and no error. One operand makes both a parse
-        error instead.
+        The ``--format``/``-o`` pair it replaced needed a check in each
+        direction, because either alone was silently useless -- no artifact
+        and no error. One operand makes both a parse error instead.
         """
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        for operand in ("json", "=out.json", "json="):
+        for operand in ("json", "=out.json", "json=", "out.json"):
             result = runner.invoke(main, [
                 "compare",
                 str(old_p),
                 str(new_p),
                 "-o",
-                f"markdown={operand}",
+                operand,
             ])
             assert result.exit_code == 64, operand
-            assert "FORMAT=PATH" in result.output, operand
+            assert "FORMAT=DESTINATION" in result.output, operand
 
-    def test_write_rejects_a_directory_destination_at_parse_time(self, tmp_path):
-        """A directory destination is a *parse* error, not a late write error.
+    def test_a_directory_destination_on_a_single_pair_fails_at_parse_time(
+        self, tmp_path
+    ):
+        """Rejected before any analysis runs, not after a partial report.
 
-        The replaced ``--secondary-output`` was a ``click.Path(dir_okay=
-        False)``, so this failed before any analysis ran. Building the path
-        from the operand directly let it through, moving the failure to the
-        secondary write -- after the whole comparison and the primary render
-        had already completed, leaving a partial report behind (Codex
-        review). The primary report not existing is what proves it is still
-        a parse error rather than a tidier late one.
+        A directory destination is the per-component fan-out, and this is a
+        single pair, so it names no artifact -- and quietly not producing an
+        artifact the user asked for is what plan §Non-goals forbids. That it
+        fails at parse time is the second half: an earlier revision built
+        the path from the operand directly and moved the failure to the
+        write, after the whole comparison and the first render had already
+        completed, leaving a partial report behind (Codex review). The other
+        export not existing is what proves it is still a parse error rather
+        than a tidier late one.
         """
         old_p, new_p = _write_snapshots(tmp_path)
         destination = tmp_path / "adir"
@@ -464,7 +469,7 @@ class TestCompareWrite:
             f"json={destination}",
         ])
         assert result.exit_code == 64, result.output
-        assert "is a directory" in result.output
+        assert "per-component export" in result.output
         assert not primary.exists(), "the comparison ran before rejecting"
 
     def test_write_rejects_an_unrenderable_format(self, tmp_path):
@@ -474,14 +479,16 @@ class TestCompareWrite:
             str(old_p),
             str(new_p),
             "-o",
-            "markdown=text=out.txt",
+            "text=out.txt",
         ])
         assert result.exit_code == 64
         assert "not a renderable format here" in result.output
 
-    def test_write_rejects_same_path_as_primary(self, tmp_path):
-        # Writing both formats to the same file would silently overwrite the
-        # primary report with the secondary one (Codex review, PR #557).
+    def test_two_exports_to_one_destination_are_rejected(self, tmp_path):
+        # The second would silently overwrite the first (Codex review, PR
+        # #557). Checked across the whole export set now, not between two
+        # flags -- see tests/test_cli_export_grammar.py for the invariant
+        # over generated permutations.
         old_p, new_p = _write_snapshots(tmp_path)
         same_path = tmp_path / "report"
         runner = CliRunner()
@@ -495,13 +502,13 @@ class TestCompareWrite:
             f"json={same_path}",
         ])
         assert result.exit_code == 64
-        assert "--write's PATH must differ from --output/-o" in result.output
+        assert "both export to" in result.output
 
-    def test_dry_run_rejects_write(self, tmp_path):
-        # Regression (CLI-audit P2): --dry-run promises no output-file side
-        # effect and already rejects -o/--output, but the secondary
-        # destination was accepted and then silently never written (the dry
-        # run exits before the secondary render runs) — reject it the same way.
+    def test_dry_run_rejects_a_file_export(self, tmp_path):
+        # Regression (CLI-audit P2): --dry-run promises no file side effect,
+        # but a second destination used to be accepted and then silently
+        # never written (the dry run exits before any render). One export
+        # request means one rejection covering every file destination.
         old_p, new_p = _write_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
@@ -514,7 +521,7 @@ class TestCompareWrite:
             f"json={secondary_out}",
         ])
         assert result.exit_code == 64
-        assert "--dry-run cannot be combined with --write" in result.output
+        assert "--dry-run writes no report" in result.output
         assert not secondary_out.exists()
 
 

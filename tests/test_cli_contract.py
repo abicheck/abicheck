@@ -809,10 +809,10 @@ def test_gate_flags_missing_decorator(
     # severity/scope/output are missing → three coverage errors naming `compare`.
     missing = {
         fam
-        for fam in ("severity_options", "scope_options", "output_options")
+        for fam in ("severity_options", "scope_options", "export_options")
         if any(fam in m and "compare" in m for m in msgs)
     }
-    assert missing == {"severity_options", "scope_options", "output_options"}, msgs
+    assert missing == {"severity_options", "scope_options", "export_options"}, msgs
 
 
 def test_gate_flags_missing_command(
@@ -850,7 +850,7 @@ def test_intentional_subset_decorator_is_not_flagged(
         "@two_sided_input_options\n"
         "@policy_options\n"
         "@scope_options\n"
-        "@output_options(['json'])\n"
+        "@export_options(['json'])\n"
         "def synth_cmd():\n"
         "    pass\n"
     )
@@ -1374,7 +1374,7 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
             "--contract",
             "exports",
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     result_explicit = CliRunner().invoke(
@@ -1386,7 +1386,7 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
             "--contract",
             "exports",
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result_implicit.exit_code == result_explicit.exit_code

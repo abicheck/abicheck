@@ -109,7 +109,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "markdown=json=-"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
         assert parsed["root_binary"] == str(binary)
@@ -126,7 +126,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "markdown=markdown=-"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "markdown=-"])
         assert result.exit_code == 0, result.output
         assert "# Stack Report:" in result.output
         assert "Loadability" in result.output
@@ -164,7 +164,7 @@ class TestDepsCommand:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "markdown=json=-"])
+        result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 1
 
     def test_deps_sysroot_and_search_path(self, tmp_path, monkeypatch):
@@ -196,7 +196,7 @@ class TestDepsCommand:
             "--search-path",
             str(search_dir),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0, result.output
         assert captured_kwargs["sysroot"] == sysroot
@@ -250,7 +250,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
@@ -285,7 +285,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
         ])
         assert result.exit_code == 0, result.output
         assert "# Stack Report:" in result.output
@@ -350,7 +350,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 4
 
@@ -381,7 +381,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 4
 
@@ -424,7 +424,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 5
 
@@ -455,7 +455,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 1
 
@@ -486,7 +486,7 @@ class TestStackCheckCommand:
             "--new-root",
             str(candidate),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0
 

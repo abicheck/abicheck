@@ -646,7 +646,7 @@ def _build_compare_cmd(
         str(snap1),
         str(snap2),
         "-o",
-        "markdown=json=-",
+        "json=-",
     ]
     if old_build_source is not None:
         cmd += ["--build-info", "old=" + str(old_build_source), "--sources", "old=" + str(old_build_source)]
@@ -705,7 +705,7 @@ def _build_compare_direct_cmd(
         str(v1_so),
         str(v2_so),
         "-o",
-        "markdown=json=-",
+        "json=-",
     ]
     if v1_hdr and v1_hdr.exists():
         cmd += ["-H", "old=" + str(v1_hdr)]

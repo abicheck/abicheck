@@ -195,7 +195,7 @@ class TestResolvedContractModeWiring:
                 "--pack",
                 str(pack_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
 

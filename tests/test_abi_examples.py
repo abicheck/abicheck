@@ -377,7 +377,7 @@ def _run_compare_and_assert(
             str(snap1),
             str(snap2),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
         capture_output=True,
         text=True,

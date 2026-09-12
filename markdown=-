@@ -1,0 +1,42 @@
+# ABI Release Comparison
+
+| | |
+|---|---|
+| **Old** | `/tmp/pytest-of-root/pytest-27/test_corrupt_snapshot_reports_0/old` |
+| **New** | `/tmp/pytest-of-root/pytest-27/test_corrupt_snapshot_reports_0/new` |
+| **Verdict** | 🛑 no comparison completed |
+
+## 🧭 Comparison Scope
+
+**No comparison completed** — the selected scope produced no valid comparison, which is never a clean pass (ADR-065 D7).
+
+| | |
+|---|---|
+| **Scope** | ⚠️ `incomplete` — 0 member(s) compared |
+| **Selection** | every library discovered on either side is selected |
+| **Policy** | `scope.on_incomplete: warn` (contributes 0 to the exit code) |
+| **Inventory** | OLD `unproven`, NEW `unproven` |
+
+Members that did not reach a completed comparison (the verdict above covers the compared members only):
+
+| Member | State | OLD | NEW | Reason |
+|---|---|---|---|---|
+| `libfoo.json` | failed | ✓ | ✓ | corrupt snapshot |
+
+## Libraries
+
+| Library | Verdict | Breaking | Source | Risk | Additions |
+|---|---|---|---|---|---|
+| `libfoo.json` | 💥 `ERROR` | — | — | — | — |
+
+## Disposition audit
+
+| Disposition | Count |
+|---|---|
+| Detected (raw) | 0 |
+| Effective (gating) | 0 |
+| … non gating | 0 |
+| … suppressed | 0 |
+| … out of contract | 0 |
+| … unresolved relevance | 0 |
+| … deduplicated | 0 |

@@ -95,7 +95,7 @@ def _run(*args: str) -> tuple[int, str]:
 
 
 def _report(*args: str) -> tuple[int, dict]:
-    code, out = _run(*args, "--format", "json")
+    code, out = _run(*args, "-o", "json=-")
     return code, json.loads(out)
 
 

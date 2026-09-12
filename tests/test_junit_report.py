@@ -1101,7 +1101,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1139,7 +1139,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         assert result.exit_code == 4  # BREAKING
@@ -1177,7 +1177,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         assert result.exit_code == 0
@@ -1293,7 +1293,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         assert result.exit_code == 4  # BREAKING
@@ -1331,7 +1331,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         root = xml_fromstring(result.output)
@@ -1367,7 +1367,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
                 "--policy",
                 "sdk_vendor",
             ],
@@ -1405,7 +1405,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
                 "--view",
                 "show=breaking",
             ],
@@ -1432,7 +1432,7 @@ class TestJUnitCLICompare:
                 "/nonexistent/old.json",
                 "/nonexistent/new.json",
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         # Should fail on missing file, NOT on unrecognized format
@@ -1476,7 +1476,7 @@ class TestJUnitCLICompare:
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
             ],
         )
         # Must parse as valid XML regardless of exit code

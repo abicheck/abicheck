@@ -122,7 +122,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
 
 def compare_json(old: Path | str, new: Path | str, *extra_args: str) -> dict[str, Any]:
     """Invoke ``compare OLD NEW --format json`` and return the parsed report."""
-    result = invoke_cli("compare", str(old), str(new), "--format", "json", *extra_args)
+    result = invoke_cli("compare", str(old), str(new), "-o", "json=-", *extra_args)
     # 5/7 (ADR-068 §3 #19/#28, Phase 4 commit 2): `--budget` overflow and the
     # `--depth build`/`--depth source` evidence-contract floor are both
     # legitimate, reported axes now -- a real result still renders (this

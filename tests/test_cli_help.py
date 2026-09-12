@@ -150,7 +150,6 @@ class TestCompareHelpAllDisclosure:
         for advanced_flag in (
             "--compiler",
             "--ast-frontend",
-            "--write",
             "--probe-matrix",
             "--diagnostic-comparison",
         ):
@@ -164,7 +163,6 @@ class TestCompareHelpAllDisclosure:
             "--header",
             "--include",
             "--output",
-            "--format",
             "--view",
             "--config",
             "--severity-preset",
@@ -236,7 +234,6 @@ class TestCompareHelpAllDisclosure:
         # three belong in this "still renders somewhere" list any more.
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--write",
             "--probe-matrix",
             "--diagnostic-comparison",
         ):

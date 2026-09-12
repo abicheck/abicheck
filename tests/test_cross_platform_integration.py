@@ -226,7 +226,7 @@ class TestMachoIntegration:
                 str(td_path / "old.json"),
                 str(td_path / "new.json"),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
             ],
                 capture_output=True, text=True, check=False,
             )
@@ -407,7 +407,7 @@ class TestPeIntegration:
                 str(td_path / "old.json"),
                 str(td_path / "new.json"),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
             ],
                 capture_output=True, encoding="utf-8", check=False, env=env,
             )

@@ -302,7 +302,8 @@ def configure_rich_help() -> None:
 # help screen changes.
 #
 # Dest names (``click.Option.name``), not flag strings: a few options share
-# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``--view``,
+# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``-o``,
+# ``--view``,
 # ADR-068 D4/Phase 5's collapse of --report-mode/--show-only/--demangle/
 # --no-demangle/--explain-patterns into one dest) where only one dest exists
 # either way.
@@ -313,9 +314,10 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "include",
         # --lang has no Click dest here any more (Phase 7: compile.lang
         # config-only, one-comparison-product.md §4.1).
-        # Output & reporting
-        "output",
-        "fmt",
+        # Output & reporting -- one dest ("exports") for the whole export
+        # request since plan slice 7m; the retired "fmt" was the other half
+        # of the pair it replaced.
+        "exports",
         "view",
         # Policy & severity
         "config",

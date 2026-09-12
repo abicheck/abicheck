@@ -177,7 +177,7 @@ class TestCompareRequestGateOptions:
                 "--severity-preset",
                 "info-only",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert cli_result.exit_code == 0, cli_result.output

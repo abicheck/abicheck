@@ -334,7 +334,7 @@ class TestRemediationNamesOnlyLiveFlags:
         # Execute it. The ambiguity must be gone -- the run may still fail
         # for unrelated reasons, but never again on variant selection.
         ec2, out2 = _invoke(
-            "compare", str(old_pkg), str(new_pkg), *example, "--format", "json"
+            "compare", str(old_pkg), str(new_pkg), *example, "-o", "json=-"
         )
         assert "declares" not in out2 or "variant(s)" not in out2, (
             f"following the tool's own advice {example} still hit a variant "
@@ -366,7 +366,7 @@ class TestRemediationNamesOnlyLiveFlags:
         _write_package(new_pkg, new_libs)
 
         ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), *extra, "--format", "json"
+            "compare", str(old_pkg), str(new_pkg), *extra, "-o", "json=-"
         )
         assert ec != 0
         self._assert_advice_lands(out, "compare")

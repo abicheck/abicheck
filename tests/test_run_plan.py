@@ -1482,7 +1482,7 @@ class TestRunPlanGenerateCli:
                 "--build-output",
                 f"linux={build_dir}",
                 "-o",
-                "markdown=text=-",
+                "text=-",
             ],
         )
         assert result.exit_code == 0

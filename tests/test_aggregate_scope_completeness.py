@@ -274,10 +274,8 @@ class TestScopeCompletenessFromARealRelease:
                 str(new),
                 "--config",
                 str(cfg),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         expected_exit = 1 if policy == "block" else 0
@@ -306,10 +304,8 @@ class TestScopeCompletenessFromARealRelease:
                 "compare",
                 str(old),
                 str(new),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -465,10 +461,8 @@ class TestStoredDispatchShapeAndAcceptedGaps:
                 str(new),
                 "--config",
                 str(cfg),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         expected_exit = 1 if policy == "block" else 0
@@ -581,10 +575,8 @@ class TestExtractionErrorSurvivesAggregation:
                 "compare",
                 str(old),
                 str(new_dir),
-                "--format",
-                "json",
                 "-o",
-                str(reports / f"abi-report-{LINUX}.json"),
+                f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
         assert result.exit_code == 4, result.output

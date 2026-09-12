@@ -244,7 +244,7 @@ class TestStatOutput:
             str(old),
             str(new),
             "-o",
-            "markdown=oneline=-",
+            "oneline=-",
         ])
         assert result.exit_code == 0
         output = result.output.strip()
@@ -274,7 +274,7 @@ class TestRenderOutputFormats:
             str(old),
             str(new),
             "-o",
-            "markdown=sarif=-",
+            "sarif=-",
         ])
         assert result.exit_code == 0
         # Read stdout (not .output) so any stderr warning — e.g. the
@@ -531,7 +531,7 @@ class TestStackCheckCommand:
                 "--new-root",
                 str(candidate),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ])
             assert result.exit_code == 0
             data = json.loads(result.output)

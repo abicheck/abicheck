@@ -79,7 +79,7 @@ def _fixture_path(case_name: str, filename: str) -> Path:
 
 def _no_baseline_report(path: Path, *extra: str) -> dict:
     result = invoke_cli(
-        "compare", "--no-baseline", str(path), "--format", "json", *extra
+        "compare", "--no-baseline", str(path), "-o", "json=-", *extra
     )
     assert result.exit_code in (0, 1), (
         f"compare --no-baseline aborted on {path.name} "

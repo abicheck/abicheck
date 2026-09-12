@@ -700,7 +700,7 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
                 "--contract",
                 "public",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         # Compatible addition-only change, but `public` cannot prove its own
@@ -719,7 +719,7 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
                 "--contract",
                 "public",
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--pack",
                 str(pack),
             ],

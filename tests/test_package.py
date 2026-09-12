@@ -899,7 +899,7 @@ class TestCompareReleaseTarPackages:
             str(old_tar),
             str(new_tar),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         # Should succeed — NO_CHANGE since snapshots are identical
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
@@ -929,7 +929,7 @@ class TestCompareReleaseTarPackages:
             str(tar),
             str(tar),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--keep-extracted",
         ])
         assert result.exit_code == 64, f"Exit {result.exit_code}: {result.output}"
@@ -964,7 +964,7 @@ class TestCompareReleaseDirectoryPassthrough:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -2351,7 +2351,7 @@ class TestCompareReleaseWheelPackages:
             str(old_whl),
             str(new_whl),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -4162,7 +4162,7 @@ class TestCompareReleaseDsoOnly:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--config",
             str(cfg),
         ])
@@ -4202,7 +4202,7 @@ class TestExtractedTempDirsAlwaysCleanedUp:
             str(archive),
             str(archive),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
         assert "Extracted files kept in:" not in result.output

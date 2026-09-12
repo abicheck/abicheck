@@ -238,7 +238,7 @@ class TestCompareChangedPathCli:
                 "--changed-path",
                 "src/a.cc",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -275,7 +275,7 @@ class TestCompareChangedPathCli:
                 "--changed-path",
                 "src/a.cc",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -407,7 +407,7 @@ class TestCompareAbi3:
     ) -> None:
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "markdown=json=-"]
+            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"]
         )
         assert result.exit_code == 0, result.output
         report = json.loads(result.stdout)
@@ -433,7 +433,7 @@ class TestCompareAbi3:
         )
         new = _write(clean, tmp_path / "new.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--abi3", "3.9", "-o", "markdown=json=-"]
+            main, ["compare", str(old), str(new), "--abi3", "3.9", "-o", "json=-"]
         )
         report = json.loads(result.stdout)
         assert not [
@@ -448,7 +448,7 @@ class TestCompareAbi3:
             AbiSnapshot(library="libfoo.so", version="1.0"), tmp_path / "s.json"
         )
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "markdown=json=-"]
+            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"]
         )
         assert result.exit_code == 7, result.output
         report = json.loads(result.stdout)
@@ -465,7 +465,7 @@ class TestCompareAbi3:
     def test_without_the_flag_nothing_changes(self, tmp_path: Path) -> None:
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "-o", "markdown=json=-"]
+            main, ["compare", str(path), str(path), "-o", "json=-"]
         )
         assert result.exit_code == 0
         report = json.loads(result.stdout)
@@ -518,7 +518,7 @@ class TestAbi3FindingsReachPolicy:
                 "--policy",
                 str(self._policy(tmp_path, severity)),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == exit_code, result.output
@@ -531,7 +531,7 @@ class TestAbi3FindingsReachPolicy:
         policy in effect the same findings still gate nothing."""
         path = _write(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
         result = CliRunner().invoke(
-            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "markdown=json=-"]
+            main, ["compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"]
         )
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["verdict"] == "COMPATIBLE_WITH_RISK"
@@ -561,7 +561,7 @@ class TestAbi3FindingsReachPolicy:
                 "--suppress",
                 str(suppress),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -605,7 +605,7 @@ class TestAbi3FloorConfigDefault:
         cfg = self._config(tmp_path, "3.9")
         result = CliRunner().invoke(
             main,
-            ["compare", str(path), str(path), "--config", str(cfg), "-o", "markdown=json=-"],
+            ["compare", str(path), str(path), "--config", str(cfg), "-o", "json=-"],
         )
         assert result.exit_code == 0, result.output
         assert [
@@ -630,7 +630,7 @@ class TestAbi3FloorConfigDefault:
                 "--abi3",
                 "3.12",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output

@@ -144,7 +144,7 @@ def _invoke_json(*args: str) -> tuple[int, dict[str, object]]:
     (``Unsupported: ...``) are interleaved into ``result.output``."""
     from abicheck.cli import main
 
-    result = CliRunner().invoke(main, [*args, "--format", "json"])
+    result = CliRunner().invoke(main, [*args, "-o", "json=-"])
     return result.exit_code, json.loads(result.stdout)
 
 
@@ -1145,7 +1145,7 @@ class TestJunitScopeProjection:
                 str(old),
                 str(new),
                 "-o",
-                "markdown=junit=-",
+                "junit=-",
                 "--config",
                 str(cfg),
             ],
@@ -1202,7 +1202,7 @@ class TestJunitScopeProjection:
                     str(old),
                     str(new),
                     "-o",
-                    "markdown=junit=-",
+                    "junit=-",
                     "--config",
                     str(cfg),
                 ],

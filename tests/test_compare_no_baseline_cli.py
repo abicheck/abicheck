@@ -94,25 +94,36 @@ def test_an_unsupported_format_is_a_usage_error_that_names_the_ruling(
     """
     result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", f"{fmt}=-")
     assert result.exit_code == _EXIT_USAGE, result.output
-    assert f"--format {fmt}" in result.output
+    assert f"-o {fmt}=..." in result.output
     assert "compatibility comparison" in result.output
     assert "oneline" in result.output, "the error must point at a usable alternative"
 
 
-def test_an_unsupported_write_format_names_write_not_format(
+def test_every_export_is_checked_against_the_supported_set(
     candidate: Path, tmp_path: Path
 ) -> None:
-    """The error quotes the flag the user actually typed."""
+    """Not just the first: `-o` is repeatable, and an unsupported format in
+    *any* export must be refused rather than silently producing nothing at
+    that destination.
+
+    This replaces a test that checked the error named `--write` rather than
+    `--format` -- a distinction plan slice 7m dissolved, since both spellings
+    are now the one `-o` operand. What survives is the substantive half: the
+    rejection covers every export, and the message names the export grammar.
+    """
+    unsupported = tmp_path / "second.html"
     result = invoke_cli(
         "compare",
         "--no-baseline",
         str(candidate),
         "-o",
-        f"html={tmp_path / 'x.html'}",
+        "json=-",
+        "-o",
+        f"html={unsupported}",
     )
     assert result.exit_code == _EXIT_USAGE, result.output
-    assert "--write html" in result.output
-    assert "--format html" not in result.output
+    assert "-o html=..." in result.output
+    assert not unsupported.exists()
 
 
 def test_write_emits_each_format_from_one_run(candidate: Path, tmp_path: Path) -> None:

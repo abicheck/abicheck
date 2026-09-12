@@ -371,7 +371,7 @@ class TestStatKeepsItsSummaryOnlyShape:
                 str(old),
                 str(new),
                 "-o",
-                "markdown=oneline=-",
+                "oneline=-",
                 "--use-cases",
                 str(manifest),
             ],
@@ -424,7 +424,7 @@ class TestStatKeepsItsSummaryOnlyShape:
             main,
             [
                 "compare", str(old), str(new), "--use-cases", str(manifest),
-                "--format", fmt, "-o", str(tmp_path / f"r.{fmt}"),
+                "-o", f"{fmt}=-", "-o", str(tmp_path / f"r.{fmt}"),
             ],
         )
         assert result.exit_code == 64, result.output
@@ -442,7 +442,7 @@ class TestStatKeepsItsSummaryOnlyShape:
             main,
             [
                 "compare", str(old), str(new), "--use-cases", str(manifest),
-                "--format", "sarif", "-o", str(tmp_path / "r.sarif"),
+                "-o", f"sarif={tmp_path / 'r.sarif'}",
                 "--write", f"html={tmp_path / 'r.html'}",
             ],
         )
@@ -478,7 +478,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         # The rejection must not have narrowed the one-line format itself.
         old, new = self._pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "-o", "markdown=oneline=-"]
+            main, ["compare", str(old), str(new), "-o", "oneline=-"]
         )
         assert result.exit_code == 4, result.output
         assert "use_case_impact" not in result.output

@@ -450,7 +450,7 @@ class TestReleasePolicyOverrideWarningFiresOnce:
                 "--policy",
                 str(policy_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output

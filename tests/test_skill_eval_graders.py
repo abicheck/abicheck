@@ -435,7 +435,7 @@ class TestEvidenceReading:
         """Only *adjacent equal* non-flag tokens count, so a value repeated
         elsewhere in the command line does not fail a correct run."""
         assert not ev.compares_one_side_against_itself(
-            {"argv": ["compare", "v1.so", "v2.so", "-o", "markdown=json=json"]}
+            {"argv": ["compare", "v1.so", "v2.so", "-o", "json=json"]}
         )
 
     def test_suppression_flags_are_seen_in_both_spellings(self):
@@ -1311,8 +1311,8 @@ class TestSelfComparisonDetection:
         "argv",
         [
             ["compare", "x.so", "x.so"],
-            ["compare", "x.so", "-o", "markdown=json=-", "x.so"],
-            ["compare", "-o", "markdown=json=-", "x.so", "x.so"],
+            ["compare", "x.so", "-o", "json=-", "x.so"],
+            ["compare", "-o", "json=-", "x.so", "x.so"],
             # A boolean flag consumes nothing, so the operand after it is still
             # an operand — `--verbose` is `is_flag=True` in cli_options.py.
             ["compare", "x.so", "--verbose", "x.so"],
@@ -1340,7 +1340,7 @@ class TestSelfComparisonDetection:
         [
             ["compare", "old.so", "new.so"],
             ["compare", "a.so", "b.so", "--policy", "p.yaml"],
-            ["compare", "a.so", "b.so", "-o", "markdown=markdown=b.so"],
+            ["compare", "a.so", "b.so", "-o", "markdown=b.so"],
             [
                 "compare",
                 "a.so",

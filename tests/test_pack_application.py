@@ -153,11 +153,11 @@ class TestAPackActuallyConfiguresTheRun:
         self, pair: tuple[Path, Path], ignore_removals: Path
     ) -> None:
         runner = CliRunner()
-        without = _compare(runner, pair, "--format", "json")
+        without = _compare(runner, pair, "-o", "json=-")
         assert without.exit_code == 4, without.output
 
         with_pack = _compare(
-            runner, pair, "--format", "json", "--pack", str(ignore_removals)
+            runner, pair, "-o", "json=-", "--pack", str(ignore_removals)
         )
         assert with_pack.exit_code == 0, with_pack.output
         assert json.loads(with_pack.output)["verdict"] == "COMPATIBLE"
@@ -186,7 +186,7 @@ class TestAPackActuallyConfiguresTheRun:
             "id: lenient\nversion: 1\nkind: gate\n"
             "assignments:\n  gate.severity.abi_breaking: warning\n",
         )
-        result = _compare(CliRunner(), pair, "--format", "json", "--pack", str(gate))
+        result = _compare(CliRunner(), pair, "-o", "json=-", "--pack", str(gate))
         assert result.exit_code == 0, result.output
         # The finding is still reported -- only the gate moved.
         assert json.loads(result.output)["verdict"] == "BREAKING"
@@ -212,8 +212,8 @@ class TestAPackActuallyConfiguresTheRun:
         result = _compare(
             CliRunner(),
             (new_p, old_p),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--config",
             str(config),
             "--pack",
@@ -281,8 +281,8 @@ class TestD8Precedence:
         result = _compare(
             CliRunner(),
             pair,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--pack",
             str(ignore_removals),
             "--policy",
@@ -308,8 +308,8 @@ class TestD8Precedence:
         result = _compare(
             CliRunner(),
             two_kind_pair,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--pack",
             str(ignore_removals),
             "--policy",
@@ -332,8 +332,8 @@ class TestD8Precedence:
         result = _compare(
             CliRunner(),
             pair,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--pack",
             str(gate),
             "--severity-preset",
@@ -364,7 +364,7 @@ class TestD8Precedence:
             "id: lenient\nversion: 1\nkind: gate\n"
             "assignments:\n  gate.severity.abi_breaking: warning\n",
         )
-        result = _compare(CliRunner(), pair, "--format", "json", "--pack", str(gate))
+        result = _compare(CliRunner(), pair, "-o", "json=-", "--pack", str(gate))
         assert result.exit_code == 0, result.output
 
     def test_two_packs_disagreeing_on_one_field_is_a_usage_error(
@@ -401,8 +401,8 @@ class TestD8Precedence:
         result = _compare(
             CliRunner(),
             pair,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--pack",
             str(first),
             "--pack",
@@ -926,7 +926,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "  gate.severity.addition: error\n",
         )
         without_pack = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "-o", "markdown=json=-"]
+            main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"]
         )
         assert without_pack.exit_code == 0, without_pack.output
         with_pack = CliRunner().invoke(
@@ -936,7 +936,7 @@ class TestOnlyAppliedFieldsAreAccepted:
                 str(old_dir),
                 str(new_dir),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--pack",
                 str(gate),
             ],
@@ -993,7 +993,7 @@ class TestOnlyAppliedFieldsAreAccepted:
                 str(old_dir),
                 str(new_dir),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--pack",
                 str(gate),
             ],
@@ -1247,16 +1247,12 @@ class TestReceiptAgreesWithWhatScored:
         result = _compare(
             CliRunner(),
             pair,
-            # See the parity test below: `all` keeps ADR-049 Phase 7's
-            # contract-coverage axis quiet so this stays a test about packs.
             "--contract",
             "all",
-            "--format",
-            "json",
+            "-o",
+            f"json={report}",
             "--pack",
             str(ignore_removals),
-            "-o",
-            str(report),
         )
         # The verdict moved *and* the receipt explains why -- neither alone is
         # the claim being made here.
@@ -1309,12 +1305,10 @@ class TestReceiptAgreesWithWhatScored:
             pair,
             "--contract",
             "public",
-            "--format",
-            "json",
+            "-o",
+            f"json={report}",
             "--pack",
             str(gate),
-            "-o",
-            str(report),
         )
         assert result.exit_code == 4, result.output
         ctx = json.loads(report.read_text(encoding="utf-8"))["contract_context"][

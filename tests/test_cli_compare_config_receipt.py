@@ -87,7 +87,7 @@ def _context(tmp_path: Path, *args: str) -> dict:
             "--contract",
             "auto",
             "-o",
-            "markdown=json=-",
+            "json=-",
             *args,
         ],
     )
@@ -266,7 +266,7 @@ class TestProjectConfigOverridesReachTheReceipt:
                 "--contract",
                 "auto",
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 *args,
             ],
         )
@@ -633,7 +633,7 @@ class TestWiringContract:
         monkeypatch.setattr(receipt, "resolve_and_apply", _spy)
         old_p, new_p = _write_pair(tmp_path)
         CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert set(seen) == set(COMPARE_CONFIG_PARAMS)
 
@@ -658,7 +658,7 @@ class TestWiringContract:
                 "--contract",
                 "public",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 64, result.output
@@ -723,7 +723,7 @@ class TestRequireCompleteAnalysisReceiptConsistency:
                 "--config",
                 str(tmp_path / ".abicheck.yml"),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -757,7 +757,7 @@ class TestRequireCompleteAnalysisReceiptConsistency:
                 "--contract",
                 "auto",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -802,7 +802,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "--config",
                 str(config_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -830,7 +830,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "--contract",
                 "auto",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -863,7 +863,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "--config",
                 str(config_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -900,7 +900,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
                 "--config",
                 str(config_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -953,7 +953,7 @@ class TestRequireCompleteAnalysisProvenanceIdentity:
                 "--config",
                 str(config_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
@@ -999,7 +999,7 @@ class TestRequireCompleteAnalysisProvenanceIdentity:
                 "--config",
                 str(config_path),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output

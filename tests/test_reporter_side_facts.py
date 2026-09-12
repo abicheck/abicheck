@@ -124,7 +124,7 @@ class TestEvidenceDepthOutOfBandPack:
                 "--build-info",
                 "new=" + str(new_pack_dir),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code in (0, 1, 2, 4), result.output
@@ -148,7 +148,7 @@ class TestEvidenceDepthOutOfBandPack:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"],
+            ["compare", str(old_p), str(new_p), "-o", "json=-"],
         )
         assert result.exit_code in (0, 1, 2, 4), result.output
         payload = json.loads(result.output)
@@ -171,7 +171,7 @@ class TestEvidenceDepthOutOfBandPack:
                     str(old_p),
                     str(new_p),
                     "-o",
-                    "markdown=json=-",
+                    "json=-",
                     "--view",
                     mode,
                 ],

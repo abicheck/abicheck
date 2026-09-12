@@ -365,15 +365,16 @@ class TestReleaseViewShowOnly:
         self, tmp_path: Path
     ) -> None:
         """Codex review, fresh evidence, third round ("Count uncapped
-        findings in release filter totals"): a library with more than
-        `_MAX_RELEASE_FINDINGS_PER_LIBRARY` (10) real findings has its
-        `findings` display list capped at 10, but `release_filtered_
-        summary`'s `total` must still report the true, uncapped count --
-        summing the already-capped display list under-reports past the
-        cap (25 real findings would read as 10). The cap is passed
-        explicitly because the default one no longer truncates a machine
-        document (a JSON consumer who never asked for truncation must not
-        receive a truncated one)."""
+        findings in release filter totals"): `release_filtered_summary`'s
+        `total` must report the true finding count, not a display-list
+        length.
+
+        Plan slice 7m sharpened the surrounding fact rather than changing
+        this one: a machine export is never truncated at all now (there is
+        no longer any way to ask for it), so this library's own `findings`
+        list carries all 25 too, and `total` agreeing with it is the point
+        -- the old failure mode was `total` reading 10 because it summed a
+        capped list."""
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
@@ -388,8 +389,10 @@ class TestReleaseViewShowOnly:
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
         lib = doc["libraries"][0]
-        assert lib.get("findings_truncated") is True
-        assert len(lib["findings"]) <= 10
+        # Complete machine data, never truncated, and no truncation claimed.
+        assert len(lib["findings"]) == 25
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
         # 25 real removed-function findings (plus 1 compatible
         # public-surface-shrank note, element `surface` -- not `functions`,
         # so it doesn't match `show=functions`) existed before the filter;
@@ -402,15 +405,18 @@ class TestReleaseViewShowOnly:
         self, tmp_path: Path
     ) -> None:
         """CodeRabbit review ("Fix the rendered truncation metadata before
-        documenting it"): `_release_findings_for_render`'s `findings`/
-        `findings_truncated` swap under `--view show=...` used to leave
-        `findings_truncated_kinds` reading the *unfiltered* projection's
-        value -- so a rendered, `show=functions`-filtered `findings` list
-        (25 `func_removed`, capped to 10) carried a truncation ledger that
-        also counted the one `public_surface_shrank` note the filter had
-        already excluded outright, and the private `findings_view_
-        truncated_kinds` key leaked into the rendered entry unstripped.
-        The cap is explicit for the same reason as the test above."""
+        documenting it"): a rendered, `show=functions`-filtered `findings`
+        list must never carry a truncation ledger describing a different
+        projection -- the bug counted the one `public_surface_shrank` note
+        the filter had already excluded, and leaked the private
+        `findings_view_truncated_kinds` key into the rendered entry.
+
+        Plan slice 7m removes the *source* of the mismatch for a machine
+        export: it is never truncated, so it claims no truncation and
+        carries no ledger at all. Both private keys must still be stripped,
+        which is the half of this guard that survives -- a leaked
+        `findings_view_*` key would be an internal projection escaping into
+        a published document whatever the cap does."""
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
@@ -424,12 +430,13 @@ class TestReleaseViewShowOnly:
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
-        assert lib["findings_truncated"] is True
-        # Only the 15 excluded `func_removed` -- never the filtered-out
-        # `public_surface_shrank`, which isn't part of the displayed
-        # `show=functions` view at all.
-        assert lib["findings_truncated_kinds"] == {"func_removed": 15}
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
         assert "findings_view_truncated_kinds" not in lib
+        assert "findings_view" not in lib
+        # The displayed view really is the filtered one: 25 `func_removed`
+        # and not the `public_surface_shrank` note `show=functions` excludes.
+        assert {f["kind"] for f in lib["findings"]} == {"func_removed"}
 
     def test_release_findings_for_render_drops_the_kind_ledger_when_the_filtered_view_is_untruncated(
         self,
@@ -915,13 +922,15 @@ class TestReleaseViewImpactAggregate:
         assert "**Impact**" in result.output
         assert "Point" in result.output
 
-    def test_impact_table_respects_show_only_and_write_stays_full(
+    def test_impact_table_respects_show_only_in_every_export(
         self, tmp_path: Path
     ) -> None:
         """Combining ``--view impact`` with ``--view show=...`` filters the
-        primary render's impact table the same way it filters ``findings``,
-        while a secondary ``--write`` stays the full, unfiltered table --
-        mirroring the existing findings/findings_view contract exactly."""
+        impact table the same way it filters ``findings`` -- and, since plan
+        slice 7m, in every export rather than only the first, mirroring the
+        findings/findings_view contract exactly (see
+        ``TestReleaseViewShowOnlyAppliesToEveryExport`` for why the old
+        primary-vs-secondary split had no answer under one operand)."""
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
         write_path = tmp_path / "full.json"
 
@@ -950,7 +959,10 @@ class TestReleaseViewImpactAggregate:
 
         secondary = json.loads(write_path.read_text(encoding="utf-8"))
         secondary_lib = secondary["libraries"][0]
-        assert secondary_lib["impact_table"]["root_entries"]
+        assert "impact_table" not in secondary_lib
+        # And the private view key never leaks into either rendered document.
+        assert "impact_table_view" not in primary_lib
+        assert "impact_table_view" not in secondary_lib
 
 
 class TestReleaseViewImpactJUnitParity:
@@ -1037,21 +1049,29 @@ class TestReleaseViewImpactJUnitParity:
         assert "impact" not in single_pair.output.lower()
 
 
-class TestReleaseViewShowOnlySecondaryWriteStaysFull:
-    """Codex review, PR #1154 second follow-up ("Apply release show filters
-    inside each renderer"): a secondary ``--write`` report is documented/
-    contracted to always be full and unfiltered -- the *previous* fix
-    filtered the shared ``library_results`` projection once, upstream of
-    both the primary ``--format`` render and a secondary ``--write`` render,
-    so ``--write`` incorrectly inherited the primary's own ``--view show=``
-    selection. This proves ``--write`` stays full even when the primary
-    render is filtered down to nothing."""
+class TestReleaseViewShowOnlyAppliesToEveryExport:
+    """A display filter means the same thing for every export.
 
-    def test_write_json_is_full_while_primary_markdown_is_filtered(
-        self, tmp_path: Path
-    ) -> None:
+    This class previously pinned the opposite: a secondary ``--write``
+    report was contracted to be full and unfiltered whatever ``--format``
+    was asked for. That asymmetry was answerable only while "primary" and
+    "secondary" were two different flags -- under plan slice 7m's one
+    repeatable ``-o FORMAT=DESTINATION`` there is no principled way to say
+    which of two exports is the unfiltered one, so the filter applies
+    uniformly and the complete accounting stays where it always was: in the
+    machine projection's own disposition/suppression ledger and its
+    `release_filtered_summary`, which reports the true pre-filter totals.
+
+    The underlying regression this class was added for is unchanged and
+    still guarded: the shared ``library_results`` projection must not be
+    filtered *in place* upstream of the renderers, or a filtered view would
+    be all any consumer could ever see.
+    """
+
+    def test_every_export_sees_the_same_filtered_view(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
-        write_path = tmp_path / "secondary.json"
+        first = tmp_path / "one.json"
+        second = tmp_path / "two.json"
 
         result = _invoke(
             "compare",
@@ -1060,63 +1080,45 @@ class TestReleaseViewShowOnlySecondaryWriteStaysFull:
             "--view",
             "show=variables",
             "-o",
-            f"json={write_path}",
+            f"json={first}",
+            "-o",
+            f"json={second}",
         )
         assert result.exit_code == 4, result.output
 
-        # Primary (markdown, the default format) is filtered: the function
-        # finding is a "functions"-element kind, and `show=variables` keeps
-        # only variable-element kinds.
-        assert "## Per-Library Findings" not in result.output
-        assert "api_b" not in result.output
+        docs = [
+            json.loads(path.read_text(encoding="utf-8")) for path in (first, second)
+        ]
+        assert docs[0] == docs[1]
+        for doc in docs:
+            (entry,) = doc["libraries"]
+            # `show=variables` keeps only variable-element kinds, and this
+            # pair's findings are a function removal plus a surface note.
+            assert [f["kind"] for f in entry.get("findings", [])] == []
+            # Nothing is hidden by narrowing the display: the filter states
+            # what it excluded, over the true uncapped pool.
+            assert doc["release_filtered_summary"]["total"] >= 2
+            assert doc["release_filtered_summary"]["displayed"] == 0
 
-        # Secondary --write is full/unfiltered: the same function finding
-        # a `--view show=variables` filter removed from the primary render
-        # must still be present here. Two findings, not one, since Codex
-        # review (PR #1154 follow-up: "Filter the complete release finding
-        # set") widened the full/unfiltered pool to every category
-        # (including the unconditional surface-metrics compatible finding),
-        # not only the legacy breaking/api_break/risk buckets.
-        secondary_doc = json.loads(write_path.read_text(encoding="utf-8"))
-        lib_entries = secondary_doc["libraries"]
-        assert len(lib_entries) == 1
-        findings = lib_entries[0].get("findings", [])
-        assert {f["kind"] for f in findings} == {"func_removed", "public_surface_shrank"}
-        assert len(findings) == 2
-
-    def test_write_json_is_full_even_when_primary_is_also_json(
+    def test_the_unfiltered_result_is_still_one_invocation_away(
         self, tmp_path: Path
     ) -> None:
-        """The same invariant holds when the *primary* format is JSON too --
-        the private ``findings_view`` transport key the primary render
-        consumes must never leak into either document, and a secondary
-        ``--write`` must never see it either."""
+        """The capability the old asymmetry existed to provide -- a complete
+        machine artifact -- is not lost, it is just spelled by not asking
+        for a filter. Stated here so "the filter now applies everywhere"
+        cannot quietly become "the complete document is unobtainable"."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
-        write_path = tmp_path / "secondary.json"
+        full = tmp_path / "full.json"
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "-o",
-            f"markdown={write_path}",
-            "--view",
-            "show=variables",
+            "compare", str(old_dir), str(new_dir), "-o", f"json={full}"
         )
         assert result.exit_code == 4, result.output
-
-        # A secondary --write to a *file* (unlike stdout) prints a "Report
-        # written to ..." notice ahead of the primary JSON on stdout.
-        primary_json_text = result.output[result.output.index("{") :]
-        primary_doc = json.loads(primary_json_text)
-        assert primary_doc["libraries"][0].get("findings", []) == []
-        assert "findings_view" not in primary_doc["libraries"][0]
-
-        secondary_text = write_path.read_text(encoding="utf-8")
-        assert "api_b" in secondary_text
-        assert "findings_view" not in secondary_text
+        (entry,) = json.loads(full.read_text(encoding="utf-8"))["libraries"]
+        assert {f["kind"] for f in entry["findings"]} == {
+            "func_removed",
+            "public_surface_shrank",
+        }
 
 
 class TestReleaseViewShowOnlyJUnit:

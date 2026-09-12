@@ -412,7 +412,7 @@ class TestNoBaselineCli:
         path.write_text(snapshot_to_json(snap), encoding="utf-8")
 
         result = CliRunner().invoke(
-            main, ["compare", "--no-baseline", str(path), "-o", "markdown=json=-"]
+            main, ["compare", "--no-baseline", str(path), "-o", "json=-"]
         )
         assert result.exit_code == 0, result.output
 
@@ -492,6 +492,6 @@ class TestNoBaselineRejectsViewTokens:
 
         path = self._snapshot_path(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", "--no-baseline", str(path), "-o", "markdown=json=-"]
+            main, ["compare", "--no-baseline", str(path), "-o", "json=-"]
         )
         assert result.exit_code == 0, result.output

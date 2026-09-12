@@ -83,7 +83,7 @@ def a_breaking_call(seq: int = 0, argv: list[str] | None = None) -> dict:
     return {
         "seq": seq,
         "call_id": f"c{seq}",
-        "argv": argv or ["compare", "old.so", "new.so", "-o", "markdown=json=-"],
+        "argv": argv or ["compare", "old.so", "new.so", "-o", "json=-"],
         "exit_code": 4,
         "stdout_path": f"captured/{seq}.out",
         "outputs": [],

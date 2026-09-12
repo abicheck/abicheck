@@ -59,32 +59,38 @@ SCENARIO_BREAKING = {
 
 class TestShim:
     def test_declared_outputs_cover_every_spelling(self):
-        argv = ["compare", "a", "b", "-o", "markdown=markdown=r.json", "--output-dir=out"]
-        assert shim._declared_outputs(argv) == ["r.json", "out"]
+        argv = ["compare", "a", "b", "-o", "markdown=r.json", "--output=json=out/"]
+        assert shim._declared_outputs(argv) == ["r.json", "out/"]
+
+    def test_a_stdout_export_declares_no_output(self):
+        """`-` is a destination, not a path: nothing to snapshot there."""
+        assert shim._declared_outputs(["compare", "a", "b", "-o", "json=-"]) == []
 
     def test_an_attached_short_option_value_is_recognized(self):
         """Verified against the real CLI: `compare ... -oreport.json` writes it.
 
         An unrecognized output is never snapshotted, so a later call reusing the
         path overwrites the evidence a claim cites."""
-        assert shim._declared_outputs(["compare", "a", "b", "-oreport.json"]) == [
+        assert shim._declared_outputs(["compare", "a", "b", "-ojson=report.json"]) == [
             "report.json"
         ]
-        assert shim._declared_outputs(["compare", "-o=r.json"]) == ["r.json"]
+        assert shim._declared_outputs(["compare", "-o=json=r.json"]) == ["r.json"]
 
     def test_a_long_option_is_not_split_as_an_attached_value(self):
-        """`--output-dir` must not be read as `-o` plus `utput-dir`."""
-        assert shim._declared_outputs(["compare", "-o", "markdown=json=out/"]) == ["out"]
+        """`--output` must not be read as `-o` plus `utput`."""
+        assert shim._declared_outputs(["compare", "--output", "json=out/"]) == ["out/"]
 
-    def test_write_declares_the_path_half_of_its_operand(self):
-        """``--write`` is ``FORMAT=PATH``: only the second half is a path."""
-        assert shim._declared_outputs(["compare", "-o", "markdown=json=r.json"]) == [
-            "r.json"
+    def test_an_export_declares_the_destination_half_of_its_operand(self):
+        """``-o`` is ``FORMAT=DESTINATION``: only the second half is a path,
+        and it is split on the *first* `=` so a Windows path survives."""
+        assert shim._declared_outputs(["compare", "-o", "json=r.json"]) == ["r.json"]
+        assert shim._declared_outputs(["compare", "--output=json=r.json"]) == ["r.json"]
+        assert shim._declared_outputs(["compare", "-o", r"json=C:\out\r.json"]) == [
+            r"C:\out\r.json"
         ]
-        assert shim._declared_outputs(["compare", "--write=json=r.json"]) == ["r.json"]
 
     def test_same_named_outputs_do_not_overwrite_each_other(self, tmp_path):
-        """`-o human/report.json --write json=machine/report.json`."""
+        """`-o markdown=human/report.json -o json=machine/report.json`."""
         cwd = tmp_path / "cwd"
         (cwd / "human").mkdir(parents=True)
         (cwd / "machine").mkdir(parents=True)
@@ -95,7 +101,9 @@ class TestShim:
         argv = [
             "compare",
             "-o",
-            "markdown=json=machine/report.json",
+            "markdown=human/report.json",
+            "-o",
+            "json=machine/report.json",
         ]
         snaps = shim._snapshot_outputs(argv, cwd, dest, tmp_path / "run")
         paths = [s["path"] for s in snaps]
@@ -110,7 +118,7 @@ class TestShim:
         run = tmp_path / "run"
         dest = run / "captured" / "0.outputs"
         dest.mkdir(parents=True)
-        snaps = shim._snapshot_outputs(["compare", "-o", "markdown=markdown=r.json"], cwd, dest, run)
+        snaps = shim._snapshot_outputs(["compare", "-o", "markdown=r.json"], cwd, dest, run)
         assert (run / snaps[0]["path"]).is_file()
 
     def test_a_missing_output_is_recorded_as_absent(self, tmp_path):
@@ -118,7 +126,7 @@ class TestShim:
         dest = run / "captured" / "0.outputs"
         dest.mkdir(parents=True)
         snaps = shim._snapshot_outputs(
-            ["compare", "-o", "markdown=markdown=nope.json"], tmp_path, dest, run
+            ["compare", "-o", "markdown=nope.json"], tmp_path, dest, run
         )
         assert snaps == [{"requested": "nope.json", "status": "absent"}]
 
@@ -742,7 +750,7 @@ class TestShimShortOptionClusters:
     def test_an_output_packed_into_a_cluster_is_recognized(self):
         """`compare ... -voreport.json` writes `report.json` — verified against
         the real CLI. An unrecognized output is never snapshotted."""
-        assert shim._declared_outputs(["compare", "a", "b", "-voreport.json"]) == [
+        assert shim._declared_outputs(["compare", "a", "b", "-vojson=report.json"]) == [
             "report.json"
         ]
 
@@ -751,8 +759,10 @@ class TestShimShortOptionClusters:
         assert shim._declared_outputs(["compare", "a", "b", "-Ho", "inc"]) == []
 
     def test_a_following_option_is_not_recorded_as_a_path(self):
-        """`-o --format json` otherwise put a phantom `--format` in the record."""
-        assert shim._declared_outputs(["compare", "a", "b", "-o", "markdown=markdown=--format"]) == []
+        """A bare `-o` whose next token is another option declares nothing --
+        it is a malformed operand the CLI itself rejects, and recording it
+        put a phantom entry in the transcript."""
+        assert shim._declared_outputs(["compare", "a", "b", "-o", "--view"]) == []
 
 
 class TestInterposerSpellings:

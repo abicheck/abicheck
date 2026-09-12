@@ -164,7 +164,7 @@ class TestReleaseSummaryEffectiveConfigNeverDivergesFromSinglePair:
         extra_args = make_args(tmp_path)
 
         _, single_out = _invoke(
-            "compare", str(old_path), str(new_path), *extra_args, "--format", "json"
+            "compare", str(old_path), str(new_path), *extra_args, "-o", "json=-"
         )
         single_fields = json.loads(single_out)["effective_config_fields"]
 
@@ -173,8 +173,8 @@ class TestReleaseSummaryEffectiveConfigNeverDivergesFromSinglePair:
             str(old_dir),
             str(new_dir),
             *extra_args,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         release_fields = json.loads(release_out)["effective_config_fields"]
 
@@ -213,7 +213,7 @@ class TestReleaseSummaryEffectiveConfigNeverDivergesFromSinglePair:
         for axis_name, make_args in _AXES:
             extra_args = make_args(tmp_path)
             _, out = _invoke(
-                "compare", str(old_path), str(new_path), *extra_args, "--format", "json"
+                "compare", str(old_path), str(new_path), *extra_args, "-o", "json=-"
             )
             fields = json.loads(out)["effective_config_fields"]
             assert fields != baseline_fields, (

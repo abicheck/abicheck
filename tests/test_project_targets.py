@@ -802,7 +802,7 @@ def test_cli_validate_json_output(tmp_path: Path) -> None:
         "targets:\n  libfoo:\n    kind: library\n    binary_pattern: lib/libfoo.so\n"
     )
     result = CliRunner().invoke(
-        main, ["project", "validate", str(config_path), "-o", "markdown=json=-"]
+        main, ["project", "validate", str(config_path), "-o", "json=-"]
     )
     assert result.exit_code == 0, result.output
     assert '"ok": true' in result.output

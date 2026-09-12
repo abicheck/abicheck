@@ -1046,7 +1046,7 @@ class TestExitSchemeExplicit:
                 "--config",
                 str(empty_cfg),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert baseline.exit_code == 4
@@ -1060,7 +1060,7 @@ class TestExitSchemeExplicit:
                 "--config",
                 str(cfg),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert res.exit_code == 0

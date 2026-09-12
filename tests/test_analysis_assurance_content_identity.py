@@ -153,7 +153,7 @@ def test_self_compare_of_stored_stale_snapshot_is_complete_end_to_end(
         assert degraded_reliability_facts(snapshot_from_dict(d))
 
     result = CliRunner().invoke(
-        main, ["compare", str(path), str(path), "-o", "markdown=json=-"]
+        main, ["compare", str(path), str(path), "-o", "json=-"]
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -182,7 +182,7 @@ def test_two_distinct_stored_snapshots_still_taint_end_to_end(tmp_path: Path) ->
     new_p.write_text(json.dumps(new_d))
 
     result = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+        main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
     )
     payload = json.loads(result.output)
     assurance = payload["analysis_assurance"]
@@ -212,7 +212,7 @@ def test_content_identical_compare_still_warns_it_can_detect_nothing(
     path.write_text(json.dumps(d))
 
     result = CliRunner().invoke(
-        main, ["compare", str(path), str(path), "-o", "markdown=json=-"]
+        main, ["compare", str(path), str(path), "-o", "json=-"]
     )
     payload = json.loads(result.output)
     assert payload["analysis_assurance"]["status"] == "complete"

@@ -73,7 +73,7 @@ class TestDepsCommand:
         # Class-scoped, so it can't take the function-scoped `real_binary`
         # fixture — resolve the binary via the shared helper instead.
         binary = _pick_elf()
-        result = CliRunner().invoke(main, ["deps", "tree", str(binary), "-o", "markdown=json=-"])
+        result = CliRunner().invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0
         return json.loads(result.output)
 
@@ -225,7 +225,7 @@ class TestCompareFollowDeps:
             str(real_lib),
             "--follow-deps",
             "-o",
-            "markdown=json=-",
+            "json=-",
         ])
         assert result.exit_code == 0
         data = _extract_json(result.output)

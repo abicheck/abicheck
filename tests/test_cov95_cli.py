@@ -739,7 +739,7 @@ class TestCompareCommand:
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
-        result = _invoke("compare", str(old_f), str(new_f), "-o", "markdown=json=-")
+        result = _invoke("compare", str(old_f), str(new_f), "-o", "json=-")
         assert result.exit_code == 0
 
     def test_output_to_file(self, tmp_path: Path) -> None:
@@ -853,7 +853,7 @@ class TestCompareCommand:
             str(old_f),
             str(new_f),
             "-o",
-            "markdown=sarif=-",
+            "sarif=-",
         )
         assert result.exit_code == 0
         assert "$schema" in result.output or "sarif" in result.output.lower()
@@ -873,7 +873,7 @@ class TestCompareCommand:
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
-        result = _invoke("compare", str(old_f), str(new_f), "-o", "markdown=oneline=-")
+        result = _invoke("compare", str(old_f), str(new_f), "-o", "oneline=-")
         assert result.exit_code == 4
         assert "\n" not in result.stdout.strip()  # stderr carries the scope warning
 
@@ -1147,7 +1147,7 @@ class TestCompareReleaseCommand:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
         )
         assert result.exit_code == 0
         assert "ABI Release Comparison" in result.output
@@ -1198,7 +1198,7 @@ class TestCompareReleaseCommand:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=junit=-",
+            "junit=-",
         )
         assert result.exit_code == 0
         assert "testsuite" in result.output
@@ -1234,7 +1234,7 @@ class TestCompareReleaseCommand:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
         )
         assert result.exit_code == 0
         # ADR-065 D2: a live directory cannot prove `libgone` removed, so the
@@ -1335,7 +1335,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         assert result.exit_code == 0
         # The mixed stdout+stderr `.output` may carry pre-JSON warnings (real
@@ -1402,7 +1402,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
 
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -1512,7 +1512,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--severity-preset",
             "default",
         )
@@ -1563,7 +1563,7 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=sarif=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "sarif=-",
         )
         data = json.loads(result.stdout)
         sarif_results = data["runs"][0]["results"]
@@ -1606,7 +1606,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--severity-preset",
             "default",
         )
@@ -1684,7 +1684,7 @@ class TestUsedByScoping:
             "--severity-preset",
             "info-only",
             "-o",
-            "markdown=json=-",
+            "json=-",
         )
         data = json.loads(result.stdout)
         assert result.exit_code == 0  # full-library result: no real changes
@@ -1737,7 +1737,7 @@ class TestUsedByScoping:
             "--severity-preset",
             "default",
             "-o",
-            "markdown=json=-",
+            "json=-",
         )
         data = json.loads(result.stdout)
         # Full-library diff is empty and the consumer scope never feeds the
@@ -1790,7 +1790,7 @@ class TestUsedByScoping:
             "--severity-preset",
             "default",
             "-o",
-            "markdown=json=-",
+            "json=-",
         )
         data = json.loads(result.stdout)
         # Workstream D-S1: the real gate/exit code reflect only the empty
@@ -1817,7 +1817,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=html=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "html=-",
         )
         assert result.exit_code == 0
         assert "<" in result.stdout  # HTML markup emitted
@@ -1856,7 +1856,7 @@ class TestUsedByScoping:
         )
         self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=markdown=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=-",
         )
         assert result.exit_code == 4  # the full-library BREAKING verdict
         assert "Consumer-scoped verdict: COMPATIBLE" in result.stdout
@@ -1910,7 +1910,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=oneline=-",
+            "oneline=-",
         )
         assert result.exit_code == 4  # the full-library BREAKING verdict
         # The verdict label leads with the full-library result (BREAKING),
@@ -1967,7 +1967,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=oneline=-",
+            "oneline=-",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
@@ -2001,7 +2001,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=oneline=-",
+            "oneline=-",
             "--view",
             "show=compatible",
         )
@@ -2068,7 +2068,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=oneline=-",
+            "oneline=-",
             "--depth",
             "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
@@ -2103,7 +2103,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
             "--severity-preset",
             "info-only",
         )
@@ -2153,7 +2153,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--severity-preset",
             "default",
         )
@@ -2200,7 +2200,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2226,7 +2226,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2269,7 +2269,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "root-cause",
         )
@@ -2295,7 +2295,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "root-cause",
         )
@@ -2340,7 +2340,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app_path),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "root-cause",
         )
@@ -2388,7 +2388,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app_path),
             "-o",
-            "markdown=json=-",
+            "json=-",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2437,7 +2437,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app_path),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "root-cause",
         )
@@ -2597,7 +2597,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--config",
             str(_severity_config(tmp_path, abi_breaking="warning")),
         )
@@ -2632,7 +2632,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "show=compatible",
         )
@@ -2657,7 +2657,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         data = json.loads(result.stdout)
         entry = next(
@@ -2691,7 +2691,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         data = json.loads(result.stdout)
         entry = next(
@@ -2717,7 +2717,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "show=compatible",
         )
@@ -2738,7 +2738,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "-o",
-            "markdown=json=-",
+            "json=-",
             "--view",
             "show=breaking",
         )
@@ -2770,7 +2770,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "json=-",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -3120,7 +3120,7 @@ class TestCompareReleaseExtraFlows:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
             "--config",
             str(cfg),
         )
@@ -3167,7 +3167,7 @@ class TestCompareReleaseExtraFlows:
             str(old_dir),
             str(new_dir),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
         )
         # The run completes (degraded) and notes the comparison error.
         assert "Error comparing" in result.output or "ERROR" in result.output

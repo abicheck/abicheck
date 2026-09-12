@@ -1030,7 +1030,7 @@ def test_compare_with_source_graph_packs_runs_graph_diff(tmp_path):
             "--build-info",
             "new=" + str(ev_new),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 1, 2, 4), result.output
@@ -1062,7 +1062,7 @@ def test_compare_with_evidence_emits_coverage_and_findings(tmp_path):
             "--build-info",
             "new=" + str(ev_new),
             "-o",
-            "markdown=markdown=-",
+            "markdown=-",
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output
@@ -1094,7 +1094,7 @@ def test_compare_json_carries_layer_coverage_block(tmp_path):
             "--build-info",
             "new=" + str(ev_new),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output
@@ -1132,7 +1132,7 @@ def test_compare_asymmetric_old_only_reports_target_not_collected(tmp_path):
             "--build-info",
             "old=" + str(ev_old),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output
@@ -1151,7 +1151,7 @@ def test_compare_json_without_evidence_omits_coverage(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(
-        main, ["compare", str(old_snap), str(new_snap), "-o", "markdown=json=-"]
+        main, ["compare", str(old_snap), str(new_snap), "-o", "json=-"]
     )
     assert result.exit_code == 0, result.output
     assert "layer_coverage" not in json.loads(result.stdout)
@@ -1181,7 +1181,7 @@ def test_compare_json_carries_evidence_metrics_block(tmp_path):
             "--build-info",
             "new=" + str(ev_new),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output
@@ -1229,7 +1229,7 @@ def test_evidence_metrics_bucket_counts_are_post_suppression(tmp_path):
             "--suppress",
             str(supp),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output
@@ -1243,7 +1243,7 @@ def test_compare_json_without_evidence_omits_metrics(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(
-        main, ["compare", str(old_snap), str(new_snap), "-o", "markdown=json=-"]
+        main, ["compare", str(old_snap), str(new_snap), "-o", "json=-"]
     )
     assert result.exit_code == 0, result.output
     assert "evidence_metrics" not in json.loads(result.stdout)
@@ -1328,7 +1328,7 @@ def test_evidence_metrics_excludes_probe_matrix_from_artifact_backed(tmp_path):
             "--probe-matrix",
             "new=" + str(pm_new),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 1, 2, 4), result.output
@@ -1374,7 +1374,7 @@ def test_evidence_policy_build_drift_fail_on_abi_relevant_escalates(tmp_path):
             "--policy",
             str(pol),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code == 2, result.output  # API_BREAK
@@ -1419,7 +1419,7 @@ def test_require_evidence_fails_when_layer_absent(tmp_path):
             "--policy",
             str(pol),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code == 2, result.output  # API_BREAK
@@ -1450,7 +1450,7 @@ def test_require_evidence_fails_when_layer_only_on_target_side(tmp_path):
             "--policy",
             str(pol),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code == 2, result.output
@@ -1486,7 +1486,7 @@ def test_require_evidence_satisfied_when_layer_comparable(tmp_path):
             "--policy",
             str(pol),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -1813,7 +1813,7 @@ def test_compare_source_abi_findings_and_capabilities(tmp_path):
             "--build-info",
             "new=" + str(ev_new),
             "-o",
-            "markdown=json=-",
+            "json=-",
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output

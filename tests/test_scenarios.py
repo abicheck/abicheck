@@ -280,7 +280,7 @@ def test_sc_public_surface_scope_fallback(tmp_path: Path) -> None:
     # as manual-review-required, and a warning is emitted to stderr.
     old = _lib("1", [], types=[_rec("InternalCache", 64)])
     new = _lib("2", [], types=[_rec("InternalCache", 128)])
-    res = _compare(tmp_path, old, new, "--scope-public-headers", "--format", "json")
+    res = _compare(tmp_path, old, new, "--scope-public-headers", "-o", "json=-")
     assert res.exit_code == 4  # fallback kept the break → still gated
     doc = json.loads(res.stdout)
     assert doc["scope"]["resolved"] is False
@@ -298,8 +298,8 @@ def test_sc_scan_sarif(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "sarif",
+        "-o",
+        "sarif=-",
     )
     assert res.exit_code == 4
     doc = json.loads(res.output)
@@ -314,8 +314,8 @@ def test_sc_release_recommendation(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     )
     assert res.exit_code == 4
     doc = json.loads(res.output)
@@ -414,8 +414,8 @@ def test_sc_ci_oneline_format(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "oneline",
+        "-o",
+        "oneline=-",
     )
     assert res.exit_code == 4
     # stdout, not the stderr-mixed `res.output`: this fixture gives no `-H`
@@ -546,8 +546,8 @@ def test_sc_review_digest(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "review",
+        "-o",
+        "review=-",
     )
     assert res.exit_code == 4
     out = res.output
@@ -564,8 +564,8 @@ def test_sc_scan_junit(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "junit",
+        "-o",
+        "junit=-",
     )
     assert res.exit_code == 4
     assert "<testsuites" in res.output
@@ -576,8 +576,8 @@ def test_sc_scan_html(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "html",
+        "-o",
+        "html=-",
     )
     assert res.exit_code == 4
     assert "<!DOCTYPE html>" in res.output
@@ -591,8 +591,8 @@ def test_sc_consume_json(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("a"), _fn("b")]),
         _lib("2", [_fn("a")]),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     )
     assert res.exit_code == 4
     doc = json.loads(res.output)
@@ -694,7 +694,7 @@ def test_sc_c_struct_layout(tmp_path: Path) -> None:
     )
     res = _compare(tmp_path, old, new)
     assert res.exit_code == 4
-    doc = json.loads(_compare(tmp_path, old, new, "--format", "json").output)
+    doc = json.loads(_compare(tmp_path, old, new, "-o", "json=-").output)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "type_size_changed" for c in doc["changes"])
 
@@ -727,7 +727,7 @@ def test_sc_cpp_vtable_break(tmp_path: Path) -> None:
             _shape(["_ZN5Shape4areaEv", "_ZN5Shape4drawEv", "_ZN5Shape9perimeterEv"])
         ],
     )
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
@@ -739,7 +739,7 @@ def test_sc_exported_var_removed(tmp_path: Path) -> None:
     # consumer that referenced it (var_removed → BREAKING), like a removed symbol.
     old = _lib("1", [_fn("a")], variables=[_var("g_count")])
     new = _lib("2", [_fn("a")], variables=[])
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
@@ -758,8 +758,8 @@ def test_sc_dual_abi_flip(tmp_path: Path) -> None:
         _lib("1", legacy),
         _lib("2", cxx11),
         "--no-scope-public-headers",
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     )
     assert res.exit_code == 4
     doc = json.loads(res.output)
@@ -773,7 +773,7 @@ def test_sc_integer_model_flip(tmp_path: Path) -> None:
     # (integer_model_changed → BREAKING).
     old = _lib("1", [_fn("solve")], typedefs={"MKL_INT": "int"})
     new = _lib("2", [_fn("solve")], typedefs={"MKL_INT": "int64_t"})
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
@@ -792,7 +792,7 @@ def test_sc_toolchain_flag_drift(tmp_path: Path) -> None:
 
     old = _lib("1", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions"}))
     new = _lib("2", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions", "-ffast-math"}))
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
     assert res.exit_code == 0
     doc = json.loads(res.output)
     assert doc["verdict"] == "COMPATIBLE"
@@ -856,7 +856,7 @@ def test_sc_linux_elf_baseline(tmp_path: Path) -> None:
     elf = ElfMetadata(soname="libfoo.so.1")
     old = _lib("1", [_fn("a"), _fn("b")], platform="elf", elf=elf)
     new = _lib("2", [_fn("a")], platform="elf", elf=ElfMetadata(soname="libfoo.so.1"))
-    res = _compare(tmp_path, old, new, "--format", "json")
+    res = _compare(tmp_path, old, new, "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"

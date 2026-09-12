@@ -1318,7 +1318,7 @@ class TestBuildOutputCLI:
 
     def test_json_format(self, tmp_path: Path) -> None:
         root = self._valid_dir(tmp_path)
-        res = self._run([str(root), "--format", "json"])
+        res = self._run([str(root), "-o", "json=-"])
         assert res.exit_code == 0, res.output
         payload = json.loads(res.output)
         assert payload["ok"] is True
@@ -1337,7 +1337,7 @@ class TestBuildOutputCLI:
     def test_output_flag_writes_file(self, tmp_path: Path) -> None:
         root = self._valid_dir(tmp_path)
         out_file = tmp_path / "report.json"
-        res = self._run([str(root), "--format", "json", "-o", str(out_file)])
+        res = self._run([str(root), "-o", f"json={out_file}"])
         assert res.exit_code == 0, res.output
         payload = json.loads(out_file.read_text())
         assert payload["ok"] is True

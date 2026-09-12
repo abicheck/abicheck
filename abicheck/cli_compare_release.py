@@ -1192,9 +1192,10 @@ def compare_release_cmd(
                     scope_terms=scope_terms,
                     assurance_terms=assurance_terms,
                     demangle=_resolve_demangle(secondary_fmt, demangle),
+                    show_only=show_only,
                     env_matrix_source_sha256=env_matrix_source_sha256,
                     require_complete_analysis=require_complete_analysis,
-                    )
+                )
                 _write_or_echo(secondary_output, secondary_text)
 
             _finalize_release_output(

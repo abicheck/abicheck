@@ -242,7 +242,7 @@ class TestStructuralValidationOnly:
 
     def test_json_format_reports_structure_only(self, tmp_path: Path) -> None:
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
-        res = _run([str(manifest), "--format", "json"])
+        res = _run([str(manifest), "-o", "json=-"])
         assert res.exit_code == 0, res.output
         payload = json.loads(res.output)
         assert payload["ok"] is True
@@ -255,9 +255,11 @@ class TestStructuralValidationOnly:
     def test_output_flag_writes_file(self, tmp_path: Path) -> None:
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
         out_file = tmp_path / "report.json"
-        res = _run([str(manifest), "--format", "json", "-o", str(out_file)])
+        res = _run([str(manifest), "-o", f"json={out_file}"])
         assert res.exit_code == 0, res.output
-        assert res.output == ""
+        # A file export prints only the "Report written to ..." stderr note
+        # every export destination gets, never the document itself.
+        assert res.output.strip().startswith("Report written to")
         payload = json.loads(out_file.read_text())
         assert payload["ok"] is True
 
@@ -307,7 +309,7 @@ class TestUseCaseImpactOnCompare:
         )
         old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
-        res = _compare(manifest, old, new, "--format", "json")
+        res = _compare(manifest, old, new, "-o", "json=-")
         assert res.exit_code == 4, res.output
         doc = _json_report(res)
         block = doc["use_case_impact"]
@@ -344,7 +346,7 @@ class TestUseCaseImpactOnCompare:
         )
         old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
-        res = _compare(manifest, old, new, "--format", "json")
+        res = _compare(manifest, old, new, "-o", "json=-")
         assert res.exit_code == 4, res.output
         block = _json_report(res)["use_case_impact"]
         assert block["by_use_case"] == {}
@@ -366,7 +368,7 @@ class TestUseCaseImpactOnCompare:
         )
         old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
         new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
-        res = _compare(manifest, old, new, "--format", "json")
+        res = _compare(manifest, old, new, "-o", "json=-")
         doc = _json_report(res)
         block = doc["use_case_impact"]
         (row,) = block["by_use_case"]["training workflow"]
@@ -387,14 +389,14 @@ class TestUseCaseImpactOnCompare:
         new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
 
         # Unfiltered: the added function is attributed and listed.
-        full = _json_report(_compare(manifest, old, new, "--format", "json"))
+        full = _json_report(_compare(manifest, old, new, "-o", "json=-"))
         assert full["use_case_impact"]["by_use_case"]["training workflow"]
 
         # `--show-only removed` displays no findings here (the only change is
         # an addition), so the block must attribute none either.
         scoped = _json_report(
             _compare(
-                manifest, old, new, "--format", "json", "--view", "show=removed"
+                manifest, old, new, "-o", "json=-", "--view", "show=removed"
             )
         )
         block = scoped["use_case_impact"]
@@ -415,11 +417,11 @@ class TestUseCaseImpactOnCompare:
         old = _snapshot_with_or_without_train(tmp_path, "old", present=False)
         new = _snapshot_with_or_without_train(tmp_path, "new", present=True)
 
-        full = _compare(manifest, old, new, "--format", "markdown")
+        full = _compare(manifest, old, new, "-o", "markdown=-")
         assert "training workflow: 1 change(s)" in full.output, full.output
 
         scoped = _compare(
-            manifest, old, new, "--format", "markdown", "--view", "show=removed"
+            manifest, old, new, "-o", "markdown=-", "--view", "show=removed"
         )
         # The only change is an addition, so `--show-only removed` displays
         # nothing -- and the section must attribute nothing to match. The use
@@ -436,7 +438,7 @@ class TestUseCaseImpactOnCompare:
         same = _snapshot_with_walkable_graph(
             tmp_path, "old-copy", with_train_function=True
         )
-        res = _compare(manifest, old, same, "--format", "json")
+        res = _compare(manifest, old, same, "-o", "json=-")
         assert res.exit_code == 0, res.output
         block = _json_report(res)["use_case_impact"]
         assert block["total_changes"] == 0
@@ -468,7 +470,7 @@ class TestUseCaseImpactOnCompare:
         old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
         res = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "-o", "markdown=json=-"]
+            main, ["compare", str(old), str(new), "-o", "json=-"]
         )
         assert res.exit_code == 4, res.output
         assert "use_case_impact" not in _json_report(res)
@@ -477,12 +479,12 @@ class TestUseCaseImpactOnCompare:
     def test_a_carrying_secondary_rescues_a_non_carrying_primary(
         self, tmp_path: Path, fmt: str
     ) -> None:
-        """``--format html --write json=PATH`` does deliver the attribution.
+        """``-o html=... -o json=PATH`` does deliver the attribution.
 
-        The secondary render reuses the same attributed ``DiffResult`` at
-        ``report_mode="full"``, so rejecting on the primary format alone was
-        arbitrary -- the primary-only error message had in fact been
-        proposing this exact arrangement as the fix (Codex review).
+        Every export renders the same attributed ``DiffResult``, so
+        rejecting on one export's format alone was arbitrary -- the
+        primary-only error message had in fact been proposing this exact
+        arrangement as the fix (Codex review).
 
         Asserting the block really lands in the secondary file, not merely
         that the invocation was accepted: "not rejected" would also pass
@@ -497,8 +499,8 @@ class TestUseCaseImpactOnCompare:
         secondary = tmp_path / "second.json"
         res = _compare(
             manifest, old, new,
-            "--format", fmt, "-o", str(tmp_path / f"r.{fmt}"),
-            "--write", f"json={secondary}",
+            "-o", f"{fmt}={tmp_path / f'r.{fmt}'}",
+            "-o", f"json={secondary}",
         )
         assert res.exit_code == 4, res.output
         assert "--use-cases is not supported" not in res.output
@@ -508,18 +510,17 @@ class TestUseCaseImpactOnCompare:
     def test_oneline_format_is_rescued_by_a_carrying_secondary_too(
         self, tmp_path: Path
     ) -> None:
-        """The one-line format (``--format oneline``) constrains the
-        *primary* shape only.
+        """The one-line format constrains *that export's* shape only.
 
         CLI cleanup phase two, PR 1: this used to be ``--stat``, which
-        constrained only the primary render the identical way -- the format
-        changed, the property under test (a non-carrying primary paired with
-        a carrying secondary is accepted, and the block lands only in the
-        secondary) did not. The secondary always renders the full report, so
-        the summary-only contract stays intact while the attribution still
-        reaches the caller (Codex review, originally about --stat). Both
-        halves are asserted in one run, so a fix that delivered the block by
-        widening the primary format itself would fail.
+        constrained the render the identical way -- the spelling changed,
+        the property under test (a non-carrying export paired with a
+        carrying one is accepted, and the block lands only in the carrying
+        one) did not. `oneline` is a summary document with no attribution
+        block to carry, so that contract stays intact while the attribution
+        still reaches the caller through the json export. Both halves are
+        asserted in one run, so a fix that delivered the block by widening
+        `oneline` itself would fail.
         """
         manifest = _write_manifest(
             tmp_path, "- use_case: training workflow\n  entrypoints: [train]\n"
@@ -529,7 +530,7 @@ class TestUseCaseImpactOnCompare:
         secondary = tmp_path / "full.json"
         res = _compare(
             manifest, old, new,
-            "--format", "oneline",
+            "-o", "oneline=-",
             # This test's `--use-cases` needs the fixtures'
             # `build_source.source_graph` (an L5 fact) to resolve
             # entrypoints, which ADR-063 Phase 8's `--depth` ceiling
@@ -538,7 +539,7 @@ class TestUseCaseImpactOnCompare:
             # `oneline`'s *format* is what this test exercises, not its
             # depth.
             "--depth", "source",
-            "--write", f"json={secondary}",
+            "-o", f"json={secondary}",
         )
         # ADR-068 §3 #28's evidence-contract floor (exit 7) does not apply
         # here: `old`/`new` are pre-serialized JSON snapshots this run never

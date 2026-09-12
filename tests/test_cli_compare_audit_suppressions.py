@@ -93,7 +93,7 @@ class TestNoOpWithoutSuppress:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--view", "suppressions", "-o", "markdown=json=-"],
+            ["compare", str(old_p), str(new_p), "--view", "suppressions", "-o", "json=-"],
         )
         # A real BREAKING removal in _breaking_pair() -- the flag's absence
         # of a suppression file must not change that outcome.
@@ -168,7 +168,7 @@ class TestRejectedOnSetInputs:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -196,7 +196,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -233,7 +233,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -272,7 +272,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -311,7 +311,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -353,7 +353,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -394,7 +394,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -435,7 +435,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -483,7 +483,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -516,7 +516,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -561,7 +561,7 @@ class TestJsonReport:
                 "--policy",
                 str(policy),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -594,7 +594,7 @@ class TestJsonReport:
                 "--suppress",
                 str(suppress),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -626,7 +626,7 @@ class TestJsonReport:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 report_mode,
             ],
@@ -837,7 +837,7 @@ class TestUsedByScopedOnlyChange:
                 "--view",
                 "suppressions",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         # Workstream D-S1: old/new are identical, so the global comparison

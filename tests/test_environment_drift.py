@@ -859,7 +859,7 @@ class TestPlatformBaselineFloorCliEndToEnd:
                 "--config",
                 str(cfg_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         # promote_baseline_violation_findings promotes this finding to
@@ -887,7 +887,7 @@ class TestPlatformBaselineFloorCliEndToEnd:
                 "--config",
                 str(cfg_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 0, result.output

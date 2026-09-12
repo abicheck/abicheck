@@ -79,13 +79,17 @@ from pathlib import Path
 #: Options whose value names a path the call writes. `--output-dir` is a
 #: directory; the rest are files. Kept explicit rather than "any path-looking
 #: argument" so an input path is never mistaken for an output.
-OUTPUT_OPTIONS = ("-o", "--output", "--output-dir")
+#: Options whose value is a bare path. Only ``dump``'s snapshot destination
+#: is one now: plan slice 7m made every *report* destination the second half
+#: of an ``-o FORMAT=DESTINATION`` operand.
+OUTPUT_OPTIONS: tuple[str, ...] = ()
 
-#: Options whose value is ``FORMAT=PATH`` rather than a bare path -- the
-#: destination is the half after the first ``=``. ``--write`` replaced the
-#: ``--secondary-format``/``--secondary-output`` pair, which spelled the two
-#: halves as two flags and so needed no special case here.
-PAIRED_OUTPUT_OPTIONS = ("--write",)
+#: Options whose value is ``FORMAT=DESTINATION`` rather than a bare path --
+#: the destination is the half after the first ``=``. One repeatable option
+#: since plan slice 7m, which retired ``--format``/``--write``/
+#: ``--output-dir`` into it (and with them the path-only ``-o`` this shim
+#: also used to recognize).
+PAIRED_OUTPUT_OPTIONS = ("-o", "--output")
 
 
 #: How many times to re-attempt a contended Windows lock. Each `LK_LOCK` call
@@ -154,23 +158,38 @@ def _is_short(option: str) -> bool:
 SHORT_VALUE_OPTIONS = ("-H", "-I", "-o")
 
 
+def _record_destination(found: list[str], operand: str) -> None:
+    """Record the destination half of one ``FORMAT=DESTINATION`` operand.
+
+    Split on the first ``=`` only, exactly as the CLI's own parser does, so a
+    Windows destination survives. ``-`` is stdout and declares no output.
+    """
+    _fmt, sep, destination = operand.partition("=")
+    if not sep or not destination or destination == "-":
+        return
+    found.append(destination)
+
+
 def _cluster_output(token: str) -> str | None:
-    """The output path packed into a short-option cluster, if there is one.
+    """The export operand packed into a short-option cluster, if there is one.
 
-    `-voreport.json` writes `report.json` — verified against the real CLI, and
-    missed entirely before, since the token starts with neither `-o` nor `-o=`.
-    An unrecognized output is never snapshotted, so a later call reusing the
-    path silently overwrites the evidence a claim cites, which is the exact
-    failure per-call snapshotting exists to prevent.
+    `-vojson=report.json` writes `report.json` — verified against the real
+    CLI, and missed entirely before, since the token starts with neither `-o`
+    nor `-o=`. An unrecognized output is never snapshotted, so a later call
+    reusing the path silently overwrites the evidence a claim cites, which is
+    the exact failure per-call snapshotting exists to prevent.
 
-    Answers None when a letter before the output option takes a value of its
-    own (`-Ho` is `-H` with the value `o`), because then no output was declared
-    here at all.
+    Answers None when a letter before the export option takes a value of its
+    own (`-Ho` is `-H` with the value `o`), because then no output was
+    declared here at all -- and when the operand it carries names stdout or
+    is malformed, for the same reason :func:`_record_destination` does.
     """
     for position, letter in enumerate(token[1:], start=2):
         option = f"-{letter}"
-        if option in OUTPUT_OPTIONS:
-            return token[position:] or None
+        if option in PAIRED_OUTPUT_OPTIONS:
+            recorded: list[str] = []
+            _record_destination(recorded, token[position:])
+            return recorded[0] if recorded else None
         if option in SHORT_VALUE_OPTIONS:
             return None  # this letter consumes the rest as its own value
     return None
@@ -180,22 +199,39 @@ def _declared_outputs(argv: list[str]) -> list[str]:
     """Paths this invocation asked abicheck to write.
 
     Four spellings, because Click accepts four and the shim has to recognize
-    every one the real command does: `-o path`, `-o=path`, the attached short
-    form `-opath`, and the same attached form inside a cluster (`-voreport.json`).
+    every one the real command does: `-o VALUE`, `-o=VALUE`, the attached
+    short form `-oVALUE`, and the same attached form inside a cluster
+    (`-voVALUE`).
 
-    ``--write`` is the one option whose value is ``FORMAT=PATH`` rather than a
-    bare path, so its destination is read out of the second half.
+    Every value is ``FORMAT=DESTINATION`` since plan slice 7m, so the
+    destination is read out of the half after the first ``=``. A destination
+    of ``-`` is stdout, not a path, and declares no output.
     """
     found: list[str] = []
     for i, token in enumerate(argv):
         if token in PAIRED_OUTPUT_OPTIONS:
             if i + 1 < len(argv) and "=" in argv[i + 1]:
-                found.append(argv[i + 1].split("=", 1)[1])
+                _record_destination(found, argv[i + 1])
             continue
+        paired = False
         for opt in PAIRED_OUTPUT_OPTIONS:
             if token.startswith(f"{opt}=") and "=" in token[len(opt) + 1 :]:
-                found.append(token.split("=", 2)[2])
+                _record_destination(found, token[len(opt) + 1 :])
+                paired = True
                 break
+            # The attached short form carries the whole operand:
+            # `-ojson=r.json`, and `-vojson=r.json` inside a cluster.
+            if (
+                _is_short(opt)
+                and token.startswith(opt)
+                and len(token) > len(opt)
+                and "=" in token[len(opt) :]
+            ):
+                _record_destination(found, token[len(opt) :])
+                paired = True
+                break
+        if paired:
+            continue
         if token in OUTPUT_OPTIONS:
             # A following option is not a path. `compare a b -o --format json`
             # otherwise recorded `--format` as a declared output, which shows

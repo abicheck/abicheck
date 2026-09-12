@@ -168,8 +168,8 @@ class TestTheCoverageExitIsApplied:
         result = _compare(
             tmp_path,
             _breaking_pair(),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--contract",
             "exports",
         )
@@ -220,8 +220,8 @@ class TestTheGatingConditionIsVisible:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            fmt,
+            "-o",
+            f"{fmt}=-",
             "--contract",
             "exports",
         )
@@ -251,7 +251,7 @@ class TestTheGatingConditionIsVisible:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--contract",
                 "exports",
             ],
@@ -278,8 +278,8 @@ class TestTheGatingConditionIsVisible:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            "oneline",
+            "-o",
+            "oneline=-",
             "--contract",
             "exports",
         )
@@ -367,10 +367,8 @@ class TestTheGatingConditionIsVisible:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
                 "-o",
-                str(tmp_path / "r.json"),
+                f"json={tmp_path / 'r.json'}",
                 "--write",
                 f"markdown={tmp_path / 'r.md'}",
                 "--contract",
@@ -404,10 +402,8 @@ class TestArtifactsAgreeWithTheProcessExit:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            "sarif",
             "-o",
-            str(out),
+            f"sarif={out}",
             "--contract",
             "exports",
         )
@@ -427,7 +423,7 @@ class TestArtifactsAgreeWithTheProcessExit:
         """The fold must not invent a floor for a run that had none."""
         out = tmp_path / "report.sarif"
         result = _compare(
-            tmp_path, _compatible_pair(), "--format", "sarif", "-o", str(out)
+            tmp_path, _compatible_pair(), "-o", f"sarif={out}"
         )
         assert result.exit_code == 0, result.output
         invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
@@ -455,10 +451,8 @@ class TestArtifactsAgreeWithTheProcessExit:
         result = _compare(
             tmp_path,
             _breaking_pair(),
-            "--format",
-            "sarif",
             "-o",
-            str(out),
+            f"sarif={out}",
             "--contract",
             mode,
         )
@@ -642,8 +636,8 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--format",
-            "review",
+            "-o",
+            "review=-",
             "--contract",
             "exports",
             "--pack",

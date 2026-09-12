@@ -223,7 +223,7 @@ class TestF19OutputFormatInvariance:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 view_demangle,
                 "--suppress",
@@ -256,7 +256,7 @@ class TestF19OutputFormatInvariance:
         old_p, new_p = _write_pair(tmp_path)
 
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert baseline.exit_code == 4, baseline.output
         baseline_facts = _canonical_facts(json.loads(baseline.stdout))
@@ -294,7 +294,7 @@ class TestF19OutputFormatInvariance:
         old_p, new_p = _write_pair(tmp_path)
 
         without = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         with_flag = CliRunner().invoke(
             main,
@@ -303,7 +303,7 @@ class TestF19OutputFormatInvariance:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 "filtered",
             ],
@@ -348,7 +348,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         old_p, new_p = _write_pair(tmp_path)
 
         without = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         with_patterns = CliRunner().invoke(
             main,
@@ -357,7 +357,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 "patterns",
             ],
@@ -396,7 +396,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         monkeypatch.setattr(service_module, "compare_snapshots", _spy)
 
         for view_patterns in (False, True):
-            args = ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            args = ["compare", str(old_p), str(new_p), "-o", "json=-"]
             if view_patterns:
                 args += ["--view", "patterns"]
             result = CliRunner().invoke(main, args)
@@ -431,7 +431,7 @@ class TestViewGrammar:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
                 "--view",
                 "show=removed",
             ],
@@ -457,7 +457,7 @@ class TestViewGrammar:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
                 "--view",
                 "show=removed",
                 "--view",
@@ -495,7 +495,7 @@ class TestViewGrammar:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
                 "--view",
                 "show=breaking",
                 "--view",
@@ -535,7 +535,7 @@ class TestViewGrammar:
         three combined must still leave the JSON payload untouched."""
         old_p, new_p = _write_pair(tmp_path)
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         combined = CliRunner().invoke(
             main,
@@ -544,7 +544,7 @@ class TestViewGrammar:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 "leaf",
                 "--view",
@@ -567,7 +567,7 @@ class TestViewGrammar:
         this one token, distinct from the content-preserving tokens above."""
         old_p, new_p = _write_pair(tmp_path)
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         narrowed = CliRunner().invoke(
             main,
@@ -576,7 +576,7 @@ class TestViewGrammar:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 "show=breaking",
             ],
@@ -619,7 +619,7 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
                 "--view",
                 "show=breaking",
                 "--view",
@@ -645,7 +645,7 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=markdown=-",
+                "markdown=-",
                 *[f"--view={t}" for t in tokens],
             ],
         )
@@ -663,7 +663,7 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=html=-",
+                "html=-",
                 "--view",
                 "show=breaking",
                 "--view",
@@ -693,7 +693,7 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=html=-",
+                "html=-",
                 "--view",
                 "show=breaking,variables",
                 "--view",
@@ -747,7 +747,7 @@ class TestSurfaceMetricsAreUnconditional:
         old_p, new_p = self._shrinking_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "markdown=json=-", "--surface-metrics"],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--surface-metrics"],
         )
         assert result.exit_code == 64, result.output
         assert "No such option" in result.output
@@ -757,7 +757,7 @@ class TestSurfaceMetricsAreUnconditional:
     ) -> None:
         old_p, new_p = self._shrinking_pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert result.exit_code == 4, result.output
         kinds = {c["kind"] for c in json.loads(result.stdout)["changes"]}
@@ -780,7 +780,7 @@ class TestAuditSuppressionsNoOpWithoutSuppress:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--view",
                 "suppressions",
             ],

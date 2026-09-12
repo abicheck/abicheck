@@ -386,63 +386,72 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
         assert rendered < 25, result.output
         assert "additional findings omitted" in result.output
 
-    def test_an_explicit_cap_still_truncates_and_still_says_so(
+    def test_no_invocation_can_truncate_the_machine_document(
         self, tmp_path: Path
     ) -> None:
-        """Asking for truncation is the user's own call -- and it is still
-        flagged, never silent."""
+        """Plan slice 7m: asking for truncation is no longer expressible.
+
+        This used to be two tests -- "an explicit cap still truncates and
+        still says so" and "a truncated entry indexes its complete
+        artifact" -- both of which described `--max-findings-per-library`,
+        the flag whose whole purpose was to bound a document the reader
+        never had to bound. It retired as a *consequence* of the export
+        request rather than by deletion: complete machine data is never
+        truncated, the human summary stays bounded automatically (the test
+        above), and every member's own complete report is one export away
+        (the test below). So the property worth pinning is the absence: no
+        invocation, and no environment, produces a truncated machine
+        document.
+        """
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-        )
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
-        assert len(lib["findings"]) == 5
-        assert lib["findings_truncated"] is True
-        assert lib["findings_truncated_kinds"]
+        assert len(lib["findings"]) == 26
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
 
-    def test_a_truncated_entry_indexes_its_complete_artifact(
+    def test_the_retired_cap_flag_is_gone_with_no_alias(
         self, tmp_path: Path
     ) -> None:
-        """With ``--output-dir`` in effect, the truncated entry names the
-        file holding that member's complete, uncapped report -- an
-        unambiguous index rather than "see --output-dir" prose a machine
-        consumer cannot follow."""
-        old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
-        reports = tmp_path / "reports"
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=3)
         result = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
             "--max-findings-per-library",
             "5",
-            "--output-dir",
-            str(reports),
+        )
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
+
+    def test_the_complete_per_member_report_is_one_export_away(
+        self, tmp_path: Path
+    ) -> None:
+        """What the retired cap's own help text already pointed at: the
+        per-component export writes each member's complete, uncapped
+        report, and the summary indexes it unambiguously rather than in
+        prose a machine consumer cannot follow."""
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
+        reports = tmp_path / "reports"
+        summary = tmp_path / "summary.json"
+        result = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
             "-o",
-            str(tmp_path / "summary.json"),
+            f"json={summary}",
+            "-o",
+            f"json={reports}/",
         )
         assert result.exit_code == 4, result.output
-        # Read from the file rather than stdout: `--output-dir` appends a
-        # human "Per-library reports written to ..." line to stdout.
-        lib = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))[
-            "libraries"
-        ][0]
-        assert lib["findings_truncated"] is True
+        lib = json.loads(summary.read_text(encoding="utf-8"))["libraries"][0]
         complete = Path(lib["complete_report"])
         assert complete.is_file(), lib
         full = json.loads(complete.read_text(encoding="utf-8"))
-        assert len(full["changes"]) > len(lib["findings"])
-
-
-# ---------------------------------------------------------------------------
-# 4. One analysis, several artifacts -- at release cardinality
-# ---------------------------------------------------------------------------
+        # Both are complete now; the per-member report is the one carrying
+        # the full `changes` graph rather than the summary's projection.
+        assert len(full["changes"]) >= len(lib["findings"])
 
 
 class TestReleaseArtifactsDoNotDependOnCardinality:
@@ -552,12 +561,10 @@ class TestTheReportAgreesWithTheProcessExit:
             str(new_dir),
             "--config",
             str(tmp_path / ".abicheck.yml"),
-            "--format",
-            "json",
             "-o",
-            str(tmp_path / "s.json"),
-            "--output-dir",
-            str(reports),
+            f"json={tmp_path / 's.json'}",
+            "-o",
+            f"json={reports}/",
         )
         assert result.exit_code == 1, result.output
         doc = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
@@ -586,39 +593,47 @@ class TestTheReportAgreesWithTheProcessExit:
         assert doc["exit"]["analysis_assurance_contribution"] == 0
 
 
-class TestTheMarkdownCapHonoursTheRequestedValue:
-    """P2: the Markdown render sliced at the built-in constant, so raising
-    `--max-findings-per-library` above 10 changed nothing it itemized --
-    contradicting the option's own documented contract."""
+class TestTheMarkdownCapIsAutomaticAndUnconfigurable:
+    """P2 was: the Markdown render sliced at the built-in constant, so
+    raising `--max-findings-per-library` above 10 changed nothing it
+    itemized -- contradicting the option's own documented contract.
 
-    @pytest.mark.parametrize(("cap", "expected"), [(3, 3), (20, 20)])
-    def test_the_requested_cap_is_what_is_rendered(
-        self, tmp_path: Path, cap: int, expected: int
-    ) -> None:
-        """Parametrized below *and* above the default 10: below alone would
-        pass against a `min(requested, 10)` bug, and above alone would pass
-        against one that ignores the option only when lowering it."""
-        old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "markdown=-",
+    Plan slice 7m settled that contradiction the other way: the option (and
+    the environment variable beside it) retired, and the human summary's
+    bound is now automatic and unconfigurable. The regression this class
+    still guards is the same one, restated: the render must slice at the
+    *one* cap the leaf owns, so it cannot drift from what every other
+    consumer of that cap believes -- and nothing outside the leaf can move
+    it.
+    """
+
+    def test_the_render_slices_at_the_leafs_own_cap(self, tmp_path: Path) -> None:
+        from abicheck.report.release_display_limits import (
+            MAX_RELEASE_FINDINGS_PER_LIBRARY,
         )
+
+        old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "markdown=-")
         assert result.exit_code == 4, result.output
         rendered = sum(
             1
             for line in result.output.splitlines()
             if line.startswith("- **func_removed**")
         )
-        assert rendered == expected, result.output
+        assert rendered == MAX_RELEASE_FINDINGS_PER_LIBRARY, result.output
+        assert "additional findings omitted" in result.output
 
-    def test_the_env_var_is_honoured_the_same_way(
+    def test_the_environment_cannot_move_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Same contract through the env var, which is the other half of the
-        documented override and resolves through the same function."""
+        """The env var retired with the flag rather than surviving it --
+        Phase 7l's standing constraint that a demoted flag lands in
+        `.abicheck.yml`, never in an undocumented variable. Set to a value
+        that would be plainly visible if anything still read it."""
+        from abicheck.report.release_display_limits import (
+            MAX_RELEASE_FINDINGS_PER_LIBRARY,
+        )
+
         monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "18")
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
         result = _invoke("compare", str(old_dir), str(new_dir), "-o", "markdown=-")
@@ -628,7 +643,8 @@ class TestTheMarkdownCapHonoursTheRequestedValue:
             for line in result.output.splitlines()
             if line.startswith("- **func_removed**")
         )
-        assert rendered == 18, result.output
+        assert rendered == MAX_RELEASE_FINDINGS_PER_LIBRARY, result.output
+        assert rendered != 18, result.output
 
 
 class TestOnelineIncludesReleaseGlobalFindings:

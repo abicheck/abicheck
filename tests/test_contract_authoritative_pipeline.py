@@ -512,7 +512,7 @@ class TestCompareKeepsWhatItDoesNotScore:
         old_p.write_text(snapshot_to_json(old), encoding="utf-8")
         new_p.write_text(snapshot_to_json(new), encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-", *extra]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-", *extra]
         )
         # A documented nonzero exit is a `SystemExit`, not a failure --
         # anything else is a real traceback the parse below would hide.
@@ -608,7 +608,7 @@ class TestReleaseFanoutKeepsWhatItDoesNotScore:
                 str(old_dir),
                 str(new_dir),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--contract",
                 "exports",
             ],
@@ -1365,7 +1365,7 @@ class TestNothingIsLost:
                 str(old_p),
                 str(new_p),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--contract",
                 "exports",
             ],

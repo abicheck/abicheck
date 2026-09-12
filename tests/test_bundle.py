@@ -3469,7 +3469,7 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "-o", "markdown=json=-"],
+            ["compare", str(old), str(new), "-o", "json=-"],
         )
         # Bundle BREAKING → exit 4.
         assert result.exit_code == 4, result.output
@@ -3625,7 +3625,7 @@ class TestCompareReleaseBundleE2E:
                 str(new),
                 "--no-bundle-analysis",
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         assert result.exit_code == 64
@@ -3656,7 +3656,7 @@ class TestCompareReleaseBundleE2E:
                 str(old),
                 str(new),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         data = _json.loads(result.stdout)
@@ -3707,7 +3707,7 @@ class TestCompareReleaseBundleE2E:
                 "--instantiation-manifest",
                 str(manifest),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
         data = _json.loads(result.stdout)
@@ -3864,7 +3864,7 @@ class TestCompareReleaseBundleE2E:
                 str(old),
                 str(new),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--config",
                 str(cfg),
             ],
@@ -3916,7 +3916,7 @@ class TestCompareReleaseBundleE2E:
                 str(old),
                 str(new),
                 "-o",
-                "markdown=json=-",
+                "json=-",
                 "--config",
                 str(cfg),
             ],
@@ -3950,7 +3950,7 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "-o", "markdown=json=-"],
+            ["compare", str(old), str(new), "-o", "json=-"],
         )
         data = _json.loads(result.stdout)
         kinds = {f["kind"] for f in data.get("bundle_findings", [])}

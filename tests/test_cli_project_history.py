@@ -85,7 +85,7 @@ class TestJsonOutput:
         p2 = _snapshot(tmp_path, "snap-b", ["add", "multiply"])
 
         res = _run(
-            [p1, p2, "--version", "1.0.0", "--version", "1.1.0", "--format", "json"]
+            [p1, p2, "--version", "1.0.0", "--version", "1.1.0", "-o", "json=-"]
         )
         assert res.exit_code == 0, res.output
         doc = json.loads(res.output)
@@ -96,9 +96,9 @@ class TestJsonOutput:
         p2 = _snapshot(tmp_path, "2.0.0", ["add"])
         out_file = tmp_path / "history.json"
 
-        res = _run([p1, p2, "-o", str(out_file)])
+        res = _run([p1, p2, "-o", f"json={out_file}"])
         assert res.exit_code == 0, res.output
-        assert res.output == ""
+        assert res.output.strip().startswith("Report written to")
         doc = json.loads(out_file.read_text())
         assert doc["library"] == "libmath.so"
 
@@ -108,7 +108,7 @@ class TestTextOutput:
         p1 = _snapshot(tmp_path, "1.0.0", ["add", "subtract"])
         p2 = _snapshot(tmp_path, "2.0.0", ["add"])
 
-        res = _run([p1, p2, "--format", "text"])
+        res = _run([p1, p2, "-o", "text=-"])
         assert res.exit_code == 0, res.output
         assert "longitudinal history: libmath.so" in res.output
         assert "1.0.0" in res.output
@@ -119,7 +119,7 @@ class TestTextOutput:
         p1 = _snapshot(tmp_path, "1.0.0", ["add"])
         p2 = _snapshot(tmp_path, "1.5.0", ["add"])  # skips intermediate releases
 
-        res = _run([p1, p2, "--format", "text"])
+        res = _run([p1, p2, "-o", "text=-"])
         assert res.exit_code == 0, res.output
         assert "coverage gaps" in res.output
 

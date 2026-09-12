@@ -235,7 +235,7 @@ class TestCompareOldBundleFactsEarlyRejections:
                 str(facts_path),
                 str(new_dir),
                 "-o",
-                "markdown=json=-",
+                "json=-",
             ],
         )
 

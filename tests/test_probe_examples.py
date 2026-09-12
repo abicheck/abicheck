@@ -120,7 +120,7 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
         "--probe-matrix",
         "new=" + str(new_matrix),
         "-o",
-        "markdown=json=-",
+        "json=-",
     ],
     )
     assert json_res.exit_code in (2, 4), json_res.output
@@ -139,7 +139,7 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
         "--probe-matrix",
         "new=" + str(new_matrix),
         "-o",
-        "markdown=sarif=-",
+        "sarif=-",
     ],
     )
     assert "cxx_standard_floor_raised" in sarif_res.stdout
@@ -194,7 +194,7 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
         "--probe-matrix",
         "new=" + str(new_matrix),
         "-o",
-        "markdown=json=-",
+        "json=-",
     ],
     )
     # Floor-raised is a source-level break → API_BREAK → release exit 2.
@@ -208,7 +208,7 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     # Without the matrix flags the same release is clean (regression guard
     # against the matrix path firing unconditionally).
     res_clean = runner.invoke(
-        main, ["compare", str(old_dir), str(new_dir), "-o", "markdown=json=-"],
+        main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"],
     )
     assert res_clean.exit_code == 0, res_clean.output
     assert "matrix_findings" not in json.loads(res_clean.stdout)
@@ -283,7 +283,7 @@ def test_feature_macro_api_depends_reaches_mainline_compare(tmp_path: Path) -> N
         "--probe-matrix",
         "new=" + str(new_matrix),
         "-o",
-        "markdown=json=-",
+        "json=-",
     ],
     )
     data = json.loads(res.stdout)
