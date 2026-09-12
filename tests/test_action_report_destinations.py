@@ -1096,6 +1096,13 @@ class TestEveryOutputSpellingNamesTheDestination:
         )
         assert outputs.get("verdict") == "BREAKING", outputs
         assert outputs.get("report-path") == str(dest), outputs
+        # Side-effect absence, not only the published value: a misread would
+        # make `foo` the effective destination, and the freshness check would
+        # then fingerprint -- and on a rewrite trust -- a path the caller never
+        # named. Asserting the published value alone cannot see that, which is
+        # the #705 -> #758 lesson applied to this boundary.
+        assert not (tmp_path / "foo").exists(), "misread as an output path"
+        assert not list(tmp_path.glob("**/ofoo")), "misread as an output path"
 
     def test_a_header_value_containing_o_with_no_real_output(
         self, tmp_path: Path
@@ -1111,3 +1118,10 @@ class TestEveryOutputSpellingNamesTheDestination:
         outputs = _run_action(tmp_path, env, bindir)
         assert outputs.get("verdict") == "BREAKING", outputs
         assert outputs.get("report-path") == str(dest), outputs
+        # Side-effect absence, not only the published value: a misread would
+        # make `foo` the effective destination, and the freshness check would
+        # then fingerprint -- and on a rewrite trust -- a path the caller never
+        # named. Asserting the published value alone cannot see that, which is
+        # the #705 -> #758 lesson applied to this boundary.
+        assert not (tmp_path / "foo").exists(), "misread as an output path"
+        assert not list(tmp_path.glob("**/ofoo")), "misread as an output path"
