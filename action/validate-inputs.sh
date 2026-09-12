@@ -28,13 +28,6 @@ NEW_LIBRARY="${INPUT_NEW_LIBRARY:-}"
 NEW_LIBRARY_SET="${INPUT_NEW_LIBRARY_SET:-}"
 OLD_LIBRARY="${INPUT_OLD_LIBRARY:-}"
 UPLOAD_SARIF="${INPUT_UPLOAD_SARIF:-false}"
-LANG_INPUT="${INPUT_LANG:-}"
-AST_FRONTEND="${INPUT_AST_FRONTEND:-}"
-GCC_PATH="${INPUT_GCC_PATH:-}"
-GCC_PREFIX="${INPUT_GCC_PREFIX:-}"
-GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}"
-SYSROOT="${INPUT_SYSROOT:-}"
-NOSTDINC="${INPUT_NOSTDINC:-false}"
 SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
@@ -252,35 +245,17 @@ case "$MODE" in
       fi
     fi
     # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/
-    # nostdinc) are rejected outright by run.sh for a directory/package
-    # operand — the per-library release fan-out never threads a
-    # CompileContext to each pair's header dump — so mirror that check here
-    # too (Codex review): without it, a workflow with a slow dependency-
-    # install step still passes this fail-fast validation and only errors
-    # after setup begins, reopening the exact silent-fallback-until-late-
-    # failure bug this script exists to prevent. "auto" is the documented
-    # no-op spelling of ast-frontend (same default resolution as leaving it
-    # unset) and must not trip this the way a real frontend choice does —
-    # mirrors run.sh. Phase 7 (one-comparison-product.md §4.1) removed all
-    # of these flags from compare's CLI, forwarded via a synthesized
-    # --config compile: block instead (run.sh's add_compile_context_flags,
-    # only reachable from the single-pair path) -- lang joined this group
-    # then, since it would otherwise be silently dropped for a
-    # directory/package operand rather than rejected.
-    if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
-       || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
-      # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is
-      # the *default*, not a user override, so (mirroring the identical
-      # "auto" carve-out for ast-frontend just above) it must not by itself
-      # trip this guard (CodeRabbit review, PR #1146, finding #6; run.sh's
-      # own release-operand predicate carries the same fix).
-      if [[ (-n "$LANG_INPUT" && "$LANG_INPUT" != "c++") \
-            || (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
-            || -n "$GCC_PATH" || -n "$GCC_PREFIX" || -n "$GCC_OPTIONS" \
-            || -n "$SYSROOT" || "$NOSTDINC" == "true" ]]; then
-        _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
-      fi
-    fi
+    # nostdinc) used to be rejected here for a directory/package operand,
+    # mirroring a guard run.sh no longer carries either: the per-library
+    # release fan-out *does* thread the both-sides compile context to each
+    # pair's header dump (`cli_resolve.resolve_directory_compile_context`,
+    # the identical `resolve_compile_context` call the single-pair path
+    # makes), and run.sh forwards these inputs to it as a synthesized
+    # `--config` `compile:` overlay on that shape exactly as it does for a
+    # single pair. Both rejections were un-updated restatements of a CLI
+    # restriction that had already been lifted. Nothing to validate here
+    # now; the one residue the CLI still refuses (a *sided*
+    # `--ast-frontend old=/new=`) has no Action input spelling at all.
     ;;
   *)
     # An unrecognized mode (e.g. a typo like 'scna') has no arm above, so

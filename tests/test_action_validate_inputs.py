@@ -707,28 +707,22 @@ class TestCompareFormatAllowlistMatchesCli:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestCompareRejectsCompileContextForDirectoryOrPackage:
-    """Mirrors run.sh's compile-context guard (Codex review): the per-
-    library release fan-out never threads ast-frontend/gcc-*/sysroot/
-    nostdinc to each pair's header dump, so a directory/package compare
-    with any of these set must fail here, before dependency install --
-    not only later in run.sh, reopening the exact silent-fallback-until-
-    late-failure bug this validator exists to prevent (action/AGENTS.md:
-    "Keep validate-inputs.sh and run.sh in sync")."""
+class TestCompareAcceptsCompileContextForDirectoryOrPackage:
+    """The inverse of the guard this class used to pin. run.sh no longer
+    rejects the L2 compile-context inputs for a directory/package operand
+    -- it forwards them as a synthesized ``--config`` ``compile:`` overlay,
+    which the per-library release fan-out threads to every pair's header
+    dump (``cli_resolve.resolve_directory_compile_context``) -- so this
+    fail-fast validator must not reject them either, on pain of failing a
+    workflow the run itself would have served (action/AGENTS.md: "Keep
+    validate-inputs.sh and run.sh in sync").
 
-    def test_gcc_path_against_directory_is_rejected(self, tmp_path: Path) -> None:
-        lib_dir = tmp_path / "lib"
-        lib_dir.mkdir()
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": str(lib_dir),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
-            }
-        )
-        assert result.returncode == 1
-        assert "does not support lang/ast-frontend/gcc-path" in result.stdout
+    The class-level invariant ("run.sh/validate-inputs.sh never assert a
+    CLI restriction the CLI no longer has") is executed over the whole
+    input family in
+    ``tests/test_action_run_sh_release_capability_parity.py``; these cases
+    pin the validator half against the exact inputs the removed guard
+    named."""
 
     @pytest.mark.parametrize(
         "var,value",
@@ -742,7 +736,7 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
             ("INPUT_NOSTDINC", "true"),
         ],
     )
-    def test_each_compile_context_input_is_rejected(
+    def test_each_compile_context_input_is_accepted(
         self, tmp_path: Path, var: str, value: str
     ) -> None:
         pkg = tmp_path / "libfoo.rpm"
@@ -755,14 +749,12 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
                 var: value,
             }
         )
-        assert result.returncode == 1, f"{var}={value} should have been rejected"
-        assert "does not support lang/ast-frontend/gcc-path" in result.stdout
+        assert result.returncode == 0, f"{var}={value}: " + result.stdout + result.stderr
+        assert "does not support lang/ast-frontend" not in result.stdout
 
-    def test_default_lang_is_not_rejected(self, tmp_path: Path) -> None:
-        """action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that
-        is the *default*, not a user override, so it must not by itself
-        trip this guard (CodeRabbit review, PR #1146, finding #6), mirroring
-        the "auto" carve-out for ast-frontend just below."""
+    def test_directory_operand_with_gcc_path_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
         result = _run_validate(
@@ -770,23 +762,7 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": str(lib_dir),
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_LANG": "c++",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-    def test_ast_frontend_auto_is_not_rejected(self, tmp_path: Path) -> None:
-        """ "auto" is the documented no-op spelling -- resolves to the same
-        default castxml selection as leaving the input unset -- and must
-        not trip this guard, unlike a real frontend choice."""
-        lib_dir = tmp_path / "lib"
-        lib_dir.mkdir()
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": str(lib_dir),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AST_FRONTEND": "auto",
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
