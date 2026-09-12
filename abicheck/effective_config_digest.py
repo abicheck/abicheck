@@ -118,6 +118,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "policy.env_matrix",
     "policy.reconcile_build_context",
     "surface.internal_namespaces",
+    "surface.experimental_namespaces",
     "surface.explicit_scope",
     "surface.scope_to_public_surface",
     "surface.scope_to_public_surface_requested",
@@ -497,6 +498,13 @@ def effective_config_fields_from_full_config(
         "surface.internal_namespaces": _namespaces_str(
             getattr(surface, "internal_namespaces", ())
         ),
+        # Read off the policy file in both tiers, unlike its
+        # `internal_namespaces` sibling above: the `experimental_namespaces:`
+        # key has no CLI flag and no pack route, so a `--policy` document is
+        # its only source and there is no `surface` field to prefer.
+        "surface.experimental_namespaces": _namespaces_str(
+            getattr(policy_file, "experimental_namespaces", ())
+        ),
         "surface.explicit_scope": _rich_tier_explicit_scope_str(surface, result),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
@@ -583,6 +591,9 @@ def effective_config_fields_from_diff_result(
         ),
         "surface.internal_namespaces": _namespaces_str(
             getattr(policy_file, "internal_namespaces", ())
+        ),
+        "surface.experimental_namespaces": _namespaces_str(
+            getattr(policy_file, "experimental_namespaces", ())
         ),
         "surface.explicit_scope": str(
             getattr(result, "explicit_scope_source_sha256", "") or ""

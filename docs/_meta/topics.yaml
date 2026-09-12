@@ -320,6 +320,14 @@ topics:
       - abicheck/policy/classification.py
       - abicheck/reclassify.py
       - abicheck/policy/reclassify.py
+      # ADR-069 D4: the two namespace-convention keys this page documents,
+      # `internal_namespaces:` and `experimental_namespaces:`. The parser and
+      # the policy-file derivations live here, and `diff_namespaces.py` owns
+      # DEFAULT_EXPERIMENTAL_NAMESPACES itself -- the default whose `v0` entry
+      # ADR-069 removed, which is exactly the kind of change this page must be
+      # re-reviewed for.
+      - abicheck/policy/policy_file_namespaces.py
+      - abicheck/diff_namespaces.py
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
       - learn/rollout-and-governance.md

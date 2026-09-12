@@ -167,3 +167,58 @@ class TestVersionSegmentIsNotAStabilityPromise:
             "svs::runtime::v0::Index",
             None,
         )
+
+
+class TestEffectiveConfigDigest:
+    """ADR-069: two runs differing only in ``experimental_namespaces`` must not
+    report the same effective configuration.
+
+    The key changes which namespace-pattern findings are emitted, so a digest
+    that ignored it would let a JSON report claim identical configuration
+    across comparisons that produced different findings (Codex review, P1).
+    """
+
+    def test_field_key_is_registered(self) -> None:
+        from abicheck.effective_config_digest import EFFECTIVE_CONFIG_FIELD_KEYS
+
+        assert "surface.experimental_namespaces" in EFFECTIVE_CONFIG_FIELD_KEYS
+
+    def test_digest_distinguishes_differing_namespace_sets(self) -> None:
+        from abicheck.effective_config_digest import (
+            EFFECTIVE_CONFIG_FIELD_KEYS,
+            effective_config_digest,
+        )
+
+        base = dict.fromkeys(EFFECTIVE_CONFIG_FIELD_KEYS, "")
+        without = effective_config_digest(base)
+        with_v0 = effective_config_digest(
+            {**base, "surface.experimental_namespaces": "experimental;preview;v0"}
+        )
+        other = effective_config_digest(
+            {**base, "surface.experimental_namespaces": "experimental;preview"}
+        )
+        assert without != with_v0
+        assert with_v0 != other
+
+    def test_both_tiers_project_the_policy_file_value(self) -> None:
+        """Not just the key list -- both real projections must populate it, or
+        the digest silently reads empty for every run."""
+        from abicheck.effective_config_digest import (
+            effective_config_fields_from_diff_result,
+            effective_config_fields_from_full_config,
+        )
+        from abicheck.policy.effective_gate import EffectiveGate
+
+        pf = PolicyFile(experimental_namespaces=["experimental", "v0"])
+
+        class _Result:
+            policy_file = pf
+
+        gate = EffectiveGate.from_severity(None)
+        baseline = effective_config_fields_from_diff_result(_Result(), gate=gate)
+        assert "v0" in baseline["surface.experimental_namespaces"]
+
+        rich = effective_config_fields_from_full_config(
+            None, result=_Result(), policy_file=pf, gate=gate
+        )
+        assert "v0" in rich["surface.experimental_namespaces"]
