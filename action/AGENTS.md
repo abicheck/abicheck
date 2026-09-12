@@ -184,6 +184,28 @@ Two predicates close that without weakening anything above:
   the option declaration in `frontends/cli/options/secondary_output.py`, not
   against either comment.
 
+  **A known verdict is not automatically a compatibility result.**
+  `OPERATIONAL_VERDICTS` is the subset of `KNOWN_VERDICTS` that reports an
+  operational outcome instead — a crash, ADR-050 D2's comparability refusal, an
+  unanalyzable artifact, a member whose capture failed. They must stay *known*
+  (they are real emitter values, and rejecting them would make a valid release
+  document read as `no_result`), but `_resolve_clean_exit_verdict` acts on the
+  break and risk tiers and otherwise keeps `COMPATIBLE`, so naming them is what
+  stops `{"verdict": "ERROR"}` at exit 0 from publishing a clean claim. The
+  engine draws the same line for the same reason —
+  `_release_completed_compatibility_verdict` excludes exactly these from
+  `run_outcome.compatibility` — so the set is derived from both emitter sets and
+  pinned by `TestTheOperationalSetTracksTheEngine`, in both directions.
+
+  Read the canonical axis first (`run_outcome.operational`, ADR-063 D6, what the
+  exit-4 arm already uses via `_operational_failure_status`) and fall back to the
+  legacy `verdict` sentinel for a report with no `run_outcome`. A modern release
+  report carries *both* a real compatibility verdict and an operational failure
+  — one library broke, another failed to extract — so the operational axis has
+  to win, or the failure launders into a plain break. Labels reuse existing
+  owners: `not_comparable` gets the established `NOT_COMPARABLE`, everything
+  else the non-waivable `ERROR` path, never a new parallel vocabulary.
+
   **A structural rule requires `verdict: null`, not a present `verdict` key.**
   The not-comparable and audit rules exist because their emitters write a
   literal `null` and put the result elsewhere (a `reason` object; the two audit

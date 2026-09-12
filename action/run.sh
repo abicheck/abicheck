@@ -4412,7 +4412,7 @@ _reject_unusable_report() {
 }
 
 _resolve_clean_exit_verdict() {
-  local _v _no_baseline_audit _validity _dest _dest_validity
+  local _v _no_baseline_audit _validity _dest _dest_validity _operational
   VERDICT="COMPATIBLE"
   # An audit-only (no-baseline) dry run writes no JSON report at all --
   # `compare --dry-run` performs no analysis and only previews the command
@@ -4540,6 +4540,43 @@ _resolve_clean_exit_verdict() {
   if _assurance_axis_contradictory; then
     VERDICT="REPORT_UNREADABLE"
     echo "::error::abicheck exited 0, but its JSON report claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+    return
+  fi
+  # A report that reports an *operational* outcome rather than a compatibility
+  # one. This function acts on the break and risk tiers and otherwise keeps its
+  # initial COMPATIBLE, so a report saying "nothing was compared" published a
+  # clean compatibility claim at exit 0 -- `{"verdict": "ERROR"}` reproduced as
+  # `ERROR COMPATIBLE 0` (Codex review, P2). The engine draws the same line for
+  # the same reason: `_release_completed_compatibility_verdict` excludes exactly
+  # these from `run_outcome.compatibility`, because an operational failure and a
+  # compatibility result are separate axes.
+  #
+  # Two sources, canonical first. `run_outcome.operational` is ADR-063 D6's own
+  # name for this fact and is what the exit-4 arm below already reads via
+  # `_operational_failure_status`; the legacy `verdict` sentinel
+  # (`report_query.py`'s `OPERATIONAL_VERDICTS`) is the fallback for a report
+  # with no `run_outcome` block, which is precisely what `_report_compat_verdict`
+  # already falls through to for a release document.
+  #
+  # The labels reuse existing owners rather than adding a parallel vocabulary:
+  # `not_comparable` is the same fact ADR-050 D2's exit 16 reports, so it gets
+  # the established NOT_COMPARABLE verdict (which already carries its own
+  # summary arm and unconditional step failure), and everything else takes the
+  # same non-waivable ERROR path the exit-4 operational arm takes.
+  _operational=$(_operational_failure_status || true)
+  if [[ -z "$_operational" ]]; then
+    _operational=$(_report_query "$(_json_report_src)" operational_verdict)
+  fi
+  if [[ -n "$_operational" ]]; then
+    case "$_operational" in
+      not_comparable)
+        VERDICT="NOT_COMPARABLE"
+        ;;
+      *)
+        VERDICT="ERROR"
+        echo "::error::abicheck exited 0, but its JSON report reports an operational outcome rather than a compatibility one (${_operational}): a crash, an artifact this build cannot analyze, or a member whose capture failed. No compatibility claim was established for this run, so this step will not report one, and this is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+        ;;
+    esac
     return
   fi
   _no_baseline_audit=$(_report_query "$(_json_report_src)" no_baseline_audit)

@@ -104,6 +104,10 @@ finishes in ~45 seconds.
   since it runs at *collection* time on every lane. Direct tests in
   `test_canonical_lane.py`, split out so the (already large) consumer module
   doesn't grow past the file-size cap just to host them.
+- `_action_report_reader.py` — loads `action/report_query.py` as a module (it
+  lives in `action/`, not `abicheck/`, because it versions with the Action, so
+  it is not importable by name). Shared by `test_action_report_query.py` and
+  `test_action_report_verdict_vocabulary.py`.
 - `_action_run_sh_harness.py` — runs the *whole* of `action/run.sh` against a
   shebang-dispatched `abicheck` stub on PATH, with a real `$GITHUB_OUTPUT` and
   `$GITHUB_STEP_SUMMARY`. Shared by `test_action_unreadable_report_verdict.py`

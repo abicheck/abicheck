@@ -30,6 +30,16 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **An operational outcome no longer reads as a clean compatibility result.**
+  A report whose verdict is `ERROR`, `unsupported`, `failed`, `UNKNOWN` or
+  `not_comparable` — or whose `run_outcome.operational` names any failure —
+  reports that nothing was compared, not that the new version is compatible.
+  At exit 0 those published `COMPATIBLE`. They now take the same non-waivable
+  `ERROR` path the exit-4 operational arm already takes, except
+  `not_comparable`, which gets the established `NOT_COMPARABLE` verdict. The
+  canonical `run_outcome.operational` axis is read ahead of the legacy verdict
+  sentinel, so a release carrying one library's real break beside another's
+  failed extraction reports the failure rather than laundering it into a break.
 - **Three more ways a report could be accepted without supplying a result.** A
   structural fallback keyed on a *present* `verdict` key re-admitted the
   arbitrary strings the vocabulary check rejects, so `{"verdict": "write

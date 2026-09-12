@@ -550,3 +550,131 @@ class TestADryRunIsNotAMissingReport:
         outputs = self._dry_run(tmp_path)
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
+
+
+#: Every operational outcome a report can name, with the verdict the Action
+#: must publish for it at exit 0. None of them is a compatibility result.
+OPERATIONAL_OUTCOMES = (
+    ("ERROR", "ERROR"),
+    ("unsupported", "ERROR"),
+    ("failed", "ERROR"),
+    ("UNKNOWN", "ERROR"),
+    # The one with a more specific owner already: ADR-050 D2's refusal, which
+    # exit 16 reports under this name and which carries its own summary arm.
+    ("not_comparable", "NOT_COMPARABLE"),
+)
+
+
+class TestAnOperationalOutcomeIsNotACompatibilityResult:
+    """A report that says "nothing was compared" must not publish COMPATIBLE.
+
+    `_resolve_clean_exit_verdict` acts on the break and risk tiers and otherwise
+    keeps its initial `COMPATIBLE`, so admitting the release operational
+    sentinels into the reader's vocabulary — which is correct, they are real
+    emitter values — let `{"verdict": "ERROR"}` at exit 0 publish a clean
+    compatibility claim (Codex review, P2, reproduced as `ERROR COMPATIBLE 0`).
+
+    The engine already draws this line for the same reason:
+    `cli_compare_release_helpers._release_completed_compatibility_verdict`
+    excludes exactly these from `run_outcome.compatibility`, because an
+    operational failure and a compatibility result are separate axes.
+
+    Labels reuse existing owners rather than adding a parallel vocabulary:
+    `not_comparable` gets the established `NOT_COMPARABLE` (the same fact exit
+    16 reports), and the rest take the same non-waivable `ERROR` path that the
+    exit-4 operational arm already takes.
+    """
+
+    @pytest.mark.parametrize(
+        "sentinel,expected",
+        OPERATIONAL_OUTCOMES,
+        ids=[o[0] for o in OPERATIONAL_OUTCOMES],
+    )
+    def test_the_legacy_verdict_sentinel_is_not_compatible(
+        self, tmp_path: Path, sentinel: str, expected: str
+    ) -> None:
+        payload = json.dumps({"report_schema_version": "4.4", "verdict": sentinel})
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs.get("verdict") != "COMPATIBLE", (sentinel, outputs)
+        assert outputs.get("verdict") == expected, (sentinel, outputs)
+
+    @pytest.mark.parametrize(
+        "sentinel,expected",
+        OPERATIONAL_OUTCOMES,
+        ids=[o[0] for o in OPERATIONAL_OUTCOMES],
+    )
+    def test_the_step_fails(self, tmp_path: Path, sentinel: str, expected: str) -> None:
+        payload = json.dumps({"report_schema_version": "4.4", "verdict": sentinel})
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs["_exit"] != 0, (sentinel, outputs)
+
+    @pytest.mark.parametrize(
+        "operational,expected",
+        (
+            ("extraction_error", "ERROR"),
+            ("no_comparison_completed", "ERROR"),
+            ("budget_overflow", "ERROR"),
+            ("not_comparable", "NOT_COMPARABLE"),
+        ),
+    )
+    def test_the_canonical_run_outcome_axis_is_read_too(
+        self, tmp_path: Path, operational: str, expected: str
+    ) -> None:
+        # ADR-063 D6's canonical name for the same fact. A modern report carries
+        # it *and* a real compatibility verdict beside it (a release can have
+        # one library break and another fail to extract), so the operational
+        # axis has to win here or the failure laundered into a plain break.
+        payload = json.dumps(
+            {
+                "report_schema_version": "4.4",
+                "verdict": "ERROR",
+                "run_outcome": {
+                    "compatibility": "BREAKING",
+                    "operational": operational,
+                },
+            }
+        )
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs.get("verdict") == expected, (operational, outputs)
+
+    @pytest.mark.parametrize(
+        "verdict",
+        ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"),
+    )
+    def test_a_real_compatibility_tier_is_unaffected(
+        self, tmp_path: Path, verdict: str
+    ) -> None:
+        # The control. Every real tier must still resolve to itself (or to
+        # COMPATIBLE for the two clean ones), or the operational branch has
+        # swallowed the ordinary path.
+        payload = json.dumps(
+            {
+                "report_schema_version": "4.4",
+                "verdict": verdict,
+                "run_outcome": {"compatibility": verdict, "operational": "none"},
+            }
+        )
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs.get("verdict") not in ("ERROR", "NOT_COMPARABLE"), (
+            verdict,
+            outputs,
+        )
+
+    def test_operational_none_does_not_trigger_it(self, tmp_path: Path) -> None:
+        # `none` is the ordinary value on every healthy modern report; treating
+        # it as an operational failure would fail every run.
+        payload = json.dumps(
+            {
+                "report_schema_version": "4.4",
+                "verdict": "COMPATIBLE",
+                "run_outcome": {"compatibility": "COMPATIBLE", "operational": "none"},
+            }
+        )
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs.get("verdict") == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs

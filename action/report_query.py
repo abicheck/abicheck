@@ -194,6 +194,34 @@ KNOWN_VERDICTS = frozenset(
 )
 
 
+#: The subset of :data:`KNOWN_VERDICTS` that is **not** a compatibility result.
+#:
+#: Each is a real emitter value, which is why it must stay in
+#: ``KNOWN_VERDICTS`` -- a release document reporting one is a valid document
+#: and must not read as ``no_result``. But none of them answers "is the new
+#: version compatible": they report a crash, a comparability refusal
+#: (ADR-050 D2), an artifact this build cannot analyze, or a member whose
+#: capture failed.
+#:
+#: The engine draws the same line for the same reason, which is what this set
+#: mirrors rather than invents: ``cli_compare_release_helpers.
+#: _release_completed_compatibility_verdict`` excludes exactly these four from
+#: ``run_outcome.compatibility`` because that axis is separate from the
+#: release's own rolled-up ``verdict``, where an operational failure
+#: deliberately dominates. ``UNKNOWN`` joins them from a different emitter --
+#: ``reporter.py``'s appcompat document, where it means "no verdict was
+#: computed".
+#:
+#: Why it matters here: ``_resolve_clean_exit_verdict`` acts on the break and
+#: risk tiers and otherwise keeps its initial ``COMPATIBLE``, so admitting
+#: these into the vocabulary without naming them made `{"verdict": "ERROR"}`
+#: at exit 0 publish a clean compatibility claim (Codex review, P2, which
+#: reproduced `ERROR COMPATIBLE 0`).
+OPERATIONAL_VERDICTS = frozenset(
+    {"ERROR", "not_comparable", "unsupported", "failed", "UNKNOWN"}
+)
+
+
 def _is_known_verdict(value: object) -> bool:
     return isinstance(value, str) and value in KNOWN_VERDICTS
 
@@ -578,6 +606,13 @@ def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:
         # only source this reader is ever handed -- never yields a SARIF
         # document in the first place.
         return str(_either("verdict", "") or "")
+    if query == "operational_verdict":
+        # The report's verdict when it is an *operational* one rather than a
+        # compatibility tier -- see `OPERATIONAL_VERDICTS`. Empty otherwise, so
+        # a caller can branch on "did this report answer the compatibility
+        # question at all" without keeping a second copy of the set.
+        _verdict = str(_either("verdict", "") or "")
+        return _verdict if _verdict in OPERATIONAL_VERDICTS else ""
     if query == "blocking_categories":
         return ", ".join(str(c) for c in (_severity().get("blocking_categories") or []))
     if query == "coverage_where":
