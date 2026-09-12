@@ -237,6 +237,9 @@ PROVENANCE_UNVERIFIED = frozenset(
         "func_virtual_removed",
         "func_visibility_changed",
         "func_visibility_protected_changed",
+        # Same bucket as the two above, for the same reason: no producer
+        # computes evidence_provenance for it yet.
+        "var_visibility_changed",
         "generated_file_dependency_unstable",
         "generated_header_changed",
         "generated_header_reaches_public_api",

@@ -53,6 +53,7 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
+    admit_subprogram as _admit_subprogram,
     default_member_access_for_tag as _default_member_access_for_tag,
     format_qualified_type_name as _format_qualified_type_name,
     local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
@@ -507,10 +508,10 @@ class _DwarfSnapshotBuilder:
         mangled = linkage_name or name
         qualified_name = f"{scope}::{name}" if scope else name
 
-        # Deleted functions intentionally bypass the exported-symbol check below
-        # so a public API that becomes ``= delete`` is still observable. Do not
-        # let that bypass re-admit transitive stdlib/runtime subprograms into a
-        # non-runtime library's public surface.
+        # Deleted functions intentionally bypass the exported-symbol check so a
+        # `= delete`d public API stays observable -- but that bypass must not
+        # re-admit transitive stdlib/runtime subprograms into a non-runtime
+        # library's public surface.
         if not self._is_abi_relevant_export(
             mangled
         ) or not self._is_abi_relevant_export(qualified_name):
@@ -526,20 +527,14 @@ class _DwarfSnapshotBuilder:
         if _attr_bool(die, "DW_AT_declaration") and not is_deleted:
             return
 
-        # Must be in the ELF dynamic export set -- except a deleted function,
-        # which has no symbol in the new binary and is kept for
-        # cross-reference. A definition with external linkage (DW_AT_external,
-        # not a C `static`) absent from the export set had its ELF visibility
-        # hidden: recorded rather than dropped, so it stays distinguishable
-        # from an outright removal (see case06_visibility); one with no
-        # external linkage was never ABI and is dropped. This reaches the
-        # model as its own export fact -- see model/surface_facts.py.
-        visibility = Visibility.PUBLIC
-        if not is_deleted and not self._is_exported(mangled, name):
-            if _attr_bool(die, "DW_AT_external"):
-                visibility = Visibility.HIDDEN
-            else:
-                return
+        exported = self._is_exported(mangled, name)
+        visibility = _admit_subprogram(
+            is_deleted=is_deleted,
+            is_exported=exported,
+            is_external=_attr_bool(die, "DW_AT_external"),
+        )
+        if visibility is None:
+            return
 
         # Dedup
         if mangled in self._seen_func_mangles:
@@ -556,6 +551,7 @@ class _DwarfSnapshotBuilder:
                 qualified_name,
                 is_deleted,
                 visibility=visibility,
+                exported=exported,
                 scope_path=scope_path,
                 default_access=default_access,
             )
@@ -571,11 +567,15 @@ class _DwarfSnapshotBuilder:
         qualified_name: str,
         is_deleted: bool,
         visibility: Visibility = Visibility.PUBLIC,
+        exported: bool = True,
         scope_path: ScopePath = (),
         default_access: AccessLevel = AccessLevel.PUBLIC,
     ) -> Function:
         """Construct a :class:`Function` from a (already surface-admitted)
-        ``DW_TAG_subprogram`` DIE. *default_access*: see ``_process_cu``'s
+        ``DW_TAG_subprogram`` DIE. *exported*: the export-set lookup's own
+        answer, which the export fact is taken from (never *visibility* --
+        see ``extract.surface_fact_producers.debug_info_surface_facts``).
+        *default_access*: see ``_process_cu``'s
         identical record-scope-segment default (Codex review, PR #1015).
 
         Pure DWARF→model mapping (N-C): admission/dedup live in
@@ -652,7 +652,7 @@ class _DwarfSnapshotBuilder:
             return_type=ret_type,
             params=params,
             visibility=visibility,
-            **debug_info_surface_facts(exported=visibility is Visibility.PUBLIC),
+            **debug_info_surface_facts(exported=exported),
             is_virtual=is_virtual,
             is_extern_c=is_extern_c,
             vtable_index=vtable_index,

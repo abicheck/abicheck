@@ -307,12 +307,26 @@ def in_source_declaration_index(decl: SurfaceFactBearing) -> bool:
     Deliberately blind to (c): an export lost to a version-script or
     ``-fvisibility`` change does not remove a declaration, and keying this
     population off export evidence is exactly what made one read as the
-    other. A declaration drops out only on a *confirmed* negative — the
-    header parse accounted for it and found nothing (a), or the contract
-    ruled it out (b). Unknown keeps it in, symmetrically on both sides,
-    so weaker evidence narrows the conclusion instead of manufacturing a
-    removal.
+    other. A declaration drops out on a *confirmed* negative — the header
+    parse accounted for it and found nothing (a), or the contract ruled it
+    out (b) — and otherwise unknown keeps it in, symmetrically on both
+    sides, so weaker evidence narrows the conclusion instead of
+    manufacturing a removal.
+
+    An export-table-only record is the one exclusion that is not about
+    either fact: it has no source declaration *at all* to belong to a
+    source-declaration population, by construction — no header AST produced
+    it, its name is a raw mangled spelling and its signature is ``"?"``.
+    Admitting it (its fact (a) is unknown, not false, on a headerless dump)
+    would feed raw export-table entries to source-level detectors, which is
+    how a fresh symbols-only comparison of ``_ZN3lib2v13fooEv`` against
+    ``_ZN3lib2v23fooEv`` started reporting an inline-namespace version bump
+    with no header evidence behind it (Codex review, P2). See
+    :func:`is_export_table_only_record` for why that question is not one of
+    the three facts.
     """
+    if is_export_table_only_record(decl):
+        return False
     if declaration_confirmed_absent(decl):
         return False
     if is_confirmed_false(in_public_contract(decl)):

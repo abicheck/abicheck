@@ -298,6 +298,52 @@ class TestExportLossIsDetectedForEveryDeclarationKind:
         assert ChangeKind.VAR_VISIBILITY_CHANGED not in kinds
 
 
+class TestExportTableOnlyRecordsAreNotSourceDeclarations:
+    """An export-table stub has no source declaration to belong to.
+
+    Its fact (a) is *unknown* on a headerless dump, not false, so the
+    "unknown keeps it in" rule of the source-declaration population would
+    admit it -- feeding raw mangled export entries to source-level
+    detectors, which made a symbols-only comparison report an
+    inline-namespace version bump with no header evidence behind it (Codex
+    review, P2). See ``is_export_table_only_record``.
+    """
+
+    def test_export_only_entries_are_excluded(self) -> None:
+        from abicheck.extract.export_symbol_identity import (
+            itanium_export_function,
+            itanium_export_variable,
+        )
+
+        for decl in (
+            itanium_export_function("_ZN3lib2v13fooEv"),
+            itanium_export_variable("_ZN3lib2v13barE"),
+        ):
+            # The premise the exclusion has to survive: (a) is unknown here,
+            # which is exactly why the fact alone cannot carry this.
+            assert surface_fact_summary(decl)["declared_in_headers"] == "unknown"
+            assert not in_source_declaration_index(decl)
+
+    def test_a_symbols_only_namespace_rename_reports_no_source_finding(self) -> None:
+        from abicheck.extract.export_symbol_identity import itanium_export_function
+
+        old = _snap("1.0", itanium_export_function("_ZN3lib2v13fooEv"))
+        new = _snap("2.0", itanium_export_function("_ZN3lib2v23fooEv"))
+        old.elf_only_mode = new.elf_only_mode = True
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED not in kinds
+
+    def test_a_header_declared_entity_is_still_included(self) -> None:
+        """The exclusion is about the record's producer, not about (a) being
+        unknown -- a DWARF-derived declaration also has (a) unknown and must
+        stay in the population."""
+        from abicheck.extract.surface_fact_producers import debug_info_surface_facts
+
+        dwarf_decl = _fn(**debug_info_surface_facts(exported=True))  # type: ignore[arg-type]
+        assert surface_fact_summary(dwarf_decl)["declared_in_headers"] == "unknown"
+        assert in_source_declaration_index(dwarf_decl)
+
+
 class TestTheQuestionDecidesTheFact:
     """Each consumer reads the fact its own question needs.
 
@@ -331,6 +377,27 @@ class TestTheQuestionDecidesTheFact:
             "dlsym cannot resolve a promised-but-unexported declaration, so it "
             "must not satisfy a required entrypoint"
         )
+
+    def test_the_report_schema_declares_the_surface_facts_block(self) -> None:
+        """A schema-version bump nobody can discover from the schema is not a
+        published field (Codex review, P2)."""
+        import json
+        from pathlib import Path
+
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parent.parent
+                / "abicheck/schemas/compare_report.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        block = schema["$defs"]["change"]["properties"]["surface_facts"]
+        assert set(block["required"]) == set(surface_fact_summary(_fn()))
+        for name in block["required"]:
+            assert set(block["properties"][name]["enum"]) == {
+                "true",
+                "false",
+                "unknown",
+            }
 
     def test_export_named_metrics_count_the_export_fact(self) -> None:
         from abicheck.surface_graph import compute_surface_metrics

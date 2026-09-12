@@ -90,6 +90,16 @@ def debug_info_surface_facts(
     evidence about the *available headers* a consumer compiles against —
     so (a) stays unknown. (c) is real: the extractor checked the dynamic
     export set to admit the entity in the first place.
+
+    *exported* must be that **real lookup's** answer, not a re-derivation
+    from the record's legacy ``visibility``. They are not the same for one
+    case that matters: a ``DW_AT_deleted`` subprogram deliberately bypasses
+    the admission check and keeps a synthetic ``Visibility.PUBLIC`` so the
+    deleted declaration stays available for cross-reference — while having,
+    by construction, no symbol in the binary at all. Reading the enum there
+    would record an export that does not exist, and every consumer of this
+    fact (``binary_exported``, bundle signature evidence, the report's
+    ``surface_facts``) would trust it (Codex review, P2).
     """
     return {
         "declared_in_headers_fact": Fact.not_collected(
