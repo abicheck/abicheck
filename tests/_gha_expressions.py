@@ -37,6 +37,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+#: A bare integer or decimal literal.
+_NUMERIC = re.compile(r"-?\d+(?:\.\d+)?")
+
 #: `matrix.os` value -> the `runner.os` GitHub sets for it.
 _RUNNER_OS = {"ubuntu": "Linux", "macos": "macOS", "windows": "Windows"}
 
@@ -61,9 +64,27 @@ def _atom(token: str, ctx: dict[str, Any]) -> Any:
     if token in ctx:
         value = ctx[token]
         return value if value != "" else False
-    if token.startswith(("github.", "matrix.", "runner.", "env.", "needs.")):
-        return False  # unmodelled context field: absent, never a guess
-    return token
+    if _NUMERIC.fullmatch(token):
+        # A bare number is a literal, and the only place one appears in this
+        # repository is as a comparison operand (`matrix.shard == 1`). It is
+        # returned as *text* because `_context` stringifies matrix values, so
+        # the two sides must meet in the same type to compare equal.
+        return token
+    if token in ("true", "false"):
+        return token == "true"
+    # Everything else -- a context reference this evaluator does not model, a
+    # function call it does not implement (`failure()`, `cancelled()`,
+    # `contains(...)`), a bareword -- is *absent*.
+    #
+    # Returning the raw token here was a real defect (CodeRabbit review): a
+    # non-empty string is truthy, so a step whose `if:` used an unmodelled
+    # function evaluated as "runs". In `test_workflow_coverage_consumers.py`
+    # that made such a step look like an active consumer unconditionally,
+    # masking exactly the orphaned-report defect that guard exists to catch --
+    # and it contradicted this module's own docstring, which already claimed
+    # the falsy behaviour. A guard that fails open is worse than no guard,
+    # because it reads as coverage.
+    return False
 
 
 def evaluate(expr: str, ctx: dict[str, Any]) -> Any:

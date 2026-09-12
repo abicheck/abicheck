@@ -177,6 +177,9 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # ubuntu -- which is the argument for making a rule executable
             # rather than writing it down.
             "tests/test_workflow_coverage_consumers.py",
+            # The evaluator both guards rest on, with its own contract
+            # suite -- chiefly *which way it fails*.
+            "tests/test_gha_expression_evaluator.py",
         ),
         # `()` per the field's own rule: these seed tests read and parse
         # workflow/config files, they do not invoke the CLI, `abicheck.
@@ -199,9 +202,15 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "The consumer half checks each *matrix combination*, "
                     "which needs every step's `if:` evaluated against it, so "
                     "it inherits `_gha_expressions`' deliberate subset: an "
-                    "unmodelled context field or function evaluates falsy "
-                    "rather than raising, and a step gated on one this "
-                    "evaluator does not know is checked loosely. A matrix "
+                    "unmodelled reference or function evaluates as *absent*. "
+                    "That direction is deliberate but not uniformly safe. "
+                    "For a consumer it fails closed (the step is not counted "
+                    "as reading the report, so at worst a real consumer is "
+                    "reported as missing); for a *producer* it fails open "
+                    "(the step is not counted as writing one, so an orphaned "
+                    "report under an unmodelled `if:` is missed). Both beat "
+                    "the original defect, where an unmodelled token returned "
+                    "truthy and made any such step read as active. A matrix "
                     "built from an expression cannot be expanded statically "
                     "at all and is scanned as one nameless combination. The "
                     "core-effectiveness test also probes the interpreter "
