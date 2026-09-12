@@ -698,7 +698,7 @@ class TestDirectoryExportOwnsItsTree:
                     supports_directory=True,
                     directory_formats=["json"],
                 )
-            assert "per-component reports" in str(excinfo.value)
+            assert "is inside" in str(excinfo.value)
         else:
             exports = build_export_set(
                 operands,
@@ -714,6 +714,80 @@ class TestDirectoryExportOwnsItsTree:
         case above pass while asserting nothing."""
         answers = {
             self._oracle_is_inside(Path("reports"), Path(d)) for d in self._DESTINATIONS
+        }
+        assert answers == {True, False}
+
+    @pytest.mark.parametrize(
+        "file_destination",
+        ["reports", "reports/", "outer", "reports/sub"],
+    )
+    @pytest.mark.parametrize("directory_first", [True, False])
+    def test_a_file_that_is_an_ancestor_of_the_directory_is_rejected_too(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        file_destination: str,
+        directory_first: bool,
+    ) -> None:
+        """Nesting loses a document whichever way round it runs.
+
+        The fan-out creates its directory, which makes every ancestor a
+        directory too, so a document export naming one of them fails at
+        write time -- after every comparison has been paid for.
+        """
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        monkeypatch.chdir(workdir)
+
+        operands = [f"json=reports{os.sep}sub{os.sep}", f"markdown={file_destination}"]
+        if not directory_first:
+            operands.reverse()
+
+        directory = Path("reports") / "sub"
+        # Equal paths are the exact-path rule's business, not containment's,
+        # but they must be rejected all the same -- so the expectation here
+        # is "these two operands overlap", of which nesting and equality are
+        # the two shapes.
+        overlaps = (
+            self._oracle_is_inside(directory, Path(file_destination))
+            or self._oracle_is_inside(Path(file_destination), directory)
+            or Path(file_destination).resolve() == directory.resolve()
+        )
+
+        def build() -> object:
+            return build_export_set(
+                operands,
+                ["json", "markdown"],
+                default_format="markdown",
+                supports_directory=True,
+                directory_formats=["json"],
+            )
+
+        if overlaps:
+            # Rejected -- by this rule for a true ancestor, and by the
+            # exact-path or one-directory-at-a-time rules for the two
+            # spellings that resolve onto the directory itself. Which rule
+            # fires is not the claim; that the pair never reaches the
+            # analysis is.
+            with pytest.raises(click.BadParameter):
+                build()
+        else:
+            assert len(build().targets) == 2  # type: ignore[attr-defined]
+
+        if file_destination == "reports":
+            # The one genuinely new case: an ancestor, caught by containment
+            # rather than by either pre-existing rule.
+            with pytest.raises(click.BadParameter) as excinfo:
+                build()
+            assert "is inside" in str(excinfo.value)
+
+    def test_the_ancestor_cases_are_not_all_one_answer(self) -> None:
+        directory = Path("reports") / "sub"
+        answers = {
+            self._oracle_is_inside(directory, Path(d))
+            or self._oracle_is_inside(Path(d), directory)
+            or Path(d).resolve() == directory.resolve()
+            for d in ("reports", "reports/", "outer", "reports/sub")
         }
         assert answers == {True, False}
 

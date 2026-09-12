@@ -380,14 +380,26 @@ def build_export_set(
         for target in targets:
             if target is directory or target.destination is None:
                 continue
-            if root not in target.destination.resolve().parents:
+            other = target.destination.resolve()
+            # Both directions, because a path pair nests either way and both
+            # ways lose a document (Codex review, P2). `-o markdown=reports`
+            # with `-o json=reports/sub/` is the reverse case: the fan-out
+            # creates `reports/sub/`, which makes `reports` a directory, and
+            # the run then fails writing the Markdown document to it -- after
+            # every comparison has already been paid for. A conflict this
+            # predictable belongs before the analysis, not after it.
+            if root in other.parents:
+                inner, outer = target, directory
+            elif other in root.parents:
+                inner, outer = directory, target
+            else:
                 continue
             raise click.BadParameter(
-                f"{target.spelling!r} writes inside {root}, which "
-                f"{directory.spelling!r} already claims for its per-component "
-                "reports: the fan-out generates one report per component plus "
-                "summary.json there, so either export could overwrite the "
-                "other's document. Send it somewhere outside that directory.",
+                f"{inner.spelling!r} is inside {outer.spelling!r}'s own "
+                "destination: a per-component fan-out generates one report "
+                "per component plus summary.json in the directory it names, "
+                "so nesting the two means one export's document lands on the "
+                "other's. Give each its own location.",
                 param=param,
             )
 

@@ -6,7 +6,7 @@
 #     require_justification: true  # fail if any rule has an empty/missing reason
 #
 # Generate candidates automatically:
-#   abicheck compare old.so new.so --format json -o diff.json
+#   abicheck compare old.so new.so -o json=diff.json
 #   abicheck suggest-suppressions diff.json -o candidates.yml
 #
 version: 1

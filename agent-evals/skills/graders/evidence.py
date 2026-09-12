@@ -439,7 +439,7 @@ def compares_one_side_against_itself(call: dict) -> bool:
     compared nothing.
 
     This used to test *adjacency*, which Click does not require. Verified
-    against the real CLI: `abicheck compare x.so --format json x.so` runs the
+    against the real CLI: `abicheck compare x.so -o json=- x.so` runs the
     comparison, exits 0 and reports `NO_CHANGE`, while the two `x.so` tokens
     sit three apart — so the interleaved spelling walked straight through the
     check the plain one is caught by. Operand identification (above) closes
