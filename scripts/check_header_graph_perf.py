@@ -916,6 +916,111 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _measure_under_a_throwaway_cache(
+    args: argparse.Namespace,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Measure every point with ``XDG_CACHE_HOME`` pointed at a throwaway dir.
+
+    Returns the points, or a failure message. Every repeat deliberately forces an
+    AST-cache *miss* (see ``_build_fixture``), so each parse writes a real,
+    never-reused entry into the persistent cache that nothing then cleans up --
+    repeated runs at larger ``--sizes`` accumulate real disk usage there for no
+    benefit. Redirecting the cache root for the run's lifetime avoids that.
+
+    Windows has no equivalent env-var override in ``dumper_cache._cache_path``, so
+    this is best-effort there, matching the module's Linux/ELF scope.
+
+    The two failure shapes are kept distinct in the returned message, not
+    conflated: a castxml *version-policy* rejection is a different condition from
+    any other extraction failure (a timeout, a crash, malformed output), and a
+    caller matching on the printed text must be able to tell them apart.
+    """
+    from abicheck.errors import SnapshotError, UnsupportedCastxmlVersionError
+
+    with tempfile.TemporaryDirectory(prefix="hgperf_cache_") as cache_dir:
+        old_xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+        os.environ["XDG_CACHE_HOME"] = cache_dir
+        try:
+            return (
+                measure(
+                    tuple(args.sizes),
+                    args.repeat,
+                    require_castxml=args.require_castxml,
+                ),
+                None,
+            )
+        except UnsupportedCastxmlVersionError as exc:
+            # Only reachable with --require-castxml; without it _measure_size
+            # turns this specific error into a SKIP+continue.
+            return [], f"FAIL: castxml version rejected by this build's policy: {exc}"
+        except SnapshotError as exc:
+            return [], f"FAIL: header extraction failed: {exc}"
+        finally:
+            if old_xdg_cache_home is None:
+                os.environ.pop("XDG_CACHE_HOME", None)
+            else:
+                os.environ["XDG_CACHE_HOME"] = old_xdg_cache_home
+
+
+def _report_and_gate(
+    points: list[dict[str, Any]],
+    baseline: dict[tuple[int, str], dict[str, float]] | None,
+    thresholds: dict[str, GateThreshold],
+    metrics: tuple[str, ...],
+    args: argparse.Namespace,
+) -> int:
+    """Print the effective thresholds, gate the points, return the exit code."""
+    print("\nEffective thresholds (the numbers that gated this run):")
+    for metric, threshold in thresholds.items():
+        print(
+            f"  {metric}: tolerance={threshold.tolerance} "
+            f"min_delta_ms={threshold.min_delta} source={threshold.source}"
+        )
+
+    if baseline is None:
+        print(
+            "\nNo --baseline given: report-only run. Pass a previously written "
+            "--json-out report via --baseline to gate future runs against it."
+        )
+        return 0
+
+    matched = matched_points(points, baseline, metrics)
+    if not matched:
+        print(
+            f"\nFAIL: --baseline {args.baseline} has no gateable entry for any of "
+            f"this run's {len(points)} (size, backend) point(s) and selected "
+            f"metric(s) {list(metrics)} — nothing was actually gated. Check that "
+            "--sizes/--metrics/the backends measured match what the baseline was "
+            "generated with, or regenerate it via --json-out."
+        )
+        return 1
+
+    failures = check_regressions(points, baseline, thresholds)
+    ungated = ungated_metrics(points, baseline, metrics)
+    if args.require_all_metrics and ungated:
+        failures.extend(f"--require-all-metrics: {u}" for u in ungated)
+    if failures:
+        print("\nFAIL: header-graph L2 perf regression:")
+        for failure in failures:
+            print(f"  - {failure}")
+        return 1
+    if ungated:
+        print(
+            f"\nNOTE: {len(ungated)} (point, metric) pair(s) were NOT gated "
+            "(no baseline entry, or a non-gateable value on one side). Pass "
+            "--require-all-metrics to turn this into a failure:"
+        )
+        for entry in ungated:
+            print(f"  - {entry}")
+    gated_pairs = sum(len(gateable_metrics(p, baseline, metrics)) for p in points)
+    print(
+        f"\nOK: no header-graph L2 perf regression vs. baseline "
+        f"({gated_pairs} (point, metric) pair(s) checked across "
+        f"{len(matched)} point(s), metrics={list(metrics)})."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     # Resolved up front so the --json-out report records them even on a
@@ -942,54 +1047,12 @@ def main(argv: list[str] | None = None) -> int:
             "is not covered by this run)."
         )
 
-    # Every repeat deliberately forces a cache *miss* (see _build_fixture's
-    # docstring), so every one of those parses writes a real, never-reused
-    # entry into the persistent AST cache (~/.cache/abi_check or platform
-    # equivalent) that nothing then cleans up — repeated runs, especially at
-    # larger --sizes, accumulate real disk usage there for no benefit (Codex
-    # review). Redirect XDG_CACHE_HOME (the same env var dumper_cache._cache_path
-    # already honors) to a throwaway directory for the run's lifetime instead.
-    # Windows has no equivalent env-var override in _cache_path, so this is a
-    # best-effort mitigation there, matching the module's Linux/ELF scope.
-    from abicheck.errors import SnapshotError, UnsupportedCastxmlVersionError
-
-    with tempfile.TemporaryDirectory(prefix="hgperf_cache_") as cache_dir:
-        old_xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
-        os.environ["XDG_CACHE_HOME"] = cache_dir
-        try:
-            points = measure(
-                tuple(args.sizes), args.repeat, require_castxml=args.require_castxml
-            )
-        except UnsupportedCastxmlVersionError as exc:
-            # Only reachable with --require-castxml (without it, _measure_size
-            # already turns this specific error into a SKIP+continue) -- a
-            # clean FAIL here, not an unhandled traceback, matching this
-            # script's existing --baseline-read-error convention. Kept as its
-            # own except clause, with its own distinct message prefix, so a
-            # caller (e.g. header-graph-regression's base-measurement step)
-            # can tell a genuine version-policy rejection apart from any
-            # *other* SnapshotError below -- a castxml timeout, a crash, or
-            # malformed output is a real extraction regression, not an
-            # optional/skippable condition, and must not be mistaken for one
-            # by string-matching a shared message (Codex review, fresh
-            # evidence: an earlier version of this used one shared message
-            # for both, which made that distinction impossible from the
-            # printed output alone).
-            print(f"\nFAIL: castxml version rejected by this build's policy: {exc}")
-            return 1
-        except SnapshotError as exc:
-            # Any other castxml/clang extraction failure under
-            # --require-castxml (a timeout, a crash, malformed output) --
-            # deliberately NOT the same message prefix as the version-policy
-            # FAIL above, so the two are never conflated by a caller matching
-            # on the printed text.
-            print(f"\nFAIL: header extraction failed: {exc}")
-            return 1
-        finally:
-            if old_xdg_cache_home is None:
-                os.environ.pop("XDG_CACHE_HOME", None)
-            else:
-                os.environ["XDG_CACHE_HOME"] = old_xdg_cache_home
+    # The cache-redirection and failure-shape reasoning lives in
+    # _measure_under_a_throwaway_cache's own docstring.
+    points, measure_failure = _measure_under_a_throwaway_cache(args)
+    if measure_failure is not None:
+        print(f"\n{measure_failure}")
+        return 1
 
     if args.markdown:
         _print_markdown(points)
@@ -1066,48 +1129,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    print("\nEffective thresholds (the numbers that gated this run):")
-    for metric, threshold in thresholds.items():
-        print(
-            f"  {metric}: tolerance={threshold.tolerance} "
-            f"min_delta_ms={threshold.min_delta} source={threshold.source}"
-        )
-
-    matched = matched_points(points, baseline, metrics)
-    if not matched:
-        print(
-            f"\nFAIL: --baseline {args.baseline} has no gateable entry for any of "
-            f"this run's {len(points)} (size, backend) point(s) and selected "
-            f"metric(s) {list(metrics)} — nothing was actually gated. Check that "
-            "--sizes/--metrics/the backends measured match what the baseline was "
-            "generated with, or regenerate it via --json-out."
-        )
-        return 1
-
-    failures = check_regressions(points, baseline, thresholds)
-    ungated = ungated_metrics(points, baseline, metrics)
-    if args.require_all_metrics and ungated:
-        failures.extend(f"--require-all-metrics: {u}" for u in ungated)
-    if failures:
-        print("\nFAIL: header-graph L2 perf regression:")
-        for f in failures:
-            print(f"  - {f}")
-        return 1
-    if ungated:
-        print(
-            f"\nNOTE: {len(ungated)} (point, metric) pair(s) were NOT gated "
-            "(no baseline entry, or a non-gateable value on one side). Pass "
-            "--require-all-metrics to turn this into a failure:"
-        )
-        for u in ungated:
-            print(f"  - {u}")
-    gated_pairs = sum(len(gateable_metrics(p, baseline, metrics)) for p in points)
-    print(
-        f"\nOK: no header-graph L2 perf regression vs. baseline "
-        f"({gated_pairs} (point, metric) pair(s) checked across "
-        f"{len(matched)} point(s), metrics={list(metrics)})."
-    )
-    return 0
+    return _report_and_gate(points, baseline, thresholds, metrics, args)
 
 
 if __name__ == "__main__":

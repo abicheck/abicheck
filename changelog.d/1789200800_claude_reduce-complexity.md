@@ -9,3 +9,8 @@
   setup-step loop out of `run_scenario`; and the process-group reaping out of
   `run_measured`. Each extracted function states the one decision it owns, which
   is also why their docstrings are where the reasoning now lives.
+
+- `check_header_graph_perf.main` went from D (23) on `main` to D (30) with this
+  branch's three-metric gate, and is now C (18) — better than where it started.
+  The cache-redirection measurement and the report-and-gate tail are separate
+  named functions, which is also where their reasoning now lives.
