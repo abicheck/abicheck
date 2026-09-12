@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import warnings
 from pathlib import Path
 
 import coverage
@@ -54,14 +55,37 @@ _REQUEST_SITES = (
 
 
 def _selected_core(*, branch: bool) -> str:
-    """What coverage.py actually uses, asked of coverage.py."""
+    """What coverage.py actually does with a sysmon request.
+
+    The primary signal is coverage.py's own **documented** `no-sysmon`
+    warning ("Can't use core=sysmon: ... using default core", listed on its
+    messages page) — public, stable behaviour rather than an internal
+    attribute. `Collector.tracer_name()` reached through `Coverage.
+    _collector` names the core exactly, but `_collector` is private and
+    coverage.py says so explicitly ("names starting with underscore are not
+    part of the public API"); `pytest-cov` is unpinned here, so a future
+    resolve could remove it and fail this test for a reason unrelated to
+    the invariant (CodeRabbit review). It is therefore read defensively and
+    used only to sharpen the answer, never as the thing the test depends
+    on.
+
+    Returns the tracer's own name when it can be read, otherwise
+    `"fallback"`/`"sysmon"` derived from the warning alone.
+    """
     previous = os.environ.get("COVERAGE_CORE")
     os.environ["COVERAGE_CORE"] = "sysmon"
     try:
-        cov = coverage.Coverage(branch=branch)
-        cov.start()
-        cov.stop()
-        return str(cov._collector.tracer_name())
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            cov = coverage.Coverage(branch=branch)
+            cov.start()
+            cov.stop()
+        fell_back = any("core=sysmon" in str(w.message) for w in caught)
+        collector = getattr(cov, "_collector", None)
+        namer = getattr(collector, "tracer_name", None)
+        if callable(namer):
+            return str(namer())
+        return "fallback" if fell_back else "sysmon"
     finally:
         if previous is None:
             os.environ.pop("COVERAGE_CORE", None)

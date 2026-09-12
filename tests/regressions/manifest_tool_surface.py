@@ -68,7 +68,13 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1240,),
         seed_tests=("tests/test_snapshot_read_allocation.py",),
-        public_surfaces=("python-api",),
+        # `()` per the field's own rule: the seed test calls
+        # `abicheck.snapshot_io` directly, never through `abicheck.
+        # service`, so it reaches no documented public surface. A claimed
+        # surface a seed test does not reach conceals exactly the missing
+        # cross-surface coverage this registry exists to surface
+        # (CodeRabbit review).
+        public_surfaces=(),
         axes={
             "algorithm": ("none", "gzip", "zstd"),
             "cap_magnitude": ("4MiB", "64MiB", "1GiB", "2GiB"),
@@ -113,7 +119,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1240,),
         seed_tests=("tests/test_workflow_path_filter_closure.py",),
-        public_surfaces=("ci-workflow",),
+        # `()` per the field's own rule: these seed tests read and parse
+        # workflow/config files, they do not invoke the CLI, `abicheck.
+        # service`, or a real workflow run. A claimed surface a seed test
+        # does not reach conceals exactly the missing cross-surface
+        # coverage this registry exists to surface (CodeRabbit review
+        # raised it for the storage entry; the same rule decides all of
+        # them).
+        public_surfaces=(),
         axes={
             "dependency": ("package-metadata", "composite-action", "action-script"),
             "event": ("push", "pull_request"),
@@ -156,7 +169,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1240,),
         seed_tests=("tests/test_coverage_core_effectiveness.py",),
-        public_surfaces=("ci-workflow",),
+        # `()` per the field's own rule: these seed tests read and parse
+        # workflow/config files, they do not invoke the CLI, `abicheck.
+        # service`, or a real workflow run. A claimed surface a seed test
+        # does not reach conceals exactly the missing cross-surface
+        # coverage this registry exists to surface (CodeRabbit review
+        # raised it for the storage entry; the same rule decides all of
+        # them).
+        public_surfaces=(),
         axes={
             "half": ("requested-vs-selected-core", "documented-fallback"),
         },
@@ -194,12 +214,19 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "correct for a pull request and silently inert for a `push` "
             "-- a push carries no PR number, so it fell through to "
             "`run_id`. The complement half of the invariant is load-"
-            "bearing: the literal group `\"x\"` satisfies the first half "
+            'bearing: the literal group `"x"` satisfies the first half '
             "while cancelling every unrelated run in the repository."
         ),
         fixed_by=(1240,),
         seed_tests=("tests/test_workflow_concurrency_grouping.py",),
-        public_surfaces=("ci-workflow",),
+        # `()` per the field's own rule: these seed tests read and parse
+        # workflow/config files, they do not invoke the CLI, `abicheck.
+        # service`, or a real workflow run. A claimed surface a seed test
+        # does not reach conceals exactly the missing cross-surface
+        # coverage this registry exists to surface (CodeRabbit review
+        # raised it for the storage entry; the same rule decides all of
+        # them).
+        public_surfaces=(),
         axes={
             "event": ("pull_request", "push"),
             "unit": ("same", "different"),

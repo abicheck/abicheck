@@ -41,7 +41,6 @@ moment it does — not when someone remembers to extend a list here.
 
 from __future__ import annotations
 
-import fnmatch
 import re
 from pathlib import Path
 
@@ -65,17 +64,52 @@ def _executed_files(text: str) -> set[str]:
     return {m for m in _EXECUTED_FILE.findall(text) if (REPO_ROOT / m).is_file()}
 
 
+def _glob_to_regex(glob: str) -> re.Pattern[str]:
+    """Translate one GitHub path-filter glob to a regex.
+
+    GitHub's `*` matches within a single path segment and `**` crosses `/`.
+    `fnmatch` does not make that distinction -- its `*` matches `/` too --
+    so `scripts/*/check.py` would "cover" `scripts/a/b/check.py`, which
+    GitHub would not schedule. That error points the wrong way for a guard:
+    it reports a genuinely uncovered dependency as covered, which is the
+    finding this module exists to surface (CodeRabbit review, with a
+    concrete counterexample).
+    """
+    out = []
+    i = 0
+    while i < len(glob):
+        if glob.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif glob[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(glob[i]))
+            i += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
 def _covers(globs: list[str], path: str) -> bool:
-    """Whether any filter entry matches *path* under GitHub's path syntax.
-    Deliberately permissive about `**` (treated as "anything"): this test
-    should report a path that is genuinely uncovered, never argue about a
-    glob that plausibly covers it."""
+    """Whether *path* is selected by this ordered filter list.
+
+    Follows GitHub's two documented rules: patterns are evaluated in order,
+    and a `!`-prefixed pattern matching after a positive one excludes the
+    path (a later positive re-includes it). The previous version ignored
+    negation entirely and would have read an exclusion as an inclusion.
+    """
+    selected = False
     for glob in globs:
-        if path == glob or fnmatch.fnmatch(path, glob.replace("**", "*")):
-            return True
-        if glob.endswith("/**") and path.startswith(glob[:-3] + "/"):
-            return True
-    return False
+        negated = glob.startswith("!")
+        pattern = glob[1:] if negated else glob
+        if path == pattern or _glob_to_regex(pattern).match(path):
+            selected = not negated
+        elif pattern.endswith("/**") and path.startswith(pattern[:-3] + "/"):
+            selected = not negated
+    return selected
 
 
 def _required_paths(text: str) -> set[str]:
@@ -132,6 +166,37 @@ def test_path_filter_covers_the_workflow_own_infrastructure(
         f"filter does not name them, so changing one merges without this "
         f"workflow running: {missing}"
     )
+
+
+@pytest.mark.parametrize(
+    "globs,path,expected",
+    [
+        # A single `*` stays inside one segment. `fnmatch` got this wrong
+        # and reported the third case as covered (CodeRabbit review).
+        ((["scripts/*/check.py"], "scripts/a/check.py", True)),
+        ((["scripts/*/check.py"], "scripts/a/b/check.py", False)),
+        ((["scripts/**/check.py"], "scripts/a/b/check.py", True)),
+        ((["abicheck/**"], "abicheck/deep/nested/mod.py", True)),
+        ((["pyproject.toml"], "pyproject.toml", True)),
+        ((["pyproject.toml"], "sub/pyproject.toml", False)),
+        ((["*.py"], "a/b.py", False)),
+        ((["**/*.py"], "a/b.py", True)),
+        # Ordered negation: a `!` after a positive excludes, a later
+        # positive re-includes. Ignored entirely by the old helper.
+        ((["sub/**", "!sub/docs/**"], "sub/src/x.py", True)),
+        ((["sub/**", "!sub/docs/**"], "sub/docs/readme.md", False)),
+        ((["sub/**", "!sub/docs/**", "sub/docs/keep.md"], "sub/docs/keep.md", True)),
+        ((["!sub/docs/**", "sub/**"], "sub/docs/readme.md", True)),
+    ],
+)
+def test_matcher_follows_github_path_filter_semantics(
+    globs: list[str], path: str, expected: bool
+) -> None:
+    """The matcher's own contract, tested directly rather than only through
+    the workflows that happen to exist today — none of which currently uses
+    a `!` pattern or a single-`*` segment wildcard, so the repo-wide scan
+    alone would never exercise either rule."""
+    assert _covers(globs, path) is expected
 
 
 @pytest.mark.parametrize(

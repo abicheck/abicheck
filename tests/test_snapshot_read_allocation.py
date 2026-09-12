@@ -37,13 +37,16 @@ original expression fails the first direction for all of them.
 
 from __future__ import annotations
 
+import os
 import tracemalloc
 from pathlib import Path
 
 import pytest
 
+from abicheck import snapshot_io
 from abicheck.snapshot_io import (
     SnapshotCompression,
+    SnapshotError,
     read_snapshot_bytes,
     write_snapshot_bytes,
 )
@@ -160,14 +163,53 @@ def test_bounded_read_round_trips_every_format_and_size(
 
 
 @pytest.mark.parametrize("compression", _COMPRESSIONS, ids=lambda c: c.value)
-def test_oversized_file_is_still_rejected(
+def test_oversized_file_is_rejected_by_the_size_precheck(
     tmp_path: Path, compression: SnapshotCompression, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The one-byte overshoot the single-shot read provided is preserved:
-    a file past the cap raises rather than being silently truncated."""
+    """A file whose stored size already exceeds the cap is refused."""
     content = _payload(256 * 1024)
     path = _written(tmp_path, content, compression)
     tiny = 1024
     monkeypatch.setenv("_ABICHECK_SNAPSHOT_MAX_STORED_BYTES", str(tiny))
-    with pytest.raises(Exception):
+    with pytest.raises(SnapshotError):
         read_snapshot_bytes(path, max_decoded_bytes=tiny)
+
+
+def test_file_growing_past_its_stat_size_is_rejected_after_the_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one-byte overshoot specifically — the property the chunked read
+    had to preserve, and the only one that proves `_read_bounded` stops one
+    byte *past* the cap rather than exactly at it.
+
+    The test above does not reach it: a real oversized file is refused by
+    the `stored_size > cap` precheck before any content is read, so it
+    would pass against a `_read_bounded` that truncated silently at `cap`
+    (CodeRabbit review — the earlier version asserted a bare `Exception`
+    and claimed to pin this path). Reaching the post-read check needs the
+    case it was written for: a file that grows through the same descriptor
+    after `fstat` reported its size. `fstat` is stubbed to under-report,
+    which is what a concurrent writer sharing the inode produces.
+    """
+    cap = 4096
+    content = _payload(cap + 1)
+    path = _written(tmp_path, content, SnapshotCompression.NONE)
+
+    real_fstat = os.fstat
+
+    def understating_fstat(fd: int) -> os.stat_result:
+        real = real_fstat(fd)
+        return os.stat_result((*real[:6], cap, *real[7:]))
+
+    monkeypatch.setattr(snapshot_io.os, "fstat", understating_fstat)
+    with pytest.raises(SnapshotError, match="safety limit"):
+        read_snapshot_bytes(path, max_decoded_bytes=cap)
+
+
+def test_a_file_exactly_at_the_cap_still_reads(tmp_path: Path) -> None:
+    """The boundary on the other side, so the overshoot check above cannot
+    be satisfied by an off-by-one that rejects a legal file."""
+    cap = 4096
+    content = _payload(cap)
+    path = _written(tmp_path, content, SnapshotCompression.NONE)
+    assert read_snapshot_bytes(path, max_decoded_bytes=cap) == content
