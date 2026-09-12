@@ -476,13 +476,13 @@ class TestCompareModeDirectoryDepthAsymmetry:
     directory/package operand (``_resolve_depth_for_set_inputs`` rejects
     none: the floor is enforced per member by ``enforce_requested_depth``
     and the ceiling by ``policy.depth_projection``), so the Action forwards
-    the rung verbatim rather than dropping it. Only the rungs that need
-    inline evidence the fan-out genuinely cannot collect
-    (``build``/``source``, still rejected by
-    ``_reject_evidence_flags_for_set_inputs`` together with
-    ``--sources``/``--build-info``) fail loud here. The ``headers`` rung's
-    former ``::notice::``-and-drop is gone with the CLI restriction it
-    restated -- see
+    the rung verbatim rather than dropping it -- every rung, ``build`` and
+    ``source`` included, since a member may be a pre-dumped snapshot that
+    already carries the evidence. What fails loud here is the inline
+    evidence *inputs* (``--sources``/``--build-info``/``--compile-db``,
+    rejected by ``_reject_evidence_flags_for_set_inputs``), never a rung.
+    The ``headers`` rung's former ``::notice::``-and-drop is gone with the
+    CLI restriction it restated -- see
     ``tests/test_action_run_sh_release_capability_parity.py`` for the
     class-level invariant."""
 

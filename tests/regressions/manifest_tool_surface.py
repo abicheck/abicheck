@@ -444,7 +444,18 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # sweep in this class's gap note is the thing actually needed.
             "tests/test_action_run_sh_release_capability_parity.py",
         ),
-        public_surfaces=("cli", "github-action"),
+        # "cli" is earned by the two CLI seeds above (real `CliRunner`
+        # invocations). "github-action" is deliberately NOT claimed: the
+        # adapter seed executes `action/run.sh`/`validate-inputs.sh`
+        # directly against a fake `abicheck` on `$PATH`, which reaches
+        # neither `action.yml`'s composite step nor the real CLI -- and
+        # this field's own contract is that a claimed surface a seed does
+        # not reach conceals exactly the missing cross-surface coverage a
+        # contributor is supposed to discover here (CodeRabbit review, PR
+        # #1233). The gap is real and worth closing by a seed that runs
+        # the composite step end to end; overstating the tuple would hide
+        # it instead.
+        public_surfaces=("cli",),
         axes={
             "guard": (
                 "depth-rung-allow-list",

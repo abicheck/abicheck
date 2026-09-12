@@ -2924,7 +2924,7 @@ elif [[ "$MODE" == "compare" ]]; then
     # same defect this whole change removes, one guard further down the
     # file (Codex review, PR #1233).
     if [[ -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to collect inline evidence, or pre-dump each member with `dump --sources/--build-info` so its snapshot already carries it (a directory of such snapshots satisfies --depth build/source with no inline collection at all)."
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to collect inline evidence, or pre-dump each member with 'dump --sources/--build-info' so its snapshot already carries it (a directory of such snapshots satisfies --depth build/source with no inline collection at all)."
       exit 1
     fi
     # Every rung of the public ladder (binary, headers, build, source) is
