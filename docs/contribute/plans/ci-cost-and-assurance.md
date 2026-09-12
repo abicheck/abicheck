@@ -1,6 +1,6 @@
 # CI cost and assurance — closing the audit's remaining items
 
-**Status:** Proposed. Phase 0 landed in PR #1240; Phases 1–6 not started.
+**Status:** Proposed. Phases 0 and 6 landed in PR #1240; Phases 1–5 not started.
 
 Origin: a CI audit that profiled this repository's workflows and found one
 real product performance bug plus a family of *inert configuration* — settings
@@ -138,11 +138,19 @@ against a real artifact. It went away with the `scan` command, and `ci.yml`'s
 own comment already records the absence of a `compare`-side equivalent as a
 tracked capability gap.
 
-**Target.** A small representative component-and-bundle fixture exercised
-through `compare --depth binary` / `--depth headers`, guarding the pipeline
-rather than reviving tests for a retired command. This is the one remaining
-phase that needs no decision from anyone and no unavailable toolchain — it is
-test-authoring work.
+**Landed** (`tests/test_perf_compare_depth_scaling.py`). Both depths are
+exercised through the real CLI against compiled ELF fixtures, guarding the
+pipeline rather than reviving tests for a retired command.
+
+It asserts a *scaling exponent* rather than a wall-clock ceiling, following
+`_perf_scaling.py`, which exists because fixed per-run time bounds on a shared
+runner flaked an unregressed `main`. Measured when written: `--depth binary`
+costs 0.36s at n=500 and 1.50s at n=2000 — 4.15x for 4x the input. A
+non-vacuity precondition fails the test if fixed overhead ever starts
+dominating, since the exponent would then tend to zero and pass while
+measuring nothing; that predicate cannot fire under today's in-process
+harness (~27ms of overhead), so it is exercised directly rather than left as
+an assertion nobody has seen hold.
 
 ## Explicitly not pursued
 
