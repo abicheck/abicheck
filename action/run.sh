@@ -71,6 +71,31 @@ _is_path_already_qualified() {
 # `mktemp` produced it -- the same form every pre-existing, working
 # invocation already relied on -- and only ever touches the genuinely
 # relative case this helper exists to fix.
+# Neutralize a workflow-controlled value before it is printed into a
+# GitHub annotation or job-log line. Annotations and workflow commands are
+# *line-delimited*, so any value carrying CR/LF ends the line it is printed
+# inside and everything after it is parsed as a NEW workflow command --
+# `depth: $'headers\n::add-mask::secret'` really did forge an `::add-mask::`
+# of its own through the "Command:" line below (reproduced, then fixed;
+# Codex review, PR #1233).
+#
+# The same helper, contract and escaping order as
+# `validate-inputs.sh`'s own `_sanitize_annotation` -- `%` first, then
+# CR/LF, matching `actions/toolkit`'s `escapeData`, because the runner
+# percent-decodes a workflow command's message data and a value carrying
+# the literal five characters `%0A::error::` would otherwise become a real
+# line break after this script is done with it. `printf`, never `echo`: an
+# `echo` under `xpg_echo` expands backslash escapes, turning a literal
+# `\n::error::` into a real newline after the CR/LF collapse has already
+# run.
+#
+# This sanitizes what is *displayed*. `CMD` itself keeps the exact bytes
+# the CLI must receive: argv is not line-delimited, so a newline inside one
+# argument is data there, not a command.
+_sanitize_annotation() {
+  printf '%s' "${1//%/%25}" | tr '\r\n' '  '
+}
+
 _mktemp_canonical() {
   if ! _is_path_already_qualified "$1"; then
     printf '%s\n' "$PWD/$1"
@@ -331,6 +356,52 @@ add_single_flag() {
   if [[ -n "$value" ]]; then
     CMD+=("$flag" "$value")
   fi
+}
+
+# The public evidence ladder, exactly as the CLI's own `DepthParam` accepts
+# it. `depth` is a raw, unvalidated workflow input and one of the few that
+# reach `CMD` as a *value* rather than a path, so it is validated here
+# rather than forwarded and left to the CLI: an unknown value is a usage
+# error there anyway (exit 64, after Python and dependency setup), and
+# anything off this list has no business being echoed into the job log.
+# `depth: $'headers\n::add-mask::secret'` really did forge a workflow
+# command of its own through the "Command:" line (reproduced, then fixed;
+# Codex review, PR #1233): `_sanitize_annotation` closes that for every
+# displayed value, and this closes it at the source for the one input the
+# newly-widened release path made reachable.
+#
+# Sets `_DEPTH_LC` to the lowercased rung -- the CLI's own `DepthParam` is
+# case-insensitive, so `depth: BUILD` is valid and must keep working -- or
+# fails loud. Used by every mode that forwards `--depth`, so the rung means
+# the same thing on all of them.
+#
+# Assigns a global rather than echoing its result, and callers must NOT
+# wrap it in `$(...)`: a command substitution runs the function in a
+# subshell, where `exit 1` ends only that subshell -- the script would sail
+# on with the *error message* captured as the depth value and forward
+# `--depth ::error::mode:...` to the CLI. (Caught by probing the forwarded
+# value while fixing the injection below, which is the only reason it
+# isn't still here: the annotation-forgery assertion alone passes either
+# way.)
+_DEPTH_LC=""
+_resolve_depth_lc() {
+  local raw="${1:-}"
+  _DEPTH_LC=""
+  if [[ -z "$raw" ]]; then
+    return 0
+  fi
+  # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
+  local lowered
+  lowered=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+  case "$lowered" in
+    binary | headers | build | source)
+      _DEPTH_LC="$lowered"
+      ;;
+    *)
+      printf '%s\n' "::error::mode: ${MODE} does not accept depth: $(_sanitize_annotation "$raw") -- it must be one of binary, headers, build, or source."
+      exit 1
+      ;;
+  esac
 }
 
 # Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1): --ast-frontend/
@@ -1244,7 +1315,28 @@ add_compile_context_flags() {
   # *default*, not a user override, so it must not by itself count as "lang
   # was explicitly requested" (CodeRabbit review, PR #1146, finding #6): a
   # non-empty INPUT_LANG only counts when it differs from that default.
-  if [[ -z "${INPUT_AST_FRONTEND:-}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
+  # `auto` is the documented no-op spelling of ast-frontend -- it resolves
+  # to exactly what leaving the input unset resolves to -- so it is
+  # excluded here for the same reason the `c++` lang default is: a run that
+  # configures nothing must synthesize nothing. Without this, `ast-frontend:
+  # auto` alone produced an empty `{"compile": {}}` overlay and put a
+  # `--config` on the command line that was not there before, routing a
+  # discovered project `.abicheck.yml` through this function's own
+  # merge-and-strip path instead of letting the CLI discover it directly.
+  # Harmless-looking and not: `discover` mode strips `compile.compiler`
+  # (see `_merge_config_overlay_with_discovered_project_config`'s trust
+  # distinction), so a project that set one could silently lose it. The
+  # release path made this reachable where it previously was not, but the
+  # fix belongs here rather than at that call site -- the single-pair path
+  # has the same behavior and `auto` means the same thing on both (Codex
+  # review, PR #1233; its own stated mechanism, a `compile.lang: c++` in
+  # the overlay, is not what this produced -- the empty overlay and the
+  # `--config` it carries are).
+  local _ast_frontend_requested="${INPUT_AST_FRONTEND:-}"
+  if [[ "$_ast_frontend_requested" == "auto" ]]; then
+    _ast_frontend_requested=""
+  fi
+  if [[ -z "${_ast_frontend_requested}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
         && "${INPUT_NOSTDINC:-false}" != "true" \
         && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
@@ -1443,11 +1535,14 @@ PYEOF
 # reads via --config, the same "--config is NOT one of the flags the
 # release fan-out rejects" precedent add_compile_context_flags already
 # established for the compile: block above. Called from the
-# release-style-operand branch in `mode: compare`, AFTER that branch's own
-# unconditional `add_single_flag "--config" "$INPUT_BUILD_CONFIG"` has
-# already run -- so when build-config is given, CMD already carries a raw,
-# un-merged "--config $INPUT_BUILD_CONFIG" pair by the time this function
-# runs. Rather than rejecting that combination outright (an earlier
+# release-style-operand branch in `mode: compare`, AFTER both
+# `add_compile_context_flags` and that branch's own `add_single_flag
+# "--config" "$INPUT_BUILD_CONFIG"` have already run -- so by the time this
+# function runs CMD may already carry either a raw, un-merged "--config
+# $INPUT_BUILD_CONFIG" pair or this Action's own compile-context overlay
+# (the latter reachable on this shape since the compile-context inputs
+# stopped being rejected for a directory/package operand). Rather than
+# rejecting either combination outright (an earlier
 # revision did, as "mutually exclusive" -- a real regression, since a
 # workflow could legitimately combine both before Phase 7d demoted these
 # flags to config, Codex review, PR #1159, second round), this function
@@ -1485,14 +1580,52 @@ add_release_topology_config_flags() {
       break
     fi
   done
+  # The base document this function's own release:/gate: overlay is merged
+  # into. Two legitimate predecessors can already sit on the command line
+  # by the time this runs, and each is folded onto rather than rejected:
+  #
+  #   * the raw "--config $INPUT_BUILD_CONFIG" pair the release-style
+  #     branch's own `add_single_flag` added, or
+  #   * `add_compile_context_flags`'s synthesized overlay -- reachable for a
+  #     directory/package operand ever since the compile-context inputs
+  #     stopped being rejected for that shape (they are threaded through the
+  #     release fan-out; see that branch's own comment). That overlay has
+  #     *already* folded in whichever base applied (an explicit
+  #     build-config, or the auto-discovered project .abicheck.yml), so it
+  #     is merged into as "explicit"/fully trusted and the base is not
+  #     re-discovered -- doing so would drop this Action's own compile:
+  #     block back out of the final document.
+  #
+  # Any OTHER "--config" already in CMD is a real caller bug, not a user
+  # input to accommodate -- that case still fails loud rather than silently
+  # producing a two---config command line.
+  local _release_base="" _release_base_mode="discover"
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    _release_base="${INPUT_BUILD_CONFIG}"
+    _release_base_mode="explicit"
+  else
+    _release_base="$PWD"
+  fi
   if [[ $_config_idx -ge 0 ]]; then
-    if [[ -z "${INPUT_BUILD_CONFIG:-}" || "${CMD[$((_config_idx + 1))]:-}" != "${INPUT_BUILD_CONFIG}" ]]; then
-      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line for a reason other than build-config -- this is a bug in run.sh, not a user input problem."
+    local _existing_config="${CMD[$((_config_idx + 1))]:-}"
+    # `${...:-}`, not a bare expansion: this function is extracted and run
+    # standalone (without the script's own global initialization) by
+    # `tests/test_action_release_topology_config.py`'s harness, under `set
+    # -u` (Codex-review precedent: every other extracted-region reference
+    # in this file is written the same defensive way).
+    if [[ -n "${_COMPILE_CONTEXT_CONFIG_OVERLAY:-}" \
+          && "$_existing_config" == "${_COMPILE_CONTEXT_CONFIG_OVERLAY:-}" ]]; then
+      _release_base="$_COMPILE_CONTEXT_CONFIG_OVERLAY"
+      _release_base_mode="explicit"
+    elif [[ -n "${INPUT_BUILD_CONFIG:-}" && "$_existing_config" == "${INPUT_BUILD_CONFIG}" ]]; then
+      :
+    else
+      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line for a reason other than build-config or this Action's own compile-context overlay -- this is a bug in run.sh, not a user input problem."
       exit 1
     fi
-    # Remove the raw "--config $INPUT_BUILD_CONFIG" pair the release-style
-    # branch's own unconditional add_single_flag already added -- it is
-    # replaced below by the merged overlay.
+    # Remove the predecessor pair -- it is replaced below by the merged
+    # overlay (which folds its content in, so nothing the caller asked for
+    # is dropped).
     unset "CMD[$_config_idx]" "CMD[$((_config_idx + 1))]"
     CMD=("${CMD[@]}")
   fi
@@ -1566,12 +1699,12 @@ PYEOF
     _rm_overlay_on_early_exit "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY"
     exit 1
   fi
-  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+  if [[ "$_release_base_mode" == "explicit" ]]; then
     _merge_config_overlay_with_discovered_project_config \
-      "$_release_overlay_json" "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY" "${INPUT_BUILD_CONFIG}" "explicit"
+      "$_release_overlay_json" "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY" "$_release_base" "explicit"
   else
     _merge_config_overlay_with_discovered_project_config \
-      "$_release_overlay_json" "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY" "$PWD"
+      "$_release_overlay_json" "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY" "$_release_base"
   fi
   CMD+=(--config "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY")
 }
@@ -2665,7 +2798,8 @@ if [[ "$MODE" == "dump" ]]; then
   # check above, which exits before this command-assembly code ever runs
   # with a non-empty value) -- `.abicheck.yml`'s `build.targets` is the
   # only route left.
-  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  _resolve_depth_lc "${INPUT_DEPTH:-}"
+  add_single_flag "--depth" "$_DEPTH_LC"
   # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
   # deprecated no-op removed outright in CLI cleanup H1 -- the input stays
   # registered in action.yml for back-compat, but nothing is forwarded to
@@ -2779,43 +2913,31 @@ elif [[ "$MODE" == "compare" ]]; then
     add_sided_scalar_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
     add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   fi
-  # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc/lang)
-  # have no CLI channel at all for a directory/package operand (Phase 7
-  # removed --ast-frontend etc. from `compare` entirely, and the per-library
-  # release fan-out never threaded a CompileContext to each pair's header
-  # dump even when those were still flags). Gate them to the single-pair
-  # path, same as the release-only flags below are gated the other way.
-  # Fail loud (::error:: + exit 1) rather than warn and continue, matching
-  # the evidence-flags guard just below (Codex review): a warning alone
-  # lets the comparison run to a green verdict with headers parsed under
-  # the wrong macros/sysroot/frontend, which is exactly the silent-wrong-
-  # result failure mode the evidence-flags guard was already fixed to
-  # avoid for the analogous --depth build/source case — an explicitly-
-  # configured compile-context input deserves the same treatment as an
-  # explicitly-configured evidence input.
-  if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-     || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    # "auto" is the documented no-op spelling of ast-frontend (resolves to
-    # the same default castxml selection as leaving the input unset, per
-    # its description above) -- a workflow that spells it out explicitly
-    # requests nothing the release fan-out could actually drop, so it must
-    # not trip this guard (Codex review, second round).
-    # Same "c++" is the default, not an override" carve-out as
-    # add_compile_context_flags above (CodeRabbit review, PR #1146, finding
-    # #6): action.yml's INPUT_LANG default means a plain non-empty check
-    # here rejected every directory/package compare, even one that
-    # configured nothing at all.
-    if [[ (-n "${INPUT_LANG:-}" && "${INPUT_LANG:-}" != "c++") \
-          || (-n "${INPUT_AST_FRONTEND:-}" && "${INPUT_AST_FRONTEND:-}" != "auto") \
-          || -n "${INPUT_GCC_PATH:-}" || -n "${INPUT_GCC_PREFIX:-}" \
-          || -n "${INPUT_GCC_OPTIONS:-}" || -n "${INPUT_SYSROOT:-}" \
-          || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
-      exit 1
-    fi
-  else
-    add_compile_context_flags true
-  fi
+  # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/nostdinc)
+  # reach the CLI as a synthesized `--config` `compile:` overlay (Phase 7
+  # removed the individual --ast-frontend/--compiler/... flags from
+  # `compare` entirely), and the per-library release fan-out *does* thread
+  # that both-sides compile context to every pair's header dump --
+  # `cli_resolve.resolve_directory_compile_context` runs the identical
+  # `resolve_compile_context` call the single-pair path uses, folding the
+  # project `.abicheck.yml` `compile:` block the same way. So a
+  # directory/package operand takes the same treatment as a single pair
+  # here; the guard that used to reject these inputs for that shape was an
+  # un-updated restatement of a CLI restriction that had already been
+  # lifted, which made a release comparison through this Action strictly
+  # less capable than the same comparison run through the CLI directly.
+  #
+  # The one compile-context input the CLI still refuses for this shape is a
+  # *sided* `--ast-frontend old=/new=` override
+  # (`cli_resolve._reject_compile_context_for_set_inputs`): "parse the old
+  # library's headers with a different frontend than the new one" has no
+  # per-library-pair-within-a-release meaning. This Action exposes no sided
+  # spelling of any of these inputs at all -- `ast-frontend` is a single
+  # scalar folded into one both-sides `compile:` block -- so there is
+  # nothing here that could be silently dropped by that rejection; a sided
+  # override typed into `extra-args` reaches the CLI verbatim and fails
+  # there, loudly, as its own UsageError.
+  add_compile_context_flags true
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.
   # The old side's evidence, if any, already lives in whatever
@@ -2845,10 +2967,16 @@ elif [[ "$MODE" == "compare" ]]; then
   # rejected flags and silently dropped a bundle caller's build-config
   # (Codex review, second round). Skipped only when add_compile_context_flags
   # above already merged build-config into a synthesized compile: overlay and
-  # added --config itself (single-pair operand, explicit-build-config-plus-
-  # compile-context case) -- a directory/package operand never reaches that
-  # merge (compile-context inputs are hard-rejected for that shape instead),
-  # so this stays unconditional there, exactly as before.
+  # added --config itself (the explicit-build-config-plus-compile-context
+  # case) -- which, now that the compile-context inputs are forwarded for a
+  # directory/package operand too, is reachable on *both* operand shapes,
+  # not just the single-pair one. `_cmd_has_config_flag` is what keeps that
+  # from double-adding --config, and the caller's build-config is not lost
+  # to the skip: the overlay add_compile_context_flags wrote is a merge of
+  # this Action's compile: block into a COPY of that very file (Action
+  # input wins on a key conflict). The release-topology overlay below folds
+  # onto whichever of the two this leaves on the command line -- see
+  # add_release_topology_config_flags.
   if ! _cmd_has_config_flag; then
     add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   fi
@@ -2858,49 +2986,59 @@ elif [[ "$MODE" == "compare" ]]; then
   # extension and cohort declarations are sourced only from
   # build-config's own .abicheck.yml `bundle:` block now, which --config
   # above already forwards unconditionally.
+  # Validated and lowercased once, for both operand shapes: the rung a
+  # workflow pins means the same thing either side of this branch, and an
+  # unknown value must reach neither `CMD` nor the job log on either. Not
+  # `local` -- this runs in the top-level script body, not a function.
+  _resolve_depth_lc "${INPUT_DEPTH:-}"
+  _depth_lc="$_DEPTH_LC"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    # Case-insensitive, matching the CLI's own DepthParam.convert() (Codex
-    # review): INPUT_DEPTH is a raw, unvalidated Action input string, so a
-    # workflow spelling `depth: BUILD`/`BINARY`/etc. previously matched none
-    # of the case-sensitive comparisons below -- silently skipping the
-    # fail-loud guard for build/source (defeating its entire purpose) and
-    # silently dropping `binary` with no forwarding and no ::notice:: either.
-    # Portable lowercasing: ${var,,} is bash-4+ only (see add_flag above).
-    # Not `local` -- this runs in the top-level script body, not a function.
-    _depth_lc=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
-    # A caller that explicitly asked for build/source-depth evidence (via
-    # --depth build/source, or by supplying --sources/--build-info/
-    # --compile-db directly) against a directory/package operand would
-    # otherwise have that request silently dropped: the flags above are
-    # skipped rather than forwarded, so the comparison would quietly run
-    # without the requested evidence and could miss a source-only break
-    # while still reporting a clean/normal result -- fail loud instead
-    # (Codex review).
-    if [[ "$_depth_lc" == "build" || "$_depth_lc" == "source" \
-       || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
+    # Inline build/source evidence is the one thing genuinely unservable
+    # here: `cli_resolve._reject_evidence_flags_for_set_inputs` rejects
+    # --sources/--build-info/--dump-manifest for a set input, because the
+    # per-library fan-out collects none of it, so forwarding them would be
+    # a hard usage error and dropping them would run the comparison without
+    # the requested evidence -- missing a source-only break while still
+    # reporting a clean result. Fail loud instead (Codex review).
+    #
+    # `--depth` is deliberately NOT part of this guard, on any rung. It
+    # left `cli_resolve.py`'s set-input evidence-flag table when the
+    # fan-out moved onto `service.run_compare` (naming that constant in
+    # full here would trip `test_every_run_sh_input_var_is_set_by_action_
+    # yml`, which scans this file for `INPUT_*` reads and cannot tell a
+    # prose mention from a real variable): a member may itself be a pre-dumped snapshot
+    # carrying embedded L3/L4/L5 evidence (`dump --sources`/`--build-info`),
+    # which satisfies `build`/`source` with no inline collection at all, so
+    # rejecting those rungs here denied a genuinely reachable configuration
+    # -- and reachability is a property of the members, not of the operand's
+    # cardinality. A member that cannot reach the pinned rung says so as
+    # that member's own error (ADR-064's exit-7 axis), rather than being
+    # pre-judged for its neighbours. Keeping a rung rejection here was the
+    # same defect this whole change removes, one guard further down the
+    # file (Codex review, PR #1233).
+    if [[ -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to collect inline evidence, or pre-dump each member with 'dump --sources/--build-info' so its snapshot already carries it (a directory of such snapshots satisfies --depth build/source with no inline collection at all)."
       exit 1
     fi
-    # --depth binary requests *less* evidence than the fan-out already
-    # collects by default, and the CLI now accepts and honours it per
-    # library on this path (D1) -- forward it, same as the single-pair
-    # branch below. --depth headers is still rejected by the CLI here (the
-    # per-library fan-out has no per-library evidence-floor enforcement
-    # yet), so it is dropped rather than forwarded -- but with a visible
-    # ::notice:: instead of the previous silent drop (D2: that silent drop
-    # was asymmetric with the compile-context guard above, which fails loud
-    # for everything it can't honour rather than swallowing part of the
-    # request unannounced).
-    if [[ "$_depth_lc" == "binary" ]]; then
-      add_single_flag "--depth" "$_depth_lc"
-    elif [[ "$_depth_lc" == "headers" ]]; then
-      echo "::notice::mode: compare with a directory/package operand (a release/bundle comparison) does not honour --depth headers yet -- the per-library fan-out has no per-library evidence-floor enforcement, so the request is dropped rather than forwarded (the comparison still runs, using whatever headers -H/--include-dir/.abicheck.yml already resolve for each library). Compare the libraries individually (mode: compare with single-file operands) to require header-level evidence."
-    fi
+    # Every rung of the public ladder (binary, headers, build, source) is
+    # forwarded verbatim, exactly as the single-pair branch below forwards
+    # it: `cli_compare_options._resolve_depth_for_set_inputs` rejects no
+    # rung -- it returns the requested rung for the fan-out to forward, with
+    # the shortfall answered per member downstream
+    # (`policy/depth_evidence_contract.py`, ADR-064's exit-7 axis) and the
+    # ceiling applied by `policy.depth_projection.project_pair_to_depth`.
+    # That axis is narrower than an earlier revision of this comment
+    # claimed (Codex review): it fires only for a pinned `build`/`source`
+    # rung, and only for a *live* side this run extracts. A member that is
+    # already a serialized snapshot was never extracted by this run, so
+    # there is no shortfall to report for it -- the same pre-dumped-member
+    # case that makes those rungs reachable here at all.
+    add_single_flag "--depth" "$_depth_lc"
   else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
     add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-    add_single_flag "--depth" "${INPUT_DEPTH:-}"
+    add_single_flag "--depth" "$_depth_lc"
     # --since/--changed-path (ADR-068 Phase 2c) were previously silently
     # dropped in compare mode -- only the scan branch forwarded them,
     # despite this page's own docs already claiming `mode: compare` "takes
@@ -3199,7 +3337,7 @@ fi
 _EFFECTIVE_FORMAT="$(_effective_format)"
 
 echo "::group::abicheck $MODE"
-echo "Command: ${CMD[*]}"
+printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
 echo ""
 
 ABICHECK_EXIT=0
@@ -4821,7 +4959,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       if [[ -n "${INPUT_SOURCES:-}" ]]; then
         echo "| Sources | \`${INPUT_SOURCES}\` |"
       fi
-      echo "| Depth | ${INPUT_DEPTH:-headers} |"
+      printf '%s\n' "| Depth | $(_sanitize_annotation "${INPUT_DEPTH:-headers}") |"
     elif [[ "$MODE" == "compare" ]]; then
       echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
       echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"

@@ -419,18 +419,64 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "comment or plan document is unfalsifiable, so every such claim "
             "needs an executed test whose oracle is the other surface, not a "
             "pinned constant and not the same table the implementation "
-            "consults."
+            "consults. The front end need not be the CLI: an adapter over "
+            "the CLI (the composite Action's `run.sh`/`validate-inputs.sh`) "
+            "restating a CLI restriction is the same defect one layer out, "
+            "and decays the same way -- silently, because its own tests pin "
+            "its prose rather than measuring what it adapts."
         ),
-        fixed_by=(1195,),
+        fixed_by=(1195, 1233),
         seed_tests=(
             "tests/test_cli_compare_release_depth.py",
             "tests/test_cli_compare_release_header_graph.py",
+            # PR #1233: the *adapter* half. `action/run.sh` and
+            # `action/validate-inputs.sh` are front ends over the `abicheck`
+            # CLI, and both carried a guard restating a CLI restriction that
+            # had already been lifted -- the compile-context rejection and
+            # the `--depth headers` drop for a directory/package operand.
+            # Same invariant, one layer out, and the same oracle discipline:
+            # the other operand shape, never the adapter's own table. Note
+            # the class reproducing itself inside its own fix: the first
+            # revision of that module kept `--depth build`/`source`
+            # rejected for a release operand -- a stale CLI claim of
+            # exactly the kind being removed -- and only review caught it,
+            # which is the strongest evidence yet that the mechanical
+            # sweep in this class's gap note is the thing actually needed.
+            "tests/test_action_run_sh_release_capability_parity.py",
         ),
+        # "cli" is earned by the two CLI seeds above (real `CliRunner`
+        # invocations). "github-action" is deliberately NOT claimed: the
+        # adapter seed executes `action/run.sh`/`validate-inputs.sh`
+        # directly against a fake `abicheck` on `$PATH`, which reaches
+        # neither `action.yml`'s composite step nor the real CLI -- and
+        # this field's own contract is that a claimed surface a seed does
+        # not reach conceals exactly the missing cross-surface coverage a
+        # contributor is supposed to discover here (CodeRabbit review, PR
+        # #1233). The gap is real and worth closing by a seed that runs
+        # the composite step end to end; overstating the tuple would hide
+        # it instead.
         public_surfaces=("cli",),
         axes={
-            "guard": ("depth-rung-allow-list", "header-graph-attach-claim"),
+            "guard": (
+                "depth-rung-allow-list",
+                "header-graph-attach-claim",
+                "action-compile-context-rejection",
+                "action-depth-headers-drop",
+                "action-depth-build-source-rejection",
+            ),
             "depth_rung": ("binary", "headers", "build", "source"),
             "member_evidence": ("binary", "headers", "build"),
+            "adapter_surface": ("action/run.sh", "action/validate-inputs.sh"),
+            "compile_context_input": (
+                "lang",
+                "ast-frontend",
+                "gcc-path",
+                "gcc-prefix",
+                "gcc-options",
+                "sysroot",
+                "nostdinc",
+            ),
+            "operand_shape": ("dir-new", "dir-old", "rpm-new", "whl-new"),
         },
         known_gaps=(
             KnownGap(
@@ -448,7 +494,16 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "pipeline does *today*, one at a time -- the two closed "
                     "here were both stale, so the base rate is not "
                     "reassuring, but a mechanical gate cannot tell a stale "
-                    "claim from a live one."
+                    "claim from a live one. PR #1233 is the same finding at "
+                    "the adapter layer -- two more stale guards, in "
+                    "`action/run.sh`, each pinned by a test asserting the "
+                    "adapter's own message -- which moves that base rate "
+                    "further the wrong way. A systematic executable check "
+                    "for the adapter half (every capability claim in "
+                    "`action/**` measured against the CLI it adapts) is "
+                    "deliberately not built there: the new seed test is "
+                    "shaped so such a check can absorb it, with the "
+                    "CLI-side residue stated as data rather than prose."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
