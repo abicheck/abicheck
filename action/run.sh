@@ -2237,6 +2237,30 @@ _effective_format() {
   printf '%s' "$_found"
 }
 
+# The attached `-o` value in an opaque bare token, or failure when it holds none.
+#
+# The forms Click accepts and this recognizes: `-oPATH`, and a cluster of
+# leading boolean `-v`s before it (`-voPATH`, `-vvoPATH`). Leading `v`s are
+# stripped one at a time rather than matched with `-v*o?*`, because that glob
+# also accepts `-vHofoo` -- which Click reads as `-v -Hofoo`, a *header* value
+# whose text merely happens to contain `o`. `-v` is the only boolean short
+# option across every command this Action invokes, which is the same fact
+# `_extra_args_expand_short_clusters` relies on.
+#
+# Fails (prints nothing, returns 1) for a bare `-o` or `-vo`, whose value is the
+# *next* token: the cluster expander already turns those into a pending option
+# that `_extra_args_options` pairs with its value, so they never arrive here.
+_attached_output_value() {
+  local _token="${1:-}" _rest
+  _rest="${_token#-}"
+  [[ "$_rest" != "$_token" ]] || return 1
+  while [[ "$_rest" == v* ]]; do
+    _rest="${_rest#v}"
+  done
+  [[ "$_rest" == o?* ]] || return 1
+  printf '%s' "${_rest#o}"
+}
+
 # The real `--output` path `abicheck` writes to, accounting for `extra-args`
 # overriding this script's own `-o "$OUTPUT_FILE"` flag -- the exact sibling of
 # `_effective_format` above, and for the same reason: `CMD` carries this
@@ -2259,16 +2283,26 @@ _effective_output_file() {
   while IFS=$'\t' read -r _name _value; do
     case "$_name" in
       --output | -o) _found="$_value" ;;
-      # Click's *attached* short form, `-oPATH`. `_extra_args_options` leaves it
-      # an opaque bare token on purpose -- that form consumes no following
-      # token, so for every other consumer "unexpanded" is already the right
-      # answer -- but here the attached value IS the answer, and dropping it
-      # sent a file-writing run down the stdout path (Codex review, P2;
-      # confirmed against the installed Click parser, which resolves
-      # `-oreport.json` to `--output`). Matched with a literal `-o` prefix and a
-      # non-empty remainder, so a bare `-o` (whose value is the next token, and
-      # which the case above already handled) cannot fall in here.
-      -o?*) _found="${_name#-o}" ;;
+      # Click's *attached* short forms, bare (`-oPATH`) or clustered
+      # (`-voPATH`, `-vvoPATH`). `_extra_args_options` leaves these opaque bare
+      # tokens on purpose -- an attached value consumes no following token, so
+      # for every other consumer "unexpanded" is already the right answer -- but
+      # here the attached value IS the answer, and dropping it sent a
+      # file-writing run down the stdout path (Codex review, P2 twice: first the
+      # bare form, then the clustered one, both confirmed directly against the
+      # installed Click parser).
+      #
+      # Delegated to `_attached_output_value` rather than matched with a glob:
+      # `-v*o?*` would also swallow `-vHofoo`, which Click reads as `-v -Hofoo`
+      # -- a header value, not an output path. Recognizing the form needs the
+      # same knowledge of which short options exist that
+      # `_extra_args_expand_short_clusters` already encodes, so it gets a named
+      # function instead of a third ad-hoc pattern.
+      -*)
+        if _value="$(_attached_output_value "$_name")"; then
+          _found="$_value"
+        fi
+        ;;
     esac
   done <<<"$(_extra_args_options)"
   printf '%s' "$_found"
@@ -4545,7 +4579,7 @@ _resolve_clean_exit_verdict() {
       _reject_unusable_report "$_dest_validity" "$_dest" || return
       if _assurance_axis_contradictory_at "$_dest"; then
         VERDICT="REPORT_UNREADABLE"
-        echo "::error::abicheck exited 0, but the JSON report requested at $(_sanitize_annotation "$_dest") claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        echo "::error::abicheck exited 0, but the JSON report requested at $(_sanitize_annotation "$_dest") reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
         return
       fi
     done <<<"$(_caller_json_destinations)"
@@ -4579,7 +4613,7 @@ _resolve_clean_exit_verdict() {
       _reject_unusable_report "$_validity" "format: json on stdout" || return
       if _assurance_axis_contradictory_at "$_STDOUT_JSON_FILE"; then
         VERDICT="REPORT_UNREADABLE"
-        echo "::error::abicheck exited 0, but the JSON report it printed on stdout claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        echo "::error::abicheck exited 0, but the JSON report it printed on stdout reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
         return
       fi
     fi
@@ -4597,7 +4631,7 @@ _resolve_clean_exit_verdict() {
   # correct direction for a gate.
   if _assurance_axis_contradictory; then
     VERDICT="REPORT_UNREADABLE"
-    echo "::error::abicheck exited 0, but its JSON report claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+    echo "::error::abicheck exited 0, but its JSON report reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
     return
   fi
   # A report that reports an *operational* outcome rather than a compatibility

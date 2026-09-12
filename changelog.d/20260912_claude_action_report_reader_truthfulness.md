@@ -35,6 +35,9 @@
   emitted an empty value or, worse, a stale pre-existing file at the superseded
   path — which `action.yml`'s SARIF-upload step gates on and consuming workflows
   read. It now resolves the effective path and requires the file to be fresh.
+- **Every Click spelling of `--output` is recognized**, including the clustered
+  attached forms (`-voPATH`, `-vvoPATH`) that the short-option expander leaves
+  opaque by design.
 - **Click's attached `-oPATH` form is recognized as the report destination**, so
   a run writing to a file is no longer judged as the stdout shape (or judged at
   the superseded input path).

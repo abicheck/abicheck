@@ -986,3 +986,142 @@ class TestReportPathPublishesTheEffectiveDestination:
         bindir = self._stub(tmp_path, dest)
         outputs = _run_action(tmp_path, self._env(tmp_path, "", dest), bindir)
         assert outputs.get("report-path") == str(dest), outputs
+
+
+#: Every spelling Click accepts for `--output`, each verified directly against
+#: the installed parser before being relied on here. The clustered attached
+#: forms are the ones that were missed: `_extra_args_expand_short_clusters`
+#: deliberately leaves a cluster ending in an attached value unexpanded, so the
+#: token arrives opaque and a naive `-o` prefix test does not see it.
+OUTPUT_SPELLINGS = (
+    "--output {dest}",
+    "--output={dest}",
+    "-o {dest}",
+    "-o{dest}",
+    "-vo{dest}",
+    "-vvo{dest}",
+    "-vo {dest}",
+)
+
+
+class TestEveryOutputSpellingNamesTheDestination:
+    """One spelling missed is a working run reported as `REPORT_UNREADABLE`.
+
+    The bare attached form (`-oPATH`) was the first finding here and the
+    clustered attached form (`-voPATH`) the second, which is why this is stated
+    over the whole spelling set rather than per reported input. Each entry was
+    confirmed against the installed Click parser, not assumed from the help text.
+
+    `_attached_output_value` is what recognizes them, and it strips leading `v`s
+    one at a time rather than globbing `-v*o?*` — that glob also accepts
+    `-vHofoo`, which Click reads as `-v -Hofoo`: a *header* value whose text
+    merely contains an `o`. `test_a_header_value_containing_o_is_not_an_output`
+    is the guard.
+    """
+
+    def _stub(self, tmp_path: Path, dest: Path) -> Path:
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        blob = tmp_path / "payload.json"
+        blob.write_text(
+            json.dumps({"report_schema_version": "4.4", "verdict": "BREAKING"}),
+            encoding="utf-8",
+        )
+        stub = bindir / "abicheck"
+        stub.write_text(
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+        )
+        stub.chmod(0o755)
+        return bindir
+
+    def _env(self, tmp_path: Path, extra: str) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_EXTRA_ARGS": extra,
+        }
+
+    @pytest.mark.parametrize("spelling", OUTPUT_SPELLINGS)
+    def test_the_report_is_found_and_read(self, tmp_path: Path, spelling: str) -> None:
+        dest = tmp_path / "out.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, spelling.format(dest=dest)), bindir
+        )
+        assert outputs.get("verdict") == "BREAKING", (spelling, outputs)
+
+    @pytest.mark.parametrize("spelling", OUTPUT_SPELLINGS)
+    def test_the_effective_path_is_published(
+        self, tmp_path: Path, spelling: str
+    ) -> None:
+        dest = tmp_path / "out.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, spelling.format(dest=dest)), bindir
+        )
+        assert outputs.get("report-path") == str(dest), (spelling, outputs)
+
+    @pytest.mark.parametrize("spelling", OUTPUT_SPELLINGS)
+    def test_a_missing_destination_is_still_caught(
+        self, tmp_path: Path, spelling: str
+    ) -> None:
+        # Recognizing a spelling must not stop requiring what it names.
+        dest = tmp_path / "out.json"
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "abicheck"
+        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, spelling.format(dest=dest)), bindir
+        )
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", (spelling, outputs)
+
+    def test_a_header_value_containing_o_is_not_an_output(self, tmp_path: Path) -> None:
+        # `-vHofoo` is `-v -Hofoo` to Click: a header value, not a destination.
+        # A "strip everything before the first o" rule would take `foo` as the
+        # output path.
+        #
+        # The trap comes *after* the real `-o`, deliberately. Written the other
+        # way round this test is vacuous: the resolver is last-wins, so a real
+        # `-o` following the trap overwrites the bad value and the assertion
+        # passes either way. Mutation-testing this very assertion is what caught
+        # that -- the loose rule survived the first version of it.
+        dest = tmp_path / "real.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, f"-o{dest} -vHofoo"), bindir
+        )
+        assert outputs.get("verdict") == "BREAKING", outputs
+        assert outputs.get("report-path") == str(dest), outputs
+        # Side-effect absence, not only the published value: a misread would
+        # make `foo` the effective destination, and the freshness check would
+        # then fingerprint -- and on a rewrite trust -- a path the caller never
+        # named. Asserting the published value alone cannot see that, which is
+        # the #705 -> #758 lesson applied to this boundary.
+        assert not (tmp_path / "foo").exists(), "misread as an output path"
+        assert not list(tmp_path.glob("**/ofoo")), "misread as an output path"
+
+    def test_a_header_value_containing_o_with_no_real_output(
+        self, tmp_path: Path
+    ) -> None:
+        # The same trap with no `-o` to shadow it, so a misread cannot be masked
+        # by ordering at all: the run genuinely writes `output-file`, and if the
+        # header value were read as a destination the effective path would move
+        # to `foo` and the run would report REPORT_UNREADABLE.
+        dest = tmp_path / "declared.json"
+        bindir = self._stub(tmp_path, dest)
+        env = self._env(tmp_path, "-vHofoo")
+        env["INPUT_OUTPUT_FILE"] = str(dest)
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs.get("verdict") == "BREAKING", outputs
+        assert outputs.get("report-path") == str(dest), outputs
+        # Side-effect absence, not only the published value: a misread would
+        # make `foo` the effective destination, and the freshness check would
+        # then fingerprint -- and on a rewrite trust -- a path the caller never
+        # named. Asserting the published value alone cannot see that, which is
+        # the #705 -> #758 lesson applied to this boundary.
+        assert not (tmp_path / "foo").exists(), "misread as an output path"
+        assert not list(tmp_path.glob("**/ofoo")), "misread as an output path"
