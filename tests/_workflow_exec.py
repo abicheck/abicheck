@@ -261,6 +261,7 @@ def _path_bash_candidates() -> list[str]:
 
 
 def _windows_system_root() -> str:
+    """Windows' own system root, defaulting when the variable is unset."""
     return os.environ.get("SystemRoot") or r"C:\Windows"
 
 
@@ -284,7 +285,18 @@ def _real_bash() -> str | None:
         r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
     ):
-        if candidate and Path(candidate).exists():
+        # The stub filter applies to the explicitly-named candidates too, not
+        # only to the PATH search below. `GIT_BASH_PATH` is an escape hatch a
+        # runner sets by hand, so it can name the launcher -- and this branch
+        # used to return whatever it named, which put the rejected stub back
+        # in play through the one input a person chooses (CodeRabbit review).
+        # A no-op for the two Program Files paths, which cannot be under the
+        # system directory; the point is that the rule has no exceptions.
+        if (
+            candidate
+            and Path(candidate).exists()
+            and not _is_under_windows_system_dir(candidate, _windows_system_root())
+        ):
             return candidate
     return select_real_bash(_path_bash_candidates(), system_root=_windows_system_root())
 

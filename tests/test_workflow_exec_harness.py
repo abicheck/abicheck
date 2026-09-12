@@ -55,7 +55,15 @@ from _workflow_exec import (
     select_real_bash,
 )
 
-pytestmark = pytest.mark.skipif(not have_bash(), reason="bash not available")
+#: Applied per test rather than as a module-level `pytestmark`, which is what
+#: it used to be. The two resolver classes at the bottom of this file drive
+#: `select_real_bash`/`require_bash` over monkeypatched inputs and `tmp_path`
+#: directories -- they never launch a shell -- and their whole subject is what
+#: happens on a machine with NO usable bash. A module-wide skip keyed on
+#: `have_bash()` therefore skipped exactly the tests written to protect that
+#: environment, on that environment (CodeRabbit review). Every test that really
+#: does run a step carries this instead.
+_needs_real_bash = pytest.mark.skipif(not have_bash(), reason="bash not available")
 
 #: Windows' own ``CreateProcess`` command-line ceiling -- the boundary the
 #: sweep below is built around.
@@ -121,6 +129,7 @@ def _real_run_bodies() -> list[str]:
         250_000,
     ],
 )
+@_needs_real_bash
 def test_run_step_executes_a_body_of_any_length(tmp_path: Path, size: int) -> None:
     workspace = make_workspace(tmp_path)
     body = _padded_body(size)
@@ -135,6 +144,7 @@ def test_run_step_executes_a_body_of_any_length(tmp_path: Path, size: int) -> No
     assert result.outputs["size"] == str(size)
 
 
+@_needs_real_bash
 def test_largest_real_step_body_is_executable_by_the_harness(tmp_path: Path) -> None:
     """The repository's own longest ``run:`` body, at its real length.
 
@@ -157,6 +167,7 @@ def test_largest_real_step_body_is_executable_by_the_harness(tmp_path: Path) -> 
     assert result.outputs["size"] == str(longest)
 
 
+@_needs_real_bash
 def test_step_body_script_is_not_left_inside_the_workspace(tmp_path: Path) -> None:
     """The script file must not show up in what the step itself produced.
 
@@ -178,6 +189,7 @@ def test_step_body_script_is_not_left_inside_the_workspace(tmp_path: Path) -> No
     assert not list(workspace.parent.glob("_step_body_*.sh"))
 
 
+@_needs_real_bash
 def test_step_body_script_is_cleaned_up_even_when_the_body_fails(
     tmp_path: Path,
 ) -> None:
@@ -188,6 +200,7 @@ def test_step_body_script_is_cleaned_up_even_when_the_body_fails(
     assert not list(workspace.parent.glob("_step_body_*.sh"))
 
 
+@_needs_real_bash
 def test_body_reaches_bash_byte_for_byte(tmp_path: Path) -> None:
     """No newline translation between the YAML body and bash.
 
@@ -238,6 +251,7 @@ _AWKWARD_PARENT_NAMES = [
 
 
 @pytest.mark.parametrize("parent_name", _AWKWARD_PARENT_NAMES)
+@_needs_real_bash
 def test_run_step_executes_under_an_awkward_parent_directory(
     tmp_path: Path, parent_name: str
 ) -> None:
@@ -320,6 +334,7 @@ class TestBashResolutionNeverFallsBackToWhatItRejected:
         assert not _is_under_windows_system_dir(chosen, root)
 
     def test_no_candidates_at_all_resolve_to_nothing(self, tmp_path: Path) -> None:
+        """An empty candidate list is "no bash", not an accidental fallback."""
         root, _ = self._layout(tmp_path, stub=False, real=False)
         assert select_real_bash([], system_root=root) is None
 
@@ -344,11 +359,52 @@ class TestBashResolutionNeverFallsBackToWhatItRejected:
         assert _is_under_windows_system_dir(candidates[0], root) is False
         assert select_real_bash(candidates, system_root=root) == candidates[0]
 
+    def test_an_explicitly_named_candidate_is_filtered_too(
+        self, tmp_path: Path
+    ) -> None:
+        """`GIT_BASH_PATH` is an escape hatch a runner sets by hand, so it can
+        name the launcher — and the explicit-candidate branch used to return
+        whatever it named, putting the rejected stub back in play through the
+        one input a person chooses (CodeRabbit review).
+
+        Asserted on the shared predicate rather than by setting the real
+        environment variable, for the same reason as the rest of this class:
+        `_real_bash()`'s own branch is unreachable off Windows, and forcing
+        `os.name` to reach it breaks `pathlib`.
+        """
+        root, candidates = self._layout(tmp_path, stub=True, real=True)
+        stub, real = candidates
+        assert _is_under_windows_system_dir(stub, root) is True
+        assert _is_under_windows_system_dir(real, root) is False
+        # The rule the explicit branch now shares with the PATH search: a
+        # named candidate under the system directory is rejected, whatever
+        # named it.
+        assert select_real_bash([stub], system_root=root) is None
+
     def test_the_two_public_functions_agree_on_this_machine(self) -> None:
-        """The invariant the defect broke, on whatever platform runs this:
-        `have_bash()` is true exactly when what `bash_executable()` returns is
-        a real bash. Their disagreement was the whole finding."""
-        assert have_bash() is (not is_wsl_launcher_stub(bash_executable()))
+        """The invariant the defect broke: both public functions answer from
+        one resolution, so they cannot disagree about whether a usable bash
+        exists.
+
+        Stated against `_real_bash()` rather than as
+        `have_bash() is not is_wsl_launcher_stub(bash_executable())`, which is
+        what this first said and is simply false off Windows: a POSIX machine
+        with no bash answers `have_bash()` False while
+        `is_wsl_launcher_stub()` is *also* False, because there is no stub
+        concept there. It passed only because this machine has bash — and the
+        module-wide `have_bash()` skip this file used to carry would have kept
+        it passing on the one machine that disproves it. Found exactly by
+        removing that skip (CodeRabbit review), which is the point of removing
+        it.
+        """
+        resolved = _workflow_exec._real_bash()
+        assert have_bash() is (resolved is not None)
+        if resolved is None:
+            # The documented fallback: still a `str`, and callers must skip.
+            assert bash_executable() == "bash"
+        else:
+            assert bash_executable() == resolved
+            assert is_wsl_launcher_stub(resolved) is False
 
 
 class TestRequireBashSkipsRatherThanRunsTheStub:
@@ -363,6 +419,7 @@ class TestRequireBashSkipsRatherThanRunsTheStub:
     def test_it_skips_when_no_real_bash_exists(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The guard's whole job: a skip, not an attempt to run the stub."""
         monkeypatch.setattr(_workflow_exec, "have_bash", lambda: False)
         with pytest.raises(BaseException) as excinfo:
             require_bash()

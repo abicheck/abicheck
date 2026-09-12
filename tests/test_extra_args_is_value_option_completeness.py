@@ -498,6 +498,8 @@ class TestCheckTargetTableSurvivesItsOwnEncoding:
         )
 
     def test_a_crlf_interpreter_changes_nothing(self, tmp_path: Path) -> None:
+        """The table an interpreter writing CRLF produces must answer exactly
+        as the LF one does, option for option."""
         options = sorted(_value_taking_options(("compare",))) + [
             "--verbose",
             "--dry-run",
@@ -518,6 +520,7 @@ class TestCheckTargetDerivesTheSameWay:
     wrong copies can agree -- and did) but "each equals the real CLI"."""
 
     def _derived(self) -> set[str]:
+        """check-target's own derived option table, as a set of spellings."""
         require_bash()
         text = ACTION_YML.read_text(encoding="utf-8")
         start = text.index('        _ct_cli_value_options=""')
