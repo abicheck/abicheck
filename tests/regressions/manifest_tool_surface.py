@@ -430,24 +430,55 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "checked against the real execution order -- it was false for "
             "both of this class's own call sites, which run post-install."
         ),
-        # #1222 is where the first instance surfaced (Codex flagging one
-        # missing `--used-by-manifest`) and where the one-directional,
-        # `compare`-only guard this class's seed test now generalizes was
-        # written. The later bidirectional/multi-command widening, and the
-        # 17 discrepancies it found, are the same escape history continuing
-        # -- not a separate class.
-        fixed_by=(1222,),
+        # Both halves of the escape history, in order (Codex review, PR
+        # #1234): #1222 is where the first instance surfaced (one missing
+        # `--used-by-manifest`) and where the one-directional, `compare`-only
+        # guard was written; #1234 is where the generalized fix landed -- the
+        # bidirectional, multi-command invariant plus the 17 discrepancies it
+        # found (12 surplus, 4 non-`compare` omissions, the stale `-j`
+        # cluster terminal). Recording only #1222 would point a future audit
+        # at the change that did NOT contain the generalized fix.
+        fixed_by=(1222, 1234),
         seed_tests=(
             "tests/test_extra_args_is_value_option_completeness.py",
             "tests/test_action_run_sh_helpers.py",
         ),
-        public_surfaces=("action",),
+        # Deliberately `()` (Codex review, PR #1234). An earlier revision
+        # claimed `("action",)`, which this field's own contract forbids
+        # twice over: the vocabulary is `github-action`, and that value is
+        # reserved for "a real execution of a workflow/composite-action
+        # step". Neither seed test is one -- the completeness test reads the
+        # two shells' source and introspects Click, and the helper test
+        # `source`s individual functions out of `run.sh` and calls them
+        # directly. A claimed surface no seed test reaches conceals exactly
+        # the missing cross-surface coverage this field exists to expose
+        # (the same rule Codex's PR #885 review established), so the gap is
+        # recorded below instead of papered over here.
+        public_surfaces=(),
         axes={
             "direction": ("missing-entry", "surplus-entry"),
             "command": ("compare", "dump", "deps tree", "deps compare"),
             "spelling": ("long-option", "short-option", "short-cluster"),
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "No seed test executes the real composite Action, so "
+                    "`public_surfaces` is `()`: the invariant is proven "
+                    "against the shells' source and against individually "
+                    "sourced helper functions, never against a workflow "
+                    "step. `.github/workflows/test-action.yml` is where an "
+                    "end-to-end cell would live (an `extra-args` string "
+                    "whose value resembles a flag, asserting the step "
+                    "neither mis-tokenizes nor falsely rejects it). Until "
+                    "one exists, a defect that only manifests through the "
+                    "composite Action's own environment -- `INPUT_*` "
+                    "quoting, the `CMD+=($INPUT_EXTRA_ARGS)` word-split "
+                    "under a real runner's IFS -- is outside what these "
+                    "tests can see."
+                ),
+                reference="docs/contribute/plans/action-cli-surface-drift.md",
+            ),
             KnownGap(
                 description=(
                     "The enumeration is still a hand-maintained `case` list "

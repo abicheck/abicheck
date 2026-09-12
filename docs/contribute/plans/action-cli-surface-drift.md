@@ -525,6 +525,17 @@ One `test-action.yml` cell per surviving CLI-justified guard, asserting the
 Action's decision and the CLI's decision agree. Only worth it after Phase 2
 shrinks the guard set to something enumerable.
 
+This is also the phase that would earn
+`cli_surface.copied_option_table_went_stale` a real `public_surfaces` entry.
+That field is `()` today and must stay so (Codex review, PR #1234): its
+contract reserves `github-action` for "a real execution of a
+workflow/composite-action step", and Phase 1's seed tests read the shells'
+source and call individually sourced helper functions instead. The class of
+defect that gap leaves uncovered is specifically the one only the real
+runner shows — `INPUT_*` quoting, and `CMD+=($INPUT_EXTRA_ARGS)`'s word-split
+under a live IFS — so one `extra-args` cell whose value resembles a flag
+would buy more than its cost even before the rest of Phase 5.
+
 ---
 
 ## Regression-test contract
