@@ -66,6 +66,26 @@ OUTCOME_RENAMED = "declaration_renamed"
 OUTCOME_MOVED = "declaration_moved"
 OUTCOME_RECONCILED = "declaration_identity_reconciled"
 OUTCOME_COORDINATES_ONLY = "declaration_coordinates_shifted"  # neither predicate fired -- distinct from OUTCOME_RECONCILED, where both did
+#: Matched through non-name evidence with NOTHING about the identity
+#: differing -- not even the :line:col shift OUTCOME_COORDINATES_ONLY
+#: reports. Split out of OUTCOME_RECONCILED, which until then absorbed
+#: this population while asserting the strictly stronger "both the name
+#: and the declaring-file evidence changed": measured on a oneTBB header
+#: graph, ALL 234 reconciled calls were `source_decl` pairs whose
+#: qualified name, `source_relative` and two-sided declaring file were
+#: byte-identical, and 13 of the emitted findings had `old_value ==
+#: new_value`. Prose correction alone could not fix that (PR #1232 already
+#: corrected it once) -- the outcome itself has to stop making the claim.
+OUTCOME_IDENTITY_UNCHANGED = "declaration_identity_unchanged"
+#: Some identity evidence differs, but not in a way this classifier can
+#: attribute to a rename or a move. Split out for the same reason as
+#: OUTCOME_IDENTITY_UNCHANGED: with the no-change population removed,
+#: OUTCOME_RECONCILED still absorbed this residue while claiming both
+#: dimensions changed. Narrowing OUTCOME_RECONCILED to mean only what its
+#: prose says leaves this as an affirmative classification of a real,
+#: unattributable difference -- an explicit "cannot place", never the
+#: strongest available claim.
+OUTCOME_RECONCILED_UNRESOLVED = "declaration_identity_reconciled_unresolved"
 
 #: OUTCOME_COORDINATES_ONLY-eligible kinds -- excludes "source_decl": a
 #: function's signature isn't exposed to resolve_identity_for_node in
@@ -406,10 +426,63 @@ def classify(
         and not markers_reordered
         and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
-    return Classification(
-        OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED,
-        moved,
+    if coordinate_only:
+        return Classification(OUTCOME_COORDINATES_ONLY, moved)
+    # Nothing differs at all. Every identity dimension this function can
+    # read agrees on both sides, so the pair was matched through non-name
+    # evidence (structural context, a canonical id, an alias) and there is
+    # no rename, no move, and not even the :line:col shift
+    # OUTCOME_COORDINATES_ONLY reports. Checked before the fall-through
+    # below rather than left to it: OUTCOME_RECONCILED's claim is that
+    # both dimensions changed, and this population is the exact negation
+    # of that claim (measured: all 234 of a oneTBB header graph's
+    # reconciled calls).
+    #
+    # `same_sig` is part of the predicate, not decoration -- a pair whose
+    # normalized signature tail differs HAS a material identity change,
+    # even with equal names and files, and must not be reported as
+    # unchanged.
+    #
+    # Restricted to `_COORDINATE_ONLY_KINDS` for exactly the reason that
+    # set exists, and the reason is load-bearing rather than inherited
+    # boilerplate: for a `source_decl` the dimensions this function reads
+    # are NOT exhaustive, so "no dimension I read differs" does not
+    # entail "nothing differs". A pair only reaches reconciliation
+    # because its two node identities were not equal in the first place,
+    # so on a `source_decl` something the classifier cannot see did
+    # change -- catalog case197 is precisely that shape (equal qualified
+    # name, equal declaring header, a parameter type change that moved
+    # the Itanium mangled name), and calling it "unchanged" would
+    # downgrade a real, consumer-visible difference to COMPATIBLE on
+    # evidence that never looked at it. Only a type has no such hidden
+    # dimension, which is the same sentence `_COORDINATE_ONLY_KINDS`'s
+    # own comment already makes. A `source_decl` in this position is the
+    # honest "something differs that I cannot attribute" case and falls
+    # to OUTCOME_RECONCILED_UNRESOLVED below, keeping its RISK tier.
+    identity_unchanged = (
+        old_qn == new_qn
+        and old_file == new_file
+        and same_sig
+        and not markers_differ
+        and not markers_reordered
+        and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
+    if identity_unchanged:
+        return Classification(OUTCOME_IDENTITY_UNCHANGED, moved)
+    # What is left is neither renamed, nor moved, nor coordinate-only, nor
+    # unchanged: some identity evidence differs while the classifier
+    # cannot attribute it to either dimension -- an ambiguous marker
+    # basename, a permutation, a declaring file contradicting its own
+    # markers, a differing signature tail, a name present on one side
+    # only. That is its OWN outcome, not OUTCOME_RECONCILED. PR #1232
+    # softened the rendered *description* for this population (it says the
+    # location dimension is unresolved rather than claiming it changed),
+    # but the ChangeKind's own `impact` text and its RISK verdict still
+    # asserted the combined rename-and-move, and prose is not where that
+    # claim lives. `moved` is necessarily False on every path reaching
+    # here, so this is exactly the population `move_established` used to
+    # be the only discriminator for -- now it has a name.
+    return Classification(OUTCOME_RECONCILED_UNRESOLVED, moved)
 
 
 def coordinate_evidence(
@@ -466,4 +539,9 @@ _OUTCOME_PROSE: dict[str, str] = {
     OUTCOME_MOVED: "moved to a different declaring file",
     OUTCOME_RECONCILED: "identity-reconciled (both name and location evidence changed)",
     OUTCOME_COORDINATES_ONLY: "no material identity change (coordinate-only shift)",
+    OUTCOME_IDENTITY_UNCHANGED: "no material identity change (matched through non-name evidence; no identity dimension differs)",
+    OUTCOME_RECONCILED_UNRESOLVED: (
+        "identity-reconciled (no clean split: the available evidence does "
+        "not establish whether the name or the declaring location changed)"
+    ),
 }

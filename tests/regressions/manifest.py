@@ -46,8 +46,10 @@ entry is checked, not just written" discipline `check_ai_readiness.py`'s
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_classification import CLASSIFICATION_BUG_CLASSES
 from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
+from .manifest_performance import PERFORMANCE_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
@@ -149,65 +151,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "test when a call site is found to pass it positionally."
                 ),
                 reference="PR #1231",
-            ),
-        ),
-    ),
-    BugClass(
-        id="classification.name_shape_as_contract_membership",
-        invariant=(
-            "A symbol's spelling answers how it is *represented* and what "
-            "convention it follows -- never whether it is in the "
-            "compatibility contract. Two corollaries the report layer must "
-            "honour: (a) a name-derived bucket (RTTI/vtable, "
-            "internal-namespace-by-convention, version segment) may be "
-            "counted and described, but never presented as evidence that a "
-            "finding is not a public break -- a vtable change on a public, "
-            "user-derivable class is one, and a `vN` segment states an API "
-            "version, not a stability promise; (b) when a name *is* parsed "
-            "for a scope-convention answer, only the scope that OWNS the "
-            "entity counts. A mangled name embeds its parameter types, so a "
-            "whole-string scan attributes a parameter's namespace to the "
-            "function, and an entity merely named like a convention "
-            "namespace is not in one."
-        ),
-        fixed_by=(1231,),
-        seed_tests=(
-            "tests/test_symbol_origin_ownership_properties.py",
-            "tests/test_surface_breakdown.py",
-            "tests/test_policy_experimental_namespaces.py",
-            "tests/test_diff_namespaces.py",
-        ),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Corollary (b) is now structural (the real Itanium "
-                    "nested-name parser resolves the owner) and generated "
-                    "against an independent oracle -- the seed test builds "
-                    "each mangled name from known components with its own "
-                    "encoder rather than re-deriving the answer through the "
-                    "parser under test. Two residual gaps. First, the "
-                    "fallback for shapes that parser does not model "
-                    "(constructors, destructors, operators) is still a "
-                    "textual scan of the region before the first `E`; it errs "
-                    "safe (a template argument's own `E` truncates it early, "
-                    "under-detecting rather than over-detecting) and is "
-                    "covered only by enumerated sibling cases -- teaching the "
-                    "structural parser those productions is the real fix. "
-                    "Second, and larger: corollary (a) is enforced only by "
-                    "making the report stop *claiming* membership it cannot "
-                    "establish. The positive half -- classifying these "
-                    "findings against a resolved contract -- is ADR-049's "
-                    "`--contract` machinery, which the surface breakdown does "
-                    "not consult at all; the JSON `abi_surface_breakdown` "
-                    "block still uses the `rtti_churn`/`internal_churn` key "
-                    "names, kept for report-schema stability and now "
-                    "contradicted by the prose beside them. A third, adjacent "
-                    "defect from the same report is tracked separately in "
-                    "docs/contribute/known-gaps.md: `Visibility.PUBLIC` used "
-                    "as a proxy for declaration presence, which is an "
-                    "evidence-selection problem rather than a naming one."
-                ),
-                reference="docs/contribute/known-gaps.md",
             ),
         ),
     ),
@@ -1439,7 +1382,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
     _ANALYSIS_BUG_CLASSES
+    + CLASSIFICATION_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
+    + PERFORMANCE_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + REPORT_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES

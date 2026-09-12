@@ -161,7 +161,20 @@ def snapshot_content_digest(snap: AbiSnapshot) -> str:
     compare equal, so this is the one place that computation lives rather
     than being inlined at each call site (Codex review, fresh evidence:
     the CLI path was found to still be missing this fallback entirely).
+
+    Memoized per snapshot for the duration of an open
+    ``storage.snapshot_digest_cache.digest_scope`` -- see that module for
+    why the memo is run-scoped rather than unbounded. The digest string
+    itself is unchanged by that: it appears in report output and in cache
+    keys, so it stays a plain sha256 over the same canonical JSON.
     """
+    from .snapshot_digest_cache import memoized_digest
+
+    return memoized_digest(snap, _uncached_snapshot_content_digest)
+
+
+def _uncached_snapshot_content_digest(snap: AbiSnapshot) -> str:
+    """The digest computation itself, with no memoization around it."""
     return hashlib.sha256(snapshot_to_json(snap).encode()).hexdigest()
 
 
@@ -196,7 +209,20 @@ def same_persisted_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     already-degraded path: answering "not provably equal" there costs an
     over-cautious ``degraded``, while letting the exception out would fail
     a comparison that used to complete.
+
+    ``old is new`` short-circuits without serializing anything. That is
+    not an optimization that weakens the answer: one object trivially has
+    the same persisted content as itself, and the serializer is a pure
+    function of the snapshot, so the digest comparison it replaces could
+    only ever have returned ``True``. Structural ``==`` is deliberately
+    *not* used as a second short-circuit -- it is sound in the accepting
+    direction but not the rejecting one (two unequal snapshots can persist
+    identically: a rounded float, a derived id), so it would answer only
+    the case identity already answers while paying a deep comparison on
+    every case it cannot answer.
     """
+    if old is new:
+        return True
     try:
         return snapshot_content_digest(old) == snapshot_content_digest(new)
     except Exception:

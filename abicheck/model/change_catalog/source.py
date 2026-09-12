@@ -102,6 +102,51 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "graph diff, the same way its RISK-tier siblings do.",
     ),
     _E(
+        "declaration_identity_reconciled_unresolved",
+        _R,
+        impact="The L5 source graph matched an old and a new declaration/type "
+        "node as the same real-world entity, and SOME identity evidence "
+        "differs -- but not in a way the classifier can attribute to "
+        "either dimension: an ambiguous marker basename, a reordering of "
+        "template arguments, a declaring file contradicting its own "
+        "markers, a differing normalized signature tail, or a name "
+        "present on one side only. It is neither a rename (the "
+        "location-free names agree), nor a move (no two-sided "
+        "declaring-file difference, and the marker fallback was "
+        "unusable), nor a pure coordinate shift, nor unchanged. "
+        "Deliberately its own kind rather than the combined "
+        "declaration_identity_reconciled: that kind's claim is that both "
+        "the name AND the declaring-file evidence changed together, and "
+        "asserting it here would re-make in the catalog exactly the "
+        "claim the classifier declined to make. RISK-tier like its "
+        "reconciliation siblings -- an unresolved difference is weaker "
+        "evidence, which narrows the conclusion; it does not license a "
+        "clean one. Informational: does not by itself indicate a break.",
+    ),
+    _E(
+        "declaration_identity_unchanged",
+        _C,
+        impact="The L5 source graph matched an old and a new declaration/type "
+        "node as the same real-world entity through non-name evidence "
+        "(structural context, canonical id, or an alias) where NO "
+        "identity dimension differs at all: the qualified name, the "
+        "declaring-file evidence, and the normalized signature tail are "
+        "each equal on both sides, and no embedded marker differs or "
+        "was reordered. Strictly less of a change than "
+        "declaration_coordinates_shifted, which at least has a "
+        ":line:col shift to report -- so it is COMPATIBLE for the same "
+        "reason and more so: there is nothing about the identity for a "
+        "consumer to act on, and scoring it as risk would inflate "
+        "risk_changes with pairs the reconciliation itself proves "
+        "identical. It exists because the alternative was falling "
+        "through to declaration_identity_reconciled, whose claim (both "
+        "the name and the declaring-file evidence changed together) is "
+        "false for every pair in this population. Still recorded, never "
+        "dropped, per this repo's record-before-disposing rule -- it "
+        "explains what would otherwise look like an unrelated "
+        "remove-then-add pair in the graph diff.",
+    ),
+    _E(
         "declaration_identity_reconciled",
         _R,
         impact="The L5 source graph reconciled an old and a new declaration/type "

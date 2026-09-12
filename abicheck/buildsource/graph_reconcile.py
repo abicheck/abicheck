@@ -114,8 +114,10 @@ from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabu
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
     COORDINATE_EVIDENCE_QUALIFIED_NAME,
     OUTCOME_COORDINATES_ONLY,
+    OUTCOME_IDENTITY_UNCHANGED,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
+    OUTCOME_RECONCILED_UNRESOLVED,
     OUTCOME_RENAMED,
     _classify_outcome,  # noqa: F401  # re-export: imported from here by tests/callers
     _project_relative_path,
@@ -147,7 +149,7 @@ class ReconciledPair:
     old_node: GraphNode
     new_node: GraphNode
     match_kind: str  # canonical_id | alias | structural_context
-    outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED | OUTCOME_COORDINATES_ONLY
+    outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED | OUTCOME_COORDINATES_ONLY | OUTCOME_IDENTITY_UNCHANGED | OUTCOME_RECONCILED_UNRESOLVED
     old_identity: CanonicalIdentity
     new_identity: CanonicalIdentity
     #: For an OUTCOME_COORDINATES_ONLY pair, which provider carried the
@@ -754,6 +756,8 @@ def diff_graph_reconciliation_findings(
         OUTCOME_MOVED: ChangeKind.DECLARATION_MOVED,
         OUTCOME_RECONCILED: ChangeKind.DECLARATION_IDENTITY_RECONCILED,
         OUTCOME_COORDINATES_ONLY: ChangeKind.DECLARATION_COORDINATES_SHIFTED,
+        OUTCOME_IDENTITY_UNCHANGED: ChangeKind.DECLARATION_IDENTITY_UNCHANGED,
+        OUTCOME_RECONCILED_UNRESOLVED: ChangeKind.DECLARATION_IDENTITY_RECONCILED_UNRESOLVED,
     }
     boundary = f"[{EVIDENCE_TIER_L5}]"
     old_reachable = _public_reachable_ids(old_graph) if old_graph is not None else None
@@ -767,23 +771,21 @@ def diff_graph_reconciliation_findings(
                 continue
         old_label = pair.old_node.label or pair.old_node.id
         new_label = pair.new_node.label or pair.new_node.id
-        prose = _OUTCOME_PROSE.get(pair.outcome, "identity-reconciled")
-        # OUTCOME_RECONCILED's prose asserts that location evidence
-        # CHANGED, which is false for a pair that reached it because the
-        # location could not be determined at all -- an ambiguous marker
-        # basename, a kind mismatch, a permutation, a declaring file
-        # contradicting its own markers (Codex review, PR #1232). Those
-        # are exactly the cases where the move claim was withheld for
-        # being unsupported, so rendering it back in the description
-        # re-made the claim the classifier had just declined. Same
-        # outcome, same ChangeKind, same severity -- only the sentence
-        # stops over-claiming, and says which dimension is unresolved.
-        if pair.outcome == OUTCOME_RECONCILED and not pair.move_established:
-            prose = (
-                "identity-reconciled (no clean split: the available "
-                "evidence does not establish whether the declaring "
-                "location changed)"
-            )
+        # Indexed, not `.get(..., "identity-reconciled")`: an outcome with
+        # no prose is a wiring bug, and defaulting to the combined
+        # rename-and-move sentence is the same over-claim the outcome
+        # split removed.
+        prose = _OUTCOME_PROSE[pair.outcome]
+        # PR #1232 rewrote this sentence at render time for a pair that
+        # reached OUTCOME_RECONCILED with its move claim withheld -- an
+        # ambiguous marker basename, a kind mismatch, a permutation, a
+        # declaring file contradicting its own markers. That population
+        # now has its own outcome (OUTCOME_RECONCILED_UNRESOLVED) whose
+        # own prose says it, and its own ChangeKind whose `impact` says it
+        # too -- which is what PR #1232 could not reach from here.
+        # OUTCOME_RECONCILED is now returned only for `renamed and moved`,
+        # so `move_established` is necessarily True on it and the
+        # render-time override had no reachable input left.
         # State the weaker evidence rather than hiding it (Codex review, PR
         # #1228): a coordinate-only pair with no declaring-file evidence on
         # either side read its coordinate shift out of the qualified name,
@@ -827,9 +829,13 @@ def diff_graph_reconciliation_findings(
         location = new_file or old_file or boundary
         findings.append(
             Change(
-                kind=kind_by_outcome.get(
-                    pair.outcome, ChangeKind.DECLARATION_IDENTITY_RECONCILED
-                ),
+                # Indexed, not `.get(..., DECLARATION_IDENTITY_RECONCILED)`:
+                # that default was an else-bucket of exactly the shape the
+                # fifth outcome exists to remove -- an unmapped outcome
+                # silently emitted the strongest claim in the vocabulary.
+                # Every outcome `classify` can return is mapped above, so a
+                # miss here is a wiring bug and should say so.
+                kind=kind_by_outcome[pair.outcome],
                 symbol=new_label,
                 description=(
                     f"Graph evidence reconciles {old_label!r} (old) with "

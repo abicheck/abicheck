@@ -41,8 +41,10 @@ from abicheck.buildsource.entity_identity import (
 from abicheck.buildsource.graph_reconcile import (
     _OUTCOME_PROSE,
     OUTCOME_COORDINATES_ONLY,
+    OUTCOME_IDENTITY_UNCHANGED,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
+    OUTCOME_RECONCILED_UNRESOLVED,
     OUTCOME_RENAMED,
     _classify_outcome,
 )
@@ -119,13 +121,21 @@ def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
                 expected = OUTCOME_RECONCILED
             elif has_coord and old_sig == new_sig and kind != "source_decl":
                 expected = OUTCOME_COORDINATES_ONLY
+            elif old_qn == new_qn and old_f == new_f and old_sig == new_sig:
+                expected = OUTCOME_IDENTITY_UNCHANGED
             else:
-                expected = OUTCOME_RECONCILED
+                expected = OUTCOME_RECONCILED_UNRESOLVED
             assert outcome == expected, f"{nk}/{fk}: {expected!r} != {outcome!r}"
             prose = _OUTCOME_PROSE[outcome]
-            # RECONCILED w/ neither axis changed is ADR-048's accepted
-            # "no clean split" (case197) prose overstatement, not a bug.
-            if outcome == OUTCOME_RECONCILED and not (name_ch and file_ch):
+            # The two "no clean split" outcomes name the dimension WORDS
+            # inside an explicit negation ("no identity dimension
+            # differs", "does not establish whether the name or the
+            # declaring location changed"), which this deliberately crude
+            # keyword check cannot tell from an assertion. They are
+            # exempted from the keyword sweep, not from truthfulness:
+            # `tests/test_graph_reconcile_outcome_properties.py` states
+            # the entailment property over the same space directly.
+            if outcome in (OUTCOME_IDENTITY_UNCHANGED, OUTCOME_RECONCILED_UNRESOLVED):
                 continue
             if not name_ch:
                 assert not any(w in prose for w in name_words), (nk, fk, outcome, prose)
@@ -141,7 +151,7 @@ def test_coordinate_only_requires_both_names_present() -> None:
     `old_qn != new_qn` is trivially true against an empty string."""
     old_id = _identity("", "a.h", kind="record_type")
     new_id = _identity("(lambda at f.h:1:2)", "a.h", kind="record_type")
-    assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED
+    assert _classify_outcome(old_id, new_id) == OUTCOME_RECONCILED_UNRESOLVED
 
 
 def test_coordinate_only_does_not_require_declaring_file_evidence() -> None:
@@ -195,9 +205,19 @@ def _expected_outcome(
     file_changed: bool,
     same_sig: bool,
     kind: str,
+    names_equal: bool,
+    files_equal: bool,
 ) -> str:
-    """Oracle stated from the four input DIMENSIONS, not from the
-    implementation's own predicate expressions."""
+    """Oracle stated from the input DIMENSIONS, not from the
+    implementation's own predicate expressions.
+
+    ``names_equal``/``files_equal`` are the RAW comparisons, which the
+    normalized ``name_changed``/``file_changed`` tags cannot stand in for:
+    a pair can be "not renamed" and "not moved" while still differing
+    (a coordinate shift, a one-sided absent file). Distinguishing the two
+    is the whole point of the fifth and sixth outcomes -- the classifier
+    used to answer both with the combined rename-and-move claim.
+    """
     if name_changed and not file_changed:
         return OUTCOME_RENAMED
     if file_changed and not name_changed:
@@ -206,7 +226,14 @@ def _expected_outcome(
         return OUTCOME_RECONCILED
     if has_coord and same_sig and kind in ("record_type", "enum_type", "typedef"):
         return OUTCOME_COORDINATES_ONLY
-    return OUTCOME_RECONCILED
+    if (
+        names_equal
+        and files_equal
+        and same_sig
+        and kind in ("record_type", "enum_type", "typedef")
+    ):
+        return OUTCOME_IDENTITY_UNCHANGED
+    return OUTCOME_RECONCILED_UNRESOLVED
 
 
 def _generated_cases() -> list[tuple[str, CanonicalIdentity, CanonicalIdentity, str]]:
@@ -227,6 +254,8 @@ def _generated_cases() -> list[tuple[str, CanonicalIdentity, CanonicalIdentity, 
                         file_changed=file_ch,
                         same_sig=old_sig == new_sig,
                         kind=kind,
+                        names_equal=old_qn == new_qn,
+                        files_equal=old_f == new_f,
                     )
                     cases.append((f"{nk}/{fk}/{sk}/{kind}", old_id, new_id, expected))
     return cases
@@ -243,26 +272,35 @@ class TestClassifyOutcomeProperties:
     invariants: the defect this class was written for was an outcome no
     production input could ever produce."""
 
-    def test_every_pair_gets_exactly_one_of_the_four_outcomes(self) -> None:
+    def test_every_pair_gets_exactly_one_of_the_declared_outcomes(self) -> None:
         outcomes = {
             OUTCOME_RENAMED,
             OUTCOME_MOVED,
             OUTCOME_RECONCILED,
             OUTCOME_COORDINATES_ONLY,
+            OUTCOME_IDENTITY_UNCHANGED,
+            OUTCOME_RECONCILED_UNRESOLVED,
         }
         for label, old_id, new_id, _ in _generated_cases():
             assert _classify_outcome(old_id, new_id) in outcomes, label
 
-    def test_all_four_outcomes_are_reachable(self) -> None:
+    def test_all_reachable_outcomes_are_reachable(self) -> None:
         """The reachability half -- exactly what this defect was: the
         declaring-file guard made ``OUTCOME_COORDINATES_ONLY`` producible
-        by no real input at all, and nothing failed anywhere."""
+        by no real input at all, and nothing failed anywhere.
+
+        ``OUTCOME_RECONCILED`` is now the narrow combined
+        rename-and-move, and the two "no clean split" outcomes below are
+        what the old fall-through used to absorb; all six must stay
+        producible from this domain."""
         seen = {_classify_outcome(o, n) for _, o, n, _ in _generated_cases()}
         assert seen == {
             OUTCOME_RENAMED,
             OUTCOME_MOVED,
             OUTCOME_RECONCILED,
             OUTCOME_COORDINATES_ONLY,
+            OUTCOME_IDENTITY_UNCHANGED,
+            OUTCOME_RECONCILED_UNRESOLVED,
         }
 
     def test_outcome_matches_dimension_oracle(self) -> None:
@@ -275,10 +313,11 @@ class TestClassifyOutcomeProperties:
         declaring location changed, which absent file evidence cannot
         show -- so neither may be returned for a pair that carries
         positive coordinate-churn evidence and is kind/signature
-        eligible. (A pair with NO positive evidence on either axis still
-        falls through to ``OUTCOME_RECONCILED``: ADR-048's accepted
-        "no clean split" prose overstatement, see
-        ``test_classify_outcome_prose_is_truthful_about_what_changed``.)"""
+        eligible. A pair with NO positive evidence on either axis now
+        reaches ``OUTCOME_IDENTITY_UNCHANGED`` or
+        ``OUTCOME_RECONCILED_UNRESOLVED`` -- neither of which asserts a
+        move -- rather than falling through to ``OUTCOME_RECONCILED``,
+        which is the over-claim this narrowing removed."""
         for nk, (old_qn, new_qn, name_ch, has_coord) in _NAME_CASES.items():
             for fk, (old_f, new_f, _file_ch, has_file) in _FILE_CASES.items():
                 if has_file:
@@ -287,7 +326,11 @@ class TestClassifyOutcomeProperties:
                     old_id = _identity(old_qn, old_f, f"sig:{old_qn}\x1fs", kind)
                     new_id = _identity(new_qn, new_f, f"sig:{new_qn}\x1fs", kind)
                     outcome = _classify_outcome(old_id, new_id)
-                    assert outcome != OUTCOME_MOVED, (nk, fk, kind)
+                    assert outcome not in (OUTCOME_MOVED, OUTCOME_RECONCILED), (
+                        nk,
+                        fk,
+                        kind,
+                    )
                     if has_coord and kind != "source_decl":
                         assert outcome == OUTCOME_COORDINATES_ONLY, (nk, fk, kind)
                     assert not name_ch or outcome == OUTCOME_RENAMED, (nk, fk, kind)
@@ -410,7 +453,7 @@ class TestMarkerCarriedLocationEvidence:
             _identity(old_qn, "wrapper.h", f"sig:{old_qn}\x1fs"),
             _identity(new_qn, "wrapper.h", f"sig:{new_qn}\x1fs"),
         )
-        assert outcome == OUTCOME_RECONCILED, outcome
+        assert outcome == OUTCOME_RECONCILED_UNRESOLVED, outcome
 
     def test_two_sided_files_decide_the_move_in_both_directions(self) -> None:
         """The complement: when the declaring files themselves differ, that
@@ -468,7 +511,11 @@ class TestMarkerCarriedLocationEvidence:
                 _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                 _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
             )
-            assert outcome == OUTCOME_RECONCILED, (old_file, new_file, outcome)
+            assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (
+                old_file,
+                new_file,
+                outcome,
+            )
 
     def test_only_the_declarations_own_marker_can_say_it_moved(self) -> None:
         """Codex review (PR #1229): "some marker names the recorded file"
@@ -499,7 +546,11 @@ class TestMarkerCarriedLocationEvidence:
                     _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                     _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
                 )
-                assert outcome == OUTCOME_RECONCILED, (old_qn, old_file, outcome)
+                assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (
+                    old_qn,
+                    old_file,
+                    outcome,
+                )
 
     def test_several_markers_naming_the_recorded_file_are_ambiguous(self) -> None:
         """Codex review (PR #1229): when more than one marker names the
@@ -530,7 +581,11 @@ class TestMarkerCarriedLocationEvidence:
                     _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                     _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
                 )
-                assert outcome == OUTCOME_RECONCILED, (old_qn, old_file, outcome)
+                assert outcome == OUTCOME_RECONCILED_UNRESOLVED, (
+                    old_qn,
+                    old_file,
+                    outcome,
+                )
 
     def test_the_declarations_own_marker_changing_is_still_a_move(self) -> None:
         """The must-stay-distinct half: when the recorded file's OWN marker
@@ -768,7 +823,7 @@ class TestReorderedMarkersAreNotAMove:
     def test_a_permutation_is_not_a_move(self) -> None:
         assert (
             self._pair(f"Pair<{self._A},{self._B}>", f"Pair<{self._B},{self._A}>")
-            == OUTCOME_RECONCILED
+            == OUTCOME_RECONCILED_UNRESOLVED
         )
 
     def test_a_permutation_is_not_a_coordinate_only_shift_either(self) -> None:
@@ -820,7 +875,10 @@ class TestReorderedMarkersAreNotAMove:
         a move."""
         for kind in ("lambda", "unnamed struct", "anonymous union", "unnamed enum"):
             a, b = f"({kind} at a.h:1:2)", f"({kind} at b.h:3:4)"
-            assert self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>") == OUTCOME_RECONCILED
+            assert (
+                self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>")
+                == OUTCOME_RECONCILED_UNRESOLVED
+            )
 
     def test_markers_from_one_header_swapping_places_is_still_a_permutation(
         self,
@@ -840,9 +898,13 @@ class TestReorderedMarkersAreNotAMove:
             a = f"({kind} at same.h:1:2)"
             b = f"({kind} at same.h:3:4)"
             c = f"({kind} at same.h:5:6)"
-            assert self._pair(f"P<{a},{b}>", f"P<{b},{a}>") == OUTCOME_RECONCILED, kind
             assert (
-                self._pair(f"P<{a},{b},{c}>", f"P<{c},{a},{b}>") == OUTCOME_RECONCILED
+                self._pair(f"P<{a},{b}>", f"P<{b},{a}>")
+                == OUTCOME_RECONCILED_UNRESOLVED
+            ), kind
+            assert (
+                self._pair(f"P<{a},{b},{c}>", f"P<{c},{a},{b}>")
+                == OUTCOME_RECONCILED_UNRESOLVED
             ), kind
 
     def test_a_reorder_that_also_shifts_coordinates_is_still_a_permutation(
@@ -863,14 +925,14 @@ class TestReorderedMarkersAreNotAMove:
                     f"P<({kind} at a.h:1:2),({kind} at b.h:3:4)>",
                     f"P<({kind} at b.h:7:8),({kind} at a.h:9:10)>",
                 )
-                == OUTCOME_RECONCILED
+                == OUTCOME_RECONCILED_UNRESOLVED
             ), kind
             assert (
                 self._pair(
                     f"P<({kind} at a.h:1:2),({kind} at b.h:3:4),({kind} at c.h:5:6)>",
                     f"P<({kind} at c.h:7:8),({kind} at a.h:9:10),({kind} at b.h:1:1)>",
                 )
-                == OUTCOME_RECONCILED
+                == OUTCOME_RECONCILED_UNRESOLVED
             ), kind
 
     def test_coordinate_churn_across_several_headers_is_not_a_permutation(self) -> None:

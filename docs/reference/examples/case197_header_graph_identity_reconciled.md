@@ -8,7 +8,7 @@
 | **Classification** | Scenario — Capability / evidence demonstration |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | `declaration_identity_reconciled`, `public_api_internal_dependency_added` |
+| **Detected `ChangeKind`s** | `declaration_identity_reconciled_unresolved`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case197_header_graph_identity_reconciled/` |
 | **Related rules** | [`internal-declaration-identity-reconciled`](by-rule/internal-declaration-identity-reconciled.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md) |
 | **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |

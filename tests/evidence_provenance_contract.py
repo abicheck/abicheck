@@ -157,6 +157,8 @@ PROVENANCE_UNVERIFIED = frozenset(
         "cxx_standard_floor_raised",
         "declaration_coordinates_shifted",
         "declaration_identity_reconciled",
+        "declaration_identity_reconciled_unresolved",
+        "declaration_identity_unchanged",
         "declaration_moved",
         "declaration_renamed",
         "default_argument_changed",

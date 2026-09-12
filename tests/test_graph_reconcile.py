@@ -25,8 +25,8 @@ from __future__ import annotations
 import pytest
 
 from abicheck.buildsource.graph_reconcile import (
+    OUTCOME_IDENTITY_UNCHANGED,
     OUTCOME_MOVED,
-    OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
     diff_graph_reconciliation_findings,
     reconcile_added_removed,
@@ -392,7 +392,10 @@ def test_different_checkout_roots_not_misclassified_as_moved() -> None:
     # the raw qualified name to have actually differed (positive evidence
     # of coordinate churn) -- an already-identical name proves nothing
     # about whatever else (e.g. a mangled-name change) might differ.
-    assert result.reconciled[0].outcome == OUTCOME_RECONCILED
+    # Nothing this classifier reads differs on either side, so it is
+    # OUTCOME_IDENTITY_UNCHANGED -- not OUTCOME_RECONCILED, whose claim
+    # (both dimensions changed together) is false for this population.
+    assert result.reconciled[0].outcome == OUTCOME_IDENTITY_UNCHANGED
 
 
 def test_real_move_still_detected_across_different_checkout_roots() -> None:
@@ -619,7 +622,7 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
     # Same project-relative file across checkout roots -- not moved, and the
     # raw qualified name never differed either, so there's no positive
     # coordinate-churn evidence: stays OUTCOME_RECONCILED.
-    assert outcomes["type://old_stable"] == OUTCOME_RECONCILED
+    assert outcomes["type://old_stable"] == OUTCOME_IDENTITY_UNCHANGED
     # Genuinely moved to a different project subdirectory (detail/ -> public/).
     assert outcomes["type://old_moved"] == OUTCOME_MOVED
 
@@ -799,7 +802,7 @@ def test_diff_graph_reconciliation_findings_emits_each_change_kind() -> None:
     # might reconcile on) stays DECLARATION_IDENTITY_RECONCILED, ADR-048's
     # original intent for "match came from alias evidence with no clean
     # rename/move split."
-    assert ChangeKind.DECLARATION_IDENTITY_RECONCILED in kinds
+    assert ChangeKind.DECLARATION_IDENTITY_UNCHANGED in kinds
 
 
 def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
@@ -830,6 +833,8 @@ def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
             ChangeKind.DECLARATION_MOVED,
             ChangeKind.DECLARATION_IDENTITY_RECONCILED,
             ChangeKind.DECLARATION_COORDINATES_SHIFTED,
+            ChangeKind.DECLARATION_IDENTITY_UNCHANGED,
+            ChangeKind.DECLARATION_IDENTITY_RECONCILED_UNRESOLVED,
         )
 
 
@@ -1068,6 +1073,8 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
             ChangeKind.DECLARATION_MOVED,
             ChangeKind.DECLARATION_IDENTITY_RECONCILED,
             ChangeKind.DECLARATION_COORDINATES_SHIFTED,
+            ChangeKind.DECLARATION_IDENTITY_UNCHANGED,
+            ChangeKind.DECLARATION_IDENTITY_RECONCILED_UNRESOLVED,
         )
     ]
     assert len(reconciled_in_result) == len(graph_findings)

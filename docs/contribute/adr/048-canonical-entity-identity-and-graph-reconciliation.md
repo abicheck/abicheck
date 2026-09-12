@@ -179,6 +179,64 @@ subset specifically — a consumer with a suppression/policy rule keyed to
 `declaration_coordinates_shifted` instead (`changelog.d/`, this repo's
 standard mechanism for such changes, records it).
 
+**2026-09 amendment (second) — `declaration_identity_reconciled` narrowed
+to the combined rename-and-move; `declaration_identity_unchanged` and
+`declaration_identity_reconciled_unresolved` split out.** The amendment
+above removed the closure-coordinate subset from the fallthrough but left
+the fallthrough itself: `classify()` still ended with an unguarded
+`return OUTCOME_RECONCILED` for every pair that was neither renamed, nor
+moved, nor coordinate-only, and that outcome's own catalog `impact` text
+asserts both the qualified name and the declaring-file evidence changed
+together, at `COMPATIBLE_WITH_RISK`. A v19 oneAPI scan measured the
+population that claim was being made about: **all 234** of a oneTBB header
+graph's reconciled calls were `source_decl` pairs whose `qualified_name`,
+`source_relative` and two-sided `declaring_file` were byte-identical
+(`internal_forward` in `include/oneapi/tbb/flow_graph.h`, matched by
+`structural_context`), and 13 of the emitted findings had
+`old_value == new_value`. PR #1232 had already corrected the rendered
+*description* for exactly this case; the claim survived in the
+`ChangeKind`'s own `impact` and verdict tier, which is where a consumer
+reading a report's classification actually meets it.
+
+`declaration_identity_reconciled` now means only what its prose says: both
+dimensions genuinely changed (`renamed and moved`). The residue splits two
+ways, on whether the classifier's dimensions are *exhaustive* for the
+pair's kind:
+
+- `declaration_identity_unchanged` (`COMPATIBLE`) — no identity dimension
+  differs at all, and the kind is type-shaped
+  (`record_type`/`enum_type`/`typedef`), where the identity genuinely is
+  the normalized name + declaring file + structural position. Strictly
+  less of a change than `declaration_coordinates_shifted`, hence the same
+  verdict tier and more so.
+- `declaration_identity_reconciled_unresolved` (`COMPATIBLE_WITH_RISK`) —
+  some identity evidence differs that cannot be attributed to either
+  dimension: an ambiguous marker basename, a template-argument
+  permutation, a declaring file contradicting its own markers, a differing
+  signature tail, a name present on one side only, **or** a `source_decl`
+  with every readable dimension equal. That last case is the oneTBB
+  population and case197 alike, and it keeps the RISK tier deliberately: a
+  pair only reaches reconciliation because its two node identities were
+  not equal, so on a function something the classifier cannot read did
+  change (case197: a parameter type change that moved the Itanium mangled
+  name). "Weaker evidence narrows conclusions" means saying so, not
+  claiming a clean one — and equally not naming a dimension.
+
+`classify()`'s final `return` is therefore an affirmative classification of
+a real, unattributable difference rather than a bucket absorbing whatever
+the four predicates above did not place, and
+`diff_graph_reconciliation_findings` indexes its outcome→kind map instead
+of defaulting to the strongest kind in the vocabulary. Case197's expected
+kind moves to `declaration_identity_reconciled_unresolved`; its
+`COMPATIBLE_WITH_RISK` verdict is unchanged. The entailment property —
+an outcome claiming a name or location change may only be returned where
+the names or locations actually differ — is stated over generated pairs in
+`tests/test_graph_reconcile_outcome_properties.py`, and registered as bug
+class `classification.default_branch_asserts_more_than_inputs`. As with
+the first amendment, a consumer with a suppression/policy rule keyed to
+`declaration_identity_reconciled` for either subset now sees the new kind
+instead (`changelog.d/` records it).
+
 **Concrete example that correctly stays unreconciled** (mirrors
 `examples/case195_header_graph_ambiguous_rename_not_reconciled/`): a public
 struct has two internal-type-typed pointer fields,
