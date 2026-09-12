@@ -68,7 +68,7 @@ def _helpers_region() -> str:
     return text[:idx]
 
 
-def _cli_introspection_prelude() -> str:
+def _cli_introspection_prelude(py_bin: str | None = None) -> str:
     """Shell establishing the three variables `_cli_value_options_init` needs.
 
     `_helpers_region()` stops at run.sh's "Build the abicheck command" marker,
@@ -84,9 +84,13 @@ def _cli_introspection_prelude() -> str:
 
     Uses this interpreter (`sys.executable`), which is by construction the one
     with abicheck importable when the test suite is running at all.
+
+    *py_bin* overrides that interpreter. Its one use is
+    ``TestDerivedOptionTableIsLineEndingAgnostic`` below, which needs an
+    interpreter whose stdout line endings differ from this platform's.
     """
     return (
-        f"\n_PY_BIN={shlex.quote(sys.executable)}\n"
+        f"\n_PY_BIN={shlex.quote(py_bin or sys.executable)}\n"
         '_PY_SAFE_DIR="$(mktemp -d)"\n'
         "_PY_BIN_HAS_ABICHECK=true\n"
         "trap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"

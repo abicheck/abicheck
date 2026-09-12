@@ -1843,7 +1843,28 @@ for param in node.params:
     _CLI_VALUE_OPTIONS_DERIVED="false"
     return 0
   fi
-  _CLI_VALUE_OPTIONS="|$(printf '%s' "$_derived" | tr '\n' '|')"
+  # Strip CR before splitting on LF, for the same reason -- and from the same
+  # confirmed evidence -- as `_split_multi_value`'s own `${item%$'\r'}` above:
+  # on windows-latest `$_PY_BIN` is a native python.exe whose text-mode stdout
+  # translates every "\n" to os.linesep, so each spelling arrives as
+  # "--format\r". Without this, the table is *derived* (so the hard failure in
+  # `_require_cli_value_options_or_fail` never fires) while every lookup in it
+  # misses, because the membership test below matches "|--format|" against a
+  # table holding "|--format\r|". That is the silent wrong-answer direction
+  # ADR-070 D3 fails closed to avoid, reached through the back door: no option
+  # reads as value-taking, so a literal `--write`/`--dry-run` consumed as
+  # another option's value is misread as a real flag. Stripped table-wide
+  # rather than per-lookup so every consumer of `$_CLI_VALUE_OPTIONS` is
+  # covered by construction, not each one remembering.
+  # Both a leading AND a trailing delimiter, because the membership test below
+  # asks for the fully-delimited "|<opt>|". `$(...)` strips the derivation's
+  # trailing newline, so `tr '\n' '|'` leaves the LAST spelling with no
+  # delimiter after it -- and that one option therefore never matched. It was
+  # `--variant` at the time this was found (by asserting the table against
+  # Click's own parameter list rather than against a few sampled options), but
+  # nothing makes that stable: whichever option `node.params` happens to yield
+  # last is the one silently missing.
+  _CLI_VALUE_OPTIONS="|$(printf '%s' "$_derived" | tr -d '\r' | tr '\n' '|')|"
   _CLI_VALUE_OPTIONS_DERIVED="true"
 }
 
