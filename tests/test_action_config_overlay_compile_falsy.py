@@ -110,13 +110,17 @@ class TestCompileEmptyStringTreatedAsUnset:
             merge_compile=True,
         )
         expected = _real_two_stage_sysroot(tmp_path, checkout_compile, sources_compile)
-        # The real resolver returns `str(Path(...))`, i.e. the *platform's*
-        # spelling of this path ("\\real\\path" on Windows). Asserting the
-        # POSIX literal made this a Linux/macOS-only test that simply failed
-        # on the windows lane; `str(Path(...))` states the same thing — the
-        # sources-root value won — on every platform.
-        assert expected == str(Path("/real/path"))
-        assert out["compile"]["sysroot"] == expected
+        # The two sides spell the same path differently, and only on Windows:
+        # the real resolver returns `str(Path(...))` (the platform's spelling,
+        # "\\real\\path"), while the overlay copies the raw YAML scalar
+        # through verbatim ("/real/path"). Comparing either against a POSIX
+        # literal made this a Linux/macOS-only test that simply failed on the
+        # windows lane, and normalizing only the oracle still left the second
+        # assertion mismatched (Codex review, PR #1230). Compare both sides as
+        # `Path`, which states what the test means — the sources-root value
+        # won — independently of separator spelling.
+        assert Path(expected or "") == Path("/real/path")
+        assert Path(out["compile"]["sysroot"]) == Path(expected or "")
 
     def test_empty_checkout_compiler_is_treated_as_unset(self, tmp_path: Path) -> None:
         checkout_compile = {"compiler": ""}
@@ -162,8 +166,10 @@ class TestCompileEmptyStringTreatedAsUnset:
             merge_compile=True,
         )
         expected = _real_two_stage_sysroot(tmp_path, checkout_compile, sources_compile)
-        assert expected == str(Path("/checkout/sysroot"))
-        assert out["compile"]["sysroot"] == expected
+        # Path-normalized on both sides, for the reason the sibling test above
+        # states in full.
+        assert Path(expected or "") == Path("/checkout/sysroot")
+        assert Path(out["compile"]["sysroot"]) == Path(expected or "")
 
     def test_nonempty_checkout_compiler_still_blocks_sources_root(
         self, tmp_path: Path
