@@ -134,16 +134,24 @@ RESULT_KEYS = frozenset(
     }
 )
 
-#: ``report_schema_version`` first carried a top-level
-#: ``analysis_assurance_exit_contribution`` at 2.40 (see
-#: ``abicheck/schemas/__init__.py``'s version history). At or above this
-#: version, a document carrying an ``analysis_assurance`` block and no
-#: contribution beside it is *contradictory* -- those two keys are emitted
-#: together or not at all -- which is a different fact from a report that
-#: predates the field, and the two must not both collapse to "not gated".
-#: Consulted only by :func:`assurance_axis`; see its docstring for why the
-#: version alone is not enough to establish that a contribution was owed.
-ASSURANCE_CONTRIBUTION_SINCE = (2, 40)
+#: Per *version sequence*, the first version whose documents owe an
+#: assurance contribution alongside an assurance block.
+#:
+#: Two independent sequences reach this reader and they must never be
+#: compared against each other's thresholds (Codex review, P2): a two-sided
+#: ``compare`` document carries ``report_schema_version`` and first emitted
+#: ``analysis_assurance_exit_contribution`` at 2.40
+#: (``abicheck/schemas/__init__.py``), while an audit-only
+#: (``--no-baseline``) document carries ``audit_report_schema_version`` on
+#: its own 1.x sequence (``abicheck/report/no_baseline_document.py``) and has
+#: carried ``exit_axes.analysis_assurance`` since its first released version,
+#: 1.1 -- 1.0 was never released. Reading an audit document's ``1.5`` against
+#: the compare threshold made every audit report look older than a field it
+#: has always had, so a lost contribution silently read as "legacy, accept".
+ASSURANCE_CONTRIBUTION_SINCE = {
+    "report_schema_version": (2, 40),
+    "audit_report_schema_version": (1, 1),
+}
 
 
 class CannotTell(Exception):
@@ -174,8 +182,11 @@ def parse_schema_version(raw: object) -> tuple[int, ...] | None:
 def classify_document(path: str) -> tuple[str, dict[str, Any] | None]:
     """Read *path*, returning ``(validity_token, document_or_None)``.
 
-    The document is returned only alongside :data:`VALIDITY_OK`, so a
-    caller cannot accidentally read an ``{}`` placeholder as a real report.
+    The document is returned alongside :data:`VALIDITY_OK` and, deliberately,
+    alongside :data:`VALIDITY_EMPTY` and :data:`VALIDITY_NO_RESULT` -- see the
+    comments on those two branches for why. Every other token returns ``None``,
+    so a caller cannot read an absent or corrupt report as a real one, and
+    :func:`main` hands any non-``None`` mapping to :func:`answer`.
     """
     try:
         with open(path, encoding="utf-8") as handle:
@@ -295,10 +306,11 @@ def assurance_axis(report: dict[str, Any]) -> str:
     * ``absent_legacy_schema`` -- no contribution key, and nothing in the
       document establishes that one was owed. Honestly unknown; a caller may
       accept it, but must not call it success.
-    * ``contradictory`` -- the document carries an ``analysis_assurance``
-      block on a schema of 2.40 or newer, and no contribution beside it. The
-      report is internally inconsistent, which is an invalid *result*, not a
-      passing assurance check.
+    * ``contradictory`` -- the document shows assurance *was* evaluated (see
+      :func:`_assurance_was_evaluated` for the three placements) on a schema
+      at or past its own sequence's threshold, and carries no contribution.
+      The report is internally inconsistent, which is an invalid *result*,
+      not a passing assurance check.
 
     **The contribution is not owed unconditionally**, and getting this wrong
     fails green runs rather than red ones. ``reporter.py`` emits
@@ -313,19 +325,46 @@ def assurance_axis(report: dict[str, Any]) -> str:
     contribution = _assurance_contribution(report)
     if contribution is not None:
         return "gated" if _contribution_gates(contribution) else "not_gated"
-    block = report.get("analysis_assurance")
-    if not isinstance(block, dict):
-        block = _nested(report).get("analysis_assurance")
-    if not isinstance(block, dict):
+    if not _assurance_was_evaluated(report):
         # No assurance was evaluated at all, so no contribution was owed.
         return "absent_legacy_schema"
-    for key in ("report_schema_version", "audit_report_schema_version"):
+    for key, threshold in ASSURANCE_CONTRIBUTION_SINCE.items():
         version = parse_schema_version(report.get(key))
         if version is not None:
-            if version >= ASSURANCE_CONTRIBUTION_SINCE:
+            # Each key against its OWN sequence's threshold; see
+            # `ASSURANCE_CONTRIBUTION_SINCE` for why mixing them is a bug.
+            if version >= threshold:
                 return "contradictory"
             return "absent_legacy_schema"
     return "absent_legacy_schema"
+
+
+def _assurance_was_evaluated(report: dict[str, Any]) -> bool:
+    """Whether this run evaluated analysis assurance at all.
+
+    Three placements, because the shapes differ and a check that knew only
+    the first let an audit report's lost contribution read as legacy:
+
+    * a two-sided ``compare`` document's top-level ``analysis_assurance``
+      block (``reporter.py``),
+    * the same block under ``diff``, for the nested shape every other query
+      reaches through ``_either``,
+    * ``run_outcome.assurance`` -- the placement an audit-only document uses
+      (``report/no_baseline.py`` nests the rollup there and puts the
+      contribution under ``exit_axes`` instead), and which a ``compare``
+      report also carries.
+
+    ``run_outcome.assurance`` is ``None`` for any writer with no
+    ``AnalysisAssurance`` rollup of its own, so a non-``None`` mapping there
+    is the same positive signal the standalone block is.
+    """
+    for source in (report, _nested(report)):
+        if isinstance(source.get("analysis_assurance"), dict):
+            return True
+        outcome = source.get("run_outcome")
+        if isinstance(outcome, dict) and isinstance(outcome.get("assurance"), dict):
+            return True
+    return False
 
 
 def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:

@@ -4963,7 +4963,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # how COMPATIBLE_WITH_RISK came to publish an empty summary (see that
         # arm's own comment above). A verdict that exists to say "no result
         # was established" must not be the one that renders as silence.
-        echo "> **Verdict: REPORT_UNREADABLE** — abicheck exited 0 but produced no readable JSON report, so **no compatibility result was established**. This is not a pass; see the error annotation above."
+        echo "> **Verdict: REPORT_UNREADABLE** — abicheck exited 0, but the JSON report this run asked for was missing or unusable, or contradicted itself, so **no compatibility result was established**. This is not a pass; the error annotation above names which case applied."
         ;;
     esac
 

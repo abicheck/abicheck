@@ -68,6 +68,20 @@ rq = _load_reader()
 def _ask(
     tmp_path: Path, document: object, query: str, arg: str = ""
 ) -> tuple[int, str]:
+    """``(returncode, stdout)``, the pair almost every test here needs.
+
+    Use :func:`_ask_full` when stderr matters — it is part of the boundary's
+    contract too (`run.sh` runs the reader under `2>/dev/null`, so a traceback
+    there would be invisible in production and must not happen), but returning
+    it everywhere would make every call site carry a value it ignores.
+    """
+    code, out, _ = _ask_full(tmp_path, document, query, arg)
+    return code, out
+
+
+def _ask_full(
+    tmp_path: Path, document: object, query: str, arg: str = ""
+) -> tuple[int, str, str]:
     """Invoke the reader the way ``run.sh`` does: as a subprocess, by path.
 
     Deliberately not an in-process ``main()`` call: the contract ``run.sh``
@@ -89,7 +103,7 @@ def _ask(
         text=True,
         check=False,
     )
-    return proc.returncode, proc.stdout
+    return proc.returncode, proc.stdout, proc.stderr
 
 
 #: Every query name ``run.sh`` asks for. Kept as an explicit list rather than
@@ -297,7 +311,8 @@ class TestAssuranceAxisSupportedVersionHandling:
         assert code == 0
         expected = (
             "contradictory"
-            if rq.parse_schema_version(version) >= rq.ASSURANCE_CONTRIBUTION_SINCE
+            if rq.parse_schema_version(version)
+            >= rq.ASSURANCE_CONTRIBUTION_SINCE["report_schema_version"]
             else "absent_legacy_schema"
         )
         assert out.strip() == expected, f"{version}: expected {expected}"
@@ -558,6 +573,61 @@ class TestAnnotationsCannotForgeAWorkflowCommand:
         assert code == 0
         assert out.strip() == "::error title=t::a real finding"
 
+    def test_the_cap_and_severity_order_hold_on_real_entries(
+        self, tmp_path: Path
+    ) -> None:
+        """The cap and the ordering, on entries that actually survive the filter.
+
+        Its sibling below generates only entries the filter drops (every
+        `INJECTION_PAYLOADS` string either carries an embedded newline or has no
+        valid `::level ` prefix), so its `len(emitted) <= MAX_ANNOTATIONS`
+        assertion is vacuous — a slice-before-sort regression would pass it
+        (CodeRabbit review). This one builds well-formed entries past the cap
+        and checks what the cap is actually for: `_annotations` sorts by
+        severity *then* truncates, so the tail dropped is the least important,
+        never a real error.
+        """
+        entries = []
+        # Deliberately notice-first in input order, so a truncate-before-sort
+        # implementation would drop the errors and keep the notices.
+        for level in ("notice", "warning", "error"):
+            for index in range(rq.MAX_ANNOTATIONS):
+                entries.append(
+                    {
+                        "level": level,
+                        "annotation": f"::{level} title=t::{level}-{index}",
+                        "always_visible": True,
+                    }
+                )
+        _, out = _ask(tmp_path, {"annotations": entries}, "annotations", "1")
+        emitted = [line for line in out.split("\n") if line]
+        assert len(emitted) == rq.MAX_ANNOTATIONS, len(emitted)
+        # Every surviving line is an error: there are MAX_ANNOTATIONS of those
+        # and they sort first, so nothing less severe may occupy a slot.
+        assert all(line.startswith("::error ") for line in emitted), emitted
+        assert not any("notice-" in line for line in emitted), emitted
+
+    def test_severity_order_is_preserved_across_a_truncated_mix(
+        self, tmp_path: Path
+    ) -> None:
+        # A mix that does not saturate one level, so the assertion is about the
+        # ordering itself rather than only about which level wins.
+        entries = [
+            {
+                "level": level,
+                "annotation": f"::{level} title=t::{level}",
+                "always_visible": True,
+            }
+            for level in ("notice", "warning", "error", "notice", "error")
+        ]
+        _, out = _ask(tmp_path, {"annotations": entries}, "annotations", "1")
+        emitted = [line for line in out.split("\n") if line]
+        levels = [line.split(" ", 1)[0].removeprefix("::") for line in emitted]
+        assert levels == sorted(
+            levels, key=lambda level: rq._ANNOTATION_ORDER[level]
+        ), levels
+        assert levels.count("error") == 2 and levels.count("notice") == 2, levels
+
     def test_every_emitted_line_is_one_line_and_correctly_prefixed(
         self, tmp_path: Path
     ) -> None:
@@ -701,3 +771,149 @@ class TestARecognizedResultIsRequired:
         code, out = _ask(tmp_path, {"error": "x"}, "severity_exit")
         assert code == 0
         assert out.strip() == "0"
+
+
+class TestTheAuditOnlyAssuranceShape:
+    """An audit-only (`--no-baseline`) document carries assurance differently.
+
+    Two independent defects, both from treating the compare shape as the only
+    one (Codex review, P2):
+
+    * the assurance *block* lives at ``run_outcome.assurance``, not at a
+      top-level ``analysis_assurance``, so "was assurance evaluated?" answered
+      no and the axis accepted the report;
+    * ``audit_report_schema_version`` runs its own 1.x sequence, and comparing
+      it against the compare sequence's ``(2, 40)`` made every audit document
+      look older than a field it has carried since its first release. A lost
+      contribution therefore read as "legacy, accept" rather than as the
+      contradiction it is.
+    """
+
+    def _audit(self, **extra: object) -> dict:
+        # The real shape: `no_baseline: True`, a null top-level verdict, the
+        # rollup under run_outcome, and the contribution under exit_axes.
+        document: dict = {
+            "no_baseline": True,
+            "verdict": None,
+            "audit_report_schema_version": "1.5",
+            "run_outcome": {
+                "schema_version": "1.0",
+                "assurance": {"status": "complete"},
+            },
+        }
+        document.update(extra)
+        return document
+
+    def test_a_lost_contribution_is_contradictory_not_legacy(
+        self, tmp_path: Path
+    ) -> None:
+        _, out = _ask(tmp_path, self._audit(), "assurance_axis")
+        assert out.strip() == "contradictory"
+
+    @pytest.mark.parametrize("value,expected", ((1, "gated"), (0, "not_gated")))
+    def test_the_contribution_under_exit_axes_is_read(
+        self, tmp_path: Path, value: int, expected: str
+    ) -> None:
+        _, out = _ask(
+            tmp_path,
+            self._audit(exit_axes={"analysis_assurance": value}),
+            "assurance_axis",
+        )
+        assert out.strip() == expected
+
+    def test_an_audit_report_predating_the_field_is_still_legacy(
+        self, tmp_path: Path
+    ) -> None:
+        # The negative control on the audit sequence: 1.0 was never released,
+        # so this is the only version below the threshold -- and it must not be
+        # failed.
+        document = self._audit()
+        document["audit_report_schema_version"] = "1.0"
+        _, out = _ask(tmp_path, document, "assurance_axis")
+        assert out.strip() == "absent_legacy_schema"
+
+    def test_an_audit_version_is_never_measured_against_the_compare_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        # The bug stated directly: every real audit version is below (2, 40)
+        # numerically, so if the sequences were conflated each of these would
+        # read as legacy and accept a lost contribution.
+        for version in ("1.1", "1.2", "1.3", "1.4", "1.5", "1.99"):
+            document = self._audit()
+            document["audit_report_schema_version"] = version
+            _, out = _ask(tmp_path, document, "assurance_axis")
+            assert out.strip() == "contradictory", f"audit {version} read as legacy"
+
+    def test_a_compare_report_carrying_only_run_outcome_assurance_is_covered(
+        self, tmp_path: Path
+    ) -> None:
+        # `run_outcome.assurance` is not audit-only -- a compare report carries
+        # it too, so the same placement must count there.
+        _, out = _ask(
+            tmp_path,
+            {
+                "report_schema_version": "4.4",
+                "verdict": "COMPATIBLE",
+                "run_outcome": {"assurance": {"status": "complete"}},
+            },
+            "assurance_axis",
+        )
+        assert out.strip() == "contradictory"
+
+    def test_a_null_run_outcome_assurance_means_none_was_evaluated(
+        self, tmp_path: Path
+    ) -> None:
+        # `run_outcome.assurance` is null for any writer with no rollup of its
+        # own, which is the common case -- it must not be read as "evaluated",
+        # or every such report would fail.
+        _, out = _ask(
+            tmp_path,
+            {
+                "report_schema_version": "4.4",
+                "verdict": "COMPATIBLE",
+                "run_outcome": {"assurance": None, "gate": "none"},
+            },
+            "assurance_axis",
+        )
+        assert out.strip() == "absent_legacy_schema"
+
+
+class TestAMalformedButLoadableReportFailsQuietly:
+    """A crash inside a query must become exit 1, with nothing on stderr.
+
+    `run.sh` runs the reader under `2>/dev/null`, so a traceback there is
+    invisible in production — which is exactly why it must not happen: the
+    silent channel is what made the heredoc's own crash-to-exit-1 behavior
+    survivable, and the extracted module has to keep it deliberately rather
+    than by accident. These fixtures parse fine and are report-shaped; they
+    only hold a wrong *type* where a query iterates (CodeRabbit review).
+    """
+
+    @pytest.mark.parametrize(
+        "document,query",
+        (
+            ({"severity": {"blocking_categories": 1}}, "blocking_categories"),
+            ({"severity": {"blocking_categories": True}}, "blocking_categories"),
+            ({"verdict": "X", "contract_coverage_failures": 5}, "coverage_where"),
+            ({"comparison_scope": {"unchecked": 7}}, "scope_where"),
+            ({"verdict": "X", "analysis_assurance": {"notes": 3}}, "assurance_notes"),
+        ),
+    )
+    def test_exit_one_and_no_traceback(
+        self, tmp_path: Path, document: dict, query: str
+    ) -> None:
+        code, out, err = _ask_full(tmp_path, document, query)
+        assert code == 1, f"{query}: expected the cannot-tell exit, got {code}"
+        assert out == "", f"{query}: printed {out!r} from a malformed field"
+        assert err == "", f"{query}: leaked to stderr: {err!r}"
+
+    def test_a_well_typed_sibling_still_answers(self, tmp_path: Path) -> None:
+        # The control: the same queries on well-typed fields must answer
+        # normally, or "fails quietly" would be satisfiable by never answering.
+        code, out, err = _ask_full(
+            tmp_path,
+            {"severity": {"blocking_categories": ["addition", "quality"]}},
+            "blocking_categories",
+        )
+        assert (code, err) == (0, "")
+        assert out.strip() == "addition, quality"

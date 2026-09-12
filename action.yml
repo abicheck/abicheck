@@ -981,6 +981,13 @@ outputs:
       here since that config key applies to both compare shapes;
       not a two-sided compatibility verdict either, since no baseline was
       compared -- fails the step unconditionally),
+      REPORT_UNREADABLE (reachable on this shape too, for the same reason
+      and with the same meaning as in the two-sided enumeration above: an
+      exit-0 run whose requested JSON report was missing, unusable, or
+      self-contradictory establishes no result, and an audit's AUDIT_CLEAN/
+      AUDIT_RISK are results like any other. Listed here explicitly because
+      the enumerations are read per shape and this value was documented only
+      above, leaving the audit-only contract incomplete),
       NOT_COMPARABLE (two-sided shape only, with the old-library or
       abi-baseline input: when the candidate and baseline were not
       extracted under a comparable profile/scope contract -- ADR-050 D2 --
