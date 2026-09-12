@@ -81,6 +81,14 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "var_removed": "L0",
     "versioned_symbol_scheme_detected": "L0",  # bulk removed↔added churn in the export table
     "func_visibility_changed": "L0",
+    # The data-symbol counterpart: the export table is L0 evidence, and the
+    # declaration half it is compared against does not raise the tier (the
+    # finding fires on the export fact alone -- compare/export_transition.py).
+    "var_visibility_changed": "L0",
+    # Both export-gain kinds read the same L0 export table their loss-side
+    # mirrors do; the declaration half does not raise the tier either.
+    "func_export_added": "L0",
+    "var_export_added": "L0",
     "func_language_linkage_changed": "L0",
     "soname_missing": "L0",
     "macho_cpu_type_changed": "L0",

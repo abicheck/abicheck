@@ -127,12 +127,14 @@
   "functions": [
     {
       "access": "public",
+      "binary_exported_fact": null,
       "contract_attributes": null,
       "contract_attributes_fact": {
         "diagnostics": [],
         "status": "not_collected",
         "value": null
       },
+      "declared_in_headers_fact": null,
       "deleted_from_dwarf": false,
       "deprecated": null,
       "deprecated_fact": {
@@ -159,6 +161,7 @@
         "status": "not_collected",
         "value": null
       },
+      "in_public_contract_fact": null,
       "is_compiler_generated": null,
       "is_compiler_generated_fact": {
         "diagnostics": [],
@@ -231,7 +234,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 45,
+  "schema_version": 46,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

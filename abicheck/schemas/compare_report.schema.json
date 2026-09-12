@@ -2414,6 +2414,26 @@
           "type": "string",
           "description": "Schema 3.14: a human-readable demangling of `symbol`/`old_value`, present only on a func_removed_elf_only finding, or a var_removed finding whose old-side variable is elf_only-visibility \u2014 the one case where the old-side declaration has no header-derived pretty name to source one from, so `symbol`/`old_value` stay the raw mangled spelling. Omitted for every other finding, including a header-backed removal (whose old_value is already demangled text) and any case where demangling the mangled name produces nothing new. `symbol`/`old_value` themselves are never demangled (machine formats keep raw symbols for matching); this field is the one deliberate exception."
         },
+        "surface_facts": {
+          "type": "object",
+          "description": "Schema 4.4: the three independent surface facts this finding's declaration carried, each \"true\"/\"false\"/\"unknown\" \u2014 `declared_in_headers` (a header this run parsed declares it), `in_public_contract` (it belongs to the promised public surface for this run's scope/contract selection) and `binary_exported` (the artifact's export table carries a symbol for it). They are independent: a public inline function is declared and promised but not exported, and a version-script change flips only the last. Present only on a finding with one declaration behind it, and complete whenever present \u2014 \"unknown\" is stated explicitly rather than omitted, since an absent key is what a reader mistakes for a negative.",
+          "properties": {
+            "declared_in_headers": {
+              "type": "string",
+              "enum": ["true", "false", "unknown"]
+            },
+            "in_public_contract": {
+              "type": "string",
+              "enum": ["true", "false", "unknown"]
+            },
+            "binary_exported": {
+              "type": "string",
+              "enum": ["true", "false", "unknown"]
+            }
+          },
+          "required": ["declared_in_headers", "in_public_contract", "binary_exported"],
+          "additionalProperties": false
+        },
         "cross_source_evolution": {
           "type": "string",
           "description": "Schema 3.7 (ADR-068 D3/D4/D5): present only on a finding produced by compare()'s automatic cross-source stage (no opt-in flag) evaluating a cross-source hygiene check independently on OLD and NEW. 'introduced' \u2014 absent on OLD (OLD evidence sufficient to say so), present on NEW. 'resolved' \u2014 present on OLD, absent on NEW. 'persistent' \u2014 present on both. 'not_evaluated' \u2014 at least one side's evidence could not answer the question, so neither introduced/resolved/persistent can be asserted (mandatory, not a convenience \u2014 never infer 'introduced' from missing baseline evidence). Purely descriptive: never changes this finding's severity/verdict. Not to be confused with the top-level `finding_evolution` object, which tracks a finding's identity across a *chain* of separate compare() calls over time.",

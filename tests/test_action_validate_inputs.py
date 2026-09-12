@@ -496,9 +496,7 @@ class TestFormatIsHardErrorNotSilentFallback:
         assert result.returncode == 0, result.stdout + result.stderr
 
     @pytest.mark.parametrize("fmt", ["html", "review"])
-    def test_audit_only_compare_rejects_two_sided_only_formats(
-        self, fmt: str
-    ) -> None:
+    def test_audit_only_compare_rejects_two_sided_only_formats(self, fmt: str) -> None:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
@@ -650,15 +648,26 @@ class TestCompareFormatAllowlists:
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
 class TestCompareFormatAllowlistMatchesCli:
-    """Drift guard: validate-inputs.sh hardcodes two format allowlists for
-    compare (single-pair, and directory/package). Parse them out of the
-    script and cross-check against the live CLI's actual choices -- click's
-    own Choice.choices for the single-pair set (introspected directly rather
-    than scraped from --help-all's output, which rich-click hard-wraps
-    mid-word inside its option table at this terminal width) and
-    the compare command module's _RELEASE_FORMATS constant for the release-style set --
-    so a future CLI format addition/removal doesn't silently desync the
-    Action's fail-fast validator from what the CLI really accepts."""
+    """Drift guard for the format allowlist validate-inputs.sh **still**
+    hardcodes.
+
+    It used to guard two: the single-pair set (all of ``compare --format``'s
+    choices) and the directory/package subset. The single-pair half is gone
+    from this class because its subject is gone -- ADR-070 D3 / plan Phase 3b
+    replaced that seven-way ``"$FORMAT" != "x"`` chain with a lookup into
+    `action/cli-surface.txt`, generated from the live ``click.Choice`` set and
+    gated by ``scripts/verify.py``'s ``action-cli-surface`` step. Its
+    replacement coverage lives in
+    ``tests/test_action_cli_surface_generated.py``, which additionally
+    executes the script rather than parsing it.
+
+    The **directory/package** half stays, and is the more interesting one: it
+    is not a choice set but a claim about which renderers a release-style
+    comparison supports, cross-checked here against the compare command
+    module's own ``_RELEASE_FORMATS``. Phase 3b deliberately does not
+    generate it -- deriving a restriction mirror would dress it up as a
+    derived fact -- so it remains a transcription, and therefore still needs
+    this source-parsing guard until ADR-070 D1/D2 resolve the mirror itself."""
 
     def _extract_allowlist(self, fail_marker: str) -> set[str]:
         """The `"$FORMAT" != "x"` chain in the `if`/`elif [[ ... ]]` block
@@ -672,21 +681,6 @@ class TestCompareFormatAllowlistMatchesCli:
             start -= 1
         condition_text = " ".join(lines[start : fail_idx + 1])
         return set(re.findall(r'"\$FORMAT" != "([a-z]+)"', condition_text))
-
-    def test_single_pair_allowlist_matches_cli(self) -> None:
-        validator_formats = self._extract_allowlist(
-            "only 'json', 'markdown', 'sarif', 'html', 'junit', 'review', and 'oneline'"
-        )
-        from abicheck.cli import main as abicheck_main
-
-        fmt_param = next(
-            p for p in abicheck_main.commands["compare"].params if p.name == "fmt"
-        )
-        cli_formats = set(fmt_param.type.choices)
-        assert validator_formats == cli_formats, (
-            f"validate-inputs.sh's single-pair compare allowlist {sorted(validator_formats)} "
-            f"has drifted from the live CLI's {sorted(cli_formats)}"
-        )
 
     def test_release_style_allowlist_matches_cli_constant(self) -> None:
         validator_formats = self._extract_allowlist(

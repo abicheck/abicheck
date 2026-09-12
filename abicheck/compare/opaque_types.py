@@ -47,7 +47,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..diff_helpers import depth_aware_bare_name
-from ..diff_symbols import _PUBLIC_VIS
 from ..model.identity_tiers import (
     SnapshotLocalIdentity,
     StableEntityId,
@@ -58,6 +57,7 @@ from ..model.qualified_name_split import (
     enclosing_close_positions,
     skip_template_arguments,
 )
+from ..model.surface_facts import is_abi_visible
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -688,7 +688,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
     """Return the subset of *opaque* types that any public function/variable uses by value."""
     by_value_types: set[str] = set()
     for func in snap.functions:
-        if func.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(func):
             continue
         rt = func.return_type.strip()
         for tname in opaque:
@@ -705,7 +705,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
                     by_value_types.add(tname)
     # Also check variables — a public variable of this type means it's by-value
     for var in snap.variables:
-        if var.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(var):
             continue
         vt = var.type.strip()
         for tname in opaque:

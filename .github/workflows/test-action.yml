@@ -573,6 +573,55 @@ jobs:
             exit 1
           fi
 
+  test-extra-args-value-shaped-like-a-flag:
+    name: 'extra-args: a value spelled like a flag is not read as one'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      # The one end-to-end cell for ADR-070 D3 (plan Phases 3a/5). `run.sh`
+      # derives which CLI options take a value from the INSTALLED abicheck; the
+      # shell unit tests drive that derivation through sourced functions, which
+      # cannot see anything only a real runner produces -- `INPUT_*` quoting, and
+      # the `CMD+=($INPUT_EXTRA_ARGS)` word-split under a live IFS.
+      #
+      # `--version --dry-run` is the discriminating input, and it is the exact
+      # counterexample that disproved this ADR's first design (Codex review, PR
+      # #1234): Click accepts it by consuming `--dry-run` as `--version`'s own
+      # value, leaving `dry_run=False` and running a full comparison. A correct
+      # derivation therefore sees NO dry-run flag, injects its report sidecar,
+      # and publishes a real verdict. A tokenizer that mis-reads it -- the old
+      # hand-maintained list, or an opaque-token fallback -- reports a dry run,
+      # skips the sidecar, and publishes DRY_RUN while a real comparison ran.
+      # So the assertion below fails loudly on precisely that regression.
+      - name: Run compare with a flag-shaped --version value in extra-args
+        id: abi
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v1_compat.json
+          extra-args: --version --dry-run
+          install-deps: false
+
+      - name: Verify the run was not mistaken for a dry run
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
+          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
+          if [[ "${{ steps.abi.outputs.verdict }}" == "DRY_RUN" ]]; then
+            echo "::error::extra-args '--version --dry-run' was read as a real --dry-run flag. The CLI consumes --dry-run as --version's value and runs a full comparison, so the value-taking-option derivation in run.sh (_cli_value_options_init) is wrong or fell back to treating every token as opaque. See ADR-070 D3."
+            exit 1
+          fi
+          # A real comparison of these two fixtures is compatible, so the
+          # verdict must be the ordinary one -- not an error, and not a preview.
+          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
+            echo "::error::Expected verdict COMPATIBLE from a real comparison, got '${{ steps.abi.outputs.verdict }}'"
+            exit 1
+          fi
+
   test-compare-audit-only-gates-with-severity-preset:
     name: 'Compare: audit-only gating requires severity-preset (the audit-gate migration trap)'
     runs-on: ubuntu-latest
@@ -764,6 +813,7 @@ jobs:
       - test-compare-audit-only
       - test-compare-audit-only-dry-run
       - test-compare-audit-only-gates-with-severity-preset
+      - test-extra-args-value-shaped-like-a-flag
       - test-dependency-source-conda-forge
       - test-dependency-source-none-and-legacy-alias
     runs-on: ubuntu-latest

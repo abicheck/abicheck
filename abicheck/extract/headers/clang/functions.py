@@ -88,7 +88,7 @@ from .context import (
     source_location as _source_location,
     strip_darwin_itanium_decoration as _strip_darwin_itanium_decoration,
     symbol_candidates as _symbol_candidates,
-    visibility as _visibility,
+    visibility_and_surface_facts as _visibility_and_surface_facts,
 )
 from .param_kind import param_kind as _param_kind
 from .return_type import return_type as _return_type
@@ -608,19 +608,21 @@ def parse_functions(
         is_const = bool(re.search(r"\bconst\b", quals))
         is_volatile = bool(re.search(r"\bvolatile\b", quals))
         is_variadic = bool(node.get("variadic")) or "..." in qualtype
+        vis, surface_facts = _visibility_and_surface_facts(
+            exported_dynamic,
+            exported_static,
+            str(node.get("mangledName", "")),
+            name,
+            no_binary_evidence=no_binary_evidence,
+        )
         funcs.append(
             Function(
                 name=name,
                 mangled=mangled,
                 return_type=ret_type,
                 params=params,
-                visibility=_visibility(
-                    exported_dynamic,
-                    exported_static,
-                    str(node.get("mangledName", "")),
-                    name,
-                    no_binary_evidence=no_binary_evidence,
-                ),
+                visibility=vis,
+                **surface_facts,
                 # bool(node.get("virtual")) alone misses a signature-
                 # matched override with neither `virtual` nor `override`
                 # written -- clang's JSON gives no direct signal for that

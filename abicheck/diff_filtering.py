@@ -39,10 +39,11 @@ from .diff_helpers import (
     depth_aware_bare_name,
     record_canonical_names,
 )
-from .diff_symbols import _PUBLIC_VIS, _public_functions
+from .diff_symbols import _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import is_abi_visible
 
 # Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
 # opaque-type indices, their construction, and the struct-downgrade
@@ -1032,7 +1033,7 @@ def _public_function_uses_type_by_value(
 ) -> bool:
     """True if any PUBLIC function uses the type (matched by *bare_re*) by value."""
     for f in snap.functions:
-        if f.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(f):
             continue
         if _type_used_by_value(f.return_type, bare_re):
             return True
@@ -1047,7 +1048,7 @@ def _public_variable_uses_type_by_value(
 ) -> bool:
     """True if any PUBLIC variable uses the type (matched by *bare_re*) by value."""
     for v in snap.variables:
-        if v.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(v):
             continue
         if _type_used_by_value(v.type, bare_re):
             return True
@@ -1101,7 +1102,7 @@ def _has_public_pointer_factory(
         if _factory_re_cache is not None:
             _factory_re_cache[type_name] = factory_re
     for f in snap.functions:
-        if f.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(f):
             continue
         rt = f.return_type or ""
         if factory_re.search(rt) and "&" not in rt:
@@ -1184,7 +1185,7 @@ def _opaque_usage_index(
     ac = _SubstringMatcher(candidates)
 
     for f in snap.functions:
-        if f.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(f):
             continue
         _record_factory_returns(f.return_type, ac, factory_re_cache, has_factory)
         _record_by_value_uses(f.return_type, ac, bare_re_cache, used_by_value)
@@ -1192,7 +1193,7 @@ def _opaque_usage_index(
             _record_by_value_uses(p.type, ac, bare_re_cache, used_by_value)
 
     for v in snap.variables:
-        if v.visibility not in _PUBLIC_VIS:
+        if not is_abi_visible(v):
             continue
         _record_by_value_uses(v.type, ac, bare_re_cache, used_by_value)
 

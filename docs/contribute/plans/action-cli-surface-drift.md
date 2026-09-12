@@ -1,7 +1,9 @@
 # Action-vs-CLI surface drift: audit and prevention
 
-**Status:** Audit complete (2026-09-12). Phases 1 and 3a landed; ADR-070
-drafted (Proposed). Phases 2, 3b, 4 and 5 proposed, not started.
+**Status:** Audit complete (2026-09-12). Phases 1, 3a, 3b and 4 landed;
+ADR-070 accepted (D3 implemented, D1/D2/D4 partly). Phase 2 blocked on the
+separate task owning the two drifted guards; Phase 5 assessed and deferred
+(see its section for why, and what would change that).
 
 **Problem.** The composite GitHub Action (`action/`, `actions/check-target/`)
 is a hand-maintained adapter over the abicheck CLI. It encodes, in shell, a
@@ -559,42 +561,102 @@ warns about, so `_cli_introspection_prelude()` was added and wired into all
 four script-assembly sites (one of which, `_run_predicate`, was missed on the
 first pass and caught by four failing tests).
 
-### Phase 3b — A generated artifact for the genuinely pre-install facts
+### Phase 3b — A generated artifact for the genuinely pre-install facts *(landed)*
 
-Unchanged and still open, deliberately small: `validate-inputs.sh`'s format
-choice sets (`compare`'s seven, `deps`' three, `--compression`'s four) are the
-only CLI facts needed before install. They already AGREE (A3), so this is
-drift *prevention*, not a fix — a `scripts/gen_action_cli_surface.py --check`
-emitting a flat `action/cli-surface.txt`, wired as a `Step` in
-`scripts/verify.py`'s catalog. **Defensible to defer:** three `click.Choice`
-sets that have never drifted may not earn a generator and a gate.
+`scripts/gen_action_cli_surface.py` → `action/cli-surface.txt`, a flat
+`CHOICE <mode> <option> <value>` file read with `grep -qxF`. `--check` is
+wired as `scripts/verify.py`'s `action-cli-surface` step and invoked by
+`ci.yml`'s `ai-readiness` job (`tests/test_verify_profiles.py` enforces that a
+`pr`-profile step is reachable from a CI job, which caught it when it wasn't).
 
-### Phase 4 — Pin guard justifications to CLI symbols (B4)
+`validate-inputs.sh` now derives three checks that were transcribed:
+`compare --format`'s seven values, `deps tree`/`deps compare --format`'s three,
+and `dump --compression`'s four. Its error messages are generated from the same
+file, so a message cannot name a different set than the check used — which was
+the original defect in this area.
 
-- A `cli-mirror` annotation convention for every surviving guard that names a
-  CLI symbol, plus an `ai-readiness` check resolving each reference.
-- Fix the 5 STALE-COMMENT sites as the first consumers.
-- Document explicitly, in the check's own docstring, that symbol existence is
-  **not** behavioural agreement — B4's limitation is the thing most likely to
-  be forgotten, and a gate that is trusted for more than it proves is worse
-  than no gate.
+**What is deliberately NOT generated, and why it matters.** The same script
+enforces two narrower format sets — `json|markdown|junit` for a
+directory/package compare, and `json|markdown|sarif|junit|oneline` for
+`--no-baseline`. Those are not choice sets. They are claims about which
+renderer a particular comparison *shape* supports, i.e. restriction mirrors in
+ADR-070 D1/D2's sense. Generating them would require modelling renderer
+capability per shape — exactly the CLI semantics the Action should stop
+re-implementing — and would dress a mirror up as a derived fact, which is worse
+than leaving it visible. They stay transcribed, and
+`tests/test_action_validate_inputs.py`'s remaining source-parsing guard keeps
+watching the release-style one until Phase 2 resolves the mirror itself.
 
-### Phase 5 — Curated behavioural cells (B3, optional)
+A missing or unreadable surface file fails loudly rather than accepting
+anything: treating it as "accept everything" would turn a packaging mistake
+into silently skipped validation, the failure class this ADR exists to remove.
 
-One `test-action.yml` cell per surviving CLI-justified guard, asserting the
-Action's decision and the CLI's decision agree. Only worth it after Phase 2
-shrinks the guard set to something enumerable.
+### Phase 4 — Pin guard justifications to CLI symbols *(landed)*
 
-This is also the phase that would earn
-`cli_surface.copied_option_table_went_stale` a real `public_surfaces` entry.
-That field is `()` today and must stay so (Codex review, PR #1234): its
-contract reserves `github-action` for "a real execution of a
-workflow/composite-action step", and Phase 1's seed tests read the shells'
-source and call individually sourced helper functions instead. The class of
-defect that gap leaves uncovered is specifically the one only the real
-runner shows — `INPUT_*` quoting, and `CMD+=($INPUT_EXTRA_ARGS)`'s word-split
-under a live IFS — so one `extra-args` cell whose value resembles a flag
-would buy more than its cost even before the rest of Phase 5.
+Convention: `# cli-mirror: <repo-relative-path>::<symbol>`. The
+`action-cli-mirror` AI-readiness check (`scripts/action_cli_mirror.py`, a
+sibling leaf module since `check_ai_readiness.py` is past the 2000-line cap)
+resolves every one — the file must exist and must genuinely *define* the symbol
+(`def`/`class`/assignment), not merely mention it in prose.
+
+First consumers are the four stale citations the audit found (A5): `run.sh`'s
+comments naming `abicheck/cli_scan.py` and `scan_engine`, deleted with
+ADR-068's retirement of `scan`, now pointing at
+`policy/exit_decision_precedence.py::EXIT_EVIDENCE_CONTRACT_ERROR`,
+`cli_compare_fold.py::_exit_on_budget_overflow` and
+`policy/exit_decision.py::ExitDecision`, each with a note recording what it
+used to cite.
+
+**The limitation, stated here and pinned as a test.** Symbol *existence* is
+much weaker than symbol *behaviour*. Both release-operand drifts this audit
+found live inside functions that still exist and merely reject less than they
+used to — this gate would have passed on both, before and after. It guards
+citations from rotting; it is not evidence that a mirrored restriction is
+accurate, and it is no substitute for Phases 2 and 5.
+`tests/test_action_cli_mirror.py::TestTheGatesDocumentedLimit` asserts exactly
+that, so a future reader who assumes otherwise meets a failing expectation
+rather than a comment they might not read.
+
+Non-mandatory by design: the check validates the annotations that exist rather
+than demanding one per guard. A sweep adding ~20 unreviewed annotations would
+be the unverified bulk `AGENTS.md` warns against, and each annotation added is
+permanently load-bearing.
+
+### Phase 5 — Curated behavioural cells: one landed, the rest deferred
+
+**Assessed, not skipped.** The bulk of B3 — one cell per surviving
+CLI-justified guard — is **deferred**, and the reason is ordering rather than
+cost: those guards are what Phase 2 *deletes*. Writing cells for them now means
+writing tests for code scheduled for removal, and ADR-070's own alternatives
+section already orders this after D1/D2 shrink the guard set to something
+enumerable. What unblocks it is Phase 2 landing, not more effort here.
+
+**One cell landed, because it is the exception that pays for itself.**
+`test-extra-args-value-shaped-like-a-flag` in `.github/workflows/test-action.yml`
+runs the composite Action with `extra-args: --version --dry-run` against two
+stored snapshot fixtures (`install-deps: false`, so it is one of the cheap
+cells).
+
+It earns its place on three counts the unit tests cannot cover:
+
+1. **It is the only end-to-end evidence for Phase 3a.** Every other test drives
+   the derivation through sourced shell functions, which by construction cannot
+   see what only a real runner produces — `INPUT_*` quoting, and
+   `CMD+=($INPUT_EXTRA_ARGS)`'s word-split under a live IFS.
+2. **Its input is the counterexample that disproved D3's first design.** Click
+   consumes `--dry-run` as `--version`'s value and runs a full comparison, so a
+   correct derivation publishes a real verdict while a mis-reading tokenizer —
+   the old hand-maintained list, or an opaque-token fallback — publishes
+   `DRY_RUN` after a real comparison ran. The assertion fails on precisely that
+   regression rather than on a proxy.
+3. **It is what would earn the bug class a real `public_surfaces` entry.**
+   `cli_surface.copied_option_table_went_stale` records `()` because no seed
+   test executes a workflow/composite-action step. This cell is one; promoting
+   the field is a follow-up once it has run green, deliberately not claimed in
+   advance.
+
+It is wired into the `test-action summary` job's `needs` list, without which it
+would gate nothing — and that list is now complete over the workflow's jobs.
 
 ---
 

@@ -133,6 +133,10 @@ from ..buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
 from ..model.export_index import build_raw_export_index, default_versioned_names
+from ..model.surface_facts import (
+    headers_discarded_surface_facts,
+    is_export_confirmed_absent,
+)
 
 if TYPE_CHECKING:
     from ..buildsource.pack import BuildSourcePack
@@ -333,18 +337,34 @@ def _strip_header_and_above_evidence(
     if dwarf_sourced is None:
         dwarf_sourced = _structural_facts_are_dwarf_confirmed(snap)
 
-    snap.functions = [f for f in snap.functions if f.visibility != Visibility.HIDDEN]
-    snap.variables = [v for v in snap.variables if v.visibility != Visibility.HIDDEN]
+    # A confirmed non-export -- the fact, not the conflated enum: a
+    # declaration no binary-only view could ever have seen.
+    snap.functions = [f for f in snap.functions if not is_export_confirmed_absent(f)]
+    snap.variables = [v for v in snap.variables if not is_export_confirmed_absent(v)]
     exported = _exported_symbol_names(snap)
     if exported is not None:
         snap.functions = [f for f in snap.functions if f.mangled in exported]
         snap.variables = [v for v in snap.variables if v.mangled in exported]
+    # Projecting to a binary-only view *discards* the header evidence; it
+    # does not disprove it. So the two header-derived surface facts go back
+    # to unknown rather than to a confirmed negative -- a projected
+    # snapshot must read "public declaration not established", never "no
+    # declaration" (model/surface_facts.py). The export fact is untouched:
+    # it never came from a header, and the filter just above already
+    # required a real export-table entry.
+    discarded = headers_discarded_surface_facts(
+        reason="header evidence discarded by evidence-depth projection"
+    )
     for f in snap.functions:
         f.visibility = Visibility.ELF_ONLY
         f.origin = ScopeOrigin.UNKNOWN
+        for fact_name, fact in discarded.items():
+            setattr(f, fact_name, fact)
     for v in snap.variables:
         v.visibility = Visibility.ELF_ONLY
         v.origin = ScopeOrigin.UNKNOWN
+        for fact_name, fact in discarded.items():
+            setattr(v, fact_name, fact)
 
     if dwarf_sourced:
         for t in snap.types:

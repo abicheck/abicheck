@@ -31,11 +31,14 @@ Phase 5 section for the design this page's data comes from.
 | `EnumType.is_scoped` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.binary_exported` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.declared_in_headers` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.in_public_contract` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_explicit` | `bool \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -66,8 +69,11 @@ Phase 5 section for the design this page's data comes from.
 | `TypeField.is_volatile` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.access` | `AccessLevel` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.binary_exported` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.declared_in_headers` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.in_public_contract` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))

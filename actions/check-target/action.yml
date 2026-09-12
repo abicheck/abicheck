@@ -966,9 +966,18 @@ runs:
         # nothing to tokenize there is no decision to get wrong, so a runner
         # whose interpreter cannot import abicheck keeps working for every
         # invocation that does not use the escape hatch.
+        # NB `$EXTRA_ARGS`, not `$INPUT_EXTRA_ARGS`: this step receives the
+        # input under its own name (see this step's `env:` block), and every
+        # other consumer here reads `$EXTRA_ARGS` too. The first revision of
+        # this guard was transplanted from run.sh unchanged and tested
+        # `$INPUT_EXTRA_ARGS`, which is never set in this step -- so the guard
+        # always succeeded and check-target silently kept the unsafe
+        # opaque-token behaviour the fail-closed fix exists to remove (Codex
+        # review, PR #1234). Exactly the copy-without-rechecking failure
+        # ADR-070 is about, committed inside the fix for it.
         _ct_require_cli_value_options_or_fail() {
           [[ "${_ct_cli_value_options_derived:-false}" == "true" ]] && return 0
-          [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
+          [[ -z "${EXTRA_ARGS:-}" ]] && return 0
           echo "::error::extra-args is set, but this step cannot determine which abicheck compare options take a value, so it cannot tell a real --config in extra-args from another option's literal value (interpreter: '${PY:-<none resolved>}'; it must be able to import abicheck). Guessing is not safe -- see ADR-070 D3. Install abicheck into this step's interpreter, or remove extra-args." >&2
           exit 1
         }

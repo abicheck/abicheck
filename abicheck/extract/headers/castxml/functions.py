@@ -39,6 +39,7 @@ from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, Fact, Function, Param, Visibility
 from ....model.identity import entity_id_for_function
+from ...surface_fact_producers import header_ast_surface_facts
 from .context import CastxmlParserContext
 from .location import (
     access_level,
@@ -550,6 +551,40 @@ def parse_function_element(
         if el.tag in ("Constructor", "Destructor")
         else visibility(ctx, raw_mangled, name)
     )
+    # The export half of that answer, kept as its own fact (see
+    # ``model/surface_facts.py``): ``None`` when nothing was looked up --
+    # a header-only dump has no export table at all, and the ctor/dtor
+    # fallback above promotes to PUBLIC precisely when castxml gave it no
+    # mangled name to look up. "Not looked up" must stay distinguishable
+    # from "looked up and absent", which is what let a lost export read
+    # as a lost declaration.
+    exported_: bool | None
+    judged_public_ = False
+    if ctx.no_binary_evidence or (
+        el.tag in ("Constructor", "Destructor") and not raw_mangled
+    ):
+        exported_ = None
+    else:
+        # Derived from the **raw lookup**, never from `visibility_`. For an
+        # ordinary function the two agree, but `ctor_or_dtor_visibility` can
+        # promote to PUBLIC on access-level grounds while the lookup found no
+        # symbol -- reading the resolved value there would record an export
+        # that does not exist, the same mistake the DWARF `DW_AT_deleted`
+        # path made (Codex review) in the opposite direction.
+        #
+        # A `.symtab`-only symbol counts as export evidence, matching what
+        # the legacy `Visibility` bridge derives for `ELF_ONLY` and what
+        # `_EXPORTED_VISIBILITIES` meant before the split. The two must
+        # agree, or the same static-only symbol reads as exported from a
+        # pre-v46 snapshot and unexported from a fresh one -- exactly the
+        # vintage-dependent divergence this split exists to remove
+        # (CodeRabbit review).
+        raw_vis_ = visibility(ctx, raw_mangled, name)
+        exported_ = raw_vis_ in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        # The promotion itself is a *contract* judgement, so record it as
+        # one rather than leaving (b) unknown beside a confirmed-absent (c)
+        # -- which is what made `in_public_surface` answer False.
+        judged_public_ = visibility_ is Visibility.PUBLIC and not exported_
 
     # Hoisted so the identity constructor is handed the identical values
     # the model object records, rather than a second, independently
@@ -563,6 +598,9 @@ def parse_function_element(
         return_type=ret_type,
         params=params,
         visibility=visibility_,
+        **header_ast_surface_facts(
+            exported=exported_, judged_public=judged_public_, producer="castxml"
+        ),
         is_virtual=is_virtual,
         is_noexcept=bool(noexcept_re),
         is_extern_c=is_extern_c,

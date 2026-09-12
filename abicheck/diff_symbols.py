@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .checker_types import Change
+from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
@@ -94,10 +95,6 @@ from .diff_symbols_variables import (
     _without_top_level_const,
     var_access_changes,
 )
-from .dumper_castxml import (
-    is_synthetic_ctor_key,
-    is_synthetic_dtor_key,
-)
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -124,7 +121,6 @@ from .model import (
     ParamKind,
     RecordType,
     Variable,
-    Visibility,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
@@ -138,10 +134,23 @@ from .model import (
 # for back-compat.
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import (
+    is_abi_visible,
+    is_export_confirmed_absent,
+    is_export_table_only_record,
+    surface_fact_summary,
+)
 from .name_classification import is_local_rtti_symbol
 
-# Visibility levels that constitute the public ABI surface.
-_PUBLIC_VIS = (Visibility.PUBLIC, Visibility.ELF_ONLY)
+# The public ABI surface is asked as a question now, not matched against a
+# set of enum members: `is_abi_visible` holds for an entity the binary
+# exports *or* one the promised contract carries -- the union the old
+# ``(PUBLIC, ELF_ONLY)`` tuple spelled out, plus the combination the enum
+# could not represent at all (promised, declared, and not exported).
+# The *other* half of the old ``== ELF_ONLY`` test -- "this record came from
+# an export table alone", which is a producer question rather than one of the
+# three facts -- is `is_export_table_only_record`. See model/surface_facts.py
+# for why the split deliberately does not answer that one.
 
 
 # Sentinel the dumper writes for the type/return type of a symbol whose
@@ -210,9 +219,9 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
         k: v
         for k, v in snap.function_map.items()
         if (
-            v.visibility in _PUBLIC_VIS
+            is_abi_visible(v)
             and (
-                v.visibility != Visibility.ELF_ONLY
+                not is_export_table_only_record(v)
                 or is_abi_relevant_elf_symbol(
                     k,
                     filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
@@ -235,26 +244,7 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     return {
         k: v
         for k, v in funcs.items()
-        if (
-            k in exported
-            or (v.name in exported and name_counts.get(v.name) == 1)
-            or (v.is_deleted and not v.deleted_from_dwarf)
-            # A synthetic constructor-overload key (castxml omitted its real
-            # mangled name) can never equal a real exported symbol — it isn't
-            # one, by construction (see dumper_castxml's synthesis comment).
-            # Requiring an ELF match here would always fail and silently drop
-            # a genuinely public, non-deleted constructor overload (case78's
-            # removed / case111's added overload); its visibility was already
-            # resolved from source access when castxml gave no name to check.
-            or is_synthetic_ctor_key(k)
-            # Same reasoning for a synthetic destructor key ("~ClassName",
-            # castxml omitted the real mangled name): it can never equal a
-            # real exported symbol either, so without this a genuinely
-            # public virtual destructor's PUBLIC visibility
-            # (_ctor_or_dtor_visibility) would still be silently dropped
-            # here — necessary but not sufficient (Codex review, PR #582).
-            or is_synthetic_dtor_key(k)
-        )
+        if _export_transition.survives_export_narrowing(k, v, exported, name_counts)
     }
 
 
@@ -270,9 +260,9 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
         k: v
         for k, v in snap.variable_map.items()
         if (
-            v.visibility in _PUBLIC_VIS
+            is_abi_visible(v)
             and (
-                v.visibility != Visibility.ELF_ONLY
+                not is_export_table_only_record(v)
                 or is_abi_relevant_elf_symbol(
                     k,
                     filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
@@ -308,8 +298,12 @@ def _check_removed_function(
     f_hidden = new_all.get(mangled)
     if (
         f_hidden is not None
-        and f_hidden.visibility == Visibility.HIDDEN
-        and not (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
+        # The new side still declares it but no longer exports it -- read
+        # from the export fact, which is exactly this question (and, unlike
+        # the old enum, does not also assert anything about the
+        # declaration). See model/surface_facts.py.
+        and is_export_confirmed_absent(f_hidden)
+        and not (elf_only_mode and is_export_table_only_record(f_old))
     ):
         return make_change(
             ChangeKind.FUNC_VISIBILITY_CHANGED,
@@ -320,10 +314,16 @@ def _check_removed_function(
             # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
             entity_id=f_old.entity_id or f_hidden.entity_id,
+            # The three split facts for the *new* side, which is the side
+            # this finding is about: a reader can see that the declaration
+            # survived and only the export went away, rather than having to
+            # infer it from one conflated enum value (see Change.
+            # surface_facts and model/surface_facts.py).
+            surface_facts=surface_fact_summary(f_hidden),
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
-        if (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
+        if (elf_only_mode and is_export_table_only_record(f_old))
         else ChangeKind.FUNC_REMOVED
     )
     return make_change(
@@ -335,6 +335,10 @@ def _check_removed_function(
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
         entity_id=f_old.entity_id,
         demangled_symbol=_elf_only_demangled_name(mangled, f_old.visibility),
+        # The old side's three facts: whether this removal rests on header
+        # evidence, on the export table, or on neither (see
+        # Change.surface_facts).
+        surface_facts=surface_fact_summary(f_old),
     )
 
 
@@ -746,6 +750,7 @@ def _check_function_signature(
     changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
     changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
     changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
+    changes.extend(_export_transition.check_function(mangled, f_old, f_new))
     return changes
 
 
@@ -838,11 +843,7 @@ def _match_old_function(
     # reporting the same symbol. The castxml-deleted path keeps such functions
     # in new_map and is matched above; this aligns the deleted_from_dwarf path.
     f_new_all = new_all.get(mangled)
-    if (
-        f_new_all is not None
-        and f_new_all.is_deleted
-        and f_new_all.visibility in _PUBLIC_VIS
-    ):
+    if _export_transition.deleted_declaration_is_public(f_new_all, f_old):
         return []
 
     # Fallback by plain name when either side uses extern "C". Only join when
@@ -915,10 +916,9 @@ def _detect_newly_deleted_functions(
             and mangled not in old_exported
         ):
             continue
-        # Skip functions that are not part of the public ABI surface.
-        if f_new.visibility not in _PUBLIC_VIS:
-            continue
         f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
+        if not _export_transition.deleted_declaration_is_public(f_new, f_old_any):
+            continue
         if f_old_any is not None and not f_old_any.is_deleted:
             kind = (
                 ChangeKind.FUNC_DELETED_DWARF
@@ -1185,6 +1185,11 @@ def _check_variable(
     misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
     """
     changes = _check_variable_alignment(mangled, v_old, v_new)
+    # The export axis is independent of every type/qualifier comparison below
+    # and must survive their early returns -- an unknown "?" type on a
+    # stripped side says nothing about whether the symbol is still exported --
+    # so it is folded in first (compare/export_transition.py).
+    changes += _export_transition.check_variable(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
         return changes
@@ -1254,6 +1259,8 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
             demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
+            # See _check_removed_function's identical stamp.
+            surface_facts=surface_fact_summary(v_old),
         )
     ]
 

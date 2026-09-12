@@ -16,7 +16,7 @@
 """ADR-049 ``contract=exports``: the export-rooted evidence provider.
 
 :mod:`abicheck.surface` resolves the *header-derived* public surface
-(ADR-024): roots are :data:`~abicheck.model.Visibility.PUBLIC` declarations,
+(ADR-024): roots are public-surface declarations,
 and a declaration's header origin can demote it. That is exactly ADR-049's
 ``public`` contract domain, and deliberately **not** its ``exports`` domain,
 which is defined as "only exported function/variable roots and closure

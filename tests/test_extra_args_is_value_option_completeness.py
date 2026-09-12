@@ -443,6 +443,72 @@ class TestCheckTargetDerivesTheSameWay:
             f"only real: {sorted(expected - derived)}"
         )
 
+    def _run_guard(self, env_assignments: str) -> subprocess.CompletedProcess[str]:
+        """Execute check-target's derivation + guard with *env_assignments*
+        prepended, so a test can choose which extra-args variable is set."""
+        text = ACTION_YML.read_text(encoding="utf-8")
+        start = text.index('        _ct_cli_value_options=""')
+        end = text.index(
+            "        }\n",
+            text.index("        _ct_require_cli_value_options_or_fail() {"),
+        ) + len("        }\n")
+        body = "\n".join(
+            line[8:] if line.startswith("        ") else line
+            for line in text[start:end].splitlines()
+        )
+        script = (
+            "set -uo pipefail\n"
+            "PY=/nonexistent/python\n"
+            '_py_safe_dir=""\n'
+            + env_assignments
+            + body
+            + "\n_ct_cli_value_options_init\n"
+            "_ct_require_cli_value_options_or_fail\n"
+            "echo CONTINUED\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+        ) as handle:
+            handle.write(script)
+            path = handle.name
+        try:
+            return subprocess.run(
+                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+            )
+        finally:
+            os.unlink(path)
+
+    def test_the_guard_reads_this_steps_own_extra_args_variable(self) -> None:
+        """Regression for a bug introduced *by* the fail-closed fix (Codex
+        review, PR #1234).
+
+        run.sh's guard reads ``$INPUT_EXTRA_ARGS``; this step receives the
+        input as ``$EXTRA_ARGS`` (its own ``env:`` block), and every other
+        consumer in the step reads that name. The guard was transplanted
+        unchanged, so it tested a variable that is never set here -- always
+        empty, always "nothing to tokenize", so the hard failure never fired
+        and check-target silently kept the opaque-token behaviour the fix
+        exists to remove.
+
+        Asserted behaviourally with ``EXTRA_ARGS`` set and
+        ``INPUT_EXTRA_ARGS`` deliberately absent, which is the real shape of
+        that step's environment -- a test that set both would have passed
+        against the bug."""
+        result = self._run_guard('EXTRA_ARGS="--version --config"\n')
+        assert result.returncode == 1, (
+            "check-target's guard did not fail closed with EXTRA_ARGS set; "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "CONTINUED" not in result.stdout
+        assert "::error::" in result.stderr
+
+    def test_the_guard_still_allows_an_empty_extra_args(self) -> None:
+        """Same scoping as run.sh's: nothing to tokenize, nothing to get
+        wrong, so an interpreter that cannot import abicheck is not fatal."""
+        result = self._run_guard('EXTRA_ARGS=""\n')
+        assert result.returncode == 0
+        assert "CONTINUED" in result.stdout
+
     def test_neither_file_carries_a_hand_maintained_option_list_any_more(self) -> None:
         """ADR-070 D3, as an executable check rather than a convention: the
         whole point is that the enumeration is gone. A future PR

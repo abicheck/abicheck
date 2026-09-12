@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
@@ -143,7 +144,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "mid-signature insertion into *them*. What it does not do "
                     "is enumerate every other long-lived entry point in the "
                     "codebase: there is no automatic discovery of "
-                    "\"signatures whose order is load-bearing\", and a naive "
+                    '"signatures whose order is load-bearing", and a naive '
                     "sweep over every public callable would pin churn-prone "
                     "internal helpers and be deleted within a release. "
                     "Extending coverage means adding a signature to the seed "
@@ -1440,6 +1441,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
     _ANALYSIS_BUG_CLASSES
+    + EVIDENCE_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + REPORT_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES

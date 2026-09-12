@@ -39,7 +39,7 @@ file owns development procedure, not direction.
 
 Mechanically: pure Python (3.10+); reads ELF, PE/COFF, and Mach-O binaries
 plus optional debug info, public headers, build data, and sources (L0–L5);
-detects 402 ABI/API change types categorized into `BREAKING_KINDS`,
+detects 405 ABI/API change types categorized into `BREAKING_KINDS`,
 `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`);
 drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -337,6 +337,25 @@ Core pipeline (in order of data flow):
    this slice does not attempt. Function/variable/typedef identity remains
    unimplemented for both formats (neither's own richer parse carries that
    evidence across its own `to_dwarf_metadata()` conversion at all).
+   `model/surface_facts.py` owns the three independent facts `Visibility`
+   used to conflate — (a) a declaration exists in the headers this run
+   parsed, (b) it belongs to the promised public contract for the run's
+   scope/contract selection, (c) the artifact's export table carries a
+   symbol for it — each a real `Fact[bool]` on `Function`/`Variable`
+   (`declared_in_headers_fact`/`in_public_contract_fact`/
+   `binary_exported_fact`, schema v46) so "unknown" stays representable and
+   the `fact-detector-misuse` gate applies. **Never read those fields
+   directly and never add a fourth merged boolean**: that module's
+   accessors are the supported surface, and each names the question it
+   answers (`in_public_surface`, `is_abi_visible`,
+   `in_source_declaration_index`, `declaration_confirmed_absent`,
+   `is_export_confirmed_absent`, `surface_fact_summary`). A pre-v46
+   snapshot, or a hand-built `Function`, falls back to a `PARTIAL` reading
+   derived from the legacy `visibility` value. Producers answer only what
+   they observed (`extract/surface_fact_producers.py`); the scope-aware
+   half of (b) is added by `provenance.tag_provenance`, and it only ever
+   adds a positive. Reasoning: the `Visibility.PUBLIC` entry in
+   `docs/contribute/known-gaps.md`.
 1. **Parsing** — extract metadata from binaries
    - `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py` — platform-specific
    - `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py` — DWARF debug info
@@ -814,7 +833,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 402 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 405 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 

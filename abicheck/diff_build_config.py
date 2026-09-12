@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 from .checker_types import Change
 from .diff_helpers import make_change
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import in_public_surface
 
 if TYPE_CHECKING:
     from .probe_harness import MatrixSnapshot
@@ -52,10 +53,9 @@ if TYPE_CHECKING:
 
 
 def _public_function_names(snap) -> set[str]:  # type: ignore[no-untyped-def]
-    from .model import Visibility
     out: set[str] = set()
     for f in snap.functions:
-        if f.visibility != Visibility.PUBLIC:
+        if not in_public_surface(f):
             continue
         out.add(f.name or f.mangled)
     return out

@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 
 from ..errors import SnapshotError, ValidationError
+from ..extract.surface_fact_producers import header_ast_surface_facts
 from ..model import AbiSnapshot, Function, Param, RecordType, Variable, Visibility
 
 
@@ -175,6 +176,10 @@ def _snapshot_from_abicc_dict(data: dict[str, object], path: Path) -> AbiSnapsho
                     return_type=return_type,
                     params=params,
                     visibility=Visibility.PUBLIC,
+                    # An ABICC dump is a header-derived description of the
+                    # promised surface; it carries no export table of its
+                    # own, so (c) stays unknown.
+                    **header_ast_surface_facts(exported=None, producer="abicc"),
                 )
             )
         else:
@@ -185,6 +190,7 @@ def _snapshot_from_abicc_dict(data: dict[str, object], path: Path) -> AbiSnapsho
                     mangled=mangled,
                     type=var_type,
                     visibility=Visibility.PUBLIC,
+                    **header_ast_surface_facts(exported=None, producer="abicc"),
                 )
             )
 

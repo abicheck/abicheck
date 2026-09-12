@@ -41,9 +41,9 @@ from .model import (
     RecordType,
     ScopeOrigin,
     Variable,
-    Visibility,
     resolved_fact_value,
 )
+from .model.surface_facts import in_public_surface, is_binary_exported
 from .surface import _type_identifiers
 
 if TYPE_CHECKING:
@@ -445,8 +445,34 @@ def _is_public(
     tallies — ``public_entity_ids`` membership when given (ADR-063 Phase 3
     D5), else the pre-Phase-3 ``Visibility.PUBLIC`` check, unchanged."""
     if public_entity_ids is None:
-        return decl.visibility == Visibility.PUBLIC
+        return in_public_surface(decl)
     return decl.entity_id is not None and decl.entity_id in public_entity_ids
+
+
+def _is_exported(
+    decl: Function | Variable, public_entity_ids: frozenset[EntityId] | None
+) -> bool:
+    """Whether *decl* counts toward this function's *export*-named tallies
+    (``exported_symbols``, ``undocumented_export_ratio``, the per-header
+    ``exported`` column).
+
+    Public membership *and* a confirmed binary export, which is what those
+    counters have always measured: before the three surface facts were split
+    (``model/surface_facts.py``), ``Visibility.PUBLIC`` meant both at once, so
+    one predicate served both and the counters' name stayed true by accident.
+    With the facts separated, a promised-but-unexported declaration (a public
+    inline function, or one a version script stopped exporting) passes the
+    public test and must still not be counted as a binary export, or the
+    export-coverage and undocumented-export metrics silently describe
+    something else (Codex review, P2).
+
+    Deliberately the conjunction rather than the export fact alone: an
+    export-table-only entry is excluded here exactly as it was before, since
+    these are *public*-surface metrics; this keeps every pre-split snapshot's
+    numbers identical (a legacy ``PUBLIC`` record's derived export fact is
+    true, ``ELF_ONLY`` fails the public half, ``HIDDEN`` fails both).
+    """
+    return _is_public(decl, public_entity_ids) and is_binary_exported(decl)
 
 
 def compute_surface_metrics(
@@ -477,17 +503,21 @@ def compute_surface_metrics(
     public_variables = sum(
         1 for v in snap.variables if _is_public(v, public_entity_ids)
     )
-    exported_symbols = public_functions + public_variables
+    # Not `public_functions + public_variables`: see _is_exported -- an
+    # export-named counter reads the export fact, not public membership alone.
+    exported_symbols = sum(
+        1 for f in snap.functions if _is_exported(f, public_entity_ids)
+    ) + sum(1 for v in snap.variables if _is_exported(v, public_entity_ids))
 
     undocumented = sum(
         1
         for f in snap.functions
-        if _is_public(f, public_entity_ids) and f.origin == ScopeOrigin.EXPORT_ONLY
+        if _is_exported(f, public_entity_ids) and f.origin == ScopeOrigin.EXPORT_ONLY
     )
     undocumented += sum(
         1
         for v in snap.variables
-        if _is_public(v, public_entity_ids) and v.origin == ScopeOrigin.EXPORT_ONLY
+        if _is_exported(v, public_entity_ids) and v.origin == ScopeOrigin.EXPORT_ONLY
     )
     ratio = (undocumented / exported_symbols) if exported_symbols else 0.0
 
@@ -512,11 +542,11 @@ def compute_surface_metrics(
 
     for fn in snap.functions:
         _bump(declared_counts, fn.source_header)
-        if _is_public(fn, public_entity_ids):
+        if _is_exported(fn, public_entity_ids):
             _bump(exported_counts, fn.source_header)
     for var in snap.variables:
         _bump(declared_counts, var.source_header)
-        if _is_public(var, public_entity_ids):
+        if _is_exported(var, public_entity_ids):
             _bump(exported_counts, var.source_header)
     for rec in snap.types:
         _bump(declared_counts, rec.source_header)

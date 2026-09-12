@@ -565,8 +565,16 @@ def _realistic_zstd_snapshot(
     rng = random.Random(4242)
     funcs = [
         Function(
-            name=f"oneapi_dal_kernel_{i}_{_dense(rng, 2000)}",
-            mangled=f"_ZN6oneapi3dal{_dense(rng, 4000)}6kernelE{i}v",
+            # Densities raised (2000/4000 -> 2500/5000) when snapshot schema
+            # v46 gave every declaration three more `*_fact` keys: that
+            # boilerplate is identical on every function, so zstd compresses
+            # it well and it lifted the *head* of this document back out of
+            # the low-ratio regime this fixture exists to reproduce (the
+            # precondition below caught it, which is what it is for). The
+            # entropy per declaration has to stay large relative to the
+            # per-declaration boilerplate, whatever that boilerplate grows to.
+            name=f"oneapi_dal_kernel_{i}_{_dense(rng, 2500)}",
+            mangled=f"_ZN6oneapi3dal{_dense(rng, 5000)}6kernelE{i}v",
             return_type="void",
             params=[Param(name="p", type=_dense(rng, 200))],
             visibility=Visibility.PUBLIC,

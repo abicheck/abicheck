@@ -1538,16 +1538,16 @@ def _change_to_dict(
     }
     if reclassified_by:
         d["reclassified_by"] = reclassified_by
-    # Codex review, item 8: a human-readable demangling for a finding whose
-    # old-side declaration is export-table-only (Visibility.ELF_ONLY) --
-    # `symbol`/`old_value` stay the raw mangled spelling deliberately (this
-    # is the "machine format" branch demangle.demangle_text's own docstring
-    # describes), but a reader gets a readable name too instead of having
-    # to demangle `symbol` themselves. None (omitted) for every ordinary,
-    # already-demangled finding.
-    demangled_symbol = getattr(c, "demangled_symbol", None)
-    if demangled_symbol:
+    # Two per-declaration blocks, omitted when absent (see their own field
+    # docs on Change): `demangled_symbol`, a readable name for a finding whose
+    # old-side declaration is export-table-only (`symbol`/`old_value` stay raw
+    # mangled -- the "machine format" branch demangle.demangle_text
+    # describes), and `surface_facts`, the three split surface facts emitted
+    # whole, "unknown" included (report schema 4.4, model/surface_facts.py).
+    if demangled_symbol := getattr(c, "demangled_symbol", None):
         d["demangled_symbol"] = demangled_symbol
+    if surface_facts := getattr(c, "surface_facts", None):
+        d["surface_facts"] = dict(surface_facts)
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)
