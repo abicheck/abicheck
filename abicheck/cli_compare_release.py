@@ -107,7 +107,9 @@ from .report.comparison_scope import (
     comparison_scope_terms,
     release_scope_warnings,
 )
+from .report.release_assurance import release_assurance_terms
 from .workflows.gate import resolve_scope_decision
+from .workflows.release_assurance_members import release_assurance_from_entries
 from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
     StrandedLibraryResolution,
@@ -347,6 +349,12 @@ def compare_release_cmd(
     probe_matrix_new: Path | None,
     severity_preset: str | None,
     on_incomplete_scope: str = "warn",
+    # ADR-070: `assurance.require_complete`, project-wide (never per-library,
+    # D4) -- a plain keyword parameter for the same reason
+    # `on_incomplete_scope` above is one: the setting is config-only, so the
+    # fan-out states it here without re-exposing a user-facing flag on this
+    # unregistered internal command.
+    require_complete_analysis: bool = False,
     support_promise: str = "off",
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
@@ -741,6 +749,7 @@ def compare_release_cmd(
                 severity_config=severity_config,
                 contract_evaluation=contract_evaluation,
                 contract_mode=contract_mode,
+                require_complete_analysis=require_complete_analysis,
                 pack_application=pack_application,
                 compile_context=compile_context,
                 depth=depth,
@@ -1041,6 +1050,19 @@ def compare_release_cmd(
                 )
             )
 
+            # ADR-070 D1/D2: the assurance axis, `max`-folded across every
+            # compared member -- one member's incomplete analysis must still
+            # raise the release's exit code, and cannot be masked by a
+            # complete sibling. `0` for every run without
+            # `assurance.require_complete`, since no member entry carries the
+            # key at all then (D4). Decided once, by policy, and read by the
+            # report section, the stderr notice and the exit alike.
+            assurance_terms = release_assurance_terms(
+                release_assurance_from_entries(
+                    library_results, require_complete=require_complete_analysis
+                )
+            )
+
             # Compute the severity-aware exit code while per-library DiffResults
             # are still stashed (before _strip_diff_results_and_adjust_verdict).
             # `gate.severity is None` already covers both "legacy" and
@@ -1186,6 +1208,7 @@ def compare_release_cmd(
                     pack_application=pack_application,
                     scope_public_headers=scope_public_headers,
                     scope_terms=scope_terms,
+                    assurance_terms=assurance_terms,
                     demangle=_resolve_demangle(secondary_fmt, demangle),
                     env_matrix_source_sha256=env_matrix_source_sha256,
                 )
@@ -1218,6 +1241,7 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 scope_public_headers=scope_public_headers,
                 scope_terms=scope_terms,
+                assurance_terms=assurance_terms,
                 demangle=_resolve_demangle(fmt, demangle),
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,

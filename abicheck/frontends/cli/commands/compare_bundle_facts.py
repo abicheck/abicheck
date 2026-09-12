@@ -66,6 +66,7 @@ from typing import Any
 import click
 
 from ....report.comparison_scope import ComparisonScopeTerms
+from ....workflows.release_assurance_members import release_assurance_from_results
 from .compare_bundle_facts_scope import (
     json_scope_fields,
     markdown_scope_lines,
@@ -784,12 +785,24 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             # unwritable output_dir; routed through the shared writer.
             _safe_write_output(output_dir / f"{safe_name}.json", to_json(diff))
 
+    # ADR-070 D8: the identical fold, over this driver's own members --
+    # `result.per_library` carries real `DiffResult`s, so both operand shapes
+    # reach one `resolve_release_assurance_decision` and cannot diverge on
+    # what `assurance.require_complete` means. Retires this driver's own
+    # mirror of the release rejection.
+    assurance_decision = release_assurance_from_results(
+        getattr(result, "per_library", ()),
+        # Off the same `_bundle_cfg` every other release-shaped setting here
+        # is: the key is config-only and project-wide (D4).
+        require_complete=bool(_bundle_cfg.assurance_require_complete if _bundle_cfg else False),
+    )
     _exit_compare_release(
         _reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
         incomplete_scope_exit_contribution=scope_terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=scope_terms.decision.no_comparison_completed_exit_contribution,
+        assurance_decision=assurance_decision,
     )
 
 

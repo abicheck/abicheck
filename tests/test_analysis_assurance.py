@@ -1364,22 +1364,30 @@ class TestAnalysisAssuranceCliIntegration:
         res = _compare(tmp_path, _breaking_pair(), "--require-complete-analysis")
         assert res.exit_code == 4, res.output
 
-    def test_config_rejected_for_directory_release_compares(self, tmp_path: Path) -> None:
+    def test_config_not_rejected_for_directory_release_compares(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-070: the release operand no longer rejects the setting.
+
+        Inverted, not deleted -- a silent regression back to a usage error for
+        a now-supported setting is what this still guards. The two directories
+        are empty, so the run still fails on its own grounds (nothing was
+        compared, ADR-065 D7); only the old rejection's absence is asserted
+        here. The positive release behaviour -- the `max` fold, the report
+        block, the exit floor -- lives in tests/test_release_assurance_cli.py
+        (real multi-library bundle) and tests/test_release_assurance_
+        properties.py (the fold's own invariants).
+        """
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         res = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_dir),
-                str(new_dir),
-                *_assurance_config_args(tmp_path),
-            ],
+            ["compare", str(old_dir), str(new_dir), *_assurance_config_args(tmp_path)],
         )
-        assert res.exit_code != 0
-        assert "assurance.require_complete" in res.output
+        assert "assurance.require_complete is not supported" not in res.output
+        assert "no single analysis_assurance" not in res.output
 
 
 # ``scan --against --require-complete-analysis``'s own CLI-integration

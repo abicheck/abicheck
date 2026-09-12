@@ -105,6 +105,8 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     str | None,
+    # require_complete_analysis (ADR-070)
+    bool,
     "SeverityConfig | None",
     "PackApplication | None",
     bool,
@@ -285,6 +287,7 @@ def _compare_one_library(
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    require_complete_analysis: bool = False,
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
     collect_diff_results: bool = False,
@@ -454,6 +457,17 @@ def _compare_one_library(
         entry["evidence_contract_error_contribution"] = (
             EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
         )
+        if require_complete_analysis:
+            # ADR-070 D6: this member's own assurance fact, for the release's
+            # `max` fold to fold and the report to name. Only under the
+            # setting (D4), the same rule the coverage block below follows for
+            # --contract. The keys and the flat-root read behind them are
+            # `workflows.release_assurance_members`' -- see its docstring.
+            from .workflows.release_assurance_members import (
+                member_assurance_entry_fields,
+            )
+
+            entry.update(member_assurance_entry_fields(result))
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -667,6 +681,7 @@ def _compare_release_libraries(
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    require_complete_analysis: bool = False,
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
@@ -742,6 +757,7 @@ def _compare_release_libraries(
         include_dependencies,
         contract_evaluation,
         contract_mode,
+        require_complete_analysis,
         severity_config,
         pack_application,
         collect_diff_results,

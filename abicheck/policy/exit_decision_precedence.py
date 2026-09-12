@@ -390,6 +390,7 @@ def resolve_release_exit_decision(
     verdict_or_severity_contribution: int,
     removed_required_library: bool = False,
     contract_coverage_contribution: int = 0,
+    analysis_assurance_contribution: int = 0,
     evidence_contract_error_contribution: int = 0,
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
@@ -494,6 +495,21 @@ def resolve_release_exit_decision(
     outrank a real ``4``/``8`` decided by a *different* member without
     being named as the reason.
 
+    *analysis_assurance_contribution* (ADR-070) is the release's own
+    ``assurance.require_complete`` floor -- ``max`` over every compared
+    member's, resolved by ``policy.release_assurance.
+    resolve_release_assurance_decision``. Shaped exactly like
+    *contract_coverage_contribution* and folded in every non-dominant branch
+    below, in **both** schemes, so it raises a clean ``0`` to ``1`` and never
+    lowers a real ``2``/``4`` -- and preserved, never deciding, under a
+    dominant ``16``/``8``/``7``. Deliberately the *same* axis
+    ``resolve_compare_exit_decision`` fills for a scalar ``compare`` rather
+    than a release-only sibling field: over one member the fold is the
+    identity, so a one-member package must gate and report identically to
+    the scalar path (ADR-070 D1), and a second field would leave a consumer
+    reading ``analysis_assurance_contribution`` a ``0`` for a run this axis
+    actually floored.
+
     *incomplete_scope_contribution*/*no_comparison_completed_contribution*
     (ADR-065 D6/D7, S2) are two more ``0``/``1`` fold participants, shaped
     exactly like *contract_coverage_contribution*: folded with ``max()``
@@ -524,6 +540,7 @@ def resolve_release_exit_decision(
             ExitReason.NOT_COMPARABLE,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             # The evidence branch below is unreachable once this returns, so
             # without this a release that is `not_comparable` *and* short of
             # its pinned rung would report `0` for the axis while the member
@@ -583,6 +600,7 @@ def resolve_release_exit_decision(
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
+                analysis_assurance_contribution=analysis_assurance_contribution,
                 evidence_contract_error_contribution=evidence_contract_error_contribution,
                 operational_error_contribution=operational_error_contribution,
                 incomplete_scope_contribution=incomplete_scope_contribution,
@@ -593,6 +611,7 @@ def resolve_release_exit_decision(
             ExitReason.EVIDENCE_CONTRACT_ERROR,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             removed_required_library_contribution=(
                 removed_required_library_code if removal_is_active else 0
             ),
@@ -617,6 +636,7 @@ def resolve_release_exit_decision(
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
+                analysis_assurance_contribution=analysis_assurance_contribution,
                 operational_error_contribution=operational_error_contribution,
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
@@ -624,6 +644,7 @@ def resolve_release_exit_decision(
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
@@ -636,6 +657,7 @@ def resolve_release_exit_decision(
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
@@ -648,12 +670,14 @@ def resolve_release_exit_decision(
             removed_required_library_code,
             ExitReason.REMOVED_REQUIRED_LIBRARY,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
     return resolve_exit_decision(
         compatibility_contribution=0,
         contract_coverage_contribution=contract_coverage_contribution,
+        analysis_assurance_contribution=analysis_assurance_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
     )

@@ -75,4 +75,20 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       candidate declared no ``deployment:`` contract at all. A pre-1.2
 #:       consumer reads nothing differently; one that wants the field
 #:       feature-detects the key or requires >= 1.2.
-RELEASE_SCHEMA_VERSION = "1.2"
+#: 1.3 -- ADR-070 (release analysis-assurance fold): a top-level
+#:       ``analysis_assurance`` block (the fold over every compared member:
+#:       its own ``schema_version``, the aggregate ``status``, the member and
+#:       incomplete-member counts, the ``0``/``1`` ``exit_contribution``, and
+#:       the named ``incomplete_members`` rows), plus
+#:       ``analysis_assurance_status``/``analysis_assurance_notes``/
+#:       ``analysis_assurance_exit_contribution`` on each ``libraries[]``
+#:       entry. Unlike 1.1's unconditional field, all of these are present
+#:       ONLY when ``assurance.require_complete`` was in effect -- the same
+#:       "present only when active" convention the ``severity`` and
+#:       ``contract_coverage_*`` blocks already follow, and what keeps every
+#:       release document produced without the setting byte-identical. The
+#:       ``exit`` block's own ``analysis_assurance_contribution`` is not new
+#:       (ADR-064 stage 1b already wrote it, always ``0`` on a release); it
+#:       can now be nonzero. A pre-1.3 consumer reads nothing differently;
+#:       one that wants the block feature-detects the key or requires >= 1.3.
+RELEASE_SCHEMA_VERSION = "1.3"

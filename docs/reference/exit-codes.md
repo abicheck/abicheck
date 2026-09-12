@@ -189,7 +189,7 @@ run, folded with the same `max` discipline:
 | Axis | Contributes | When |
 |---|---|---|
 | Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
-| Analysis assurance (P0.4) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete` |
+| Analysis assurance (P0.4 / ADR-070) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution (ADR-070) |
 | Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
 
@@ -267,9 +267,24 @@ to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
 demote a real ABI break to "warnings only", and it never rewrites the
 compatibility verdict, any finding, or the severity gate's own contribution.
 
-`assurance.require_complete: true` is single-pair only. A directory/package
-(release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out).
+`assurance.require_complete: true` applies to a directory/package (release)
+`compare` too, as of ADR-070 — it used to be rejected there (exit 64). The
+release's contribution is `max` over **every compared member's own**
+contribution, folded into this same axis rather than a release-only sibling:
+over one member the fold is the identity, so a one-member package gates and
+reports exactly as the scalar path does for that pair, and any member whose
+analysis fell short floors the whole release regardless of how many complete
+siblings it has. The release JSON carries an `analysis_assurance` block naming
+the members that fell short and why, and each `libraries[]` entry carries its
+own `analysis_assurance_status`; a non-JSON format gets the same facts as a
+one-line stderr notice. The stored-`BundleFacts` operand folds identically.
+
+This axis stays orthogonal to ADR-065's completeness axis, and both can apply
+to the same run: that one asks whether every *selected member* was compared at
+all (an inventory question), this one asks whether the comparisons that *ran*
+had complete evidence. A release can be scope-`complete` with a `partial`
+analysis, or scope-`incomplete` with a complete analysis over what ran; on a
+tie both are named in `reasons`.
 
 **Without `assurance.require_complete: true` every pre-existing invocation's
 exit code is unchanged**, exactly as `--contract`'s own coverage axis

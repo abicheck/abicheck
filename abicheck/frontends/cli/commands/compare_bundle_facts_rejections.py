@@ -253,7 +253,11 @@ def reject_unsupported_options(
         # (see _reject_set_input_flags's own comment for the full reasoning).
         suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
-        require_complete_analysis=require_complete_analysis,
+        # ADR-070 D8: `assurance.require_complete` is deliberately NOT
+        # forwarded any more. It has a real channel here now --
+        # `compare_bundle_facts.dispatch` folds every member's own
+        # `AnalysisAssurance` -- so it is no longer one of the "no channel,
+        # reject rather than silently diverge" set this module exists for.
     )
     if any(
         kwargs.get(name) is not None

@@ -34,6 +34,7 @@ import click
 from ...bundle import BundleDiffResult
 from ...checker import DiffResult
 from ...report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
+from ...report.release_assurance import ReleaseAssuranceTerms
 from .options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
@@ -62,6 +63,7 @@ def _write_release_summary_file(
     pack_application: Any = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_terms: ReleaseAssuranceTerms | None = None,
     write_output: Callable[[Path, str], None] | None = None,
     env_matrix_source_sha256: str | None = None,
 ) -> None:
@@ -90,6 +92,15 @@ def _write_release_summary_file(
     real configuration every library was compared under, same as the
     primary report (see ``_release_summary_effective_config_block``'s own
     docstring).
+
+    *assurance_terms* (ADR-070) is likewise the same resolved decision the
+    primary report used. It is threaded for the same reason *scope_terms* is,
+    and the reason is load-bearing rather than cosmetic: this sidecar builds
+    its **own** ``exit`` block through the same resolver, so a run floored by
+    the assurance axis would otherwise publish a ``summary.json`` whose
+    ``exit.code``/``analysis_assurance_contribution`` disagreed with the
+    process's real exit status -- exactly the self-contradicting report
+    ADR-070 D5 exists to prevent.
 
     *env_matrix_source_sha256* (Codex review, P2 follow-up): the same
     release-wide deployment-floor digest the primary release JSON's own
@@ -138,6 +149,9 @@ def _write_release_summary_file(
         release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+        analysis_assurance_contribution=(
+            assurance_terms.decision.exit_contribution if assurance_terms else 0
+        ),
     ).to_dict()
     record = terms.record
     # This sidecar is documented/contracted to always be full and
@@ -180,6 +194,8 @@ def _write_release_summary_file(
         summary_data["env_matrix_source_sha256"] = env_matrix_source_sha256
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section
+    if assurance_terms is not None and assurance_terms.section is not None:
+        summary_data["analysis_assurance"] = assurance_terms.section
     # ADR-067 C-S2: the same folded release-level `disposition_audit` the
     # primary report carries (`cli_compare_release_helpers._format_release_
     # json`), via the identical shared helper, so this sidecar cannot drift

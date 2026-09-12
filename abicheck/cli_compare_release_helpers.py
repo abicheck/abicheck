@@ -51,6 +51,7 @@ from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
+from .report.release_assurance import ReleaseAssuranceTerms, release_assurance_terms
 from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_bundle_findings as _release_md_bundle_findings,
     _release_md_changed_libraries as _release_md_changed_libraries,
@@ -74,6 +75,7 @@ from .workflows.gate import (
     GateOptions as GateOptions,  # re-exported, ADR-064
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
+    resolve_release_assurance_decision,
     resolve_release_exit_decision_for_report,
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
     resolve_scope_decision,
@@ -1056,6 +1058,7 @@ def _format_release_summary(
     suppress: Path | None = None, pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_terms: ReleaseAssuranceTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
@@ -1110,6 +1113,7 @@ def _format_release_summary(
             suppress=suppress, pack_application=pack_application,
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
+            assurance_terms=assurance_terms,
             show_only=show_only,
             env_matrix_source_sha256=env_matrix_source_sha256,
         )
@@ -1341,6 +1345,7 @@ def _format_release_json(
     suppress: Path | None = None, pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_terms: ReleaseAssuranceTerms | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
 ) -> str:
@@ -1387,12 +1392,18 @@ def _format_release_json(
     from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.release_scope import release_global_ran, unmatched_names
     terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
+    # ADR-070, already decided by the caller; a direct unit-test/legacy call
+    # falls back to an empty, setting-off decision (contributes `0`, emits no
+    # section) -- the same default `scope_terms` uses just above.
+    a_terms = assurance_terms if assurance_terms is not None else release_assurance_terms(
+        resolve_release_assurance_decision((), require_complete=False))
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict, fail_on_removed, removed_keys, severity_exit_code,
         contract_coverage_exit_contribution, library_results, release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+        analysis_assurance_contribution=a_terms.decision.exit_contribution,
     ).to_dict()
     record = terms.record
     summary: dict[str, object] = {
@@ -1452,6 +1463,14 @@ def _format_release_json(
             },
             "exit_code": escalated_exit_code,
         }
+    # ADR-070 D6's orthogonal analysis-assurance axis, max()-aggregated
+    # across members. Same "present only when active" convention as the
+    # severity/coverage blocks around it, so a release report produced
+    # without the setting is byte-identical (D4). Key name matches
+    # single-pair `compare` JSON's; the shape differs (it is the *fold*),
+    # which is why it carries its own `schema_version`.
+    if a_terms.section is not None:
+        summary["analysis_assurance"] = a_terms.section
     # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
     # release/package parity), max()-aggregated across every library. Only
     # present when at least one library entry carries the per-library key --

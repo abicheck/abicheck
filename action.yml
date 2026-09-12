@@ -43,7 +43,23 @@ inputs:
       (the replacement for a baseline-less `mode: scan`/`audit: true`
       request — see the mode input's own description). May also be a
       directory or package (RPM, Deb, tar, conda, wheel) — abicheck then
-      fans out to a per-library comparison automatically.
+      fans out to a per-library comparison automatically. May also be a
+      stored `BundleFacts` document written by an earlier run's
+      `--bundle-facts-out` (plain `.json`, a compressed `.json.gz`/`.json.zst`,
+      or the content-addressed archive form): no separate input or flag
+      selects that shape, since `compare` classifies the operand from the
+      file's own content, so pointing this input at such a document is all a
+      stored-OLD-side bundle comparison needs. A real large-toolkit document
+      may exceed the conservative pre-`json.loads()` decode-node ceiling; raise
+      it with `resource_limits.max_bundle_facts_decode_nodes` in a
+      `.abicheck.yml` passed as `build-config` (an explicit, operator-reviewed
+      config — an auto-discovered one may only lower that budget, never raise
+      it, since it can come from the same untrusted checkout being decoded).
+      Producing such a document is `--bundle-facts-out`, which stays an
+      `extra-args` option rather than a first-class input: it names one
+      pipeline stage's output artifact path, and a dedicated input would add a
+      second spelling for something `extra-args` already forwards and
+      validates.
     required: false
   new-library:
     description: >
@@ -753,9 +769,10 @@ inputs:
       CLI override. Applied identically to single-pair compare's two-sided
       and audit-only (`--no-baseline`) shapes before its removal, and
       rejected outright for a directory/package compare's per-library
-      release fan-out, which has no single analysis_assurance result to
-      gate on -- `assurance.require_complete: true` inherits that same
-      single-pair-only scope now that it lives in config instead. Still
+      release fan-out until ADR-070, which gave that operand real semantics:
+      the fan-out folds every compared member's own `analysis_assurance` with
+      `max` into the same exit axis, so `assurance.require_complete: true` is
+      no longer single-pair-only. Still
       declared here so a workflow that sets it gets an explicit `::error::`
       naming that replacement instead of a silently-ignored input; set
       `assurance.require_complete: true` in your `.abicheck.yml` and pass

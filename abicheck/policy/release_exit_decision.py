@@ -157,6 +157,7 @@ def resolve_release_exit_decision_for_report(
     *,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
+    analysis_assurance_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064 stage 1b: the release fan-out's persisted, explainable
     ``exit`` block.
@@ -168,6 +169,10 @@ def resolve_release_exit_decision_for_report(
     the new side's inventory cannot prove is the scope axis's business
     (*incomplete_scope_contribution*), not exit ``8``'s.
     *no_comparison_completed_contribution* is D7's own ``0``/``1``.
+    *analysis_assurance_contribution* (ADR-070) is the release's
+    ``assurance.require_complete`` floor, already folded with ``max`` across
+    every compared member by ``policy.release_assurance``; ``0`` whenever the
+    setting is off, which is every pre-existing invocation.
 
     Reproduces ``cli_compare_release_helpers._exit_compare_release``'s own
     precedence via :func:`resolve_release_exit_decision`, for **report
@@ -264,4 +269,5 @@ def resolve_release_exit_decision_for_report(
         operational_error_contribution=operational_error_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
+        analysis_assurance_contribution=analysis_assurance_contribution,
     )

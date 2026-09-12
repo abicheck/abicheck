@@ -8446,3 +8446,61 @@ unproven: check the header before believing it. Bug class
 `classification.name_shape_as_contract_membership` covers the sibling
 name-shape defects; this one is about *evidence* selection, not naming, so
 it is deliberately recorded as its own gap.
+
+## ADR-070's release assurance fold: what it deliberately does not do
+
+ADR-070 gave `assurance.require_complete` real semantics for a
+directory/package (release) `compare` and for a stored `BundleFacts` operand,
+and retired the four guards that existed only to stay ahead of the missing
+semantics. Three adjacent things were in scope to consider and deliberately
+left out, each for a stated reason rather than for effort:
+
+1. **No per-library `assurance.require_complete` override.** The setting stays
+   project-wide (ADR-070 D4), like `gate.fail_on_removed_library` and the
+   `release.*` keys. A per-member override is a real config-surface question
+   (where does it live — a `release.libraries.<key>` block? a selector? — and
+   how does it interact with the D7 precedence resolver), not a fold detail,
+   and nothing in the reported gap asked for one.
+2. **No per-member `analysis_assurance` *block* in the release report.** Each
+   `libraries[]` entry carries its own `analysis_assurance_status` and the
+   fold names the short members and their notes, but the full per-pair block
+   (target/TU/export accounting, the five context statuses, layout-unverified
+   detectors) is not embedded per member. Doing so would multiply a
+   substantial sub-object across every member of every release document — a
+   report-schema sizing decision of its own. A member that needs the full
+   block is reachable today by comparing that library individually, and the
+   fold's notes name which member to compare.
+3. **The three orthogonal `0`/`1` release axes still fold in three places.**
+   ADR-049's contract-coverage floor, ADR-065 D6's incomplete-scope floor and
+   ADR-070's assurance floor now have the same shape — resolve a decision per
+   run, `max` it across members, carry it to the exit and the report — and
+   each has its own resolver, its own `*_terms` projection and its own
+   parameter threaded through `_format_release_summary`/
+   `_finalize_release_output`/`_exit_compare_release`. That is three near-
+   identical threadings, and the `no_growth` baseline bumps ADR-070 needed in
+   five files are the visible cost of adding the third. The convergence target
+   is the duplication-and-convergence plan's own P0
+   `EffectiveGate`/`EffectiveEvaluationConfig` work — one object carrying every
+   orthogonal axis's decision, threaded once — not a fourth copy of the
+   pattern. **Do not add a fourth `0`/`1` release axis by copying this one;**
+   land that convergence first.
+
+4. **The stored-`BundleFacts` operand's JSON carries no assurance block.** It
+   folds the axis and exits on it identically (D8), and its stderr notice names
+   the short members — but that driver's `--format json` document has no `exit`
+   block at all, so unlike the live release report there is nowhere for the
+   fold's own section to hang without first giving that document an `exit`
+   block. Nothing *contradicts* anything as a result (the failure mode would be
+   a published `exit.code` disagreeing with the process status, and there is no
+   published one here); a consumer of that JSON simply learns the verdict and
+   not the assurance. Giving that driver a real `exit` block is its own change,
+   and the right one — it would close this and several adjacent asymmetries at
+   once, rather than bolting one block onto a document with no exit contract.
+
+The companion test gap is recorded in `tests/regressions/manifest.py` under
+bug class `gate.per_member_axis_fold`: the order-independence and monotonicity
+properties are stated and generated for the assurance axis only. The coverage
+and scope axes have example-level tests but no property suite of their own, so
+a regression in *their* fold would not be caught by it. Generalizing one
+property harness over all three axes is the real remaining work there, and it
+pairs naturally with the convergence above.

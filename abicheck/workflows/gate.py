@@ -105,6 +105,14 @@ from ..policy.gate_pack_fold import (
     gate_exit_code_scheme,
 )
 from ..policy.outcome import ScopeCompleteness
+from ..policy.release_assurance import (
+    MemberAssurance,
+    ReleaseAssuranceDecision,
+    release_assurance_diagnostic,
+    release_assurance_exit_contribution,
+    release_assurance_status,
+    resolve_release_assurance_decision,
+)
 from ..policy.release_exit_decision import (
     release_evidence_contract_contribution,
     resolve_release_exit_decision_for_report,
@@ -146,6 +154,8 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 __all__ = [
+    "MemberAssurance",
+    "ReleaseAssuranceDecision",
     "EffectiveGate",
     "ExitDecision",
     "GATE_SEVERITY_CATEGORIES",
@@ -192,6 +202,10 @@ __all__ = [
     "resolve_compare_exit_decision",
     "resolve_compare_exit_decision_with_abort_axes",
     "resolve_exit_decision",
+    "release_assurance_diagnostic",
+    "release_assurance_exit_contribution",
+    "release_assurance_status",
+    "resolve_release_assurance_decision",
     "resolve_release_exit_decision",
     "resolve_release_exit_decision_for_report",
     "resolve_release_gate_options",

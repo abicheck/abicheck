@@ -344,23 +344,24 @@ class TestAnalysisAssuranceTruthfulnessCli:
         assert "OK" in result.output
 
 
-class TestAnalysisAssuranceCompleteRejectedForBundle:
-    """Codex review, fresh evidence after the earlier inert-setting finding
-    (PR #1222): ``checks[].analysis.assurance: complete`` on a bundle check
-    was accepted by validation and unconditionally forwarded into
-    ``check-target``'s ``analysis-assurance-complete`` input, which merges
-    ``assurance: {require_complete: true}`` into the resolved config and
-    forwards it to the underlying ``compare`` invocation -- for a bundle
-    check that invocation is the directory/package release fan-out, which
-    ``cli_compare_options.py``'s ``_reject_set_input_flags`` unconditionally
-    rejects ``require_complete_analysis=True`` for (a bundle comparison has
-    no single ``analysis_assurance`` result to gate on). That turned every
-    such bundle check into a hard CLI usage/operational error instead of an
-    actionable rejection. Reject it here, at run-plan generation time, the
-    same way ``allow_new_target`` is already rejected for a bundle check
-    (``test_bundle_check_allow_new_target_is_rejected``) -- bundle-level
-    assurance enforcement is a real, separate feature this fix does not
-    attempt."""
+class TestAnalysisAssuranceCompleteAcceptedForBundle:
+    """ADR-070: ``checks[].analysis.assurance: complete`` on a bundle check
+    is **supported**, and this class pins that it validates cleanly.
+
+    It previously pinned the opposite. The rejection existed because the
+    underlying ``compare`` invocation for a bundle check is the
+    directory/package release fan-out, which rejected
+    ``require_complete_analysis=True`` outright on the premise that a bundle
+    comparison "has no single ``analysis_assurance`` result to gate on" --
+    rejecting here, at run-plan generation time, kept that from surfacing as
+    a hard CLI usage error. ADR-070 supplied the missing semantics (one
+    ``AnalysisAssurance`` per compared member, folded with ``max`` into the
+    same ``ANALYSIS_ASSURANCE`` exit axis a scalar ``compare`` uses), so the
+    fan-out accepts the setting and there is nothing left to reject.
+
+    Inverted rather than deleted, deliberately: a declared, now-supported
+    setting silently regressing to a validation error is exactly the class of
+    break this class was written to catch, only in the other direction."""
 
     @staticmethod
     def _bundle_config(assurance: str) -> ProjectTargetsConfig:
@@ -386,17 +387,14 @@ class TestAnalysisAssuranceCompleteRejectedForBundle:
             }
         )
 
-    def test_bundle_check_analysis_assurance_complete_is_rejected(self) -> None:
+    def test_bundle_check_analysis_assurance_complete_is_accepted(self) -> None:
         report = validate_project_targets(self._bundle_config("complete"))
-        assert not report.ok
-        assert any(
-            "analysis.assurance: complete is not supported for a bundle check" in e
-            for e in report.errors
-        )
+        assert report.ok, report.errors
+        assert not any("analysis.assurance" in e for e in report.errors)
 
     def test_bundle_check_without_assurance_passes(self) -> None:
         """Negative control: a bundle check declaring no assurance
-        requirement at all is unaffected by this new rule."""
+        requirement at all validates cleanly, as it always did."""
         config = ProjectTargetsConfig.from_dict(
             {
                 "targets": {

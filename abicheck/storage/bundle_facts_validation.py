@@ -133,11 +133,27 @@ def check_bundle_facts_json_budget(
     try:
         check_json_container_budget(raw, max_json_object_nodes)
     except JsonContainerBudgetExceeded:
+        # The remedy names the real user-facing config key, not this
+        # function's own parameter name, and says who may raise it. The
+        # previous wording ("pass a larger max_json_object_nodes") named an
+        # internal parameter no CLI user can pass, which made a legitimate
+        # large-bundle failure read as an unfixable refusal -- the capability
+        # was reachable, just not discoverable. The ceiling stays
+        # conservative by design (see DEFAULT_MAX_JSON_OBJECT_NODES): the
+        # node count is read from the payload under inspection, so no
+        # "scale-aware" default can distinguish a real oneDAL-scale bundle
+        # from a decode bomb of the same declared size -- only an operator
+        # naming a document they reviewed can.
         raise SnapshotError(
             f"{path}: {description} contains more than "
-            f"{max_json_object_nodes} JSON containers -- refusing to decode "
-            "(possible container-count amplification attack; pass a larger "
-            "max_json_object_nodes if this is a known-large, trusted payload)"
+            f"{max_json_object_nodes} JSON nodes -- refusing to decode "
+            "(possible container-count amplification attack). A real "
+            "large-toolkit bundle can legitimately exceed this: raise it with "
+            "resource_limits.max_bundle_facts_decode_nodes in a .abicheck.yml "
+            "passed as an EXPLICIT --config (the composite Action's "
+            "build-config input). An auto-discovered .abicheck.yml may only "
+            "lower this budget, never raise it, since it can come from the "
+            "same untrusted checkout being decoded."
         ) from None
     except JsonNestingTooDeepError:
         raise SnapshotError(

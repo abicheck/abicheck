@@ -78,6 +78,7 @@ from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
 from .frontends.cli.release_variant_operand import _resolve_release_package_side
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms
+from .report.release_assurance import ReleaseAssuranceTerms
 from .workflows.extraction import package_component_inventory
 from .workflows.gate import incomplete_scope_diagnostic
 
@@ -215,6 +216,7 @@ def _finalize_release_output(
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_terms: ReleaseAssuranceTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
@@ -258,6 +260,7 @@ def _finalize_release_output(
         pack_application=pack_application,
         scope_public_headers=scope_public_headers,
         scope_terms=scope_terms,
+        assurance_terms=assurance_terms,
         demangle=demangle,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
@@ -292,6 +295,7 @@ def _finalize_release_output(
             pack_application=pack_application,
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
+            assurance_terms=assurance_terms,
             write_output=_safe_write_output,
             env_matrix_source_sha256=env_matrix_source_sha256,
         )
@@ -394,6 +398,13 @@ def _finalize_release_output(
             scope_terms.decision.no_comparison_completed_exit_contribution
             if scope_terms
             else 0
+        ),
+        # ADR-070: the whole resolved decision, not just its contribution --
+        # `_exit_compare_release` both folds it and formats its notice, and
+        # the notice's wording needs the real compatibility exit, which only
+        # that function's own resolution knows.
+        assurance_decision=(
+            assurance_terms.decision if assurance_terms is not None else None
         ),
     )
 

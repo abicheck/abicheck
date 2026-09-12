@@ -38,10 +38,17 @@ unaffected.
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import click
 
+from ...report.release_assurance import release_assurance_notice
 from .release_evidence_contract import evidence_contract_notice
+
+if TYPE_CHECKING:
+    # Via `report`, which re-exports it: `frontends -> policy` is forbidden
+    # even for a type-only import (`architecture/modules.yaml`).
+    from ...report.release_assurance import ReleaseAssuranceDecision
 
 __all__ = ["_exit_compare_release"]
 
@@ -57,6 +64,7 @@ def _exit_compare_release(
     release_global_verdict: str = "NO_CHANGE",
     incomplete_scope_exit_contribution: int = 0,
     no_comparison_completed_exit_contribution: int = 0,
+    assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> None:
     """Exit a directory/package ``compare`` with the release's own status code.
 
@@ -112,7 +120,25 @@ def _exit_compare_release(
         release_global_verdict,
         incomplete_scope_contribution=incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=no_comparison_completed_exit_contribution,
+        analysis_assurance_contribution=(
+            assurance_decision.exit_contribution if assurance_decision else 0
+        ),
     )
+    # ADR-070's assurance notice, emitted here for the same reason the
+    # evidence-contract one below is (see that comment) -- and *formatted*
+    # here rather than by each caller, which is the part that matters: its
+    # wording turns on the compatibility axis's own exit code ("floored to 1"
+    # vs. "below the compatibility axis's own exit 4, which stands"), and the
+    # resolved decision just above is the only place that number is actually
+    # known. A caller passing its own guess got this wrong: `compare
+    # --bundle-facts` has no severity code to guess from and would have
+    # claimed a floor beside a real break.
+    if assurance_decision is not None:
+        assurance_notice = release_assurance_notice(
+            assurance_decision, base_exit=decision.compatibility_contribution
+        )
+        if assurance_notice:
+            click.echo(assurance_notice, err=True)
     # Emitted here rather than by each caller: a release document is
     # rendered before the exit is taken, and the fan-out has already
     # discarded every member's `DiffResult` by then, so nothing downstream
