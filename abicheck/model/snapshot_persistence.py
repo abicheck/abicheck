@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
 
 __all__ = [
+    "ROUNDED_FIELDS",
     "RUNTIME_ONLY_FIELDS",
     "UNPERSISTED_FIELDS_BY_TYPE",
     "persisted_field_value",
@@ -112,17 +113,45 @@ _DERIVED_FIELD_FALLBACKS: dict[str, dict[str, str]] = {
 }
 
 
+#: Fields whose owning ``to_dict`` ROUNDS the stored value before writing
+#: it, keyed by class name then field name, with the ``ndigits`` that
+#: ``to_dict`` itself passes. Precision finer than this never reaches
+#: persisted content, so two values that round alike ARE the same
+#: persisted content -- comparing the raw floats reported ``degraded`` for
+#: a pair whose canonical digests are identical (Codex review, PR #1229).
+#: The same "normalize, don't exclude" rule as the derived fields above:
+#: rounding to a *different* value is still genuinely different content.
+#: ``tests/test_snapshot_runtime_only_fields.py`` derives this table's
+#: required keys by AST-scanning every first-party ``to_dict`` for a
+#: ``round(self.<field>, n)`` call, so a newly-rounded field cannot be
+#: added anywhere in the repository without being registered here.
+_ROUNDED_FIELDS: dict[str, dict[str, int]] = {
+    "LayerCoverage": {"elapsed_s": 3},
+    "CostEstimate": {"est_seconds": 3, "cache_hit_rate": 3},
+    "SurfaceMetrics": {"undocumented_export_ratio": 4},
+}
+
+
 def persisted_field_value(owner: object, field_name: str, value: object) -> object:
     """*value* as it would be persisted for ``owner.field_name``.
 
-    The identity for everything but the handful of derived fields above,
-    where an unset in-memory value is serialized as its computed form.
+    The identity for everything but the handful of derived and rounded
+    fields above, where an unset in-memory value is serialized as its
+    computed form and a finer-grained float as its rounded one.
     """
-    method = _DERIVED_FIELD_FALLBACKS.get(type(owner).__name__, {}).get(field_name)
+    owner_name = type(owner).__name__
+    ndigits = _ROUNDED_FIELDS.get(owner_name, {}).get(field_name)
+    if ndigits is not None and isinstance(value, float):
+        return round(value, ndigits)
+    method = _DERIVED_FIELD_FALLBACKS.get(owner_name, {}).get(field_name)
     if method is None or value:
         return value
     computed = getattr(owner, method, None)
     return computed() if callable(computed) else value
+
+
+#: Public alias for the guard test's exhaustiveness check.
+ROUNDED_FIELDS = _ROUNDED_FIELDS
 
 
 def shares_one_graph_object(snap: AbiSnapshot) -> bool:

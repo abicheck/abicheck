@@ -350,3 +350,90 @@ def test_graph_aliasing_is_itself_persisted_content() -> None:
     # "anything with a graph is always different".
     assert _same_content(_snap(aliased=True), _snap(aliased=True))
     assert _same_content(_snap(aliased=False), _snap(aliased=False))
+
+
+def test_precision_the_codec_rounds_away_is_not_a_content_difference() -> None:
+    """Codex review (PR #1229): `LayerCoverage.to_dict` writes
+    `round(self.elapsed_s, 3)`, so precision finer than a millisecond
+    never reaches persisted content. Comparing the raw floats made two
+    snapshots whose canonical digests are *identical* read `degraded`, and
+    could fail `--require-complete-analysis`, purely on a timing digit the
+    codec discards.
+
+    The digest is the oracle in both directions, so the normalization
+    cannot degrade into "float fields never count": a difference that
+    survives the rounding is still a content difference.
+    """
+    from abicheck.buildsource.model import LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.policy.analysis_assurance_schema_staleness import _same_content
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    def _with_elapsed(elapsed: float) -> AbiSnapshot:
+        snap = AbiSnapshot(version="1.0", library="libfoo.so.1")
+        snap.build_source = BuildSourcePack.empty(root="/pack")
+        snap.build_source.manifest.coverage = [
+            LayerCoverage(layer="L3_build", elapsed_s=elapsed)
+        ]
+        return snap
+
+    # Below the rounding granularity: same persisted content.
+    a, b = _with_elapsed(0.0001), _with_elapsed(0.0002)
+    assert a.build_source.manifest.coverage[0].elapsed_s != (
+        b.build_source.manifest.coverage[0].elapsed_s
+    )
+    assert snapshot_content_digest(a) == snapshot_content_digest(b)
+    assert _same_content(a, b)
+    assert _same_content(b, a)
+
+    # Above it: still distinct, and still agreeing with the digest.
+    c = _with_elapsed(0.002)
+    assert snapshot_content_digest(a) != snapshot_content_digest(c)
+    assert not _same_content(a, c)
+    assert not _same_content(c, a)
+
+
+def test_every_rounded_field_in_the_repository_is_registered() -> None:
+    """The exhaustiveness half, so the class closes rather than this one
+    field: AST-scan every first-party `to_dict`-style serializer for a
+    `round(self.<field>, n)` call and require each to be registered in
+    `ROUNDED_FIELDS` with the same `ndigits` the serializer passes.
+
+    A newly-rounded field anywhere under `abicheck/` therefore fails here
+    instead of silently making `_same_content` stricter than the codec.
+    """
+    import ast
+    import pathlib
+
+    from abicheck.model.snapshot_persistence import ROUNDED_FIELDS
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "abicheck"
+    found: dict[tuple[str, str], int] = {}
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for call in ast.walk(cls):
+                if not (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "round"
+                    and len(call.args) == 2
+                    and isinstance(call.args[0], ast.Attribute)
+                    and isinstance(call.args[0].value, ast.Name)
+                    and call.args[0].value.id == "self"
+                    and isinstance(call.args[1], ast.Constant)
+                    and isinstance(call.args[1].value, int)
+                ):
+                    continue
+                found[(cls.name, call.args[0].attr)] = call.args[1].value
+
+    assert found, "the scan found no rounded serializer field at all — it is vacuous"
+    for (cls_name, field_name), ndigits in sorted(found.items()):
+        registered = ROUNDED_FIELDS.get(cls_name, {}).get(field_name)
+        assert registered == ndigits, (
+            f"{cls_name}.{field_name} is rounded to {ndigits} digits by its own "
+            f"serializer but ROUNDED_FIELDS records {registered!r} — register it "
+            "in abicheck/model/snapshot_persistence.py"
+        )
