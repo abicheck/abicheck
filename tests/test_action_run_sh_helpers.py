@@ -499,9 +499,7 @@ class TestExtraArgsHasExport:
     """
 
     def _predicate(self, extra_args: str) -> bool:
-        return _run_predicate(
-            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_export"
-        )
+        return _run_predicate(f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_export")
 
     def test_absent_extra_args(self) -> None:
         assert not self._predicate("")
@@ -538,9 +536,7 @@ class TestExtraArgsHasExport:
         and inside bash single quotes that stays two characters -- so the
         plain helper cannot express the very input these cases are about.
         """
-        return _run_predicate(
-            f"INPUT_EXTRA_ARGS=$'{escaped}' _extra_args_has_export"
-        )
+        return _run_predicate(f"INPUT_EXTRA_ARGS=$'{escaped}' _extra_args_has_export")
 
     def test_export_after_a_newline(self) -> None:
         # `extra-args: |` (a YAML literal block) is ordinary Action usage and

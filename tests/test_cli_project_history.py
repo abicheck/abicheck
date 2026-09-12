@@ -84,9 +84,7 @@ class TestJsonOutput:
         p1 = _snapshot(tmp_path, "snap-a", ["add"])
         p2 = _snapshot(tmp_path, "snap-b", ["add", "multiply"])
 
-        res = _run(
-            [p1, p2, "--version", "1.0.0", "--version", "1.1.0", "-o", "json=-"]
-        )
+        res = _run([p1, p2, "--version", "1.0.0", "--version", "1.1.0", "-o", "json=-"])
         assert res.exit_code == 0, res.output
         doc = json.loads(res.output)
         assert [e["version"] for e in doc["entries"]] == ["1.0.0", "1.1.0"]

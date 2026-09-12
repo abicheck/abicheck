@@ -632,9 +632,7 @@ class TestWiringContract:
 
         monkeypatch.setattr(receipt, "resolve_and_apply", _spy)
         old_p, new_p = _write_pair(tmp_path)
-        CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
-        )
+        CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
         assert set(seen) == set(COMPARE_CONFIG_PARAMS)
 
     def test_a_resolution_usage_error_becomes_exit_64(self, tmp_path, monkeypatch):

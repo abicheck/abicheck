@@ -83,9 +83,7 @@ def _click_choices(path: tuple[str, ...], spelling: str) -> tuple[str, ...]:
             export_formats = getattr(param, "export_formats", None)
             if export_formats:
                 return tuple(export_formats)
-            raise AssertionError(
-                f"{' '.join(path)} {spelling} declares no value set"
-            )
+            raise AssertionError(f"{' '.join(path)} {spelling} declares no value set")
     raise AssertionError(f"{' '.join(path)} has no {spelling}")
 
 

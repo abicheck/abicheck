@@ -558,9 +558,7 @@ class TestEveryReleaseFormatCarriesTheShortfall:
         pin must leave the document exactly as it was."""
         old_dir, new_dir = live_release_dirs
         out = tmp_path / f"clean.{fmt}"
-        code, _ = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", f"{fmt}={out}"
-        )
+        code, _ = _invoke("compare", str(old_dir), str(new_dir), "-o", f"{fmt}={out}")
         assert code == 0, fmt
         text = out.read_text(encoding="utf-8")
         if fmt == "json":

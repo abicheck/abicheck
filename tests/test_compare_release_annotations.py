@@ -179,9 +179,7 @@ class TestReleaseSeveralExports:
     are the one repeatable `-o FORMAT=DESTINATION`.
     """
 
-    def test_json_export_alongside_a_stdout_markdown_one(
-        self, tmp_path: Path
-    ) -> None:
+    def test_json_export_alongside_a_stdout_markdown_one(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         new_dir = tmp_path / "new"

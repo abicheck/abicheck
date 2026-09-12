@@ -107,9 +107,7 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         bindir = self._stub_writing(tmp_path, honor=set())
         outputs = _run_action(
             tmp_path,
-            self._env(
-                tmp_path, f"-o json={target} -o markdown={tmp_path / 'b.md'}"
-            ),
+            self._env(tmp_path, f"-o json={target} -o markdown={tmp_path / 'b.md'}"),
             bindir,
         )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
@@ -125,9 +123,7 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         bindir = self._stub_writing(tmp_path, honor={str(target)})
         outputs = _run_action(
             tmp_path,
-            self._env(
-                tmp_path, f"-o json={target} -o markdown={tmp_path / 'b.md'}"
-            ),
+            self._env(tmp_path, f"-o json={target} -o markdown={tmp_path / 'b.md'}"),
             bindir,
         )
         assert outputs["verdict"] == "COMPATIBLE", outputs

@@ -143,10 +143,29 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
 # reaching for a user-facing option factory. There is no `--format`/
 # `-o`/`--output-dir` surface here to keep in sync with `compare`'s any
 # more -- only the three dest names that set carries.
-@click.option("--format", "fmt", type=click.Choice(_ENGINE_FORMATS), default="markdown", hidden=True)
-@click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None, hidden=True)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(_ENGINE_FORMATS),
+    default="markdown",
+    hidden=True,
+)
+@click.option(
+    "-o",
+    "--output",
+    "output",
+    type=click.Path(path_type=Path),
+    default=None,
+    hidden=True,
+)
 @click.option("--write", "secondary_writes", multiple=True, hidden=True)
-@click.option("--output-dir", "output_dir", type=click.Path(path_type=Path), default=None, hidden=True)
+@click.option(
+    "--output-dir",
+    "output_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    hidden=True,
+)
 # Policy + suppression family (ADR-037 D3); strict/justification stay inline.
 @policy_options
 @click.option(

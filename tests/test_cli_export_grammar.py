@@ -439,7 +439,9 @@ class TestExportsAreOneAnalysis:
                 ["compare", str(old), str(new), "-o", f"{fmt}={dest}", *extra]
             )
             assert dest.exists(), result.output
-            return result.exit_code, _canonical_result(dest.read_text(encoding="utf-8"), fmt)
+            return result.exit_code, _canonical_result(
+                dest.read_text(encoding="utf-8"), fmt
+            )
 
         alone = run_with([], "alone")
         before = run_with(
@@ -475,7 +477,9 @@ class TestExportsAreOneAnalysis:
         assert result.exit_code == 4, result.output
         missing = [fmt for fmt, dest in destinations.items() if not dest.exists()]
         assert missing == []
-        assert all(dest.read_text(encoding="utf-8").strip() for dest in destinations.values())
+        assert all(
+            dest.read_text(encoding="utf-8").strip() for dest in destinations.values()
+        )
 
     def test_two_exports_of_one_format_are_identical(
         self, snapshot_pair: tuple[Path, Path], tmp_path: Path

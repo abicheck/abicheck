@@ -152,9 +152,7 @@ def test_self_compare_of_stored_stale_snapshot_is_complete_end_to_end(
         warnings.simplefilter("ignore")
         assert degraded_reliability_facts(snapshot_from_dict(d))
 
-    result = CliRunner().invoke(
-        main, ["compare", str(path), str(path), "-o", "json=-"]
-    )
+    result = CliRunner().invoke(main, ["compare", str(path), str(path), "-o", "json=-"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assurance = payload["analysis_assurance"]
@@ -211,9 +209,7 @@ def test_content_identical_compare_still_warns_it_can_detect_nothing(
     path = tmp_path / "baseline.abi.json"
     path.write_text(json.dumps(d))
 
-    result = CliRunner().invoke(
-        main, ["compare", str(path), str(path), "-o", "json=-"]
-    )
+    result = CliRunner().invoke(main, ["compare", str(path), str(path), "-o", "json=-"])
     payload = json.loads(result.output)
     assert payload["analysis_assurance"]["status"] == "complete"
     warnings_out = payload.get("coverage_warnings", [])

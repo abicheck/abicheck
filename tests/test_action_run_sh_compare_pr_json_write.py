@@ -80,9 +80,9 @@ def _compare_argv(
         # only the first leaves the second's destination unwritten, which is
         # exactly the parametrized pair these tests exist to distinguish. A
         # destination of `-` is stdout and writes no file.
-        '    json=-) : ;;\n'
+        "    json=-) : ;;\n"
         '    json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#json=}" ;;\n'
-        '    --output=json=-) : ;;\n'
+        "    --output=json=-) : ;;\n"
         '    --output=json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#--output=json=}" ;;\n'
         "  esac\n"
         "done\n"
@@ -516,11 +516,11 @@ def _compare_github_output(
         "_wrote=0\n"
         "while [[ $# -gt 0 ]]; do\n"
         '  case "$1" in\n'
-        '    -o)\n'
+        "    -o)\n"
         '      _dest="${2#*=}"\n'
         '      if [[ "$_dest" == "-" ]]; then\n'
         '        echo \'{"verdict":"COMPATIBLE"}\'\n'
-        '      else\n'
+        "      else\n"
         '        printf \'%s\\n\' \'{"verdict": "COMPATIBLE"}\' > "$_dest"\n'
         "      fi\n"
         "      _wrote=1\n"

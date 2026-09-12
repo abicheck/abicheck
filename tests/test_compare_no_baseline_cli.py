@@ -294,7 +294,9 @@ def test_findings_alone_never_gate(candidate: Path) -> None:
 
 def test_output_file_receives_the_report(candidate: Path, tmp_path: Path) -> None:
     target = tmp_path / "audit.md"
-    result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", f"markdown={target}")
+    result = invoke_cli(
+        "compare", "--no-baseline", str(candidate), "-o", f"markdown={target}"
+    )
     assert result.exit_code == 0, result.output
     assert target.read_text().startswith("# ABI audit:")
 
@@ -779,9 +781,7 @@ def test_the_audit_accepts_a_project_snapshot_package_directory(
     package = _project_snapshot_package(tmp_path, case)
     stored = example_catalog.case_dir(case) / "snapshot.abi.json"
 
-    from_package = invoke_cli(
-        "compare", "--no-baseline", str(package), "-o", "json=-"
-    )
+    from_package = invoke_cli("compare", "--no-baseline", str(package), "-o", "json=-")
     from_file = invoke_cli("compare", "--no-baseline", str(stored), "-o", "json=-")
     assert from_package.exit_code == from_file.exit_code == 0, from_package.output
 

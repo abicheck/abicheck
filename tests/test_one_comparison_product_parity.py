@@ -411,9 +411,7 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
         assert "findings_truncated" not in lib
         assert "findings_truncated_kinds" not in lib
 
-    def test_the_retired_cap_flag_is_gone_with_no_alias(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_retired_cap_flag_is_gone_with_no_alias(self, tmp_path: Path) -> None:
         old_dir, new_dir = _many_removals_pair(tmp_path, count=3)
         result = _invoke(
             "compare",

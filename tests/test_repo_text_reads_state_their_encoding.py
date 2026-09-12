@@ -347,6 +347,6 @@ def test_a_rendered_report_really_defeats_the_platform_default() -> None:
     # would NOT do: its bytes are all mapped in cp1252, so it decodes into
     # mojibake rather than raising, and a non-vacuity guard built on one would
     # pass while proving nothing.
-    sample = "Removed \u201Cfoo\u201D from the export table."
+    sample = "Removed \u201cfoo\u201d from the export table."
     with pytest.raises(UnicodeDecodeError):
         sample.encode("utf-8").decode("cp1252")

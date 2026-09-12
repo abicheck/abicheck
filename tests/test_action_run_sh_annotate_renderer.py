@@ -395,7 +395,7 @@ class TestAnnotateRendererReadsThePersistedReport:
             'for arg in "$@"; do\n'
             '  case "$arg" in\n'
             "    -o|--output) _want_next=1; continue ;;\n"
-            '    json=-) _want_next=0 ;;\n'
+            "    json=-) _want_next=0 ;;\n"
             '    json=*) if [[ "${_want_next:-0}" == 1 ]]; then\n'
             f"      cat > \"${{arg#json=}}\" <<'STUBJSON'\n{payload}\nSTUBJSON\n"
             "    fi ;;\n"

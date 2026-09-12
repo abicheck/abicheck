@@ -365,9 +365,7 @@ class TestRemediationNamesOnlyLiveFlags:
         self._multi_variant_package(old_pkg)
         _write_package(new_pkg, new_libs)
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), *extra, "-o", "json=-"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), *extra, "-o", "json=-")
         assert ec != 0
         self._assert_advice_lands(out, "compare")
 
