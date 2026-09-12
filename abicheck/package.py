@@ -400,9 +400,6 @@ def _drain_reader_queue(
 #: ``tarfile`` cannot open transparently, so it is the only one this module
 #: has to recognise for itself.
 _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
-#: Local-file-header and end-of-central-directory magics: a zip container
-#: (``.whl``, a ``.conda`` v2 package, or a plain zip).
-_ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x06\x06")
 
 
 def _magic(path: Path, size: int = 8) -> bytes:
@@ -426,8 +423,28 @@ def looks_like_zstd(path: Path) -> bool:
 
 
 def looks_like_zip(path: Path) -> bool:
-    """Whether *path*'s content is a zip container, regardless of its name."""
-    return _magic(path, 4) in tuple(m[:4] for m in _ZIP_MAGICS)
+    """Whether *path* is a zip container, regardless of its name.
+
+    Asked of the central directory (``zipfile.is_zipfile`` seeks the
+    end-of-central-directory record from the end of the file), not of byte
+    0. The ZIP format explicitly permits arbitrary bytes *before* the first
+    local file header -- that is how a self-extracting archive works -- so a
+    magic check at offset 0 rejects wheels that every real zip reader
+    accepts, including Python's own ``ZipFile`` that this module's
+    extractors then use (Codex review, PR #1253). The same property is
+    documented at length on this repo's own
+    ``workflows.bundle_compare_operand_marker.path_is_a_real_zip_container``,
+    which cannot be imported here (ADR-061: ``extract`` may not import
+    ``workflows``).
+
+    A coincidental EOCD-shaped byte sequence can satisfy this on a file
+    with no real zip content -- the hardening story on that sibling -- which
+    is why no caller here treats it as sufficient on its own: both
+    `WheelExtractor` and `CondaExtractor` additionally require their own
+    format's marker *member*, and a fake central directory does not produce
+    a ``.dist-info/`` entry or a conda payload.
+    """
+    return zipfile.is_zipfile(path)
 
 
 def _zip_entry_names(path: Path) -> list[str]:
@@ -1000,13 +1017,33 @@ class CondaExtractor:
             n.startswith(("pkg-", "info-")) and n.endswith(".tar.zst") for n in names
         )
 
+    #: Members this format sniff will look at before giving up. A conda
+    #: package's `info/` tree is at the front of the archive, so a real one
+    #: is recognised well inside this.
+    _SNIFF_MEMBERS = 50
+
     @staticmethod
     def _is_legacy_conda_tar(pkg_path: Path) -> bool:
-        """A legacy conda tarball, recognised by its own ``info/`` marker."""
+        """A legacy conda tarball, recognised by its own ``info/`` marker.
+
+        Iterated lazily and stopped at :data:`_SNIFF_MEMBERS`. ``getnames()``
+        parses *every* header in the archive and retains a ``TarInfo`` for
+        each before any slice applies, which since this detector stopped
+        gating on the filename runs for every tar-shaped operand -- so a
+        large or adversarial archive could force full decompression, or
+        exhaust memory on millions of empty members, before
+        ``_reject_oversized_declared_content`` ever got to enforce the
+        extraction limits (Codex review, PR #1253). Detection must be
+        cheaper than extraction, not a way around its bounds.
+        """
         try:
             with tarfile.open(pkg_path, tarinfo=_BoundedTarInfo) as tf:
-                names = tf.getnames()
-                return any(n.startswith("info/") for n in names[:50])
+                for seen, member in enumerate(tf):
+                    if member.name.startswith("info/"):
+                        return True
+                    if seen + 1 >= CondaExtractor._SNIFF_MEMBERS:
+                        break
+                return False
         # ExtractionSecurityError alongside tarfile's own exceptions: a
         # _BoundedTarInfo rejection during this mere format-sniff peek
         # should degrade to "not detected as this format" the same way
