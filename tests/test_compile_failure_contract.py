@@ -101,6 +101,13 @@ def test_oracle_is_not_a_constant() -> None:
 @pytest.mark.parametrize(
     "stderr",
     [b"", b"x" * 100_000, b"\xff\xfe not utf-8", "жёсткая ошибка".encode()],
+    # Explicit ids: pytest derives one from the value otherwise, and it exports
+    # the full node id in `PYTEST_CURRENT_TEST`. A 100 KB parameter therefore
+    # produced a 100 KB environment variable, which Windows rejects outright
+    # ("the environment variable is longer than 32767 characters") -- an error
+    # at setup, on that platform only. Any parametrized value large enough to
+    # matter as a test input is large enough to need an id of its own.
+    ids=["empty", "100kb", "not_utf8", "non_ascii"],
 )
 def test_failure_diagnostics_survive_any_stderr(stderr: bytes) -> None:
     """The failure message carries command, source and stderr for *every*
@@ -162,3 +169,30 @@ def test_real_compiler_error_fails_the_test(tmp_path: Path) -> None:
     # above is the compiler's verdict and not a broken helper.
     out = _compile_dll(_SRC, "good.dll", tmp_path)
     assert out.exists()
+
+
+def test_every_parametrized_id_in_this_module_stays_short() -> None:
+    """Guard for the platform-specific setup error the 100 KB stderr case hit.
+
+    pytest exports the whole node id in `PYTEST_CURRENT_TEST`, and Windows caps
+    an environment variable at 32767 characters, so a large parameter used as
+    its own implicit id turns into a collection-time `ValueError` on one
+    platform and passes everywhere else. The bound below is far under that cap;
+    the point is that a value big enough to be an interesting input must be
+    given an id, not that 200 is special.
+    """
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", __file__, "--collect-only", "-q", "--no-header"],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    ids = [line for line in result.stdout.splitlines() if "::" in line]
+    assert ids, "collection produced no test ids — the guard would be vacuous"
+    too_long = [(line[:60], len(line)) for line in ids if len(line) > 200]
+    assert not too_long
