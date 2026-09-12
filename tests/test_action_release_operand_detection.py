@@ -37,6 +37,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from _package_fixtures import _make_conda_v2, _make_tar_mode, _make_wheel
 from _workflow_exec import bash_executable, require_bash
 
@@ -48,12 +49,23 @@ _FN_START = "_is_release_style_operand() {"
 _FN_END = "\n}\n"
 
 
-def _function_source() -> str:
-    """The real definition, parsed out of `run.sh` rather than restated."""
+def _named_function_source(name: str) -> str:
+    """The real definition of *name*, parsed out of `run.sh`, not restated."""
     text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_FN_START)
+    start = text.index(f"{name}() {{")
     end = text.index(_FN_END, start) + len(_FN_END)
     return text[start:end]
+
+
+def _function_source() -> str:
+    """The real `_is_release_style_operand`, plus the helpers it calls."""
+    return "\n".join(
+        (
+            '_RUNNING_ON_WINDOWS="${_RUNNING_ON_WINDOWS:-false}"',
+            _named_function_source("_is_path_already_qualified"),
+            _named_function_source("_is_release_style_operand"),
+        )
+    )
 
 
 def _ask(
@@ -190,6 +202,119 @@ class TestTheProbeResolvesTheOperandNotTheSafeDirectory:
         assert _ask(
             "./nested/operand", abicheck_available=True, cwd=safe_dir, workdir=workdir
         )
+
+
+class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
+    """The anchoring decision has one owner, and it is not this call site.
+
+    The first version of the anchoring fix above carried its *own* regex
+    (`^[A-Za-z]:[/\\\\]` plus a POSIX-absolute test). That is the
+    `cli_surface.copied_option_table_went_stale` shape inside one file: a
+    second, narrower spelling of a question `_is_path_already_qualified`
+    already answers, which silently disagreed on UNC (`\\\\server\\share`),
+    root-relative (`\\pkg`) and drive-relative (`C:pkg`) paths -- each then
+    prefixed with `$PWD`, sending the probe at a path that does not exist
+    and withholding the package-only inputs (Codex P2 and CodeRabbit,
+    PR #1261).
+
+    So the oracle here is the predicate itself, asked of the same string,
+    and the observation is the argv the probe *actually* passes to Python
+    -- not the probe's verdict, which collapses two different paths onto
+    the same "not a package" answer and would have passed against the bug.
+    The spellings are swept from both sides of every branch the predicate
+    has, so a future narrowing at either site fails here.
+    """
+
+    SPELLINGS = (
+        "pkg",
+        "./nested/pkg",
+        "../pkg",
+        "/abs/pkg",
+        "C:/pkg",
+        "C:\\pkg",
+        "C:pkg",
+        "\\pkg",
+        "\\\\server\\share\\pkg",
+        "a:baseline.json",
+        "weird name/pkg",
+    )
+
+    @staticmethod
+    def _probe_argv(spelling: str, *, on_windows: bool, workdir: Path) -> str:
+        """The path the probe subprocess is actually handed."""
+        require_bash()
+        recorder = workdir / "recorded"
+        stub = workdir / "py-stub"
+        stub.write_text(
+            '#!/usr/bin/env bash\nprintf "%s" "${!#}" > "$RECORD"\nexit 3\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        script = "\n".join(
+            (
+                f'_RUNNING_ON_WINDOWS={"true" if on_windows else "false"}',
+                "_PY_BIN_HAS_ABICHECK=true",
+                f'_PY_BIN="{stub}"',
+                f'_PY_SAFE_DIR="{workdir}"',
+                f'RECORD="{recorder}"; export RECORD',
+                _function_source(),
+                '_is_release_style_operand "$1"',
+            )
+        )
+        subprocess.run(  # noqa: S603
+            [bash_executable(), "-c", script, "bash", spelling],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(workdir),
+        )
+        return recorder.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _predicate(spelling: str, *, on_windows: bool) -> bool:
+        """The oracle: `run.sh`'s own shared predicate, nothing restated."""
+        require_bash()
+        script = "\n".join(
+            (
+                f'_RUNNING_ON_WINDOWS={"true" if on_windows else "false"}',
+                _named_function_source("_is_path_already_qualified"),
+                '_is_path_already_qualified "$1"',
+            )
+        )
+        completed = subprocess.run(  # noqa: S603
+            [bash_executable(), "-c", script, "bash", spelling],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode in (0, 1), completed.stderr
+        return completed.returncode == 0
+
+    @pytest.mark.parametrize("on_windows", [False, True])
+    def test_the_probe_anchors_iff_the_predicate_says_unqualified(
+        self, tmp_path: Path, on_windows: bool
+    ) -> None:
+        disagreements = {}
+        for spelling in self.SPELLINGS:
+            workdir = tmp_path / f"w{len(disagreements)}-{abs(hash(spelling))}"
+            workdir.mkdir()
+            qualified = self._predicate(spelling, on_windows=on_windows)
+            argv = self._probe_argv(
+                spelling, on_windows=on_windows, workdir=workdir
+            )
+            anchored = argv != spelling
+            if anchored is qualified:
+                disagreements[spelling] = (qualified, argv)
+        assert not disagreements, disagreements
+
+    def test_the_sweep_covers_both_answers_on_each_platform(self) -> None:
+        """Vacuity guard: a sweep that is all-qualified or all-unqualified
+        would pass against a predicate reduced to a constant."""
+        for on_windows in (False, True):
+            answers = {
+                self._predicate(s, on_windows=on_windows) for s in self.SPELLINGS
+            }
+            assert answers == {True, False}, on_windows
 
 
 class TestThePreInstallFallback:

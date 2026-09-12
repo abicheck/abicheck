@@ -1749,10 +1749,14 @@ _is_release_style_operand() {
     # the package-only inputs for an operand `compare` does fan out
     # (Codex review, PR #1259). `$_PY_SAFE_DIR` exists to keep the
     # untrusted checkout off `sys.path`, not to relocate the operand.
-    # A drive-lettered path (`C:/...`) is already absolute on the Git Bash
-    # runners and must not be prefixed.
+    # Which spellings must NOT be prefixed is `_is_path_already_qualified`'s
+    # question, not a second regex's: it covers UNC (`\\server\share`),
+    # root-relative (`\pkg`) and drive-relative (`C:pkg`) forms this call
+    # site would otherwise mangle, and it gates every Windows-only form on
+    # actually running on Windows, so a POSIX file literally named `C:pkg`
+    # still anchors (Codex and CodeRabbit review, PR #1261).
     local _probe_path="$path"
-    if [[ "$_probe_path" != /* ]] && ! [[ "$_probe_path" =~ ^[A-Za-z]:[/\\] ]]; then
+    if ! _is_path_already_qualified "$_probe_path"; then
       _probe_path="$PWD/$_probe_path"
     fi
     local _probe_rc=0
