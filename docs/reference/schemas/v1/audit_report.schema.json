@@ -396,46 +396,28 @@
         },
         "pattern": {
           "type": "object",
-          "description": "Each side's raw PatternFactsResult.to_dict() -- the same shape `scan`'s own report carries under `pattern_scan`.",
+          "description": "The candidate side's PatternFactsResult.to_dict(). An audit has one operand, so only the candidate half is emitted and the evolution maps a two-sided report carries are omitted entirely rather than stated without an OLD to state them against.",
           "properties": {
-            "old": {
+            "candidate": {
               "$ref": "#/$defs/patternScanSide"
-            },
-            "new": {
-              "$ref": "#/$defs/patternScanSide"
-            },
-            "escalation_evolution": {
-              "$ref": "#/$defs/evolutionMap"
             }
           }
         },
         "preprocessor": {
           "type": "object",
           "properties": {
-            "old": {
+            "candidate": {
               "$ref": "#/$defs/preprocessorScanSide"
-            },
-            "new": {
-              "$ref": "#/$defs/preprocessorScanSide"
-            },
-            "macro_divergence_evolution": {
-              "$ref": "#/$defs/evolutionMap"
-            },
-            "header_leak_evolution": {
-              "$ref": "#/$defs/evolutionMap"
             }
           }
         },
         "coverage": {
           "type": "object",
-          "description": "Added in 1.5. Per-check, per-side sufficiency: whether an *absence* claim is established for that check on that side. Answered per check because the three rest on different evidence -- a set of files, one `clang -E -dM` probe per compile unit, one `clang -M` probe per public header -- so one may be established while another is not. A check whose side is not established never yields `introduced`/`resolved` for any identity; `reason` says why.",
+          "description": "Added in 1.5. Per-check sufficiency for the candidate side (an audit has one operand, so this is keyed `candidate` where a two-sided compare report keys `old`/`new`): whether an *absence* claim is established for that check on that side. Answered per check because the three rest on different evidence -- a set of files, one `clang -E -dM` probe per compile unit, one `clang -M` probe per public header -- so one may be established while another is not. A check whose side is not established never yields `introduced`/`resolved` for any identity; `reason` says why.",
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "old": {
-                "$ref": "#/$defs/checkSufficiency"
-              },
-              "new": {
+              "candidate": {
                 "$ref": "#/$defs/checkSufficiency"
               }
             }

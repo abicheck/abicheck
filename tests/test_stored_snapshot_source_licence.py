@@ -56,6 +56,7 @@ from abicheck.buildsource.source_inputs import (
     SourceInputDisposition,
     SourceInputSet,
     SourceReadLicence,
+    extraction_read_source_inputs,
     resolve_source_inputs,
 )
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin
@@ -770,7 +771,10 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
     def test_run_dump_grants_the_licence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from abicheck import service, service_dump_native
 
-        produced = AbiSnapshot(library="libfoo.so", version="1.0")
+        # Header-derived: the AST frontend really opened the files it attributes
+        # declarations to. A DWARF-only extraction is *not* licensed -- see
+        # TestLicenceRequiresThatSourceInputsWereActuallyRead below.
+        produced = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
         assert produced.live_source_evidence is False
 
         monkeypatch.setattr(
@@ -978,3 +982,97 @@ def test_a_changed_filter_with_no_join_predicate_narrows_nothing(
         licence=SourceReadLicence.live_extraction(),
     )
     assert [i.disposition for i in inputs.inputs] == [SourceInputDisposition.SELECTED]
+
+
+class TestLicenceRequiresThatSourceInputsWereActuallyRead:
+    """ "Extracted in this run" is not by itself evidence that the recorded
+    source paths were read.
+
+    A headerless DWARF dump derives every declaration's `source_header` from
+    `DW_AT_decl_file` — a path on the *build* machine this run never opened and
+    which may not exist here at all. Granting the licence unconditionally to
+    any live extraction therefore reopened the original hole for downloaded or
+    previously-built binaries: the scan would characterise whatever now occupies
+    those paths (Codex review, P2). The licence now requires header-derived
+    provenance, where the AST frontend genuinely opened the files it attributes
+    declarations to.
+    """
+
+    @staticmethod
+    def _snapshot(**kw: object) -> AbiSnapshot:
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        for k, v in kw.items():
+            setattr(snap, k, v)
+        return snap
+
+    @pytest.mark.parametrize(
+        "from_headers,inferred,expected",
+        [
+            (True, False, True),  # header-AST extraction: files really opened
+            (True, True, False),  # from_headers was *guessed* on a legacy load
+            (False, False, False),  # DWARF- or symbol-table-derived: never opened
+            (False, True, False),
+        ],
+    )
+    def test_only_established_header_provenance_reads_source_inputs(
+        self, from_headers: bool, inferred: bool, expected: bool
+    ) -> None:
+        """Exhaustive over the four (from_headers, inferred) states, so neither
+        can be dropped from the predicate without a failure."""
+        from abicheck.buildsource.source_inputs import extraction_read_source_inputs
+
+        snap = self._snapshot(from_headers=from_headers, from_headers_inferred=inferred)
+        assert extraction_read_source_inputs(snap) is expected
+
+    def test_a_dwarf_only_live_extraction_is_not_licensed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Through the real `run_dump` wrapper: a snapshot whose provenance is
+        DWARF comes back unlicensed even though this run produced it."""
+        from abicheck import service, service_dump_native
+
+        dwarf_only = self._snapshot(from_headers=False)
+        monkeypatch.setattr(
+            service_dump_native, "_run_dump_uncached", lambda *a, **kw: dwarf_only
+        )
+        out = service.run_dump(tmp_path / "libfoo.so", "elf")
+        assert out.live_source_evidence is False
+        assert snapshot_source_licence(out).permitted is False
+
+    def test_a_header_derived_live_extraction_is_licensed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from abicheck import service, service_dump_native
+
+        header_derived = self._snapshot(from_headers=True)
+        monkeypatch.setattr(
+            service_dump_native, "_run_dump_uncached", lambda *a, **kw: header_derived
+        )
+        out = service.run_dump(tmp_path / "libfoo.so", "elf")
+        assert out.live_source_evidence is True
+
+    def test_a_dwarf_only_side_reports_not_evaluated_not_fabricated_facts(
+        self, tmp_path: Path
+    ) -> None:
+        """The consequence. The path a DWARF snapshot records is occupied by an
+        unrelated file here — exactly the downloaded-binary case — and the scan
+        must decline rather than describe it."""
+        decoy = tmp_path / "on_the_build_machine.h"
+        decoy.write_text(PACKED_SOURCE)
+
+        # DWARF provenance: recorded, never read (from_headers stays False).
+        old = _snapshot_recording([str(decoy)])
+        new = _snapshot_recording([str(decoy)], version="2.0")
+        old.live_source_evidence = extraction_read_source_inputs(old)
+        new.live_source_evidence = extraction_read_source_inputs(new)
+
+        result = compute_pattern_preprocessor_scan(old, new)
+        assert result.pattern_escalation_evolution == {}
+        assert result.coverage[CHECK_PATTERN_ESCALATION]["old"].established is False
+
+        # The very same paths, now with header-derived provenance, are read.
+        for side in (old, new):
+            side.from_headers = True
+            side.live_source_evidence = extraction_read_source_inputs(side)
+        licensed = compute_pattern_preprocessor_scan(old, new)
+        assert set(licensed.pattern_escalation_evolution.values()) == {"persistent"}

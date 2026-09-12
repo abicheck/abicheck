@@ -73,3 +73,22 @@
   is why a schema-shape test now pins the described keys rather than relying on
   positive validation alone.
 
+- **The licence requires that the extraction actually *read* the recorded
+  source paths, not merely that it ran in this session.** A headerless dump
+  derives every declaration's `source_header` from DWARF's `DW_AT_decl_file` —
+  a path on the *build* machine that the run never opened, and which on a
+  downloaded binary either does not exist locally or belongs to something
+  else. Granting the licence to any live extraction therefore reopened the
+  original hole through the binary's debug info. It is now granted only for
+  header-derived provenance, where the AST frontend genuinely opened the files
+  it attributes declarations to. **User-visible:** a headerless
+  `compare old.so new.so` now reports the pattern/preprocessor facts as not
+  evaluated instead of characterising whatever occupies those paths; pass `-H`
+  to get them.
+
+- **A `--no-baseline` audit carries its candidate-side `coverage`.** The
+  one-sided projection dropped it along with the evolution maps. The evolution
+  maps genuinely cannot be stated without an OLD side; coverage can, and it is
+  the only thing that distinguishes "the candidate has none of these
+  constructs" from "we could not look".
+

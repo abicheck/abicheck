@@ -684,9 +684,17 @@ So abicheck reads a side's recorded source paths only when it is entitled to:
 
 | Side | What happens |
 |---|---|
-| Extracted in this run (you pointed at a binary and headers on disk) | Read normally — those paths are today's paths |
+| Extracted in this run **from headers** (you passed `-H`, so the AST frontend opened those files) | Read normally — those paths are today's paths |
+| Extracted in this run from the binary alone (DWARF or the symbol table) | **Not read.** `DW_AT_decl_file` names a path on the *build* machine, which this run never opened |
 | Loaded from a stored snapshot | **Not read at all.** The check reports that the historical evaluation was not possible |
 | Loaded, with an explicitly supplied and verified source context | Read, on the caller's stated provenance |
+
+The second row is the one that surprises people. A snapshot built from debug
+info records where each declaration was *compiled from*, not a file this run
+has seen — and for a downloaded or previously-built binary that path either
+does not exist locally or belongs to something else entirely. So a headerless
+`compare old.so new.so` reports these advisory facts as not evaluated. Pass the
+headers (`-H`) if you want them.
 
 The consequence you will see in a report: the lexical `pattern` and
 `preprocessor` pre-scan blocks of a stored-versus-stored (or

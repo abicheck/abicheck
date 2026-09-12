@@ -8472,9 +8472,9 @@ Two residuals are deliberately open, both recorded on the
    own, not part of this fix, and today there is exactly one such consumer to
    guard.
 
-2. **The licence is object-level, not content-verified.** A live extraction
-   grants it for the whole run; it does not digest each source input and
-   re-check that digest at read time. The consequence is the conservative
+2. **The licence is object-level, not content-verified.** A header-derived
+   live extraction grants it for the whole run; it does not digest each source
+   input and re-check that digest at read time. The consequence is the conservative
    direction (a stored snapshot declines to re-derive even when the tree on
    disk genuinely *is* the one it was dumped from), which is why it is a gap
    rather than a defect. Closing it properly means persisting per-input
@@ -8484,6 +8484,21 @@ Two residuals are deliberately open, both recorded on the
    take if stored-versus-stored pattern/preprocessor evolution ever needs to
    be answerable rather than honestly declined; do not instead widen the
    licence, which would reintroduce exactly the defect above.
+
+A third residual, narrower than both: the licence requires *header-derived*
+provenance (`extraction_read_source_inputs`), which is what the header-AST
+frontends establish by actually opening the files they attribute declarations
+to. A dump that collected only L3 build evidence (`--sources` with no `-H`) did
+read its compile units, but nothing distinguishable at the grant point
+separates that from a *loaded* build-source pack whose paths are as historical
+as a stored snapshot's. Such a run therefore reports its source-derived facts
+as not evaluated. That is the deliberate direction -- declining a fact we could
+have had, rather than risking one we did not -- and closing it properly means
+recording on the snapshot *which* inputs an extraction actually opened, not
+loosening the predicate. The same applies to a DWARF-only dump, whose
+`DW_AT_decl_file` paths name the build machine's tree: that one is not a gap
+but the point, and it is why the grant is conditional at all (see the review
+round on PR #1236).
 
 Note also the *shape* of the accepted trade-off in the third fix: the
 evolution fold now decides each identity from what is established for that

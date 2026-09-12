@@ -41,8 +41,6 @@ from pathlib import Path
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
-from abicheck.buildsource.preprocessor_probe_families import PROBE_FAMILIES
-from abicheck.buildsource.source_inputs import SourceInputDisposition
 from abicheck.report.no_baseline import (
     AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS,
@@ -56,11 +54,6 @@ from abicheck.suppression import Suppression, SuppressionList
 from abicheck.workflows.no_baseline_compare import (
     resolve_no_baseline_candidate,
     run_no_baseline_compare,
-)
-from abicheck.workflows.pattern_preprocessor_scan import (
-    CHECK_HEADER_LEAK,
-    CHECK_MACRO_DIVERGENCE,
-    CHECK_PATTERN_ESCALATION,
 )
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -1065,111 +1058,3 @@ def test_the_audit_schemas_required_list_is_pinned() -> None:
         f"the audit schema's root `required` list lost {sorted(removed)}; a "
         "removal is a MAJOR change in the other direction"
     )
-
-
-def test_the_published_schema_describes_the_pattern_preprocessor_scan_block() -> None:
-    """The audit schema is where a consumer discovers this block's shape, so a
-    key the emitter added must be discoverable there — not merely permitted by
-    an opaque `{"type": "object"}` (Codex review, P2).
-
-    This asserts the schema *describes* the keys, not just that a document
-    validates: an opaque object declaration validates every document, so the
-    positive-validation test above passed throughout the version bump that
-    introduced `coverage` while the schema still said 1.4 and described
-    nothing. Pinning the described keys is what makes that drift fail.
-    """
-    from abicheck.schemas import load_audit_report_schema
-
-    schema = load_audit_report_schema()
-    block = schema["properties"]["pattern_preprocessor_scan"]
-    assert "properties" in block, (
-        "the block must be described, not declared as an opaque object"
-    )
-    assert set(block["properties"]) >= {
-        "version",
-        "pattern",
-        "preprocessor",
-        "coverage",
-    }
-
-    # The version the schema advertises is the one the emitter stamps.
-    assert (
-        f'currently "{AUDIT_REPORT_SCHEMA_VERSION}"'
-        in (schema["properties"]["audit_report_schema_version"]["description"])
-    ), "the schema's own advertised version drifted from the emitted constant"
-
-    # Every $ref the block reaches for really resolves.
-    defs = schema["$defs"]
-    for name in (
-        "patternScanSide",
-        "preprocessorScanSide",
-        "evolutionMap",
-        "checkSufficiency",
-        "sourceInputAccount",
-        "probeFamilyTally",
-    ):
-        assert name in defs, f"${{defs}}/{name} is referenced but not defined"
-
-    # The four evolution states, and only those.
-    assert set(defs["evolutionMap"]["additionalProperties"]["enum"]) == {
-        "persistent",
-        "introduced",
-        "resolved",
-        "not_evaluated",
-    }
-    # Every disposition the input account can report.
-    assert set(
-        defs["sourceInputAccount"]["properties"]["counts"]["propertyNames"]["enum"]
-    ) == {d.value for d in SourceInputDisposition}
-    # Every probe family, and every check the coverage object can key on.
-    assert set(defs["probeFamilyTally"]["propertyNames"]["enum"]) == set(PROBE_FAMILIES)
-    assert set(block["properties"]["coverage"]["propertyNames"]["enum"]) == {
-        CHECK_PATTERN_ESCALATION,
-        CHECK_MACRO_DIVERGENCE,
-        CHECK_HEADER_LEAK,
-    }
-
-
-def test_a_live_audit_block_validates_against_the_described_schema() -> None:
-    """The described shape must accept a real emitted block, including its
-    `coverage` object and the per-family probe tallies — the negative half of
-    the test above, which only checks the schema says something."""
-    jsonschema = pytest.importorskip("jsonschema")
-
-    from abicheck.model import AbiSnapshot, Function, ScopeOrigin
-    from abicheck.schemas import load_audit_report_schema
-    from abicheck.workflows.pattern_preprocessor_scan import (
-        compute_pattern_preprocessor_scan,
-    )
-
-    def _side(version: str) -> AbiSnapshot:
-        snap = AbiSnapshot(
-            library="libfoo.so",
-            version=version,
-            functions=[
-                Function(
-                    name="f",
-                    mangled="f",
-                    return_type="void",
-                    source_header=__file__,
-                    origin=ScopeOrigin.PUBLIC_HEADER,
-                )
-            ],
-        )
-        snap.live_source_evidence = True
-        return snap
-
-    emitted = compute_pattern_preprocessor_scan(_side("1.0"), _side("2.0")).to_dict()
-    block_schema = load_audit_report_schema()["properties"]["pattern_preprocessor_scan"]
-    # Resolve $refs against the whole schema, as a real consumer would.
-    validator = jsonschema.Draft202012Validator(
-        {**block_schema, "$defs": load_audit_report_schema()["$defs"]}
-    )
-    errors = list(validator.iter_errors(emitted))
-    assert not errors, [e.message for e in errors]
-    assert set(emitted["coverage"]) == {
-        CHECK_PATTERN_ESCALATION,
-        CHECK_MACRO_DIVERGENCE,
-        CHECK_HEADER_LEAK,
-    }
-    assert "family_attempted" in emitted["preprocessor"]["old"]

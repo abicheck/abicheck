@@ -156,13 +156,48 @@ WITHHELD_FOR_STORED_SNAPSHOT = SourceReadLicence.withheld(
 
 
 class LiveSourceEvidence(Protocol):
-    """Anything carrying the runtime-only source-read licence flag.
+    """A snapshot-shaped object, as far as the licence is concerned.
 
     Structural on purpose: this module is a dependency-free leaf, and a real
-    ``AbiSnapshot`` import would point it at ``model`` for one attribute.
+    ``AbiSnapshot`` import would point it at ``model`` for three attributes.
     """
 
     live_source_evidence: bool
+    from_headers: bool
+    from_headers_inferred: bool
+
+
+def extraction_read_source_inputs(snapshot: Any) -> bool:
+    """Did the extraction that produced *snapshot* actually **read** the source
+    paths the snapshot records?
+
+    "Extracted in this run" is not sufficient on its own, and assuming it was
+    is a hole worth naming: a headerless DWARF dump derives every declaration's
+    ``source_header`` from ``DW_AT_decl_file``, which names a file on the
+    *build* machine that this run never opened and that may not exist here at
+    all. A live extraction of a downloaded binary would then have licensed a
+    re-read of whatever happens to occupy those paths now -- the same
+    fabrication the licence exists to prevent, reached through the binary's
+    debug info instead of through a stored snapshot (Codex review, P2).
+
+    So the licence requires *header-derived* provenance: the header-AST
+    frontends (castxml / ``clang -ast-dump``) genuinely opened the files they
+    attribute declarations to. ``from_headers_inferred`` excludes a legacy
+    snapshot where ``from_headers`` was guessed rather than established, on the
+    same "a guess is not evidence" reasoning
+    ``diff_symbols``/``diff_platform_elf_symbols`` already apply to it.
+
+    Deliberately conservative: a dump that collected only L3 build evidence
+    (``--sources`` with no ``-H``) did read its compile units, but nothing
+    distinguishable at this point separates that from a *loaded* build-source
+    pack whose paths are as historical as a stored snapshot's. Such a run
+    reports its source-derived facts as not evaluated rather than risking the
+    fabrication; see ``docs/contribute/known-gaps.md``.
+    """
+    return bool(
+        getattr(snapshot, "from_headers", False)
+        and not getattr(snapshot, "from_headers_inferred", False)
+    )
 
 
 def granting_live_source_licence(
@@ -183,15 +218,22 @@ def granting_live_source_licence(
     facts through the Python API while working through the CLI -- the
     front-end parity break AGENTS.md forbids (Codex review).
 
-    Re-applying is idempotent, which matters because the dump pipeline recurses
-    back through its own entry point for the hybrid AST frontend.
+    The grant is **conditional**: see :func:`extraction_read_source_inputs` for
+    why "extracted in this run" is not by itself evidence that the recorded
+    source paths were read. Re-applying is idempotent, which matters because
+    the dump pipeline recurses back through its own entry point for the hybrid
+    AST frontend.
     """
 
     @functools.wraps(extract)
     def _stamped(*args: Any, **kwargs: Any) -> _T:
         result = extract(*args, **kwargs)
-        # Duck-typed rather than isinstance-checked: see LiveSourceEvidence.
-        result.live_source_evidence = True  # type: ignore[attr-defined]
+        # Conditional, not unconditional: "this run produced it" does not mean
+        # "this run read the files it names" (see
+        # :func:`extraction_read_source_inputs`). Duck-typed rather than
+        # isinstance-checked, per LiveSourceEvidence.
+        if extraction_read_source_inputs(result):
+            result.live_source_evidence = True  # type: ignore[attr-defined]
         return result
 
     return _stamped
