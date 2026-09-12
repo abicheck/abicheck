@@ -136,7 +136,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `version` | `str` | `''` |
 | `pdb` | `Path \| None` | `None` |
 | `debug_roots` | `tuple[Path, ...]` | `()` |
-| `include_dependencies` | `bool` | `True` |
+| `include_dependencies` | `bool` | `False` |
 | `sources` | `Path \| None` | `None` |
 | `build_info` | `Path \| None` | `None` |
 | `build_targets` | `tuple[str, ...]` | `()` |
@@ -360,8 +360,7 @@ Render comparison result in the requested output format.
 | `severity_config` | `SeverityConfig \| None` | `None` |
 | `demangle` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
-| `stat` | `bool` | `False` |
-| `show_recommendation` | `bool` | `False` |
+| `show_recommendation` | `bool` | `True` |
 | `require_complete_analysis` | `bool` | `False` |
 
 **Returns:** `str`
@@ -409,7 +408,7 @@ Auto-detect input type and return an ABI snapshot.
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
-| `include_dependencies` | `bool` | `True` |
+| `include_dependencies` | `bool` | `False` |
 | `public_include_search_dirs` | `list[Path] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
@@ -457,7 +456,7 @@ Compare two ABI inputs and return the classified diff result.
 | `debuginfod_url` | `str \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
-| `include_dependencies` | `bool` | `True` |
+| `include_dependencies` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
 | `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
@@ -512,7 +511,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `public_include_search_dirs` | `list[Path] \| None` | `None` |
-| `include_dependencies` | `bool` | `True` |
+| `include_dependencies` | `bool` | `False` |
 
 **Returns:** `AbiSnapshot`
 
@@ -535,5 +534,33 @@ Read a small header chunk and return ``'json'``, ``'perl'``, ``'symvers'``, or `
 | Parameter | Type | Default |
 |---|---|---|
 | `path` | `Path` | *(required)* |
+
+**Returns:** `str`
+
+## `to_stat`
+
+One-line summary for CI gates.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `result` | `DiffResult` | *(required)* |
+| *(keyword-only below)* | | |
+| `severity_config` | `SeverityConfig \| None` | `None` |
+
+**Returns:** `str`
+
+## `to_stat_json`
+
+JSON output for --stat mode: summary only, no changes array.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `result` | `DiffResult` | *(required)* |
+| `indent` | `int` | `2` |
+| *(keyword-only below)* | | |
+| `severity_config` | `SeverityConfig \| None` | `None` |
+| `require_complete_analysis` | `bool` | `False` |
+| `show_only` | `str \| None` | `None` |
+| `contract_evaluation` | `bool` | `False` |
 
 **Returns:** `str`
