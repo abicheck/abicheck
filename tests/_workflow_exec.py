@@ -287,6 +287,12 @@ def run_step(
     # reach bash byte-for-byte as the YAML holds it.
     body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
     body.write_bytes(step["run"].encode("utf-8"))
+    # Git Bash wants forward slashes, but a backslash is a legal *filename*
+    # character on POSIX, so rewriting one unconditionally would corrupt a real
+    # path (a workspace under `with\backslash/` would be run from
+    # `with/backslash/`, i.e. "No such file or directory" -- Codex review,
+    # PR #1230). Convert only where the separator actually differs.
+    script_arg = body.as_posix() if os.name == "nt" else str(body)
     try:
         proc = subprocess.run(
             # `-e` as well as pipefail: the runner invokes a `run:` body as
@@ -295,7 +301,7 @@ def run_step(
             # real step failed — every `assert result.returncode == 0` in the
             # workflow tests was weaker than the thing it models (CodeRabbit
             # review).
-            [bash_executable(), "-eo", "pipefail", str(body).replace("\\", "/")],
+            [bash_executable(), "-eo", "pipefail", script_arg],
             cwd=workspace,
             env=step_env,
             capture_output=True,

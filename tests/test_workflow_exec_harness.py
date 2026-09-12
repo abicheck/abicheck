@@ -37,6 +37,7 @@ only that one 50 KB step now runs.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -203,3 +204,47 @@ def test_body_reaches_bash_byte_for_byte(tmp_path: Path) -> None:
     # failing the shell, so assert the exact string, not a prefix.
     assert result.outputs["value"] == "no-trailing-cr"
     assert "\r" not in "".join(result.output_lines)
+
+
+#: Directory-name shapes that are legal on the running platform and awkward for
+#: a path that reaches a shell. The first three hold everywhere; the last two are
+#: POSIX-only (Windows forbids both characters in a filename), and the backslash
+#: is the one that matters most: the harness has to translate separators for Git
+#: Bash without corrupting a POSIX name that legitimately contains one.
+_AWKWARD_PARENT_NAMES = [
+    pytest.param("plain", id="plain"),
+    pytest.param("with space", id="space"),
+    pytest.param("wïth-ünicode", id="non-ascii"),
+    *(
+        []
+        if os.name == "nt"
+        else [
+            pytest.param("with\\backslash", id="backslash"),
+            pytest.param("with'quote", id="single-quote"),
+        ]
+    ),
+]
+
+
+@pytest.mark.parametrize("parent_name", _AWKWARD_PARENT_NAMES)
+def test_run_step_executes_under_an_awkward_parent_directory(
+    tmp_path: Path, parent_name: str
+) -> None:
+    """The step-body script path must survive the platform's own legal names.
+
+    Codex review (PR #1230): the path handed to bash was rewritten with an
+    unconditional ``str(body).replace("\\\\", "/")``. On POSIX a backslash is an
+    ordinary filename character, so a workspace under ``with\\backslash/`` was
+    executed from ``with/backslash/`` — every `run_step` call under such a path
+    failing with "No such file or directory". Stated here as the general
+    invariant (a path legal on this platform works) over several independently
+    awkward shapes, rather than a single repro of the backslash case.
+    """
+    base = tmp_path / parent_name
+    base.mkdir()
+    workspace = make_workspace(base)
+    result = run_step(
+        {"run": _padded_body(256)}, workspace=workspace, env={"PADDED_SIZE": "256"}
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.outputs["size"] == "256"
