@@ -753,7 +753,7 @@ def _embed_inline_source_side(
                    "-- an unattributed finding is an absence of proof, not proof "
                    "the finding is harmless, so this never moves a verdict or an "
                    "exit code. Validate a manifest on its own with "
-                   "`abicheck project validate-use-cases`.")
+                   "`abicheck project validate`.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

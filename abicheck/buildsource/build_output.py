@@ -376,16 +376,31 @@ def is_build_output_dir(path: Path | str) -> bool:
     return isinstance(data, dict) and data.get("schema") == BUILD_OUTPUT_SCHEMA
 
 
-def load_build_output(root: Path | str) -> BuildOutput:
-    """Load and parse ``<root>/build-output.json``.
+def resolve_build_output_manifest(path: Path | str) -> tuple[Path, Path]:
+    """``(root, manifest_path)`` for a build output named either way.
 
-    Raises ``FileNotFoundError`` if absent, ``ValueError`` if *root* carries a
-    ``build-output.json`` that does not declare
-    ``schema: abicheck.build-output/v1`` — matching
-    :func:`~.inputs_pack.load_inputs_manifest`'s same two-exception contract.
+    A caller may name the *directory* (the usual ``abicheck-build/``) or the
+    manifest file, which need not be called ``build-output.json``: the
+    ``schema:`` tag makes a document one, not its name (a CI job's
+    ``artifacts/run-42.json``, which ``project validate`` routes by shape).
+    Re-deriving the conventional name from a named manifest's parent turns
+    that valid input into "no manifest here". *root* — where relative paths resolve from — is its directory either way.
     """
-    root = Path(root)
-    manifest_path = root / BUILD_OUTPUT_MANIFEST_NAME
+    p = Path(path)
+    if p.is_file():
+        return p.parent, p
+    return p, p / BUILD_OUTPUT_MANIFEST_NAME
+
+
+def load_build_output(root: Path | str) -> BuildOutput:
+    """Load and parse a build output's manifest.
+
+    *root* is a directory or a manifest file under any name
+    (:func:`resolve_build_output_manifest`). Raises ``FileNotFoundError``
+    if absent, ``ValueError`` if it does not declare
+    ``schema: abicheck.build-output/v1`` — :func:`~.inputs_pack.load_inputs_manifest`'s two-exception contract.
+    """
+    _, manifest_path = resolve_build_output_manifest(root)
     if not manifest_path.is_file():
         raise FileNotFoundError(
             f"No build-output manifest at {manifest_path}. Expected an "
@@ -743,16 +758,16 @@ def _declared_evidence_sharing_issues(
 
 
 def validate_build_output(root: Path | str) -> BuildOutputValidationReport:
-    """Validate one ``build-output.json`` + its referenced artifacts (ADR-047 §11.1).
+    """Validate one build output + its referenced artifacts (ADR-047 §11.1).
 
-    Never raises for a structurally-readable ``build-output.json`` — problems
-    are reported, not thrown. Raises ``FileNotFoundError``/``ValueError`` only
-    when *root* is not a readable ``abicheck-build/`` directory at all,
-    matching :func:`load_build_output`.
+    *root* is a directory or a manifest file under any name
+    (:func:`resolve_build_output_manifest`). Never raises for a
+    structurally-readable manifest — problems are reported, not thrown;
+    ``FileNotFoundError``/``ValueError`` only when *root* is not a readable build output at all, matching :func:`load_build_output`.
     """
-    root = Path(root)
+    root, manifest_path = resolve_build_output_manifest(root)
     report = BuildOutputValidationReport(root=str(root))
-    build_output = load_build_output(root)
+    build_output = load_build_output(manifest_path)
 
     if not build_output.targets:
         report.warnings.append("build-output.json declares no targets[].")
@@ -778,6 +793,8 @@ def validate_build_output(root: Path | str) -> BuildOutputValidationReport:
         report.errors.extend(_evidence_projection_issues(target))
 
     report.errors.extend(_declared_evidence_sharing_issues(root, build_output.targets))
-    report.errors.extend(_inferred_evidence_projection_issues(root, build_output.targets))
+    report.errors.extend(
+        _inferred_evidence_projection_issues(root, build_output.targets)
+    )
 
     return report

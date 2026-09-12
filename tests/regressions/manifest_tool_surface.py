@@ -999,4 +999,47 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="cli_surface.name_independent_dispatch_undone_downstream",
+        invariant=(
+            "When a front end decides what an operand *is* from its own "
+            "content -- a schema discriminator, a directory contract -- "
+            "every consumer it then hands that operand to must accept it "
+            "as given. Re-deriving a conventional filename from it (taking "
+            "a named manifest's parent directory and looking for the usual "
+            "name beside it) re-introduces, one layer down, exactly the "
+            "name dependency the dispatch just refused, and turns a valid "
+            "input into 'not found'. The corollary is where this class "
+            "actually escapes: proving the *classifier* is name-independent "
+            "proves nothing about the pipeline behind it, so the "
+            "generalized test must run the whole public invocation under "
+            "the non-conventional name, not just the classification step."
+        ),
+        fixed_by=(1242,),
+        seed_tests=(
+            "tests/test_cli_project_validate_dispatch.py",
+            "tests/test_build_output.py",
+        ),
+        # Earned: the seed's name-independence matrix runs real `CliRunner`
+        # invocations of `abicheck project validate` end to end, which is
+        # the half that was missing when the defect shipped.
+        public_surfaces=("cli",),
+        axes={
+            "input_kind": (
+                "project-config",
+                "build-output",
+                "use-case-manifest",
+                "empty-document",
+            ),
+            "operand_shape": ("directory", "named-manifest-file"),
+            "filename": (
+                ".abicheck.yml",
+                "impact-use-cases.yaml",
+                "build-output.json",
+                "run-42.json",
+                "config.yaml",
+                "NOTES",
+            ),
+        },
+    ),
 )

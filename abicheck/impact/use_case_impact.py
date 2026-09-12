@@ -85,7 +85,7 @@ class UseCaseImpact:
 
     *resolutions* is the manifest's own entrypoint resolution, unioned
     across both sides' graphs the same way the attribution below is (what
-    ``project validate-use-cases`` reports against one graph on its own);
+    ``project validate`` reports a manifest's own structure);
     *by_use_case* is this comparison's findings attributed to the use cases
     whose entrypoints reach them; *unattributed_changes* is how many
     findings no declared entrypoint could be shown to reach.

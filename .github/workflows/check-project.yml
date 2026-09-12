@@ -781,7 +781,7 @@ jobs:
                   # claim is actually trustworthy (e.g. two targets
                   # sharing one pack, or a pack whose own manifest.library
                   # names a different target). validate_build_output() is
-                  # the same check 'project validate-build' runs, and
+                  # the same check 'project validate' runs on a build output, and
                   # 'project plan' never calls it -- run it here, before
                   # this target's evidence is treated as scoped to it,
                   # rather than inferring validity from path confinement

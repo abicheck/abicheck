@@ -118,7 +118,7 @@ if __name__ == "__main__":
 from . import (  # noqa: E402  — must run after `main` is defined
     cli_aggregate,  # noqa: F401  — registers aggregate
     cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
-    cli_project,  # noqa: F401  — registers project (validate, validate-build, plan)
+    cli_project,  # noqa: F401  — registers project (validate, plan, history)
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
 )
 from .cli_options import variant_options  # noqa: E402

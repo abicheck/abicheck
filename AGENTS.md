@@ -1233,8 +1233,10 @@ already thinks in terms of this operand" bar (#2) on its own** — validating a
 project's `.abicheck.yml`, a `build-output.json`, or generating a run-plan —
 it almost certainly belongs as a new subcommand of the existing `project`
 group (`abicheck/cli_project.py`), not a new root command. `project` exists
-precisely to hold this class of operation: `project validate`,
-`project validate-build`, `project plan` are all "read one project-integration
+precisely to hold this class of operation: `project validate` (one command
+over a project config, a build-output directory, or a use-case manifest,
+dispatched on the document's own schema — never its filename),
+`project plan`, `project history` are all "read one project-integration
 artifact, report on it" operations that share one advanced/opt-in namespace
 instead of each claiming root. Add `@project_group.command("your-verb")`
 there and extend `tests/test_cli_root_surface.py`'s existing assertions

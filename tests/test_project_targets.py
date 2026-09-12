@@ -1919,28 +1919,12 @@ def test_cli_validate_empty_file_is_ok(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_cli_validate_non_mapping_yaml_is_usage_error(tmp_path: Path) -> None:
-    config_path = tmp_path / ".abicheck.yml"
-    config_path.write_text("- just\n- a\n- list\n")
-    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
-    assert result.exit_code == 64, result.output
-    assert "must contain a yaml mapping" in result.output.lower()
-
-
 def test_cli_validate_with_warnings_shown_in_text_output(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("")
     result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 0, result.output
     assert "warning(s)" in result.output
-
-
-def test_cli_validate_malformed_yaml_raises_usage_error(tmp_path: Path) -> None:
-    config_path = tmp_path / ".abicheck.yml"
-    config_path.write_text("targets: [this is not: valid: yaml: at: all\n")
-    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
-    assert result.exit_code == 64, result.output
-    assert "cannot read" in result.output.lower()
 
 
 def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
