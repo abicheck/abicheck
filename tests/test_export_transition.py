@@ -144,7 +144,20 @@ class TestExportLostWhileDeclarationRemains:
     ) -> None:
         """The fix must not silence the finding it is meant to keep honest:
         whatever the export evidence says, a declaration that is gone from
-        the new side is still a removal."""
+        the new side is still a removal.
+
+        Which *axis* the removal lands on does depend on the export fact, and
+        that is the point rather than an exception to it. A confirmed "never
+        exported" leaves no symbol for an already-linked consumer to fail to
+        bind to, so the removal is the source/API break
+        ``INLINE_FUNCTION_REMOVED`` names, not ``FUNC_REMOVED``, whose own
+        impact asserts the binary consequence ("old binaries call a symbol
+        that no longer exists"). Unknown export evidence keeps the binary
+        reading, which is the honest one when the run cannot rule the export
+        out. This case is parameterized over the export fact precisely so the
+        two readings stay distinguished; the invariant this class owns --
+        that the removal is reported at all -- is asserted for every value.
+        """
         old = _snap(
             "1.0",
             _fn(
@@ -156,7 +169,12 @@ class TestExportLostWhileDeclarationRemains:
         )
         new = _snap("2.0", _fn(name="keep", mangled="_Z4keepv"))
         kinds = {c.kind for c in compare(old, new).changes}
-        assert kinds & {ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY}
+        expected = (
+            {ChangeKind.INLINE_FUNCTION_REMOVED}
+            if exported is _FALSE
+            else {ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY}
+        )
+        assert kinds & expected, sorted(k.value for k in kinds)
 
 
 class TestExportLossIsDetectedForEveryDeclarationKind:

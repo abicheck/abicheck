@@ -1042,4 +1042,55 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         },
     ),
+    BugClass(
+        id="cli_surface.derived_table_lost_in_its_own_encoding",
+        invariant=(
+            "When a surface derives a table by introspecting another "
+            "program and then encodes it for lookup (the composite "
+            "Action's `$_CLI_VALUE_OPTIONS`, a delimiter-framed string "
+            "built from `abicheck`'s own Click parameter list), the "
+            "encoding round-trips EVERY entry the derivation produced -- "
+            "so membership answers the same for the first entry, the last "
+            "entry, and every entry in between, on every platform the "
+            "surface runs on. Two independent ways it did not: the table "
+            "was framed with a leading but no trailing delimiter, so the "
+            "positionally-last spelling never matched the fully-delimited "
+            "lookup key; and the captured stdout's line endings were the "
+            "*producing interpreter's*, so on Windows -- where a native "
+            "python.exe translates every written newline to CRLF -- every "
+            "entry carried a trailing CR and nothing matched at all. "
+            "Distinct from `cli_surface.copied_option_table_went_stale`, "
+            "which is about the enumeration's CONTENT drifting from the "
+            "CLI: here the content was correct and the transport lost it, "
+            "which defeats that class's own introspection rather than "
+            "repeating it. Both defects failed in the silent direction the "
+            "derivation's hard-failure path exists to prevent -- "
+            "`_CLI_VALUE_OPTIONS_DERIVED` still read `true`, so no option "
+            "read as value-taking and a literal `--write`/`--dry-run` "
+            "sitting in `extra-args` as another option's value was misread "
+            "as a real flag, suppressing the step's own report injection "
+            "while a full comparison ran. Corollary: the guard asserts the "
+            "whole table against the live Click list rather than sampling "
+            "options, because both defects are positional or global, and "
+            "it exercises a real interpreter whose newline convention "
+            "differs from the host's, because asserting the shell's "
+            "parsing of hand-written text cannot observe what the "
+            "subprocess actually wrote."
+        ),
+        fixed_by=(1234, 1239),
+        seed_tests=("tests/test_action_run_sh_option_table.py",),
+        # Not earned: the seed sources `run.sh`'s own helper region and
+        # drives it under a real bash, but that is the script's functions in
+        # isolation, not an executed workflow/composite-action step.
+        public_surfaces=(),
+        axes={
+            "line_ending": ("lf", "crlf"),
+            "table_position": ("first", "middle", "last"),
+            "option_shape": ("long", "short", "not-an-option"),
+            "consumer": (
+                "membership-test",
+                "short-cluster-expansion",
+            ),
+        },
+    ),
 )

@@ -370,6 +370,121 @@ class TestPublicInlineWithoutExport:
         assert surface_fact_summary(fn)["binary_exported"] == "false"
 
 
+class TestRemovingAnUnexportedDeclarationIsNotABinaryBreak:
+    """The removal half of the same class as
+    :class:`TestPublicInlineWithoutExport` above.
+
+    That class covers a declaration that survives on both sides while only
+    its export differs. This one covers the declaration that is genuinely
+    *gone* from the new side while the old side confirmed it was never
+    exported -- a header-only inline, a hidden friend, a declaration a
+    version script already kept out of the dynamic table. It is a real
+    removal, but not a *binary* one: with no symbol in the old artifact,
+    nothing a consumer linked against can fail to bind to, which is the only
+    thing ``FUNC_REMOVED``'s own impact asserts ("old binaries call a symbol
+    that no longer exists").
+
+    Reached because the export axis deliberately keeps such a declaration in
+    the comparison population (``export_transition.
+    has_observed_contract_evidence``) -- it must, or a regained export
+    reports as ``FUNC_ADDED``. Keeping it is right; scoring its removal on
+    the binary axis was not, and it did so for every such declaration, which
+    is why this enumerates the confirmed-unexported fact domain and several
+    independent declaration shapes rather than the one that surfaced it
+    (catalog ``case96_hidden_friend_removed``, whose verdict went
+    ``API_BREAK`` -> ``BREAKING``).
+
+    The oracle is the ``ChangeKind`` registry's own verdict partition, read
+    straight from ``checker_policy``. Deliberately not the branch in
+    ``diff_symbols._check_removed_function`` that the fix edited: asking
+    that function which kind it picks would restate the implementation.
+    """
+
+    #: Every way this run can *confirm* "not exported". An unknown export
+    #: fact is excluded on purpose -- it is the case where the binary-axis
+    #: reading is still the honest one.
+    _CONFIRMED_UNEXPORTED = (
+        Fact.present(False),
+        Fact.partial(False),
+    )
+
+    #: Declaration shapes that reach the same path for independent reasons.
+    _SHAPES: tuple[tuple[str, str, dict[str, object]], ...] = (
+        ("hidden friend", "_ZN5mylibeqERKNS_5pointES2_", {"name": "operator=="}),
+        (
+            "header-only inline",
+            "_ZNK6Widget4sizeEv",
+            {"name": "Widget::size", "is_inline": True},
+        ),
+        ("plain free function", "_Z3foov", {"name": "foo"}),
+        (
+            "member function",
+            "_ZN6Widget6resizeEi",
+            {"name": "Widget::resize"},
+        ),
+    )
+
+    @pytest.mark.parametrize("unexported", _CONFIRMED_UNEXPORTED)
+    @pytest.mark.parametrize("shape,mangled,extra", _SHAPES)
+    def test_no_removal_of_a_confirmed_unexported_declaration_is_breaking(
+        self,
+        shape: str,
+        mangled: str,
+        extra: dict[str, object],
+        unexported: Fact[bool],
+    ) -> None:
+        from abicheck.checker_policy import BREAKING_KINDS
+
+        old = _fn(
+            mangled=mangled,
+            declared_in_headers_fact=_TRUE,
+            in_public_contract_fact=_TRUE,
+            binary_exported_fact=unexported,
+            **extra,
+        )
+        changes = compare(_snap("1.0", old), _snap("2.0")).changes
+        offenders = [c.kind for c in changes if c.kind in BREAKING_KINDS]
+        assert not offenders, (
+            f"{shape}: removing a declaration this run confirmed was never "
+            f"exported produced binary-break finding(s) {offenders}"
+        )
+
+    @pytest.mark.parametrize("shape,mangled,extra", _SHAPES)
+    def test_the_removal_is_still_reported_as_an_api_break(
+        self, shape: str, mangled: str, extra: dict[str, object]
+    ) -> None:
+        """The negative control for the assertion above: "no breaking
+        finding" must not be reached by reporting nothing at all."""
+        from abicheck.checker_policy import API_BREAK_KINDS
+
+        old = _fn(
+            mangled=mangled,
+            declared_in_headers_fact=_TRUE,
+            in_public_contract_fact=_TRUE,
+            binary_exported_fact=_FALSE,
+            **extra,
+        )
+        kinds = {c.kind for c in compare(_snap("1.0", old), _snap("2.0")).changes}
+        assert kinds & API_BREAK_KINDS, f"{shape}: the removal vanished entirely"
+
+    @pytest.mark.parametrize("shape,mangled,extra", _SHAPES)
+    def test_a_confirmed_exported_declaration_still_breaks(
+        self, shape: str, mangled: str, extra: dict[str, object]
+    ) -> None:
+        """The other direction, so the fix cannot pass by never reporting a
+        binary break: the same removal with the export fact flipped to a
+        confirmed `True` is still `FUNC_REMOVED`."""
+        old = _fn(
+            mangled=mangled,
+            declared_in_headers_fact=_TRUE,
+            in_public_contract_fact=_TRUE,
+            binary_exported_fact=_TRUE,
+            **extra,
+        )
+        kinds = {c.kind for c in compare(_snap("1.0", old), _snap("2.0")).changes}
+        assert ChangeKind.FUNC_REMOVED in kinds, shape
+
+
 class TestAbsentHeadersProduceUnknown:
     """(3) Absent headers produce unknown, never a negative claim."""
 

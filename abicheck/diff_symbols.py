@@ -321,11 +321,31 @@ def _check_removed_function(
             # surface_facts and model/surface_facts.py).
             surface_facts=surface_fact_summary(f_hidden),
         )
-    removed_kind = (
-        ChangeKind.FUNC_REMOVED_ELF_ONLY
-        if (elf_only_mode and is_export_table_only_record(f_old))
-        else ChangeKind.FUNC_REMOVED
-    )
+    if is_export_table_only_record(f_old) and elf_only_mode:
+        removed_kind = ChangeKind.FUNC_REMOVED_ELF_ONLY
+    elif is_export_confirmed_absent(f_old):
+        # The old side *confirmed* this declaration was never exported -- a
+        # public header-only inline, a hidden friend, a declaration a version
+        # script already kept out of the dynamic table. There is no symbol for
+        # a consumer to fail to bind to, so its disappearance cannot be the
+        # binary break `FUNC_REMOVED`'s own impact text describes ("old
+        # binaries call a symbol that no longer exists"); it is the
+        # source/API break `INLINE_FUNCTION_REMOVED` already names, and that
+        # kind's own definition is exactly this shape -- "public header-only
+        # ... removed (no exported symbol)".
+        #
+        # Reached only since the export axis gained
+        # `export_transition.has_observed_contract_evidence`, which
+        # deliberately keeps a promised-but-unexported declaration in
+        # `_public_functions` (it has to, or a regained export reports as
+        # `FUNC_ADDED`). Keeping it in the population is right; scoring its
+        # removal as an ABI break is not, and it read as one for every such
+        # declaration, not only the hidden friend that surfaced it
+        # (catalog case96_hidden_friend_removed, whose verdict went
+        # API_BREAK -> BREAKING).
+        removed_kind = ChangeKind.INLINE_FUNCTION_REMOVED
+    else:
+        removed_kind = ChangeKind.FUNC_REMOVED
     return make_change(
         removed_kind,
         symbol=mangled,
