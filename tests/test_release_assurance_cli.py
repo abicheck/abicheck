@@ -40,7 +40,24 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The fixture links real ELF shared libraries with `-Wl,-soname`, a GNU ld
+    # flag Apple's linker rejects outright (it spells the same concept
+    # `-install_name`), so every test here errored at *setup* on the macOS
+    # integration lane. Guarded rather than made portable: what these tests
+    # validate is the release fan-out's per-member assurance recording over a
+    # real multi-library ELF bundle with real DWARF, and a Mach-O fixture would
+    # be a different subject, not the same one built differently. Same guard,
+    # same reason, as `test_cli_compare_bundle_facts.TestCompareOldBundleFacts`
+    # and its siblings. The fold's own contract is platform-independent and is
+    # stated in `tests/test_release_assurance_properties.py`, which runs
+    # everywhere.
+    pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="Uses the GNU ld flag -Wl,-soname; ELF/Linux-only bundle analysis.",
+    ),
+]
 
 _LIBS = ("core", "thread", "dpc")
 
