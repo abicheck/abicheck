@@ -275,13 +275,31 @@ def is_export_table_only_record(decl: SurfaceFactBearing) -> bool:
     binary-to-binary comparison ``catalog/cases/
     case97_api_depends_on_consumer_env`` pins).
 
-    So this stays keyed on the legacy enum, on purpose. It is not a fourth
-    boolean merging the three facts back together — it answers a different
-    question from all three, and it is here rather than spelled as a bare
-    ``visibility is ELF_ONLY`` at each call site so that reason lives in
-    one place.
+    So the enum stays *necessary* here, on purpose — it is the only thing
+    that names the producer. But it is not *sufficient*, which an earlier
+    revision of this function got wrong: both header-AST backends assign
+    ``ELF_ONLY`` to a declaration they parsed out of a header whose symbol
+    turned up in ``.symtab`` rather than the dynamic table
+    (``extract/headers/castxml/location.visibility`` and its clang sibling).
+    That record is not a stub at all — it has a real return type, real
+    parameters and a demangled name — so classifying it as one dropped a
+    genuine source declaration out of ``in_source_declaration_index``, made
+    ``bundle_signature_evidence`` reject a fully parsed signature, and could
+    mislabel its removal ``FUNC_REMOVED_ELF_ONLY`` (Codex review, P2).
+
+    Fact (a) is exactly the evidence that separates the two, and it is why
+    that fact had to stop being derived from this enum before this could be
+    fixed: a header-AST producer affirms (a), while a synthesized
+    export-table entry leaves it unknown. So a stub is ``ELF_ONLY`` **and**
+    not header-declared. Still not a fourth boolean merging the three facts
+    — it answers a different question from all three, and it consults just
+    one of them to rule out the one producer the enum cannot distinguish.
+    The DWARF case above is untouched: its (a) is unknown, but it is not
+    ``ELF_ONLY``, so the first clause already excludes it.
     """
-    return getattr(decl, "visibility", None) is Visibility.ELF_ONLY
+    if getattr(decl, "visibility", None) is not Visibility.ELF_ONLY:
+        return False
+    return not is_header_declared(decl)
 
 
 def is_legacy_derived(fact: Fact[bool]) -> bool:
