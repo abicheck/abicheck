@@ -40,7 +40,7 @@ warning rather than a hard failure -- the safe direction, matching
 
 from __future__ import annotations
 
-import fnmatch
+import re
 from pathlib import Path
 from typing import Protocol
 
@@ -57,28 +57,65 @@ class Findings(Protocol):
     def warn(self, check: str, msg: str) -> None: ...
 
 
+#: Suffixes that define a module for mypy's purposes. A module represented
+#: *only* by a stub (``kinds.pyi`` with no ``kinds.py``) is still a real module
+#: that per-module overrides apply to, so collecting ``*.py`` alone would
+#: report a valid override for it as stale (Codex review on PR #1251).
+_MODULE_SUFFIXES = (".py", ".pyi")
+
+
 def _module_names(package_root: Path, top_level: str) -> frozenset[str]:
     """Every dotted module and package name importable under *package_root*.
 
     Both are collected, because an override may legally target either a module
-    (``abicheck.cli_project``) or a package (``abicheck.workflows``).
+    (``abicheck.cli_project``) or a package (``abicheck.workflows``); and both
+    source and stub files count, per :data:`_MODULE_SUFFIXES`.
     """
     names: set[str] = {top_level}
-    for path in package_root.rglob("*.py"):
-        rel = path.relative_to(package_root)
-        parts = list(rel.parts)
-        if parts[-1] == "__init__.py":
-            parts.pop()
-        else:
-            parts[-1] = parts[-1][: -len(".py")]
-        if any(part.startswith(".") for part in parts):
-            continue
-        # Record the module itself and every package above it, so a target
-        # naming an intermediate package resolves even if that package holds
-        # no `__init__.py` of its own.
-        for cut in range(len(parts) + 1):
-            names.add(".".join([top_level, *parts[:cut]]).rstrip("."))
+    for suffix in _MODULE_SUFFIXES:
+        for path in package_root.rglob(f"*{suffix}"):
+            names.update(_dotted_names_for(path, package_root, top_level, suffix))
     return frozenset(names)
+
+
+def _dotted_names_for(
+    path: Path, package_root: Path, top_level: str, suffix: str
+) -> set[str]:
+    """The module name *path* defines, plus every package name above it."""
+    rel = path.relative_to(package_root)
+    parts = list(rel.parts)
+    if parts[-1] == f"__init__{suffix}":
+        parts.pop()
+    else:
+        parts[-1] = parts[-1][: -len(suffix)]
+    if any(part.startswith(".") for part in parts):
+        return set()
+    # Record the module itself and every package above it, so a target naming
+    # an intermediate package resolves even if that package holds no
+    # `__init__.py` of its own.
+    return {
+        ".".join([top_level, *parts[:cut]]).rstrip(".") for cut in range(len(parts) + 1)
+    }
+
+
+def _compile_module_pattern(pattern: str) -> re.Pattern[str]:
+    r"""Compile a per-module override pattern the way **mypy itself** does.
+
+    Deliberately a faithful port of ``mypy.options.Options.compile_glob``
+    rather than an approximation: a ``*`` component compiles to ``(\..*)?``,
+    matching *zero or more* module components. So ``abicheck.foo.*`` applies to
+    ``abicheck.foo`` itself, not only to its children -- which filesystem-style
+    ``fnmatch`` cannot express (it requires characters after the final dot) and
+    which would make this gate report a valid override as stale (Codex review
+    on PR #1251). Approximating a dependency's matching rules is how a gate
+    ends up disagreeing with the very tool it exists to keep honest, so the
+    rule is read from that tool's own source rather than from its prose.
+    """
+    parts = pattern.split(".")
+    expr = re.escape(parts[0]) if parts[0] != "*" else ".*"
+    for part in parts[1:]:
+        expr += re.escape("." + part) if part != "*" else r"(\..*)?"
+    return re.compile(expr + r"\Z")
 
 
 def _override_targets(doc: dict) -> list[str]:
@@ -131,7 +168,8 @@ def stale_override_targets(
         if target != top_level and not target.startswith(prefix):
             continue  # third-party; see this module's docstring
         if "*" in target:
-            if not any(fnmatch.fnmatchcase(name, target) for name in known):
+            matcher = _compile_module_pattern(target)
+            if not any(matcher.match(name) for name in known):
                 stale.append((target, "wildcard matches no module"))
         elif target not in known:
             stale.append((target, "no such module or package"))

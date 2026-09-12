@@ -14,10 +14,13 @@
   deleted or moved module leaves its override (and the comment explaining it)
   behind with no signal anywhere. The new gate fails on any first-party
   (`abicheck.*`) target that resolves to neither a module nor a package, and on
-  any wildcard target matching nothing. It found eleven stale entries on the
-  tree it was written against, all now removed — eight `cli_*` modules plus
-  `cli_scan`/`cli_scan_baseline`/`workflows.scan_config`, the last three left
-  behind by ADR-068 Phase 6's `scan` removal.
+  any wildcard target matching nothing. Module resolution and wildcard matching
+  follow mypy's own rules — stub-only (`.pyi`) modules count, and a `*`
+  component matches zero or more module components, ported from
+  `mypy.options.Options.compile_glob` rather than approximated. It found eleven
+  stale entries on the tree it was written against, all now removed — eight
+  `cli_*` modules plus `cli_scan`/`cli_scan_baseline`/`workflows.scan_config`,
+  the last three left behind by ADR-068 Phase 6's `scan` removal.
 
 ### Documentation
 
