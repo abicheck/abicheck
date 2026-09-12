@@ -230,11 +230,11 @@ class TestTheGatingConditionIsVisible:
         # actionable, "2 coverage failures" is not.
         assert "export_table" in result.output, result.output
         # ...and points at the way out, so the message is actionable. Both
-        # halves are things a CLI user really has: `--format json` for the
+        # halves are things a CLI user really has: a `json` export for the
         # ledger, `--pack` for `contract.unresolved`. The MCP tool has
         # neither, which is why its own wording differs.
         assert "contract.unresolved=warn" in result.output
-        assert "--format json" in result.output
+        assert "-o json=..." in result.output
 
     def test_json_does_not_repeat_what_its_report_already_carries(
         self, tmp_path: Path
@@ -357,9 +357,9 @@ class TestTheGatingConditionIsVisible:
         self, tmp_path: Path
     ) -> None:
         """Staying quiet requires *every* rendered report to carry the ledger.
-        With `--format json --secondary-format markdown` the markdown carries
-        none of it, so answering from the primary alone let that report say
-        the change is safe while the process exited 1 (Codex review)."""
+        With a json export beside a markdown one the markdown carries none of
+        it, so answering from the first alone let that report say the change
+        is safe while the process exited 1 (Codex review)."""
         old_p, new_p = _write(tmp_path, *_compatible_pair())
         result = CliRunner().invoke(
             main,
@@ -369,7 +369,7 @@ class TestTheGatingConditionIsVisible:
                 str(new_p),
                 "-o",
                 f"json={tmp_path / 'r.json'}",
-                "--write",
+                "-o",
                 f"markdown={tmp_path / 'r.md'}",
                 "--contract",
                 "exports",

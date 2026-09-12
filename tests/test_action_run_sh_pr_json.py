@@ -16,7 +16,7 @@
 """Behavioral tests for ``action/run.sh``'s sticky-PR-comment JSON acquisition.
 
 ``compare`` mode now renders its PR-comment JSON as a second format from the
-*same* comparison run (``--write json=``,
+*same* comparison run (``-o json=``,
 abicheck's own ``--write`` CLI feature) instead of re-invoking
 abicheck a second time. This exercises the acquisition decision in
 ``_maybe_post_pr_comment`` (extracted verbatim from run.sh, the same "parse
@@ -165,7 +165,7 @@ class TestPrJsonAcquisition:
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE="$TEST_OUTPUT_FILE"
-CMD=(abicheck compare old.json new.json --format markdown -o "$TEST_OUTPUT_FILE")
+CMD=(abicheck compare old.json new.json -o "markdown=${TEST_OUTPUT_FILE}")
 """
         _run(
             harness,
@@ -186,7 +186,7 @@ CMD=(abicheck compare old.json new.json --format markdown -o "$TEST_OUTPUT_FILE"
 PR_JSON="$TEST_PR_JSON"
 FORMAT=json
 OUTPUT_FILE="$TEST_OUTPUT_FILE"
-CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
+CMD=(abicheck compare old.json new.json -o "json=${TEST_OUTPUT_FILE}")
 """
         _run(
             harness,
@@ -200,7 +200,7 @@ CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
         self, tmp_path
     ):
         # Codex review, fresh evidence: `format: text`/`markdown` whose own
-        # extra-args supplied `--write json=PATH` is exactly as faithful and
+        # extra-args supplied `-o json=PATH` is exactly as faithful and
         # unfiltered as a `format: json` primary output -- `_json_report_src`
         # already only trusts that sidecar when it's real and fresh
         # (fingerprint-checked). Before this fix, `_can_reuse_primary_json`'s
@@ -216,13 +216,19 @@ CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
         stub = tmp_path / "stub.sh"
         # Would overwrite pr_json with a rerun sentinel if `_build_json_cmd`'s
         # rerun path were reached — proves reuse, not just "didn't crash".
-        stub.write_text('echo rerun-sentinel > "${@: -1}"\n', encoding="utf-8")
+        # The rerun appends one `-o json=$PR_JSON` operand, so the last argument
+        # carries the destination after its `json=` prefix -- the same split
+        # the real CLI does (plan slice 7m).
+        stub.write_text(
+            '_last="${@: -1}"\necho rerun-sentinel > "${_last#json=}"\n',
+            encoding="utf-8",
+        )
         harness = """
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
 _extra_write_json_path="$TEST_EXTRA_WRITE_JSON"
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json -o markdown=-)
 """
         _run(
             harness,
@@ -243,16 +249,23 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
         # Windows' non-functional WSL stub, see _bash_executable) running a
         # script with no shebang/executable-bit dependency — that writes a
         # sentinel to its last argument (where _build_json_cmd appends
-        # "-o $PR_JSON") so the rerun's execution is directly observable.
+        # "-o json=$PR_JSON") so the rerun's execution is directly
+        # observable.
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         stub = tmp_path / "stub.sh"
-        stub.write_text('echo rerun-sentinel > "${@: -1}"\n', encoding="utf-8")
+        # The rerun appends one `-o json=$PR_JSON` operand, so the last argument
+        # carries the destination after its `json=` prefix -- the same split
+        # the real CLI does (plan slice 7m).
+        stub.write_text(
+            '_last="${@: -1}"\necho rerun-sentinel > "${_last#json=}"\n',
+            encoding="utf-8",
+        )
         harness = """
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added --format markdown)
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added -o markdown=-)
 """
         _run(
             harness,
@@ -264,51 +277,52 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added --for
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
 
-    def test_rerun_strips_a_stale_write_flag_targeting_the_same_path(
+    def test_rerun_strips_a_stale_export_targeting_the_same_path(
         self, tmp_path
     ):
         """Codex review, fresh evidence, round 9: NOT_COMPARABLE (and any
         other early-refusal verdict) aborts the primary run before it ever
-        renders its own injected ``--write json=$PR_JSON`` sidecar --
-        confirmed live: neither ``-o`` nor ``--write``'s target exists on
-        disk after a real ``compare`` run that hits a comparability
-        mismatch. ``PR_JSON`` therefore stays the empty mktemp file
-        ``_maybe_post_pr_comment`` created, ``_can_reuse_primary_json``
-        finds nothing to reuse either, and the fallback rerun's own
-        ``_build_json_cmd`` used to leave that stale ``--write
-        json=$PR_JSON`` in the rebuilt command while *also* appending
-        ``-o "$PR_JSON"`` -- the identical path for both, which the real
-        CLI hard-rejects (``--write's PATH must differ from --output/-o``,
-        confirmed live). The rerun always failed and the comment was
-        silently skipped with a misleading "no JSON report produced"
-        warning.
+        renders its own injected ``-o json=$PR_JSON`` sidecar -- confirmed
+        live: no export's target exists on disk after a real ``compare``
+        run that hits a comparability mismatch. ``PR_JSON`` therefore stays
+        the empty mktemp file ``_maybe_post_pr_comment`` created,
+        ``_can_reuse_primary_json`` finds nothing to reuse either, and the
+        fallback rerun's own ``_build_json_cmd`` used to leave that stale
+        ``json=$PR_JSON`` export in the rebuilt command while *also*
+        appending its own -- two exports to the identical destination,
+        which the real CLI hard-rejects as a collision (confirmed live).
+        The rerun always failed and the comment was silently skipped with a
+        misleading "no JSON report produced" warning.
 
         The stub here plays the real CLI's own rejection: it refuses (exits
-        1, writes nothing) if invoked with a bare ``--write`` flag at all,
-        the same way the real CLI would reject this specific duplicate-path
-        shape. Before the fix, `_build_json_cmd` handed the stub exactly
-        that forbidden `--write ... -o $PR_JSON` combination and the rerun
-        failed; after the fix, `--write` (and its value) is stripped before
-        the rerun, so the stub receives a clean command and succeeds.
+        1, writes nothing) if invoked with more than one export, the same
+        way the real CLI rejects two of them naming one destination. Before
+        the fix, `_build_json_cmd` handed the stub exactly that forbidden
+        combination and the rerun failed; after the fix, every export from
+        the primary command is stripped before the rerun, so the stub
+        receives a clean command and succeeds.
         """
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         stub = tmp_path / "stub.sh"
         stub.write_text(
+            "_exports=0\n"
             'for a in "$@"; do\n'
-            '  if [[ "$a" == "--write" ]]; then\n'
-            '    echo "stub: refusing --write, same as the real CLI would" >&2\n'
-            "    exit 1\n"
-            "  fi\n"
+            '  if [[ "$a" == "-o" ]]; then _exports=$((_exports + 1)); fi\n'
             "done\n"
-            'echo rerun-sentinel > "${@: -1}"\n',
+            'if [[ "$_exports" -gt 1 ]]; then\n'
+            '  echo "stub: refusing two exports, same as the real CLI would" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            '_last="${@: -1}"\n'
+            'echo rerun-sentinel > "${_last#json=}"\n',
             encoding="utf-8",
         )
         harness = """
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --write "json=$TEST_PR_JSON" --format markdown)
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json -o "json=$TEST_PR_JSON" -o markdown=-)
 """
         _run(
             harness,
@@ -340,13 +354,19 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --write "json=$TEST_PR_
             encoding="utf-8",
         )
         stub = tmp_path / "stub.sh"
-        stub.write_text('echo rerun-sentinel > "${@: -1}"\n', encoding="utf-8")
+        # The rerun appends one `-o json=$PR_JSON` operand, so the last argument
+        # carries the destination after its `json=` prefix -- the same split
+        # the real CLI does (plan slice 7m).
+        stub.write_text(
+            '_last="${@: -1}"\necho rerun-sentinel > "${_last#json=}"\n',
+            encoding="utf-8",
+        )
         harness = """
 PR_JSON="$TEST_PR_JSON"
 _EFFECTIVE_FORMAT=sarif
 FORMAT=sarif
 OUTPUT_FILE="$TEST_OUTPUT_FILE"
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format sarif -o "$TEST_OUTPUT_FILE")
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json -o "sarif=${TEST_OUTPUT_FILE}")
 """
         _run(
             harness,
@@ -375,7 +395,7 @@ PR_JSON="$TEST_PR_JSON"
 FORMAT=json
 OUTPUT_FILE=
 _STDOUT_JSON_FILE="$TEST_STDOUT_JSON"
-CMD=(abicheck scan liblib.so --format json)
+CMD=(abicheck scan liblib.so -o json=-)
 """
         _run(
             harness,

@@ -62,23 +62,27 @@ def _compare_argv(
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
     stub = fake_bin / "abicheck"
-    # Honors `--write json=PATH` the way a real abicheck does, in addition to
-    # capturing argv. It used to only echo a report to stdout, which left a
-    # requested JSON destination empty -- and `run.sh` now reports a
-    # caller-requested JSON report that never arrived as REPORT_UNREADABLE
-    # (exit 1), so the unfaithful stub failed these argv tests for a reason
-    # unrelated to argv. A real abicheck exiting 0 always honors `--write`.
+    # Honors every `-o FORMAT=DESTINATION` export the way a real abicheck
+    # does, in addition to capturing argv. It used to only echo a report to
+    # stdout, which left a requested JSON destination empty -- and `run.sh`
+    # reports a caller-requested JSON report that never arrived as
+    # REPORT_UNREADABLE (exit 1), so the unfaithful stub failed these argv
+    # tests for a reason unrelated to argv. A real abicheck exiting 0 always
+    # writes every export it was given.
     stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
         'for _a in "$@"; do\n'
         '  case "$_a" in\n'
-        # Both documented spellings: `--write json=PATH` arrives as a separate
-        # `json=PATH` token, `--write=json=PATH` as one. A stub handling only
-        # the first leaves the second's destination unwritten, which is exactly
-        # the parametrized pair these tests exist to distinguish.
+        # Both documented spellings: `-o json=PATH` arrives as a separate
+        # `json=PATH` token, `--output=json=PATH` as one. A stub handling
+        # only the first leaves the second's destination unwritten, which is
+        # exactly the parametrized pair these tests exist to distinguish. A
+        # destination of `-` is stdout and writes no file.
+        '    json=-) : ;;\n'
         '    json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#json=}" ;;\n'
-        '    --write=json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#--write=json=}" ;;\n'
+        '    --output=json=-) : ;;\n'
+        '    --output=json=*) printf \'%s\' \'{"verdict": "COMPATIBLE"}\' > "${_a#--output=json=}" ;;\n'
         "  esac\n"
         "done\n"
         'echo \'{"verdict":"COMPATIBLE"}\'\n'
@@ -124,7 +128,7 @@ def _compare_argv(
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareDoesNotInjectALosingWrite:
     @pytest.mark.parametrize(
-        "spelling", ["--write json=mine.json", "--write=json=mine.json"]
+        "spelling", ["-o json=mine.json", "--output=json=mine.json"]
     )
     def test_a_user_write_suppresses_the_internal_one(
         self, tmp_path: Path, spelling: str
@@ -133,8 +137,10 @@ class TestCompareDoesNotInjectALosingWrite:
         # string and a separator-only difference would slip past a check
         # written for just one of them.
         argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": spelling})
-        assert argv.count("--write") == 1, argv
-        assert "mine.json" in argv
+        assert "json=mine.json" in argv, argv
+        # Only the caller's own export: the Action injects none of its own
+        # when `extra-args` states an export set (plan slice 7m).
+        assert "abicheck-pr-json" not in argv, argv
         # The injected one names a mktemp path under RUNNER_TEMP/tmp; its
         # absence is the whole point.
         assert "abicheck-pr-json" not in argv, argv
@@ -146,7 +152,6 @@ class TestCompareDoesNotInjectALosingWrite:
         # outright, or every non-JSON PR run pays for the rerun this exists
         # to avoid.
         argv = _compare_argv(tmp_path, {})
-        assert argv.count("--write") == 1, argv
         assert "abicheck-pr-json" in argv, argv
 
     def test_a_non_json_user_write_no_longer_suppresses_the_internal_one(
@@ -162,8 +167,8 @@ class TestCompareDoesNotInjectALosingWrite:
         # TestCompareInjectsWriteForReleaseStyleOperandToo below, and
         # asserts the opposite: there, only one `--write` is supported at
         # all, so a non-json one still suppresses.
-        argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"})
-        assert argv.count("--write") == 2, argv
+        argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "-o markdown=mine.md"})
+        assert argv.split().count("-o") == 2, argv
         assert "mine.md" in argv, argv
         assert "abicheck-pr-json" in argv, argv
 
@@ -171,7 +176,7 @@ class TestCompareDoesNotInjectALosingWrite:
         # Pre-existing behaviour, pinned here so the new guard cannot be
         # mistaken for what suppresses this case.
         argv = _compare_argv(tmp_path, {"INPUT_FORMAT": "json"})
-        assert "--write" not in argv, argv
+        assert "abicheck-pr-json" not in argv, argv
 
     def test_extra_args_overriding_json_away_still_injects_a_write(
         self, tmp_path: Path
@@ -185,9 +190,8 @@ class TestCompareDoesNotInjectALosingWrite:
         # fire based on the *effective* format, not the nominal one.
         argv = _compare_argv(
             tmp_path,
-            {"INPUT_FORMAT": "json", "INPUT_EXTRA_ARGS": "--format text"},
+            {"INPUT_FORMAT": "json", "INPUT_EXTRA_ARGS": "-o text=-"},
         )
-        assert argv.count("--write") == 1, argv
         assert "abicheck-pr-json" in argv, argv
 
     def test_extra_args_overriding_to_json_still_injects_nothing(
@@ -198,9 +202,9 @@ class TestCompareDoesNotInjectALosingWrite:
         # primary already is one.
         argv = _compare_argv(
             tmp_path,
-            {"INPUT_FORMAT": "markdown", "INPUT_EXTRA_ARGS": "--format json"},
+            {"INPUT_FORMAT": "markdown", "INPUT_EXTRA_ARGS": "-o json=-"},
         )
-        assert "--write" not in argv, argv
+        assert "abicheck-pr-json" not in argv, argv
 
     def test_an_effective_dry_run_via_extra_args_suppresses_the_injection(
         self, tmp_path: Path
@@ -213,7 +217,7 @@ class TestCompareDoesNotInjectALosingWrite:
         # with --write`), turning what should be a clean dry-run preview
         # into a usage error.
         argv = _compare_argv(tmp_path, {"INPUT_EXTRA_ARGS": "--dry-run"})
-        assert "--write" not in argv, argv
+        assert "abicheck-pr-json" not in argv, argv
         assert "--dry-run" in argv, argv
 
     def test_an_effective_dry_run_also_suppresses_output_file_forwarding(
@@ -270,7 +274,6 @@ class TestCompareInjectsWriteForReleaseStyleOperandToo:
         old_dir.mkdir()
         new_dir.mkdir()
         argv = _compare_argv(tmp_path, {}, old=old_dir, new=new_dir)
-        assert argv.count("--write") == 1, argv
         assert "abicheck-pr-json" in argv, argv
 
     def test_a_user_write_still_suppresses_the_internal_one_for_a_directory(
@@ -282,36 +285,39 @@ class TestCompareInjectsWriteForReleaseStyleOperandToo:
         new_dir.mkdir()
         argv = _compare_argv(
             tmp_path,
-            {"INPUT_EXTRA_ARGS": "--write json=mine.json"},
+            {"INPUT_EXTRA_ARGS": "-o json=mine.json"},
             old=old_dir,
             new=new_dir,
         )
-        assert argv.count("--write") == 1, argv
-        assert "mine.json" in argv
+        assert "json=mine.json" in argv, argv
+        # Only the caller's own export: the Action injects none of its own
+        # when `extra-args` states an export set (plan slice 7m).
+        assert "abicheck-pr-json" not in argv, argv
         assert "abicheck-pr-json" not in argv, argv
 
-    def test_a_non_json_user_write_also_suppresses_the_internal_one_for_a_directory(
+    def test_a_non_json_caller_export_still_gets_the_sidecar_for_a_directory(
         self, tmp_path: Path
     ) -> None:
-        # Codex review, PR #1210, round 9: unlike a single-pair operand
-        # (`--write` is repeatable there), a directory/package operand only
-        # supports ONE `--write` at all (`compare --help-all`), so a
-        # non-json one must still suppress the internal injection here --
-        # this is the one case `_extra_args_write_would_conflict` still
-        # treats as "any --write conflicts", not just an already-json one.
+        # This used to assert the opposite, because a directory/package
+        # operand supported only ONE `--write` at all while a single pair
+        # allowed several -- so a non-json caller write suppressed the
+        # internal one here and not there. Plan slice 7m removed that split:
+        # the release fan-out renders every requested export from the same
+        # already-computed per-library results, so the operand shape decides
+        # nothing and the sidecar (a fresh mktemp destination, never a
+        # collision) is injected for both.
         old_dir = tmp_path / "old_release"
         new_dir = tmp_path / "new_release"
         old_dir.mkdir()
         new_dir.mkdir()
         argv = _compare_argv(
             tmp_path,
-            {"INPUT_EXTRA_ARGS": "--write markdown=mine.md"},
+            {"INPUT_EXTRA_ARGS": "-o markdown=mine.md"},
             old=old_dir,
             new=new_dir,
         )
-        assert argv.count("--write") == 1, argv
-        assert "mine.md" in argv
-        assert "abicheck-pr-json" not in argv, argv
+        assert "markdown=mine.md" in argv, argv
+        assert "abicheck-pr-json" in argv, argv
 
 
 @pytest.mark.skipif(
@@ -390,7 +396,7 @@ class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
             "INPUT_FORMAT": "markdown",
             "INPUT_ADD_JOB_SUMMARY": "false",
             "INPUT_PR_COMMENT": "false",
-            "INPUT_EXTRA_ARGS": f"--write json={write_path}",
+            "INPUT_EXTRA_ARGS": f"-o json={write_path}",
             "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
         }
@@ -435,10 +441,13 @@ class TestSarifDefaultOutputFileUsesEffectiveFormat:
     ) -> None:
         argv = _compare_argv(
             tmp_path,
-            {"INPUT_FORMAT": "sarif", "INPUT_EXTRA_ARGS": "--format json"},
+            {"INPUT_FORMAT": "sarif", "INPUT_EXTRA_ARGS": "-o json=-"},
         )
         assert "abicheck-results.sarif" not in argv, argv
-        assert "-o" not in argv.split(), argv
+        # The caller's own export set is the whole set, so the only `-o` in
+        # argv is theirs -- plus, when the effective format is not json, the
+        # internal PR-comment sidecar, which is not this default.
+        assert "json=-" in argv, argv
 
     def test_plain_sarif_still_gets_the_default_output_file(
         self, tmp_path: Path
@@ -448,42 +457,76 @@ class TestSarifDefaultOutputFileUsesEffectiveFormat:
         argv = _compare_argv(tmp_path, {"INPUT_FORMAT": "sarif"})
         assert "abicheck-results.sarif" in argv, argv
 
-    def test_extra_args_overriding_to_sarif_still_gets_the_default(
+    def test_a_caller_stated_sarif_export_gets_no_injected_default(
         self, tmp_path: Path
     ) -> None:
-        # The reverse direction: a nominal non-sarif primary overridden *to*
-        # sarif should still get the default sarif filename.
+        """The reverse direction, and the one plan slice 7m changed.
+
+        A nominal non-sarif primary whose `extra-args` names its own sarif
+        export used to still receive the default `abicheck-results.sarif`
+        filename, because the two were separate flags and only the format
+        half was overridden. Now the caller states the whole export set, so
+        the Action adds no destination of its own -- the caller who wants
+        the upload-sarif step's conventional path writes
+        `-o sarif=abicheck-results.sarif` and gets exactly it, with no
+        second, differently-named artifact appearing beside it.
+        """
         argv = _compare_argv(
             tmp_path,
-            {"INPUT_FORMAT": "markdown", "INPUT_EXTRA_ARGS": "--format sarif"},
+            {"INPUT_FORMAT": "markdown", "INPUT_EXTRA_ARGS": "-o sarif=-"},
         )
-        assert "abicheck-results.sarif" in argv, argv
+        assert "abicheck-results.sarif" not in argv, argv
+        assert "sarif=-" in argv, argv
+
+    def test_a_caller_can_still_name_the_conventional_sarif_path(
+        self, tmp_path: Path
+    ) -> None:
+        """The capability the test above stops getting for free is one
+        operand away, which is what keeps this a simplification rather than
+        a loss."""
+        argv = _compare_argv(
+            tmp_path,
+            {
+                "INPUT_FORMAT": "markdown",
+                "INPUT_EXTRA_ARGS": "-o sarif=abicheck-results.sarif",
+            },
+        )
+        assert "sarif=abicheck-results.sarif" in argv, argv
 
 
 def _compare_github_output(
     tmp_path: Path, env_extra: dict[str, str]
 ) -> tuple[str, str]:
-    """Run compare mode with a stub that actually honors ``-o PATH`` (writing
-    real content there, unlike ``_compare_argv``'s stdout-only stub, since
-    this test cares whether ``$OUTPUT_FILE`` ends up a real, non-empty file)
-    and return ``($GITHUB_OUTPUT file contents, run.sh's own stdout+stderr)``
-    -- the latter so a caller can confirm a workflow-command annotation
-    (``::warning::``) actually reached the log rather than being silently
-    swallowed into the environment file.
+    """Run compare mode with a stub that honors every ``-o
+    FORMAT=DESTINATION`` export -- writing real content at a file
+    destination and printing it for the stdout destination ``-``, the way a
+    real abicheck does -- and return ``($GITHUB_OUTPUT file contents,
+    run.sh's own stdout+stderr)``. The latter so a caller can confirm a
+    workflow-command annotation (``::warning::``) actually reached the log
+    rather than being silently swallowed into the environment file.
     """
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     stub = fake_bin / "abicheck"
     stub.write_text(
         "#!/usr/bin/env bash\n"
-        "_out=''\n"
+        "_wrote=0\n"
         "while [[ $# -gt 0 ]]; do\n"
         '  case "$1" in\n'
-        '    -o) _out="$2"; shift 2 ;;\n'
+        '    -o)\n'
+        '      _dest="${2#*=}"\n'
+        '      if [[ "$_dest" == "-" ]]; then\n'
+        '        echo \'{"verdict":"COMPATIBLE"}\'\n'
+        '      else\n'
+        '        printf \'%s\\n\' \'{"verdict": "COMPATIBLE"}\' > "$_dest"\n'
+        "      fi\n"
+        "      _wrote=1\n"
+        "      shift 2\n"
+        "      ;;\n"
         "    *) shift ;;\n"
         "  esac\n"
         "done\n"
-        'if [[ -n "$_out" ]]; then\n'
+        'if [[ "$_wrote" == "0" ]]; then\n'
         # Valid JSON, and still deliberately not SARIF -- which is all this
         # stub's scenario needs. It used to write the bare line
         # "not-actually-sarif": non-SARIF, but also not parseable as anything,
@@ -494,8 +537,6 @@ def _compare_github_output(
         # the step for a reason unrelated to what these tests check. The
         # subject -- report-path withheld when the effective format stops
         # matching `format: sarif` -- is unchanged.
-        '  printf \'%s\\n\' \'{"verdict": "COMPATIBLE"}\' > "$_out"\n'
-        "else\n"
         '  echo \'{"verdict":"COMPATIBLE"}\'\n'
         "fi\n"
         "exit 0\n",
@@ -541,8 +582,8 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
     """Codex review, PR #998, fresh evidence (second round): the earlier
     SARIF fix only covered the no-explicit-`output-file` default path.
     `format: sarif` + `upload-sarif: true` + an *explicit* `output-file:`
-    + `extra-args: --format json` still wrote real (non-SARIF) content to
-    that explicit path, and `report-path` -- the exact value
+    + an `extra-args` export naming json still wrote real (non-SARIF)
+    content to that explicit path, and `report-path` -- the exact value
     `action.yml`'s upload-sarif step's own `if:` condition gates on
     (`steps.run-abicheck.outputs.report-path != ''`) -- was still published
     unconditionally whenever the file existed, regardless of whether its
@@ -562,10 +603,16 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
                 "INPUT_FORMAT": "sarif",
                 "INPUT_UPLOAD_SARIF": "true",
                 "INPUT_OUTPUT_FILE": str(explicit),
-                "INPUT_EXTRA_ARGS": "--format json",
+                "INPUT_EXTRA_ARGS": "-o json=-",
             },
         )
-        assert explicit.is_file()  # the mismatched content really was written
+        # Plan slice 7m: the caller's own export set replaces this Action's,
+        # so the `output-file` input names no destination at all here and
+        # nothing is written to it. That is a *stronger* version of the
+        # property this test pins -- there is no mismatched SARIF-named file
+        # for the upload step to take, and `report-path` is withheld either
+        # way, which is what the upload step's own `if:` gates on.
+        assert not explicit.exists(), "the superseded input path was written"
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
         # The warning must reach the log, not the environment file (Codex
         # review, PR #998, fresh evidence: an earlier revision echoed it
@@ -588,7 +635,7 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
             {
                 "INPUT_FORMAT": "sarif",
                 "INPUT_UPLOAD_SARIF": "true",
-                "INPUT_EXTRA_ARGS": "--format json",
+                "INPUT_EXTRA_ARGS": "-o json=-",
             },
         )
         assert "report-path=\n" in out or out.rstrip().endswith("report-path="), out
@@ -613,13 +660,15 @@ class TestSarifUploadReportPathWithheldOnEffectiveFormatMismatch:
     ) -> None:
         # The suppression is scoped to the upload-sarif combination
         # specifically -- report-path for any other purpose is unaffected.
-        explicit = tmp_path / "myreport.sarif"
+        # Stated through the caller's own export set, since that is now what
+        # decides where the report lands (plan slice 7m): the effective
+        # destination is published, and no upload warning is emitted.
+        explicit = tmp_path / "myreport.json"
         out, log = _compare_github_output(
             tmp_path,
             {
                 "INPUT_FORMAT": "sarif",
-                "INPUT_OUTPUT_FILE": str(explicit),
-                "INPUT_EXTRA_ARGS": "--format json",
+                "INPUT_EXTRA_ARGS": f"-o json={explicit}",
             },
         )
         assert f"report-path={explicit}" in out, out

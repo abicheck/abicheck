@@ -3710,7 +3710,12 @@ fi
 # `_json_report_src`'s `$_STDOUT_JSON_FILE` branch, and the caller asked for
 # it on stdout, not at a path.
 _caller_json_destinations() {
-  local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  # `${x-default}`, not `${x:-default}`: an *empty* `_EFFECTIVE_OUTPUT_FILE`
+  # is a real answer ("this run writes no report file", e.g. every export
+  # goes to stdout), and must not fall back to the `output-file` input the
+  # caller's own export set replaced. The unset case is the snippet-
+  # extraction tests, which never assign it (plan slice 7m).
+  local _primary="${_EFFECTIVE_OUTPUT_FILE-${OUTPUT_FILE:-}}"
   if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" ]]; then
     printf '%s\n' "$_primary"
   fi
@@ -3761,7 +3766,13 @@ _json_dest_is_fresh() {
   [[ "$(_file_fingerprint "$_path")" != "$_pre" ]]
 }
 
-if [[ -n "${OUTPUT_FILE:-}" ]]; then
+# Whether to capture stdout keys on where the report really goes, not on the
+# `output-file` input: since plan slice 7m a caller's own `extra-args -o`
+# export set replaces this Action's, so `output-file` can name a destination
+# this run never writes while the real report goes to stdout -- and keying on
+# the input there left the stdout report uncaptured and the run published as
+# REPORT_UNREADABLE. A run can also legitimately do both at once.
+if ! _report_goes_to_stdout; then
   # Output goes to file; capture stderr separately for error detection
   "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
   if [[ -s "$STDERR_FILE" ]]; then
@@ -3865,7 +3876,12 @@ _json_report_src() {
   # completed comparison, so the two agree in every ordinary case; the one
   # they disagree in is a partially-written run, which is exactly when
   # answering from the artifact the reader was shown matters.
-  local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  # `${x-default}`, not `${x:-default}`: an *empty* `_EFFECTIVE_OUTPUT_FILE`
+  # is a real answer ("this run writes no report file", e.g. every export
+  # goes to stdout), and must not fall back to the `output-file` input the
+  # caller's own export set replaced. The unset case is the snippet-
+  # extraction tests, which never assign it (plan slice 7m).
+  local _primary="${_EFFECTIVE_OUTPUT_FILE-${OUTPUT_FILE:-}}"
   if [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
     echo "${_STDOUT_JSON_FILE}"
   elif [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" && -s "$_primary" ]] \
@@ -5157,7 +5173,8 @@ fi
   # is recorded for the effective path under every format, and degrading to
   # "no freshness claim" when that bookkeeping never ran -- the same rule
   # `_json_report_src` applies, for the same snippet-extraction tests.
-  _REPORT_PATH_OUT="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  # `${x-default}`, not `${x:-default}` -- see `_caller_json_destinations`.
+  _REPORT_PATH_OUT="${_EFFECTIVE_OUTPUT_FILE-${OUTPUT_FILE:-}}"
   if [[ "$_SARIF_UPLOAD_FORMAT_MISMATCH" == "1" ]]; then
     echo "report-path="
   elif [[ -n "$_REPORT_PATH_OUT" && -f "$_REPORT_PATH_OUT" ]] \
