@@ -28,7 +28,6 @@ from __future__ import annotations
 import copy
 import json
 
-import jsonschema
 import pytest
 
 from abicheck.buildsource.check_report import (
@@ -47,6 +46,7 @@ from abicheck.policy.outcome import (
     run_outcome_for_scan_fields,
 )
 from abicheck.workflows.aggregate.gate import GateInfo
+from tests.schema_validation import validate_instance
 
 # ---------------------------------------------------------------------------
 # RunOutcome / PolicyGateDecision / OperationalStatus domain behavior
@@ -1014,7 +1014,7 @@ class TestRunOutcomeSchemaValidation:
             / "compare_report.schema.json"
         )
         schema = json.loads(schema_path.read_text())
-        jsonschema.validate(data, schema)
+        validate_instance(data, schema)
 
     def test_fresh_compare_report_validates_against_the_published_schema_mirror(self):
         from pathlib import Path
@@ -1047,4 +1047,4 @@ class TestRunOutcomeSchemaValidation:
             / "compare_report.schema.json"
         )
         schema = json.loads(schema_path.read_text())
-        jsonschema.validate(data, schema)
+        validate_instance(data, schema)

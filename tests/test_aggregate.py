@@ -48,6 +48,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
+from tests.schema_validation import validate_instance
+
 LINUX = "linux-x86_64"
 WINDOWS = "windows-x86_64"
 MACOS = "macos-arm64"
@@ -1365,7 +1367,7 @@ class TestJsonSchema:
         )
         _write_report(tmp_path, MACOS, "BREAKING")  # unexpected
         d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()
-        jsonschema.validate(d, load_aggregate_report_schema())
+        validate_instance(d, load_aggregate_report_schema())
         assert d["aggregate_schema_version"] == AGGREGATE_SCHEMA_VERSION
         assert d["unexpected_targets"]
 
@@ -1375,7 +1377,7 @@ class TestJsonSchema:
 
         _write_report(tmp_path, LINUX, "API_BREAK")
         d = aggregate_reports_dir(tmp_path, discovered_only=True).to_dict()
-        jsonschema.validate(d, load_aggregate_report_schema())
+        validate_instance(d, load_aggregate_report_schema())
 
 
 class TestWarnAcceptanceProvenance:

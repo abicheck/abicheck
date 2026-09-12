@@ -58,6 +58,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
+from tests.schema_validation import validate_instance
+
 LINUX = "linux-x86_64"
 
 
@@ -465,7 +467,7 @@ class TestFindingMatrix:
         d = aggregate_reports_dir(
             tmp_path, expected=_expect(GCC, CLANG, MSVC)
         ).to_dict()
-        jsonschema.validate(d, load_aggregate_report_schema())
+        validate_instance(d, load_aggregate_report_schema())
         assert d["finding_matrix"]
 
 
@@ -1527,7 +1529,7 @@ class TestProfileContractState:
         _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED_IN_CONTRACT])
         _write_findings_report(tmp_path, CLANG, "BREAKING", [_SIZE_CHANGED_UNRESOLVED])
         d = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG)).to_dict()
-        jsonschema.validate(d, load_aggregate_report_schema())
+        validate_instance(d, load_aggregate_report_schema())
         (entry,) = d["finding_matrix"]
         assert entry["profile_contract"]
 
@@ -1539,6 +1541,6 @@ class TestProfileContractState:
 
         _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
         d = aggregate_reports_dir(tmp_path, expected=_expect(GCC)).to_dict()
-        jsonschema.validate(d, load_aggregate_report_schema())
+        validate_instance(d, load_aggregate_report_schema())
         (entry,) = d["finding_matrix"]
         assert "profile_contract" not in entry

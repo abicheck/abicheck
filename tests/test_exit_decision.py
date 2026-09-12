@@ -67,6 +67,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
+from tests.schema_validation import validate_instance
+
 _requires_jsonschema = pytest.mark.skipif(
     jsonschema is None, reason="jsonschema not installed"
 )
@@ -1143,6 +1145,6 @@ class TestIncludeExitDecisionFlag:
         result = compare(old, new)
         report = json.loads(to_json(result, include_exit_decision=False))
         assert "exit" not in report
-        jsonschema.validate(report, load_compare_report_schema())
+        validate_instance(report, load_compare_report_schema())
 
 

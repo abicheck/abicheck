@@ -205,4 +205,46 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="guard.absent_capability_vs_real_failure",
+        invariant=(
+            "A test-support helper may report 'skipped' only for a capability "
+            "that is genuinely absent (no platform, no tool, an explicitly "
+            "named optional feature). A tool that is present, was configured, "
+            "was actually run, and then failed is a test FAILURE with the "
+            "command, input and stderr attached -- for every nonzero exit "
+            "status, signal-kill included, and whatever the stderr's encoding. "
+            "The rule generalizes past compilers: the failure mode is any "
+            "helper that widens 'this environment cannot do X' to cover "
+            "'doing X went wrong', because the silent-skip guard "
+            "(ABICHECK_MIN_EXECUTED) cannot see it -- the sibling fixtures "
+            "that still build satisfy the floor while the broken ones vanish."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_compile_failure_contract.py",),
+        public_surfaces=(),
+        axes={
+            "exit_status": ("zero", "nonzero", "signal"),
+            "optional_feature": ("named", "absent"),
+            "stderr": ("empty", "large", "non_utf8"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only `tests/test_cross_platform_integration.py`'s two "
+                    "fixture-building helpers are migrated to the contract. "
+                    "A repo-wide grep finds roughly thirty other "
+                    "`if result.returncode != 0: pytest.skip(...)` sites "
+                    "across the integration/parity suites; each needs its own "
+                    "reading (several are genuine optional-feature probes -- "
+                    "a -gdwarf-5 or BTF-capable toolchain -- where a skip is "
+                    "the right answer), so they are not converted "
+                    "mechanically. No structural gate rejects a new site yet; "
+                    "the structural half of the seed test pins only the two "
+                    "migrated helpers."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
 )

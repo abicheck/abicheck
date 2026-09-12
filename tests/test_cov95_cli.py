@@ -63,6 +63,7 @@ from abicheck.cli_compare_release import (
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
+from tests.schema_validation import validate_instance
 
 # ── snapshot helpers (mirror tests/test_compare_release.py) ───────────────────
 
@@ -2556,7 +2557,6 @@ class TestUsedByScoping:
         "consumer_proven" added alongside the four public-surface-walk
         values it already had."""
         pytest.importorskip("jsonschema")
-        import jsonschema
 
         from abicheck.schemas import load_compare_report_schema
 
@@ -2578,7 +2578,7 @@ class TestUsedByScoping:
             c for c in data["changes"] if c["kind"] == "consumer_required_symbol_removed"
         )
         assert entry["reachability_kind"] == "consumer_proven"
-        jsonschema.validate(instance=data, schema=load_compare_report_schema())
+        validate_instance(data, load_compare_report_schema())
 
     def test_json_missing_symbol_respects_show_only(
         self, tmp_path, monkeypatch
@@ -2651,13 +2651,10 @@ class TestUsedByScoping:
         # scoped-only payload validates against the packaged
         # compare_report.schema.json, not just that reading it by hand
         # looks right.
-        try:
-            import jsonschema
-        except ImportError:
-            pytest.skip("jsonschema not installed")
+        pytest.importorskip("jsonschema")
         from abicheck.schemas import load_compare_report_schema
 
-        jsonschema.validate(instance=data, schema=load_compare_report_schema())
+        validate_instance(data, load_compare_report_schema())
 
     # test_stat_json_summary_reflects_scoped_only_and_missing_findings removed
     # (CLI cleanup phase two, PR 1): it exercised `--format json --stat`
