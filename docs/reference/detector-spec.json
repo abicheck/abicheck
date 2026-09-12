@@ -511,7 +511,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L5",
       "doc_slug": "declaration_identity_reconciled_unresolved",
       "examples": "case197_header_graph_identity_reconciled"
     },
@@ -520,7 +520,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L5",
       "doc_slug": "declaration_identity_unchanged",
       "examples": ""
     },

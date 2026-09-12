@@ -87,6 +87,11 @@ import pathlib
 #: the ADR-061 new-file production line ceiling. Same class as
 #: `snapshot_load_normalization` above: real snapshot codec/migration
 #: logic, not a Phase 0 identity/availability/versioning/package primitive.
+#: `snapshot_digest_cache` is a tenth, and rides with that ninth group: the
+#: run-scoped memo for `snapshot_encode.snapshot_content_digest`, whose
+#: whole subject is how often that codec's serialization runs within one
+#: comparison. It stores no document, owns no schema and has no v2 surface
+#: -- a performance property of the codec, not a Phase 0 primitive.
 NON_ADR062_MODULES = frozenset(
     {
         "bounded_read",
@@ -118,6 +123,7 @@ NON_ADR062_MODULES = frozenset(
         "snapshot_encode",
         "snapshot_decode_declarations",
         "snapshot_reliability_flags",
+        "snapshot_digest_cache",
     }
 )
 
