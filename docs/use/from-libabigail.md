@@ -76,8 +76,8 @@ the severity-aware scheme).
 | `--drop-private-types` | *(automatic)* | With headers, abicheck scopes findings to the public surface by default; opt out with `--no-scope-public-headers` |
 | `--suppressions FILE` / `--suppr` | `--suppress FILE` | Different file format: YAML instead of libabigail's INI sections — see [Suppressions](suppressions.md) and the translation section below |
 | `--no-default-suppression` | *(not needed)* | abicheck applies no default suppression specs |
-| `--debug-info-dir1 DIR` / `--d1` | `--debug-root old=DIR` | Sidecar/split debug trees |
-| `--debug-info-dir2 DIR` / `--d2` | `--debug-root new=DIR` | `--debug-root DIR` applies to both sides |
+| `--debug-info-dir1 DIR` / `--d1` | `--debug-info old=DIR` | Sidecar/split debug trees; also takes a detached debug file or a debug package |
+| `--debug-info-dir2 DIR` / `--d2` | `--debug-info new=DIR` | `--debug-info DIR` applies to both sides |
 | *(no equivalent)* | `.abicheck.yml` `debug.debuginfod: true` | Fetch debug info from a debuginfod server |
 | `--stat` | `--format oneline` | One-line summary instead of the full report; purely a rendering choice — pair with whatever `--depth` you already use, since `--format` never changes coverage/findings |
 | `--leaf-changes-only` / `-l` | `--view leaf` | Root-type-grouped leaf view |

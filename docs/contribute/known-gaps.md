@@ -7316,6 +7316,12 @@ performs (`--used-by`, `--used-by-manifest`, `--required-symbol`,
 `--instantiation-manifest`, `--follow-deps` and its search-path siblings,
 `--debug-info`, `--devel-pkg`). That last family is recorded here rather
 than left as an accepted no-op precisely so it is a visible decision.
+**Update (plan Phase 7n):** `--debug-root`, `--devel-pkg` and
+`--probe-matrix` no longer exist as flags -- each merged into the one input
+for its evidence role (`--debug-info`, `-H/--header`, `--build-info`). The
+rejections above are unchanged in substance and still keyed on the
+generated destinations (`devel_pkg2`, `probe_matrix_*`, ...), which is what
+made them survive the rename; only the spelling each message names moved.
 Writing the test found one the manual audit had missed
 (`--used-by-manifest`), which is the argument for the mechanism in one line.
 

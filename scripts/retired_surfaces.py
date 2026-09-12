@@ -870,6 +870,29 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        "--debug-root/--devel-pkg/--probe-matrix (plan Phase 7n: one input"
+        " per evidence role -- merged into --debug-info, -H/--header and"
+        " --build-info respectively, each old spelling exiting 64 with no"
+        " alias)",
+        (
+            "--debug-root",
+            "--devel-pkg",
+            "--probe-matrix",
+        ),
+        # Each of these pages names an old spelling only while documenting
+        # the fold, or in its own historical-record capacity.
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "reference/config-file.md",
+                "use/companion-commands.md",
+                "use/dump-compare-flags.md",
+                "use/from-libabigail.md",
+            }
+        ),
+    ),
+    (
         "compare --env-matrix (ADR-068 D5: declared deployment constraints"
         " demoted to .abicheck.yml's deployment: config key, embedding"
         " EnvironmentMatrix's own YAML shape inline via"

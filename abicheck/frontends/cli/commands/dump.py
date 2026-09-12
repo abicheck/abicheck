@@ -190,10 +190,14 @@ def _resolve_and_check_dump_debug_format(
 # SS4.2's CONFIG row: --compile-db-filter is gone (build.compile_db_filter).
 # ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
 # --dwarf-only/--debug-format/--debuginfod/--debuginfod-url/--pdb-path: gone
-# (Phase 7c, debug: config only). --debug-root stays (per-run evidence).
-@click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
-              help="Directory containing separate debug files (build-id trees, "
-                   "path-mirror debug files, or dSYM bundles). This option can be repeated.")
+# (Phase 7c, debug: config only). --debug-info stays (per-run evidence), and
+# absorbed --debug-root in Phase 7n (one role, several transports).
+@click.option("--debug-info", "debug_roots", multiple=True, type=click.Path(path_type=Path),
+              help="Separate debug info: a directory to search (build-id tree, "
+                   "path mirror, dSYM bundles) or a detached debug file (.debug "
+                   "sidecar, .dwp, .pdb) -- told apart by content, not name. "
+                   "Repeatable. A debug *package* is a release transport "
+                   "(`compare --debug-info`), rejected here rather than ignored.")
 # ── Multi-TU manifest (ADR-050 D3) ────────────────────────────────────────────
 @click.option("--dump-manifest", "dump_manifest_path",
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
@@ -277,7 +281,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # `--compile-db-filter`.
     compile_db_filter = resolve_dump_build_compile_db_filter(build_config, sources)
     # Phase 7c: debug.* config only
-    _debug = resolve_dump_debug_fields(_resolved_debug, build_config=build_config, sources=sources)
+    _debug = resolve_dump_debug_fields(_resolved_debug, build_config=build_config, sources=sources, debug_roots=debug_roots)
     dwarf_only, debug_format_opt, debuginfod, debuginfod_url, pdb_path = (
         _debug.dwarf_only, _debug.format, _debug.debuginfod, _debug.debuginfod_url, _debug.pdb_path,
     )

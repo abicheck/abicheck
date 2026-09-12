@@ -34,7 +34,7 @@ side:
 ```bash
 abicheck compare old.rpm new.rpm \
   --debug-info old=old-debuginfo.rpm --debug-info new=new-debuginfo.rpm \
-  --devel-pkg old=old-devel.rpm --devel-pkg new=new-devel.rpm
+  -H old=old-devel.rpm -H new=new-devel.rpm
 ```
 
 A tarball or a conda package is the same command with a different

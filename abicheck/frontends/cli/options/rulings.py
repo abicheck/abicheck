@@ -107,7 +107,11 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
     "--header": _keep(
         "The canonical L2 evidence input -- which headers describe each "
         "side's declared surface. Side-scoped (`old=`/`new=`), and the "
-        "paths differ on every comparison of two different releases."
+        "paths differ on every comparison of two different releases. Since "
+        "Phase 7n it carries that evidence over both of its transports: a "
+        "header file/directory, and a development package that ships them "
+        "(the former --devel-pkg), which is the same per-run evidence under "
+        "a different wrapper, not a second decision."
     ),
     "--include": _keep(
         "The include search path the -H headers parse under. Travels with "
@@ -121,27 +125,23 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "per-run operand by construction -- it is the thing being compared."
     ),
     "--build-info": _keep(
-        "The L3 build directory / compile_commands.json / prebuilt pack for "
-        "this side. Same per-run reasoning as --sources, whose tree it is "
-        "auto-discovered inside when omitted."
+        "The one build-evidence input for this side, over both of its kinds "
+        "since Phase 7n: the L3 build directory / compile_commands.json / "
+        "prebuilt pack (same per-run reasoning as --sources, whose tree it "
+        "is auto-discovered inside when omitted) and the probe-matrix "
+        "snapshot the separate --probe-matrix used to carry (which probes "
+        "were run for this comparison is a property of the run, not the "
+        "project). Routed on the document, and both may be given per side."
     ),
     "--debug-info": _keep(
-        "A side's separate debug-info package/file for package extraction. "
-        "Real per-run evidence: which .ddeb/.rpm carries this particular "
-        "release's DWARF is not a project property."
-    ),
-    "--devel-pkg": _keep(
-        "A side's development package supplying headers for package "
-        "extraction. Same per-run evidence reasoning as --debug-info."
-    ),
-    "--debug-root": _keep(
-        "Where this run's debug artifacts live (also the per-side spelling "
-        "that replaced --pdb-path in Phase 7i, since debug_resolver already "
-        "searches a debug root for a PDB). A per-run artifact location."
-    ),
-    "--probe-matrix": _keep(
-        "Per-run probe evidence for one or both sides. Which probes were "
-        "run for this comparison is a property of the run, not the project."
+        "The one separate-debug-info input for this side, over all three of "
+        "its transports since Phase 7n: a debug package, a directory of "
+        "debug files, and a detached debug file (the last two were "
+        "--debug-root, whose per-side spelling also replaced --pdb-path in "
+        "Phase 7i, since debug_resolver already searches a debug root for a "
+        "PDB). Real per-run evidence either way: which .ddeb/.rpm carries "
+        "this release's DWARF, and where this run's artifacts live, are not "
+        "project properties."
     ),
     "--dump-manifest": _keep(
         "ADR-050 D3: a real multi-translation-unit dump for one side, in "
@@ -487,13 +487,20 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "Same ruling as `compare --sources`: the L4/L5 checkout being captured."
     ),
     "--build-info": _keep(
-        "Same ruling as `compare --build-info`: this run's L3 evidence."
+        "Same ruling as `compare --build-info`: this run's L3 evidence. "
+        "Single-sided and compile-context-only here -- a probe matrix is "
+        "folded across two sides, so it has no meaning on a one-artifact "
+        "capture and `dump` never took one."
     ),
     "--depth": _keep(
         "Same ruling as `compare --depth`: ADR-037 D5's single evidence dial."
     ),
-    "--debug-root": _keep(
-        "Same ruling as `compare --debug-root`: a per-run artifact location."
+    "--debug-info": _keep(
+        "Same ruling as `compare --debug-info`, minus the package transport: "
+        "a per-run artifact location, in either of the two transports a "
+        "single-binary operand can resolve (a directory to search or the "
+        "detached file itself). Phase 7n renamed it from --debug-root; a "
+        "debug package is a release transport and a usage error here."
     ),
     "--dump-manifest": _keep(
         "Same ruling as `compare --dump-manifest`: ADR-050 D3 multi-TU operand."

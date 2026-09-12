@@ -97,9 +97,9 @@ def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
 _OLD_ONLY_DESTS: dict[str, str] = {
     "old_headers_only": "--header old=",
     "old_includes_only": "--include old=",
-    "debug_roots_old": "--debug-root old=",
+    "debug_roots_old": "--debug-info old=",
     "debug_info1": "--debug-info old=",
-    "devel_pkg1": "--devel-pkg old=",
+    "devel_pkg1": "--header old=",
 }
 
 #: Destinations that are inert here *by construction*, with the reason.
@@ -318,16 +318,24 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     ),
     # Keyed on the destinations `normalize_sided_options` *generates*, not on
     # the raw option names: `compare_cmd` normalizes before dispatching, so a
-    # guard keyed on `debug_info`/`devel_pkg`/`dump_manifest` would check a
+    # guard keyed on `debug_info`/`header`/`dump_manifest` would check a
     # key that never exists and never fire (Codex review, P1 -- the same hole
     # that let a bare `--dump-manifest` through as a silent no-op).
     "debug_info2": (
         "--debug-info",
         "separate debug-info resolution is not wired to this path yet",
     ),
+    # Named as the *transport*, not the bare flag: plain `-H/--header`
+    # headers are supported on this path, and only the development-package
+    # transport plan Phase 7n folded into it is not. A bare "--header" here
+    # would make every documented `--no-baseline -H include/` example read
+    # as rejected (`tests/test_docs_no_baseline_flag_examples.py` scans
+    # these spellings).
     "devel_pkg2": (
-        "--devel-pkg",
-        "development-package header discovery is not wired to this path yet",
+        "--header <development package>",
+        "development-package header discovery is not wired to this path yet "
+        "(a plain header file/directory is fine -- this is the package "
+        "transport plan Phase 7n folded into -H/--header)",
     ),
     "new_dump_manifest": (
         "--dump-manifest",
@@ -336,12 +344,14 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "was silently ignored before, so even an invalid manifest exited 0 "
         "while the audit analysed a different surface than requested",
     ),
+    # Same reason as `devel_pkg2` above: a plain `--build-info` compile
+    # context is supported on this path; a probe matrix is not.
     "probe_matrix_old": (
-        "--probe-matrix",
+        "--build-info <probe matrix>",
         "a build-configuration matrix is folded across two sides",
     ),
     "probe_matrix_new": (
-        "--probe-matrix",
+        "--build-info <probe matrix>",
         "a build-configuration matrix is folded across two sides",
     ),
 }

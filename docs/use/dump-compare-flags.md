@@ -277,9 +277,10 @@ automatically searches for debug artifacts across multiple locations:
 
 | Flag / config key | Description |
 |------|-------------|
-| `--debug-root <dir>` | Directory containing separate debug files. Can be repeated. A per-run evidence input (ADR-068 D5 guard #3) -- stays a CLI flag on `dump`/`compare`. |
-| `--debug-root old=<dir>` | Debug root for old side only (`compare` command). |
-| `--debug-root new=<dir>` | Debug root for new side only (`compare` command). |
+| `--debug-info <path>` | The separate-debug-info input, over all of its transports: a directory containing separate debug files, a detached debug file (a `.debug` sidecar, a `.dwp`, a `.pdb`), or -- on `compare` with directory/package operands -- a debug package (RPM/Deb/tar). Which one a given operand is comes from its content, not its name. Can be repeated. A per-run evidence input (ADR-068 D5 guard #3) -- stays a CLI flag on `dump`/`compare`. Spelled `--debug-root` before plan Phase 7n merged the two; the old spelling exits 64. |
+| `--debug-info old=<path>` | Debug info for the old side only (`compare` command). |
+| `--debug-info new=<path>` | Debug info for the new side only (`compare` command). |
+| `dump --debug-info <pkg>` | A usage error: `dump`'s operand is one binary, with no package-extraction stage. Pass the extracted directory, or use `compare --debug-info` on the release packages. |
 | `.abicheck.yml` `debug.debuginfod` | Enable debuginfod network resolution (opt-in). Phase 7: no `--debuginfod` flag left on `dump`/`compare` (was demoted to this config key, then the override itself removed — `.abicheck.yml` is its only source now). |
 | `.abicheck.yml` `debug.debuginfod_url` | Override debuginfod server URL. Was `--debuginfod-url`, same Phase 7 removal. |
 
@@ -287,8 +288,8 @@ automatically searches for debug artifacts across multiple locations:
 # Locate + report separate debuginfo for stripped .so files
 abicheck compare \
     old/usr/lib64/libfoo.so.1 new/usr/lib64/libfoo.so.1 \
-    --debug-root old=old-debug/usr/lib/debug \
-    --debug-root new=new-debug/usr/lib/debug
+    --debug-info old=old-debug/usr/lib/debug \
+    --debug-info new=new-debug/usr/lib/debug
 ```
 
 ```yaml
@@ -302,7 +303,7 @@ export DEBUGINFOD_URLS="https://debuginfod.fedoraproject.org/"
 abicheck compare old-libfoo.so new-libfoo.so
 ```
 
-!!! note "What `--debug-root`/`debug.debuginfod` feed into the DWARF parse today"
+!!! note "What `--debug-info`/`debug.debuginfod` feed into the DWARF parse today"
     On `dump` and `compare`, a build-id-tree, path-mirror, or debuginfod-fetched
     `.debug` file — a separate ELF file distinct from the input binary — is
     parsed for DWARF instead of the (stripped) input itself: the commands above

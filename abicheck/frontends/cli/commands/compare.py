@@ -78,7 +78,6 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
 )
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
 from ..options.params import (
-    SIDED_EXISTING_PATH_PARAM,
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 
@@ -695,15 +694,14 @@ def _embed_inline_source_side(
                    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
                    "private __pp_* kernel churn and other non-committed exports are demoted "
                    "to the filtered ledger (see --view filtered).")
-@click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
-              help="Build-configuration matrix snapshot, "
-                   "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
-                   "old=m1 --probe-matrix new=m2). With both sides given, build-config "
-                   "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
-                   "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
-                   "verdict and report (G2: probe -> compare; ADR-040).")
+# one-comparison-product.md Phase 7n: --probe-matrix is gone. A probe-matrix
+# snapshot is build evidence, so it is one of --build-info's operands now,
+# recognised from the document's own schema/required-key contract rather
+# than a filename -- probe observations and compile context stay distinct
+# internally and may be supplied together for one side.
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
-# --debug-root{,1,2}: the shared local-ELF debug-resolution family. The
+# --debug-info: the whole separate-debug-info role (Phase 7n merged
+# --debug-root into it -- directory, detached file, or debug package). The
 # dwarf-only/debuginfod[-url]/debug-format hidden flags are gone (ADR-068 D5,
 # Phase 7a) -- debug.* .abicheck.yml keys are their only spelling now.
 @debug_resolution_options

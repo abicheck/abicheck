@@ -14,7 +14,9 @@ library-level concern (`abicheck/debian_symbols.py`, still tested directly in
 
 from __future__ import annotations
 
+import io
 import json
+import tarfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -678,12 +680,22 @@ class TestCompareReleaseErrorPaths:
         assert "<testsuites" in text or "<testsuite" in text
 
     def test_compare_release_unrecognized_package(self, tmp_path: Path) -> None:
-        """A file with a recognised-as-package name but no extractor returns
-        a clear 'Unrecognized package format' error."""
+        """A real package archive no extractor claims returns a clear
+        'Unrecognized package format' error.
+
+        The operands are genuine tarballs, not files merely *named* like
+        one: plan Phase 7n routes package detection on content, so the
+        upstream operand classification would call a `not-a-tarball` blob a
+        plain file and never reach the branch under test. The
+        `detect_extractor` patch below is what actually creates the
+        unrecognized case, and always was."""
         old_pkg = tmp_path / "old.tar.gz"
         new_pkg = tmp_path / "new.tar.gz"
-        old_pkg.write_bytes(b"not-a-tarball")
-        new_pkg.write_bytes(b"not-a-tarball")
+        for pkg in (old_pkg, new_pkg):
+            with tarfile.open(pkg, "w:gz") as tf:
+                info = tarfile.TarInfo(name="lib/libfoo.so")
+                info.size = 3
+                tf.addfile(info, io.BytesIO(b"elf"))
 
         runner = CliRunner()
         # ADR-061 gap D, closed: the request/plan and the input resolution
