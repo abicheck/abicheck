@@ -4281,6 +4281,22 @@ _resolve_clean_exit_verdict() {
       return
     fi
   fi
+  # A readable report whose assurance key pair is broken, checked HERE rather
+  # than only at the FINAL_EXIT fold below (Codex review, P2, reproduced):
+  # that fold runs after the verdict output, the job summary and the PR comment
+  # have all been published, so the contradiction failed the step while
+  # publishing `verdict=COMPATIBLE` and "No binary ABI break detected" -- exit 1
+  # beside a false clean result, which a workflow branching on the output (or
+  # using continue-on-error) reads as a pass. The whole point of this axis is
+  # that an unreportable assurance result must not read as a passing one, so it
+  # has to be decided before anything is emitted. The FINAL_EXIT check stays as
+  # the non-exit-0 path's cover; at exit 0 it is now redundant, which is the
+  # correct direction for a gate.
+  if _assurance_axis_contradictory; then
+    VERDICT="REPORT_UNREADABLE"
+    echo "::error::abicheck exited 0, but its JSON report claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+    return
+  fi
   _no_baseline_audit=$(_report_query "$(_json_report_src)" no_baseline_audit)
   if [[ "$_no_baseline_audit" == "clean" ]]; then
     VERDICT="AUDIT_CLEAN"

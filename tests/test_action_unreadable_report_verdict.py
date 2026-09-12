@@ -289,7 +289,7 @@ class TestContradictoryAssuranceSchema:
     ``_assurance_gated``'s deliberate fail-open would otherwise pass it.
     """
 
-    def test_fails_the_step(self, tmp_path: Path) -> None:
+    def _contradictory(self, tmp_path: Path) -> dict:
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=0,
@@ -301,11 +301,41 @@ class TestContradictoryAssuranceSchema:
                 }
             ).encode(),
         )
-        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        return _run_action(tmp_path, _compare_env(tmp_path), bindir)
+
+    def test_fails_the_step(self, tmp_path: Path) -> None:
+        outputs = self._contradictory(tmp_path)
         assert outputs["_exit"] == 1, outputs
         assert "analysis_assurance_exit_contribution" in outputs["_stdout"], outputs[
             "_stdout"
         ]
+
+    def test_the_published_verdict_is_not_compatible(self, tmp_path: Path) -> None:
+        """The exit code is not the only thing a consumer reads.
+
+        Regression for a real defect in this very change (Codex review, P2,
+        reproduced): the contradiction was detected only at the FINAL_EXIT fold,
+        which runs *after* the verdict output, the job summary and the PR comment
+        are published. So the step failed while publishing
+        `verdict=COMPATIBLE` and "No binary ABI break detected" -- a false clean
+        result for any workflow that branches on the output or runs under
+        `continue-on-error`, which is the exact failure this axis exists to
+        prevent, reintroduced one layer out.
+
+        `test_fails_the_step` above did not catch it because it asserted the exit
+        code and the log text only. That is why this file's contract row is
+        "verdict, gate and exit code checked independently" -- asserting one and
+        assuming the others agree is how they came to disagree.
+        """
+        outputs = self._contradictory(tmp_path)
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["verdict"] != "COMPATIBLE", outputs
+
+    def test_the_summary_does_not_claim_no_break(self, tmp_path: Path) -> None:
+        outputs = self._contradictory(tmp_path)
+        summary = outputs["_summary"]
+        assert "No binary ABI break detected" not in summary, summary
+        assert "REPORT_UNREADABLE" in summary, summary
 
     def test_a_pre_2_40_report_is_accepted(self, tmp_path: Path) -> None:
         bindir = _stub_abicheck(
