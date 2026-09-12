@@ -567,6 +567,53 @@ class TestCacheServiceClassification:
         assert harness._classify_cache_service({"cold": [_run({})]}) == "unknown"
 
 
+class TestCompareArgvGrammar:
+    """The harness must build the CLI's *current* export grammar.
+
+    Added after the grammar changed under this branch (ADR-068 slices 7m/7n
+    replaced `--format F -o PATH` with a repeatable `-o FORMAT=DESTINATION`) and
+    every scenario silently built invocations the CLI no longer accepts. A
+    logic-level guard here fails in milliseconds; without it the first signal is
+    a real subprocess exiting 64 minutes into a lane.
+    """
+
+    def test_a_single_export_uses_the_format_equals_destination_form(self):
+        argv = harness._compare_argv(
+            "old.json", "new.so", exports={"json": Path("r.json")}
+        )
+        assert "-o" in argv
+        assert "json=r.json" in argv
+        assert "--format" not in argv
+
+    def test_two_exports_produce_two_o_flags_in_one_invocation(self):
+        # The whole point of the two-format scenario: one comparison, two
+        # artifacts. Two invocations would measure something else.
+        argv = harness._compare_argv(
+            "old.json",
+            "new.so",
+            exports={"json": Path("r.json"), "markdown": Path("r.md")},
+        )
+        assert argv.count("-o") == 2
+        assert "json=r.json" in argv and "markdown=r.md" in argv
+
+    def test_depth_headers_is_always_requested(self):
+        argv = harness._compare_argv("o", "n", exports={"json": Path("r.json")})
+        assert argv[argv.index("--depth") + 1] == "headers"
+
+    def test_no_baseline_omits_the_old_operand(self):
+        argv = harness._compare_argv(
+            None, "new.so", exports={"json": Path("r.json")}, no_baseline=True
+        )
+        assert "--no-baseline" in argv
+        assert argv.count("new.so") == 1
+
+    def test_a_baseline_comparison_without_an_old_operand_is_a_usage_error(self):
+        # Raise, never silently build a one-operand compare that would be
+        # interpreted as something else.
+        with pytest.raises(ValueError):
+            harness._compare_argv(None, "new.so", exports={"json": Path("r.json")})
+
+
 class TestDryRunArgv:
     def test_the_output_flag_is_stripped(self):
         # compare rejects --dry-run together with -o (exit 64); the first version
@@ -677,7 +724,9 @@ class TestRealL2Execution:
                 harness.Step(
                     "compare",
                     harness._compare_argv(
-                        str(fixture.old[0].so), str(fixture.new[0].so), out=out
+                        str(fixture.old[0].so),
+                        str(fixture.new[0].so),
+                        exports={"json": out},
                     ),
                     extraction="any",
                     ok_exit_codes=(0, 2, 4),

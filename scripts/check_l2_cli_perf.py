@@ -90,6 +90,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -115,6 +116,7 @@ from perf_measurement import (  # noqa: E402
 from perf_receipt import (  # noqa: E402
     CommandRun,
     NativeInvocationSpy,
+    RssSample,
     build_receipt,
     digest_paths,
     run_measured,
@@ -200,19 +202,29 @@ def _compare_argv(
     old: str | None,
     new: str,
     *,
-    out: Path,
-    fmt: str = "json",
+    exports: dict[str, Path],
     old_headers: list[str] | None = None,
     new_headers: list[str] | None = None,
     no_baseline: bool = False,
 ) -> list[str]:
+    """A ``compare`` invocation exporting each ``{format: destination}`` pair.
+
+    *exports* is a mapping rather than a single format because ``-o`` is
+    repeatable (``-o FORMAT=DESTINATION``, ADR-068 slices 7m/7n): one invocation
+    renders any number of artifacts from the one completed analysis. That is
+    what lets the two-format scenario be a *single* comparison, which is what it
+    is supposed to measure.
+    """
     args = ["compare"]
     if no_baseline:
         args += [new, "--no-baseline"]
     else:
-        assert old is not None
+        if old is None:
+            raise ValueError("a baseline comparison needs an old operand")
         args += [old, new]
-    args += ["--depth", "headers", "--format", fmt, "-o", str(out)]
+    args += ["--depth", "headers"]
+    for fmt, destination in exports.items():
+        args += ["-o", f"{fmt}={destination}"]
     args += old_headers or []
     args += new_headers or []
     return _cli(*args)
@@ -243,7 +255,7 @@ def _dry_run_argv(argv: list[str]) -> list[str]:
 
 # ── validation (always outside the timed window) ──────────────────────────────
 def _load_report(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _validate_l2_reached(
@@ -519,7 +531,7 @@ def scenario_compare_live_live(
         argv = _compare_argv(
             str(fixture.old[0].so),
             str(fixture.new[0].so),
-            out=out,
+            exports={"json": out},
             old_headers=old_h,
             new_headers=new_h,
         )
@@ -574,7 +586,7 @@ def scenario_compare_stored_live(
                 _compare_argv(
                     str(old_out),
                     str(fixture.new[0].so),
-                    out=out,
+                    exports={"json": out},
                     new_headers=_header_args(fixture.new, "new"),
                 ),
                 # The load-bearing assertion: exactly one side's extraction
@@ -617,7 +629,7 @@ def scenario_compare_stored_stored(
     def steps(fixture: fixtures.BuiltFixture, work: Path) -> list[Step]:
         old_out, new_out = _stored_paths(work)
         out = work / "stored_stored.json"
-        argv = _compare_argv(str(old_out), str(new_out), out=out)
+        argv = _compare_argv(str(old_out), str(new_out), exports={"json": out})
         return [
             Step("resolution", _dry_run_argv(argv), scope="startup_and_resolution"),
             Step(
@@ -662,7 +674,7 @@ def scenario_no_baseline(
                 _compare_argv(
                     None,
                     str(fixture.new[0].so),
-                    out=out,
+                    exports={"json": out},
                     new_headers=_header_args(fixture.new, "new"),
                     no_baseline=True,
                 ),
@@ -690,61 +702,69 @@ def scenario_no_baseline(
 def scenario_two_formats(
     spec: fixtures.FixtureSpec, suites=("pr", "extended")
 ) -> Scenario:
-    """JSON plus a human report, without re-extracting evidence for the second.
+    """JSON plus a human report from **one** comparison, evidence extracted once.
 
-    A single invocation emitting two formats at once is **not** a supported
-    capability today (``--format`` is single-valued; repeating it simply lets
-    the last one win -- verified, not assumed). So this measures the supported
-    equivalent and asserts the property that actually matters: evidence is
-    extracted once, into stored snapshots, and each render then runs with a
-    header-extraction count of **zero**. The marginal cost of the second format
-    is therefore rendering only.
+    ``-o`` is repeatable (``-o FORMAT=DESTINATION``, ADR-068 slices 7m/7n) and
+    every export renders the same completed analysis, so this is a single
+    ``compare`` invocation producing both artifacts -- not two runs.
 
-    Adding a real dual-format flag would be a product change, which is out of
-    this harness's scope; the gap is recorded in ``docs/contribute/performance.md``
-    rather than papered over by pretending one invocation did both.
+    The measurement that makes it worth a scenario is the one the CLI's own
+    promise invites: *asking for a second artifact must not re-extract
+    evidence*. That is checked directly rather than trusted, by requiring the
+    invocation's header-extraction count to equal exactly one side's (the
+    operands are a stored snapshot and a live artifact here, so one side is the
+    correct figure) -- a re-run of the analysis for the second renderer would
+    show up as a doubled count.
+
+    Deliberately stored-old/live-new rather than stored/stored: with both
+    operands stored the extraction count is zero either way, so it could not
+    distinguish one analysis from two. An assertion that cannot fail is not one.
     """
 
     def prepare(fixture: fixtures.BuiltFixture, work: Path) -> list[Step]:
-        return _prepare_stored(fixture, work, sides=("old", "new"))
+        return _prepare_stored(fixture, work, sides=("old",))
 
     def steps(fixture: fixtures.BuiltFixture, work: Path) -> list[Step]:
-        old_out, new_out = _stored_paths(work)
+        old_out, _ = _stored_paths(work)
         json_out = work / "fmt.json"
         md_out = work / "fmt.md"
         return [
             Step(
-                "render_json",
-                _compare_argv(str(old_out), str(new_out), out=json_out, fmt="json"),
-                extraction="forbidden",
+                "compare_exporting_two_formats",
+                _compare_argv(
+                    str(old_out),
+                    str(fixture.new[0].so),
+                    exports={"json": json_out, "markdown": md_out},
+                    new_headers=_header_args(fixture.new, "new"),
+                ),
+                # One side's worth, calibrated from prepare()'s own dump: two
+                # exports must not mean two analyses.
+                extraction="one_side",
                 ok_exit_codes=(0, 2, 4),
                 output=json_out,
-            ),
-            Step(
-                "render_markdown",
-                _compare_argv(str(old_out), str(new_out), out=md_out, fmt="markdown"),
-                extraction="forbidden",
-                ok_exit_codes=(0, 2, 4),
-                output=md_out,
-            ),
+                sample_rss=True,
+            )
         ]
 
     def validate(work: Path, runs: dict[str, list[CommandRun]]) -> list[str]:
         problems = _validate_l2_reached(
             _load_report(work / "fmt.json"), sides=("old", "new")
         )
-        markdown = (work / "fmt.md").read_text()
+        markdown_path = work / "fmt.md"
+        if not markdown_path.exists():
+            return problems + ["the second export produced no file at all"]
+        markdown = markdown_path.read_text(encoding="utf-8")
         if "ABI Report" not in markdown:
             problems.append("the markdown render is not a recognisable ABI report")
-        # The user-facing report must reflect the same finding the JSON does; a
-        # renderer that dropped it would otherwise be a pure speedup here.
+        # Both artifacts must describe the same analysis. A renderer that
+        # dropped the finding would otherwise read as a pure speedup here.
         if spec.change == "break" and "BREAKING" not in markdown.upper():
             problems.append("the markdown render does not state the breaking verdict")
         return problems
 
     return Scenario(
         id=f"compare_two_formats[{spec.profile_id}]",
-        description="JSON and a human report over one extraction of evidence",
+        description="one comparison exporting JSON and a human report together",
         spec=spec,
         prepare=prepare,
         steps=steps,
@@ -967,7 +987,7 @@ def scenario_multi_library(spec: fixtures.FixtureSpec) -> Scenario:
                     _compare_argv(
                         str(old.so),
                         str(new.so),
-                        out=report,
+                        exports={"json": report},
                         old_headers=_header_args([old], "old"),
                         new_headers=_header_args([new], "new"),
                     ),
@@ -1005,7 +1025,11 @@ def scenario_multi_library(spec: fixtures.FixtureSpec) -> Scenario:
 def _mutate_dependency_header(fixture: fixtures.BuiltFixture) -> None:
     """Append to the shared ``detail/`` header every public header includes."""
     core = fixture.new[0].include_dir / "detail" / "core.h"
-    core.write_text(core.read_text() + f"\n// invalidation probe {time.time_ns()}\n")
+    core.write_text(
+        core.read_text(encoding="utf-8")
+        + f"\n// invalidation probe {time.time_ns()}\n",
+        encoding="utf-8",
+    )
 
 
 def _one_side_extractions(observed: dict[str, int] | None) -> int | None:
@@ -1017,6 +1041,146 @@ def _one_side_extractions(observed: dict[str, int] | None) -> int | None:
     """
     count = (observed or {}).get("header_extraction", 0)
     return count if count > 0 else None
+
+
+def _step_failure(
+    step: Step,
+    run: CommandRun,
+    *,
+    timeout: float,
+    one_side: int | None,
+    check_extraction: bool,
+) -> list[str] | None:
+    """Why *run* disqualifies its step, or ``None`` when it is a valid sample.
+
+    Four independent ways a measured step is not a measurement: it timed out, it
+    exited outside its allowed set, its observed extraction count broke its
+    contract, or it wrote an output past the size cap. Each returns a message
+    rather than raising, so the caller decides the scenario's fate in one place.
+    """
+    if run.timed_out:
+        return [f"step {step.name} timed out after {timeout}s"]
+    if run.exit_code not in step.ok_exit_codes:
+        return [
+            f"step {step.name} exited {run.exit_code} (allowed "
+            f"{list(step.ok_exit_codes)}): {run.stderr.strip()[-600:]}"
+        ]
+    if check_extraction:
+        problems = _check_extraction(run, step.extraction, one_side=one_side)
+        if problems:
+            return [f"step {step.name}: {p}" for p in problems]
+    if step.output is not None and step.output.exists():
+        size = step.output.stat().st_size
+        if size > MAX_OUTPUT_BYTES:
+            return [f"step {step.name} wrote {size} bytes, over the cap"]
+    return None
+
+
+def _run_measured_steps(
+    measured: list[Step],
+    *,
+    execute: Callable[..., CommandRun],
+    repeat: int,
+    runs: dict[str, list[CommandRun]],
+    scenario: Scenario,
+    fixture: fixtures.BuiltFixture,
+    cache_root: Path,
+    timeout: float,
+    one_side: int | None,
+    check_extraction: bool,
+) -> list[str] | None:
+    """Run every measured step *repeat* times, collecting samples into *runs*.
+
+    Returns ``None`` when every sample is valid, or the messages explaining the
+    first invalid one -- at which point the scenario is abandoned rather than
+    reported with a partial sample set, since a median over some-of-the-repeats
+    is not the figure the receipt claims.
+    """
+    for _repetition in range(repeat):
+        for step in measured:
+            if (
+                scenario.cache_mode == "invalidation_control"
+                and step.name == "after_dependency_change"
+            ):
+                _mutate_dependency_header(fixture)
+            if scenario.cache_mode == "cold" and step.scope == "full_cli":
+                # Every timed repeat of a cold-cache scenario must really be
+                # cold: without this, repeat 2 would be served by repeat 1's
+                # cache and the median would describe a warm run under a cold
+                # label.
+                shutil.rmtree(cache_root, ignore_errors=True)
+                cache_root.mkdir(parents=True, exist_ok=True)
+            run = execute(step, timed=True)
+            runs.setdefault(step.name, []).append(run)
+            failure = _step_failure(
+                step,
+                run,
+                timeout=timeout,
+                one_side=one_side,
+                check_extraction=check_extraction,
+            )
+            if failure is not None:
+                return failure
+    return None
+
+
+def _rss_receipt(rss: RssSample | None) -> dict[str, Any] | None:
+    """The memory block of a step's receipt, or ``None`` when not sampled.
+
+    Every field keeps the name that states what it is: ``sampled_`` for the
+    interval-sampled tree figure and ``ru_maxrss_bytes`` for the kernel
+    per-process high-water mark, with the interval and any unavailability reason
+    alongside, so a reader can never mistake the first for an exact peak.
+    """
+    if rss is None:
+        return None
+    return {
+        "sampled_peak_tree_bytes": rss.sampled_peak_tree_bytes,
+        "sample_count": rss.sample_count,
+        "interval_seconds": rss.interval_seconds,
+        "max_concurrent_processes": rss.max_concurrent_processes,
+        "ru_maxrss_bytes": rss.ru_maxrss_bytes,
+        "unavailable_reason": rss.unavailable_reason,
+    }
+
+
+def _step_receipt(step: Step, batch: list[CommandRun]) -> dict[str, Any]:
+    """One measured step's receipt row, summarized over its repeats.
+
+    Timing comes from the whole *batch* (median plus spread); the single-valued
+    observations -- exit code, invocation counts, output size, memory -- come
+    from the last repeat, since they do not vary meaningfully across repeats of
+    the same command and a median of them would be meaningless.
+    """
+    stats = summarize_samples([r.wall_seconds for r in batch])
+    last = batch[-1]
+    return {
+        "name": step.name,
+        # Phase scope, stated per step. "full_cli" is the real user-facing
+        # number; "startup_only" and "startup_and_resolution" are NESTED
+        # INCLUSIVE windows that must never be added to it or to each other.
+        "scope": step.scope,
+        "additive": False,
+        "gated": step.scope == "full_cli",
+        "extraction_contract": step.extraction,
+        "extraction_contract_meaning": EXTRACTION_EXPECTATIONS[step.extraction],
+        "wall_seconds": stats.median,
+        "wall_seconds_samples": [r.wall_seconds for r in batch],
+        "wall_seconds_min": stats.min,
+        "wall_seconds_max": stats.max,
+        "wall_seconds_cv": stats.cv,
+        "user_cpu_seconds": last.user_cpu_seconds,
+        "system_cpu_seconds": last.system_cpu_seconds,
+        "cpu_scope": last.cpu_scope,
+        "exit_code": last.exit_code,
+        "native_invocations": last.native_invocations,
+        "output_bytes": (
+            step.output.stat().st_size
+            if step.output is not None and step.output.exists()
+            else None
+        ),
+        "rss": _rss_receipt(last.rss),
+    }
 
 
 def run_scenario(
@@ -1054,7 +1218,16 @@ def run_scenario(
         t_build = time.perf_counter()
         try:
             fixture = fixtures.build(scenario.spec, build_root)
-        except Exception as exc:  # a build failure is a hard failure, not a skip
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ) as exc:
+            # A fixture build failure is a hard failure, never a skip: a
+            # scenario that could not build its own inputs measured nothing.
+            # Narrowed from a bare `Exception` -- those three are what a real
+            # compile can raise, and catching more would swallow a bug in this
+            # harness as if it were a toolchain problem.
             result["status"] = "failed"
             result["skip_reason"] = f"fixture build failed: {type(exc).__name__}: {exc}"
             return result
@@ -1130,54 +1303,22 @@ def run_scenario(
                         one_side = calibrated
                         break
         result["one_side_extraction_calibration"] = one_side
-        for repetition in range(repeat):
-            for step in measured:
-                if (
-                    scenario.cache_mode == "invalidation_control"
-                    and step.name == "after_dependency_change"
-                ):
-                    _mutate_dependency_header(fixture)
-                if scenario.cache_mode == "cold" and step.scope == "full_cli":
-                    # Every timed repeat of a cold-cache scenario must really be
-                    # cold: without this, repeat 2 would be served by repeat 1's
-                    # cache and the median would describe a warm run under a
-                    # cold label.
-                    shutil.rmtree(cache_root, ignore_errors=True)
-                    cache_root.mkdir(parents=True, exist_ok=True)
-                run = execute(step, timed=True)
-                runs.setdefault(step.name, []).append(run)
-                if run.timed_out:
-                    result["status"] = "failed"
-                    result["validation_problems"].append(
-                        f"step {step.name} timed out after {timeout}s"
-                    )
-                    return result
-                if run.exit_code not in step.ok_exit_codes:
-                    result["status"] = "failed"
-                    result["validation_problems"].append(
-                        f"step {step.name} exited {run.exit_code} (allowed "
-                        f"{list(step.ok_exit_codes)}): {run.stderr.strip()[-600:]}"
-                    )
-                    return result
-                if keep_spy:
-                    problems = _check_extraction(
-                        run, step.extraction, one_side=one_side
-                    )
-                    if problems:
-                        result["status"] = "failed"
-                        result["validation_problems"] += [
-                            f"step {step.name}: {p}" for p in problems
-                        ]
-                        return result
-                if step.output is not None and step.output.exists():
-                    size = step.output.stat().st_size
-                    if size > MAX_OUTPUT_BYTES:
-                        result["status"] = "failed"
-                        result["validation_problems"].append(
-                            f"step {step.name} wrote {size} bytes, over the cap"
-                        )
-                        return result
-
+        abort = _run_measured_steps(
+            measured,
+            execute=execute,
+            repeat=repeat,
+            runs=runs,
+            scenario=scenario,
+            fixture=fixture,
+            cache_root=cache_root,
+            timeout=timeout,
+            one_side=one_side if keep_spy else None,
+            check_extraction=keep_spy,
+        )
+        if abort is not None:
+            result["status"] = "failed"
+            result["validation_problems"] += abort
+            return result
         # Validation, strictly after every timed window.
         result["uncalibrated_contracts"] = (
             uncalibrated_contracts(measured, one_side) if keep_spy else []
@@ -1188,53 +1329,9 @@ def run_scenario(
         if problems:
             result["status"] = "failed"
 
-        for step in measured:
-            batch = runs[step.name]
-            stats = summarize_samples([r.wall_seconds for r in batch])
-            last = batch[-1]
-            result["steps"].append(
-                {
-                    "name": step.name,
-                    # Phase scope, stated per step. "full_cli" is the real
-                    # user-facing number; "startup_only" and
-                    # "startup_and_resolution" are NESTED INCLUSIVE windows that
-                    # must never be added to it or to each other.
-                    "scope": step.scope,
-                    "additive": False,
-                    "gated": step.scope == "full_cli",
-                    "extraction_contract": step.extraction,
-                    "extraction_contract_meaning": EXTRACTION_EXPECTATIONS[
-                        step.extraction
-                    ],
-                    "wall_seconds": stats.median,
-                    "wall_seconds_samples": [r.wall_seconds for r in batch],
-                    "wall_seconds_min": stats.min,
-                    "wall_seconds_max": stats.max,
-                    "wall_seconds_cv": stats.cv,
-                    "user_cpu_seconds": last.user_cpu_seconds,
-                    "system_cpu_seconds": last.system_cpu_seconds,
-                    "cpu_scope": last.cpu_scope,
-                    "exit_code": last.exit_code,
-                    "native_invocations": last.native_invocations,
-                    "output_bytes": (
-                        step.output.stat().st_size
-                        if step.output is not None and step.output.exists()
-                        else None
-                    ),
-                    "rss": (
-                        {
-                            "sampled_peak_tree_bytes": last.rss.sampled_peak_tree_bytes,
-                            "sample_count": last.rss.sample_count,
-                            "interval_seconds": last.rss.interval_seconds,
-                            "max_concurrent_processes": last.rss.max_concurrent_processes,
-                            "ru_maxrss_bytes": last.rss.ru_maxrss_bytes,
-                            "unavailable_reason": last.rss.unavailable_reason,
-                        }
-                        if last.rss is not None
-                        else None
-                    ),
-                }
-            )
+        result["steps"].extend(
+            _step_receipt(step, runs[step.name]) for step in measured
+        )
         if scenario.cache_mode == "cold_then_warm":
             result["observed_cache_service"] = _classify_cache_service(runs)
     return result
@@ -1278,7 +1375,7 @@ def gated_points(scenarios: list[dict[str, Any]]) -> dict[tuple[str, str], float
 
 
 def load_baseline(path: Path) -> dict[tuple[str, str], float]:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return gated_points(data.get("scenarios", []))
 
 

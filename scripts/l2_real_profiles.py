@@ -446,7 +446,12 @@ def toolchain_identity(profile: RealProfile) -> dict[str, str | None]:
             continue
         try:
             proc = subprocess.run(
-                [path, "--version"], capture_output=True, text=True, timeout=60
+                [path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                # A probe's non-zero exit is information, not an error.
+                check=False,
             )
             text = (proc.stdout or proc.stderr).strip()
             identity[tool] = text.splitlines()[0] if text else None
@@ -544,23 +549,23 @@ if __name__ == "__main__":  # pragma: no cover - a reporting convenience
     import json
 
     report = []
-    for profile in PROFILES.values():
+    for entry in PROFILES.values():
         report.append(
             {
-                "id": profile.id,
-                "project": profile.project,
-                "reference": profile.reference,
-                "l2_libraries": [lib.name for lib in profile.l2_libraries],
+                "id": entry.id,
+                "project": entry.project,
+                "reference": entry.reference,
+                "l2_libraries": [lib.name for lib in entry.l2_libraries],
                 "excluded": {
                     lib.name: lib.out_of_scope_reason
-                    for lib in profile.libraries
+                    for lib in entry.libraries
                     if not lib.in_l2_scope
                 },
-                "header_contexts": profile.header_contexts,
-                "scenarios": list(profile.scenarios),
-                "validation": validate_profile(profile),
+                "header_contexts": entry.header_contexts,
+                "scenarios": list(entry.scenarios),
+                "validation": validate_profile(entry),
                 "status": resolve_status(
-                    profile, prepared_root=None, requested=True
+                    entry, prepared_root=None, requested=True
                 ).as_dict(),
             }
         )

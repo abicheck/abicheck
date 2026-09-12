@@ -7642,20 +7642,23 @@ cache is worth its invalidation complexity is a real design question, and
 `scripts/l2_real_profiles.py`'s oneDAL profile (five header-bearing libraries
 across two contexts) is the realistic case to judge it against.
 
-### `compare --format` repeated silently keeps only the last format
+### ~~`compare --format` repeated silently keeps only the last format~~ — CLOSED by the export grammar
 
-`compare --format json --format markdown -o out` exits 0 and writes **markdown
-only** — the option is single-valued and a repeat is last-wins, with no warning
-that the first format was discarded. There is no way to emit a machine-readable
-and a human-readable report from one invocation, so producing both means two
-invocations; over stored snapshots that costs no extra evidence extraction
-(verified: zero header extractions per render), but it does pay interpreter
-startup and report assembly twice.
+Recorded while building the full-CLI harness against `main` at `f6aa2aae`, where
+`compare --format json --format markdown -o out` exited 0 and wrote markdown
+only, with no way to get both artifacts from one invocation. ADR-068's slices
+7m/7n landed before this branch merged and closed it outright: `--format` is gone
+and `-o FORMAT=DESTINATION` is repeatable, with every export rendered from the
+one completed analysis.
 
-Whether the fix is a warning, a rejection, or real multi-format support is a
-product decision. `check_l2_cli_perf.py`'s `compare_two_formats` scenario
-measures the supported two-invocation path and says so explicitly rather than
-implying one invocation did both.
+Kept as a closed entry rather than deleted because the *measurement* survives and
+is worth knowing: `check_l2_cli_perf.py`'s `compare_two_formats` scenario now
+verifies that promise rather than trusting it. A single `compare` exporting both
+`json=` and `markdown=` over a stored-old/live-new pair performs **2 header
+extractions — exactly one side's worth**, so the second renderer demonstrably
+does not re-run the analysis. (Stored/stored would have been the easier operand
+pair and a useless test: the count is zero either way, so it could not
+distinguish one analysis from two.)
 
 ### A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
 

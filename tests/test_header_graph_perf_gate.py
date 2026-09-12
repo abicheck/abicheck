@@ -909,8 +909,18 @@ class TestLiveMeasurement:
         result = results[0]
         assert result["size"] == 5
         assert result["backend"] == "clang"
-        assert result["baseline_ms"] > 0
-        assert result["attach_ms"] > 0
+        # Every gated metric, not just one: this test is the only live proof that
+        # a real measurement populates each of them, and it kept asserting the
+        # pre-rename `baseline_ms` after the three-metric split because it only
+        # runs in the integration lane (Codex-style miss: a `-m "not
+        # integration"` sweep cannot see it).
+        for metric in hg_gate.METRICS:
+            assert result[metric] > 0, metric
+            assert result[f"{metric}_samples"], metric
+        # total_ms is the whole window, so it cannot be smaller than either
+        # phase it contains -- a real invariant the arithmetic must satisfy.
+        assert result["total_ms"] >= result["dump_ms"]
+        assert result["total_ms"] >= result["attach_ms"]
 
     def test_resolve_includes_infers_the_headers_own_directory(self, tmp_path):
         header = tmp_path / "api.h"

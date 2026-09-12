@@ -381,8 +381,9 @@ lane makes roughly 30 CLI invocations (8 gated steps plus setup and resolution
 steps, times 3 repeats) at ~0.6 s of startup each, so well over a third of the
 lane is spent before any evidence work happens.
 
-Per-scenario gated `full_cli` medians on that fixture (`--repeat 3`), with the
-coefficient of variation that sets the gate's noise floor:
+Per-scenario gated `full_cli` medians on that fixture, with the coefficient of
+variation that sets the gate's noise floor (`--repeat 3`, except the two-format
+row, re-measured at `--repeat 1` after the export grammar landed):
 
 | Scenario | Step | Median | cv |
 |---|---|---:|---:|
@@ -391,8 +392,7 @@ coefficient of variation that sets the gate's noise floor:
 | `compare_stored_live` | compare | 1.389 s | 5.3% |
 | `compare_stored_stored` | compare | 1.272 s | 15.9% |
 | `compare_no_baseline` | audit | 1.125 s | 11.6% |
-| `compare_two_formats` | render_json | 1.209 s | 9.7% |
-| `compare_two_formats` | render_markdown | 1.239 s | 7.0% |
+| `compare_two_formats` | compare_exporting_two_formats | 1.140 s | — |
 | `compare_live_live` (unchanged) | compare | 1.327 s | 6.1% |
 
 Those cv figures (up to ~16%) are why the lane's absolute floor is 0.5 s rather
@@ -401,6 +401,13 @@ than 0: a purely relative 30% tolerance on a ~1.2 s measurement would be only
 
 On the extended axes (`--repeat 1`): templates ~1.36 s, 8 headers ~2.48 s,
 32 headers ~10.4 s, and five libraries ~1.1–1.4 s *each*.
+
+**One comparison, two artifacts.** `-o FORMAT=DESTINATION` is repeatable and
+every export renders the one completed analysis (ADR-068 slices 7m/7n), so a
+JSON report and a human report come from a single `compare`. The harness
+verifies that rather than assuming it: over a stored-old/live-new pair the
+two-export invocation performs exactly one side's worth of header extraction, so
+the second renderer provably does not re-run the analysis.
 
 **Instrumentation overhead, and a worked example of why ordering matters.**
 Measured by running the identical lane with and without `--no-spy`.

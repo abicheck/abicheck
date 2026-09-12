@@ -666,19 +666,19 @@ jobs:
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base_tree[dev]"
-          if [ -f base_tree/scripts/check_l2_cli_perf.py ]; then
-            # HEAD's harness against BASE's installed package: one harness, two
-            # products, which is the only way the two numbers are comparable at
-            # all. Base's own copy of the script may not exist (this lane's
-            # introducing PR) or may measure different scenarios.
-            ./base_env/bin/python scripts/check_l2_cli_perf.py \
-              --suite pr --repeat 3 --require-toolchain \
-              --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 || true
-          else
-            ./base_env/bin/python scripts/check_l2_cli_perf.py \
-              --suite pr --repeat 3 --require-toolchain \
-              --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 || true
-          fi
+          # HEAD's harness (this checkout's script) against BASE's installed
+          # package: one harness, two products, which is the only way the two
+          # numbers are comparable at all. Deliberately unconditional -- base's
+          # own copy of the script may not exist (this lane's introducing PR) or
+          # may measure different scenarios, and in either case running it would
+          # compare two different measurements rather than two products.
+          #
+          # `|| true` because a base measurement that cannot be taken is a
+          # report-only run, not a PR failure; the `-s` test below is what
+          # decides whether a gate is possible.
+          ./base_env/bin/python scripts/check_l2_cli_perf.py \
+            --suite pr --repeat 3 --require-toolchain \
+            --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 || true
           if [ -s reports/perf/l2_cli_base.json ]; then
             # Interleaved re-measurement of head AFTER base, so the gated
             # comparison is not a completed base sweep against a later head

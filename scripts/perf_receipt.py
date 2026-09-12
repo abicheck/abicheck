@@ -115,6 +115,15 @@ SPIED_TOOLS = ("castxml", "clang", "clang++", "g++", "gcc", "cc", "c++", "llvm-c
 INVOCATION_KINDS = ("header_extraction", "include_pass", "probe", "other")
 
 
+#: The tools that can actually perform a header parse. ``tool`` is consulted
+#: rather than trusted to argv alone so a *coincidental* argv match on some other
+#: binary can never inflate the extraction count -- the one number the
+#: stored-snapshot scenarios assert is zero. A no-op for every invocation
+#: observed today (only castxml and clang++ parse), which is the point: it is a
+#: guard, not a behaviour change.
+_AST_CAPABLE_TOOLS = frozenset({"castxml", "clang", "clang++"})
+
+
 def classify_invocation(tool: str, argv_text: str) -> str:
     """Which :data:`INVOCATION_KINDS` bucket an observed invocation falls in.
 
@@ -132,9 +141,9 @@ def classify_invocation(tool: str, argv_text: str) -> str:
     # library's own is a toolchain interrogation, not work on the library.
     if "-dM" in args or ("-E" in args and "-v" in args):
         return "probe"
-    if any(a.startswith("--castxml-output") for a in args):
-        return "header_extraction"
-    if any(a.startswith("-ast-dump") for a in args):
+    if tool in _AST_CAPABLE_TOOLS and any(
+        a.startswith(("--castxml-output", "-ast-dump")) for a in args
+    ):
         return "header_extraction"
     if any(a in ("-M", "-MM", "-MD", "-MMD") for a in args):
         return "include_pass"
@@ -144,7 +153,7 @@ def classify_invocation(tool: str, argv_text: str) -> str:
 # ── host / run identity ───────────────────────────────────────────────────────
 def _read_first_line(path: str) -> str | None:
     try:
-        return Path(path).read_text().strip().splitlines()[0]
+        return Path(path).read_text(encoding="utf-8").strip().splitlines()[0]
     except (OSError, IndexError):
         return None
 
@@ -207,7 +216,7 @@ def memory_limit() -> dict[str, Any]:
     else:
         out["unavailable_reason"] = "no readable cgroup v2 memory.max"
     try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("MemTotal:"):
                 out["system_total_bytes"] = int(line.split()[1]) * 1024
                 break
@@ -245,7 +254,13 @@ def tool_version(tool: str) -> str | None:
     for flag in ("--version", "-dumpversion"):
         try:
             proc = subprocess.run(
-                [path, flag], capture_output=True, text=True, timeout=30
+                [path, flag],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                # A probe's non-zero exit is information, not an error: a tool
+                # that rejects --version is simply reported as version-unknown.
+                check=False,
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -287,7 +302,7 @@ def digest_paths(paths: list[Path]) -> str:
     what was in them.
     """
     h = hashlib.sha256()
-    for p in sorted(paths, key=lambda q: str(q)):
+    for p in sorted(paths, key=str):
         h.update(p.name.encode())
         h.update(b"\0")
         try:
@@ -332,7 +347,7 @@ class NativeInvocationSpy:
 
     def install(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.log.write_text("")
+        self.log.write_text("", encoding="utf-8")
         for tool in SPIED_TOOLS:
             real = shutil.which(tool)
             if real is None:
@@ -341,16 +356,16 @@ class NativeInvocationSpy:
             shim.write_text(
                 "#!/bin/sh\n"
                 # Append, never truncate: several tools run concurrently, and a
-                # single-line append under O_APPEND is atomic enough for a
-                # count. Writing the real resolved path too makes a surprising
-                # count traceable to which binary served it.
+                # single-line append under O_APPEND is atomic enough for a count.
+                #
                 # The full argv is logged, not just the tool name: the
                 # classification above needs it, and without it a cold-vs-warm
                 # count delta cannot be attributed to a cached parse rather
                 # than a skipped version probe. Tab-separated so a path
                 # containing spaces cannot be mistaken for a field boundary.
                 f'printf "%s\\t%s\\n" "{tool}" "$*" >> "${self.LOG_ENV}"\n'
-                f'exec "{real}" "$@"\n'
+                f'exec "{real}" "$@"\n',
+                encoding="utf-8",
             )
             shim.chmod(0o755)
             self.shimmed.append(tool)
@@ -362,7 +377,7 @@ class NativeInvocationSpy:
         return env
 
     def reset(self) -> None:
-        self.log.write_text("")
+        self.log.write_text("", encoding="utf-8")
 
     def counts(self) -> dict[str, int]:
         """Invocations per tool name. Absent tools are omitted, not zeroed...
@@ -381,7 +396,7 @@ class NativeInvocationSpy:
 
     def _records(self) -> list[tuple[str, str]]:
         try:
-            lines = self.log.read_text().splitlines()
+            lines = self.log.read_text(encoding="utf-8").splitlines()
         except OSError:
             return []
         out = []
@@ -449,7 +464,7 @@ class RssSample:
 
 def _proc_rss_bytes(pid: int) -> int | None:
     try:
-        fields = Path(f"/proc/{pid}/statm").read_text().split()
+        fields = Path(f"/proc/{pid}/statm").read_text(encoding="utf-8").split()
         return int(fields[1]) * os.sysconf("SC_PAGE_SIZE")
     except (OSError, IndexError, ValueError):
         return None
@@ -471,7 +486,7 @@ def _descendants(root: int) -> list[int]:
         if not name.isdigit():
             continue
         try:
-            stat = Path(f"/proc/{name}/stat").read_text()
+            stat = Path(f"/proc/{name}/stat").read_text(encoding="utf-8")
             # The comm field may itself contain spaces and parentheses, so
             # split after the LAST ')' rather than on whitespace.
             ppid = int(stat[stat.rindex(")") + 1 :].split()[1])
@@ -697,7 +712,10 @@ def write_receipt(path: Path, receipt: dict[str, Any]) -> None:
     # allow_nan=False: a NaN/Infinity in a receipt is both non-standard JSON
     # and, for anything a gate later reads, a silent always-pass. Failing here
     # surfaces it at the point it was produced.
-    path.write_text(json.dumps(receipt, indent=2, allow_nan=False, default=str) + "\n")
+    path.write_text(
+        json.dumps(receipt, indent=2, allow_nan=False, default=str) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - a convenience probe

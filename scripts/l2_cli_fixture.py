@@ -289,23 +289,24 @@ def _write_library(
     include = root / f"lib{lib}" / "include"
     (include / "detail").mkdir(parents=True, exist_ok=True)
     (include / "detail" / "core.h").write_text(
-        _detail_header(lib, spec.distinct_contexts)
+        _detail_header(lib, spec.distinct_contexts), encoding="utf-8"
     )
     indices = list(range(spec.headers))
     headers: list[Path] = []
     render = _simple_header if spec.shape == "simple" else _template_header
     for index in indices:
         path = include / f"part{index}.h"
-        path.write_text(render(lib, index, broken=broken))
+        path.write_text(render(lib, index, broken=broken), encoding="utf-8")
         headers.append(path)
     # One aggregate header for the .cpp to include, so the translation unit
     # sees every part without the harness having to generate N sources.
     (include / "all.h").write_text(
-        "#pragma once\n" + "".join(f'#include "part{i}.h"\n' for i in indices)
+        "#pragma once\n" + "".join(f'#include "part{i}.h"\n' for i in indices),
+        encoding="utf-8",
     )
     src = root / f"lib{lib}" / "impl.cpp"
     src.parent.mkdir(parents=True, exist_ok=True)
-    src.write_text(_source(spec, lib, indices, broken=broken))
+    src.write_text(_source(spec, lib, indices, broken=broken), encoding="utf-8")
     so = root / f"lib{lib}" / f"libl2fx{lib}.so"
     subprocess.run(
         [
