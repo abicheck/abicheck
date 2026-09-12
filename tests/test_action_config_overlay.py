@@ -194,11 +194,12 @@ class TestRebaseRelativeConfigPaths:
         ]
 
     def test_absolute_include_dir_is_left_unchanged(self, tmp_path: Path) -> None:
+        # Anchored to the platform's own root, since "/abs/dir" is absolute on POSIX but drive-relative on Windows -- where the rebase correctly rewrote it, failing this test while its name claimed to be about absolute paths.
+        absolute = str(Path(tmp_path.anchor or "/") / "abs" / "dir")
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("compile:\n  include_dirs: [/abs/dir]\n", encoding="utf-8")
-        base = {"compile": {"include_dirs": ["/abs/dir"]}}
+        base = {"compile": {"include_dirs": [absolute]}}
         out = rebase_relative_config_paths(base, found_path=cfg)
-        assert out["compile"]["include_dirs"] == ["/abs/dir"]
+        assert out["compile"]["include_dirs"] == [absolute]
 
     def test_scalar_include_dirs_value_also_rebases(self, tmp_path: Path) -> None:
         """include_dirs need not be a list -- a bare string entry must be

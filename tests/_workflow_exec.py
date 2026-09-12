@@ -34,6 +34,7 @@ and stays structural.
 
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import subprocess
@@ -43,6 +44,10 @@ from typing import Any
 
 import pytest
 import yaml
+
+#: Distinguishes the per-invocation step-body script files `run_step` writes,
+#: so two calls sharing one tmp_path never race on the same name.
+_BODY_COUNTER = itertools.count()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -96,6 +101,20 @@ HOSTILE_SCALAR_CORPUS = [
 #: bare ASCII here would be the test being wrong, not the sanitizer. Shared
 #: for the same reason as ``HOSTILE_SCALAR_CORPUS`` above.
 FORBIDDEN_ARTIFACT_NAME_CHARS = set('":<>|*?\r\n/\\')
+
+
+#: Skips a test whose fixture needs a path containing a literal newline byte.
+#: POSIX filesystems allow one -- which is exactly why the workflow-command
+#: injection defenses (`_gha_escape`, `action/run.sh`'s own helper) exist and
+#: are exercised with such a path. Windows rejects the character in a filename
+#: at the OS level (`OSError: [WinError 123]`), so the attack shape cannot be
+#: constructed there at all: the test has nothing to say about the defense on
+#: that platform, rather than the defense being unverified. Shared here so the
+#: three sites needing it state one reason, not three.
+requires_newline_in_filenames = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows filenames cannot contain a literal newline (WinError 123)",
+)
 
 
 def load_workflow(name: str) -> dict[str, Any]:
@@ -249,19 +268,52 @@ def run_step(
     step_env.update({k: str(v) for k, v in (step.get("env") or {}).items()})
     step_env.update(env or {})
 
-    proc = subprocess.run(
-        # `-e` as well as pipefail: the runner invokes a `run:` body as
-        # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without it a
-        # command failing mid-body left returncode 0 here while the real step
-        # failed — every `assert result.returncode == 0` in the workflow tests
-        # was weaker than the thing it models (CodeRabbit review).
-        [bash_executable(), "-eo", "pipefail", "-c", step["run"]],
-        cwd=workspace,
-        env=step_env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    # The body goes to a real script file rather than `bash -c <body>`, which
+    # is both what the runner itself does (`bash -e {0}`, a generated script)
+    # and the only form that has no length ceiling: Windows caps a process
+    # command line at 32767 characters, so a long `run:` body (the
+    # `assurance_overlay` step in `actions/check-target/action.yml` is ~50 KB)
+    # raised `FileNotFoundError: [WinError 206] The filename or extension is
+    # too long` before bash ever started — every executing test in the module
+    # failing for a reason unrelated to the step it models. The file lives
+    # beside the workspace, not inside it, so `StepResult.tree()` and the
+    # `$RUNNER_TEMP` assertions keep seeing only what the step itself created.
+    #
+    # Written as explicit bytes, never `write_text`: on Windows the default
+    # `newline=None` translates every "\n" to "\r\n", and Git Bash keeps that
+    # carriage return inside shell tokens -- a heredoc delimiter line becomes
+    # `EOF\r`, so the heredoc never terminates, and `set -euo pipefail`-style
+    # bodies break on the trailing CR (Codex review, PR #1230). The body must
+    # reach bash byte-for-byte as the YAML holds it.
+    body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
+    body.write_bytes(step["run"].encode("utf-8"))
+    # Git Bash wants forward slashes, but a backslash is a legal *filename*
+    # character on POSIX, so rewriting one unconditionally would corrupt a real
+    # path (a workspace under `with\backslash/` would be run from
+    # `with/backslash/`, i.e. "No such file or directory" -- Codex review,
+    # PR #1230). Convert only where the separator actually differs.
+    script_arg = body.as_posix() if os.name == "nt" else str(body)
+    try:
+        proc = subprocess.run(
+            # `-e` as well as pipefail: the runner invokes a `run:` body as
+            # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without
+            # it a command failing mid-body left returncode 0 here while the
+            # real step failed — every `assert result.returncode == 0` in the
+            # workflow tests was weaker than the thing it models (CodeRabbit
+            # review).
+            [bash_executable(), "-eo", "pipefail", script_arg],
+            cwd=workspace,
+            env=step_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    finally:
+        # Unconditional, so a timeout or a spawn failure does not leave the
+        # script behind either: a caller passing a workspace whose parent is
+        # not itself a pytest-managed temporary directory would otherwise
+        # accumulate one file per step (CodeRabbit review, PR #1230).
+        body.unlink(missing_ok=True)
     # `$GITHUB_OUTPUT` is written by the step, not by us, so its bytes are
     # whatever the runner's shell produced. On Windows a non-ASCII input
     # reaches Git Bash through the ANSI code page and comes back as cp1252,

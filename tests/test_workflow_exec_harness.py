@@ -1,0 +1,250 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Contract tests for ``tests/_workflow_exec.py``'s own ``run_step``.
+
+Bug class this closes, stated as an invariant rather than one reproducer:
+**a step's ``run:`` body length must not affect whether the harness can
+execute it.** ``run_step`` used to spawn ``bash -c <body>``, which put the
+whole body on the child's command line -- fine on POSIX, but Windows caps a
+command line at 32767 characters, so the moment
+``actions/check-target/action.yml``'s ``assurance_overlay`` step's body grew
+past that (it is ~50 KB today) every executing test in
+``tests/test_reusable_workflows_require_complete_analysis.py`` and its
+siblings failed on the windows-latest lane with ``FileNotFoundError:
+[WinError 206] The filename or extension is too long`` -- a harness spawn
+error, not a judgement about the step. The fix writes the body to a real
+script file, which is also what the runner itself does (``bash -e {0}``).
+
+The generalized test below therefore sweeps body sizes across and far past
+that ceiling, and separately pins the *largest real body in the repository*
+(so a future step that grows past a new platform limit is caught here, at
+the harness, instead of as an unexplained red lane), rather than asserting
+only that one 50 KB step now runs.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+import yaml
+from _workflow_exec import REPO_ROOT, have_bash, make_workspace, run_step
+
+pytestmark = pytest.mark.skipif(not have_bash(), reason="bash not available")
+
+#: Windows' own ``CreateProcess`` command-line ceiling -- the boundary the
+#: sweep below is built around.
+_WINDOWS_COMMAND_LINE_LIMIT = 32767
+
+
+def _padded_body(total_length: int) -> str:
+    """A real, side-effect-visible step body padded to *total_length* chars.
+
+    The padding is trailing comment lines, so the body's *behavior* is
+    identical at every size and the only variable under test is its length.
+    """
+    head = 'printf "%s\\n" "size=$PADDED_SIZE" >> "$GITHUB_OUTPUT"\n'
+    if total_length <= len(head):
+        return head
+    filler = "# padding\n"
+    remaining = total_length - len(head)
+    whole, partial = divmod(remaining, len(filler))
+    body = head + filler * whole
+    if partial:
+        # A truncated final comment line, so the body is *exactly* the
+        # requested length rather than rounded up past it -- otherwise the
+        # `limit - 1` case in the sweep below silently ran at or above the
+        # limit and proved nothing about the boundary (CodeRabbit review,
+        # PR #1230). `partial >= 1`, and a comment line of any length is
+        # still a valid, no-op shell line, so this never changes behavior.
+        body += "#" * (partial - 1) + "\n"
+    return body
+
+
+def _real_run_bodies() -> list[str]:
+    """Every ``run:`` body in the repo's workflows and composite actions."""
+    bodies: list[str] = []
+    documents = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    documents += sorted((REPO_ROOT / "actions").glob("*/action.yml"))
+    for path in documents:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            continue
+        step_lists = []
+        for job in (data.get("jobs") or {}).values():
+            if isinstance(job, dict):
+                step_lists.append(job.get("steps") or [])
+        runs = data.get("runs")
+        if isinstance(runs, dict):
+            step_lists.append(runs.get("steps") or [])
+        for steps in step_lists:
+            for step in steps:
+                if isinstance(step, dict) and isinstance(step.get("run"), str):
+                    bodies.append(step["run"])
+    return bodies
+
+
+@pytest.mark.parametrize(
+    "size",
+    [
+        64,
+        4_096,
+        _WINDOWS_COMMAND_LINE_LIMIT - 1,
+        _WINDOWS_COMMAND_LINE_LIMIT,
+        _WINDOWS_COMMAND_LINE_LIMIT + 1,
+        64_000,
+        250_000,
+    ],
+)
+def test_run_step_executes_a_body_of_any_length(tmp_path: Path, size: int) -> None:
+    workspace = make_workspace(tmp_path)
+    body = _padded_body(size)
+    # The sweep is only about the boundary if the body really is that long.
+    assert len(body) == size
+    result = run_step(
+        {"run": body},
+        workspace=workspace,
+        env={"PADDED_SIZE": str(size)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.outputs["size"] == str(size)
+
+
+def test_largest_real_step_body_is_executable_by_the_harness(tmp_path: Path) -> None:
+    """The repository's own longest ``run:`` body, at its real length.
+
+    Padded to that length rather than executed verbatim (a real body needs
+    its own inputs, which is its own module's job): what this pins is that
+    the harness can *spawn* a body that big, which is exactly what broke.
+    """
+    bodies = _real_run_bodies()
+    assert bodies, "no run: steps discovered — the sweep above would be vacuous"
+    longest = max(len(body) for body in bodies)
+    workspace = make_workspace(tmp_path)
+    padded = _padded_body(longest)
+    assert len(padded) == longest
+    result = run_step(
+        {"run": padded},
+        workspace=workspace,
+        env={"PADDED_SIZE": str(longest)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.outputs["size"] == str(longest)
+
+
+def test_step_body_script_is_not_left_inside_the_workspace(tmp_path: Path) -> None:
+    """The script file must not show up in what the step itself produced.
+
+    ``StepResult.tree()`` and several ``$RUNNER_TEMP`` assertions in the
+    workflow tests enumerate the workspace, so the harness's own scratch
+    file living there would silently change what those tests see.
+    """
+    workspace = make_workspace(tmp_path)
+    result = run_step(
+        {"run": _padded_body(40_000)},
+        workspace=workspace,
+        env={"PADDED_SIZE": "40000"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert not [name for name in result.tree() if "_step_body" in name]
+    # Nor left behind beside it: the script is deleted in a `finally`, so a
+    # caller whose workspace parent is not a pytest-managed temporary
+    # directory never accumulates one file per step (CodeRabbit review).
+    assert not list(workspace.parent.glob("_step_body_*.sh"))
+
+
+def test_step_body_script_is_cleaned_up_even_when_the_body_fails(
+    tmp_path: Path,
+) -> None:
+    """The cleanup is in a `finally`, so a non-zero exit is covered too."""
+    workspace = make_workspace(tmp_path)
+    result = run_step({"run": "exit 3\n"}, workspace=workspace)
+    assert result.returncode == 3
+    assert not list(workspace.parent.glob("_step_body_*.sh"))
+
+
+def test_body_reaches_bash_byte_for_byte(tmp_path: Path) -> None:
+    """No newline translation between the YAML body and bash.
+
+    Codex review (PR #1230): writing the script with `Path.write_text` used
+    Python's default `newline=None`, which rewrites every ``\\n`` to
+    ``\\r\\n`` on Windows. Git Bash keeps that carriage return inside shell
+    tokens, so a heredoc delimiter line becomes ``EOF\\r`` and never
+    terminates the heredoc -- a real body like the ``assurance_overlay``
+    step's would fail differently rather than run. The oracle here is the
+    shell's own heredoc/quoting behavior, not the harness's notion of a
+    newline: this body cannot succeed under CRLF.
+    """
+    workspace = make_workspace(tmp_path)
+    run = (
+        "cat <<'MARKER_EOF' >> \"$GITHUB_OUTPUT\"\n"
+        "marker=intact\n"
+        "MARKER_EOF\n"
+        'value="no-trailing-cr"\n'
+        'printf "%s\\n" "value=$value" >> "$GITHUB_OUTPUT"\n'
+    )
+    result = run_step({"run": run}, workspace=workspace)
+    assert result.returncode == 0, result.stderr
+    assert result.outputs["marker"] == "intact"
+    # A surviving CR would ride along at the end of the value rather than
+    # failing the shell, so assert the exact string, not a prefix.
+    assert result.outputs["value"] == "no-trailing-cr"
+    assert "\r" not in "".join(result.output_lines)
+
+
+#: Directory-name shapes that are legal on the running platform and awkward for
+#: a path that reaches a shell. The first three hold everywhere; the last two are
+#: POSIX-only (Windows forbids both characters in a filename), and the backslash
+#: is the one that matters most: the harness has to translate separators for Git
+#: Bash without corrupting a POSIX name that legitimately contains one.
+_AWKWARD_PARENT_NAMES = [
+    pytest.param("plain", id="plain"),
+    pytest.param("with space", id="space"),
+    pytest.param("wïth-ünicode", id="non-ascii"),
+    *(
+        []
+        if os.name == "nt"
+        else [
+            pytest.param("with\\backslash", id="backslash"),
+            pytest.param("with'quote", id="single-quote"),
+        ]
+    ),
+]
+
+
+@pytest.mark.parametrize("parent_name", _AWKWARD_PARENT_NAMES)
+def test_run_step_executes_under_an_awkward_parent_directory(
+    tmp_path: Path, parent_name: str
+) -> None:
+    """The step-body script path must survive the platform's own legal names.
+
+    Codex review (PR #1230): the path handed to bash was rewritten with an
+    unconditional ``str(body).replace("\\\\", "/")``. On POSIX a backslash is an
+    ordinary filename character, so a workspace under ``with\\backslash/`` was
+    executed from ``with/backslash/`` — every `run_step` call under such a path
+    failing with "No such file or directory". Stated here as the general
+    invariant (a path legal on this platform works) over several independently
+    awkward shapes, rather than a single repro of the backslash case.
+    """
+    base = tmp_path / parent_name
+    base.mkdir()
+    workspace = make_workspace(base)
+    result = run_step(
+        {"run": _padded_body(256)}, workspace=workspace, env={"PADDED_SIZE": "256"}
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.outputs["size"] == "256"
