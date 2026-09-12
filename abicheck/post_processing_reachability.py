@@ -265,7 +265,12 @@ class MarkReachability:
             return names
 
         namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
-        old_paths = compute_leak_paths(ctx.old, namespaces)
+        # An absent baseline (``compare --no-baseline``) contributes an empty
+        # snapshot here: it declares nothing, exports nothing and carries no
+        # call graph, so every union below reduces to the candidate's own and
+        # "did this decl exist before?" correctly answers no.
+        old_snap = ctx.baseline_or_empty
+        old_paths = compute_leak_paths(old_snap, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
         # ADR-044 P1 item 1: a second, independent reachability signal — the
@@ -279,7 +284,7 @@ class MarkReachability:
         # section named. Returns {} on both sides with no embedded graph, so
         # this degrades to the prior behavior automatically for the common
         # case.
-        old_call_paths = compute_call_graph_leak_paths(ctx.old, namespaces)
+        old_call_paths = compute_call_graph_leak_paths(old_snap, namespaces)
         new_call_paths = compute_call_graph_leak_paths(ctx.new, namespaces)
         call_reachable = set(old_call_paths) | set(new_call_paths)
         # ScopeOrigin.PUBLIC_HEADER (Codex review, fresh evidence):
@@ -294,7 +299,7 @@ class MarkReachability:
         # diff_templates.py — apply it here too, across every declaration
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
-        public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
+        public_header_names = _public_header_names(old_snap) | _public_header_names(ctx.new)
         # Codex review, fourth pass: this used to return early here when
         # nothing at all was found reachable (no point tagging
         # public_reachable/reachability_kind — they'd all stay at their
@@ -348,7 +353,7 @@ class MarkReachability:
                 for n in graph.nodes
             )
 
-        old_call_graph_trusted = _call_graph_fully_trusted(ctx.old)
+        old_call_graph_trusted = _call_graph_fully_trusted(old_snap)
         new_call_graph_trusted = _call_graph_fully_trusted(ctx.new)
 
         # Codex review, eighth pass: a ``kind.value.endswith("_removed"/"_added")``
@@ -360,8 +365,8 @@ class MarkReachability:
         # PROVEN_UNREACHABLE. Check the decl's *actual* presence on each
         # snapshot instead of pattern-matching the kind name, which is immune
         # to new one-sided or attribute-toggle kinds being added later.
-        old_decl_names = {f.mangled for f in ctx.old.functions} | {f.name for f in ctx.old.functions}
-        old_decl_names |= {v.mangled for v in ctx.old.variables} | {v.name for v in ctx.old.variables}
+        old_decl_names = {f.mangled for f in old_snap.functions} | {f.name for f in old_snap.functions}
+        old_decl_names |= {v.mangled for v in old_snap.variables} | {v.name for v in old_snap.variables}
         new_decl_names = {f.mangled for f in ctx.new.functions} | {f.name for f in ctx.new.functions}
         new_decl_names |= {v.mangled for v in ctx.new.variables} | {v.name for v in ctx.new.variables}
 
@@ -390,16 +395,16 @@ class MarkReachability:
         # alongside types/enums for TYPEDEF_REMOVED/TYPEDEF_BASE_CHANGED's
         # root (the alias name) to be recognized as layout-walk domain.
         known_type_names = (
-            {t.name for t in ctx.old.types} | {e.name for e in ctx.old.enums}
+            {t.name for t in old_snap.types} | {e.name for e in old_snap.enums}
             | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
-            | set(ctx.old.typedefs) | set(ctx.new.typedefs)
+            | set(old_snap.typedefs) | set(ctx.new.typedefs)
         )
         # RecordType.qualified_name (DWARF-backend only) resolves a bare name
         # like "Hidden" ("ns::detail::Hidden") for is_internal_type below --
         # only when unambiguous, else a colliding public/internal type of
         # the same bare name could leak the wrong namespace (Codex review).
         qualified_names_by_bare: dict[str, set[str]] = {}
-        for t in (*ctx.old.types, *ctx.new.types):
+        for t in (*old_snap.types, *ctx.new.types):
             if t.qualified_name:
                 qualified_names_by_bare.setdefault(t.name, set()).add(t.qualified_name)
         qualified_name_by_bare = {

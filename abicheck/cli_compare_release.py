@@ -96,7 +96,7 @@ from .cli_options import (
 )
 from .errors import SnapshotError
 from .frontends.cli.options import (
-    reject_incoherent_secondary_output,
+    reject_incoherent_secondary_writes,
     secondary_output_options,
 )
 from .model import AbiSnapshot
@@ -139,7 +139,7 @@ if TYPE_CHECKING:
     ["json", "markdown", "junit"],
     output_help="Output file for summary report (default: stdout).",
 )
-@secondary_output_options(["json", "markdown", "junit"])
+@secondary_output_options(["json", "markdown", "junit"], multiple=True)
 @click.option(
     "--output-dir",
     "output_dir",
@@ -321,8 +321,7 @@ def compare_release_cmd(
     lang: str,
     fmt: str,
     output: Path | None,
-    secondary_fmt: str | None,
-    secondary_output: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...],
     output_dir: Path | None,
     suppress: Path | None,
     strict_suppressions: bool,
@@ -431,6 +430,11 @@ def compare_release_cmd(
     # command has no `--view` option of its own; only `compare`'s
     # directory/package dispatch supplies a non-default value).
     show_impact: bool = False,
+    # `.abicheck.yml`'s `assurance.require_complete`, forwarded by
+    # `compare`'s directory/package fan-out (config-only, no Click option of
+    # its own -- same internal-parameter shape as `env_matrix`/
+    # `pack_application` above). `False` (the default) is a true no-op.
+    require_complete_analysis: bool = False,
     # CodeRabbit review, PR #1138: a project's `.abicheck.yml`
     # `scope.public_header_dirs` (`workflows.public_header_boundary.
     # project_config_public_header_dirs`), resolved once by the caller
@@ -553,13 +557,18 @@ def compare_release_cmd(
             raise click.UsageError(str(exc)) from exc
 
     # CLI cleanup phase two, PR E: shared with `compare` so it can't drift.
-    reject_incoherent_secondary_output(
+    # CLI cleanup phase two, PR E, generalized: `--write` is repeatable
+    # here now, exactly as it already is on `compare` -- one analysis, several
+    # artifacts (ADR-068 D4). Shared coherence check, so the two cannot drift.
+    reject_incoherent_secondary_writes(
         dry_run=False,
         output=output,
-        secondary_fmt=secondary_fmt,
-        secondary_output=secondary_output,
+        secondary_writes=secondary_writes,
     )
-    reject_bundle_facts_out_collision(bundle_facts_out, output, secondary_output)
+    reject_bundle_facts_out_collision(
+        bundle_facts_out, output, *(path for _, path in secondary_writes)
+    )
+    secondary_formats = {f for f, _ in secondary_writes}
 
     # Track temporary directory paths for cleanup
     _temp_dir_paths: list[str] = []
@@ -729,7 +738,7 @@ def compare_release_cmd(
                 # Phase 9: only JUnit/--bundle-facts-out need AbiSnapshot.
                 need_full_snapshots=(
                     fmt == "junit"
-                    or secondary_fmt == "junit"
+                    or "junit" in secondary_formats
                     or bundle_facts_out is not None
                 ),
                 # ADR-068 D5 / plan Phase 7h: -j/--jobs removed outright --
@@ -1095,7 +1104,7 @@ def compare_release_cmd(
                 removed_keys,
                 worst_verdict,
                 severity_config,
-                needs_annotations=(fmt == "json" or secondary_fmt == "json"),
+                needs_annotations=(fmt == "json" or "json" in secondary_formats),
                 show_only=show_only,
                 show_impact=show_impact,
                 max_findings=max_findings_per_library,
@@ -1143,15 +1152,13 @@ def compare_release_cmd(
 
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
-            if secondary_output is not None:
-                # CLI cleanup phase two, PR E: --write, now supported for a
-                # directory/package (release) compare. Renders the second
-                # format from the exact same already-computed
-                # library_results/diff_pairs/bundle_result/matrix_result --
-                # no second per-library comparison pass, mirroring how
-                # single-pair `compare`'s own --write reuses its one already-
-                # computed DiffResult (see run_compare's own secondary
-                # _write_or_echo call).
+            for secondary_fmt, secondary_output in secondary_writes:
+                # CLI cleanup phase two, PR E, generalized: `--write` is
+                # repeatable for a directory/package (release) compare, the
+                # same as on `compare`. Every artifact is rendered from the
+                # exact same already-computed library_results/diff_pairs/
+                # bundle_result/matrix_result -- one analysis, several
+                # artifacts, no second per-library comparison pass.
                 #
                 # `show_only` is deliberately NOT forwarded here (Codex
                 # review, PR #1154 second follow-up: "Apply release show
@@ -1160,7 +1167,6 @@ def compare_release_cmd(
                 # single-pair `compare`'s own `--write` already honours; only
                 # the primary `--format` render below (`_finalize_release_
                 # output`) receives the release's `--view show=` selection.
-                assert secondary_fmt is not None  # guaranteed by Click's callback
                 secondary_text = _format_release_summary(
                     secondary_fmt,
                     worst_verdict,
@@ -1221,6 +1227,7 @@ def compare_release_cmd(
                 demangle=_resolve_demangle(fmt, demangle),
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,
+                require_complete_analysis=require_complete_analysis,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)

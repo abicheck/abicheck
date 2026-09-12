@@ -150,6 +150,11 @@ class FilterOpaqueSizeChanges:
     name = "filter_opaque_size_changes"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .diff_filtering import _filter_opaque_size_changes
 
         changes, filtered = _filter_opaque_size_changes(changes, ctx.old, ctx.new)
@@ -167,6 +172,11 @@ class DowngradeOpaqueStructChanges:
     dropped_finding_disposition = None
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .diff_filtering import _downgrade_opaque_struct_changes
 
         kept, filtered = _downgrade_opaque_struct_changes(changes, ctx.old, ctx.new)
@@ -180,6 +190,11 @@ class DeduplicateAstDwarf:
     name = "deduplicate_ast_dwarf"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .diff_filtering import _deduplicate_ast_dwarf
 
         return _deduplicate_ast_dwarf(changes, ctx.old, ctx.new)
@@ -196,7 +211,7 @@ class DeduplicateCrossDetector:
         # Pass the snapshots so the enum bare/qualified-name bridge can run
         # here (before EnrichSourceLocations, which runs later in this
         # pipeline) — see _deduplicate_cross_detector's own docstring.
-        return _deduplicate_cross_detector(changes, ctx.old, ctx.new)
+        return _deduplicate_cross_detector(changes, ctx.baseline_or_empty, ctx.new)
 
 
 class DowngradeOpaqueTypeChanges:
@@ -209,6 +224,11 @@ class DowngradeOpaqueTypeChanges:
     dropped_finding_disposition = Disposition.NON_GATING
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .diff_filtering import _downgrade_opaque_type_changes
 
         return _downgrade_opaque_type_changes(changes, ctx.old, ctx.new)
@@ -319,7 +339,7 @@ class EnrichSourceLocations:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _enrich_source_locations
 
-        _enrich_source_locations(changes, ctx.old, ctx.new)
+        _enrich_source_locations(changes, ctx.baseline_or_empty, ctx.new)
         return changes
 
 
@@ -400,7 +420,7 @@ class FilterNonPublicSurface:
             surface_unions,
         )
 
-        surf_old = compute_public_surface(ctx.old)
+        surf_old = compute_public_surface(ctx.baseline_or_empty)
         surf_new = compute_public_surface(ctx.new)
         # Cache for reuse (surface_scope_confidence) — avoids a second walk.
         ctx.surf_old = surf_old
@@ -452,7 +472,9 @@ class FilterNonPublicSurface:
 
         allow = ctx.public_surface_allowlist or set()
         force_public = ctx.force_public_symbols
-        export_ids = _snapshot_export_ids(ctx.old) | _snapshot_export_ids(ctx.new)
+        export_ids = _snapshot_export_ids(ctx.baseline_or_empty) | _snapshot_export_ids(
+            ctx.new
+        )
         kept: list[Change] = []
         for c in changes:
             sym = c.symbol or ""
@@ -560,9 +582,15 @@ class DemoteOffPythonSurface:
         # genuine break for the old library's C/C++ consumers. Only when the old
         # artifact was itself an extension is its native symbol surface known to
         # be implementation detail rather than a public contract.
-        old_ext = ctx.old.python_ext
-        if old_ext is None or not old_ext.is_extension:
-            return changes
+        # With no baseline (``compare --no-baseline``) there is no OLD
+        # artifact whose consumers could be broken, so the "was the old
+        # artifact itself an extension?" precondition below has nothing to
+        # answer and the candidate's own recovered Python surface is the
+        # only oracle there is.
+        if ctx.old is not None:
+            old_ext = ctx.old.python_ext
+            if old_ext is None or not old_ext.is_extension:
+                return changes
         # Defer to the C-header oracle when a public header surface resolved on
         # *either* side (hybrid modules that ship a real public C API):
         # FilterNonPublicSurface already scoped it. Checking both sides matters
@@ -1092,7 +1120,7 @@ class EnrichAffectedSymbols:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _enrich_affected_symbols
 
-        _enrich_affected_symbols(changes, ctx.old)
+        _enrich_affected_symbols(changes, ctx.baseline_or_empty)
         return changes
 
 
@@ -1151,22 +1179,26 @@ class DetectCppPatterns:
         from .diff_serialization import detect_serialization_tag_changes
         from .diff_templates import detect_missing_instantiations
 
+        # `run` returns early when there is no baseline, so this is never
+        # reached with `ctx.old is None`; bound locally so mypy sees it too.
+        old = ctx.old
+        assert old is not None
         new_findings: list[Change] = []
-        new_findings.extend(detect_serialization_tag_changes(ctx.old, ctx.new))
-        new_findings.extend(detect_missing_instantiations(ctx.old, ctx.new))
+        new_findings.extend(detect_serialization_tag_changes(old, ctx.new))
+        new_findings.extend(detect_missing_instantiations(old, ctx.new))
 
         sycl_findings, sycl_suppressed = detect_sycl_overload_set_removal(
-            ctx.old, ctx.new
+            old, ctx.new
         )
         new_findings.extend(sycl_findings)
 
-        isa_findings, isa_suppressed = detect_cpu_dispatch_isa_dropped(ctx.old, ctx.new)
+        isa_findings, isa_suppressed = detect_cpu_dispatch_isa_dropped(old, ctx.new)
         new_findings.extend(isa_findings)
 
-        new_findings.extend(detect_tag_type_renamed(ctx.old, ctx.new))
-        new_findings.extend(detect_default_template_arg_changed(ctx.old, ctx.new))
+        new_findings.extend(detect_tag_type_renamed(old, ctx.new))
+        new_findings.extend(detect_default_template_arg_changed(old, ctx.new))
         new_findings.extend(
-            detect_inline_body_renamed_member(ctx.old, ctx.new, changes)
+            detect_inline_body_renamed_member(old, ctx.new, changes)
         )
 
         return new_findings, sycl_suppressed | isa_suppressed
@@ -1223,6 +1255,11 @@ class DetectCppPatterns:
         changes[:] = to_keep
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         new_findings, suppressed_keys = self._run_all_detectors(ctx, changes)
 
         if suppressed_keys:
@@ -1257,6 +1294,11 @@ class DetectTemplatePatterns:
         self._namespaces = namespaces
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .diff_templates import (
             _INTERNAL_TEMPLATE_NAMESPACES,
             detect_template_patterns,
@@ -1290,6 +1332,11 @@ class DetectNamespacePatterns:
         self._experimental_namespaces = experimental_namespaces
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .diff_namespaces import (
             DEFAULT_EXPERIMENTAL_NAMESPACES,
             detect_namespace_patterns,
@@ -1322,6 +1369,11 @@ class DetectInternalLeaks:
         self._namespaces = namespaces
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         from .internal_leak import (
             DEFAULT_INTERNAL_NAMESPACES,
             detect_call_graph_leaks,
@@ -1375,6 +1427,11 @@ class DemoteUnreachableInternalChurn:
         self._namespaces = namespaces
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # An evolution step: no baseline, no OLD->NEW delta to read
+        # (see PipelineContext.baseline_present for why not a self-compare).
+        if ctx.old is None:
+            return changes
+
         import fnmatch
 
         from .internal_leak import (
@@ -1464,6 +1521,12 @@ class DetectVersionedSymbolScheme:
     name = "detect_versioned_symbol_scheme"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        # No baseline: a versioned-symbol *rename scheme* is by definition a
+        # pairing of an OLD-side removal with a NEW-side addition, neither
+        # of which a single-build audit can produce.
+        if ctx.old is None:
+            return changes
+
         from .model.change_catalog.kinds import ChangeKind
         from .versioned_symbol_scheme import analyze_versioned_scheme
 
@@ -1639,7 +1702,7 @@ class EscalateFrozenNamespaceViolations:
         from .diff_filtering import _qualified_functions_by_mangled
 
         patterns = list(ctx.frozen_namespaces)
-        old_qualified = _qualified_functions_by_mangled(ctx.old)
+        old_qualified = _qualified_functions_by_mangled(ctx.baseline_or_empty)
         new_qualified = _qualified_functions_by_mangled(ctx.new)
 
         for c in changes:
@@ -1671,7 +1734,7 @@ class PostProcessingPipeline:
     def run(
         self,
         changes: list[Change],
-        old: AbiSnapshot,
+        old: AbiSnapshot | None,
         new: AbiSnapshot,
         suppression: SuppressionList | None = None,
         frozen_namespaces: list[str] | None = None,

@@ -855,7 +855,11 @@ def _release_summary_effective_config_block(
     return effective_config_digest(ec_fields), ec_fields
 
 
-def _release_md_library_findings(library_results: list[dict[str, object]]) -> list[str]:
+def _release_md_library_findings(
+    library_results: list[dict[str, object]],
+    *,
+    display_cap: int | None = None,
+) -> list[str]:
     """Per-library findings (kind/symbol/description) -- symbol names
     included. R2 (CLI-audit): the release Markdown report's own
     ``## Libraries`` table is counts only; reuses ``entry["findings"]`` --
@@ -910,25 +914,44 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
         if not findings and not has_impact:
             continue
         lines += ["", f"### `{lib['library']}` Findings", ""]
-        for f in cast(list[dict[str, object]], findings or []):
+        all_findings = cast(list[dict[str, object]], findings or [])
+        # The presentation cap lives here, at render time, not in the
+        # projection every format shares: a human summary may be bounded, a
+        # machine document may not be silently truncated (see
+        # `cli_compare_release_matrix._release_findings_cap_is_explicit`).
+        shown = (
+            all_findings if display_cap is None else all_findings[:display_cap]
+        )
+        rendered_truncated = len(shown) < len(all_findings)
+        for f in shown:
             symbol = f.get("symbol")
             lines.append(
                 f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
             )
             lines.extend(release_finding_detail_lines(f))
-        if lib.get("findings_truncated"):
-            # `--format json` is *not* a complete-list source (Codex review,
-            # PR #1016): the release JSON's own `findings` field is this
-            # same `_MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection --
-            # a reader following that advice would see the identical
-            # truncated list again. `--output-dir` is the only source that
-            # writes each library's real, uncapped `DiffResult` in the same
-            # shape (a per-library `compare` re-run is the other option).
-            lines.append(
-                "  - _...additional findings omitted; see `--output-dir` "
-                "(or compare this library individually) for the complete "
-                "list._"
-            )
+        if rendered_truncated or lib.get("findings_truncated"):
+            # `--format json` *is* a complete-list source now, unless this
+            # run explicitly asked for a cap (`--max-findings-per-library`
+            # or the env var), which is what this note distinguishes. It
+            # used not to be: the release JSON carried the identical capped
+            # projection, so a reader following the old advice met the same
+            # truncated list again.
+            complete_report = lib.get("complete_report")
+            if lib.get("findings_truncated"):
+                where = (
+                    f"`{complete_report}`"
+                    if complete_report
+                    else "`--output-dir` (or compare this library individually)"
+                )
+                lines.append(
+                    f"  - _...additional findings omitted; see {where} for "
+                    "the complete list._"
+                )
+            else:
+                lines.append(
+                    "  - _...additional findings omitted from this summary; "
+                    "`--format json` carries the complete list._"
+                )
         if has_impact:
             # `--view impact`'s aggregate counterpart (Codex review, PR
             # #1154 follow-up: "Reject unsupported impact views instead of

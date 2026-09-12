@@ -1260,7 +1260,6 @@ def run_compare(
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
             include_labels=include_labels,
-            require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
             suppress=suppress,
             budget=budget, pdb_path=pdb_path,
@@ -1452,6 +1451,12 @@ def run_compare(
             public_header_dirs=project_config_public_header_dirs(project_cfg),
             collapse_versioned_symbols=collapse_versioned_symbols,
             env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
+            # `.abicheck.yml`'s `assurance.require_complete` -- config-only,
+            # no CLI kwarg, and no longer rejected for a directory/package
+            # operand: the fan-out folds each member's own assurance floor
+            # with max(), the identical contribution a single-pair compare
+            # of that member computes.
+            require_complete_analysis=require_complete_analysis,
             # Codex review (PR #1154 follow-up): --view's derived values were
             # silently dropped from this dispatch -- forwarded raw
             # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);

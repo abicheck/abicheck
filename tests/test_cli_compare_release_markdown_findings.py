@@ -160,21 +160,25 @@ class TestReleaseMarkdownCarriesSymbolNames:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4, out
         assert "additional findings omitted" in out
-        # Codex review, PR #1016: the truncation note must not point to
-        # `--format json` as a source of the complete list -- the release
-        # JSON's own `findings` field is the identical
+        # The note now *does* point at `--format json`, and the sibling test
+        # below proves that advice is true rather than merely stated. Codex
+        # review, PR #1016 had banned exactly this wording, correctly at the
+        # time: the release JSON then carried the identical
         # `_MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection, so a reader
-        # following that advice would see the same truncated list again.
-        assert "--format json" not in out
-        assert "--output-dir" in out
+        # following it met the same truncated list again. The cap is a
+        # render-time presentation choice now, so the machine document is
+        # complete unless the run asked otherwise.
+        assert "`--format json` carries the complete list" in out
 
     def test_truncation_note_matches_the_actual_json_output(
         self, tmp_path: Path
     ) -> None:
-        """The JSON render's own `findings` array for a truncated library
-        must actually be capped -- proving the markdown note's claim (that
-        `--format json` does *not* carry the complete list) is true, not
-        just that the note avoids saying otherwise."""
+        """The JSON render's own ``findings`` array really is complete --
+        proving the markdown note's claim, rather than only checking that
+        the note says it. This is the same test as before, inverted along
+        with the behaviour it pins: it used to prove the opposite claim
+        (that ``--format json`` did *not* carry the complete list), which is
+        why the note could not point there."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -205,5 +209,6 @@ class TestReleaseMarkdownCarriesSymbolNames:
         entry = next(
             lib for lib in data["libraries"] if lib["library"] == "libfoo.json"
         )
-        assert entry["findings_truncated"] is True
-        assert len(entry["findings"]) < 15
+        assert "findings_truncated" not in entry
+        # 15 removals + the library's own `public_surface_shrank`.
+        assert len(entry["findings"]) == 16

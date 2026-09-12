@@ -353,12 +353,16 @@ class TestReleaseViewShowOnly:
         `findings` display list capped at 10, but `release_filtered_
         summary`'s `total` must still report the true, uncapped count --
         summing the already-capped display list under-reports past the
-        cap (25 real findings would read as 10)."""
+        cap (25 real findings would read as 10). The cap is passed
+        explicitly because the default one no longer truncates a machine
+        document (a JSON consumer who never asked for truncation must not
+        receive a truncated one)."""
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
             "compare", str(old_dir), str(new_dir),
             "--format", "json", "--view", "show=functions",
+            "--max-findings-per-library", "10",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -384,12 +388,14 @@ class TestReleaseViewShowOnly:
         (25 `func_removed`, capped to 10) carried a truncation ledger that
         also counted the one `public_surface_shrank` note the filter had
         already excluded outright, and the private `findings_view_
-        truncated_kinds` key leaked into the rendered entry unstripped."""
+        truncated_kinds` key leaked into the rendered entry unstripped.
+        The cap is explicit for the same reason as the test above."""
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
             "compare", str(old_dir), str(new_dir),
             "--format", "json", "--view", "show=functions",
+            "--max-findings-per-library", "10",
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]

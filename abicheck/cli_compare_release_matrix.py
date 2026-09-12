@@ -218,6 +218,7 @@ def _finalize_release_output(
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -395,6 +396,7 @@ def _finalize_release_output(
             if scope_terms
             else 0
         ),
+        require_complete_analysis=require_complete_analysis,
     )
 
 
@@ -441,26 +443,41 @@ def _validate_suppression_early(
         )
 
 
-#: Default cap on findings embedded in each library's ``findings``/
-#: ``findings_view`` lists in the release summary so a large fan-out cannot
-#: blow up the always-on release output; ``--output-dir`` (see
-#: ``cli_compare_release_pairwise.py``'s per-library ``<lib>.json`` sidecar)
-#: remains the way to see every library's full, unfiltered report
-#: unconditionally. Overridable per run via ``compare-release
-#: --max-findings-per-library``, or globally via the
-#: ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY`` env var when neither passes
-#: an explicit value -- mirrors ``cli_scan_baseline``'s identical
-#: ``_MAX_BASELINE_FINDINGS``/``_resolve_max_baseline_findings`` pair (see
-#: :func:`_resolve_max_release_findings_per_library`), which this cap used
-#: to lack entirely (Codex review: "a presentation default masquerading as
-#: a contract").
-_MAX_RELEASE_FINDINGS_PER_LIBRARY = 10
+#: Both values now live in the ``report.release_display_limits`` leaf, so
+#: the Markdown renderer that applies the cap can read it without importing
+#: this module -- a function-local import between the two was a real new
+#: import cycle. Re-exported here under their original private names for
+#: every existing importer, tests included.
+from .report.release_display_limits import (  # noqa: E402
+    MAX_RELEASE_FINDINGS_PER_LIBRARY as _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+    MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR as _MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR,
+)
 
-#: Env var read by :func:`_resolve_max_release_findings_per_library` when a
-#: caller does not pass an explicit ``max_findings``. Kept distinct from a
-#: CLI/API default of ``None`` so "not specified" is distinguishable from
-#: "explicitly 10".
-_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY"
+
+def _release_findings_cap_is_explicit(max_findings: int | None) -> bool:
+    """Whether *this run* asked for a per-library findings cap.
+
+    True for ``--max-findings-per-library`` or a usable
+    ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY``; False when the cap
+    resolves to the built-in default, which is a *presentation* choice
+    nobody made. That distinction is what lets a machine document stay
+    complete by default while the human summary stays bounded: a reader of
+    ``--format json`` who never asked for truncation must not receive a
+    silently truncated document, and one who *did* ask gets
+    ``findings_truncated`` plus (under ``--output-dir``) ``complete_report``
+    naming the uncapped artifact.
+    """
+    if max_findings is not None:
+        return True
+    import os
+
+    env_value = os.environ.get(_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
+    if not env_value:
+        return False
+    try:
+        return int(env_value) >= 1
+    except ValueError:
+        return False
 
 
 def _resolve_max_release_findings_per_library(max_findings: int | None) -> int:
@@ -660,8 +677,18 @@ def _release_finding_dicts(
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
     max_findings: int | None = None,
+    *,
+    uncapped: bool = False,
 ) -> tuple[list[dict[str, object]], list[str]]:
     """Project a library's gating findings into small, capped dicts.
+
+    *uncapped* builds the **complete** projection instead, and returns no
+    cut kinds -- nothing was cut. Used for the machine documents when no
+    cap was actually requested (see
+    :func:`_release_findings_cap_is_explicit`): a truncated JSON/JUnit
+    document nobody asked to truncate is not a summary, it is a lossy
+    result, and this release schema has no per-library findings array
+    elsewhere for a consumer to fall back to.
 
     Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
     ``stack_report._stack_finding_dicts``. Counts (not already-built dicts)
@@ -702,7 +729,11 @@ def _release_finding_dicts(
     from .reporter import release_finding_entry
     from .reporter_markdown import apply_show_only
 
-    cap = _resolve_max_release_findings_per_library(max_findings)
+    cap = (
+        _resolve_max_release_findings_per_library(max_findings)
+        if not uncapped
+        else None
+    )
     findings: list[dict[str, object]] = []
     cut_kinds: list[str] = []
     for bucket_name, bucket_changes in _release_display_buckets(diff, severity_config):
@@ -714,8 +745,11 @@ def _release_finding_dicts(
                 kind_sets=diff._effective_kind_sets(),
                 policy_file=diff.policy_file,
             )
-        remaining = max(0, cap - len(findings))
-        included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
+        if cap is None:
+            included, excluded = list(bucket_changes), []
+        else:
+            remaining = max(0, cap - len(findings))
+            included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
         for c in included:
             findings.append(release_finding_entry(c, bucket_name, diff.policy_file))
         # Keep tallying excluded kinds across every remaining bucket (not
@@ -807,6 +841,11 @@ def _strip_diff_results_and_adjust_verdict(
     Returns the (possibly updated) *worst_verdict* string.
     """
     cap = _resolve_max_release_findings_per_library(max_findings)
+    # `entry["findings"]` feeds every renderer, and only the human ones want
+    # a cap. Left complete unless this run actually asked for truncation, so
+    # a machine document is complete by default; `_release_md_library_
+    # findings` applies the presentation cap at render time instead.
+    uncapped = not _release_findings_cap_is_explicit(max_findings)
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -815,11 +854,11 @@ def _strip_diff_results_and_adjust_verdict(
             display_buckets = _release_display_buckets(diff, severity_config)
             total_gating = sum(len(cat_changes) for _, cat_changes in display_buckets)
             findings, cut_kinds = _release_finding_dicts(
-                diff, severity_config, None, max_findings
+                diff, severity_config, None, max_findings, uncapped=uncapped
             )
             if findings:
                 entry["findings"] = findings
-                if total_gating > cap:
+                if not uncapped and total_gating > cap:
                     entry["findings_truncated"] = True
                     _accumulate_release_kind_counts(
                         entry, "findings_truncated_kinds", cut_kinds
@@ -855,10 +894,10 @@ def _strip_diff_results_and_adjust_verdict(
                     for _, cat_changes in display_buckets
                 )
                 findings_view, cut_kinds_view = _release_finding_dicts(
-                    diff, severity_config, show_only, max_findings
+                    diff, severity_config, show_only, max_findings, uncapped=uncapped
                 )
                 entry["findings_view"] = findings_view
-                if total_gating_view > cap:
+                if not uncapped and total_gating_view > cap:
                     entry["findings_view_truncated"] = True
                     _accumulate_release_kind_counts(
                         entry, "findings_view_truncated_kinds", cut_kinds_view

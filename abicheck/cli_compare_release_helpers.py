@@ -561,7 +561,7 @@ def _debian_symbols_warning(
 def reject_bundle_facts_out_collision(
     bundle_facts_out: Path | None,
     output: Path | None,
-    secondary_output: Path | None,
+    *secondary_outputs: Path | None,
 ) -> None:
     """Reject ``--bundle-facts-out`` naming the same file as ``--output``/
     ``--write`` (G38 Phase 2).
@@ -571,10 +571,18 @@ def reject_bundle_facts_out_collision(
     own docstring) -- without it, ``--bundle-facts-out result.json --output
     result.json`` silently overwrites the requested baseline with the
     report while still reporting success (Codex review).
+
+    *secondary_outputs* is variadic because ``--write`` is repeatable: every
+    requested artifact's PATH is checked, not just the first. Checking one
+    let ``--write json=a.json --write markdown=b.md --bundle-facts-out
+    b.md`` through.
     """
     if bundle_facts_out is None:
         return
-    for label, other in (("--output/-o", output), ("--write", secondary_output)):
+    for label, other in (
+        ("--output/-o", output),
+        *(("--write", out) for out in secondary_outputs),
+    ):
         if other is not None and bundle_facts_out.resolve() == other.resolve():
             raise click.UsageError(
                 f"--bundle-facts-out's PATH must differ from {label}: writing "
@@ -1772,7 +1780,15 @@ def _format_release_markdown(
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_evidence_contract(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
-    lines += _release_md_library_findings(display_library_results)
+    # The human summary stays bounded even though the shared projection is
+    # now complete -- the cap is a presentation choice, applied here. Read
+    # from the `report.release_display_limits` leaf, not from
+    # `cli_compare_release_matrix`: that would be an import cycle.
+    from .report.release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
+
+    lines += _release_md_library_findings(
+        display_library_results, display_cap=MAX_RELEASE_FINDINGS_PER_LIBRARY
+    )
     lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)
     lines += _release_md_matrix_findings(matrix_result, display_matrix_changes)
     lines += render_disposition_audit_section(
