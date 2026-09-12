@@ -2113,7 +2113,38 @@ _effective_exports() {
   if ! _extra_args_has_export; then
     printf '%s\t%s\n' "${FORMAT:-markdown}" "${OUTPUT_FILE:--}"
   fi
-  _extra_args_exports
+  # Documents only. A destination ending in `/` is a *directory* export --
+  # the per-component fan-out, which writes one report per component plus
+  # its own `summary.json` inside that directory. It is not a file this
+  # script can read, and every consumer here (the effective format, the
+  # primary destination, the stdout predicate, the json-destination
+  # inventory) is asking about a document (Codex review, P1): treating
+  # `reports/` as the primary report handed the directory itself to
+  # `report_query.py`, which classifies a directory as unreadable, so a
+  # successful comparison published REPORT_UNREADABLE.
+  #
+  # And when a caller names *only* directory exports, the CLI prepends its
+  # own default document export to stdout rather than rendering no summary
+  # at all (`build_export_set`), so this mirrors that: without it the
+  # stdout summary really is produced and this script does not capture it,
+  # because `_report_goes_to_stdout` cannot see an implicit export.
+  # `markdown` is the literal default `compare` applies -- deliberately not
+  # `$FORMAT`, which the CLI never sees.
+  local _fmt _dest _documents=""
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ -n "$_fmt" ]] || continue
+    # A trailing separator, or a destination that already exists as a
+    # directory -- the two spellings `parse_export_operand` itself accepts.
+    case "$_dest" in
+      */) continue ;;
+    esac
+    [[ -d "$_dest" ]] && continue
+    _documents+="$_fmt"$'\t'"$_dest"$'\n'
+  done <<<"$(_extra_args_exports)"
+  if _extra_args_has_export && [[ -z "$_documents" ]]; then
+    _documents="markdown"$'\t'"-"$'\n'
+  fi
+  printf '%s' "$_documents"
 }
 
 # Would injecting our own internal `-o json=$PR_JSON` sidecar be redundant

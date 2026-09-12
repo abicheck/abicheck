@@ -732,6 +732,38 @@ class TestEffectiveFormat:
             == "json"
         )
 
+    def test_a_directory_export_is_a_fan_out_not_the_primary_report(self) -> None:
+        """A destination ending in `/` is the per-component fan-out.
+
+        It is not a document this script can read, and the CLI answers a
+        caller who names only directory exports by prepending its own
+        default document export to stdout. Reading `reports/` as the
+        primary handed a directory to `report_query.py`, which classifies
+        one as unreadable -- so a successful comparison published
+        REPORT_UNREADABLE (Codex review, P1).
+        """
+        assert self._value("text", "-o json=reports/") == "markdown"
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE= INPUT_EXTRA_ARGS='-o json=reports/' "
+                "_effective_output_file"
+            )
+            == ""
+        )
+
+    def test_a_directory_export_beside_a_document_leaves_the_document_primary(
+        self,
+    ) -> None:
+        assert self._value("text", "-o json=reports/ -o junit=a.xml") == "junit"
+        assert (
+            _run_value(
+                "FORMAT=text OUTPUT_FILE= "
+                "INPUT_EXTRA_ARGS='-o json=reports/ -o junit=a.xml' "
+                "_effective_output_file"
+            )
+            == "a.xml"
+        )
+
     def test_does_not_false_positive_on_a_substring(self) -> None:
         assert self._value("text", "--not-an-export-flag") == "text"
 
