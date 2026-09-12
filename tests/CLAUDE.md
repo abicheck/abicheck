@@ -129,6 +129,17 @@ finishes in ~45 seconds.
   `StepResult.output_lines` exposes the raw records, so an *injected extra*
   `$GITHUB_OUTPUT` line is visible and not just a wrong value. See
   `test_reusable_workflow_execution.py`.
+  It also owns `bash_executable()`/`require_bash()`, together the **only**
+  sanctioned way a test in this suite shells out: resolve the program, and ask
+  first whether this machine has a real bash at all. A bare `["bash", ...]`
+  argv resolves to the WSL launcher stub on `windows-latest` and reddens the
+  whole calling module at once, and resolving without the guard reaches the
+  same stub by the resolver's own documented fallback. The twenty-nine private
+  `_bash_executable` clones that used to encode half of this — each a copy
+  predating the resolver's stub detection — have been folded onto it, and
+  `test_subprocess_bash_is_resolved.py` fails on a new clone, a new bare
+  `"bash"` program, or a resolved call site with no `require_bash()`, anywhere
+  under `tests/`.
 - `schema_validation.py` — `validate_instance(instance, schema)`, a drop-in
   replacement for `jsonschema.validate` that checks the *schema* once per
   distinct schema content instead of on every call (which is what the library

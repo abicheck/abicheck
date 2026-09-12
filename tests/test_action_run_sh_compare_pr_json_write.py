@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _REAL_ABICHECK = shutil.which("abicheck")
@@ -58,6 +58,7 @@ def _compare_argv(
     directory to exercise the release-style-operand path instead (CLI
     cleanup phase two, PR E: `--write` now applies there too).
     """
+    require_bash()
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
@@ -333,6 +334,7 @@ class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
     def test_write_json_is_a_real_file_with_persisted_annotations(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import json
 
         from abicheck.model import AbiSnapshot, Function, Visibility
@@ -471,6 +473,7 @@ def _compare_github_output(
     (``::warning::``) actually reached the log rather than being silently
     swallowed into the environment file.
     """
+    require_bash()
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     stub = fake_bin / "abicheck"

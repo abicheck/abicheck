@@ -37,6 +37,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "case $VERDICT in"
@@ -162,27 +163,9 @@ def _report_path_anchor_source() -> str:
     return text[start:end]
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale (GitHub windows-latest runners resolve a bare "bash" to a
-    non-functional WSL stub ahead of Git for Windows' real bash).
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run(env_overrides: dict[str, str], *, cwd: Path | None = None) -> str:
     """Run the extracted VERDICT-case snippet, return its stdout."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w",
         suffix=".sh",
@@ -196,7 +179,7 @@ def _run(env_overrides: dict[str, str], *, cwd: Path | None = None) -> str:
     env.update(env_overrides)
     try:
         result = subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -384,6 +367,7 @@ class TestReportPathAnchoring:
     def _anchor(
         self, report_path: str, cwd: Path, *, windows: bool = False
     ) -> str:
+        require_bash()
         script = (
             _path_qualified_helper_source()
             + '\nf() {\n  local report_path="$1"\n'
@@ -404,7 +388,7 @@ class TestReportPathAnchoring:
         env["OSTYPE"] = "msys" if windows else "linux-gnu"
         try:
             result = subprocess.run(
-                [_bash_executable(), script_path, report_path],
+                [bash_executable(), script_path, report_path],
                 capture_output=True,
                 text=True,
                 cwd=cwd,
@@ -431,8 +415,9 @@ class TestReportPathAnchoring:
         the expected value in the same representation the real script
         output is always in, on every platform (a no-op on POSIX hosts,
         where both forms already coincide)."""
+        require_bash()
         result = subprocess.run(
-            [_bash_executable(), "-c", "printf '%s' \"$PWD\""],
+            [bash_executable(), "-c", "printf '%s' \"$PWD\""],
             capture_output=True,
             text=True,
             cwd=cwd,

@@ -60,6 +60,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _workflow_exec import bash_executable, require_bash
+
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
@@ -170,24 +172,6 @@ def _write_fake_sitecustomize(root: Path) -> None:
     )
 
 
-def _bash_executable() -> str:
-    """Resolve a real bash, bypassing Windows' WSL-launcher stub.
-
-    See ``test_action_run_sh_helpers._bash_executable`` for the full
-    rationale.
-    """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
 def _run_bash_script(
     script: str,
     *,
@@ -200,6 +184,7 @@ def _run_bash_script(
     for the full rationale (Windows argv-reconstruction/console-encoding
     mangling of a complex inline script with many nested quotes; confirmed
     on windows-latest CI for this module's own scripts)."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
@@ -207,7 +192,7 @@ def _run_bash_script(
         script_path = f.name
     try:
         return subprocess.run(
-            [_bash_executable(), script_path],
+            [bash_executable(), script_path],
             capture_output=True,
             text=True,
             cwd=cwd,
@@ -229,8 +214,9 @@ def _mark_executable(path: Path) -> None:
     and chmod'd from Python could be silently invisible to that search,
     letting the real system binary run instead of the fake one a test
     installs to stand in for it (Codex review, fresh evidence)."""
+    require_bash()
     result = subprocess.run(
-        [_bash_executable(), "-c", 'chmod +x "$1"', "_", str(path)],
+        [bash_executable(), "-c", 'chmod +x "$1"', "_", str(path)],
         capture_output=True,
         text=True,
         timeout=10,
@@ -563,8 +549,9 @@ class TestPySafeDirCleanedUpOnEarlyExit:
         different, usually nonexistent, location. That makes a "does not
         exist" assertion pass vacuously either way, so only bash itself can
         answer this (Codex review, fresh evidence)."""
+        require_bash()
         result = subprocess.run(
-            [_bash_executable(), "-c", 'test -d "$1"', "_", created_dir],
+            [bash_executable(), "-c", 'test -d "$1"', "_", created_dir],
             capture_output=True,
             text=True,
             timeout=10,
@@ -585,6 +572,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
         """Proves the test above isn't vacuously passing -- the identical
         mktemp call, minus only the trap, really does leave the directory
         behind after the process exits."""
+        require_bash()
         script = (
             'if ! _PY_SAFE_DIR="$(mktemp -d)"; then exit 1; fi\n'
             'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'
@@ -597,7 +585,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
             assert self._bash_dir_exists(created_dir)
         finally:
             subprocess.run(
-                [_bash_executable(), "-c", 'rm -rf "$1"', "_", created_dir],
+                [bash_executable(), "-c", 'rm -rf "$1"', "_", created_dir],
                 timeout=10,
             )
 
