@@ -277,3 +277,61 @@ class TestPositionalConstructionIsPreserved:
         )
         assert pf.source_only_findings == "error"
         assert pf.experimental_namespaces == []
+
+
+class TestExperimentalFindingsAreAnOverlay:
+    """`EXPERIMENTAL_*` is appended to the ordinary break, never a relabelling.
+
+    ADR-069's first draft claimed configuring `v0` *relabelled* a removal
+    rather than adding a second finding, and that wrong claim was repeated in
+    the ADR, the policy docs, the changelog and a review reply before Codex
+    caught it. Prose was the only thing asserting it; this makes the real
+    semantics executable so the next reader cannot restate it wrongly.
+
+    The load-bearing consequence is that dropping `v0` from the defaults cannot
+    hide a break: the plain removal is emitted either way and already carries
+    the stronger verdict.
+    """
+
+    @staticmethod
+    def _removal_pair():
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        fn = Function(
+            name="foo",
+            mangled="_ZN2ns2v03fooEv",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
+        old = AbiSnapshot(library="libt.so.1", version="1.0", functions=[fn])
+        new = AbiSnapshot(library="libt.so.1", version="1.0", functions=[])
+        return old, new
+
+    def _kinds(self, policy_file: PolicyFile | None) -> set[str]:
+        from abicheck.checker import compare
+
+        old, new = self._removal_pair()
+        return {c.kind.value for c in compare(old, new, policy_file=policy_file).changes}
+
+    def test_plain_removal_is_reported_either_way(self) -> None:
+        configured = PolicyFile(experimental_namespaces=["v0"])
+        assert "func_removed" in self._kinds(None)
+        assert "func_removed" in self._kinds(configured)
+
+    def test_configuring_v0_adds_a_finding_rather_than_replacing_one(self) -> None:
+        default = self._kinds(None)
+        configured = self._kinds(PolicyFile(experimental_namespaces=["v0"]))
+        assert configured > default, "expected a strict superset (an overlay)"
+        assert configured - default == {"experimental_removed_without_replacement"}
+
+    def test_the_default_change_cannot_hide_the_break(self) -> None:
+        """The verdict is identical with and without the overlay."""
+        from abicheck.checker import compare
+
+        old, new = self._removal_pair()
+        without = compare(old, new)
+        with_overlay = compare(
+            old, new, policy_file=PolicyFile(experimental_namespaces=["v0"])
+        )
+        assert without.verdict == with_overlay.verdict
+        assert without.verdict.value == "BREAKING"

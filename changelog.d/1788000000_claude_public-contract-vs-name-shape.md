@@ -27,9 +27,22 @@
   segment is not a stability promise, and inline-versioned public APIs
   (`namespace v0 { … }`) are a widespread way to spell a library's *current
   public* API — for those projects the default reported every removal from the
-  whole public API as an experimental-API removal. Projects that do mean `v0`
-  that way now state it via the new `experimental_namespaces:` policy key,
-  which restores the previous behaviour exactly.
+  whole public API as an experimental-API removal. The `EXPERIMENTAL_*` finding
+  is an overlay, not a substitute, so nothing is hidden: the plain
+  `func_removed` is still reported and the verdict and exit code are unchanged
+  — the default simply no longer *adds* an annotation calling the removal
+  expected. Projects that do mean `v0` that way state it via the new
+  `experimental_namespaces:` policy key, which restores the old behaviour
+  exactly. See ADR-069.
+
+### Added
+
+- **Report schema 4.3** — `effective_config_fields` gains
+  `surface.experimental_namespaces`, so two comparisons differing only in that
+  policy key no longer fingerprint identically. The key set is hashed
+  positionally, so every run's `effective_config_digest` value changes; digests
+  are not comparable across this boundary, which is what the version bump
+  signals.
 
 ### Added
 

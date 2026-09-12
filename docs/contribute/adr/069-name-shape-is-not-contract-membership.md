@@ -73,21 +73,35 @@ This is the part `AGENTS.md` requires this record for.
 `("experimental", "preview", "v0")` to `("experimental", "preview")`.
 
 **Who is affected.** Only a project with a namespace segment spelled exactly
-`v0`, and only for findings `DetectNamespacePatterns` produces
-(`EXPERIMENTAL_*`). For such a project a removal under `v0` previously
-reported as `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT` and now reports as the
-ordinary removal it is. No other project's output changes at all.
+`v0`, and only for the findings `DetectNamespacePatterns` produces
+(`EXPERIMENTAL_*`). No other project's output changes at all.
 
-**Is this a loosening or a tightening?** Neither, by design — it is a
-*re-description*. The finding is still emitted; what changes is the kind, and
-therefore the prose. The rejected reading is that `v0` findings were a safety
-net now removed: they were not, because the `EXPERIMENTAL_*` kinds describe a
-removal as *expected*, which for a library's current public API is the more
-dangerous direction. Under this change such a removal is described as
-unqualified, which is the accurate and the more conservative answer.
+**`EXPERIMENTAL_*` is an overlay, not a relabelling.** This ADR's first draft
+said the finding was "still emitted, only under a different kind"; that was
+wrong, and the correction matters for reading the rest of this section.
+`DetectNamespacePatterns` *appends* to what the ordinary detectors already
+produced — it never replaces it. Measured on a removed `ns::v0::foo`:
+
+| Configuration | Findings | Verdict |
+|---|---|---|
+| `v0` not experimental (this change's default) | `func_removed` (BREAKING) | `BREAKING` |
+| `v0` configured experimental | `func_removed` (BREAKING) **+** `experimental_removed_without_replacement` (API_BREAK) | `BREAKING` |
+
+So the default change **removes one additional contextual finding**; it does
+not alter, downgrade, or hide the underlying removal.
+
+**Is this a loosening?** No, and the overlay structure is why. The plain
+`FUNC_REMOVED` is emitted either way and is already `BREAKING`, which
+dominates the overlay's `API_BREAK`, so the verdict and the exit code are
+identical under both configurations — a break cannot be hidden by this change,
+because the finding that carries the break was never the one being removed.
+What is dropped is only the annotation asserting the removal was *expected* —
+the assertion this ADR's D4 says a version segment cannot support in the first
+place. A project that wants the annotation back states it and gets both
+findings, exactly as before.
 
 **Migration.** One line in a `--policy` document restores the previous
-behaviour exactly:
+behaviour exactly, overlay included:
 
 ```yaml
 experimental_namespaces:

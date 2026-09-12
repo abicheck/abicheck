@@ -285,9 +285,10 @@ unaffected.
 
 A separate, unrelated convention: `internal_namespaces` marks
 *implementation detail*, while these mark declarations that are public but
-**not yet covered by a stability promise**. Removing one is reported as an
-`EXPERIMENTAL_*` finding rather than a plain break. The default set is
-`experimental`/`preview`:
+**not yet covered by a stability promise**. Removing one adds an
+`EXPERIMENTAL_*` finding **alongside** the ordinary break — it is an overlay,
+not a substitute, so the plain `func_removed` is still reported and still
+drives the verdict. The default set is `experimental`/`preview`:
 
 ```yaml
 experimental_namespaces:
@@ -307,6 +308,12 @@ way to spell a library's *current public* API, and treating that segment as
 experimental described a fully supported API as never having been promised.
 If your project does use `v0` to mean experimental, list it as above — the
 behaviour is then identical to the old default.
+
+Because the `EXPERIMENTAL_*` finding is an overlay, dropping `v0` from the
+default cannot hide anything: a removal under `v0` still reports
+`func_removed` and still yields a `BREAKING` verdict and the same exit code.
+What the default no longer does is add an annotation asserting the removal was
+*expected*. See [ADR-069](../contribute/adr/069-name-shape-is-not-contract-membership.md).
 
 ---
 
