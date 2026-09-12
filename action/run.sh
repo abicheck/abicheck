@@ -2147,29 +2147,48 @@ _extra_args_has_dry_run_flag() {
 # either rejecting the combination outright or (worse) silently doing
 # nothing.
 #
-# `--write` is a scalar (non-`multiple=True`) Click option: a repeated
-# `--write` resolves to the *last* occurrence, whatever its format, not the
-# first `json=...` one found (Codex review, P2, PR #1071) -- so this keeps
-# scanning the whole `extra-args` list and only remembers the most recent
-# match, clearing it again if a later `--write` isn't `json=...` (matching
-# Click's real resolved value, which could just as well be a non-JSON
-# format last).
-_extra_args_write_json_path() {
-  local _name _value _found=""
+# `--write` is **repeatable**: `compare` declares it with `multiple=True`
+# (`frontends/cli/options/secondary_output.py`'s `deco_multi`, ADR-068 D4's
+# "one analysis, several artifacts"), and its own help text gives
+# `--write json=a.json --write markdown=b.md` as the example. Every named
+# artifact is written, so every `json=` destination among them is a real,
+# caller-requested report.
+#
+# This comment used to say the opposite -- "a scalar (non-`multiple=True`)
+# Click option ... resolves to the *last* occurrence" (Codex review, P2, PR
+# #1071) -- and the function cleared an already-found `json=` path whenever a
+# later `--write` named another format, to match that supposed last-wins
+# resolution. The claim was stale (the singular `deco` shape still exists in
+# that factory, but `compare` does not use it) and the clearing was a real
+# defect: `--write json=a.json --write markdown=b.md` reported *no* requested
+# JSON path at all, so a missing or truncated `a.json` left an exit-0 run
+# publishing a clean verdict (Codex review, P2). Verified against the option
+# declaration rather than either comment, since the two contradicted.
+#
+# `_extra_args_write_json_paths` prints every one, newline-separated, so
+# `_json_report_expected` can require all of them; the singular
+# `_extra_args_write_json_path` keeps its one-value contract for
+# `_json_report_src`, which only needs *a* readable report to read from.
+_extra_args_write_json_paths() {
+  local _name _value _found=1
   while IFS=$'\t' read -r _name _value; do
     if [[ "$_name" == "--write" ]]; then
       case "$_value" in
         json=*)
-          _found="${_value#json=}"
-          ;;
-        *)
-          _found=""
+          printf '%s\n' "${_value#json=}"
+          _found=0
           ;;
       esac
     fi
   done <<<"$(_extra_args_options)"
-  [[ -n "$_found" ]] || return 1
-  printf '%s' "$_found"
+  return $_found
+}
+
+_extra_args_write_json_path() {
+  local _first
+  _first=$(_extra_args_write_json_paths | head -n 1)
+  [[ -n "$_first" ]] || return 1
+  printf '%s' "$_first"
 }
 
 # The real `--format` value `abicheck` runs with, accounting for `extra-args`
@@ -4224,7 +4243,7 @@ ADVISORY_BREAK=false
 # only an escalation (see `_escalate_verdict_to_report`) makes the two differ.
 GATE_TIER=""
 _resolve_clean_exit_verdict() {
-  local _v _no_baseline_audit _validity
+  local _v _no_baseline_audit _validity _dest _dest_validity
   VERDICT="COMPATIBLE"
   # An audit-only (no-baseline) dry run writes no JSON report at all --
   # `compare --dry-run` performs no analysis and only previews the command
@@ -4304,6 +4323,21 @@ _resolve_clean_exit_verdict() {
       return
     fi
   fi
+  # Every caller-named `--write json=` destination, each independently. The
+  # discovered-source check above reads whichever one `_json_report_src`
+  # happened to settle on; with a repeatable `--write` a caller can name
+  # several, and a missing or unusable one is just as much a report that never
+  # arrived (Codex review, P2). Checked after the block above so the more
+  # specific messages there win for the common single-destination case.
+  while IFS= read -r _dest; do
+    [[ -n "$_dest" ]] || continue
+    _dest_validity=$(_report_query "$_dest" report_validity)
+    if [[ -z "$_dest_validity" || "$_dest_validity" != "ok" ]]; then
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report requested via extra-args --write json=${_dest} is missing or unusable (${_dest_validity:-unreadable}) -- so nothing read this run's result from it, and this step will not report one."
+      return
+    fi
+  done <<<"$(_extra_args_write_json_paths)"
   # A readable report whose assurance key pair is broken, checked HERE rather
   # than only at the FINAL_EXIT fold below (Codex review, P2, reproduced):
   # that fold runs after the verdict output, the job summary and the PR comment

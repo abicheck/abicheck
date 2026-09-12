@@ -169,6 +169,24 @@ Two predicates close that without weakening anything above:
   `findings`/`suppressed_findings` arrays, and a release envelope may rely on
   `libraries`), so a naive "non-empty string verdict" rule fails working runs.
   Both directions are pinned in `TestAReadableVerdictSourceIsRequired`.
+
+  **"Requested" means every caller-named destination, not the first.**
+  `compare`'s `--write` is repeatable (`multiple=True`, ADR-068 D4), so
+  `--write json=a.json --write markdown=b.md` really does write `a.json`, and
+  each `json=` destination is independently required. A stale comment calling
+  the option scalar and last-wins had the extractor *clear* an earlier `json=`
+  path on seeing a later non-json one — settle contradictions like that against
+  the option declaration in `frontends/cli/options/secondary_output.py`, not
+  against either comment.
+
+  **Each report shape's version key gets its own threshold.** Three sequences
+  reach the reader — `report_schema_version` (2.40),
+  `audit_report_schema_version` (1.1) and `release_schema_version` (1.3) — and
+  the two non-compare ones sit numerically below `(2, 40)` at every real
+  version, so measuring either against the compare threshold makes those
+  documents read as predating a field they carry. That was missed once for
+  audit and again for release; a new shape needs an entry in
+  `ASSURANCE_CONTRIBUTION_SINCE`, never a fallback.
 - `_assurance_axis_contradictory` catches the one absence that *is* provably
   wrong: an `analysis_assurance` block on a schema ≥ 2.40 with no
   `analysis_assurance_exit_contribution` beside it. `reporter.py` emits those

@@ -938,3 +938,71 @@ class TestAMalformedButLoadableReportFailsQuietly:
         )
         assert (code, err) == (0, "")
         assert out.strip() == "addition, quality"
+
+
+class TestTheReleaseSchemaSequence:
+    """A directory/package release document carries a third version sequence.
+
+    `release_schema_version` (`abicheck/schemas/release_schema.py`) is at 1.3,
+    and 1.3 is exactly what landed ADR-071's paired top-level
+    `analysis_assurance` block and `analysis_assurance_exit_contribution`. The
+    threshold table knew only the compare and audit sequences, so a release
+    report carrying the block without its contribution answered
+    `absent_legacy_schema` and was accepted (Codex review, P2 — the same defect
+    as the audit sequence, one shape later).
+    """
+
+    def _release(self, version: str, **extra: object) -> dict:
+        document: dict = {
+            "release_schema_version": version,
+            "verdict": "NO_CHANGE",
+            "libraries": [],
+            "analysis_assurance": {"status": "complete"},
+        }
+        document.update(extra)
+        return document
+
+    @pytest.mark.parametrize("version", ("1.3", "1.4", "2.0", "1.99"))
+    def test_a_broken_pair_at_or_past_1_3_is_contradictory(
+        self, tmp_path: Path, version: str
+    ) -> None:
+        _, out = _ask(tmp_path, self._release(version), "assurance_axis")
+        assert out.strip() == "contradictory", f"release {version}"
+
+    @pytest.mark.parametrize("version", ("1.0", "1.1", "1.2"))
+    def test_a_release_report_predating_1_3_is_legacy(
+        self, tmp_path: Path, version: str
+    ) -> None:
+        # The negative control on this sequence: those versions genuinely
+        # predate the paired fields and must not be failed.
+        _, out = _ask(tmp_path, self._release(version), "assurance_axis")
+        assert out.strip() == "absent_legacy_schema", f"release {version}"
+
+    def test_a_release_version_is_never_measured_against_the_compare_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        # Every real release version is numerically below (2, 40), so conflating
+        # the sequences would read each as legacy and accept a lost
+        # contribution — the identical mistake the audit sequence suffered.
+        for version in ("1.3", "1.4", "1.9"):
+            _, out = _ask(tmp_path, self._release(version), "assurance_axis")
+            assert out.strip() == "contradictory", f"release {version} read as legacy"
+
+    def test_a_present_contribution_still_wins(self, tmp_path: Path) -> None:
+        _, out = _ask(
+            tmp_path,
+            self._release("1.3", analysis_assurance_exit_contribution=1),
+            "assurance_axis",
+        )
+        assert out.strip() == "gated"
+
+    def test_every_known_sequence_has_its_own_threshold(self) -> None:
+        # The table is the mechanism; a new report shape with its own version
+        # key needs an entry, not a fallback. Pinning the set means adding a
+        # shape without a threshold is visible here rather than silently
+        # reading as legacy — which is how both earlier misses happened.
+        assert set(rq.ASSURANCE_CONTRIBUTION_SINCE) == {
+            "report_schema_version",
+            "audit_report_schema_version",
+            "release_schema_version",
+        }

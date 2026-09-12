@@ -531,3 +531,127 @@ class TestEveryCallerRequestedJsonModeIsCovered:
         )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
+
+
+class TestEveryRepeatableWriteDestinationIsChecked:
+    """`--write` is repeatable, so every `json=` destination is a real request.
+
+    `compare` declares `--write` with `multiple=True` (ADR-068 D4, "one
+    analysis, several artifacts"), and every named artifact is written. The
+    extractor behind this predicate used to *clear* an already-found `json=`
+    path whenever a later `--write` named another format — matching a stale
+    comment that called the option scalar and last-wins. So
+    `--write json=a.json --write markdown=b.md` reported no requested JSON path
+    at all, and a missing `a.json` left an exit-0 run publishing COMPATIBLE
+    (Codex review, P2).
+
+    The two contradictory claims in the tree were settled against the option
+    declaration itself, not either comment.
+    """
+
+    def _env(self, tmp_path: Path, extra_args: str) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "markdown",
+            "INPUT_EXTRA_ARGS": extra_args,
+        }
+
+    def _stub_writing(self, tmp_path: Path, *, honor: set[str]) -> Path:
+        """An abicheck that writes only the `json=` destinations in *honor*.
+
+        Lets a test name two JSON destinations and have exactly one arrive —
+        the shape the clearing bug hid.
+        """
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        payload = json.dumps({"report_schema_version": "4.4", "verdict": "COMPATIBLE"})
+        lines = ["#!/usr/bin/env bash"]
+        for name in sorted(honor):
+            lines.append(f"printf '%s' '{payload}' > {name}")
+        lines.append("exit 0")
+        stub = bindir / "abicheck"
+        stub.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return bindir
+
+    def test_a_json_write_followed_by_another_format_is_still_required(
+        self, tmp_path: Path
+    ) -> None:
+        # The exact reported case: the json destination is named first, a
+        # non-json `--write` follows, and nothing writes the json one.
+        target = tmp_path / "a.json"
+        bindir = self._stub_writing(tmp_path, honor=set())
+        outputs = _run_action(
+            tmp_path,
+            self._env(
+                tmp_path, f"--write json={target} --write markdown={tmp_path / 'b.md'}"
+            ),
+            bindir,
+        )
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
+
+    def test_the_same_combination_passes_when_the_json_destination_arrives(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: identical extra-args, but the stub honors the json
+        # destination. Without this, the fix is satisfiable by rejecting every
+        # multi-write invocation.
+        target = tmp_path / "a.json"
+        bindir = self._stub_writing(tmp_path, honor={str(target)})
+        outputs = _run_action(
+            tmp_path,
+            self._env(
+                tmp_path, f"--write json={target} --write markdown={tmp_path / 'b.md'}"
+            ),
+            bindir,
+        )
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_second_json_destination_is_checked_too(self, tmp_path: Path) -> None:
+        # "Track all caller-supplied JSON destinations" — one arriving does not
+        # excuse another that did not, so a readable first destination must not
+        # mask an absent second.
+        first = tmp_path / "a.json"
+        second = tmp_path / "b.json"
+        bindir = self._stub_writing(tmp_path, honor={str(first)})
+        outputs = _run_action(
+            tmp_path,
+            self._env(tmp_path, f"--write json={first} --write json={second}"),
+            bindir,
+        )
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
+
+    def test_both_json_destinations_arriving_passes(self, tmp_path: Path) -> None:
+        first = tmp_path / "a.json"
+        second = tmp_path / "b.json"
+        bindir = self._stub_writing(tmp_path, honor={str(first), str(second)})
+        outputs = _run_action(
+            tmp_path,
+            self._env(tmp_path, f"--write json={first} --write json={second}"),
+            bindir,
+        )
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_resultless_destination_is_caught(self, tmp_path: Path) -> None:
+        target = tmp_path / "a.json"
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "abicheck"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf '%s' '{{\"error\": \"write interrupted\"}}' > {target}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, f"--write json={target}"), bindir
+        )
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs

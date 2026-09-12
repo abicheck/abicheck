@@ -168,20 +168,32 @@ def _carries_a_result(document: dict[str, Any]) -> bool:
 #: Per *version sequence*, the first version whose documents owe an
 #: assurance contribution alongside an assurance block.
 #:
-#: Two independent sequences reach this reader and they must never be
-#: compared against each other's thresholds (Codex review, P2): a two-sided
-#: ``compare`` document carries ``report_schema_version`` and first emitted
-#: ``analysis_assurance_exit_contribution`` at 2.40
-#: (``abicheck/schemas/__init__.py``), while an audit-only
-#: (``--no-baseline``) document carries ``audit_report_schema_version`` on
-#: its own 1.x sequence (``abicheck/report/no_baseline_document.py``) and has
-#: carried ``exit_axes.analysis_assurance`` since its first released version,
-#: 1.1 -- 1.0 was never released. Reading an audit document's ``1.5`` against
-#: the compare threshold made every audit report look older than a field it
-#: has always had, so a lost contribution silently read as "legacy, accept".
+#: Three independent sequences reach this reader and they must never be
+#: compared against each other's thresholds (Codex review, P2, twice):
+#:
+#: * a two-sided ``compare`` document carries ``report_schema_version`` and
+#:   first emitted ``analysis_assurance_exit_contribution`` at 2.40
+#:   (``abicheck/schemas/__init__.py``);
+#: * an audit-only (``--no-baseline``) document carries
+#:   ``audit_report_schema_version`` on its own 1.x sequence
+#:   (``abicheck/report/no_baseline_document.py``) and has carried
+#:   ``exit_axes.analysis_assurance`` since its first released version, 1.1 --
+#:   1.0 was never released;
+#: * a directory/package release document carries ``release_schema_version``
+#:   (``abicheck/schemas/release_schema.py``), whose 1.3 landed ADR-071's
+#:   paired top-level ``analysis_assurance`` block and
+#:   ``analysis_assurance_exit_contribution``.
+#:
+#: Both non-compare sequences are numerically below ``(2, 40)`` at every real
+#: version, so measuring either against the compare threshold makes those
+#: documents look older than a field they carry -- and a lost contribution then
+#: reads as "legacy, accept". The audit sequence was missed first and the
+#: release sequence second; a new report shape with its own version key needs
+#: an entry here, not a fallback.
 ASSURANCE_CONTRIBUTION_SINCE = {
     "report_schema_version": (2, 40),
     "audit_report_schema_version": (1, 1),
+    "release_schema_version": (1, 3),
 }
 
 
