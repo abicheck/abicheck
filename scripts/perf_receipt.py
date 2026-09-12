@@ -672,6 +672,47 @@ class CommandRun:
         return out
 
 
+def _reap_process_group(proc: subprocess.Popen[str]) -> tuple[str, str]:
+    """Terminate then kill *proc*'s whole process group, returning what it wrote.
+
+    The **group**, not just the direct child: a castxml grandchild outliving its
+    parent would keep burning CPU and skew every later measurement on the same
+    host, and the RSS sampler would keep attributing it to an abandoned tree.
+
+    SIGTERM first so a well-behaved child can flush, SIGKILL second. A failure to
+    signal at all (the group is already gone, or the platform refuses) stops the
+    escalation rather than retrying -- there is nothing left to signal.
+    """
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            break
+        try:
+            return proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            continue
+    return "", ""
+
+
+def _communicate_or_reap(
+    proc: subprocess.Popen[str], *, timeout: float
+) -> tuple[str, str, bool]:
+    """Collect *proc*'s output, reaping its whole group if it overruns *timeout*.
+
+    Returns ``(stdout, stderr, timed_out)``. A timeout is reported, never raised:
+    a scenario decides for itself that an overrunning step is a failure, and a
+    harness that propagated the exception could not record which step it was.
+    """
+    try:
+        return (*proc.communicate(timeout=timeout), False)
+    except subprocess.TimeoutExpired:
+        stdout, stderr = _reap_process_group(proc)
+        if proc.returncode is None:
+            proc.wait(timeout=10)
+        return stdout, stderr, True
+
+
 def run_measured(
     argv: list[str],
     *,
@@ -722,25 +763,7 @@ def run_measured(
     )
     if sampler is not None:
         sampler.start(proc.pid)
-    timed_out = False
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(os.getpgid(proc.pid), sig)
-            except (ProcessLookupError, PermissionError, OSError):
-                break
-            try:
-                stdout, stderr = proc.communicate(timeout=10)
-                break
-            except subprocess.TimeoutExpired:
-                continue
-        else:
-            stdout, stderr = "", ""
-        if proc.returncode is None:
-            proc.wait(timeout=10)
+    stdout, stderr, timed_out = _communicate_or_reap(proc, timeout=timeout)
     wall = time.perf_counter() - start
     if sampler is not None:
         sampler.stop()

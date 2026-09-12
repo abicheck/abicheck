@@ -1053,6 +1053,72 @@ def _reset_cache(cache_root: Path) -> None:
     cache_root.mkdir(parents=True, exist_ok=True)
 
 
+def _build_fixture_for(
+    scenario: Scenario, build_root: Path
+) -> tuple[fixtures.BuiltFixture | None, dict[str, Any]]:
+    """Build *scenario*'s fixture, returning it plus the receipt fields it yields.
+
+    ``None`` with a ``status``/``skip_reason`` pair when the build fails: a
+    scenario that could not build its own inputs measured nothing, so that is a
+    hard failure and never a skip.
+
+    The build's own duration is reported separately and is never inside any timed
+    window -- compiling a fixture is setup, not something a user's command pays
+    for.
+    """
+    start = time.perf_counter()
+    try:
+        fixture = fixtures.build(scenario.spec, build_root)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        # Those three are what a real compile can raise; catching more would
+        # swallow a bug in this harness as if it were a toolchain problem.
+        return None, {
+            "status": "failed",
+            "skip_reason": f"fixture build failed: {type(exc).__name__}: {exc}",
+        }
+    return fixture, {
+        "fixture_build_seconds": time.perf_counter() - start,
+        "input_digest": digest_paths(
+            [h for lib in fixture.old + fixture.new for h in lib.headers]
+        ),
+        "header_contexts": len(
+            {str(lib.include_dir.name) for lib in fixture.new}
+            if scenario.spec.distinct_contexts
+            else {"shared"}
+        ),
+    }
+
+
+def _run_setup_steps(
+    setup_steps: list[Step], execute: Callable[..., CommandRun]
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Run the untimed setup steps, returning their receipt rows and any failure.
+
+    Setup rows are returned even when a later step fails, so a reader can see how
+    far preparation got. Their scope is ``"setup"`` and they are never gated: a
+    pre-dump of a stored operand is not something a user's command pays for.
+    """
+    rows: list[dict[str, Any]] = []
+    for step in setup_steps:
+        run = execute(step, timed=False)
+        rows.append(
+            {
+                "name": step.name,
+                "scope": "setup",
+                "gated": False,
+                "wall_seconds": run.wall_seconds,
+                "exit_code": run.exit_code,
+                "native_invocations": run.native_invocations,
+            }
+        )
+        if run.exit_code not in step.ok_exit_codes:
+            return rows, (
+                f"setup step {step.name} exited {run.exit_code}: "
+                f"{run.stderr.strip()[-600:]}"
+            )
+    return rows, None
+
+
 def _needs_cold_cache(cache_mode: str, step: Step, index: int) -> bool:
     """Whether the cache must be emptied before this step of this repetition.
 
@@ -1246,32 +1312,10 @@ def run_scenario(
             spy.install()
         result["spy_shimmed_tools"] = list(spy.shimmed)
 
-        t_build = time.perf_counter()
-        try:
-            fixture = fixtures.build(scenario.spec, build_root)
-        except (
-            subprocess.CalledProcessError,
-            subprocess.TimeoutExpired,
-            OSError,
-        ) as exc:
-            # A fixture build failure is a hard failure, never a skip: a
-            # scenario that could not build its own inputs measured nothing.
-            # Narrowed from a bare `Exception` -- those three are what a real
-            # compile can raise, and catching more would swallow a bug in this
-            # harness as if it were a toolchain problem.
-            result["status"] = "failed"
-            result["skip_reason"] = f"fixture build failed: {type(exc).__name__}: {exc}"
+        fixture, build_rows = _build_fixture_for(scenario, build_root)
+        result.update(build_rows)
+        if fixture is None:
             return result
-        # Setup cost, reported separately and never inside any measured window.
-        result["fixture_build_seconds"] = time.perf_counter() - t_build
-        result["input_digest"] = digest_paths(
-            [h for lib in fixture.old + fixture.new for h in lib.headers]
-        )
-        result["header_contexts"] = len(
-            {str(lib.include_dir.name) for lib in fixture.new}
-            if scenario.spec.distinct_contexts
-            else {"shared"}
-        )
 
         base_env = dict(os.environ)
         # A per-scenario cache root is what makes "cold application cache" true.
@@ -1298,26 +1342,14 @@ def run_scenario(
             return run
 
         # Untimed setup (pre-dumping a stored operand, etc.).
-        setup_steps = scenario.prepare(fixture, work) if scenario.prepare else []
-        for step in setup_steps:
-            run = execute(step, timed=False)
-            if run.exit_code not in step.ok_exit_codes:
-                result["status"] = "failed"
-                result["validation_problems"].append(
-                    f"setup step {step.name} exited {run.exit_code}: "
-                    f"{run.stderr.strip()[-600:]}"
-                )
-                return result
-            result["steps"].append(
-                {
-                    "name": step.name,
-                    "scope": "setup",
-                    "gated": False,
-                    "wall_seconds": run.wall_seconds,
-                    "exit_code": run.exit_code,
-                    "native_invocations": run.native_invocations,
-                }
-            )
+        setup_rows, setup_failure = _run_setup_steps(
+            scenario.prepare(fixture, work) if scenario.prepare else [], execute
+        )
+        result["steps"].extend(setup_rows)
+        if setup_failure is not None:
+            result["status"] = "failed"
+            result["validation_problems"].append(setup_failure)
+            return result
 
         measured = scenario.steps(fixture, work)
         runs: dict[str, list[CommandRun]] = {}
@@ -1540,6 +1572,106 @@ def _print_table(scenarios: list[dict[str, Any]], *, markdown: bool = False) -> 
         print("  ".join(c.ljust(w) for c, w in zip(row, widths)))
 
 
+def host_unsuitable_reason() -> str | None:
+    """Why this host cannot run the harness, or ``None`` when it can."""
+    if not sys.platform.startswith("linux"):
+        return "the full-CLI L2 harness is Linux/ELF-scoped"
+    if not fixtures.compiler_available("g++"):
+        return "no g++ on PATH: the fixture cannot be built"
+    return None
+
+
+def select_scenarios(suite: str, patterns: list[str] | None) -> list[Scenario]:
+    """The suite's scenarios, narrowed to those whose id contains any *pattern*."""
+    scenarios = pr_suite() if suite == "pr" else extended_suite()
+    if not patterns:
+        return scenarios
+    return [s for s in scenarios if any(pattern in s.id for pattern in patterns)]
+
+
+def _report_coverage_claim(
+    results: list[dict[str, Any]], *, suite: str, narrowed: bool, no_spy: bool
+) -> list[str]:
+    """Enforce or disclaim required-shape coverage, returning any failures.
+
+    A full ``pr``-suite run must measure every required shape -- a missing one is
+    a failure, never a clean pass over the shapes that did run. A deliberately
+    narrowed run instead *states* that it claims no coverage, which is the only
+    honest form a local subset run can take. ``--no-spy`` disclaims separately,
+    since it disables every extraction-count contract and so proves nothing about
+    the compiler-free or single-side paths however many scenarios ran.
+    """
+    failures: list[str] = []
+    if suite == "pr" and not narrowed:
+        failures += required_coverage_failures(results, REQUIRED_PR_SHAPES)
+    elif narrowed:
+        missing = required_coverage_failures(results, REQUIRED_PR_SHAPES)
+        print(
+            f"\nCOVERAGE NOT CLAIMED: --scenario narrowed this run; "
+            f"{len(missing)} required shape(s) were not measured. This run's "
+            "verdict covers only the scenarios it actually ran."
+        )
+    if no_spy:
+        print(
+            "\nCOVERAGE NOT CLAIMED (native invocations): --no-spy disabled "
+            "invocation observation, so no extraction-count contract was checked "
+            "-- this run proves nothing about compiler-free or single-side paths."
+        )
+    return failures
+
+
+def _gate_against_baseline(
+    current: dict[tuple[str, str], float],
+    baseline: dict[tuple[str, str], float] | None,
+    threshold: GateThreshold,
+    *,
+    baseline_path: Path | None,
+) -> list[str]:
+    """Compare *current* against *baseline*, printing what was and was not gated.
+
+    Returns the gate's failure messages. A baseline sharing **no** point with this
+    run is itself a failure rather than a clean pass: an axis change or a
+    mistargeted file otherwise produces an empty failure list, which reads
+    identically to "everything was fine".
+    """
+    if baseline is None:
+        print(
+            "No --baseline given: report-only run. Pass a previously written "
+            "--json-out report via --baseline to gate future runs against it."
+        )
+        return []
+    matched = {k: v for k, v in current.items() if is_gateable(baseline.get(k))}
+    if not matched:
+        return [
+            f"--baseline {baseline_path} shares no gated (scenario, step) point "
+            f"with this run's {len(current)} — nothing was actually gated"
+        ]
+    failures = check_regressions(current, baseline, threshold)
+    print(f"Gated {len(matched)} of {len(current)} measured point(s).")
+    for key in sorted(set(current) - set(matched)):
+        print(f"  NOTE: not gated (no baseline entry): {key[0]} / {key[1]}")
+    return failures
+
+
+def _read_baseline_or_fail(
+    path: Path,
+) -> tuple[dict[tuple[str, str], float] | None, str | None]:
+    """Load *path*, or return the message explaining why it could not be read."""
+    try:
+        baseline, rejected = load_baseline(path)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return None, f"could not read --baseline {path}: {exc}"
+    if rejected:
+        print(
+            f"\nNOTE: {len(rejected)} baseline scenario(s) did not pass their own "
+            "validation and contribute no gated point (a failed base run is not a "
+            "measurement, and is usually *faster* than a correct one):"
+        )
+        for scenario_id in rejected:
+            print(f"  - {scenario_id}")
+    return baseline, None
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1603,11 +1735,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    unsuitable = None
-    if not sys.platform.startswith("linux"):
-        unsuitable = "the full-CLI L2 harness is Linux/ELF-scoped"
-    elif not fixtures.compiler_available("g++"):
-        unsuitable = "no g++ on PATH: the fixture cannot be built"
+    unsuitable = host_unsuitable_reason()
     if unsuitable:
         if args.require_toolchain:
             print(f"FAIL: --require-toolchain given but {unsuitable}.")
@@ -1615,14 +1743,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"SKIP: {unsuitable} — nothing measured (exit 0, no coverage claimed).")
         return 0
 
-    scenarios = pr_suite() if args.suite == "pr" else extended_suite()
-    if args.scenario:
-        scenarios = [
-            s for s in scenarios if any(pattern in s.id for pattern in args.scenario)
-        ]
-        if not scenarios:
-            print(f"FAIL: --scenario {args.scenario} matched nothing.")
-            return 1
+    scenarios = select_scenarios(args.suite, args.scenario)
+    if not scenarios:
+        print(f"FAIL: --scenario {args.scenario} matched nothing.")
+        return 1
 
     threshold = GateThreshold(
         tolerance=args.regress_tolerance,
@@ -1694,58 +1818,22 @@ def main(argv: list[str] | None = None) -> int:
     # never read as a clean pass -- and reported-but-not-enforced when the caller
     # asked for a subset, with the lack of a coverage claim stated rather than
     # left for a reader to infer from the absent rows.
-    if args.suite == "pr" and not args.scenario:
-        failures += required_coverage_failures(results, REQUIRED_PR_SHAPES)
-    elif args.scenario:
-        missing = required_coverage_failures(results, REQUIRED_PR_SHAPES)
-        print(
-            f"\nCOVERAGE NOT CLAIMED: --scenario narrowed this run; "
-            f"{len(missing)} required shape(s) were not measured. This run's "
-            "verdict covers only the scenarios it actually ran."
-        )
-    if args.no_spy:
-        print(
-            "\nCOVERAGE NOT CLAIMED (native invocations): --no-spy disabled "
-            "invocation observation, so no extraction-count contract was checked "
-            "-- this run proves nothing about compiler-free or single-side paths."
-        )
+    failures += _report_coverage_claim(
+        results, suite=args.suite, narrowed=bool(args.scenario), no_spy=args.no_spy
+    )
 
     baseline = None
     if args.baseline is not None:
-        try:
-            baseline, rejected = load_baseline(args.baseline)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            print(f"\nFAIL: could not read --baseline {args.baseline}: {exc}")
+        baseline, read_error = _read_baseline_or_fail(args.baseline)
+        if read_error is not None:
+            print(f"\nFAIL: {read_error}")
             return 1
-        if rejected:
-            print(
-                f"\nNOTE: {len(rejected)} baseline scenario(s) did not pass their own "
-                "validation and contribute no gated point (a failed base run is not a "
-                "measurement, and is usually *faster* than a correct one):"
-            )
-            for scenario_id in rejected:
-                print(f"  - {scenario_id}")
 
     current = gated_points(results)
     print(f"\nEffective threshold: {threshold.as_dict()}")
-    if baseline is not None:
-        matched = {k: v for k, v in current.items() if is_gateable(baseline.get(k))}
-        if not matched:
-            failures.append(
-                f"--baseline {args.baseline} shares no gated (scenario, step) point "
-                f"with this run's {len(current)} — nothing was actually gated"
-            )
-        else:
-            failures += check_regressions(current, baseline, threshold)
-            print(f"Gated {len(matched)} of {len(current)} measured point(s).")
-            ungated = sorted(set(current) - set(matched))
-            for key in ungated:
-                print(f"  NOTE: not gated (no baseline entry): {key[0]} / {key[1]}")
-    else:
-        print(
-            "No --baseline given: report-only run. Pass a previously written "
-            "--json-out report via --baseline to gate future runs against it."
-        )
+    failures += _gate_against_baseline(
+        current, baseline, threshold, baseline_path=args.baseline
+    )
 
     if args.json_out is not None:
         same = (
