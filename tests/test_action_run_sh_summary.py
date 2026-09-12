@@ -30,7 +30,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "# If output was captured"
@@ -60,6 +60,7 @@ def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
     docstring); omitted, the isolated snippet behaves exactly as it did
     before that value existed.
     """
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
     ) as f:

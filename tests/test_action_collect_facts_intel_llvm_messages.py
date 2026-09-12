@@ -39,7 +39,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_DIR = REPO_ROOT / "actions" / "collect-facts"
@@ -50,6 +50,7 @@ def _run_action(
     env_extra: dict[str, str], cwd: Path
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Invoke the real script end-to-end with GITHUB_ENV/GITHUB_OUTPUT files."""
+    require_bash()
     github_env = cwd / "github_env"
     github_output = cwd / "github_output"
     github_env.write_text("")

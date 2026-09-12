@@ -38,7 +38,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 CHECK_SINGLE = WORKFLOWS_DIR / "check-single.yml"
@@ -787,6 +787,7 @@ class TestPreCheckOperationalErrorReport:
         confirming the emitted report-path/exit-code/check-id outputs and
         that the underlying report.json is a valid operational-error
         envelope."""
+        require_bash()
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         precheck = next(
@@ -1198,6 +1199,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         script = resolver["run"]
 
         def build_output_output(*, stage_file: bool) -> str:
+            require_bash()
             root = tmp_path / ("with-file" if stage_file else "without-file")
             (root / "candidate").mkdir(parents=True)
             (root / "candidate" / "libexample.so").write_text("real")
@@ -1619,6 +1621,7 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         # once bash's own double-quote unescaping has run; extracting and
         # feeding the raw text straight to `python3 -c` skips that step and
         # is a SyntaxError (backslash in an f-string expression part).
+        require_bash()
         github_output = tmp_path / "github_output"
         github_output.write_text("")
         env = {

@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -219,6 +219,7 @@ def _run_bash_script(
     inline ``-c`` argument -- see
     ``test_action_compile_context_parity._run_bash_script``'s identical
     docstring for the full windows-latest rationale this mirrors."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:

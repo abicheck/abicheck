@@ -57,6 +57,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.serialization import snapshot_to_json
+from tests.schema_validation import validate_instance
 
 
 def _fn(name: str, mangled: str) -> Function:
@@ -656,11 +657,11 @@ class TestCoverageFailuresValidateAgainstTheSchema:
         return json.loads(to_json(result))
 
     def _validate(self, report: dict) -> None:
-        jsonschema = pytest.importorskip("jsonschema")
+        pytest.importorskip("jsonschema")
 
         from abicheck.schemas import load_compare_report_schema
 
-        jsonschema.validate(report, load_compare_report_schema())
+        validate_instance(report, load_compare_report_schema())
 
     def test_a_report_carrying_failures_validates(self) -> None:
         report = self._report(contract_mode="exports")

@@ -34,7 +34,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "stage-baseline"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -94,6 +94,7 @@ def _parse_kv_file(path: Path) -> dict[str, str]:
 def _run_action(
     env_extra: dict[str, str], cwd: Path
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
+    require_bash()
     github_output = cwd / "github_output"
     github_output.write_text("")
     base_env = {

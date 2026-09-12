@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECK_TARGET_ACTION = _REPO_ROOT / "actions" / "check-target" / "action.yml"
@@ -121,6 +121,7 @@ def _bash_pwd(cwd: Path) -> str:
     ``_bash_pwd`` for the full rationale: a Windows/Git-Bash runner's
     ``$PWD`` is always the MSYS POSIX form, never the native backslash form
     ``pathlib.Path`` prints there)."""
+    require_bash()
     result = subprocess.run(
         [bash_executable(), "-c", "printf '%s' \"$PWD\""],
         capture_output=True,
@@ -140,6 +141,7 @@ def _run_bash_script(
     """Run *script* via a real bash from a temp file (Windows argv-quoting
     safety, matching test_action_compile_context_parity.py's own
     _run_bash_script)."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:

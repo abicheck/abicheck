@@ -40,6 +40,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
+from tests.schema_validation import validate_instance
+
 _requires_jsonschema = pytest.mark.skipif(
     jsonschema is None, reason="jsonschema not installed"
 )
@@ -223,7 +225,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         assert "suppression_audit" in payload
         schema = load_compare_report_schema()
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
         assert "suppression_audit" in schema["properties"]
 
     def test_label_falls_back_to_selector_not_bucket_index(self, tmp_path):

@@ -15,7 +15,8 @@
 
 """A test that shells out must resolve bash, not spell it as a bare literal.
 
-Bug class `tests.bare_bash_resolves_to_wsl_stub`. On GitHub's `windows-latest`
+Bug class `guard.platform_convention_without_a_gate`
+(`tests/regressions/manifest_guards.py`). On GitHub's `windows-latest`
 runners `%SystemRoot%\\System32\\bash.exe` is the WSL *launcher stub* — present
 even with no distribution installed. A bare ``["bash", ...]`` argv resolves
 through PATH and can find it ahead of Git for Windows' real bash, whereupon it
@@ -53,10 +54,10 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from types import SimpleNamespace
 
+import _workflow_exec
 import pytest
-from _workflow_exec import bash_executable
+from _pytest.outcomes import Skipped
 
 TESTS_DIR = Path(__file__).resolve().parent
 
@@ -74,12 +75,23 @@ def _test_modules() -> list[Path]:
 
 
 def _argv_program(node: ast.Call) -> ast.expr | None:
-    """The expression in `node`'s argv position, if this is a subprocess call."""
+    """The expression in `node`'s argv position, if this is a subprocess call.
+
+    `args` is read as a keyword as well as positionally: every one of these
+    entry points names its first parameter `args`, so
+    `subprocess.run(args=["bash", ...])` is the same call with the same
+    exposure, and a scan that only inspected `node.args[0]` would pass it
+    (Codex review, P1). A call that somehow supplies both is not a shape to
+    reason about -- Python rejects it -- so the positional wins and the
+    keyword is consulted only in its absence.
+    """
     func = node.func
     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-    if name not in _SUBPROCESS_ENTRY_POINTS or not node.args:
+    if name not in _SUBPROCESS_ENTRY_POINTS:
         return None
-    argv = node.args[0]
+    argv: ast.expr | None = node.args[0] if node.args else None
+    if argv is None:
+        argv = next((kw.value for kw in node.keywords if kw.arg == "args"), None)
     if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
         return None
     return argv.elts[0]
@@ -95,6 +107,45 @@ def _bare_bash_call_sites(source: str) -> list[int]:
         if isinstance(program, ast.Constant) and program.value == "bash":
             hits.append(node.lineno)
     return hits
+
+
+def _unguarded_resolutions(source: str) -> list[str]:
+    """Names of functions that resolve bash, shell out, and never guard.
+
+    Reported per enclosing function rather than per call, since the guard is a
+    property of the function that shells out: two resolutions in one guarded
+    helper are one guarded call site, not two offences.
+
+    Resolving is only an offence when the function also *runs* something: a
+    test that reasons about `bash_executable` itself -- the behavioural half
+    below, or any future test of the resolver -- never reaches a stub and has
+    nothing to skip for. Pairing the resolution with a subprocess entry point
+    is deliberately looser than checking the argv position, because a call
+    site that builds `cmd = [bash_executable(), ...]` and passes the name on
+    is just as exposed as one that inlines it.
+    """
+    offenders: list[str] = []
+
+    def _names_called(fn: ast.AST) -> set[str]:
+        found = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call):
+                f = node.func
+                name = (
+                    f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+                )
+                if name:
+                    found.add(name)
+        return found
+
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        called = _names_called(node)
+        shells_out = bool(called & _SUBPROCESS_ENTRY_POINTS)
+        if "bash_executable" in called and shells_out and "require_bash" not in called:
+            offenders.append(node.name)
+    return offenders
 
 
 def _private_clone_lines(source: str) -> list[int]:
@@ -139,6 +190,10 @@ class TestNoModuleSpellsBashItself:
         """The structural rule is not vacuous: it fires on the shape it bans."""
         assert _bare_bash_call_sites('subprocess.run(["bash", str(p)])') == [1]
         assert _bare_bash_call_sites('subprocess.Popen(("bash", "-c", s))') == [1]
+        # The same call with argv passed by keyword — a distinct shape, not a
+        # rewording of the one above, and the one the first revision missed.
+        assert _bare_bash_call_sites('subprocess.run(args=["bash", "-c", s])') == [1]
+        assert _bare_bash_call_sites('subprocess.run(args=["bash"], check=True)') == [1]
         assert _private_clone_lines(
             "def _bash_executable() -> str:\n    return 'x'\n"
         ) == [1]
@@ -151,42 +206,91 @@ class TestNoModuleSpellsBashItself:
             pytest.param('x = "bash"', id="plain-assignment"),
             pytest.param('"""a docstring mentioning bash"""', id="prose"),
             pytest.param("subprocess.run(cmd)", id="argv-is-a-name"),
+            pytest.param("subprocess.run(args=cmd)", id="keyword-argv-is-a-name"),
+            pytest.param(
+                'subprocess.run(args=[exe, "bash"])', id="keyword-not-the-program"
+            ),
         ],
     )
     def test_the_scan_does_not_fire_on_a_non_call_site(self, benign: str) -> None:
         assert _bare_bash_call_sites(benign) == []
 
 
-class TestResolverIsNotAnAlias:
-    """The behavioural half: resolving actually changes the program on `nt`."""
+class TestEveryResolvedCallSiteGuardsFirst:
+    """The third rule: resolving without asking reaches the same stub.
 
-    def test_resolves_to_git_bash_on_a_windows_host(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        git_bash = tmp_path / "bash.exe"
-        git_bash.write_text("", encoding="utf-8")
-        # Only the resolver's own view of `os` is swapped: patching the real
-        # `os.name` would also flip `pathlib.Path()` to `WindowsPath`, whose
-        # `is_file()` cannot see a POSIX path, and the test would then pass for
-        # the wrong reason.
-        monkeypatch.setattr(
-            "_workflow_exec.os",
-            SimpleNamespace(name="nt", environ={"GIT_BASH_PATH": str(git_bash)}),
-        )
-        resolved = bash_executable()
-        assert resolved == str(git_bash)
-        assert resolved != "bash", (
-            "the resolver has been reduced to an alias for the bare program, "
-            "which makes the structural rule above enforce nothing"
+    `bash_executable()` deliberately still answers `"bash"` on a machine with
+    no real bash, because every call site hands it straight to `subprocess`.
+    So the resolver alone does not protect a caller on a stub-only runner --
+    `require_bash()` is the half that skips, and a function that resolves
+    without it runs the WSL launcher exactly as a bare argv would. Banning the
+    literal while allowing the unguarded call would move the defect, not
+    remove it.
+    """
+
+    def test_every_function_that_resolves_also_guards(self) -> None:
+        offenders = {}
+        for path in _test_modules():
+            hits = _unguarded_resolutions(path.read_text(encoding="utf-8"))
+            if hits:
+                offenders[path.relative_to(TESTS_DIR).as_posix()] = hits
+        assert offenders == {}, (
+            "these functions call `bash_executable()` without calling "
+            "`require_bash()` first, so on a runner whose only bash is the "
+            "WSL launcher stub they execute it instead of skipping: "
+            f"{offenders}"
         )
 
-    def test_non_windows_hosts_keep_the_path_lookup(
+    def test_the_scan_would_catch_an_unguarded_resolution(self) -> None:
+        unguarded = "def f():\n    subprocess.run([bash_executable(), p])\n"
+        guarded = (
+            "def f():\n    require_bash()\n    subprocess.run([bash_executable(), p])\n"
+        )
+        indirect = (
+            "def f():\n    cmd = [bash_executable(), p]\n    subprocess.run(cmd)\n"
+        )
+        assert _unguarded_resolutions(unguarded) == ["f"]
+        assert _unguarded_resolutions(indirect) == ["f"]
+        assert _unguarded_resolutions(guarded) == []
+
+    def test_reasoning_about_the_resolver_is_not_shelling_out(self) -> None:
+        """The rule follows the subprocess, not the import or the mention."""
+        assert (
+            _unguarded_resolutions("from _workflow_exec import bash_executable\n") == []
+        )
+        assert _unguarded_resolutions("def f():\n    assert bash_executable()\n") == []
+
+
+class TestTheGuardedPairIsNotAnAlias:
+    """The behavioural half: both helpers do something other than the ban.
+
+    Without this the three structural rules could all pass on the day
+    `bash_executable()` became `return "bash"` and `require_bash()` became a
+    no-op -- every call site would be spelled correctly and every one of them
+    would run the stub.
+    """
+
+    def test_the_resolver_returns_the_bash_it_found(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(
-            "_workflow_exec.os",
-            SimpleNamespace(
-                name="posix", environ={"GIT_BASH_PATH": r"C:\nonsense\bash.exe"}
-            ),
+        monkeypatch.setattr(_workflow_exec, "_real_bash", lambda: r"C:\Git\bash.exe")
+        resolved = _workflow_exec.bash_executable()
+        assert resolved == r"C:\Git\bash.exe"
+        assert resolved != "bash", (
+            "the resolver has been reduced to an alias for the bare program, "
+            "which makes the structural rules above enforce nothing"
         )
-        assert bash_executable() == "bash"
+
+    def test_the_guard_really_skips_when_no_real_bash_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_workflow_exec, "_real_bash", lambda: None)
+        with pytest.raises(Skipped):
+            _workflow_exec.require_bash()
+
+    def test_the_guard_is_silent_when_a_real_bash_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_workflow_exec, "_real_bash", lambda: "/usr/bin/bash")
+        _workflow_exec.require_bash()  # does not raise
+        assert _workflow_exec.have_bash() is True

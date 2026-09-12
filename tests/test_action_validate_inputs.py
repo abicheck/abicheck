@@ -38,7 +38,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
 VALIDATE_SH = ACTION_DIR / "validate-inputs.sh"
@@ -104,6 +104,7 @@ def _run_validate(
     itself (e.g. ``["-O", "xpg_echo"]``), so a test can exercise the script
     under a shell configured the way a real runner's might be -- see
     ``test_action_validate_inputs_injection.py``."""
+    require_bash()
     # Strip any of validate-inputs.sh's own INPUT_* vars the *test process*
     # inherited (e.g. if pytest itself ran inside a composite-action step)
     # before layering env_extra back on top -- otherwise a test that
@@ -1158,6 +1159,7 @@ def _validate_sh_operand_fn() -> str:
 
 
 def _classify(fn_region: str, path: str) -> bool:
+    require_bash()
     script = (
         fn_region
         + f'\nif _is_release_style_operand "{path}"; then exit 0; else exit 1; fi\n'

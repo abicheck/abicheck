@@ -38,7 +38,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -96,6 +96,7 @@ def _bash_pwd(cwd: Path) -> str:
     would compare two different path *representations* of the same
     directory, not two different directories. A no-op on POSIX hosts, where
     both forms already coincide)."""
+    require_bash()
     result = subprocess.run(
         [bash_executable(), "-c", "printf '%s' \"$PWD\""],
         capture_output=True,
@@ -116,6 +117,7 @@ def _run_bash_script(
     """Run *script* via a real bash from a temp file (Windows argv-quoting
     safety, matching test_action_compile_context_parity.py's own
     _run_bash_script -- see that module's docstring for the exact reason)."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:

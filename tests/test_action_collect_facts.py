@@ -39,7 +39,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_DIR = REPO_ROOT / "actions" / "collect-facts"
@@ -84,6 +84,7 @@ def _run_predicate(
     this instead overrides PATH at the OS-env level like _run_action does,
     using os.pathsep so it's correct on both platforms.
     """
+    require_bash()
     script = _helpers_region() + f"\n{call}\n"
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
@@ -118,6 +119,7 @@ def _run_action(
     env_extra: dict[str, str], cwd: Path
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Invoke the real script end-to-end with GITHUB_ENV/GITHUB_OUTPUT files."""
+    require_bash()
     github_env = cwd / "github_env"
     github_output = cwd / "github_output"
     github_env.write_text("")

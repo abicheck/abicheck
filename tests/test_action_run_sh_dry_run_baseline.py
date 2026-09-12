@@ -39,7 +39,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "_baseline_unavailable() {"
@@ -71,6 +71,7 @@ def _run_bash_script(
     via a file runs cleanly). A temp-file invocation has no such
     command-line-length ceiling on any platform.
     """
+    require_bash()
     fd, path = tempfile.mkstemp(suffix=".sh")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:

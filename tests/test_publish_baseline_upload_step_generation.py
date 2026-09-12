@@ -47,7 +47,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
@@ -120,6 +120,7 @@ class TestUploadReleaseAssetRejectsMismatchedBaselineGeneration:
         existing_manifest: dict[str, Any],
         new_manifest: dict[str, Any],
     ) -> subprocess.CompletedProcess[str]:
+        require_bash()
         build_manifest = _load_build_manifest_module(tmp_path)
 
         snapshot = {"schema_version": 9, "functions": [], "types": []}

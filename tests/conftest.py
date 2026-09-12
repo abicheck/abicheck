@@ -64,6 +64,34 @@ def _hypothesis_profile_for_mutmut() -> None:
 _hypothesis_profile_for_mutmut()
 
 
+_SNAPSHOT_CACHE_BUCKETS: dict[Path, Path] = {}
+
+
+def _snapshot_cache_bucket(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The one directory this process's per-test cache directories live in.
+
+    Allocating them *directly* in pytest's basetemp fixed half the cost and
+    left the other half in place: ``tmp_path`` still uses pytest's numbered
+    allocator, which enumerates every sibling of basetemp to pick the next
+    number -- so every ordinary ``tmp_path`` request kept paying for the
+    thousands of cache directories this autouse fixture had deposited next to
+    it, directories whose names it can never collide with anyway. Keeping them
+    in one randomly-named bucket restores basetemp to roughly one entry per
+    test while preserving the guarantee that matters: each test still gets its
+    own distinct, empty, test-owned directory under pytest's retention policy,
+    and no mutable state is shared between tests.
+
+    Allocated once per process (each xdist worker has its own basetemp, so the
+    key keeps a worker from ever reading another's entry).
+    """
+    basetemp = tmp_path_factory.getbasetemp()
+    bucket = _SNAPSHOT_CACHE_BUCKETS.get(basetemp)
+    if bucket is None or not bucket.is_dir():
+        bucket = Path(tempfile.mkdtemp(prefix="snapshot-caches-", dir=basetemp))
+        _SNAPSHOT_CACHE_BUCKETS[basetemp] = bucket
+    return bucket
+
+
 @pytest.fixture(autouse=True)
 def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
     """Redirect the whole-snapshot cache (``snapshot_cache.py``) to a fresh
@@ -96,7 +124,7 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
     cache_dir = Path(
         tempfile.mkdtemp(
             prefix="snapshot_cache-",
-            dir=tmp_path_factory.getbasetemp(),
+            dir=_snapshot_cache_bucket(tmp_path_factory),
         )
     )
     monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", cache_dir)
@@ -325,12 +353,16 @@ def _materialize_generated_skill_trees() -> None:
     `pytest tests/` — not just in whichever CI job happens to run
     `gen_agent_skills.py --check` first. Deterministic and reruns cheaply
     (see that script's docstring: pure-Python, sub-second, no network), so
-    doing it unconditionally here rather than only when the trees are
-    missing keeps them from silently drifting stale mid-session too.
+    the render itself is recomputed every time rather than trusting the
+    trees to still be what `skills-src/` says -- that is what keeps them
+    from silently drifting stale mid-session.
 
-    Under pytest-xdist every worker calls `pytest_configure` independently;
-    a file lock keyed on skills-src's own module serializes them so no two
-    workers race `write_trees()`'s own rm-then-rewrite against each other.
+    The *write*, though, happens only when the render and the trees actually
+    disagree. Under pytest-xdist every worker calls `pytest_configure`
+    independently, so an unconditional write meant N+1 destructive rewrites
+    per session; a file lock keyed on skills-src's own module serializes the
+    writers that remain, so no two race `write_trees()`'s rm-then-rewrite
+    against each other.
     """
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
     if str(scripts_dir) not in sys.path:
@@ -343,21 +375,52 @@ def _materialize_generated_skill_trees() -> None:
     lock_path = scripts_dir.parent / ".pytest_cache" / "gen_agent_skills.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _write() -> None:
-        try:
-            rendered = gen.render_all()
-        except gen.SkillGenerationError:
-            return  # a skills-src authoring error; let the real gen/AI-readiness checks report it
-        gen.write_trees(rendered)
+    try:
+        rendered = gen.render_all()
+    except gen.SkillGenerationError:
+        return  # a skills-src authoring error; let the real gen/AI-readiness checks report it
 
+    def _is_stale() -> bool:
+        # Content-keyed, not "have I already run": `check_trees` compares every
+        # owned file's bytes against the render, so a tree that is already
+        # correct is left untouched and a stale or partially-written one is
+        # still repaired. That is what makes this safe for both topologies --
+        # xdist workers sharing one checkout (the first writes, the rest
+        # verify and no-op) and remote workers with their own filesystem
+        # (each writes its own, because its own check fails).
+        try:
+            return bool(gen.check_trees(rendered))
+        except OSError:
+            # `check_trees` enumerates then reads, so a file that another
+            # process removes between those two steps raises here. That can
+            # only happen while a writer is mid-`write_trees`, which means the
+            # trees really are being rebuilt: answer "stale" and let the
+            # locked path settle it, rather than letting a transient
+            # FileNotFoundError abort pytest configuration outright
+            # (Codex review, PR #1252).
+            return True
+
+    def _write_if_stale() -> None:
+        if _is_stale():
+            gen.write_trees(rendered)
+
+    # Unconditional rewriting was not merely redundant work: `write_trees`
+    # removes each owned skill directory before restoring it, so every extra
+    # writer reopened a window in which a concurrent reader -- another worker's
+    # test, a parallel session, a restarted worker -- sees the tree absent.
+    # Checking first closes that window in the common case; the lock still
+    # serializes the writers that remain, and the re-check *inside* the lock is
+    # what decides, so this unlocked one can only ever cost a lock acquisition.
+    if not _is_stale():
+        return
     if filelock is not None:
         try:
             with filelock.FileLock(str(lock_path), timeout=120):
-                _write()
+                _write_if_stale()
         except filelock.Timeout:
             pass  # another worker is already materializing; proceed, it'll be done shortly
     else:
-        _write()
+        _write_if_stale()
 
 
 def pytest_configure(config: pytest.Config) -> None:

@@ -37,7 +37,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "case $VERDICT in"
@@ -165,6 +165,7 @@ def _report_path_anchor_source() -> str:
 
 def _run(env_overrides: dict[str, str], *, cwd: Path | None = None) -> str:
     """Run the extracted VERDICT-case snippet, return its stdout."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w",
         suffix=".sh",
@@ -366,6 +367,7 @@ class TestReportPathAnchoring:
     def _anchor(
         self, report_path: str, cwd: Path, *, windows: bool = False
     ) -> str:
+        require_bash()
         script = (
             _path_qualified_helper_source()
             + '\nf() {\n  local report_path="$1"\n'
@@ -413,6 +415,7 @@ class TestReportPathAnchoring:
         the expected value in the same representation the real script
         output is always in, on every platform (a no-op on POSIX hosts,
         where both forms already coincide)."""
+        require_bash()
         result = subprocess.run(
             [bash_executable(), "-c", "printf '%s' \"$PWD\""],
             capture_output=True,

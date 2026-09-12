@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECK_PROJECT = ROOT / ".github" / "workflows" / "check-project.yml"
@@ -253,6 +253,7 @@ def test_resolver_selects_only_the_current_targets_evidence(tmp_path: Path) -> N
     fail closed before ever reaching the per-cell selection this test is
     about.
     """
+    require_bash()
     from test_build_output import _binary, _write_pack
 
     project = _load(CHECK_PROJECT)
@@ -362,6 +363,7 @@ def _write_valid_build_output(
 
 
 def _run_resolver(resolver_run: str, tmp_path: Path, target_id: str) -> Any:
+    require_bash()
     candidate = tmp_path / "candidate"
     candidate.mkdir(exist_ok=True)
     (candidate / f"lib{target_id}.so").write_text("binary")
@@ -682,6 +684,7 @@ def test_resolver_rejects_escape_without_outside_side_effects(
     what actually trips the rejection, rather than an unrelated "no
     binary declared"/"missing schema" failure.
     """
+    require_bash()
     from test_build_output import _binary
 
     project = _load(CHECK_PROJECT)

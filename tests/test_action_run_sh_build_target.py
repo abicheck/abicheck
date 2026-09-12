@@ -42,7 +42,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
@@ -54,6 +54,7 @@ def _mode_branches_region() -> str:
 
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+    require_bash()
     script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
         "w",
@@ -88,6 +89,7 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
     """Run the mode-branch region and return the raw result, so a rejected
     input's own nonzero exit and `::error::` line can be asserted (`_run_cmd`
     treats a nonzero exit as a harness failure)."""
+    require_bash()
     script = _mode_branches_region() + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",

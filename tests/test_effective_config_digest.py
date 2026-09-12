@@ -53,6 +53,7 @@ from abicheck.policy_file import PolicyFile
 from abicheck.reclassify import ReclassifyRule
 from abicheck.reporter import to_json
 from abicheck.severity import resolve_severity_config
+from tests.schema_validation import validate_instance
 
 
 def _identity(
@@ -704,7 +705,6 @@ class TestCompatReportOmitsTheDigest:
         required field is genuinely populated the way to_json's real
         callers produce it."""
         pytest.importorskip("jsonschema")
-        import jsonschema
 
         from abicheck.model import AbiSnapshot, Function, Visibility
         from abicheck.schemas import load_compare_report_schema
@@ -729,7 +729,7 @@ class TestCompatReportOmitsTheDigest:
         result = compare(old, new)
         report = json.loads(to_json(result, include_exit_decision=False))
         assert "effective_config_digest" not in report
-        jsonschema.validate(report, load_compare_report_schema())
+        validate_instance(report, load_compare_report_schema())
 
 
 def _scoped_result(**dynamic_attrs) -> DiffResult:

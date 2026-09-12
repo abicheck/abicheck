@@ -162,10 +162,13 @@ for callers/tests that want a JSON string without touching a file.
 `.json.zst` is a first-class format, so it must work after a plain `pip
 install abicheck` on every supported Python (3.10–3.14 have no stdlib
 zstd) and OS, without depending on a system `zstd` binary. `zstandard` moved
-from the `validation` extra into `[project.dependencies]`; the
-`validation` extra is kept (now empty) rather than removed, so an existing
-`pip install "abicheck[validation]"` invocation doesn't fail on an unknown
-extra.
+from the `validation` extra into `[project.dependencies]`. The
+`validation` extra was initially kept (now empty) rather than removed, so an
+existing `pip install "abicheck[validation]"` invocation wouldn't fail on an
+unknown extra; it has since been deleted outright in the pre-release
+historical-surface cleanup, since no first-party script, CI job, or doc ever
+referenced it. The `validation/` harness itself is unaffected -- it never
+needed an extra of its own once `zstandard` became core.
 
 ### 6. Deterministic compression
 

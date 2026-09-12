@@ -59,6 +59,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
+from tests.schema_validation import validate_instance
+
 _requires_jsonschema = pytest.mark.skipif(
     jsonschema is None, reason="jsonschema not installed"
 )
@@ -212,7 +214,7 @@ class TestAnalysisAssuranceSchemaNamesTheConfigKeyNotTheRetiredFlag:
 class TestReportValidatesAgainstSchema:
     def _validate(self, payload: dict) -> None:
         schema = load_compare_report_schema()
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
 
     def test_no_change_report_validates(self):
         f = _fn("api", "_Z3apiv")
@@ -790,7 +792,7 @@ class TestNotComparableReportSchema:
 
     def _validate(self, payload: dict) -> None:
         schema = load_compare_report_schema()
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
 
     def test_not_comparable_report_with_reason_validates(self):
         payload = {
@@ -832,7 +834,7 @@ class TestCheckTargetSyntheticReportsValidateAgainstSchema:
 
     def _validate(self, payload: dict) -> None:
         schema = load_compare_report_schema()
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
 
     def test_operational_error_report_validates(self):
         from abicheck.buildsource.check_report import build_operational_error_report
@@ -924,7 +926,7 @@ class TestReportIdentityEnvelope:
         result.effective_depth = "headers"
         result.baseline_channel = "accepted-main"
         payload = json.loads(reporter.to_json(result))
-        jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        validate_instance(payload, load_compare_report_schema())
         assert payload["check_id"] == "libfoo@linux-x86_64-gcc13#accepted-main@source"
         assert payload["profile_id"] == "linux-x86_64-gcc13"
         assert payload["requested_depth"] == "source"
@@ -979,11 +981,11 @@ class TestReportIdentityEnvelope:
         schema = load_compare_report_schema()
 
         payload["check_id"] = "libfoo@profile#channel@source"
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
 
         payload["check_id"] = "libfoo@profile#channel@source\n"
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(instance=payload, schema=schema)
+            validate_instance(payload, schema)
 
     def test_environment_id_starting_with_punctuation_is_rejected(self):
         """Codex review, fresh evidence: build_check_id's own
@@ -1007,10 +1009,10 @@ class TestReportIdentityEnvelope:
         schema = load_compare_report_schema()
         payload["check_id"] = "libfoo@profile#channel@source!_prod"
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(instance=payload, schema=schema)
+            validate_instance(payload, schema)
 
         payload["check_id"] = "libfoo@profile#channel@source!prod"
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)
 
     def test_explicit_id_qualified_check_id_round_trips_and_validates(self):
         """G42 'Explicit check identifiers': the full construct
@@ -1032,7 +1034,7 @@ class TestReportIdentityEnvelope:
             explicit_id="l4-plugin-rhel8",
         )
         payload = json.loads(reporter.to_json(result))
-        jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        validate_instance(payload, load_compare_report_schema())
         assert (
             payload["check_id"]
             == "libfoo@linux-x86_64-gcc13#accepted-main@source~l4-plugin-rhel8"
@@ -1170,4 +1172,4 @@ class TestGateFailOnRemovedLibraryDigestField:
         payload = json.loads(reporter.to_json(compare(old, new)))
         assert "gate.fail_on_removed_library" in payload["effective_config_fields"]
         schema = load_compare_report_schema()
-        jsonschema.validate(instance=payload, schema=schema)
+        validate_instance(payload, schema)

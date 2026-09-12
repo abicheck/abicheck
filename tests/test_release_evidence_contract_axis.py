@@ -108,6 +108,11 @@ class TestReleaseEvidenceContractAxisIsPreserved:
         self, kwargs: dict, expected_code: int, expected_reason: str
     ) -> None:
         """Which code decides, and that the axis is reported either way."""
+        # The parametrize cases above are module-level dict *literals*,
+        # created once at collection -- and the calls below `.pop()` from
+        # this argument. One run per process is fine; a second run in the
+        # same process sees an already-stripped case. Copy before popping.
+        kwargs = dict(kwargs)
         decision = resolve_release_exit_decision(
             not_comparable=kwargs.pop("not_comparable", False),
             severity_scheme_active=kwargs.pop("severity_scheme_active", False),

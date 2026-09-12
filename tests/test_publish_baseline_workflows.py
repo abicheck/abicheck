@@ -43,7 +43,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 from abicheck.buildsource.baseline_publish import (
     accepted_main_cache_key,
@@ -345,6 +345,7 @@ class TestAcceptedMainCacheKeyRotation:
         # closes the gap a purely-structural/hand-derived check can't catch
         # (Codex review: the bash folding logic itself needs to be run, not
         # just asserted to contain a template string).
+        require_bash()
         import subprocess
 
         data = _load(UPDATE_MAIN_BASELINE)

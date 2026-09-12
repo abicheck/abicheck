@@ -46,7 +46,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
@@ -113,6 +113,7 @@ class TestUploadReleaseAssetRejectsMismatchedFactSet:
     def test_different_fact_set_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil

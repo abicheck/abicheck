@@ -51,7 +51,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 # Starts from _PY_BIN's own resolution, not _baseline_unavailable() -- the
@@ -224,6 +224,7 @@ def _run_bash_script(
     such command-line-length ceiling on any platform. Mirrors
     ``test_action_run_sh_dry_run_baseline.py``'s identical helper.
     """
+    require_bash()
     fd, path = tempfile.mkstemp(suffix=".sh")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:

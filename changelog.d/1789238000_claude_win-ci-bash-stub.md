@@ -1,0 +1,3 @@
+### Fixed
+
+- **`actions/check-target`'s derived CLI option table no longer loses entries.** The composite action carries a second copy of the derivation `action/run.sh` uses to learn which `abicheck compare` options take a value, and it carried both of that copy's defects: a leading-but-not-trailing delimiter, so the positionally-last spelling never matched on any platform; and, on Windows, CRLF from a native `python.exe`, so no option matched at all. Both failed silently past the "undetermined table" guard, leaving the step unable to tell a real flag in `extra-args` from another option's literal value.

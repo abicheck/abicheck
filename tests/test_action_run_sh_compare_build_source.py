@@ -36,7 +36,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -76,6 +76,7 @@ def _run_compare_raw(
     $PATH that records its own argv; returns the raw result plus the path
     the argv would have been captured to (may not exist if run.sh exited
     before ever invoking the stub)."""
+    require_bash()
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
@@ -549,6 +550,7 @@ def _run_baseline_compare_raw(
     result, the captured-argv path, and the captured-config path (mirrors
     ``_compile_overlay_from_cmd``'s own "snapshot the overlay file's
     content while run.sh is still running" rationale)."""
+    require_bash()
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"

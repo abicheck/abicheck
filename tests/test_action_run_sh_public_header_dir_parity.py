@@ -46,7 +46,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _END_MARKER = 'if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then'
@@ -63,6 +63,7 @@ def _mode_branches_region() -> str:
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     """Source the real mode-branch region with *env_extra* set, return CMD."""
+    require_bash()
     script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
         "w",

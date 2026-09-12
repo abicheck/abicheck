@@ -35,7 +35,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "check-target"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -59,6 +59,7 @@ _BASE_IDENTITY = {
 def _run(
     script: Path, env_extra: dict[str, str], cwd: Path
 ) -> subprocess.CompletedProcess[str]:
+    require_bash()
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env = {**base_env, "ACTION_PATH": str(ACTION_DIR), **env_extra}
     return subprocess.run(

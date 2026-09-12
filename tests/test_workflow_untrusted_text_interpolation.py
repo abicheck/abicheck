@@ -47,7 +47,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable, have_bash
+from _workflow_exec import bash_executable, have_bash, require_bash
 from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
 
 #: Contexts whose value is free text chosen by whoever opened the PR,
@@ -166,6 +166,7 @@ def _run_body_step(script: str, payload: str, workdir: Path) -> tuple[str | None
     `test_the_harness_can_execute_a_trivial_step` is what makes that state
     visible rather than silently reassuring.
     """
+    require_bash()
     env = {
         "PR_BODY": payload,
         "RUNNER_TEMP": str(workdir),

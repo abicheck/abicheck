@@ -35,7 +35,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -93,6 +93,7 @@ def _lib(tmp_path: Path, name: str) -> str:
 
 
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
+    require_bash()
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"

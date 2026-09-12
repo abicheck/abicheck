@@ -60,7 +60,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -184,6 +184,7 @@ def _run_bash_script(
     for the full rationale (Windows argv-reconstruction/console-encoding
     mangling of a complex inline script with many nested quotes; confirmed
     on windows-latest CI for this module's own scripts)."""
+    require_bash()
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
@@ -213,6 +214,7 @@ def _mark_executable(path: Path) -> None:
     and chmod'd from Python could be silently invisible to that search,
     letting the real system binary run instead of the fake one a test
     installs to stand in for it (Codex review, fresh evidence)."""
+    require_bash()
     result = subprocess.run(
         [bash_executable(), "-c", 'chmod +x "$1"', "_", str(path)],
         capture_output=True,
@@ -547,6 +549,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
         different, usually nonexistent, location. That makes a "does not
         exist" assertion pass vacuously either way, so only bash itself can
         answer this (Codex review, fresh evidence)."""
+        require_bash()
         result = subprocess.run(
             [bash_executable(), "-c", 'test -d "$1"', "_", created_dir],
             capture_output=True,
@@ -569,6 +572,7 @@ class TestPySafeDirCleanedUpOnEarlyExit:
         """Proves the test above isn't vacuously passing -- the identical
         mktemp call, minus only the trap, really does leave the directory
         behind after the process exits."""
+        require_bash()
         script = (
             'if ! _PY_SAFE_DIR="$(mktemp -d)"; then exit 1; fi\n'
             'echo "DIR=$_PY_SAFE_DIR"\nexit 0\n'

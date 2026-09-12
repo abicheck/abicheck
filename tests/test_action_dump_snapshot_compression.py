@@ -29,7 +29,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
@@ -64,6 +64,7 @@ def _run_dump_region(env_extra: dict[str, str]) -> list[str]:
     # minimal equivalents here since only the dump-mode region is
     # extracted, not the whole file (keeps the harness self-contained and
     # fast, same approach test_action_compile_context_parity.py uses).
+    require_bash()
     harness = (
         'add_flag() { local f="$1" v="$2"; [[ -n "$v" ]] && CMD+=("$f" "$v"); }\n'
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'

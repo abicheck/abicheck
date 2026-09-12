@@ -57,7 +57,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
@@ -129,6 +129,7 @@ class TestUploadReleaseAssetRetryDispatchesBySuffix:
     @_WINDOWS_PYTHON3_SKIP
     @_JQ_REQUIRED
     def test_identical_tar_gz_content_is_a_safe_retry(self, tmp_path: Path) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -279,6 +280,7 @@ class TestUploadReleaseAssetRejectsCrossProfileCollision:
     @_WINDOWS_PYTHON3_SKIP
     @_JQ_REQUIRED
     def test_same_content_different_profile_is_rejected(self, tmp_path: Path) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -424,6 +426,7 @@ class TestUploadReleaseAssetRejectsMissingProfile:
     def test_existing_manifest_with_no_profile_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -559,6 +562,7 @@ class TestUploadReleaseAssetRejectsUnsupportedManifestVersion:
     def test_unsupported_manifest_version_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -698,6 +702,7 @@ class TestUploadReleaseAssetRejectsUnsupportedSnapshotSchema:
     def test_snapshot_schema_newer_than_installed_reader_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -835,6 +840,7 @@ gh() {{
         reader -- matching profile and content, so every other guard
         would classify it as a safe retry.
         """
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -983,6 +989,7 @@ gh() {{
         message. Explicit ``isinstance`` validation now makes this a clean
         rejection instead of a crash.
         """
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1121,6 +1128,7 @@ class TestUploadReleaseAssetRejectsMismatchedProjectRef:
     def test_different_project_ref_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1237,6 +1245,7 @@ gh() {{
     def test_missing_project_ref_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1373,6 +1382,7 @@ class TestUploadReleaseAssetHandlesLeadingDashAssetName:
     def test_leading_dash_asset_name_is_uploaded_via_a_relative_path(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import shlex
         import subprocess
         import tempfile
@@ -1470,6 +1480,7 @@ class TestUploadReleaseAssetRejectsSymlinkContainingExistingAsset:
     def test_in_root_symlink_is_rejected_even_with_matching_content(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1607,6 +1618,7 @@ class TestUploadReleaseAssetRejectsCorruptedExistingContent:
     def test_declared_digest_matching_but_real_bytes_differing_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil
@@ -1757,6 +1769,7 @@ class TestUploadReleaseAssetRejectsGenuinelyDifferentContent:
     def test_self_consistent_but_genuinely_different_content_is_rejected(
         self, tmp_path: Path
     ) -> None:
+        require_bash()
         import importlib.util
         import json
         import shutil

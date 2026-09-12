@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "baseline"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -49,6 +49,7 @@ def _run_action(
     env_extra: dict[str, str], cwd: Path
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Invoke the real script end-to-end with a GITHUB_OUTPUT file."""
+    require_bash()
     github_output = cwd / "github_output"
     github_output.write_text("")
     env = {
@@ -619,6 +620,7 @@ class TestDumpLoopFieldSplitting:
     Separator (\\x1f) instead, which bash does not treat as whitespace."""
 
     def _run_dump_loop(self, libraries: list[dict[str, str]]) -> str:
+        require_bash()
         script = (
             '_fail() { echo "::error::$1"; exit 1; }\n'
             'abicheck() { echo "CMD_ARGS:$*"; return 0; }\n'

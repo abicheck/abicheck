@@ -40,7 +40,7 @@ from pathlib import Path
 
 import pytest
 import tomllib
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_DIR = ROOT / "agent-evals" / "skills"
@@ -808,6 +808,7 @@ class TestPythonInterposer:
     reading the Dockerfile text."""
 
     def test_python_dot_version_invocation_is_also_intercepted(self, tmp_path):
+        require_bash()
         import os
 
         dockerfile = (
@@ -875,6 +876,7 @@ class TestArchitectureGuard:
     """
 
     def _run_with_fake_uname(self, tmp_path, task_id, reported_arch):
+        require_bash()
         task_dir = TASKS_DIR / task_id
         test_sh = (task_dir / "tests" / "test.sh").read_text(encoding="utf-8")
         logs = tmp_path / "logs"
@@ -1038,6 +1040,7 @@ class TestSolveScriptsEndToEnd:
         ],
     )
     def test_reference_solution_grades_correct(self, tmp_path, scenario_id):
+        require_bash()
         task_dir = TASKS_DIR / scenario_id
         if not (task_dir / "solution" / "solve.sh").is_file():
             pytest.skip(f"{scenario_id} has no generated solve.sh")

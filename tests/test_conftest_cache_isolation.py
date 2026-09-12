@@ -95,3 +95,38 @@ def test_ast_memo_slot_starts_cleared(occurrence: int) -> None:
     left by one test is otherwise still visible to the next."""
     assert dumper_cache._ast_memo_slot.get() is None
     dumper_cache._ast_memo_slot.set({"poisoned": occurrence})
+
+
+@pytest.mark.parametrize("occurrence", range(6))
+def test_cache_directories_do_not_accumulate_in_pytest_basetemp(
+    occurrence: int, tmp_path_factory: pytest.TempPathFactory, tmp_path: Path
+) -> None:
+    """The *cost* half of the same contract, stated as an invariant so the
+    next "make this faster" round cannot quietly undo it.
+
+    ``tmp_path`` is allocated by pytest's numbered allocator, which enumerates
+    basetemp's children to choose the next number. An autouse fixture that
+    deposits one directory per test *directly* in basetemp therefore charges
+    every later ``tmp_path`` request for a scan over its own leftovers. The
+    per-test cache directory must live one level down, in a single bucket, so
+    basetemp holds roughly one entry per test and no cache directory of its
+    own.
+    """
+    basetemp = tmp_path_factory.getbasetemp()
+    cache_dir = _current_cache_dir()
+
+    # Still a real, distinct, empty, test-owned directory under basetemp...
+    assert basetemp in cache_dir.parents
+    assert list(cache_dir.iterdir()) == []
+    # ... but never a direct child of it.
+    assert cache_dir.parent != basetemp
+    assert cache_dir.parent.name.startswith("snapshot-caches-")
+
+    # And basetemp itself carries no per-test cache entry at all, however many
+    # tests have run before this one.
+    assert [p.name for p in basetemp.iterdir() if p.name.startswith("snapshot_cache-")] == []
+
+    # The bucket is shared, the directories in it are not: this occurrence's
+    # directory is distinct from every earlier one even though they are
+    # siblings now.
+    assert cache_dir not in _SEEN

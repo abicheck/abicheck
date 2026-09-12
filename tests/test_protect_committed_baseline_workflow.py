@@ -39,7 +39,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 WORKFLOW_PATH = (
     Path(__file__).resolve().parents[1]
@@ -166,6 +166,7 @@ class TestCheckScriptBehavior:
         bypass_label: str = "",
         pr_labels: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        require_bash()
         env = {
             **os.environ,
             "PROTECTED_PATHS": protected_paths,

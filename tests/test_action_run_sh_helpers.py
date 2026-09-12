@@ -55,7 +55,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import HOSTILE_SCALAR_CORPUS, bash_executable
+from _workflow_exec import HOSTILE_SCALAR_CORPUS, bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _MARKER = "# Build the abicheck command"
@@ -131,6 +131,7 @@ def _run_harness(harness: str, *, cwd: Path | None = None) -> str:
       ever sees it. Capturing raw bytes and decoding them directly (no
       ``text=True``) preserves every byte exactly.
     """
+    require_bash()
     script = (
         _helpers_region()
         + _cli_introspection_prelude()
@@ -216,6 +217,7 @@ def _run_predicate(call: str) -> bool:
     """Source the real helper functions and evaluate a boolean-returning call
     (e.g. an ``_is_release_style_operand "path"`` invocation), returning
     whether it exited zero (true) or non-zero (false)."""
+    require_bash()
     script = (
         _helpers_region()
         + _cli_introspection_prelude()
@@ -675,6 +677,7 @@ def _run_value(call: str) -> str:
     """Source the real helper functions and return a value-printing call's
     stdout (e.g. an ``_effective_format`` invocation), stripped of the
     trailing newline `echo`/`printf` conventions may or may not add."""
+    require_bash()
     script = _helpers_region() + _cli_introspection_prelude() + f"\n{call}\n"
     with tempfile.NamedTemporaryFile(
         "w",
@@ -998,6 +1001,7 @@ class TestExtraArgsConfigCollisionGuard:
         # this test's own `CMD=(compare ...)` seed -- so the new branch
         # deterministically takes the plain-append `else` path, which is
         # what this collision-guard test class is actually about.
+        require_bash()
         cmd_seed = "MODE=compare\n_CLI_MODE=compare\n" + (
             "CMD=(compare --config /tmp/overlay.yml)"
             if cmd_has_config

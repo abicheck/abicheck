@@ -41,7 +41,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parent.parent / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -73,6 +73,7 @@ def _stub_abicheck_dry_run(tmp_path: Path) -> Path:
 
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
     """Run ``action/run.sh`` and return its ``GITHUB_OUTPUT`` key/value pairs."""
+    require_bash()
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"

@@ -38,7 +38,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 #: The EXIT-trap line that cleans up STDERR_FILE/_STDOUT_JSON_FILE/PR_JSON/
@@ -106,6 +106,7 @@ def _run(harness: str, env_extra: dict[str, str] | None = None) -> None:
     script is an escape character (``\\a`` etc.), silently corrupting the
     path. Passing paths through ``env`` instead sidesteps that entirely.
     """
+    require_bash()
     script = _funcs_region() + "\n" + harness + "\n" + _fragment_region()
     with tempfile.NamedTemporaryFile(
         "w",
@@ -192,6 +193,7 @@ CMD=(abicheck compare old.json new.json --format json -o "$TEST_OUTPUT_FILE")
         # for an `_EvidenceContractError` abi3 abort specifically, that rerun
         # happens after real candidate-snapshot extraction, not the cheap,
         # precondition-only kind a rerun is for the pinned-depth abort.
+        require_bash()
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         extra_write_json = tmp_path / "caller-report.json"
@@ -227,6 +229,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
         # script with no shebang/executable-bit dependency — that writes a
         # sentinel to its last argument (where _build_json_cmd appends
         # "-o $PR_JSON") so the rerun's execution is directly observable.
+        require_bash()
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         stub = tmp_path / "stub.sh"
@@ -274,6 +277,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added --for
         failed; after the fix, `--write` (and its value) is stripped before
         the rerun, so the stub receives a clean command and succeeds.
         """
+        require_bash()
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         stub = tmp_path / "stub.sh"
@@ -315,6 +319,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --write "json=$TEST_PR_
         # straight into PR_JSON for `cli_pr_comment` to misparse as an
         # empty compare report. Must fall through to a real rerun instead,
         # exactly like any other non-json/non-reusable primary format.
+        require_bash()
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
         output_file = tmp_path / "primary.sarif"
@@ -379,6 +384,7 @@ class TestExitTrapCleansUpPrJson:
         # self-hosted runner that leaks one JSON report per scan run,
         # indefinitely, even on a non-PR event or `pr-comment-on: never`
         # where the file was created but never posted.
+        require_bash()
         text = RUN_SH.read_text(encoding="utf-8")
         match = _EXIT_TRAP_LINE.search(text)
         assert match, "EXIT trap line not found in run.sh"

@@ -56,7 +56,7 @@ from typing import NamedTuple
 
 import pytest
 import yaml
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_DIR = REPO_ROOT / ".github" / "actions" / "install-system-deps"
@@ -191,6 +191,7 @@ exit 1
 
 
 def _run(env: dict[str, str], packages: str) -> subprocess.CompletedProcess[str]:
+    require_bash()
     env = dict(env)
     env["INPUT_PACKAGES"] = packages
     return subprocess.run(
@@ -700,6 +701,7 @@ class TestNoWorkflowGatesInstallOnUpdate:
 
     @requires_apt_harness
     def test_install_sh_is_executable_and_syntactically_valid(self) -> None:
+        require_bash()
         assert os.access(INSTALL_SH, os.X_OK)
         assert (
             subprocess.run([bash_executable(), "-n", str(INSTALL_SH)]).returncode == 0
@@ -852,6 +854,7 @@ class TestUpdateFailureAbsorptionPredicate:
         reachability past `exit` -- each of which a hand-written assertion
         would have agreed with.
         """
+        require_bash()
         executable = form.replace("CMD2", "false").replace("CMD", "false")
         real_exit = subprocess.run(
             [bash_executable(), "-c", executable], capture_output=True
@@ -1031,6 +1034,7 @@ class TestLogicalLines:
         tokenized. The two must agree -- which is the whole claim this
         function makes about itself.
         """
+        require_bash()
         bindir = tmp_path / "bin"
         bindir.mkdir()
         log = tmp_path / "argv.log"

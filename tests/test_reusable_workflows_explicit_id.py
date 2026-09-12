@@ -40,7 +40,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 from test_reusable_workflows import CHECK_PROJECT, _load, _steps
 
 
@@ -53,6 +53,7 @@ from test_reusable_workflows import CHECK_PROJECT, _load, _steps
     ),
 )
 def test_precheck_script_threads_explicit_id_into_check_id(tmp_path: Path) -> None:
+    require_bash()
     data = _load(CHECK_PROJECT)
     steps = _steps(data["jobs"]["check"])
     precheck = next(

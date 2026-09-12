@@ -34,7 +34,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "resolve-baseline"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -46,6 +46,7 @@ def _run_action(
     env_extra: dict[str, str], cwd: Path
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
     """Invoke the real script end-to-end with a GITHUB_OUTPUT file."""
+    require_bash()
     github_output = cwd / "github_output"
     github_output.write_text("")
     # Strip any inherited INPUT_* from the host/CI environment before
