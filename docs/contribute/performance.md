@@ -257,6 +257,141 @@ same-runner base-vs-head pattern (see [Baseline regression](#baseline-regression
 below) and gates from day one, since that pattern never needs a stale
 committed number to begin with.
 
+## Three measurement levels — which number means what
+
+The single most common way to misread this page is to quote one level's number
+as another's. There are three harnesses, they measure genuinely different
+things, and none of them is a substitute for the others:
+
+| Level | Harness | What it measures | Compiler? | Interpreter startup? |
+|---|---|---|---|---|
+| **1. Synthetic, in-process** | `scripts/benchmark_scaling.py` | `compare()`, suppression audit, severity, serialization and the HTML/SARIF/JUnit renderers over hand-built snapshots. Scaling exponents, peak heap, process RSS. | no | no |
+| **2. Real L2, in-process** | `scripts/check_header_graph_perf.py` | A real `dumper.dump()` of a real `.so` + synthetic header sweep, plus `service._attach_header_graph`'s marginal cost. Gated as three separate metrics: `dump_ms`, `attach_ms`, `total_ms`. | yes | no |
+| **3. Full CLI** | `scripts/check_l2_cli_perf.py` | The whole `abicheck` CLI as a subprocess against a real compiled C++ fixture, across the six supported L2 forms. | yes (except the stored-operand forms, which must run none) | yes |
+
+Boundaries worth stating explicitly, because each has been a real source of
+confusion:
+
+- **Level 2's `total_ms` is not a CLI wall time.** It is `dump` + `attach`
+  in-process, and it excludes interpreter startup, config resolution, input
+  resolution, serialization, comparison and rendering. It was previously named
+  `baseline_ms`, which invited reading it as "the baseline cost of a run"; it is
+  the cost of one phase.
+- **Level 3's measured window is the subprocess's whole lifetime.** Fixture
+  compilation, snapshot pre-dumping for a stored-operand scenario, artifact
+  download and dependency installation are all *setup*, measured separately and
+  excluded. Every correctness check runs after the timed window closes.
+- **Old binary-only numbers are not L2 numbers.** The ~5 s `libonedal_core.so`
+  dump quoted in this page's TL;DR is a historical binary-plus-DWARF figure. An
+  L2 run of the same library additionally parses its public headers, and mixing
+  the two is how a "dump got 10x slower" conclusion gets manufactured.
+
+### What the full-CLI harness asserts besides duration
+
+A timing harness that checks only duration rewards the worst regression
+available to it: getting faster by doing less. Level 3 therefore gates
+correctness alongside time, and a scenario whose validation fails is a
+**failure**, never a fast data point. Per scenario, outside the timed window:
+
+- the *resolved* evidence depth really reached `headers` on every side (a
+  binary-only fallback still accepts `--depth headers`, and it is faster);
+- public scoping resolved and did not fall back;
+- the expected declarations survived into the snapshot (names, not counts — a
+  count can be matched by a degraded parse that found a different set);
+- the header call, include and type graph extractor passes all ran and none is
+  recorded as degraded, and the include graph collected at least one edge;
+- the fixture's deliberate break produced **both** a removal-family and a
+  layout-family finding — a much stronger claim than "the verdict was
+  BREAKING", which a single unrelated finding can satisfy;
+- the unchanged control produced neither, i.e. no false positive;
+- `--no-baseline` read as an audit, with no manufactured compatibility verdict.
+
+### Native invocations are observed, not assumed
+
+`perf_receipt.NativeInvocationSpy` prepends a directory of `exec`-ing shims to
+`PATH`, one per spied tool, each logging its own argv before handing off to the
+real binary. `classify_invocation` then bins each observed invocation as header
+extraction, include pass, or version probe — a distinction that is load-bearing
+rather than cosmetic: a cold L2 dump makes **three** `castxml` calls and only
+one of them is a parse (the others are `--version` and `-dumpmachine`), so a
+flat per-tool count cannot tell a cached parse from a skipped probe.
+
+That turns three otherwise-unfalsifiable claims into measurements:
+
+- a stored-snapshot/stored-snapshot comparison performs **zero** header
+  extractions and zero include passes — measured, not assumed;
+- a stored/live comparison performs exactly **one side's** worth, so the operand
+  handed over as a snapshot is demonstrably not re-extracted;
+- a run labelled "warm cache" really was served by a cache, proven by its
+  extraction count dropping rather than by the fact that it ran second.
+
+The last one matters because on a small fixture a second run served by *nothing*
+is indistinguishable from a warm one by wall time alone.
+
+### Cache states are three things, not two
+
+The harness separates, and never conflates:
+
+- **cold application cache** — a fresh process with a fresh `XDG_CACHE_HOME`.
+  This is explicitly *not* a cold disk: the OS page cache still holds the
+  fixture and the interpreter, and no attempt is made to drop it. Dropping a CI
+  runner's page cache needs privilege and would measure the host.
+- **warm AST cache** — a fresh process against the same cache root and
+  byte-identical inputs.
+- **invalidated** — the same again after a *transitive* dependency header
+  changes. The cache must not serve; if it does, the product is reusing stale
+  evidence, which the harness reports as a failure rather than a speedup.
+
+Which one actually served is read off the counters
+(`observed_cache_service`: `none` / `partial` / `full`), never inferred from run
+order.
+
+### Memory is reported as two differently-derived numbers
+
+`sampled_peak_tree_bytes` is the largest *simultaneous* sum of RSS across the
+measured process and every descendant alive at one sampling instant, taken from
+a parent-side sampler at a recorded interval. It is deliberately **not** called
+a peak:
+
+- a spike shorter than the sampling interval is missed entirely;
+- pages shared between processes are counted once per process, so it can also
+  *over*state real physical usage;
+- a descendant that exits between two samples is never seen.
+
+`ru_maxrss_bytes` is carried separately because it is a different thing: the
+kernel's own high-water mark, which never misses a spike but is a maximum over
+*individual* processes and so cannot see two live children's combined footprint.
+Both are reported, labelled, with the interval and the observation limits —
+picking one would hide the other's failure mode.
+
+### Real-integration profiles (oneDAL, SVS, PVXS)
+
+`scripts/l2_real_profiles.py` pins the three live integrations declaratively:
+each profile's revisions, the libraries and headers actually in L2 scope, the
+required tools and approximate build cost, and reproducible prepare commands.
+They are **periodic/manual only** — an ordinary PR must never download and build
+oneDAL (~120 build-minutes, ~25 GB).
+
+The rule the module exists to enforce: **an unavailable profile is reported
+`BLOCKED`/`NOT_RUN` with a concrete reason, never silently replaced by a
+synthetic substitute, and a synthetic number is never published under a real
+project's name.** Three further constraints it encodes:
+
+- **No declarative L2 bundle capability exists today.** A multi-library profile
+  is measured as the supported set of per-library L2 operations — the set's
+  total, each library's own cost, the number of distinct header contexts, and
+  how much work was genuinely repeated across them. That is not a bundle scan
+  and the module never calls it one. Adding a bundle capability is product work.
+- **A library with no public API of its own is not an L2 case.** oneDAL's
+  `libonedal_thread` is recorded as a non-case with a stated reason, rather than
+  inflated into a sixth L2 library by pointing it at someone else's headers.
+- **A historical baseline must be historical.** `validate_side_headers` rejects
+  a plan that resolves both sides' headers to one root — the easy accidental
+  substitution (check out the new revision, build both binaries, point both
+  `--header` sets at the working tree) runs fine, is faster, and is not a
+  temporal L2 comparison. PVXS must also not be measured by running the
+  project's own script with `--depth source`: that is an L4/L5 measurement.
+
 ## Coverage gaps this workflow does not close
 
 An external performance audit (2026-08) found that `compare()`/dump/scan
@@ -307,13 +442,16 @@ convention — root `AGENTS.md`):
   unseeded) × cold/warm cache. `eval/scan_level_scaling.py` sweeps the level
   axis but is manual-only (real clang time), and `eval/scaling.py`'s
   `ABICHECK_L4_JOBS` sweep is likewise manual.
-- **Per-scan performance receipts.** Nothing today emits a structured
-  wall/user/sys + process-tree RSS + per-phase-timing + cache-hit/miss record
-  for a single `scan`/`compare` run, the way `--json-out` does for the
-  synthetic harnesses. Building one would let a real regression (an extra
-  Bazel query, a lost L4 cache hit, an unexpected full-TU replay) be diagnosed
-  from one run's own output instead of only from a before/after harness
-  comparison.
+- **Per-run performance receipts — now implemented for the L2 CLI path**
+  (`scripts/perf_receipt.py`, consumed by `scripts/check_l2_cli_perf.py`). A
+  run now emits a versioned receipt carrying wall/user/sys time with its CPU
+  accounting scope named, sampled concurrent process-tree RSS alongside a
+  separately-labelled `ru_maxrss`, nested phase windows, per-kind native
+  invocation counts (header extraction vs. include pass vs. version probe),
+  output sizes, correctness-validation status, and the effective thresholds
+  that gated the run. What is still open is the wider
+  *depth/backend* coverage below, and an L3/L4/L5 equivalent: the receipt
+  layer is generic, but only the L2 CLI harness feeds it today.
 - **Repeated L3 collection under `dump --sources`/`--build-info` (P0.3) —
   open, accepted cost, not this PR's to close.** Include seeding and
   compile-context derivation (`derive_l2_include_dirs`/

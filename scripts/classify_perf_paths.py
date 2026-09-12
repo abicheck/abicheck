@@ -176,6 +176,43 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "scripts/classify_perf_paths.py",
     "tests/test_classify_perf_paths.py",
     ".github/workflows/performance.yml",
+    # The full-CLI L2 harness (scripts/check_l2_cli_perf.py) and its own
+    # measurement layer. Listed because a change to any of them changes what the
+    # perf lane measures, and an unmeasured harness change is how a lane comes
+    # to report a pass it never earned.
+    "scripts/check_l2_cli_perf.py",
+    "scripts/l2_cli_fixture.py",
+    "scripts/perf_receipt.py",
+    "scripts/l2_real_profiles.py",
+    "tests/test_l2_cli_perf_gate.py",
+    "tests/test_perf_receipt.py",
+    "tests/test_l2_real_profiles.py",
+    # The full-CLI L2 harness exercises the real `dump` and `compare` commands
+    # end to end, so the CLI entry points, their option/config resolution, the
+    # orchestration the commands route through, the report renderers the run
+    # writes with, and the storage codec the stored-operand scenarios load
+    # through are all inside the window it measures. Previously none of these
+    # were listed: the pattern list predates a full-CLI level existing, and was
+    # written for two in-process harnesses that never start an interpreter or
+    # render a report.
+    #
+    # Listed per real dependency rather than by directory name (AGENTS.md: "не
+    # разделяй jobs по названиям каталогов без проверки реальных зависимостей"),
+    # and verified against what the harness's own scenarios actually invoke --
+    # `abicheck dump`, `abicheck compare` (live/live, stored/live,
+    # stored/stored, --no-baseline, --dry-run, json and markdown renderers).
+    "abicheck/cli.py",
+    "abicheck/frontends/cli/**",
+    "abicheck/cli_compare*.py",
+    "abicheck/cli_dump*.py",
+    "abicheck/cli_options.py",
+    "abicheck/reporter.py",
+    "abicheck/reporter_markdown.py",
+    "abicheck/report/**",
+    "abicheck/workflows/**",
+    "abicheck/storage/**",
+    "abicheck/comparability.py",
+    "abicheck/snapshot_io.py",
 )
 
 

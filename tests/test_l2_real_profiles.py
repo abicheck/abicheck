@@ -1,0 +1,331 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for the pinned real-integration L2 profiles.
+
+These profiles can never run in this test lane -- oneDAL alone is ~120
+build-minutes and 25GB -- so what is testable here is the part that keeps their
+*reporting* honest: that an unavailable profile is BLOCKED with a concrete
+reason rather than silently substituted, that a library with no public API is a
+recorded non-case rather than an inflated one, and that a "historical" baseline
+really comes from its own revision.
+
+That list is not incidental. Each item is a way a real-integration number can be
+published while being about something other than what its name says, which is
+worth more guarding than the arithmetic is.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+import pytest
+
+_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+_spec = importlib.util.spec_from_file_location(
+    "l2_real_profiles", _SCRIPTS / "l2_real_profiles.py"
+)
+assert _spec and _spec.loader
+profiles = importlib.util.module_from_spec(_spec)
+sys.modules["l2_real_profiles"] = profiles
+_spec.loader.exec_module(profiles)
+
+
+class TestProfileDefinitions:
+    def test_all_three_integrations_are_defined(self):
+        assert set(profiles.PROFILES) == {"onedal", "svs", "pvxs"}
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_profile_is_structurally_valid(self, profile_id):
+        assert profiles.validate_profile(profiles.PROFILES[profile_id]) == []
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_profile_names_its_upstream_reference(self, profile_id):
+        # A measurement must be traceable to the change it was taken for.
+        assert profiles.PROFILES[profile_id].reference.startswith("https://")
+
+    def test_onedal_has_five_l2_libraries_not_six(self):
+        # libonedal_thread has no public API of its own. Counting it would
+        # manufacture a sixth L2 case rather than measure one.
+        assert len(profiles.ONEDAL.l2_libraries) == 5
+
+    def test_the_thread_library_is_a_recorded_non_case_with_a_reason(self):
+        thread = next(
+            lib for lib in profiles.ONEDAL.libraries if lib.name == "onedal_thread"
+        )
+        assert thread.in_l2_scope is False
+        assert thread.out_of_scope_reason
+        assert thread.public_headers == ()
+
+    def test_onedal_carries_two_distinct_header_contexts(self):
+        # The shared-vs-differing-context axis the profile exists to cover: the
+        # same headers under a host and a DPC++ compile context are two
+        # different L2 inputs, not a duplicate.
+        assert profiles.ONEDAL.header_contexts == 2
+
+    def test_pvxs_carries_two_libraries_with_different_header_sets(self):
+        core, ioc = profiles.PVXS.libraries
+        assert core.public_headers != ioc.public_headers
+        assert core.context != ioc.context
+
+    def test_svs_scopes_to_published_runtime_headers_not_the_whole_tree(self):
+        # Scoping L2 at the whole include/ tree would measure a largely
+        # header-only source tree instead of the runtime library's contract.
+        headers = profiles.SVS.l2_libraries[0].public_headers
+        assert headers and all(h.endswith(".h") for h in headers)
+
+    def test_svs_keeps_temporal_and_equivalence_as_separate_scenarios(self):
+        # One number cannot mean both "did this change break the ABI" and "is
+        # the analysis stable across two builds of one revision".
+        assert set(profiles.SVS.scenarios) == {"temporal", "equivalence"}
+
+
+class TestValidationCatchesDishonestDefinitions:
+    """Each case is a definition that would publish a misleading number."""
+
+    def _profile(self, **overrides) -> profiles.RealProfile:
+        base = {
+            "id": "t",
+            "project": "p",
+            "reference": "https://example.invalid/pr/1",
+            "repository": "https://example.invalid/p.git",
+            "old_revision": "aaa",
+            "new_revision": "bbb",
+            "libraries": (profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),),
+            "required_tools": ("git",),
+        }
+        base.update(overrides)
+        return profiles.RealProfile(**base)
+
+    def test_a_valid_minimal_profile_passes(self):
+        assert profiles.validate_profile(self._profile()) == []
+
+    def test_an_l2_library_with_no_headers_is_rejected(self):
+        # That is a binary-only case mislabelled as an L2 one -- it would be
+        # faster and would appear as L2 coverage.
+        bad = self._profile(
+            libraries=(profiles.LibraryTarget("l", "lib/l.so", public_headers=()),)
+        )
+        problems = profiles.validate_profile(bad)
+        assert any("binary-only case mislabelled" in p for p in problems)
+
+    def test_an_unexplained_exclusion_is_rejected(self):
+        bad = self._profile(
+            libraries=(
+                profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),
+                profiles.LibraryTarget("x", "lib/x.so", in_l2_scope=False),
+            )
+        )
+        problems = profiles.validate_profile(bad)
+        assert any("without a stated reason" in p for p in problems)
+
+    def test_an_excluded_library_may_not_also_claim_headers(self):
+        bad = self._profile(
+            libraries=(
+                profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),
+                profiles.LibraryTarget(
+                    "x",
+                    "lib/x.so",
+                    ("inc/x.h",),
+                    in_l2_scope=False,
+                    out_of_scope_reason="r",
+                ),
+            )
+        )
+        assert profiles.validate_profile(bad)
+
+    def test_a_temporal_scenario_with_one_revision_is_rejected(self):
+        bad = self._profile(old_revision="same", new_revision="same")
+        problems = profiles.validate_profile(bad)
+        assert any("two different revisions" in p for p in problems)
+
+    def test_a_profile_with_no_l2_library_is_rejected(self):
+        bad = self._profile(
+            libraries=(
+                profiles.LibraryTarget(
+                    "x", "lib/x.so", in_l2_scope=False, out_of_scope_reason="r"
+                ),
+            )
+        )
+        assert any("no library is in L2 scope" in p for p in profiles.validate_profile(bad))
+
+    def test_a_profile_stating_no_required_tools_is_rejected(self):
+        # Without required tools, availability cannot be checked, so the profile
+        # could never report BLOCKED -- it would silently read as runnable.
+        bad = self._profile(required_tools=())
+        assert any("could never report BLOCKED" in p for p in profiles.validate_profile(bad))
+
+
+class TestHistoricalBaselineIsReallyHistorical:
+    def test_two_distinct_header_roots_are_accepted(self, tmp_path):
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        assert profiles.validate_side_headers(old_header_root=old, new_header_root=new) == []
+
+    def test_one_shared_header_root_is_rejected(self, tmp_path):
+        # The easy accidental substitution: check out the new revision, build
+        # both binaries, point both --header sets at the working tree. It runs,
+        # it is faster, and it is not a temporal L2 comparison.
+        shared = tmp_path / "inc"
+        shared.mkdir()
+        problems = profiles.validate_side_headers(
+            old_header_root=shared, new_header_root=shared
+        )
+        assert any("not a temporal L2 comparison" in p for p in problems)
+
+    def test_a_symlink_to_the_same_tree_is_also_rejected(self, tmp_path):
+        # Resolved, not compared as strings: two different paths naming one tree
+        # is the same substitution wearing a different spelling.
+        real = tmp_path / "inc"
+        real.mkdir()
+        link = tmp_path / "alias"
+        link.symlink_to(real)
+        assert profiles.validate_side_headers(old_header_root=real, new_header_root=link)
+
+
+class TestStatusReporting:
+    def test_a_missing_tool_blocks_with_a_concrete_reason(self, monkeypatch):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: None)
+        status = profiles.resolve_status(
+            profiles.PVXS, prepared_root=None, requested=True
+        )
+        assert status.status == "BLOCKED"
+        assert status.missing_tools
+        # "Concrete" means a reader can act on it: which tools, and what the
+        # profile would cost if they had them.
+        assert "not on PATH" in status.reason
+        assert "build-minutes" in status.reason
+
+    def test_an_unprepared_tree_blocks_with_a_different_reason(self, monkeypatch):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+        status = profiles.resolve_status(
+            profiles.PVXS, prepared_root=None, requested=True
+        )
+        assert status.status == "BLOCKED"
+        assert "no prepared build tree" in status.reason
+
+    def test_not_requested_is_distinct_from_blocked(self, monkeypatch):
+        # Collapsing the two would let a lane that skipped a profile for
+        # convenience look like one that could not run it.
+        status = profiles.resolve_status(
+            profiles.SVS, prepared_root=None, requested=False
+        )
+        assert status.status == "NOT_RUN"
+        assert "not selected" in status.reason
+
+    def test_a_prepared_tree_with_tools_is_measurable(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {"git": "git 2"})
+        status = profiles.resolve_status(
+            profiles.SVS, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "MEASURED"
+
+    def test_every_status_is_from_the_declared_vocabulary(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: None)
+        for profile in profiles.PROFILES.values():
+            for requested in (True, False):
+                status = profiles.resolve_status(
+                    profile, prepared_root=tmp_path, requested=requested
+                )
+                assert status.status in profiles.STATUSES
+
+    def test_a_negative_status_always_carries_a_reason(self, monkeypatch, tmp_path):
+        # A profile reported as merely "skipped" tells a reader nothing about
+        # whether the gap is environmental or a decision.
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: None)
+        for profile in profiles.PROFILES.values():
+            status = profiles.resolve_status(
+                profile, prepared_root=tmp_path, requested=True
+            )
+            assert status.status != "MEASURED"
+            assert status.reason
+
+
+class TestDigestTree:
+    def test_identical_trees_digest_identically(self, tmp_path):
+        for name in ("a", "b"):
+            root = tmp_path / name
+            (root / "pvxs").mkdir(parents=True)
+            (root / "pvxs" / "data.h").write_text("struct X {};")
+        assert profiles.digest_tree(tmp_path / "a") == profiles.digest_tree(tmp_path / "b")
+
+    def test_a_changed_header_changes_the_digest(self, tmp_path):
+        root = tmp_path / "a"
+        root.mkdir()
+        header = root / "data.h"
+        header.write_text("struct X {};")
+        before = profiles.digest_tree(root)
+        header.write_text("struct X { int y; };")
+        assert profiles.digest_tree(root) != before
+
+    def test_a_renamed_header_changes_the_digest(self, tmp_path):
+        # A stale or partially-applied checkout is exactly as dangerous as
+        # changed content: both publish a number against the wrong revision.
+        root = tmp_path / "a"
+        root.mkdir()
+        (root / "one.h").write_text("x")
+        before = profiles.digest_tree(root)
+        (root / "one.h").rename(root / "two.h")
+        assert profiles.digest_tree(root) != before
+
+    def test_the_digest_is_labelled_with_its_algorithm(self, tmp_path):
+        root = tmp_path / "a"
+        root.mkdir()
+        assert profiles.digest_tree(root).startswith("sha256:")
+
+
+class TestPrepareScript:
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_it_is_a_runnable_reproducible_script(self, profile_id):
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        assert script.startswith("#!/usr/bin/env bash")
+        assert "set -euo pipefail" in script
+        # No unsubstituted placeholders: a script a reader cannot run verbatim
+        # is documentation pretending to be reproduction instructions.
+        assert "{repository}" not in script
+        assert "{old_revision}" not in script
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_it_states_that_preparation_is_excluded_from_measurement(self, profile_id):
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        assert "SETUP" in script
+        assert "excluded from every measured window" in script
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_it_states_the_resource_cost_up_front(self, profile_id):
+        # So a lane can decline before spending an hour finding out.
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        assert "build-minutes" in script
+
+    def test_pvxs_preparation_builds_epics_base_first(self):
+        script = profiles.prepare_script(profiles.PVXS)
+        assert script.index("epics-base") < script.index("pvxs && make")
+
+    def test_no_profile_prepares_with_a_depth_source_run(self):
+        # A --depth source run is an L4/L5 measurement; its numbers do not
+        # belong in an L2 profile, and the PVXS project's own script does
+        # exactly that.
+        for profile in profiles.PROFILES.values():
+            script = profiles.prepare_script(profile)
+            assert "--depth source" not in script

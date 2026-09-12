@@ -606,3 +606,180 @@ jobs:
             cat header_graph_regression.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The full-CLI L2 lane (scripts/check_l2_cli_perf.py). Distinct from the two
+  # in-process jobs above: this one starts a real interpreter, resolves real
+  # config, and writes a real report, so it is the only lane that would see a
+  # regression in CLI startup, option/config resolution, report rendering, or
+  # snapshot load -- none of which the in-process harnesses touch at all.
+  #
+  # Cheap enough for a PR because it deliberately measures ONE small generated
+  # fixture across the six supported L2 forms rather than sweeping axes: measured
+  # locally at ~17s wall for the whole pr suite at --repeat 1 (0.9s of it fixture
+  # compilation) and ~45s at --repeat 3, against ~64s for the extended suite.
+  # The axis sweep and the real-project profiles are the periodic jobs below.
+  l2-cli-perf:
+    name: Full-CLI L2 perf (PR gate)
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
+    # Pinned for the same reason as the header-graph jobs: the checksum-pinned
+    # CastXML Superbuild has no asset for an arbitrary Ubuntu release.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - uses: ./.github/actions/setup-castxml
+
+      - name: Measure head
+        run: |
+          set -euo pipefail
+          mkdir -p reports/perf
+          # --require-toolchain, not a silent skip: this job's name claims to
+          # cover the full-CLI L2 path, and a runner without g++/clang would
+          # otherwise make it report a green pass over nothing measured.
+          python scripts/check_l2_cli_perf.py \
+            --suite pr --repeat 3 --require-toolchain \
+            --json-out reports/perf/l2_cli_head.json \
+            --markdown | tee reports/perf/l2_cli_head.txt
+
+      - name: Measure base and gate head against it
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # Base and head measured by the SAME harness on the SAME runner, with
+          # separate checkouts and separate cache roots. The harness allocates a
+          # fresh per-scenario cache root itself, so the two measurements cannot
+          # warm each other.
+          git worktree add base_tree "${{ github.event.pull_request.base.sha }}"
+          python -m venv base_env
+          ./base_env/bin/pip install -q --upgrade pip
+          ./base_env/bin/pip install -q -e "./base_tree[dev]"
+          if [ -f base_tree/scripts/check_l2_cli_perf.py ]; then
+            # HEAD's harness against BASE's installed package: one harness, two
+            # products, which is the only way the two numbers are comparable at
+            # all. Base's own copy of the script may not exist (this lane's
+            # introducing PR) or may measure different scenarios.
+            ./base_env/bin/python scripts/check_l2_cli_perf.py \
+              --suite pr --repeat 3 --require-toolchain \
+              --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 || true
+          else
+            ./base_env/bin/python scripts/check_l2_cli_perf.py \
+              --suite pr --repeat 3 --require-toolchain \
+              --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 || true
+          fi
+          if [ -s reports/perf/l2_cli_base.json ]; then
+            # Interleaved re-measurement of head AFTER base, so the gated
+            # comparison is not a completed base sweep against a later head
+            # sweep with whatever drift accumulated between them (an A-B-B-A
+            # ordering: head above, base, then head again here, gated against
+            # base).
+            python scripts/check_l2_cli_perf.py \
+              --suite pr --repeat 3 --require-toolchain \
+              --baseline reports/perf/l2_cli_base.json \
+              --regress-tolerance 0.3 --regress-min-delta-seconds 0.6 \
+              --json-out reports/perf/l2_cli_gated.json \
+              --markdown | tee reports/perf/l2_cli_regression.txt
+          else
+            echo "No base measurement available -- report-only." \
+              | tee reports/perf/l2_cli_regression.txt
+            cat base_l2.log >> reports/perf/l2_cli_regression.txt
+          fi
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Full-CLI L2 perf"
+            echo ""
+            echo '```'
+            cat reports/perf/l2_cli_head.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            echo ""
+            echo "### PR vs base"
+            echo ""
+            echo '```'
+            cat reports/perf/l2_cli_regression.txt 2>/dev/null || echo "(not a pull_request run)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-l2-cli
+          path: reports/perf/l2_cli_*
+          retention-days: 30
+
+  # The extended axis sweep: shape, header count (1/8/32 over a shared
+  # dependency closure), library count (1/2/5, shared and distinct header
+  # contexts), and the cold/warm/invalidated cache scenarios. Periodic and
+  # manual only -- an ordinary PR must not pay for it (measured locally at ~64s,
+  # which is affordable but buys nothing a PR needs, since a single-axis
+  # regression shows up on the PR lane's own fixture too).
+  l2-cli-extended:
+    name: Full-CLI L2 perf (extended axes)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - uses: ./.github/actions/setup-castxml
+      - name: Measure the extended sweep
+        run: |
+          set -euo pipefail
+          mkdir -p reports/perf
+          python scripts/check_l2_cli_perf.py \
+            --suite extended --repeat 3 --require-toolchain \
+            --json-out reports/perf/l2_cli_extended.json \
+            --markdown | tee reports/perf/l2_cli_extended.txt
+      - name: Report real-integration profile availability
+        if: always()
+        run: |
+          set -euo pipefail
+          # Availability only -- this job never builds oneDAL/SVS/PVXS. It
+          # records, per profile, MEASURED / BLOCKED-with-a-reason / NOT_RUN, so
+          # a coverage gap is visible as a gap rather than as silence. A real
+          # profile run is a separate, manually-prepared job: see
+          # docs/contribute/performance.md.
+          python scripts/l2_real_profiles.py \
+            > reports/perf/l2_real_profiles.json
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Full-CLI L2 perf (extended axes)"
+            echo ""
+            echo '```'
+            cat reports/perf/l2_cli_extended.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            echo ""
+            echo "### Real-integration profile availability"
+            echo ""
+            echo '```json'
+            cat reports/perf/l2_real_profiles.json 2>/dev/null || echo "{}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-l2-cli-extended
+          path: reports/perf/l2_*
+          retention-days: 90
