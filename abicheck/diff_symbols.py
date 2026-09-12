@@ -22,12 +22,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from .checker_types import Change
+from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
-from .compare.export_transition import check_export_lost, check_variable_export_lost
 from .compare.fact_comparison import compare_facts
 from .compare.functions import function_identity_index
 from .detector_registry import registry
@@ -773,7 +773,7 @@ def _check_function_signature(
     changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
     changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
     changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
-    changes.extend(check_export_lost(mangled, f_old, f_new))
+    changes.extend(_export_transition.check_export_lost(mangled, f_old, f_new))
     return changes
 
 
@@ -866,7 +866,7 @@ def _match_old_function(
     # reporting the same symbol. The castxml-deleted path keeps such functions
     # in new_map and is matched above; this aligns the deleted_from_dwarf path.
     f_new_all = new_all.get(mangled)
-    if f_new_all is not None and f_new_all.is_deleted and is_abi_visible(f_new_all):
+    if _export_transition.deleted_declaration_is_public(f_new_all, f_old):
         return []
 
     # Fallback by plain name when either side uses extern "C". Only join when
@@ -939,10 +939,9 @@ def _detect_newly_deleted_functions(
             and mangled not in old_exported
         ):
             continue
-        # Skip functions that are not part of the public ABI surface.
-        if not is_abi_visible(f_new):
-            continue
         f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
+        if not _export_transition.deleted_declaration_is_public(f_new, f_old_any):
+            continue
         if f_old_any is not None and not f_old_any.is_deleted:
             kind = (
                 ChangeKind.FUNC_DELETED_DWARF
@@ -1213,7 +1212,7 @@ def _check_variable(
     # and must survive their early returns -- an unknown "?" type on a
     # stripped side says nothing about whether the symbol is still exported --
     # so it is folded in first (compare/export_transition.py).
-    changes += check_variable_export_lost(mangled, v_old, v_new)
+    changes += _export_transition.check_variable_export_lost(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
         return changes

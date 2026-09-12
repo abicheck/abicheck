@@ -29,12 +29,39 @@ from ..diff_helpers import make_change
 from ..model import Function, Variable
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.surface_facts import (
+    is_abi_visible,
     is_binary_exported,
     is_export_confirmed_absent,
     surface_fact_summary,
 )
 
-__all__ = ["check_export_lost", "check_variable_export_lost"]
+__all__ = [
+    "check_export_lost",
+    "check_variable_export_lost",
+    "deleted_declaration_is_public",
+]
+
+
+def deleted_declaration_is_public(new: Function | None, old: Function | None) -> bool:
+    """Whether *new* is a ``= delete``d declaration that counts as public ABI,
+    judged on whichever side still carries the evidence.
+
+    ``False`` for a ``None`` or non-deleted *new*, so a caller can use this as
+    its whole guard rather than restating the deleted check beside it.
+
+    A deleted declaration has no symbol *by construction* -- ``dwarf_snapshot``
+    keeps it only for cross-reference -- so its own export fact is a confirmed
+    ``False``, and an eligibility test that asks the new side alone rejects
+    exactly the declarations the deletion detector exists to report (Codex
+    review, P2). The old side is what says whether the deleted API was public.
+
+    Both the detector and the removal path's "defer to the detector" guard
+    call this, so the two cannot disagree about when a deletion is reported --
+    disagreement there is a double report, not a missed one.
+    """
+    if new is None or not new.is_deleted:
+        return False
+    return is_abi_visible(new) or (old is not None and is_abi_visible(old))
 
 
 def _export_was_lost(old: Function | Variable, new: Function | Variable) -> bool:

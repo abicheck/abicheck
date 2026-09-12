@@ -35,6 +35,7 @@ import itertools
 import pytest
 
 from abicheck.checker import compare
+from abicheck.extract.surface_fact_producers import debug_info_surface_facts
 from abicheck.model import (
     AbiSnapshot,
     Fact,
@@ -345,6 +346,104 @@ class TestExportTableOnlyRecordsAreNotSourceDeclarations:
         dwarf_decl = _fn(**debug_info_surface_facts(exported=True))  # type: ignore[arg-type]
         assert surface_fact_summary(dwarf_decl)["declared_in_headers"] == "unknown"
         assert in_source_declaration_index(dwarf_decl)
+
+
+class TestEvidenceOnTheSideThatHasIt:
+    """A declaration with no symbol *by construction* must not be judged by
+    its own export fact.
+
+    Three findings from one review round shared this root: once the export
+    fact became honest (a `= delete`d function has no symbol, so it is a
+    confirmed ``False``), every filter that asked only the *new* side stopped
+    admitting exactly the declarations it existed to report.
+    """
+
+    @staticmethod
+    def _deleted_pair() -> tuple[object, object]:
+        old = _snap(
+            "1.0",
+            _fn(**debug_info_surface_facts(exported=True)),  # type: ignore[arg-type]
+        )
+        new = _snap(
+            "2.0",
+            _fn(
+                is_deleted=True,
+                deleted_from_dwarf=True,
+                **debug_info_surface_facts(exported=False),  # type: ignore[arg-type]
+            ),
+        )
+        return old, new
+
+    def test_a_deleted_dwarf_function_is_still_reported_as_deleted(self) -> None:
+        old, new = self._deleted_pair()
+        kinds = [c.kind for c in compare(old, new).changes]  # type: ignore[arg-type]
+        assert ChangeKind.FUNC_DELETED_DWARF in kinds, kinds
+
+    def test_a_deleted_function_is_reported_exactly_once(self) -> None:
+        """Not as a deletion *and* a visibility change: the removal path
+        defers to the deletion detector, and both must agree on when."""
+        old, new = self._deleted_pair()
+        kinds = [c.kind for c in compare(old, new).changes]  # type: ignore[arg-type]
+        assert kinds.count(ChangeKind.FUNC_DELETED_DWARF) == 1
+        assert ChangeKind.FUNC_VISIBILITY_CHANGED not in kinds
+        assert ChangeKind.FUNC_REMOVED not in kinds
+
+    def test_the_legacy_path_reports_the_same_single_finding(self) -> None:
+        """The oracle for the two assertions above: a pre-split snapshot pair,
+        whose behaviour this change must not alter."""
+        old = _snap("1.0", _fn())
+        new = _snap("2.0", _fn(is_deleted=True, deleted_from_dwarf=True))
+        assert [c.kind for c in compare(old, new).changes] == [
+            ChangeKind.FUNC_DELETED_DWARF
+        ]
+
+    def test_unexported_debug_only_records_stay_out_of_source_indexes(self) -> None:
+        """A debug-info-only record with neither header nor export evidence is
+        not a source declaration -- admitting it let two unexported internal
+        functions report an inline-namespace version bump."""
+        unexported = _fn(**debug_info_surface_facts(exported=False))  # type: ignore[arg-type]
+        summary = surface_fact_summary(unexported)
+        assert summary["declared_in_headers"] == "unknown"
+        assert summary["in_public_contract"] == "unknown"
+        assert not in_source_declaration_index(unexported)
+        # ... while the exported sibling, which legacy admitted, still is.
+        assert in_source_declaration_index(
+            _fn(**debug_info_surface_facts(exported=True))  # type: ignore[arg-type]
+        )
+
+    def test_a_mangling_churn_heuristic_counts_only_confirmed_exports(self) -> None:
+        """`GLIBCXX_DUAL_ABI_FLIP_DETECTED` diagnoses a mangled-symbol change
+        across two export tables, so a promised-but-unexported declaration has
+        no symbol in either table to have churned."""
+        promised = {
+            "declared_in_headers_fact": _TRUE,
+            "in_public_contract_fact": _TRUE,
+            "binary_exported_fact": _FALSE,
+        }
+        old = _snap(
+            "1.0",
+            *[
+                _fn(
+                    name=f"f{i}",
+                    mangled=f"_ZNSt7__cxx1112basic_stringE{i}",
+                    **promised,  # type: ignore[arg-type]
+                )
+                for i in range(6)
+            ],
+        )
+        new = _snap(
+            "2.0",
+            *[
+                _fn(
+                    name=f"f{i}",
+                    mangled=f"_ZNSt12basic_stringE{i}",
+                    **promised,  # type: ignore[arg-type]
+                )
+                for i in range(6)
+            ],
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED not in kinds
 
 
 class TestTheQuestionDecidesTheFact:
@@ -678,25 +777,32 @@ class TestAccessorContract:
     @pytest.mark.parametrize(
         ("declared", "contract", "expected"),
         [
-            # Each confirmed negative excludes on its own, and unknown keeps
-            # the declaration in -- the rule the removal fix depends on.
+            # Each confirmed negative excludes on its own ...
             (_FALSE, _TRUE, False),
             (_TRUE, _FALSE, False),
             (_FALSE, _FALSE, False),
-            (_UNKNOWNS[1], _UNKNOWNS[1], True),
+            # ... and past those, membership needs affirmative evidence from
+            # one of the two facts. "Both unknown" is no evidence at all, not
+            # a declaration (Codex review, P2: it admitted debug-info-only
+            # records with neither header nor export evidence).
+            (_UNKNOWNS[1], _UNKNOWNS[1], False),
             (_TRUE, _UNKNOWNS[1], True),
             (_UNKNOWNS[1], _TRUE, True),
         ],
     )
-    def test_source_declaration_membership_excludes_only_confirmed_negatives(
+    def test_source_declaration_membership_needs_affirmative_evidence(
         self, declared: Fact[bool], contract: Fact[bool], expected: bool
     ) -> None:
-        fn = _fn(
-            declared_in_headers_fact=declared,
-            in_public_contract_fact=contract,
-            binary_exported_fact=_FALSE,
-        )
-        assert in_source_declaration_index(fn) is expected
+        for exported in (_TRUE, _FALSE, _UNKNOWNS[1]):
+            fn = _fn(
+                declared_in_headers_fact=declared,
+                in_public_contract_fact=contract,
+                binary_exported_fact=exported,
+            )
+            # The export fact never participates in this population, so the
+            # answer must not move with it -- that invariance is what keeps a
+            # lost export from reading as a lost declaration.
+            assert in_source_declaration_index(fn) is expected, exported
 
     def test_a_header_only_dump_leaves_the_export_fact_unknown(self) -> None:
         from abicheck.extract.surface_fact_producers import header_ast_surface_facts

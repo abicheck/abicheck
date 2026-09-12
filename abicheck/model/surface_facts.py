@@ -325,13 +325,25 @@ def in_source_declaration_index(decl: SurfaceFactBearing) -> bool:
     :func:`is_export_table_only_record` for why that question is not one of
     the three facts.
     """
-    if is_export_table_only_record(decl):
-        return False
-    if declaration_confirmed_absent(decl):
-        return False
     if is_confirmed_false(in_public_contract(decl)):
         return False
-    return True
+    if declaration_confirmed_absent(decl) or is_export_table_only_record(decl):
+        return False
+    # Past the confirmed negatives, membership needs *affirmative* evidence:
+    # a header that declares it, or a contract that promises it. "Both
+    # unknown" is not a source declaration -- it is no evidence at all, and
+    # admitting it let a debug-info-only record with neither header nor
+    # export evidence reach source-level detectors (two unexported internal
+    # `lib::v1::foo`/`lib::v2::foo` functions reporting an inline-namespace
+    # version bump; Codex review, P2).
+    #
+    # This is where the split's asymmetry earns its keep, and it is why the
+    # rule is not simply "not a confirmed negative": the *export* fact still
+    # never appears here, so the pair of sides in the reported bug -- header
+    # evidence on both, export evidence on one -- stays symmetric and
+    # produces no removal, while a record that never had source evidence in
+    # the first place stays out.
+    return is_header_declared(decl) or is_confirmed_true(in_public_contract(decl))
 
 
 def public_header_contract_fact(
