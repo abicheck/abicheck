@@ -39,6 +39,106 @@ __all__ = ["TOOL_SURFACE_BUG_CLASSES"]
 
 #: Registered in this order, appended after ``manifest.py``'s own list.
 TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
+    # Two entries from one CI audit, sharing one shape: a configured
+    # limit that is silently inert (a concurrency key that can never
+    # cancel) or silently catastrophic (a safety ceiling handed to the
+    # allocator as a size) on a platform the fast lane does not run on.
+    # Both are found by running abicheck's own delivery surface -- a
+    # workflow job, and the wall clock of a Windows test lane -- never by
+    # comparing two libraries, which is this module's own scope line.
+    BugClass(
+        id="storage.safety_limit_used_as_allocation_size",
+        invariant=(
+            "A safety *ceiling* may bound how much a reader accepts; it "
+            "may never be handed to an allocator as a *size*. Concretely, "
+            "for every supported storage envelope and every content size: "
+            "the peak allocation of a read is a function of the file's "
+            "content, not of the configured cap -- sweeping the cap "
+            "across four orders of magnitude with the content fixed "
+            "leaves the peak flat, while the read still round-trips the "
+            "content exactly and still refuses a file past the cap. "
+            "`read_snapshot_bytes` violated this with "
+            "`f.read(cap + 1 - len(prefix))`, allocating ~1 GiB to read an "
+            "8 KiB snapshot; Linux's overcommitting allocator hid it "
+            "entirely, so it surfaced only as Windows CI wall clock "
+            "(118.03s -> 1.80s on one stored-package comparison test). "
+            "The complement direction is part of the invariant: a reader "
+            "that allocated a constant tiny buffer and truncated would "
+            "satisfy the flatness half alone."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_snapshot_read_allocation.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "algorithm": ("none", "gzip", "zstd"),
+            "cap_magnitude": ("4MiB", "64MiB", "1GiB", "2GiB"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant is stated and tested only for the "
+                    "snapshot storage reader. Other bounded readers in "
+                    "the tree take a limit-shaped argument the same way "
+                    "(`snapshot_cache.py`'s archive member reads, the "
+                    "PE/Mach-O section readers, "
+                    "`workflows/bundle_compare_operand.py`'s probe); none "
+                    "is tested against the allocation half of this class, "
+                    "and the platform that exposes it (Windows, a "
+                    "committing allocator) is not where the fast unit "
+                    "lane runs, so a sibling regression would again be "
+                    "invisible on Linux."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="ci.inert_concurrency_group_key",
+        invariant=(
+            "A concurrency group keyed off a value that is unique per run "
+            "makes `cancel-in-progress: true` a no-op: every run lands in "
+            "its own group, so a superseded run is never cancelled and "
+            "instead holds a runner or a queue slot until it finishes. "
+            "Stated behaviourally, for every workflow that opts into "
+            "cancellation: two successive events for the *same* logical "
+            "unit (the same pull request, or the same branch ref) must "
+            "render the same group string even though they differ in "
+            "`run_id` and `sha`, and two *different* units must not. Six "
+            "read-only validation workflows used "
+            "`${{ github.event.pull_request.number || github.run_id }}`, "
+            "correct for a pull request and silently inert for a `push` "
+            "-- a push carries no PR number, so it fell through to "
+            "`run_id`. The complement half of the invariant is load-"
+            "bearing: the literal group `\"x\"` satisfies the first half "
+            "while cancelling every unrelated run in the repository."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_workflow_concurrency_grouping.py",),
+        public_surfaces=("ci-workflow",),
+        axes={
+            "event": ("pull_request", "push"),
+            "unit": ("same", "different"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The guard evaluates a small GitHub-expression subset "
+                    "(parenthesised groups, `||`, `&&`, `==` against a "
+                    "literal) and models a fixed set of `github.*` context "
+                    "fields; an unmodelled field evaluates as absent "
+                    "rather than raising, so a future group expression "
+                    "using `github.event.merge_group.*`, a function call "
+                    "such as `format(...)`, or a job-level `concurrency:` "
+                    "block (not surveyed at all -- only the workflow-level "
+                    "key is) would be checked loosely or not checked. The "
+                    "class is also asserted only against synthesized "
+                    "contexts; nothing here verifies GitHub's real "
+                    "grouping semantics on a hosted run."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
     BugClass(
         id="trust_boundary.shell_workflow_injection",
         invariant=(
