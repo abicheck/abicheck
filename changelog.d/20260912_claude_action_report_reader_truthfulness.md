@@ -30,6 +30,14 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **Click's attached `-oPATH` form is recognized as the report destination**, so
+  a run writing to a file is no longer judged as the stdout shape (or judged at
+  the superseded input path).
+- **The stored-BundleFacts summary's assurance pair is checked despite carrying
+  no schema version.** It emits both keys under one `if` like every other
+  emitter but stamps none of the three version keys, so a half-present pair read
+  as a legacy report the caller may accept. Recognized by its own `mode`
+  discriminator.
 - **Two more admitted-but-unactionable shapes, and the invariant that closes the
   class.** The real not-comparable document (`verdict: null` beside a `reason`
   object) was admitted while no query consumed `reason`, and

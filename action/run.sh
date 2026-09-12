@@ -2238,6 +2238,16 @@ _effective_output_file() {
   while IFS=$'\t' read -r _name _value; do
     case "$_name" in
       --output | -o) _found="$_value" ;;
+      # Click's *attached* short form, `-oPATH`. `_extra_args_options` leaves it
+      # an opaque bare token on purpose -- that form consumes no following
+      # token, so for every other consumer "unexpanded" is already the right
+      # answer -- but here the attached value IS the answer, and dropping it
+      # sent a file-writing run down the stdout path (Codex review, P2;
+      # confirmed against the installed Click parser, which resolves
+      # `-oreport.json` to `--output`). Matched with a literal `-o` prefix and a
+      # non-empty remainder, so a bare `-o` (whose value is the next token, and
+      # which the case above already handled) cannot fall in here.
+      -o?*) _found="${_name#-o}" ;;
     esac
   done <<<"$(_extra_args_options)"
   printf '%s' "$_found"

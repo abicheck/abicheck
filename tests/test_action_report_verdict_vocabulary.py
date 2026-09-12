@@ -364,3 +364,66 @@ class TestAdmissionImpliesAnswerability:
         rejected = [d for _, d in _documents() if not rq._carries_a_result(d)]
         assert admitted, "no document was admitted"
         assert rejected, "no document was rejected"
+
+
+class TestTheUnversionedBundleFactsShape:
+    """A shape with no schema version still owes its assurance contribution.
+
+    `frontends/cli/commands/compare_bundle_facts.py`'s JSON summary emits
+    `analysis_assurance` and `analysis_assurance_exit_contribution` under one
+    `if` — the same pairing every other emitter uses — but stamps none of the
+    three schema-version keys in `ASSURANCE_CONTRIBUTION_SINCE`. So the version
+    loop found nothing and a provably broken pair read as `absent_legacy_schema`,
+    i.e. as an old report the caller may accept (Codex review, P2).
+
+    The version threshold exists to answer "was a contribution owed here". For a
+    shape with no version to ask, its own `mode` discriminator answers it, since
+    that emitter has always written both keys together. Recognizing the shape is
+    faithful; giving it a version it does not carry would be inventing a field.
+    """
+
+    def test_a_half_present_pair_is_contradictory(self) -> None:
+        assert (
+            rq.assurance_axis(
+                {"mode": "bundle_facts", "analysis_assurance": {"status": "degraded"}}
+            )
+            == "contradictory"
+        )
+
+    def test_a_complete_pair_reads_its_contribution(self) -> None:
+        for contribution, expected in ((0, "not_gated"), (1, "gated")):
+            assert (
+                rq.assurance_axis(
+                    {
+                        "mode": "bundle_facts",
+                        "analysis_assurance": {"status": "ok"},
+                        "analysis_assurance_exit_contribution": contribution,
+                    }
+                )
+                == expected
+            ), contribution
+
+    def test_carrying_neither_key_is_not_contradictory(self) -> None:
+        # The control that matters most here: the pair is emitted only under the
+        # `require_complete` setting, so an ordinary bundle-facts run carries
+        # neither key and must stay acceptable. Inferring the contradiction from
+        # the shape alone would fail every such run — the same mistake an earlier
+        # draft of this function made with the schema version.
+        assert (
+            rq.assurance_axis({"mode": "bundle_facts", "verdict": "COMPATIBLE"})
+            == "absent_legacy_schema"
+        )
+
+    def test_an_unrelated_unversioned_document_is_untouched(self) -> None:
+        # Narrowness: the exception is keyed on this emitter's discriminator, not
+        # on "unversioned", so some other schema-less document is unaffected.
+        assert (
+            rq.assurance_axis({"analysis_assurance": {"status": "degraded"}})
+            == "absent_legacy_schema"
+        )
+        assert (
+            rq.assurance_axis(
+                {"mode": "something_else", "analysis_assurance": {"status": "degraded"}}
+            )
+            == "absent_legacy_schema"
+        )

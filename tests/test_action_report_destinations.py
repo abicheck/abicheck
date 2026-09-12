@@ -802,3 +802,84 @@ class TestTheAssuranceAxisIsCheckedPerDestination:
         bindir = self._stub(tmp_path, both_absent, both_absent)
         outputs = _run_action(tmp_path, self._env(tmp_path, secondary_path), bindir)
         assert outputs.get("verdict") == "BREAKING", outputs
+
+
+class TestAnAttachedShortOutputOptionIsHonoured:
+    """Click's attached `-oPATH` form names the destination too.
+
+    `_extra_args_options` leaves an attached short option an opaque bare token on
+    purpose — that form consumes no *following* token, so for every other
+    consumer "unexpanded" is already the right answer. But for
+    `_effective_output_file` the attached value *is* the answer, and dropping it
+    sent a file-writing run down the stdout path: `REPORT_UNREADABLE` with no
+    `output-file` input, or the superseded path validated with one (Codex review,
+    P2).
+
+    Confirmed against the installed Click parser before fixing, not assumed:
+    `-oreport.json` really does resolve to `--output`.
+    """
+
+    def _stub(self, tmp_path: Path, dest: Path) -> Path:
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        blob = tmp_path / "payload.json"
+        blob.write_text(
+            json.dumps({"report_schema_version": "4.4", "verdict": "BREAKING"}),
+            encoding="utf-8",
+        )
+        stub = bindir / "abicheck"
+        stub.write_text(
+            f'#!/usr/bin/env bash\ncp "{blob}" "{dest}"\nexit 0\n', encoding="utf-8"
+        )
+        stub.chmod(0o755)
+        return bindir
+
+    def _env(self, tmp_path: Path, extra: str) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_EXTRA_ARGS": extra,
+        }
+
+    def test_the_attached_form_is_read_as_the_destination(self, tmp_path: Path) -> None:
+        dest = tmp_path / "attached.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o{dest}"), bindir)
+        assert outputs.get("verdict") == "BREAKING", outputs
+
+    def test_a_missing_attached_destination_is_still_caught(
+        self, tmp_path: Path
+    ) -> None:
+        # Narrowness control: recognizing the form must not stop requiring it.
+        dest = tmp_path / "attached.json"
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "abicheck"
+        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o{dest}"), bindir)
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
+
+    def test_a_bare_dash_o_still_takes_the_next_token(self, tmp_path: Path) -> None:
+        # The separated form must keep working — the attached-form branch matches
+        # only a non-empty remainder, so `-o PATH` cannot fall into it.
+        dest = tmp_path / "separated.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o {dest}"), bindir)
+        assert outputs.get("verdict") == "BREAKING", outputs
+
+    def test_a_literal_value_that_looks_attached_is_not_mistaken(
+        self, tmp_path: Path
+    ) -> None:
+        # `-H`'s own consumed value happening to start with `-o` is a value, not
+        # an attached option: `_extra_args_options` pairs it with `-H` and never
+        # emits it as a bare token, so the branch cannot see it.
+        dest = tmp_path / "real.json"
+        bindir = self._stub(tmp_path, dest)
+        outputs = _run_action(
+            tmp_path, self._env(tmp_path, f"-H -ofake.h -o{dest}"), bindir
+        )
+        assert outputs.get("verdict") == "BREAKING", outputs
+        assert not (tmp_path / "fake.h").exists(), "should not be an output path"

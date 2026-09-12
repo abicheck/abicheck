@@ -480,6 +480,19 @@ def assurance_axis(report: dict[str, Any]) -> str:
             if version >= threshold:
                 return "contradictory"
             return "absent_legacy_schema"
+    # An *unversioned* shape that still emits the pair under one `if`: the
+    # stored-BundleFacts comparison (`frontends/cli/commands/
+    # compare_bundle_facts.py`'s JSON summary) stamps none of the three schema
+    # keys above, so the loop fell through to `absent_legacy_schema` and a
+    # provably broken pair read as an old report (Codex review, P2).
+    #
+    # The version threshold exists to answer "was a contribution owed here"; for
+    # a shape that has no version to ask, the shape itself answers it, because
+    # that emitter has *always* written both keys together. Recognized by its own
+    # `mode` discriminator rather than by giving it a version it does not carry,
+    # which would be inventing a field to reason about.
+    if report.get("mode") == "bundle_facts":
+        return "contradictory"
     return "absent_legacy_schema"
 
 

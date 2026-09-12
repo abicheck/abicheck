@@ -299,6 +299,15 @@ Two predicates close that without weakening anything above:
   on each requested path, stdout included. Asking only the chain-selected report
   let a clean primary hide a contradictory secondary.
 
+  **`-oPATH` counts as naming the destination.** `_extra_args_options` leaves an
+  *attached* short option an opaque bare token deliberately — that form consumes
+  no following token, so "unexpanded" is the right answer for every other
+  consumer. `_effective_output_file` is the exception: the attached value *is*
+  the answer, so it matches `-o?*` (a non-empty remainder, so a bare `-o` still
+  takes the next token). A literal value that merely looks attached is safe,
+  because `_extra_args_options` pairs it with its own option and never emits it
+  as a bare token.
+
   **A requested destination must also be *fresh*.** Parseability alone says a
   document is there, not that this invocation wrote it; a leftover from an
   earlier step or one a PR author committed satisfies the former and not the
@@ -310,6 +319,14 @@ Two predicates close that without weakening anything above:
   `_json_report_src`'s own chain; the map covers *every* destination, because
   freshness is a property each requested artifact needs and not only the ones
   that can become the verdict source.
+
+  **An unversioned shape can still owe its contribution.** The
+  stored-BundleFacts summary emits the assurance pair under one `if` and stamps
+  no schema-version key at all, so the threshold loop fell through to
+  `absent_legacy_schema` and a provably broken pair read as an old report. The
+  threshold exists to answer "was a contribution owed here"; where there is no
+  version to ask, the shape's own `mode` discriminator answers it. Recognize the
+  shape — never invent a version the emitter does not write.
 
   **Each report shape's version key gets its own threshold.** Three sequences
   reach the reader — `report_schema_version` (2.40),
