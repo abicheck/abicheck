@@ -468,7 +468,17 @@ def _compare_github_output(
         "  esac\n"
         "done\n"
         'if [[ -n "$_out" ]]; then\n'
-        "  printf 'not-actually-sarif\\n' > \"$_out\"\n"
+        # Valid JSON, and still deliberately not SARIF -- which is all this
+        # stub's scenario needs. It used to write the bare line
+        # "not-actually-sarif": non-SARIF, but also not parseable as anything,
+        # and under an *effective* format of json (what `extra-args --format
+        # json` makes this run) that is a report abicheck itself would never
+        # produce at this path. `run.sh` now reports an unreadable requested
+        # JSON report as REPORT_UNREADABLE, so the unfaithful fixture failed
+        # the step for a reason unrelated to what these tests check. The
+        # subject -- report-path withheld when the effective format stops
+        # matching `format: sarif` -- is unchanged.
+        '  printf \'%s\\n\' \'{"verdict": "COMPATIBLE"}\' > "$_out"\n'
         "else\n"
         '  echo \'{"verdict":"COMPATIBLE"}\'\n'
         "fi\n"

@@ -70,6 +70,22 @@ _PY_BIN_LINE = re.compile(r"^_PY_BIN=.*$", re.MULTILINE)
 #: isolation is exercised at all.
 _PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
 _PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
+#: `_report_query` no longer carries its own Python heredoc -- it shells out
+#: to `action/report_query.py`, located via `$_REPORT_QUERY_PY`. Extracted for
+#: the same reason as the two lines above (without it every lookup answers
+#: empty and every branch takes its "no report available" fallback, the
+#: vacuous pass `_HELPERS_START`'s docstring warns about) -- and then
+#: *overridden* in the assembled script, because the real line resolves
+#: relative to `${BASH_SOURCE[0]}`, which in a snippet written to a temp file
+#: is the temp file. Extracting the real line first is what keeps a rename or
+#: deletion of it failing here rather than silently drifting; appending the
+#: override after it is what makes the snippet functional. The real
+#: resolution itself is covered end-to-end by the tests that execute the
+#: whole of run.sh (e.g. test_action_analysis_assurance_verdict.py).
+_REPORT_QUERY_PY_LINE = re.compile(r"^_REPORT_QUERY_PY=.*$", re.MULTILINE)
+#: The reader the override points at -- the real one, so these tests exercise
+#: the same report semantics production does.
+_REPORT_QUERY_PY_PATH = Path(__file__).resolve().parents[1] / "action" / "report_query.py"
 
 
 def _py_safe_dir_source() -> str:
@@ -84,6 +100,9 @@ def _verdict_case_region() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     py_bin_match = _PY_BIN_LINE.search(text)
     assert py_bin_match, "_PY_BIN resolution line not found in run.sh"
+    report_query_match = _REPORT_QUERY_PY_LINE.search(text)
+    assert report_query_match, "_REPORT_QUERY_PY resolution line not found in run.sh"
+    assert _REPORT_QUERY_PY_PATH.is_file(), f"missing reader: {_REPORT_QUERY_PY_PATH}"
     helpers_start = text.index(_HELPERS_START)
     helpers = text[helpers_start : text.index(_HELPERS_END, helpers_start)]
     # A renamed helper would otherwise silently restore the vacuous state
@@ -97,6 +116,10 @@ def _verdict_case_region() -> str:
         + "\n"
         + py_bin_match.group(0)
         + "\n"
+        + report_query_match.group(0)
+        + "\n"
+        # Overrides the extracted line above: see _REPORT_QUERY_PY_LINE.
+        + f'_REPORT_QUERY_PY="{_REPORT_QUERY_PY_PATH}"\n'
         + _py_safe_dir_source()
         + helpers
         + "\n"

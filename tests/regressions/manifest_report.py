@@ -208,4 +208,93 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.unestablished_result_reads_as_success",
+        invariant=(
+            "A consumer that publishes a verdict from a report it did not "
+            "read must publish 'no result established', never a passing one. "
+            "Stated over the whole class of unusable documents rather than "
+            "the one shape that prompted it: no file, zero bytes, truncated "
+            "JSON, non-JSON text, valid JSON that is not an object, an empty "
+            "object, and undecodable bytes are seven different ways to carry "
+            "no result, and every one of them must fail the same way. The "
+            "same rule governs a field the report was required to carry and "
+            "did not -- 'I cannot establish that this axis failed' is not "
+            "'this axis passed' -- but only where the report's own schema "
+            "version and companion keys establish that it was owed: an "
+            "absence that is legitimate under the emitting version must stay "
+            "accepted, since failing those fails working runs rather than "
+            "broken ones. Deliberately NOT extended to reconstructing an "
+            "axis from rendered prose (a CLI notice, a summary line): that "
+            "channel is forgeable by anything a run's own build step can "
+            "print, and ADR-063 Track T8 retired it. The axis predicates "
+            "therefore keep answering 'cannot tell' for an unreadable "
+            "report; what must not happen is a consumer reading that as a "
+            "pass."
+        ),
+        # Two prior escapes of this exact class, both recorded in
+        # `action/run.sh`'s own comments: #1016 (a COMPATIBLE_WITH_RISK report
+        # laundered into plain COMPATIBLE at exit 0) and #1210 (an audit-only
+        # run, then a fully-suppressed one, each defaulting to COMPATIBLE
+        # because the exit-0 path could not read its answer from the report).
+        # Each was fixed for the shape it was found in; the mechanism --
+        # `VERDICT="COMPATIBLE"` as the fallthrough for "the report did not
+        # say" -- survived both, which is what makes this a class rather than
+        # three incidents.
+        fixed_by=(1016, 1210),
+        seed_tests=(
+            "tests/test_action_report_query.py",
+            "tests/test_action_unreadable_report_verdict.py",
+        ),
+        public_surfaces=("github-action",),
+        axes={
+            "unusable_document": (
+                "absent",
+                "zero_bytes",
+                "truncated_json",
+                "not_json",
+                "json_array",
+                "bare_scalar",
+                "empty_object",
+                "undecodable_bytes",
+            ),
+            "report_schema_version": ("absent", "pre_2_40", "2_40", "post_2_40"),
+            "report_shape": ("compare_root", "nested_diff", "audit_exit_axes"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Scoped to a JSON report the caller explicitly requested "
+                    "(`format: json` plus `output-file`). When the primary "
+                    "format is not json, the Action injects an internal "
+                    "`--write json=` sidecar for its own rendering; if that "
+                    "one is missing, exit 0 still publishes `COMPATIBLE`, "
+                    "which can understate a `BREAKING`/`API_BREAK` the "
+                    "severity policy demoted to exit 0. Not closed by "
+                    "widening the predicate: exit 0 is real evidence that the "
+                    "tool's own gate passed, so failing the step there would "
+                    "be wrong. It needs a verdict value distinguishing "
+                    "'accepted, tier unverified' from 'accepted, compatible' "
+                    "-- a change to the Action's declared `verdict` output "
+                    "contract, so an ADR rather than an incremental fix."
+                ),
+                reference="action/AGENTS.md",
+                canary_test=None,
+            ),
+            KnownGap(
+                description=(
+                    "Only the composite Action's own reader is covered. "
+                    "`abicheck aggregate` reads the same report fields "
+                    "(`_analysis_assurance_exit`) through an independent "
+                    "implementation and is not held to this invariant yet; "
+                    "neither is `buildsource/check_report.py`, whose "
+                    "defaulting of a missing contribution to 0 is a "
+                    "deliberate advisory-neutralization rather than an "
+                    "instance of this class, but which shares the shape."
+                ),
+                reference="docs/contribute/known-gaps.md",
+                canary_test=None,
+            ),
+        ),
+    ),
 )

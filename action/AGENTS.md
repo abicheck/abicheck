@@ -52,6 +52,14 @@ sequence that invokes these scripts in order:
 3. `action/run.sh` — assembles the `abicheck` CLI invocation from `INPUT_*`
    environment variables (one per `action.yml` input), runs it, and sets the
    Action's declared outputs from the exit code / report contents.
+4. `action/report_query.py` — the one JSON-report reader `run.sh`'s
+   `_report_query` shells out to, for every derived value it publishes. A real
+   file rather than a heredoc so its query semantics are reachable from
+   `pytest`/`mypy`/`ruff`; see the module's own docstring for the exit-code
+   contract (`0` answered / `1` cannot tell / `2` unknown query) and for why it
+   lives here rather than under `abicheck/` (it must version with the Action,
+   not with whatever `abicheck-version:` a workflow pinned). **Add a report
+   field's reader here, never as a second parser in `run.sh`.**
 
 **Keep `validate-inputs.sh` and `run.sh` in sync.** `run.sh` independently
 re-checks the format/upload-sarif rules right before invoking `abicheck`
@@ -73,7 +81,11 @@ separate `action/tests/` — keep it there):
 `test_action_run_sh_pr_json.py`, `test_action_run_sh_severity_summary.py`,
 `test_action_run_sh_summary.py`, `test_action_run_sh_legacy_aliases.py`,
 `test_action_run_contract.py`, `test_action_validate_inputs.py`,
-`test_action_baseline.py`, `test_action_collect_facts.py`. These are plain
+`test_action_baseline.py`, `test_action_collect_facts.py`,
+`test_action_report_query.py` (the reader above, including the
+workflow-command-injection defenses, exercised by attempting the attacks),
+`test_action_unreadable_report_verdict.py` (the `REPORT_UNREADABLE` path,
+end-to-end through the whole of `run.sh`). These are plain
 Python tests that invoke the shell scripts as subprocesses and assert on
 their output/exit codes — run them with the normal fast test command
 (`pytest tests/ -k action`), no `bash`-specific test runner needed.
@@ -124,10 +136,61 @@ give it a field in the structured report.
 
 The consequence to know when reading a failure report: a run whose report
 is genuinely unreadable (a crash, or an `extra-args --write` that
-suppressed the internal sidecar) gets the plain exit-code-derived verdict —
-no `SEVERITY_ERROR`/`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no
+suppressed the internal sidecar) gets no
+`SEVERITY_ERROR`/`COVERAGE_INCOMPLETE`/`ANALYSIS_INCOMPLETE` label and no
 escalation, since no structured evidence stated one. That is deliberate:
 absence of data is not evidence an axis fired.
+
+**But absence of data is not evidence an axis *passed*, either**, and that
+half used to be missing. At exit 0 the same absence fell through to
+`VERDICT="COMPATIBLE"` — `_resolve_clean_exit_verdict` set that first and only
+ever *escalated* from a report it could read — so a run that wrote no usable
+report published "No binary ABI break detected" having established nothing.
+Two predicates close that without weakening anything above:
+
+- `_report_validity` asks `report_query.py` to classify the document itself
+  (`ok` / `absent` / `unreadable` / `unparseable` / `not_object` / `empty`),
+  and `_json_report_expected` asks whether the *caller* requested a JSON report
+  (`format: json` plus `output-file`) — because "no report arrived where one was
+  asked for" and "no report was requested" are different, and only the first is
+  a failure of this step.
+- `_assurance_axis_contradictory` catches the one absence that *is* provably
+  wrong: an `analysis_assurance` block on a schema ≥ 2.40 with no
+  `analysis_assurance_exit_contribution` beside it. `reporter.py` emits those
+  two under one `if`, so a half-present pair is an inconsistent report. A
+  report carrying **neither** key is normal and must stay accepted — inferring
+  the contradiction from the schema version alone fails ordinary green runs,
+  which an earlier draft of this check did.
+
+Either one publishes `verdict: REPORT_UNREADABLE` and fails the step
+unconditionally; no `fail-on-*` input waives it. **Don't "simplify" this by
+making the axis predicates fail closed instead** — that is the forgeable-prose
+path this section rules out, reached from the other direction.
+
+### The residual: exit 0 with no JSON report requested
+
+`_json_report_expected` is deliberately narrow, and the part it leaves open is
+worth stating rather than discovering. When the primary format is not json,
+this script injects an internal `--write json=$PR_JSON` sidecar for its own
+PR-comment and annotation rendering. If *that* turns up missing, the run still
+publishes `verdict: COMPATIBLE` — and at exit 0 the real tier could equally
+have been `NO_CHANGE`, `COMPATIBLE_WITH_RISK`, or a `BREAKING`/`API_BREAK` the
+severity policy demoted. So the published verdict can understate a demoted
+break for a non-json-format run whose sidecar did not arrive.
+
+That is not the same defect as the one above, and it must not be "fixed" by
+extending `_json_report_expected` to the sidecar. Exit 0 is genuine evidence —
+source #2 above, the kernel-reported answer to what the invocation itself said,
+and `compare` exiting 0 means its own gate did not fire. So the run's
+*acceptance* is established even when its *tier* is not, and
+`REPORT_UNREADABLE` ("nothing read this run's result") would be the wrong
+label: it would fail a step the tool itself passed. Closing this properly means
+a new verdict value distinguishing "accepted, tier unverified" from
+"accepted, compatible" — a change to this Action's declared `verdict` output
+contract that every consumer branching on it sees, so it wants an ADR and its
+own migration, not an incremental widening of the predicate here. Tracked as a
+`KnownGap` on the `report.unestablished_result_reads_as_success` bug class
+(`tests/regressions/manifest.py`).
 
 **Known, accepted limitation (Codex review, P1, fresh evidence):** a
 `scan --against` step whose own `extra-args` carries a non-JSON secondary
