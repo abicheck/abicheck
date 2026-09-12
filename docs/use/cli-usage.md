@@ -58,9 +58,9 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H include/
 
 # Output formats
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --header old=v1/foo.h --header new=v2/foo.h --format sarif -o abi.sarif
+  --header old=v1/foo.h --header new=v2/foo.h -o sarif=abi.sarif
 abicheck compare libfoo.so.1 libfoo.so.2 \
-  --header old=v1/foo.h --header new=v2/foo.h --format junit -o results.xml
+  --header old=v1/foo.h --header new=v2/foo.h -o junit=results.xml
 ```
 
 #### Public headers vs. include roots
@@ -140,7 +140,7 @@ Beyond the core `compare`/`dump` flow:
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
 - [Output Formats](output-formats.md) — `--view show=...` filtering,
-  `--format oneline`'s one-line summary, `--view leaf|impact`,
+  `-o oneline=...`'s one-line summary, `--view leaf|impact`,
   redundancy filtering, SARIF/JUnit output, evidence-tier confidence, JSON
   schema.
 - `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
@@ -164,21 +164,21 @@ independently instead:
 
 ```bash
 # What --profile ci-gate used to expand to
-abicheck compare old.json new.json --depth headers --format review \
+abicheck compare old.json new.json --depth headers -o review=- \
   --severity-preset default
 
 # What --profile release-cut used to expand to
-abicheck compare old.json new.json --depth source --format markdown
+abicheck compare old.json new.json --depth source -o markdown=-
 
-# What --profile quick used to expand to (--format oneline replaces the
+# What --profile quick used to expand to (-o oneline=... replaces the
 # one-line summary; there is no depth-bundling replacement)
-abicheck compare old.json new.json --format oneline
+abicheck compare old.json new.json -o oneline=-
 ```
 
 A project that wants `ci-gate`'s behavior on every run states depth, view,
 and severity in `.abicheck.yml` instead of retyping a preset.
 
-> `--view show=...` filtering, `scope.show_redundant: true`, `--format oneline`'s
+> `--view show=...` filtering, `scope.show_redundant: true`, `-o oneline=...`'s
 > one-line summary format, and `--view leaf|impact` are covered in full
 > on [Output Formats](output-formats.md). `--view show=...`/`show_redundant`/
 > `--view leaf|impact|root-cause` are display-only and do not affect the verdict or exit

@@ -81,7 +81,7 @@ class TestReleaseJsonEnvMatrixDigest:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0, out
         data = json.loads(out)
 
@@ -110,7 +110,7 @@ class TestReleaseJsonEnvMatrixDigest:
         _write_snap(new_dir / "libfoo.json", _snap())
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0, out
         data = json.loads(out)
 
@@ -147,7 +147,7 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         data = json.loads(out)
 
         assert data["libraries"] == [], "fixture precondition: zero matched pairs"
@@ -174,7 +174,7 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         (zero_pair_work / ".abicheck.yml").write_text(deployment_yaml)
         monkeypatch.chdir(zero_pair_work)
         _, zero_pair_out = _invoke(
-            "compare", str(zp_old), str(zp_new), "--format", "json"
+            "compare", str(zp_old), str(zp_new), "-o", "json=-"
         )
         zero_pair_digest = json.loads(zero_pair_out)["env_matrix_source_sha256"]
 
@@ -190,7 +190,7 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         (matched_work / ".abicheck.yml").write_text(deployment_yaml)
         monkeypatch.chdir(matched_work)
         matched_code, matched_out = _invoke(
-            "compare", str(m_old), str(m_new), "--format", "json"
+            "compare", str(m_old), str(m_new), "-o", "json=-"
         )
         assert matched_code == 0, matched_out
         matched_digest = json.loads(matched_out)["env_matrix_source_sha256"]
@@ -222,10 +222,10 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
-            "--output-dir",
-            str(output_dir),
+            "-o",
+            "json=-",
+            "-o",
+            f"json={output_dir}/",
         )
         summary = json.loads((output_dir / "summary.json").read_text())
         digest = summary["env_matrix_source_sha256"]
@@ -258,7 +258,7 @@ class TestReleaseMarkdownEnvMatrixDigest:
         monkeypatch.chdir(work)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "markdown"
+            "compare", str(old_dir), str(new_dir), "-o", "markdown=-"
         )
         assert code == 0, out
         assert "Deployment floor digest:" in out
@@ -278,7 +278,7 @@ class TestReleaseMarkdownEnvMatrixDigest:
         monkeypatch.chdir(work)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "markdown"
+            "compare", str(old_dir), str(new_dir), "-o", "markdown=-"
         )
         assert code == 0, out
         assert "Deployment floor digest:" not in out
@@ -311,7 +311,7 @@ class TestReleaseJunitEnvMatrixDigest:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "junit")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "junit=-")
         assert code == 0, out
         assert 'name="abicheck.deployment"' in out
         assert 'name="env_matrix_source_sha256"' in out
@@ -348,7 +348,7 @@ class TestReleaseJunitEnvMatrixDigest:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "junit")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "junit=-")
         # Zero matched pairs floors the exit code to 1 (ADR-065 D7's "no
         # comparison completed" completeness axis) -- unrelated to this fix,
         # and the same non-zero exit `TestReleaseJsonEnvMatrixDigestWithNo
@@ -393,6 +393,6 @@ class TestReleaseJunitEnvMatrixDigest:
         _write_snap(new_dir / "libfoo.json", _snap())
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "junit")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "junit=-")
         assert code == 0, out
         assert 'name="abicheck.deployment"' not in out

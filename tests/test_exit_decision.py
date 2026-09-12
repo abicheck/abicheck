@@ -855,7 +855,7 @@ class TestCompareExitDecisionIntegration:
     """
 
     def test_clean_comparison_reports_a_clean_exit_block(self, tmp_path: Path) -> None:
-        res = _compare(tmp_path, _compatible_pair(), "--format", "json")
+        res = _compare(tmp_path, _compatible_pair(), "-o", "json=-")
         assert res.exit_code == 0, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
         assert report["exit"] == {
@@ -878,7 +878,7 @@ class TestCompareExitDecisionIntegration:
     def test_breaking_comparison_reports_the_compatibility_gate_reason(
         self, tmp_path: Path,
     ) -> None:
-        res = _compare(tmp_path, _breaking_pair(), "--format", "json")
+        res = _compare(tmp_path, _breaking_pair(), "-o", "json=-")
         assert res.exit_code == 4, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
         assert report["exit"]["code"] == 4
@@ -901,7 +901,7 @@ class TestCompareExitDecisionIntegration:
             AbiSnapshot(version="2.0", functions=fns, **common),
         )
         res = _compare(
-            tmp_path, pair, "--format", "json", "--require-complete-analysis",
+            tmp_path, pair, "-o", "json=-", "--require-complete-analysis",
         )
         assert res.exit_code == 1, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
@@ -939,9 +939,13 @@ class TestCompareExitDecisionIntegration:
         res = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--required-symbol", "_Z5pub_av",  # pub_a survives; pub_b was removed
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "-o",
+                "json=-",
             ],
         )
         assert res.exit_code == 4, res.output
@@ -969,9 +973,13 @@ class TestCompareExitDecisionIntegration:
         res = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--required-symbol", "_Z5pub_bv",  # pub_b was removed
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_bv",
+                "-o",
+                "json=-",
             ],
         )
         assert res.exit_code != 0, res.output
@@ -1004,10 +1012,14 @@ class TestCompareExitDecisionIntegration:
         res = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--required-symbol", "_Z5pub_av",  # survives -- clean scoped gate
-                "--format", "json",
-                *_assurance_config_args(tmp_path),  # elf-only pair: incomplete
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "-o",
+                "json=-",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code == 1, res.output
@@ -1047,7 +1059,7 @@ class TestCompareEvidenceContractAndBudgetAxes:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._force_field(monkeypatch, "evidence_contract_error")
-        res = _compare(tmp_path, _compatible_pair(), "--format", "json")
+        res = _compare(tmp_path, _compatible_pair(), "-o", "json=-")
         assert res.exit_code == 7, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
         assert report["exit"]["code"] == 7
@@ -1063,7 +1075,7 @@ class TestCompareEvidenceContractAndBudgetAxes:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._force_field(monkeypatch, "budget_overflow")
-        res = _compare(tmp_path, _breaking_pair(), "--format", "json")
+        res = _compare(tmp_path, _breaking_pair(), "-o", "json=-")
         assert res.exit_code == 5, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
         assert report["exit"]["code"] == 5
@@ -1080,7 +1092,7 @@ class TestCompareEvidenceContractAndBudgetAxes:
         # The acceptance bar: every pre-existing invocation is bit-for-bit
         # unchanged -- both contributions stay 0, neither reason is named.
         for pair, expected_exit in ((_compatible_pair(), 0), (_breaking_pair(), 4)):
-            res = _compare(tmp_path, pair, "--format", "json")
+            res = _compare(tmp_path, pair, "-o", "json=-")
             assert res.exit_code == expected_exit, res.output
             report = json.loads(res.stdout[res.stdout.index("{") :])
             assert report["exit"]["evidence_contract_error_contribution"] == 0

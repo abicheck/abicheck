@@ -126,8 +126,8 @@ class TestReleaseCompareRequestParity:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--severity-preset",
                 "strict",
             )

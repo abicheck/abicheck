@@ -56,14 +56,14 @@ pytestmark = REQUIRES_POSIX_SHELL
 
 
 class TestEveryRepeatableWriteDestinationIsChecked:
-    """`--write` is repeatable, so every `json=` destination is a real request.
+    """`-o` is repeatable, so every `json=` destination is a real request.
 
-    `compare` declares `--write` with `multiple=True` (ADR-068 D4, "one
+    `compare` declares `-o` with `multiple=True` (ADR-068 D4, "one
     analysis, several artifacts"), and every named artifact is written. The
     extractor behind this predicate used to *clear* an already-found `json=`
-    path whenever a later `--write` named another format — matching a stale
+    path whenever a later `-o` named another format — matching a stale
     comment that called the option scalar and last-wins. So
-    `--write json=a.json --write markdown=b.md` reported no requested JSON path
+    `-o json=a.json -o markdown=b.md` reported no requested JSON path
     at all, and a missing `a.json` left an exit-0 run publishing COMPATIBLE
     (Codex review, P2).
 
@@ -102,14 +102,12 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         self, tmp_path: Path
     ) -> None:
         # The exact reported case: the json destination is named first, a
-        # non-json `--write` follows, and nothing writes the json one.
+        # non-json `-o` follows, and nothing writes the json one.
         target = tmp_path / "a.json"
         bindir = self._stub_writing(tmp_path, honor=set())
         outputs = _run_action(
             tmp_path,
-            self._env(
-                tmp_path, f"--write json={target} --write markdown={tmp_path / 'b.md'}"
-            ),
+            self._env(tmp_path, f"-o json={target} -o markdown={tmp_path / 'b.md'}"),
             bindir,
         )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
@@ -125,9 +123,7 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         bindir = self._stub_writing(tmp_path, honor={str(target)})
         outputs = _run_action(
             tmp_path,
-            self._env(
-                tmp_path, f"--write json={target} --write markdown={tmp_path / 'b.md'}"
-            ),
+            self._env(tmp_path, f"-o json={target} -o markdown={tmp_path / 'b.md'}"),
             bindir,
         )
         assert outputs["verdict"] == "COMPATIBLE", outputs
@@ -142,7 +138,7 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         bindir = self._stub_writing(tmp_path, honor={str(first)})
         outputs = _run_action(
             tmp_path,
-            self._env(tmp_path, f"--write json={first} --write json={second}"),
+            self._env(tmp_path, f"-o json={first} -o json={second}"),
             bindir,
         )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
@@ -154,7 +150,7 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         bindir = self._stub_writing(tmp_path, honor={str(first), str(second)})
         outputs = _run_action(
             tmp_path,
-            self._env(tmp_path, f"--write json={first} --write json={second}"),
+            self._env(tmp_path, f"-o json={first} -o json={second}"),
             bindir,
         )
         assert outputs["verdict"] == "COMPATIBLE", outputs
@@ -173,7 +169,7 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         )
         stub.chmod(0o755)
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"--write json={target}"), bindir
+            tmp_path, self._env(tmp_path, f"-o json={target}"), bindir
         )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
@@ -211,9 +207,9 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
 
     * `_report_validity` followed `_json_report_src`, which is a *fallback
       chain* — so a missing `format: json` primary was masked by a valid
-      `extra-args --write json=secondary.json`, and the step published a
+      `extra-args -o json=secondary.json`, and the step published a
       compatibility verdict though the requested output never arrived.
-    * the per-`--write` loop checked parseability without freshness — so a
+    * the per-`-o` loop checked parseability without freshness — so a
       leftover document (or one a PR author committed, `extra-args` being
       PR-controlled) read as one this run had written.
 
@@ -249,8 +245,12 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
             "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
             "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
             "INPUT_FORMAT": "json",
-            "INPUT_OUTPUT_FILE": str(primary),
-            "INPUT_EXTRA_ARGS": f"--write json={secondary}",
+            # Both destinations stated in one export set (plan slice 7m):
+            # `extra-args -o` states the whole set, so the two requested
+            # artifacts are two operands rather than an `output-file` input
+            # plus a `--write`. The property is unchanged -- each requested
+            # destination is judged on its own.
+            "INPUT_EXTRA_ARGS": f"-o json={primary} -o json={secondary}",
         }
 
     def _arrange(
@@ -349,7 +349,7 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
 
 #: Workflow-command payloads, embedded in a *destination path* rather than in
 #: report content. `extra-args` is PR-controlled per `action/AGENTS.md`'s threat
-#: model, so `--write json=<payload>` is a caller-supplied string that reaches a
+#: model, so `-o json=<payload>` is a caller-supplied string that reaches a
 #: `::error::` annotation whenever that destination fails to arrive.
 #:
 #: `%0A` is the one that matters and the one that was missed: GitHub
@@ -448,7 +448,7 @@ class TestADestinationPathCannotForgeAWorkflowCommand:
             "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
             "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
             "INPUT_FORMAT": "markdown",
-            "INPUT_EXTRA_ARGS": f"--write json={dest}",
+            "INPUT_EXTRA_ARGS": f"-o json={dest}",
         }
 
 
@@ -500,16 +500,16 @@ class TestAnUnknownVerdictStringIsNotAResult:
 
 
 class TestAnExtraArgsOutputOverrideIsHonoured:
-    """`extra-args --output PATH` is where the report really lands.
+    """`extra-args -o json=PATH` is where the report really lands.
 
-    `run.sh` puts its own `-o "$OUTPUT_FILE"` on `CMD` first and
-    `$INPUT_EXTRA_ARGS` last, and Click keeps the last occurrence of a repeated
-    option -- the same override `_effective_format` already existed to resolve
-    for `--format`. Keying the destination inventory on `$OUTPUT_FILE` alone got
-    it wrong in both directions (Codex review, P2, reproduced):
+    Since plan slice 7m an `extra-args` export set *replaces* this script's
+    own (`-o` is repeatable and a duplicate destination is a usage error, not
+    a last-wins override), so a caller who states exports owns them whole and
+    `run.sh` injects none. Keying the destination inventory on `$OUTPUT_FILE`
+    alone got it wrong in both directions (Codex review, P2, reproduced):
 
-    * with no `output-file` input, `format: json` plus `extra-args: --output
-      report.json` named no destination at all, so the run was validated as the
+    * with no `output-file` input, `format: json` plus `extra-args: -o
+      json=report.json` named no destination at all, so the run was validated as the
       *stdout* shape -- where the capture is empty, because output went to a
       file -- and a working run published REPORT_UNREADABLE;
     * with both given, the inventory validated the superseded path while the
@@ -552,9 +552,9 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
     def test_an_override_with_no_output_file_input_is_not_unreadable(
         self, tmp_path: Path, spelling: str
     ) -> None:
-        dest = tmp_path / "override.json"
+        dest = f"json={tmp_path / 'override.json'}"
         joiner = "" if spelling.endswith("=") else " "
-        bindir = self._stub(tmp_path, dest)
+        bindir = self._stub(tmp_path, tmp_path / "override.json")
         outputs = _run_action(
             tmp_path, self._env(tmp_path, f"{spelling}{joiner}{dest}", None), bindir
         )
@@ -570,7 +570,9 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         joiner = "" if spelling.endswith("=") else " "
         bindir = self._stub(tmp_path, dest, verdict="BREAKING")
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"{spelling}{joiner}{dest}", None), bindir
+            tmp_path,
+            self._env(tmp_path, f"{spelling}{joiner}json={dest}", None),
+            bindir,
         )
         assert outputs.get("verdict") == "BREAKING", (spelling, outputs)
 
@@ -582,7 +584,7 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         dest = tmp_path / "override.json"
         bindir = self._stub(tmp_path, dest, verdict="API_BREAK")
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"--output {dest}", superseded), bindir
+            tmp_path, self._env(tmp_path, f"--output json={dest}", superseded), bindir
         )
         assert outputs.get("verdict") == "API_BREAK", outputs
         assert not superseded.exists(), "the stub should not have written it"
@@ -597,7 +599,7 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         stub.chmod(0o755)
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"--output {dest}", None), bindir
+            tmp_path, self._env(tmp_path, f"--output json={dest}", None), bindir
         )
         assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
@@ -615,11 +617,11 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
 
 
 class TestStdoutModeIsJudgedEvenBesideAWriteDestination:
-    """A valid `--write json=` secondary must not excuse an unusable stdout report.
+    """A valid `-o json=` secondary must not excuse an unusable stdout report.
 
     `format: json` with no `output-file` is the documented stdout mode. The
     stdout validation was gated on *the destination inventory being empty*, but
-    adding `extra-args --write json=b.json` makes it non-empty while stdout is
+    adding `extra-args -o json=b.json` makes it non-empty while stdout is
     still where the requested report goes -- so the check was skipped and a valid
     secondary masked an unusable stdout document. That is the same masking this
     whole area exists to close, reintroduced one branch over (CodeRabbit review,
@@ -639,7 +641,13 @@ class TestStdoutModeIsJudgedEvenBesideAWriteDestination:
             "INPUT_FORMAT": "json",
         }
         if secondary is not None:
-            env["INPUT_EXTRA_ARGS"] = f"--write json={secondary}"
+            # Both exports stated in the caller's own set: plan slice 7m's
+            # `extra-args -o` states the whole export set, so "a stdout
+            # report beside a file one" is now one explicit request rather
+            # than the Action's own export plus a `--write`. The property
+            # under test is unchanged -- a valid file export must not excuse
+            # an unusable stdout report.
+            env["INPUT_EXTRA_ARGS"] = f"-o json=- -o json={secondary}"
         return env
 
     def _stub(self, tmp_path: Path, *, stdout: str, secondary: Path | None) -> Path:
@@ -686,7 +694,7 @@ class TestStdoutModeIsJudgedEvenBesideAWriteDestination:
         self, tmp_path: Path
     ) -> None:
         # Control: the combination itself must remain usable, or the fix is
-        # satisfiable by rejecting stdout mode whenever a --write is present.
+        # satisfiable by rejecting stdout mode whenever an export is present.
         secondary = tmp_path / "b.json"
         bindir = self._stub(
             tmp_path,
@@ -745,8 +753,9 @@ class TestTheAssuranceAxisIsCheckedPerDestination:
             "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
             "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
             "INPUT_FORMAT": "json",
-            "INPUT_OUTPUT_FILE": str(tmp_path / "primary.json"),
-            "INPUT_EXTRA_ARGS": f"--write json={secondary}",
+            "INPUT_EXTRA_ARGS": (
+                f"-o json={tmp_path / 'primary.json'} -o json={secondary}"
+            ),
         }
 
     def _stub(self, tmp_path: Path, primary: str, secondary: str) -> Path:
@@ -816,7 +825,7 @@ class TestAnAttachedShortOutputOptionIsHonoured:
     P2).
 
     Confirmed against the installed Click parser before fixing, not assumed:
-    `-oreport.json` really does resolve to `--output`.
+    `-ojson=report.json` really does resolve to `--output`.
     """
 
     def _stub(self, tmp_path: Path, dest: Path) -> Path:
@@ -846,7 +855,7 @@ class TestAnAttachedShortOutputOptionIsHonoured:
     def test_the_attached_form_is_read_as_the_destination(self, tmp_path: Path) -> None:
         dest = tmp_path / "attached.json"
         bindir = self._stub(tmp_path, dest)
-        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o{dest}"), bindir)
+        outputs = _run_action(tmp_path, self._env(tmp_path, f"-ojson={dest}"), bindir)
         assert outputs.get("verdict") == "BREAKING", outputs
 
     def test_a_missing_attached_destination_is_still_caught(
@@ -859,7 +868,7 @@ class TestAnAttachedShortOutputOptionIsHonoured:
         stub = bindir / "abicheck"
         stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         stub.chmod(0o755)
-        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o{dest}"), bindir)
+        outputs = _run_action(tmp_path, self._env(tmp_path, f"-ojson={dest}"), bindir)
         assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
 
     def test_a_bare_dash_o_still_takes_the_next_token(self, tmp_path: Path) -> None:
@@ -867,7 +876,7 @@ class TestAnAttachedShortOutputOptionIsHonoured:
         # only a non-empty remainder, so `-o PATH` cannot fall into it.
         dest = tmp_path / "separated.json"
         bindir = self._stub(tmp_path, dest)
-        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o {dest}"), bindir)
+        outputs = _run_action(tmp_path, self._env(tmp_path, f"-o json={dest}"), bindir)
         assert outputs.get("verdict") == "BREAKING", outputs
 
     def test_a_literal_value_that_looks_attached_is_not_mistaken(
@@ -879,7 +888,7 @@ class TestAnAttachedShortOutputOptionIsHonoured:
         dest = tmp_path / "real.json"
         bindir = self._stub(tmp_path, dest)
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"-H -ofake.h -o{dest}"), bindir
+            tmp_path, self._env(tmp_path, f"-H -ofake.h -ojson={dest}"), bindir
         )
         assert outputs.get("verdict") == "BREAKING", outputs
         assert not (tmp_path / "fake.h").exists(), "should not be an output path"
@@ -932,10 +941,10 @@ class TestReportPathPublishesTheEffectiveDestination:
     def test_the_override_is_published(self, tmp_path: Path, spelling: str) -> None:
         dest = tmp_path / "override.json"
         if spelling == "-o!attached":
-            extra = f"-o{dest}"
+            extra = f"-ojson={dest}"
         else:
             joiner = "" if spelling.endswith("=") else " "
-            extra = f"{spelling}{joiner}{dest}"
+            extra = f"{spelling}{joiner}json={dest}"
         bindir = self._stub(tmp_path, dest)
         outputs = _run_action(tmp_path, self._env(tmp_path, extra, None), bindir)
         assert outputs.get("report-path") == str(dest), (spelling, outputs)
@@ -949,7 +958,7 @@ class TestReportPathPublishesTheEffectiveDestination:
         dest = tmp_path / "override.json"
         bindir = self._stub(tmp_path, dest)
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"--output {dest}", superseded), bindir
+            tmp_path, self._env(tmp_path, f"--output json={dest}", superseded), bindir
         )
         assert outputs.get("report-path") == str(dest), outputs
         assert outputs.get("report-path") != str(superseded), outputs
@@ -988,19 +997,20 @@ class TestReportPathPublishesTheEffectiveDestination:
         assert outputs.get("report-path") == str(dest), outputs
 
 
-#: Every spelling Click accepts for `--output`, each verified directly against
+#: Every spelling Click accepts for the one export request `-o
+#: FORMAT=DESTINATION` (plan slice 7m), each verified directly against
 #: the installed parser before being relied on here. The clustered attached
 #: forms are the ones that were missed: `_extra_args_expand_short_clusters`
 #: deliberately leaves a cluster ending in an attached value unexpanded, so the
 #: token arrives opaque and a naive `-o` prefix test does not see it.
 OUTPUT_SPELLINGS = (
-    "--output {dest}",
-    "--output={dest}",
-    "-o {dest}",
-    "-o{dest}",
-    "-vo{dest}",
-    "-vvo{dest}",
-    "-vo {dest}",
+    "--output json={dest}",
+    "--output=json={dest}",
+    "-o json={dest}",
+    "-ojson={dest}",
+    "-vojson={dest}",
+    "-vvojson={dest}",
+    "-vo json={dest}",
 )
 
 
@@ -1084,15 +1094,16 @@ class TestEveryOutputSpellingNamesTheDestination:
         # A "strip everything before the first o" rule would take `foo` as the
         # output path.
         #
-        # The trap comes *after* the real `-o`, deliberately. Written the other
-        # way round this test is vacuous: the resolver is last-wins, so a real
-        # `-o` following the trap overwrites the bad value and the assertion
-        # passes either way. Mutation-testing this very assertion is what caught
-        # that -- the loose rule survived the first version of it.
+        # The trap comes *after* the real `-o`, deliberately. Written the
+        # other way round this test risks being vacuous: the resolver takes
+        # the first file destination it finds, so a real `-o` preceding the
+        # trap would answer correctly whether or not the trap was misread.
+        # Mutation-testing this very assertion is what caught that -- the
+        # loose rule survived the first version of it.
         dest = tmp_path / "real.json"
         bindir = self._stub(tmp_path, dest)
         outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"-o{dest} -vHofoo"), bindir
+            tmp_path, self._env(tmp_path, f"-ojson={dest} -vHofoo"), bindir
         )
         assert outputs.get("verdict") == "BREAKING", outputs
         assert outputs.get("report-path") == str(dest), outputs

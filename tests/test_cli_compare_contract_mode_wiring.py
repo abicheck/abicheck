@@ -194,8 +194,8 @@ class TestResolvedContractModeWiring:
                 str(new_p),
                 "--pack",
                 str(pack_path),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
 

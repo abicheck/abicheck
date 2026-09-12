@@ -148,9 +148,8 @@ class TestCompareHelpAllDisclosure:
         out = CliRunner().invoke(main, ["compare", "--help"]).output
         # A representative long-tail option from each folded panel.
         for advanced_flag in (
-            "--compiler",
-            "--ast-frontend",
-            "--write",
+            "--dump-manifest",
+            "--post-manifest",
             "--diagnostic-comparison",
         ):
             assert advanced_flag not in out, (
@@ -163,7 +162,6 @@ class TestCompareHelpAllDisclosure:
             "--header",
             "--include",
             "--output",
-            "--format",
             "--view",
             "--config",
             "--severity-preset",
@@ -235,12 +233,13 @@ class TestCompareHelpAllDisclosure:
         # CLI flag consolidation 5-7 removed -j/--jobs too, so none of the
         # three belong in this "still renders somewhere" list any more.
         # Phase 7n took --probe-matrix out too (a probe matrix is one of
-        # --build-info's operands now); --output-dir replaces it here, an
-        # option that is likewise advanced-only rather than curated.
+        # --build-info's operands now), and 7m took --write/--output-dir
+        # (one -o export request). The three below replace them: each is
+        # still a real compare option that the curated view folds away.
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--write",
-            "--output-dir",
+            "--dump-manifest",
+            "--post-manifest",
             "--diagnostic-comparison",
         ):
             assert advanced_flag in out

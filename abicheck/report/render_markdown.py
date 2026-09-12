@@ -154,7 +154,7 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
     # post_processing.AnnotateLayoutUnverifiableCoveredByVtableChanged as
     # sharing its evidence gap with a co-reported TYPE_VTABLE_CHANGED). Only
     # JSON (reporter.py) and SARIF (sarif.py) rendered this field before —
-    # the default `compare --format markdown` report showed the two findings
+    # the default `compare -o markdown=...` report showed the two findings
     # with no visible link between them (Codex review).
     correlated = getattr(c, "correlated_change_kind", None)
     if correlated:
@@ -717,7 +717,7 @@ def render_headline_table(table: HeadlineTable) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Review digest (--format review)
+# Review digest (-o review=...)
 # ---------------------------------------------------------------------------
 
 

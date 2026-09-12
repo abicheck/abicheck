@@ -41,12 +41,11 @@ def reject_use_cases_without_carrying_output(
 
     A manifest resolved and then dropped is the same failure --use-cases is
     rejected for set inputs to avoid -- sarif/junit/html never read
-    ``DiffResult.use_case_impact``, and the one-line format (``--format
-    oneline``) has no room for it either. Asked across *every* rendered
-    output, primary or any ``--write`` (repeatable per ADR-068 D4/Phase 5 --
-    "one output carrying it" is satisfied by the primary render OR any
-    secondary write); only when none does is the manifest genuinely resolved
-    for nothing (Codex review).
+    ``DiffResult.use_case_impact``, and ``oneline`` has no room for it
+    either. Asked across *every* export this run produces (``-o`` is
+    repeatable): "one output carrying it" is satisfied by any one of them,
+    and only when none does is the manifest genuinely resolved for nothing
+    (Codex review).
     """
     from ...cli_compare_fold import format_carries_use_case_impact
 
@@ -55,13 +54,11 @@ def reject_use_cases_without_carrying_output(
         or any(format_carries_use_case_impact(f) for f in secondary_fmts)
     ):
         return
-    writes_desc = "".join(f" --write {f}=..." for f in secondary_fmts)
-    rendered = f"--format {fmt}" + (f" and{writes_desc}" if secondary_fmts else "")
+    rendered = ", ".join(f"-o {f}=..." for f in (fmt, *secondary_fmts))
     detail = (
         f"no output this run renders ({rendered}) carries use-case "
         "attribution, so the manifest would be resolved and its result "
-        "dropped. Use --format json/markdown/review, or add --write "
-        "json=PATH to get one output that carries it alongside the "
-        f"{fmt} report."
+        "dropped. Add an export that carries it -- -o json=PATH, or "
+        "markdown/review -- alongside the ones you already asked for."
     )
     raise click.UsageError(f"--use-cases is not supported here: {detail}")

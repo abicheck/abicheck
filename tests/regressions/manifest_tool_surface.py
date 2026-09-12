@@ -1128,4 +1128,46 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "copy": ("action/run.sh", "actions/check-target/action.yml"),
         },
     ),
+    BugClass(
+        id="cli_surface.destination_collision_checked_only_by_exact_path",
+        invariant=(
+            "When one CLI operand claims a *tree* (a directory destination "
+            "whose contents the tool generates) and another names a path, "
+            "the two collide whenever the second resolves ANYWHERE inside "
+            "the first -- not only when the two spellings resolve to the "
+            "same path. An exact-path check is the natural way to write "
+            "collision detection and is wrong here for a structural "
+            "reason: the generated names come from the operand's own "
+            "inventory, resolved long after the flags are parsed, so no "
+            "parse-time check can enumerate them. Containment is decidable "
+            "without them; name prediction is not. The rule is also "
+            "order-independent -- which operand the user spelled first "
+            "says nothing about which document overwrites the other."
+        ),
+        # PR #1257 (plan slice 7m): `-o json=reports/ -o markdown=reports/
+        # libfoo.json` was accepted, and the run exited 0 after the
+        # aggregate Markdown document overwrote the per-library JSON the
+        # fan-out had just written -- automation was handed a corrupt,
+        # mislabeled artifact with a success exit code.
+        fixed_by=(1257,),
+        seed_tests=("tests/test_cli_export_grammar.py",),
+        public_surfaces=("cli",),
+        axes={
+            "nesting_depth": ("direct-child", "generated-summary", "deep"),
+            "spelling": ("plain", "dot-segment", "parent-segment"),
+            "operand_order": ("directory-first", "file-first"),
+            "near_miss": ("sibling-prefix", "unrelated", "ancestor"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Stated for the export request, the one operand family "
+                    "in this CLI that owns a generated tree. A second "
+                    "tree-claiming operand elsewhere would be found by "
+                    "hand, not by a gate."
+                ),
+                reference="docs/contribute/plans/one-comparison-product.md",
+            ),
+        ),
+    ),
 )

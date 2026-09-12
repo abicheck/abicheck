@@ -36,7 +36,7 @@ apart on its own.
 ```bash
 g++ -shared -fPIC -g old/libcore.cpp -o old/libcore.so
 g++ -shared -fPIC -g new/libcore.cpp -o new/libcore.so
-abicheck compare old/ new/ --instantiation-manifest manifest.yaml --format markdown
+abicheck compare old/ new/ --instantiation-manifest manifest.yaml -o markdown=-
 ```
 
 ## Expected abicheck finding

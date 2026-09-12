@@ -32,7 +32,7 @@ def test_compare_no_baseline_single_artifact_audit(tmp_path: Path) -> None:
     ADR-068 D2, over ADR-065's `declared_absent` acquisition state (plan
     §5 P1)."""
     path = write_snapshot(_empty_snapshot(), tmp_path / "libfoo.so.abi.json")
-    result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
+    result = invoke_cli("compare", "--no-baseline", str(path), "-o", "json=-")
     assert result.exit_code == 0, result.output
     report = json.loads(result.stdout)
     assert report["changes"] == []

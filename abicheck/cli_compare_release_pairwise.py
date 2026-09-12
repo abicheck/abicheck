@@ -320,7 +320,7 @@ def _compare_one_library(
     (Codex review, fresh evidence, PR #1154 follow-up: "Keep per-library
     output-dir reports unfiltered") -- ``--output-dir`` is the "always
     full" escape hatch a truncated aggregate report directs a reader to,
-    matching a secondary ``--write``'s own contract; the display-filtered
+    matching a secondary ``-o``'s own contract; the display-filtered
     ``findings``/``findings_view`` split lives one level up, in
     :func:`~abicheck.cli_compare_release_matrix._strip_diff_results_and_adjust_verdict`,
     which has the real live ``DiffResult`` to filter from.
@@ -507,7 +507,7 @@ def _compare_one_library(
             # reader to `--output-dir` as the one uncapped, *complete*
             # per-library source when the aggregate report's own findings
             # list was truncated, the same "always full" contract a
-            # secondary `--write` already gets (see
+            # secondary `-o` already gets (see
             # `cli_compare_release_helpers._release_findings_for_render`).
             # Applying the primary display filter here too would let
             # `--view show=...` make a genuinely truncated (or simply
@@ -851,7 +851,7 @@ def _compare_release_libraries(
             err=True,
         )
 
-    # collect_diff_results (JUnit / a secondary `--write junit=...` render)
+    # collect_diff_results (JUnit / a secondary `-o junit=...` render)
     # used to need an independent re-run (`_collect_release_extras`) purely
     # to recover the old `AbiSnapshot` alongside each `DiffResult` -- the
     # primary pass above now stashes both directly in each library's own

@@ -136,7 +136,7 @@ def _render_compare_report(
 ) -> str:
     """Render one compare report and fold every post-render section into it.
 
-    The primary (``--format``) and secondary (``--write``) renders
+    The primary (``--format``) and secondary (``-o``) renders
     run the identical pipeline and differ only in their arguments, so
     they share this one function rather than keeping two copies that can drift.
 
@@ -252,7 +252,7 @@ def _reject_flags_unsupported_for_set_inputs(
     combination the real run would then reject.
 
     ``--pack`` is not rejected here: the caller resolves it separately right
-    after this call. ``--write`` (``secondary_writes``, repeatable per
+    after this call. ``-o`` (``secondary_writes``, repeatable per
     ADR-068 D4/Phase 5) is not rejected either -- the release engine
     supports it directly (at most one write; see ``_dispatch_release_
     compare``'s own rejection of a second one), so it is simply forwarded.

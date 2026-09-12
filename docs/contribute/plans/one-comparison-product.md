@@ -1653,30 +1653,59 @@ several of our `per_run_operand` rulings would be honestly re-read as
 slice below rather than a flag row, because each is a *replacement
 mechanism* first and an option count second:
 
-- **7m — one export request.** `--format`/`-o/--output`/`--write`/
-  `--output-dir`/`--max-findings-per-library` are four mechanisms for
-  "which artifacts does this analysis produce". Target: one repeatable
-  `-o FORMAT=DESTINATION` with `-` for stdout (Click already supports `-`
-  in its file handling, so 7k's own decline of the `--write` merge — "a
-  path-less `--write` value would be one flag carrying two grammars" —
-  does not survive this framing: it is one grammar, and `-` is the
-  stdout spelling). `--output-dir`'s per-component fan-out and
-  `--max-findings-per-library`'s summary cap are then consequences of the
-  export set, not separate escape routes: complete machine data is never
-  truncated, and a human summary is bounded automatically. **Net −4**,
-  and the first removal on this surface that reduces what a user must
-  *decide*, not just what they must type. Blocked on: ADR-061 gap C (one
-  document, several projections) — already this plan's Phase 5
-  prerequisite — plus collision detection, Windows path handling, and
-  F-19's output-format invariance holding across the new grammar.
+- **7m — one export request. Done.** `--format`/`-o/--output`/`--write`/
+  `--output-dir`/`--max-findings-per-library` were four mechanisms for
+  "which artifacts does this analysis produce". They are now one repeatable
+  `-o FORMAT=DESTINATION` with `-` for stdout (`frontends/cli/options/
+  export.py`), so 7k's own decline of the `--write` merge — "a path-less
+  `--write` value would be one flag carrying two grammars" — does not
+  survive this framing: it is one grammar, and `-` is the stdout spelling.
+  `--output-dir`'s per-component fan-out and
+  `--max-findings-per-library`'s summary cap landed as consequences of the
+  export set rather than separate escape routes: a trailing `/` is a
+  directory destination writing exactly what `--output-dir` wrote, complete
+  machine data is never truncated, and a human summary is bounded
+  automatically. **Net −4** on `compare` (47 → 43) and −1 on each of the six
+  other report-rendering commands (103 → 93 native), the first removal on
+  this surface that reduces what a user must *decide*, not just what they
+  must type. The named prerequisites all held: ADR-061 gap C was confirmed
+  intact before starting (`report/envelope.py` builds one `ReportEnvelope`
+  above format selection; `service_render.render_envelope` is a pure
+  projection), and collision detection, stdout exclusivity, Windows path
+  handling (split on the first `=` only) and F-19's invariance across the
+  new grammar are stated as invariants over generated permutations in
+  `tests/test_cli_export_grammar.py`.
+
+  **Three consequences worth not rediscovering**, each a real behaviour
+  change the merge forces, none of them a capability loss:
+
+  1. **A display filter applies to every export.** `--write` deliberately
+     rendered its artifact unfiltered whatever `--format` asked for. That
+     asymmetry was answerable only while "primary" and "secondary" were two
+     flags; under one repeatable operand there is no principled answer to
+     which of `-o json=a.json -o markdown=-` is the unfiltered one. Every
+     machine projection still carries the complete disposition/suppression
+     accounting plus `show_only_filter`/`filtered_summary`, so narrowing the
+     display hides nothing.
+  2. **A directory export on a single pair is a usage error**, where
+     `--output-dir` was warned about and ignored. As a knob, ignoring it
+     promised nothing; as a destination it promises an artifact, and
+     silently not producing one is what §Non-goals forbids.
+  3. **The Action's `extra-args` export set replaces the Action's own**
+     rather than overriding one field of it. `-o` is repeatable and a
+     duplicate destination is a usage error rather than last-wins, so
+     `run.sh` injects nothing when the caller states exports — which also
+     collapsed its three separate extra-args scanners (`--format`,
+     `--write`, `-o`) into one.
 - **7n — evidence transports, one input per evidence *role*. Done.**
   `--debug-root` merged into `--debug-info` (a detached debug file, a
   directory of them, and a debug package are three transports of one
   role); `--devel-pkg` merged into `-H` (a development package is a
   carrier of header evidence); `--probe-matrix` merged into a typed
   `--build-info` (probe observations and compile context stay distinct
-  *internally* and may be supplied together). **Net −3 on `compare`:
-  47 → 44.** The bar for
+  *internally* and may be supplied together). **Net −3 on `compare`**,
+  independent of 7m's own −4; the two landed separately and the count
+  table below states where `compare` sits with both applied. The bar for
   each is that the merged input keeps the schema, side ownership, and
   binary/debug identity validation it has today — accepting more filename
   extensions is not the deliverable. **Explicitly not merged:
@@ -1809,13 +1838,17 @@ mechanism* first and an option count second:
 **Adopted as re-rulings of existing entries** (`rulings.py` changes from
 `per_run_operand` to `deferred`, with the named blocker, when the slice
 above lands — not before, since a deferral needs a real prerequisite):
-`--format`, `--write`, `--output-dir`, `--max-findings-per-library`
-(7m). **Not `--debug-root`/`--devel-pkg`/`--probe-matrix`** — 7n landed as
-a *merge*, not a deferral, so their entries are gone from `rulings.py`
-rather than re-ruled, and the three surviving inputs
-(`--debug-info`, `--header`, `--build-info`) are re-ruled to state the
-whole role each now carries. A deferral would have been the wrong record:
-there is no blocker left to name.
+Neither 7m's four entries nor 7n's three needed the intermediate
+`deferred` state, and for the same reason: each slice landed in one step,
+so `--format`, `--write`, `--output-dir`, `--max-findings-per-library`
+(7m) and `--debug-root`, `--devel-pkg`, `--probe-matrix` (7n) are simply
+*gone* from `rulings.py` rather than re-ruled — the retired export
+spellings registered in `scripts/retired_surfaces.py` instead, and the
+three surviving evidence inputs (`--debug-info`, `--header`,
+`--build-info`) re-ruled to state the whole role each now carries, as
+`--output`'s own ruling is rewritten around the new export grammar. A
+deferral would have been the wrong record for either: there is no blocker
+left to name.
 
 **Declined, with the reason recorded** — each was already measured or
 already decided, and the audit did not have the measurement:
@@ -1910,18 +1943,17 @@ listed beside it so the gap is legible rather than averaged away:
 
 | Command | Today | After 7m–7r | Audit's end state | The gap, named |
 |---|---|---|---|---|
-| `compare` | 47 | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
-| `dump` | 18 | **18** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
-| `aggregate` | 6 | **4** | 4 | — (7q + 7m's shared export) |
-| `deps tree` | 7 | **6** | 6 | — (7m) |
-| `deps compare` | 8 | **7** | 7 | — (7m) |
-| `project history` | 5 | **4** | 4 | — (7m) |
-| `project plan` | 8 | **6** | 6 | — (7r + 7m) |
-| `project validate` | 4 | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
+| `compare` | 41 (was 47; 7m and 7n both landed) | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
+| `dump` | 19 | **17** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
+| `aggregate` | 5 (7m landed) | **4** | 4 | — (7q + 7m's shared export) |
+| `deps tree` | 6 (7m landed) | **6** | 6 | — (7m) |
+| `deps compare` | 7 (7m landed) | **7** | 7 | — (7m) |
+| `project history` | 4 (7m landed) | **4** | 4 | — (7m) |
+| `project plan` | 7 (7m landed) | **6** | 6 | — (7r + 7m) |
+| `project validate` | 3 (7m landed) | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
 | `project validate-build` | 3 | **0** | folded | **done (7p)** |
 | `project validate-use-cases` | 3 | **0** | folded | **done (7p)** |
-| **Native total** | **109** (103 after 7p) | **88** | 68 | **20 options, all of them `compare`'s 15 and `dump`'s 5** |
-| `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
+| **Native total** | **92** (109 before 7p/7m/7n) | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** || `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
 
 Read the last column as this phase's actual position: **on six of the ten
 native commands the audit's end state and ours are identical**, and the

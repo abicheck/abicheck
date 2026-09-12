@@ -33,7 +33,7 @@ cmake --build /tmp/abicheck-examples-build \
 abicheck compare \
     /tmp/abicheck-examples-build/case90_bundle_intra_dep_removed/old \
     /tmp/abicheck-examples-build/case90_bundle_intra_dep_removed/new \
-    --format json
+    -o json=-
 ```
 
 ## Expected abicheck finding

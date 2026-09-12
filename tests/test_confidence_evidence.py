@@ -872,7 +872,7 @@ class TestNoteIfSameBinaryCompared:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", "--format", "oneline", str(so_path), str(so_path)]
+            main, ["compare", "-o", "oneline=-", str(so_path), str(so_path)]
         )
         assert "byte-identical" in result.output, result.output
 
@@ -908,7 +908,7 @@ class TestNoteIfSameBinaryCompared:
         new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
 
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "oneline"]
+            main, ["compare", str(old_p), str(new_p), "-o", "oneline=-"]
         )
         assert result.exit_code == 0, result.output
         # stdout, not the stderr-mixed `result.output`: this fixture gives
@@ -1098,7 +1098,7 @@ class TestNoteIfSameBinaryCompared:
         new_p.write_text(text)
 
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert result.exit_code == 0, result.output
         assert "byte-identical" not in result.output, result.output

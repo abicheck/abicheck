@@ -83,7 +83,7 @@ top of the same classification.
   policy/suppression loading, and more).
 - Want JSON instead of inspecting Python objects directly? `render_output`
   (also in `abicheck.service`) renders a `CompareResult` through the same
-  reporter the CLI's `--format json`/`--format sarif` flags use.
+  reporter the CLI's `-o json=...`/`-o sarif=...` flags use.
 - Want this exact check running in CI? See
   [`compare-release`](../compare-release/README.md) for the CLI-invocation
   equivalent, or [the GitHub Action](../../../docs/use/github-action.md) to

@@ -91,7 +91,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Output & reporting",
             "options": [
                 "--output",
-                "--format",
                 "--view",
                 "--config",
                 "--verbose",
@@ -158,8 +157,11 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             # package is one of -H/--header's transports, so it appears in
             # the Inputs panel with the headers it carries.
             "name": "Release (directory/package inputs)",
+            # Plan slice 7m: --output-dir is gone from this panel -- the
+            # per-component fan-out is a destination shape inside --output's
+            # own export request (`-o json=reports/`), so it is documented
+            # where every other export is.
             "options": [
-                "--output-dir",
                 "--instantiation-manifest",
             ],
         },
@@ -304,7 +306,8 @@ def configure_rich_help() -> None:
 # help screen changes.
 #
 # Dest names (``click.Option.name``), not flag strings: a few options share
-# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``--view``,
+# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``-o``,
+# ``--view``,
 # ADR-068 D4/Phase 5's collapse of --report-mode/--show-only/--demangle/
 # --no-demangle/--explain-patterns into one dest) where only one dest exists
 # either way.
@@ -315,9 +318,10 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "include",
         # --lang has no Click dest here any more (Phase 7: compile.lang
         # config-only, one-comparison-product.md §4.1).
-        # Output & reporting
-        "output",
-        "fmt",
+        # Output & reporting -- one dest ("exports") for the whole export
+        # request since plan slice 7m; the retired "fmt" was the other half
+        # of the pair it replaced.
+        "exports",
         "view",
         # Policy & severity
         "config",

@@ -30,9 +30,10 @@ from pathlib import Path
 import click
 
 from .cli import main
-from .cli_options import verbose_option
+from .cli_options import export_options, verbose_option
 from .cli_resolve import _detect_binary_format
-from .frontends.cli.runtime import _safe_write_output, _setup_verbosity
+from .frontends.cli.options.export import ExportSet, reject_dry_run_with_exports
+from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .stack_checker import under_sysroot
 
 
@@ -56,10 +57,7 @@ def deps_group() -> None:
               help="Sysroot prefix for cross/container analysis.")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (colon-separated).")
-@click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True, help="Output format.")
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Write output to this path (default: stdout).")
+@export_options(["json", "markdown", "html"], default_format="markdown")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Show the resolved binary, sysroot, search order, and loader "
                    "inputs without walking/checking the full stack. Writes "
@@ -68,7 +66,7 @@ def deps_group() -> None:
 def deps_tree_cmd(
     binary: Path, search_paths: tuple[Path, ...],
     sysroot: Path | None, ld_library_path: str,
-    fmt: str, output: Path | None, dry_run: bool, verbose: bool,
+    exports: ExportSet, dry_run: bool, verbose: bool,
 ) -> None:
     """Show the resolved dependency tree and symbol binding status.
 
@@ -84,17 +82,12 @@ def deps_tree_cmd(
     \b
     Examples:
       abicheck deps tree ./build/libfoo.so
-      abicheck deps tree /usr/bin/myapp --format json -o deps.json
+      abicheck deps tree /usr/bin/myapp -o json=deps.json
       abicheck deps tree ./app --sysroot /path/to/container/rootfs
     """
-    from .dry_run import (
-        DryRunResult,
-        emit_dry_run,
-        reject_dry_run_with_output,
-        tool_status,
-    )
+    from .dry_run import DryRunResult, emit_dry_run, tool_status
 
-    reject_dry_run_with_output(dry_run, output)
+    reject_dry_run_with_exports(dry_run, exports)
     _setup_verbosity(verbose)
 
     # Validated ahead of the --dry-run emit below (not just before the real
@@ -123,7 +116,7 @@ def deps_tree_cmd(
         dry_result.add("Tools and frontends", *tool_status("readelf", "ldd"))
         dry_result.add(
             "Output and exit-code behavior",
-            f"format: {fmt}",
+            f"exports: {', '.join(t.spelling or f'{t.fmt}=-' for t in exports.targets)}",
             "exit codes: 0 all resolved/bound, 1 missing dependency/symbol",
         )
         emit_dry_run(dry_result)
@@ -138,18 +131,16 @@ def deps_tree_cmd(
         ld_library_path=ld_library_path,
     )
 
-    if fmt == "json":
-        text = stack_to_json(result)
-    elif fmt == "html":
-        from .stack_html import stack_to_html
-        text = stack_to_html(result)
-    else:
-        text = stack_to_markdown(result)
-    if output:
-        _safe_write_output(output, text)
-        click.echo(f"Report written to {output}", err=True)
-    else:
-        click.echo(text)
+    def _render(fmt: str) -> str:
+        if fmt == "json":
+            return stack_to_json(result)
+        if fmt == "html":
+            from .stack_html import stack_to_html
+
+            return stack_to_html(result)
+        return stack_to_markdown(result)
+
+    emit_export_set(exports, _render)
 
     # ADR-068 D6 / one-comparison-product.md Phase 8: the canonical
     # ExitDecision fold, not a hand-rolled check -- see that function's own
@@ -172,19 +163,16 @@ def deps_tree_cmd(
               help="Additional directory to search for shared libraries.")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (colon-separated).")
-@click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True, help="Output format.")
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Write output to this path (default: stdout).")
+@export_options(["json", "markdown", "html"], default_format="markdown")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Show old/new roots, resolved binary paths, and search order "
                    "without running per-library ABI diffs. Writes nothing; "
-                   "incompatible with -o/--output.")
+                   "incompatible with any -o export to a file.")
 @verbose_option
 def deps_compare_cmd(
     binary: Path, old_root: Path, new_root: Path,
     search_paths: tuple[Path, ...], ld_library_path: str,
-    fmt: str, output: Path | None, dry_run: bool, verbose: bool,
+    exports: ExportSet, dry_run: bool, verbose: bool,
 ) -> None:
     """Compare a binary's full dependency stack across two environments.
 
@@ -207,11 +195,11 @@ def deps_compare_cmd(
     Examples:
       abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
       abicheck deps compare usr/lib/libfoo.so.1 \\
-        --old-root ./image-v1 --new-root ./image-v2 --format json
+        --old-root ./image-v1 --new-root ./image-v2 -o json=-
     """
-    from .dry_run import DryRunResult, emit_dry_run, reject_dry_run_with_output
+    from .dry_run import DryRunResult, emit_dry_run
 
-    reject_dry_run_with_output(dry_run, output)
+    reject_dry_run_with_exports(dry_run, exports)
     _setup_verbosity(verbose)
 
     # Guard against accidental no-op comparisons.
@@ -256,7 +244,7 @@ def deps_compare_cmd(
         )
         dry_result.add(
             "Output and exit-code behavior",
-            f"format: {fmt}",
+            f"exports: {', '.join(t.spelling or f'{t.fmt}=-' for t in exports.targets)}",
             "exit codes: 0 pass, 1 warn (ABI risk), 4 fail (load/ABI break), "
             "5 not_comparable (ADR-050 D2)",
         )
@@ -273,18 +261,16 @@ def deps_compare_cmd(
         search_paths=list(search_paths) or None,
     )
 
-    if fmt == "json":
-        text = stack_to_json(result)
-    elif fmt == "html":
-        from .stack_html import stack_to_html
-        text = stack_to_html(result)
-    else:
-        text = stack_to_markdown(result)
-    if output:
-        _safe_write_output(output, text)
-        click.echo(f"Report written to {output}", err=True)
-    else:
-        click.echo(text)
+    def _render(fmt: str) -> str:
+        if fmt == "json":
+            return stack_to_json(result)
+        if fmt == "html":
+            from .stack_html import stack_to_html
+
+            return stack_to_html(result)
+        return stack_to_markdown(result)
+
+    emit_export_set(exports, _render)
 
     # ADR-068 D6 / one-comparison-product.md Phase 8: the canonical
     # ExitDecision fold (loadability/abi-risk/not-comparable axes), not the

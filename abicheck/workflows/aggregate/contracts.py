@@ -84,7 +84,7 @@ from .resolve import (
     resolve_gate_policy as resolve_gate_policy,
 )
 
-#: Machine-readable schema version of the ``to_dict()`` / ``--format json``
+#: Machine-readable schema version of the ``to_dict()`` / ``-o json=...``
 #: output. Bump on any incompatible change to that structure.
 #:
 #: ``1.2`` added the additive ``finding_matrix`` block (G34 Phase D) — every

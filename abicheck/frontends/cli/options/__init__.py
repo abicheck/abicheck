@@ -15,14 +15,24 @@
 
 """Reusable Click-only option declarations (ADR-061 Phase 4 item 1)."""
 
-from .secondary_output import (
-    reject_incoherent_secondary_output,
-    reject_incoherent_secondary_writes,
-    secondary_output_options,
+from .export import (
+    EXPORT_METAVAR,
+    STDOUT_DESTINATION,
+    ExportSet,
+    ExportTarget,
+    build_export_set,
+    export_options,
+    parse_export_operand,
+    reject_dry_run_with_exports,
 )
 
 __all__ = [
-    "reject_incoherent_secondary_output",
-    "reject_incoherent_secondary_writes",
-    "secondary_output_options",
+    "EXPORT_METAVAR",
+    "STDOUT_DESTINATION",
+    "ExportSet",
+    "ExportTarget",
+    "build_export_set",
+    "export_options",
+    "parse_export_operand",
+    "reject_dry_run_with_exports",
 ]

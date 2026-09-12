@@ -278,12 +278,10 @@ class TestReportIntegration:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                f"json={out}",
                 "--contract",
                 mode,
-                "-o",
-                str(out),
             ],
         )
         # 1 is the coverage axis's own contribution (ADR-049 Phase 7), which
@@ -327,7 +325,7 @@ class TestReportIntegration:
         out = tmp_path / "plain.json"
         res = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json", "-o", str(out)],
+            ["compare", str(old_p), str(new_p), "-o", f"json={out}"],
         )
         assert res.exit_code == 4, res.output
         report = json.loads(out.read_text(encoding="utf-8"))

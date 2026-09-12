@@ -48,7 +48,7 @@ cmake --build /tmp/abicheck-examples-build \
 abicheck compare \
     /tmp/abicheck-examples-build/case91_bundle_intra_signature_drift/old \
     /tmp/abicheck-examples-build/case91_bundle_intra_signature_drift/new \
-    --format json
+    -o json=-
 ```
 
 ## Expected abicheck finding

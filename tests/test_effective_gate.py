@@ -543,8 +543,13 @@ class TestReleaseScopeAxesReachTheRealDigest:
         cfg = tmp_path / f"{name}.abicheck.yml"
         cfg.write_text(config_yaml, encoding="utf-8")
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--config", str(cfg), "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
         )
         assert code == 0
         data: dict[str, object] = json.loads(out)

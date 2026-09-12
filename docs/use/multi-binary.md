@@ -483,7 +483,7 @@ be a no-op alongside) is gone: bundle-level analysis always runs now
 
 ## JSON output schema additions
 
-`compare --format json` (on a bundle) adds two top-level keys when bundle
+`compare -o json=...` (on a bundle) adds two top-level keys when bundle
 analysis ran:
 
 ```json
@@ -534,21 +534,30 @@ Each finding has:
 - `affected_libraries` — list of every library affected by this finding;
   enables fan-out filtering downstream.
 
-## Per-library finding cap and truncation (`--max-findings-per-library`)
+## Per-library finding cap and truncation
 
-Each `libraries[i]` entry's `findings`/`findings_view` list (kind/symbol/
-description/location per finding) is capped at 10 entries by default so a
-large directory/package fan-out can't blow up the always-on release summary
-— mirrors `scan --against`'s own `--max-findings` cap, documented in
-[Output Formats](output-formats.md). Raise or lower the cap per run with
-`compare --max-findings-per-library N`
-(directory/package inputs only) or globally via the
-`ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY` environment variable when
-neither passes an explicit value; either configures the same cap, and it
-only changes how much of each library's diff the aggregate summary
-itemizes — never the verdict or exit code. `--output-dir` remains the way
-to see every library's full, unfiltered single-pair `compare` report
-unconditionally, regardless of this cap.
+The **human** release summary bounds what it itemizes: each library's
+rendered findings list (kind/symbol/description/location per finding) shows
+at most 10 entries, so a large directory/package fan-out cannot blow up a
+report a person is reading.
+
+The **machine** document is never bounded. Each `libraries[i]` entry's
+`findings`/`findings_view` list carries every finding, unconditionally —
+there is nothing to configure, and nothing that can be configured into
+truncating it. This used to be a decision (`--max-findings-per-library N`,
+or an `ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY` environment variable);
+both are retired, because the answer never depended on the caller: complete
+data is what a machine export is for, and a bound is what makes a human
+summary readable. Neither ever changed the verdict or the exit code.
+
+Every library's own full, unfiltered report is one export away:
+
+```bash
+abicheck compare release-1.0/ release-2.0/ -o json=reports/
+```
+
+writes one complete per-library report plus `summary.json` into `reports/`,
+alongside whatever other export you asked for.
 
 When a library's list is actually truncated, the rendered entry sets
 `findings_truncated` (or, under `--view show=...`, `findings_view_truncated`
@@ -556,7 +565,8 @@ swapped into that same key for the filtered display) and
 `findings_truncated_kinds` — a `ChangeKind -> count` map of what was cut
 from that library's *displayed* list, the same shape `scan --against`'s
 identical ledger uses — so the shape of a truncated library's diff is
-visible without rerunning at a higher cap. The map is absent when nothing
+visible without leaving the summary (and the machine export carries the
+findings themselves in full). The map is absent when nothing
 was truncated for the displayed view. (The release JSON's own top-level
 `release_filtered_summary` block separately carries the exact, uncapped
 total finding count across the whole release, for the aggregate case where
@@ -687,7 +697,7 @@ Under the setting the JSON report carries the fold as `analysis_assurance`
 `0`/`1` exit contribution, and an `incomplete_members` list naming each short
 member **and the notes explaining why**), and each `libraries[]` entry carries
 its own `analysis_assurance_status`. A non-JSON format gets the same facts as a
-one-line stderr notice. `--output-dir`'s `summary.json` carries the block and
+one-line stderr notice. A per-component export's `summary.json` carries the block and
 folds the axis into its own `exit` block, so it cannot report a different exit
 code than the run took. A stored `BundleFacts` operand folds identically.
 
@@ -768,7 +778,7 @@ directory/package (extracted the same way the ordinary release fan-out
 extracts one) or a *second* stored `BundleFacts` document — comparing two
 previously-captured documents with no binaries reopened on either side, e.g.
 `abicheck compare release-1.0.bundlefacts.json release-2.0.bundlefacts.json`.
-Only `--format json`/`markdown` are available in either mode, and most of
+Only `-o json=...`/`markdown` are available in either mode, and most of
 the ~44 flags the live release fan-out accepts have no channel into a
 stored-facts comparison and are rejected explicitly (exit 64) rather than
 silently ignored — see `abicheck compare --help-all` for the full, current

@@ -135,7 +135,7 @@ a coverage failure is not a finding, so the suppression machinery structurally
 cannot reach one. To accept incomplete contract assurance, set
 `contract.unresolved: warn` (for example via a `kind: contract` pack). That
 zeroes this contribution and changes nothing else: the failures remain listed
-in `contract_coverage_failures` — but only `--format json` carries that field
+in `contract_coverage_failures` — but only `-o json=...` carries that field
 at all; markdown, review, HTML, SARIF, and JUnit output surface the same
 information as a stderr diagnostic, a SARIF notification, or a JUnit error
 suite instead.
@@ -253,7 +253,7 @@ verdict and the policy/severity gate, answering "how complete and
 trustworthy was the evidence behind this comparison" independently of
 whatever the verdict says. Its `status` field is one of `complete`,
 `partial`, `failed`, `not_comparable`, or `not_requested`, and it is always
-present in `--format json` output (`analysis_assurance` — a top-level key on
+present in `-o json=...` output (`analysis_assurance` — a top-level key on
 `compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
@@ -307,7 +307,7 @@ deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
 ## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
-Every real-verdict `compare --format json` report (`full`/`leaf`/`root-cause`
+Every real-verdict `compare -o json=...` report (`full`/`leaf`/`root-cause`
 modes) carries a top-level `exit` object (introduced at report schema 2.41;
 schema 2.42 added its `crosscheck_promotion_contribution` field — see
 `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` docstring for that
@@ -316,7 +316,7 @@ already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
 `severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
 `analysis_assurance_exit_contribution` themselves. `scan --against
---format json` carries the identical object too (scan schema 1.18), nested
+-o json=-` carries the identical object too (scan schema 1.18), nested
 at `diff.exit` rather than the report's top level — matching where its own
 constituent contribution fields already live, since `scan` and `compare`
 keep their own report shapes:
@@ -407,7 +407,7 @@ below.
 | `4` | `BREAKING` — binary ABI break |
 | `5` | Budget overflow — the run's wall-clock `--budget` guard was exceeded. `compare` has its own `--budget` flag now (ADR-068 §3 #19, `frontends/cli/commands/compare.py`); exit `5` applies to both `compare` and `scan` on overflow. |
 | `7` | Evidence-contract error (ADR-037 D5) — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module** (ADR-068 plan Phase 2d), and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (ADR-068 plan §3 row 28, closed — `compare` shares this floor with `scan`/`dump` now, verified live). The depth trigger applies only when **at least one operand is a live extraction**; comparing two already-serialized snapshots is exempted from it even when neither embeds L3/L4 evidence (verified live — see [Evidence Depth](../use/evidence-depth.md)'s "pinned depth is a contract" warning), so a clean both-snapshot `compare` is not proof the pinned depth was reached. **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
-| `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `--format json`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
+| `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `-o json=-`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
 > **`compare --dry-run` does not preview the exit-`7` depth floor.** Pinning
@@ -417,7 +417,7 @@ below.
 > Depth](../use/evidence-depth.md#what-each-depth-reaches).
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
-> to distinguish them (e.g. warn on deployment risk), use `--format json` and
+> to distinguish them (e.g. warn on deployment risk), use `-o json=...` and
 > read the `verdict` field — exit code alone is not sufficient.
 
 ### Severity-aware exit codes (with any `--severity-*` flag)
@@ -483,7 +483,7 @@ ret=$?
 exit 0
 
 # Parse exact verdict from JSON (with severity info)
-abicheck compare old.json new.json --format json --severity-preset default -o result.json
+abicheck compare old.json new.json -o json=- --severity-preset default -o result.json
 verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d['verdict'])" \
   || { echo "ERROR parsing result.json"; exit 1; })
 [ "$verdict" = "BREAKING" ] && exit 1
@@ -570,8 +570,8 @@ ran a one-build audit/hygiene/source-consistency scan only; pass it and
 | `2` | Source-level / API break (incl. `API_BREAK` cross-source findings). On a baseline (`--against`) scan, a cross-source finding (`exported_not_public`, `unversioned_exported_symbol`, ...) is scored exactly like any other `compare` finding as of 2026-09-09 (ADR-068 amendment) — it is **not** advisory-only just because it came from a cross-source check |
 | `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
-| `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `--format json`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
-| `7` | Evidence-contract error (ADR-037 D5) — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `--format json`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
+| `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `-o json=-`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
+| `7` | Evidence-contract error (ADR-037 D5) — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `-o json=-`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
 | `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is `scan`-only in practice: `--budget 15m` **fails** the run
@@ -780,7 +780,7 @@ fail`, `unexpected_target: include`). The resolved policy is reported back in
 the JSON output's `effective_policy` block, including which source
 (`manifest`/`run-plan`/`explicit`/`default`) it came from — `explicit` only
 appears for a direct Python-API caller of `aggregate()` forcing a value
-(there is no CLI spelling for it). The `--format json` output is versioned
+(there is no CLI spelling for it). The `-o json=...` output is versioned
 (`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
 for the current value) and carries the six axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage` /
@@ -995,12 +995,12 @@ rather than inferring the cause from the code.
 † Every command exits `64` for an invalid invocation — bad arguments/options
 or an unreadable/unrecognised input — deliberately outside the verdict/result
 space so a usage error is never mistaken for a compatibility result. To
-reliably distinguish verdicts from errors in a script, use `--format json` and
+reliably distinguish verdicts from errors in a script, use `-o json=...` and
 read the `verdict` field where available.
 
 ‡ Two schemes, shown as `legacy / severity`. `scan`'s **legacy** scheme (the
 default) collapses every compatible/advisory-only state (no break,
-deployment risk, additions, quality signals) to exit `0` — read `--format
+deployment risk, additions, quality signals) to exit `0` — read `-o
 json` if your pipeline needs to distinguish them. Under a resolved
 `severity` scheme (`scan --against` with any `--severity-*` flag,
 or a config `severity:` block) `scan` follows

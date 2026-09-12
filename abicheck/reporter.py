@@ -179,7 +179,7 @@ def to_stat_json(
 
     *severity_config*, when given, adds a ``severity`` block (same shape as
     the full JSON report's — see :func:`_build_severity_json`) so ``--stat
-    --format json`` reflects the actual severity-aware gate instead of only
+    -o json=...`` reflects the actual severity-aware gate instead of only
     the compatibility verdict. Without it, ``--stat`` output has historically
     bypassed severity handling entirely (it short-circuits in
     ``service.render_output`` before format dispatch).

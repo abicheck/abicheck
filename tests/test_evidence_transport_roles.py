@@ -887,7 +887,7 @@ class TestMergedInputsEndToEnd:
         old, new = _release_pair(tmp_path)
         escaping = _write_tar(tmp_path / name, {"../escape.so": b"\x7fELF"})
         res = _run(
-            "compare", str(old), str(new), flag, f"new={escaping}", "--format", "json"
+            "compare", str(old), str(new), flag, f"new={escaping}", "-o", "json=-"
         )
         assert isinstance(res.exception, ExtractionSecurityError), res.output
 
@@ -903,7 +903,7 @@ class TestMergedInputsEndToEnd:
              "usr/lib/debug/libfoo.so.debug": b"\x7fELF"},
         )
         res = _run(
-            "compare", str(old), str(new), flag, f"new={pkg}", "--format", "json"
+            "compare", str(old), str(new), flag, f"new={pkg}", "-o", "json=-"
         )
         assert not isinstance(res.exception, ExtractionSecurityError), res.output
         assert res.exit_code == 4, res.output
@@ -919,7 +919,7 @@ class TestMergedInputsEndToEnd:
         for value in (root, sidecar):
             res = _run(
                 "compare", str(old), str(new), "--debug-info", f"old={value}",
-                "--format", "json",
+                "-o", "json=-",
             )
             assert res.exit_code == 4, res.output
 
@@ -939,7 +939,7 @@ class TestMergedInputsEndToEnd:
             "--build-info", f"old={old_matrix}",
             "--build-info", f"new={new_matrix}",
             "--build-info", f"old={build_dir}",
-            "--format", "json",
+            "-o", "json=-",
         )
         assert res.exit_code in (0, 2, 4), res.output
         kinds = _finding_kinds(res)
@@ -1016,10 +1016,10 @@ class TestTransportEquivalence:
         (loose / "foo.h").write_bytes(header)
 
         via_package = _run(
-            "compare", str(old), str(new), "-H", f"new={pkg}", "--format", "json"
+            "compare", str(old), str(new), "-H", f"new={pkg}", "-o", "json=-"
         )
         via_directory = _run(
-            "compare", str(old), str(new), "-H", f"new={loose}", "--format", "json"
+            "compare", str(old), str(new), "-H", f"new={loose}", "-o", "json=-"
         )
         assert via_package.exit_code == via_directory.exit_code
         assert _finding_kinds(via_package) == _finding_kinds(via_directory)
@@ -1042,7 +1042,7 @@ class TestTransportEquivalence:
                 _run(
                     "compare", str(old), str(new),
                     "--build-info", f"old={om}", "--build-info", f"new={nm}",
-                    "--format", "json",
+                    "-o", "json=-",
                 )
             )
         assert runs[0].exit_code == runs[1].exit_code
@@ -1058,8 +1058,8 @@ class TestTransportEquivalence:
         members = {"usr/include/foo.h": b"int foo(void);\n"}
         conventional = _write_tar(tmp_path / "libfoo-dev.tar.gz", members)
         renamed = _write_tar(tmp_path / "evidence", members)
-        a = _run("compare", str(old), str(new), "-H", f"new={conventional}", "--format", "json")
-        b = _run("compare", str(old), str(new), "-H", f"new={renamed}", "--format", "json")
+        a = _run("compare", str(old), str(new), "-H", f"new={conventional}", "-o", "json=-")
+        b = _run("compare", str(old), str(new), "-H", f"new={renamed}", "-o", "json=-")
         assert a.exit_code == b.exit_code
         assert _finding_kinds(a) == _finding_kinds(b)
 

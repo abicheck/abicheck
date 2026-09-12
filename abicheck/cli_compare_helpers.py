@@ -99,7 +99,6 @@ from .frontends.cli.compare_report import (
     _render_compare_report as _render_compare_report,
 )
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
-from .frontends.cli.options import reject_incoherent_secondary_writes
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.runtime import (
     _EXIT_NOT_COMPARABLE,
@@ -356,36 +355,14 @@ def _enter_budget_scope(ctx: click.Context, budget_s: float | None) -> None:
     ctx.call_on_close(lambda: scope.__exit__(None, None, None))
 
 
-def _reject_incoherent_compare_flags(
-    *,
-    dry_run: bool,
-    output: Path | None,
-    secondary_writes: tuple[tuple[str, Path], ...],
-) -> None:
-    """Reject flag combinations that cannot mean anything, before any work.
-
-    Every one of these would otherwise either do nothing silently or
-    destroy its own output: two reports aimed at one file, a dry run asked
-    to write a report. Raised as ``UsageError`` (exit 64) up front, so none
-    of them is discovered after an expensive compare.
-
-    ADR-068 D4/Phase 5: ``--write`` is repeatable on ``compare`` now
-    (``secondary_writes``), unlike ``scan``'s still-singular ``--write`` --
-    delegates to :func:`reject_incoherent_secondary_writes` (per-write PATH
-    uniqueness already checked inside the ``--write`` parsing callback).
-
-    A ``--contract`` domain given without ``--contract`` used to
-    be rejected here too (it would otherwise silently do nothing); CLI audit
-    PR 3/5 loosens that into an implication instead -- see
-    :func:`abicheck.cli_options.resolve_contract_evaluation`, called by this
-    function's caller before ``contract_evaluation`` is used for anything
-    else, so there is no longer an incoherent state to reject here.
-    """
-    reject_incoherent_secondary_writes(
-        dry_run=dry_run,
-        output=output,
-        secondary_writes=secondary_writes,
-    )
+# Plan slice 7m: ``_reject_incoherent_compare_flags`` is gone. Both rules it
+# enforced -- a dry run asked to write a report, and two reports aimed at one
+# file -- are now properties of the one export request, checked by
+# ``frontends.cli.options.export`` while the operand is parsed: collision
+# detection runs across *every* target rather than only between the primary
+# and the repeats of one flag, and ``reject_dry_run_with_exports`` covers the
+# dry run at ``compare``'s own callback boundary. Two flags with two grammars
+# needed a coherence check between them; one grammar does not.
 
 
 def _preflight_manifests_and_audit(
@@ -802,7 +779,7 @@ def _report_compare_result(
     suppression: Any, audit_suppressions: bool,
     fmt: str, output: Path | None, show_only: str | None, report_mode: str,
     show_impact: bool,
-    demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
+    demangle_explicit: bool | None, follow_deps: bool,
     secondary_writes: tuple[tuple[str, Path], ...],
     require_complete_analysis: bool = False,
     require_complete_analysis_stated: bool = False,
@@ -971,38 +948,52 @@ def _report_compare_result(
 
         stamp_scoped_result_findings(result, finding_id=_finding_id)
     # Only the same-binary warning, not every pre-existing coverage_warnings entry ("no binary metadata"/detector-disabled reasons) -- those are deliberately absent from the one-line summary today (existing tests pin exactly zero extra lines).
-    if fmt == ONELINE_FORMAT:
+    # Plan slice 7m: one export request, so one emission loop. Every target
+    # -- the stdout one and every file one alike -- renders the *same*
+    # already-computed `result` under the *same* presentation options, which
+    # is what makes §7's F-19 structural rather than tested per permutation:
+    # the canonical result block cannot differ between exports because two
+    # exports of one format are literally the same string (rendered once,
+    # memoized below), and two exports of different formats are two
+    # projections of one `ReportEnvelope` (ADR-061 gap C).
+    #
+    # The retired `-o` deliberately rendered its artifacts *unfiltered*
+    # (`show_only=None, report_mode="full"`) regardless of what the primary
+    # the stdout export was asked for. That asymmetry was defensible only while
+    # "primary" and "secondary" were two different flags carrying two
+    # different grammars; under one repeatable operand there is no principled
+    # answer to "which of `-o json=a.json -o markdown=-` is the unfiltered
+    # one", so a display selector now means the same thing for every export
+    # it is rendered into. A reader wanting the complete document alongside a
+    # narrowed human view still has one: `--view show=` narrows what is
+    # *displayed*, and every machine projection continues to carry the full
+    # disposition/suppression accounting plus a `show_only_filter`/
+    # `filtered_summary` block stating exactly what the filter did.
+    #
+    # `demangle` stays resolved *per format* (`_resolve_demangle`) -- that is
+    # not a per-target grammar but a property of the format itself (human
+    # formats demangle, machine formats keep raw mangled symbols so tooling
+    # can match on them), and it is exactly what the primary target's own
+    # already-resolved `demangle` argument is (see `_normalize_compare_
+    # options`, which resolves it through the same function).
+    targets: tuple[tuple[str, Path | None], ...] = ((fmt, output), *secondary_writes)
+    if any(target_fmt == ONELINE_FORMAT for target_fmt, _ in targets):
         echo_coverage_warnings([w for w in result.coverage_warnings if "byte-identical" in w])
-    _write_or_echo(
-        output,
-        _render_compare_report(
-            result, old, new, fmt=fmt,
-            follow_deps=follow_deps, show_only=show_only, report_mode=report_mode,
-            show_impact=show_impact, severity_config=report_severity,
-            demangle=demangle,
-            contract_evaluation=contract_evaluation,
-            require_complete_analysis=require_complete_analysis,
-            audit_suppressions=audit_suppressions,
-        ),
-    )
-
-    # ADR-068 D4/Phase 5: --write is repeatable (§4.1) -- every write renders
-    # the same already-computed `result` (no second comparison), full and
-    # unfiltered, demangled per its own format (Codex review, PR #557).
-    for secondary_fmt, secondary_output in secondary_writes:
-        _write_or_echo(
-            secondary_output,
-            _render_compare_report(
-                result, old, new, fmt=secondary_fmt,
-                follow_deps=follow_deps, show_only=None, report_mode="full",
-                show_impact=show_impact,
-                severity_config=report_severity,
-                demangle=_resolve_demangle(secondary_fmt, demangle_explicit),
+    rendered: dict[str, str] = {}
+    for target_fmt, target_output in targets:
+        text = rendered.get(target_fmt)
+        if text is None:
+            text = _render_compare_report(
+                result, old, new, fmt=target_fmt,
+                follow_deps=follow_deps, show_only=show_only, report_mode=report_mode,
+                show_impact=show_impact, severity_config=report_severity,
+                demangle=_resolve_demangle(target_fmt, demangle_explicit),
                 contract_evaluation=contract_evaluation,
                 require_complete_analysis=require_complete_analysis,
                 audit_suppressions=audit_suppressions,
-            ),
-        )
+            )
+            rendered[target_fmt] = text
+        _write_or_echo(target_output, text)
 
     # Workstream D-S1: no early `sys.exit` on the scoped/consumer result here
     # any more -- `--used-by`/`--required-symbol(s)` no longer float their own
@@ -1081,7 +1072,7 @@ def run_compare(
     depth: str | None = None,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
-    # ADR-068 D4/Phase 5: --write is repeatable (§4.1). Each entry is an
+    # ADR-068 D4/Phase 5: -o is repeatable (§4.1). Each entry is an
     # already-parsed, already PATH-uniqueness-checked (FORMAT, PATH) pair.
     secondary_writes: tuple[tuple[str, Path], ...] = (),
     dry_run: bool = False,
@@ -1099,7 +1090,7 @@ def run_compare(
     since: str | None = None,  # ADR-068 Phase 2c: changed-path localization
     changed_paths_opt: tuple[str, ...] = (),
     abi3: str | None = None,  # ADR-068 Phase 2d: candidate-side abi3 audit
-    budget: str | None = None, max_findings_per_library: int | None = None,  # release fan-out only
+    budget: str | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1108,11 +1099,6 @@ def run_compare(
     reject_dry_run_with_output(dry_run, output)
     budget_s = _parse_budget(budget)
     _enter_budget_scope(ctx, budget_s)  # before inline embedding too; see its docstring
-    _reject_incoherent_compare_flags(
-        dry_run=dry_run,
-        output=output,
-        secondary_writes=secondary_writes,
-    )
     # --contract is the only way to ask for the ADR-049 evaluator on the CLI
     # (abicheck.cli_options.resolve_contract_evaluation) -- resolved here,
     # before contract_evaluation is used for anything else in this function,
@@ -1242,7 +1228,7 @@ def run_compare(
 
     # ADR-068 D4/Phase 5: split out to _helpers_compare.reject_use_cases_
     # without_carrying_output (keeps this module under the 2000-line hard
-    # cap) -- with --write repeatable, "one output carrying it" is now the
+    # cap) -- with -o repeatable, "one output carrying it" is now the
     # primary render OR any secondary write, not just one --write.
     reject_use_cases_without_carrying_output(
         fmt=fmt,
@@ -1464,15 +1450,14 @@ def run_compare(
             report_mode=report_mode, show_only=show_only,
             demangle=demangle, explain_patterns=explain_patterns,
             # Forwarded so _dispatch_release_compare can reject (no per-library ledger yet).
-            show_filtered=show_filtered, audit_suppressions=audit_suppressions, max_findings_per_library=max_findings_per_library,
+            show_filtered=show_filtered, audit_suppressions=audit_suppressions,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
     _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
     _warn_unused_set_flags(
         dso_only=resolved_cfg.release_dso_only, output_dir=output_dir,
-        select=select, select_required=select_required,
-        max_findings_per_library=max_findings_per_library)
+        select=select, select_required=select_required)
 
     # Preserved before _normalize_compare_options resolves `demangle` against
     # the *primary* fmt below — the secondary render needs the same tri-state
@@ -1868,7 +1853,7 @@ def run_compare(
         audit_suppressions=audit_suppressions,
         fmt=fmt, output=output, show_only=show_only, report_mode=report_mode,
         show_impact=show_impact,
-        demangle=demangle, demangle_explicit=demangle_explicit,
+        demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
         secondary_writes=secondary_writes,
         require_complete_analysis=require_complete_analysis,

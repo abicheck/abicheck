@@ -124,8 +124,8 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(new_dir),
             "--include-system-declarations",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 4, out
@@ -167,8 +167,8 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(new_dir),
             "--include-system-declarations",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--config",
             str(cfg),
         )
@@ -205,8 +205,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -229,8 +229,8 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(new_dir),
             "--include-system-declarations",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -254,8 +254,8 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(new_dir),
             "--include-system-declarations",
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=-",
         )
 
         assert code == 0, out
@@ -294,8 +294,8 @@ class TestCompareOldBundleFacts:
             "--include-system-declarations",
             "--suppress",
             str(suppress_path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -328,8 +328,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         # A real facts document has more than one JSON container; a budget
@@ -365,8 +365,8 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code != 0
@@ -437,8 +437,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--max-json-object-nodes",
             "1",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -460,8 +460,8 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--format",
-            "sarif",
+            "-o",
+            "sarif=-",
         )
 
         assert code == 64
@@ -492,8 +492,8 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(new_dir),
             "--fail-on-removed-library",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -525,8 +525,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -560,8 +560,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -589,8 +589,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0
@@ -615,8 +615,8 @@ class TestCompareOldBundleFacts:
             str(new_dir),
             "--bundle-facts-out",
             str(tmp_path / "out.json"),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -655,8 +655,8 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(archive_path),
             "--include-system-declarations",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 4, out
@@ -686,10 +686,10 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--write",
+            "-o",
+            "json=-",
+            "-o",
             f"markdown={secondary_path}",
-            "--format",
-            "json",
         )
 
         assert code == 0, out
@@ -716,8 +716,8 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 1, out
@@ -758,10 +758,10 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
+            "-o",
+            f"json={output_dir}/",
         )
 
         assert code == 0, out
@@ -794,12 +794,10 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--output-dir",
-            str(output_dir),
             "-o",
-            str(colliding_output),
-            "--format",
-            "json",
+            f"json={colliding_output}",
+            "-o",
+            f"json={output_dir}/",
         )
 
         assert code == 64, out
@@ -833,12 +831,10 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--output-dir",
-            str(same_path),
             "-o",
-            str(same_path),
-            "--format",
-            "json",
+            f"json={same_path}",
+            "-o",
+            f"json={same_path}/",
         )
 
         assert code == 64, out
@@ -874,10 +870,10 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--output-dir",
-            str(preexisting_file),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
+            "-o",
+            f"json={preexisting_file}/",
         )
 
         assert code == 64, out
@@ -912,10 +908,10 @@ class TestCompareOldBundleFacts:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
+            "-o",
+            f"json={output_dir}/",
         )
 
         assert code == 1, out
@@ -953,11 +949,9 @@ class TestCompareOldBundleFacts:
             str(facts_path),
             str(new_dir),
             "-o",
-            str(summary_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "json",
+            f"json={summary_path}",
+            "-o",
+            f"json={output_dir}/",
         )
 
         assert code == 1, out

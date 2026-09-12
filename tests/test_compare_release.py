@@ -386,7 +386,7 @@ class TestFileVsFile:
         snap = _snap()
         old_f = _write_snap(tmp_path / "libfoo.json", snap)
         new_f = _write_snap(tmp_path / "libfoo2.json", snap)
-        code, out = _invoke("compare", str(old_f), str(new_f), "--format", "json")
+        code, out = _invoke("compare", str(old_f), str(new_f), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         # Two *file* operands are a single-pair compare (no release fan-out), so
@@ -485,13 +485,15 @@ class TestDirVsDir:
         orchestration). `ctx.invoke` used to backfill `UsageError.ctx` via
         its `augment_usage_errors` wrapper so the formatted CLI error got a
         "Usage: ..." header; `_dispatch_release_compare` now does that
-        backfill by hand -- this proves a validation error raised inside the
-        release engine (`reject_incoherent_secondary_output`'s "two reports
-        aimed at the same file" check -- CLI cleanup phase two, PR E's
-        earlier `--annotate-additions` trigger for this same test was
-        removed along with the flag itself) still exits 64 with the same
-        "Usage:" header through a directory compare, not just a degraded
-        one-line "Error: ..." message."""
+        backfill by hand -- this proves a usage error on a directory compare
+        still exits 64 with the same "Usage:" header, not a degraded
+        one-line "Error: ..." message.
+
+        Since plan slice 7m the trigger is the export request's own
+        collision check ("two exports to one destination"), raised while the
+        operand is parsed rather than inside the release engine -- an
+        earlier `--annotate-additions` trigger, and the `--write`-vs-`-o`
+        one after it, were each removed with the flag they used."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -505,23 +507,23 @@ class TestDirVsDir:
             str(old_dir),
             str(new_dir),
             "-o",
-            str(same_path),
-            "--write",
+            f"markdown={same_path}",
+            "-o",
             f"json={same_path}",
         )
         assert code == 64
         assert "Usage:" in out
-        assert "--write's PATH must differ from --output/-o" in out
+        assert "both export to" in out
 
     @pytest.mark.parametrize(
         "extra_args,facts_name,expected_substr",
         [
-            (("-o", "{p}"), "out.json", "must differ from --output/-o"),
-            (("--write", "json={p}"), "out.json", "must differ from --write"),
-            (("--output-dir", "{d}"), "summary.json", "summary.json"),
-            (("--output-dir", "{d}"), "libfoo.json", "'libfoo.json'"),
+            (("-o", "json={p}"), "out.json", "must differ from --output/-o"),
+            (("-o", "markdown={p}"), "out.json", "must differ from --output/-o"),
+            (("-o", "json={d}/"), "summary.json", "summary.json"),
+            (("-o", "json={d}/"), "libfoo.json", "'libfoo.json'"),
         ],
-        ids=["output", "write", "output_dir_summary", "output_dir_per_library"],
+        ids=["export", "export_other_format", "directory_summary", "directory_per_library"],
     )
     def test_bundle_facts_out_rejects_output_collisions(
         self,
@@ -531,10 +533,16 @@ class TestDirVsDir:
         expected_substr: str,
     ) -> None:
         """G38 Phase 2 (Codex review, two rounds): `--bundle-facts-out`
-        naming the same path as `--output`/`-o`, `--write`, `--output-dir`'s
-        `summary.json`, or one of its per-library `<stem>.json` files would
-        silently overwrite the requested baseline with the report -- reject
-        each up front, before `--output-dir` is even created."""
+        naming the same path as any export -- a file export, a
+        per-component export's own `summary.json`, or one of its
+        per-library `<stem>.json` files -- would silently overwrite the
+        requested baseline with the report, so each is rejected up front,
+        before the per-component directory is even created.
+
+        `--bundle-facts-out` is not part of the export set (plan slice 7m),
+        which is exactly why it needs its own check: the export request's
+        own collision detection cannot see a destination that is not an
+        export."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -569,7 +577,7 @@ class TestDirVsDir:
             snap = _snap()
             _write_snap(old_dir / name, snap)
             _write_snap(new_dir / name, snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         assert data["verdict"] == "NO_CHANGE"
@@ -589,7 +597,7 @@ class TestDirVsDir:
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         assert data["release_schema_version"] == RELEASE_SCHEMA_VERSION
@@ -607,7 +615,7 @@ class TestDirVsDir:
         old, new = _breaking_pair("libfoo.so")
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         data = json.loads(out)
         lib = data["libraries"][0]
@@ -650,7 +658,7 @@ class TestDirVsDir:
         new = _snap("2.0", [], library="libfoo.so")
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         lib = json.loads(out)["libraries"][0]
         assert lib["breaking"] == 15
@@ -695,10 +703,8 @@ class TestDirVsDir:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
-            "--max-findings-per-library",
-            "16",
+            "-o",
+            "json=-",
         )
         assert code == 4
         lib = json.loads(out)["libraries"][0]
@@ -707,7 +713,7 @@ class TestDirVsDir:
         assert "findings_truncated_kinds" not in lib
 
         monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "16")
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         lib = json.loads(out)["libraries"][0]
         assert len(lib["findings"]) == 16
@@ -747,8 +753,8 @@ class TestDirVsDir:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--config",
             str(cfg),
         )
@@ -797,69 +803,60 @@ class TestDirVsDir:
         assert "no matching" in out.lower() or "warning" in out.lower()
 
 
-class TestMaxReleaseFindingsResolver:
-    """Direct unit coverage of ``_resolve_max_release_findings_per_library``/
-    ``_accumulate_release_kind_counts``'s own edge cases -- the CLI-level
-    tests in ``TestDirVsDir`` above only ever exercise the "explicit valid
-    value" and "valid env var" paths; these hit the resolver's other
-    branches (invalid explicit value, malformed/non-positive env var,
-    nothing set) and the accumulator's empty-counter no-op directly."""
+class TestReleaseFindingsDisplayCap:
+    """The per-library display cap is one constant with no way to override it.
 
-    def test_non_positive_explicit_value_raises(self) -> None:
-        from abicheck.cli_compare_release_matrix import (
-            _resolve_max_release_findings_per_library,
+    Plan slice 7m retired both overrides (`--max-findings-per-library` and
+    the `ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY` environment variable),
+    so the resolver they fed is gone too -- what this class used to test was
+    that resolver's edge cases (invalid explicit value, malformed or
+    non-positive env var, nothing set), every one of which was a way for a
+    caller to influence the cap. Stated the other way round now, because
+    "there is no resolver" is a property worth pinning: a machine export
+    carries every finding, and a human summary is bounded automatically at
+    one value.
+    """
+
+    def test_the_cap_is_a_single_positive_constant(self) -> None:
+        from abicheck.report.release_display_limits import (
+            MAX_RELEASE_FINDINGS_PER_LIBRARY,
         )
 
-        with pytest.raises(ValueError, match="positive integer"):
-            _resolve_max_release_findings_per_library(0)
-        with pytest.raises(ValueError, match="positive integer"):
-            _resolve_max_release_findings_per_library(-5)
+        assert isinstance(MAX_RELEASE_FINDINGS_PER_LIBRARY, int)
+        assert MAX_RELEASE_FINDINGS_PER_LIBRARY >= 1
 
-    def test_malformed_env_var_falls_back_to_default(
+    def test_the_leaf_exposes_nothing_that_resolves_a_cap(self) -> None:
+        """No resolver, no env-var name, no "is it explicit" predicate --
+        an override reintroduced anywhere would need one of these back, so
+        their absence is the executable form of "the cap is automatic"."""
+        from abicheck.report import release_display_limits
+
+        assert release_display_limits.__all__ == ["MAX_RELEASE_FINDINGS_PER_LIBRARY"]
+        for retired in (
+            "resolve_max_release_findings_per_library",
+            "release_findings_cap_is_explicit",
+            "MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR",
+        ):
+            assert not hasattr(release_display_limits, retired), retired
+
+    def test_no_environment_variable_changes_the_cap(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The env var retired with the flag rather than surviving it --
+        Phase 7l's standing constraint that a demoted flag lands in
+        `.abicheck.yml`, never in an undocumented variable. Asserted by
+        setting it and observing that nothing reads it."""
         from abicheck.cli_compare_release_matrix import (
             _MAX_RELEASE_FINDINGS_PER_LIBRARY,
-            _resolve_max_release_findings_per_library,
         )
 
-        monkeypatch.setenv(
-            "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "not-a-number"
-        )
-        assert (
-            _resolve_max_release_findings_per_library(None)
-            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "999")
+        from abicheck.report.release_display_limits import (
+            MAX_RELEASE_FINDINGS_PER_LIBRARY,
         )
 
-    def test_non_positive_env_var_falls_back_to_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from abicheck.cli_compare_release_matrix import (
-            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
-            _resolve_max_release_findings_per_library,
-        )
-
-        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "0")
-        assert (
-            _resolve_max_release_findings_per_library(None)
-            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
-        )
-
-    def test_nothing_set_returns_the_built_in_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from abicheck.cli_compare_release_matrix import (
-            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
-            _resolve_max_release_findings_per_library,
-        )
-
-        monkeypatch.delenv(
-            "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", raising=False
-        )
-        assert (
-            _resolve_max_release_findings_per_library(None)
-            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
-        )
+        assert MAX_RELEASE_FINDINGS_PER_LIBRARY == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        assert MAX_RELEASE_FINDINGS_PER_LIBRARY != 999
 
 
 class TestAccumulateReleaseKindCounts:
@@ -956,7 +953,7 @@ class TestUnmatched:
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("gate:\n  fail_on_removed_library: true\n")
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-"
         )
         assert code == 0
         assert json.loads(out)["comparison_scope"]["proven_removed"] == []
@@ -1006,7 +1003,7 @@ class TestUnmatched:
         _write_snap(old_dir / "libremoved.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libadded.json", _snap())
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         assert isinstance(data["unmatched_old"], list)
@@ -1034,7 +1031,7 @@ class TestVendoredWheelPairing:
         # Same dependency, different auditwheel rebuild hash each side.
         _write_snap(old_dir / "libpng16-a746ad4a.so.16.43.0.json", snap)
         _write_snap(new_dir / "libpng16-b8f31c2e.so.16.56.0.json", snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         # Paired, not phantom removed+added.
@@ -1055,7 +1052,7 @@ class TestVendoredWheelPairing:
         old_lib, new_lib = _breaking_pair("libsodium.so.26")
         _write_snap(old_dir / "libsodium-1234567890abcdef.so.23.3.0.json", old_lib)
         _write_snap(new_dir / "libsodium-fedcba0987654321.so.26.1.0.json", new_lib)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         data = json.loads(out)
         assert data["verdict"] == "BREAKING"
@@ -1076,7 +1073,7 @@ class TestVendoredWheelPairing:
         _write_snap(
             new_dir / "libwebpdemux.so.2.0.14.json", _snap(library="libwebpdemux.so.2")
         )
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         assert data["unmatched_old"] == []
@@ -1099,8 +1096,8 @@ class TestOutputDir:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--output-dir",
-            str(out_dir),
+            "-o",
+            f"json={out_dir}/",
         )
         assert code == 0
         assert (out_dir / "libfoo.json").exists()
@@ -1159,8 +1156,8 @@ class TestOutputDir:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--output-dir",
-            str(out_dir),
+            "-o",
+            f"json={out_dir}/",
             "--severity-preset",
             "strict",
         )
@@ -1181,7 +1178,7 @@ class TestOutputDir:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, _ = _invoke(
-            "compare", str(old_dir), str(new_dir), "--output-dir", str(out_dir)
+            "compare", str(old_dir), str(new_dir), "-o", f"json={out_dir}/"
         )
         assert code == 0
         summary = json.loads((out_dir / "summary.json").read_text())
@@ -1212,7 +1209,7 @@ class TestCompareReleaseScopeAndChangedLibraries:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libbar.json", _snap(library="libbar.so"))
         _write_snap(new_dir / "libbar.json", _snap(library="libbar.so"))
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         data = json.loads(out)
         assert data["changed_libraries"] == ["libfoo.json"]
@@ -1257,8 +1254,8 @@ class TestCompareReleaseScopeAndChangedLibraries:
             str(old_dir),
             str(new_dir),
             "--scope-public-headers",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         data = json.loads(out)
         assert data["scope"]["public_headers_applied"] is True
@@ -1292,8 +1289,8 @@ class TestCompareReleaseScopeAndChangedLibraries:
             str(old_dir),
             str(new_dir),
             "--scope-public-headers",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         data = json.loads(out)
         assert data["scope"]["manual_review_required"] is True
@@ -1314,7 +1311,7 @@ class TestMixedInputs:
         snap = _snap()
         _write_snap(old_dir / "libfoo.so.1.2.json", snap)
         _write_snap(new_dir / "libfoo.so.1.3.json", snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         assert len(data["libraries"]) == 1
@@ -1331,7 +1328,7 @@ class TestMixedInputs:
         _write_snap(old_dir / "libfoo.so.1.9.json", snap)
         _write_snap(old_dir / "libfoo.so.1.10.json", snap)
         _write_snap(new_dir / "libfoo.so.2.0.json", snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         # Only 1 comparison, and warnings should mention 1.10 as selected
@@ -1375,7 +1372,7 @@ class TestFilterOutNonABIFiles:
             "{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}"
         )
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0, f"Should pass (only one real library). Output: {out}"
         data = json.loads(out)
         # Only the real ABI snapshot is compared
@@ -1409,7 +1406,7 @@ class TestFilterOutNonABIFiles:
         (old_dir / "something.dll.txt").write_text("Not a DLL")
         (new_dir / "something.dll.txt").write_text("Not a DLL")
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0, f"Should pass (only one real library). Output: {out}"
         data = json.loads(out)
         # Only the real ABI snapshot is compared
@@ -1430,7 +1427,7 @@ class TestFilterOutNonABIFiles:
         _write_snap(old_dir / "libfoo.json", snap1)
         _write_snap(new_dir / "libfoo.json", snap2)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0, f"Should compare the two snapshots. Output: {out}"
         data = json.loads(out)
         assert len(data["libraries"]) == 1

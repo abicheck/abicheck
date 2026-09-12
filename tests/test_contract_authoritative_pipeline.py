@@ -357,10 +357,8 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 "_Z4keepv",
                 "--contract",
                 "all",
-                "--format",
-                "json",
                 "-o",
-                str(out),
+                f"json={out}",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -385,10 +383,8 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 str(new_p),
                 "--contract",
                 "all",
-                "--format",
-                "json",
                 "-o",
-                str(out),
+                f"json={out}",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -422,10 +418,8 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 "all",
                 "--view",
                 "root-cause",
-                "--format",
-                "json",
                 "-o",
-                str(out),
+                f"json={out}",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -518,7 +512,7 @@ class TestCompareKeepsWhatItDoesNotScore:
         old_p.write_text(snapshot_to_json(old), encoding="utf-8")
         new_p.write_text(snapshot_to_json(new), encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json", *extra]
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-", *extra]
         )
         # A documented nonzero exit is a `SystemExit`, not a failure --
         # anything else is a real traceback the parse below would hide.
@@ -613,8 +607,8 @@ class TestReleaseFanoutKeepsWhatItDoesNotScore:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--contract",
                 "exports",
             ],
@@ -736,10 +730,8 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 "_Z5pub_bi",
                 "--contract",
                 "exports",
-                "--format",
-                "json",
                 "-o",
-                str(out),
+                f"json={out}",
             ],
         )
         # A documented nonzero exit is a `SystemExit`, not a failure --
@@ -799,17 +791,13 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 "compare",
                 str(old_p),
                 str(new_p),
-                # Absent from both sides, so it stays an uncovered label
-                # rather than being deduped into the real removal finding.
                 "--required-symbol",
                 "_Z7missingv",
                 "--contract",
                 "exports",
                 *extra_flags,
-                "--format",
-                "json",
                 "-o",
-                str(out),
+                f"json={out}",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -1376,8 +1364,8 @@ class TestNothingIsLost:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
                 "--contract",
                 "exports",
             ],

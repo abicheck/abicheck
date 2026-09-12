@@ -273,3 +273,80 @@ def test_some_checked_in_workflow_really_defeats_the_platform_default() -> None:
         "encoding rule above would pass even if every reader regressed; "
         "re-derive the non-vacuity precondition before deleting this test"
     )
+
+
+#: Test modules whose reads are of documents **abicheck itself wrote** --
+#: a rendered report at a `-o FORMAT=DESTINATION` destination under
+#: `tmp_path`, not checked-in text -- so the repository-rooted rule above
+#: does not reach them.
+#:
+#: They need the same rule for the same reason: every renderer writes UTF-8
+#: unconditionally, and this tool's own report prose is full of em dashes and
+#: `§`, so a bare `read_text()` decodes fine on Linux/macOS and raises
+#: `UnicodeDecodeError` on a default Windows runner. That is not
+#: hypothetical -- it is how `test_cli_export_grammar.py` turned the
+#: windows-latest unit lane red on this branch's first push, in four tests
+#: whose Linux runs were all green.
+#:
+#: Deliberately a named set rather than "every read under `tests/`": the
+#: suite has ~249 bare `read_text()` calls across ~97 modules, nearly all of
+#: them reading content the test itself wrote in ASCII. Sweeping those is a
+#: real but separate change; leaving *this* class unstated because the
+#: superset is large is how it would come back.
+_TOOL_OUTPUT_READERS = frozenset(
+    {
+        "test_cli_export_grammar.py",
+        "test_cli_compare_release_export_uniformity.py",
+        "test_presentation_analysis_separation.py",
+    }
+)
+
+
+def _unencoded_reads_anywhere(path: Path) -> list[str]:
+    """Every text read in *path* that leaves the encoding to the host."""
+    tree = ast.parse(path.read_text(encoding=ENCODING))
+    findings = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in ("read_text", "write_text"):
+            pass
+        elif isinstance(func, ast.Name) and func.id == "open":
+            pass
+        else:
+            continue
+        if _encoding_is_stated(node):
+            continue
+        findings.append(f"{path.name}:{node.lineno}: {ast.unparse(node)[:90]}")
+    return findings
+
+
+@pytest.mark.parametrize("module", sorted(_TOOL_OUTPUT_READERS))
+def test_a_module_reading_a_rendered_report_states_its_encoding(module: str) -> None:
+    findings = _unencoded_reads_anywhere(TESTS_DIR / module)
+    assert findings == [], (
+        f"{module} reads a document abicheck wrote as UTF-8 without saying so, "
+        "so it decodes with the host's locale and fails on a cp1252 Windows "
+        f"runner: {findings}"
+    )
+
+
+def test_the_tool_output_reader_set_names_real_modules() -> None:
+    """A renamed or deleted module must not silently drop out of the rule."""
+    missing = [m for m in _TOOL_OUTPUT_READERS if not (TESTS_DIR / m).is_file()]
+    assert missing == [], missing
+
+
+def test_a_rendered_report_really_defeats_the_platform_default() -> None:
+    """Non-vacuity, the same shape as the workflow half above: the renderers
+    must actually emit a byte `cp1252` rejects, or the rule defends nothing."""
+    # U+201D, the curly closing quote a rendered report puts around a symbol
+    # name. Its UTF-8 encoding ends in 0x9D, which cp1252 leaves undefined --
+    # and 0x9D is the exact byte the windows-latest lane reported. An em dash
+    # would NOT do: its bytes are all mapped in cp1252, so it decodes into
+    # mojibake rather than raising, and a non-vacuity guard built on one would
+    # pass while proving nothing.
+    sample = "Removed \u201cfoo\u201d from the export table."
+    with pytest.raises(UnicodeDecodeError):
+        sample.encode("utf-8").decode("cp1252")

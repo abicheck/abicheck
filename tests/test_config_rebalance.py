@@ -1047,8 +1047,8 @@ class TestExitSchemeExplicit:
                 str(new_dir),
                 "--config",
                 str(empty_cfg),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert baseline.exit_code == 4
@@ -1061,8 +1061,8 @@ class TestExitSchemeExplicit:
                 str(new_dir),
                 "--config",
                 str(cfg),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert res.exit_code == 0

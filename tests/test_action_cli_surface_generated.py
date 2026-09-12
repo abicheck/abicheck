@@ -60,6 +60,16 @@ def _surface_lines() -> set[str]:
 
 
 def _click_choices(path: tuple[str, ...], spelling: str) -> tuple[str, ...]:
+    """The declared value set behind *spelling*, read off the real command.
+
+    Two shapes, because the CLI has two: an ordinary ``click.Choice`` type
+    (``dump --compression``), and -- since plan slice 7m -- the renderable
+    format set published on the ``-o FORMAT=DESTINATION`` parameter, whose
+    *value* is the whole operand rather than a bare choice. Both are real,
+    declared facts; the generator derives from whichever the option has, so
+    this oracle reads whichever the option has too (ADR-070 D3: the artifact
+    is derived, never a hand-maintained mirror).
+    """
     from abicheck.cli import main
 
     node: click.Command = main
@@ -67,7 +77,13 @@ def _click_choices(path: tuple[str, ...], spelling: str) -> tuple[str, ...]:
         node = node.commands[segment]  # type: ignore[attr-defined]
     for param in node.params:
         if isinstance(param, click.Option) and spelling in param.opts:
-            return tuple(param.type.choices)  # type: ignore[attr-defined]
+            choices = getattr(param.type, "choices", None)
+            if choices:
+                return tuple(choices)
+            export_formats = getattr(param, "export_formats", None)
+            if export_formats:
+                return tuple(export_formats)
+            raise AssertionError(f"{' '.join(path)} {spelling} declares no value set")
     raise AssertionError(f"{' '.join(path)} has no {spelling}")
 
 
@@ -97,9 +113,9 @@ class TestTheArtifactIsDerived:
     @pytest.mark.parametrize(
         ("label", "path", "spelling"),
         [
-            ("compare", ("compare",), "--format"),
-            ("deps-tree", ("deps", "tree"), "--format"),
-            ("deps-compare", ("deps", "compare"), "--format"),
+            ("compare", ("compare",), "-o"),
+            ("deps-tree", ("deps", "tree"), "-o"),
+            ("deps-compare", ("deps", "compare"), "-o"),
             ("dump", ("dump",), "--compression"),
         ],
     )
@@ -163,7 +179,7 @@ class TestTheShellActuallyReadsIt:
     real script rather than inspecting its source."""
 
     def test_every_emitted_compare_format_is_accepted(self) -> None:
-        for value in _click_choices(("compare",), "--format"):
+        for value in _click_choices(("compare",), "-o"):
             result = _run_validate(
                 {
                     "INPUT_MODE": "compare",
@@ -211,7 +227,7 @@ class TestTheShellActuallyReadsIt:
                 "INPUT_FORMAT": "nope",
             }
         )
-        for value in _click_choices(("deps", "tree"), "--format"):
+        for value in _click_choices(("deps", "tree"), "-o"):
             assert value in result.stdout
         assert "sarif" not in result.stdout
 

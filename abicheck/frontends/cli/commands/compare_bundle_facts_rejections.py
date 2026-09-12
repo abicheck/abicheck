@@ -127,16 +127,10 @@ def reject_unsupported_options(
     # supports the identical repeatable form, so every requested write is
     # honored (never silently dropped).
     secondary_writes: tuple[tuple[str, Path], ...] = kwargs.get("secondary_writes", ())
-    # dry_run=False: --dry-run is rejected outright for this mode below,
-    # regardless of --write, so only the output/secondary-writes collision
-    # half of this shared check is relevant here.
-    from ....frontends.cli.options import reject_incoherent_secondary_writes
-
-    reject_incoherent_secondary_writes(
-        dry_run=False,
-        output=kwargs.get("output"),
-        secondary_writes=secondary_writes,
-    )
+    # Plan slice 7m: no export-vs-export collision check here any more -- the
+    # destinations reaching this dispatcher came from one already-validated
+    # export set (`frontends.cli.options.export`), which checks collisions
+    # across every target at parse time.
     for secondary_fmt, _secondary_path in secondary_writes:
         if secondary_fmt not in ("json", "markdown"):
             # Codex review: --write FORMAT=PATH was accepted (Click's own

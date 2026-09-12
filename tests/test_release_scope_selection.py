@@ -654,7 +654,7 @@ class TestDamagedMarkerSectionFailsClosed:
         assert is_multi_artifact_package(new) is True
         assert classify_compare_operand(new) == "directory"
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--format", "json"]
+            main, ["compare", str(old), str(new), "-o", "json=-"]
         )
         # Refused as a usage error by whichever reader meets the damage
         # first (materialization or the marker read), never compared.
@@ -1155,8 +1155,8 @@ class TestGhostMarkerInAStoredPackageIsRefused:
                 str(new),
                 "--config",
                 str(cfg),
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             ],
         )
         assert result.exit_code == 64, result.output

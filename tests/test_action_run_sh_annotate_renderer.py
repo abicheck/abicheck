@@ -321,7 +321,7 @@ class TestAnnotateRendererReadsThePersistedReport:
             {
                 "INPUT_FORMAT": "markdown",
                 "INPUT_ANNOTATE": "true",
-                "INPUT_EXTRA_ARGS": f"--write markdown={tmp_path / 'out.md'}",
+                "INPUT_EXTRA_ARGS": f"-o markdown={tmp_path / 'out.md'}",
             },
             stub_report=_REPORT_WITH_ANNOTATIONS,
         )
@@ -340,7 +340,7 @@ class TestAnnotateRendererReadsThePersistedReport:
         self, tmp_path: Path
     ) -> None:
         """Codex review, PR #998, fresh evidence: `format: json` overridden
-        by `extra-args: --format text --write markdown=...` really does
+        by `extra-args: -o text=- -o markdown=...` really does
         leave no JSON report anywhere (`_json_report_src` correctly finds
         nothing), but the notice above used to gate on the *nominal*
         `$FORMAT` -- which still read "json" -- and so stayed silent about
@@ -353,7 +353,7 @@ class TestAnnotateRendererReadsThePersistedReport:
             {
                 "INPUT_FORMAT": "json",
                 "INPUT_ANNOTATE": "true",
-                "INPUT_EXTRA_ARGS": f"--format text --write markdown={tmp_path / 'out.md'}",
+                "INPUT_EXTRA_ARGS": f"-o text=- -o markdown={tmp_path / 'out.md'}",
             },
             stub_report=_REPORT_WITH_ANNOTATIONS,
         )
@@ -367,8 +367,8 @@ class TestAnnotateRendererReadsThePersistedReport:
 
     def test_discovers_a_user_supplied_write_json_path(self, tmp_path: Path) -> None:
         """Codex review, PR #798: when the primary FORMAT isn't json and the
-        caller's own extra-args already carries ``--write json=PATH``, the
-        Action's internal ``--write json=$PR_JSON`` injection is correctly
+        caller's own extra-args already carries ``-o json=PATH``, the
+        Action's internal ``-o json=$PR_JSON`` injection is correctly
         suppressed (``_extra_args_has_write_flag``) -- which used to leave
         ``_json_report_src``/the annotate renderer with no JSON source at
         all, so ``annotate: true`` silently emitted nothing even though the
@@ -382,10 +382,10 @@ class TestAnnotateRendererReadsThePersistedReport:
         new_json.write_text("{}", encoding="utf-8")
         write_path = tmp_path / "mine.json"
 
-        # A real --write-capable stub: unlike _run_compare's fixed stub,
-        # this one actually honors `--write json=PATH` by writing the
-        # payload there too, so the renderer has something real to
-        # discover -- not just a plausible-looking argv.
+        # A real export-capable stub: unlike _run_compare's fixed stub,
+        # this one actually honors `-o json=PATH` by writing the payload
+        # there, so the renderer has something real to discover -- not just
+        # a plausible-looking argv.
         fake_bin = tmp_path / "fakebin"
         fake_bin.mkdir()
         stub = fake_bin / "abicheck"
@@ -394,7 +394,8 @@ class TestAnnotateRendererReadsThePersistedReport:
             "#!/usr/bin/env bash\n"
             'for arg in "$@"; do\n'
             '  case "$arg" in\n'
-            "    --write) _want_next=1; continue ;;\n"
+            "    -o|--output) _want_next=1; continue ;;\n"
+            "    json=-) _want_next=0 ;;\n"
             '    json=*) if [[ "${_want_next:-0}" == 1 ]]; then\n'
             f"      cat > \"${{arg#json=}}\" <<'STUBJSON'\n{payload}\nSTUBJSON\n"
             "    fi ;;\n"
@@ -418,7 +419,7 @@ class TestAnnotateRendererReadsThePersistedReport:
             "INPUT_ADD_JOB_SUMMARY": "false",
             "INPUT_PR_COMMENT": "false",
             "INPUT_ANNOTATE": "true",
-            "INPUT_EXTRA_ARGS": f"--write json={write_path}",
+            "INPUT_EXTRA_ARGS": f"-o json={write_path}",
             "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
         }
@@ -438,7 +439,7 @@ class TestAnnotateRendererReadsThePersistedReport:
         self, tmp_path: Path
     ) -> None:
         """Codex review, fresh evidence, two rounds: (1) a stale file
-        already at the `--write json=PATH` destination before this
+        already at the `-o json=PATH` destination before this
         invocation, left untouched because the stub fails before writing,
         must not be read as if it were this run's own report (staleness);
         (2) the fix for that must not delete the file to "prove"
@@ -481,7 +482,7 @@ class TestAnnotateRendererReadsThePersistedReport:
             "INPUT_ADD_JOB_SUMMARY": "false",
             "INPUT_PR_COMMENT": "false",
             "INPUT_ANNOTATE": "true",
-            "INPUT_EXTRA_ARGS": f"--write json={write_path}",
+            "INPUT_EXTRA_ARGS": f"-o json={write_path}",
             "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
             "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
         }

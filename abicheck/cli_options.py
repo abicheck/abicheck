@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import click
 
-from .frontends.cli.options import secondary_output_options as _secondary_output_options
+from .frontends.cli.options import export_options as _export_options
 from .frontends.cli.options.evidence_roles import (
     split_build_evidence,
     split_debug_evidence,
@@ -1333,58 +1333,22 @@ def resolve_compile_context(
     )
 
 
-def output_options(
-    formats: Sequence[str],
-    *,
-    default: str = "markdown",
-    format_help: str = "Output format.",
-    output_help: str | None = "Write output to this path (default: stdout).",
-) -> Callable[[F], F]:
-    """Factory for the ``--format`` / ``-o/--output`` pair.
-
-    A factory rather than a bare decorator because the *set* of producible
-    formats legitimately differs per command (``appcompat`` cannot emit
-    sarif/junit, ``compare-release`` cannot emit html/review) — but the option
-    *structure*, the ``-o/--output`` flag, and the contract live here once.
-    """
-
-    # ``help=None`` renders no help line in Click, so a single call covers both
-    # the with-help and without-help cases without a ``**dict[str, object]``
-    # unpack (which mypy can't reconcile with ``click.option``'s overloads).
-    def deco(func: F) -> F:
-        func = click.option(
-            "-o",
-            "--output",
-            "output",
-            type=click.Path(path_type=Path),
-            default=None,
-            help=output_help,
-        )(func)
-        func = click.option(
-            "--format",
-            "fmt",
-            type=click.Choice(list(formats)),
-            default=default,
-            show_default=True,
-            help=format_help,
-        )(func)
-        return func
-
-    return deco
-
-
-#: The ``--write FORMAT=PATH`` decorator factory
-#: (Codex review: previously declared inline, separately, by ``compare``
-#: and ``scan --against``, with drifted help text and duplicated
-#: ``reject_incoherent_*`` validation logic) lives in the dependency-free
-#: ``frontends.cli.options.secondary_output`` leaf module, not here --
-#: ``cli_scan_helpers.py`` needs its validator half and sits on an existing import path back into
-#: this module (``cli_options -> cli_resolve -> dry_run_estimate -> scan_engine
-#: -> cli_scan_helpers``), so a ``cli_scan_helpers -> cli_options`` edge
-#: would close a real import cycle. Re-exported here only for the two CLI
-#: modules (``cli.py``/``cli_scan.py``) that apply it as a decorator
-#: alongside every other option group defined in this file.
-secondary_output_options = _secondary_output_options
+#: The one ``-o FORMAT=DESTINATION`` export request (plan slice 7m) lives in
+#: the dependency-free ``frontends.cli.options.export`` leaf module, not here
+#: -- same cycle-avoidance reason the ``-o`` module it replaces
+#: recorded, and the same reason ``export_options`` is only *re-exported*
+#: here: every other cross-command Click option group is applied from this
+#: module, so the decorator has to be reachable through it, while modules
+#: sitting on an import path back into this one need the parser half without
+#: acquiring that edge.
+#:
+#: It replaces both ``output_options`` (the ``--format`` / path-only
+#: ``-o/--output`` pair) and ``secondary_output_options``
+#: (``--write FORMAT=PATH``): four mechanisms for "which artifacts does this
+#: analysis produce" are now one repeatable operand, with ``-`` as the stdout
+#: destination -- see that module's docstring for why the merge Phase 7k
+#: declined is the right call once ``-`` exists.
+export_options = _export_options
 
 
 #: ADR-049 D8 pack selection, shared by `compare` and `scan --against`.
@@ -1543,13 +1507,12 @@ def set_input_options(func: F) -> F:
         help="Declare an optional expected release member. Repeatable -- see "
         "--select-required (directory/package inputs only).",
     )(func)
-    func = click.option(
-        "--output-dir",
-        "output_dir",
-        type=click.Path(path_type=Path),
-        default=None,
-        help="Directory to write per-library reports (directory/package inputs only).",
-    )(func)
+    # Plan slice 7m: ``--output-dir`` retired here. The per-component fan-out
+    # it named is now a *destination shape* inside the one export request --
+    # ``-o json=reports/`` writes exactly what ``--output-dir reports`` wrote
+    # -- so it is covered by the same collision detection, stdout
+    # exclusivity, and dry-run rejection every other export is, instead of
+    # being a fourth parallel way to say where an artifact goes.
     return func
 
 

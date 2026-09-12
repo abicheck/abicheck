@@ -96,7 +96,7 @@ Examples (`RISK_KINDS`):
 
 **CI action:** warn; inspect the specific change kind and verify target environment requirements. Do not fail automatically unless your policy mandates it.
 
-> Use `abicheck compare --format json` to check the exact `verdict` field — `COMPATIBLE_WITH_RISK` exits with code `0`, same as `COMPATIBLE`.
+> Use `abicheck compare -o json=-` to check the exact `verdict` field — `COMPATIBLE_WITH_RISK` exits with code `0`, same as `COMPATIBLE`.
 
 ---
 
@@ -114,7 +114,7 @@ Examples:
 > **Note:** `abicheck compat` *does* emit exit code `2` for `API_BREAK` conditions.
 > However, the `compat` HTML/text report uses ABICC-style phrasing
 > ("⚠️ API_BREAK — Source-level API change — recompilation required") rather than a bare
-> `API_BREAK` verdict string. Use `abicheck compare --format json` for machine-readable
+> `API_BREAK` verdict string. Use `abicheck compare -o json=-` for machine-readable
 > verdict values.
 
 ---
@@ -187,7 +187,7 @@ report a `BREAKING` verdict while a severity gate configured to only fail on
 that particular category is set to `info`/`warning` rather than `error` —
 the verdict is a fact about what was found, the gate is a separate,
 independently-configured policy decision about what blocks CI. Read the
-`verdict` field from `--format json` if you need the fact regardless of how
+`verdict` field from `-o json=...` if you need the fact regardless of how
 the gate is tuned; see [CI Gating](../use/ci-gating.md) for how the two
 interact.
 
@@ -221,7 +221,7 @@ additions-only `COMPATIBLE` exit `1`, and `--severity-preset strict` makes
 > **Exit `0` is not one verdict.** In legacy mode, `NO_CHANGE`, `COMPATIBLE`,
 > and `COMPATIBLE_WITH_RISK` all exit `0`. If your pipeline must distinguish
 > them — for example to warn on deployment risk — read the `verdict` field from
-> `--format json` rather than keying off the exit code alone.
+> `-o json=...` rather than keying off the exit code alone.
 
 ### The two exit-code schemes
 
@@ -281,7 +281,7 @@ echo "OK (NO_CHANGE or COMPATIBLE)"
 
 ### Warning-only gate
 ```bash
-abicheck compare old.json new.json --format json -o result.json
+abicheck compare old.json new.json -o json=result.json
 ret=$?
 [ $ret -eq 4 ] && echo "::error::BREAKING ABI change" && exit 1
 [ $ret -ne 0 ] && [ $ret -ne 2 ] && echo "::error::unexpected exit code $ret" && exit 1

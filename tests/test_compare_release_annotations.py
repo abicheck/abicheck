@@ -102,7 +102,7 @@ class TestReleaseAnnotationsPersistence:
         old_foo, new_foo = _breaking_pair("libfoo.so")
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         data = json.loads(out)
         [lib] = data["libraries"]
@@ -122,7 +122,7 @@ class TestReleaseAnnotationsPersistence:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         [lib] = data["libraries"]
@@ -163,7 +163,7 @@ class TestReleaseAnnotationsPersistence:
         )
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--format", "json"],
+            ["compare", str(old_dir), str(new_dir), "-o", "json=-"],
         )
         assert result.exit_code == 4
         assert len(calls) == 1, f"expected exactly one compare per library, got {calls}"
@@ -172,15 +172,14 @@ class TestReleaseAnnotationsPersistence:
         assert lib["annotations"]
 
 
-class TestReleaseWriteSecondaryOutput:
-    """CLI cleanup phase two, PR E: `--write FORMAT=PATH` now works for a
-    directory/package (release) `compare` operand, the same as it already
-    does for a single-pair one -- it used to be rejected outright
-    (`--write is not supported for directory/package (release)
-    comparisons`).
+class TestReleaseSeveralExports:
+    """CLI cleanup phase two, PR E: several artifacts from one directory/
+    package (release) `compare`, the same as for a single pair -- a second
+    artifact used to be rejected outright there. Since plan slice 7m both
+    are the one repeatable `-o FORMAT=DESTINATION`.
     """
 
-    def test_write_json_alongside_markdown_primary(self, tmp_path: Path) -> None:
+    def test_json_export_alongside_a_stdout_markdown_one(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         new_dir = tmp_path / "new"
@@ -194,11 +193,13 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
+            "markdown=-",
+            "-o",
             f"json={write_path}",
         )
         assert code == 4
-        # Primary format (markdown, the default) still went to stdout.
+        # Both exports are produced from the one comparison.
         assert "BREAKING" in out
         assert write_path.is_file()
         data = json.loads(write_path.read_text())
@@ -237,7 +238,7 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"json={write_path}",
         )
         assert code == 4
@@ -258,18 +259,16 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
             "-o",
-            str(same_path),
-            "--write",
+            f"json={same_path}",
+            "-o",
             f"json={same_path}",
         )
         assert code == 64
-        assert "--write" in out
+        assert "both export to" in out
 
-    def test_write_sarif_rejected_on_release_operand(self, tmp_path: Path) -> None:
-        """`compare`'s own `--write` accepts sarif/html/review too (for a
+    def test_sarif_export_rejected_on_release_operand(self, tmp_path: Path) -> None:
+        """`compare`'s own `-o` accepts sarif/html/review too (for a
         single-pair operand) -- those must still be rejected for a
         release operand, not silently fall through to markdown."""
         old_dir = tmp_path / "old"
@@ -285,11 +284,11 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"sarif={write_path}",
         )
         assert code == 64
-        assert "--write sarif" in out
+        assert "-o sarif=..." in out
         assert not write_path.exists()
 
     def test_write_junit_from_release_uses_diff_pairs(self, tmp_path: Path) -> None:
@@ -310,7 +309,7 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"junit={write_path}",
         )
         assert code == 4

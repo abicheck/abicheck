@@ -41,8 +41,9 @@ from pathlib import Path
 import click
 
 from .cli import main
-from .cli_options import output_options, verbose_option
-from .frontends.cli.runtime import _safe_write_output, _setup_verbosity
+from .cli_options import export_options, verbose_option
+from .frontends.cli.options.export import ExportSet
+from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .report.aggregate import render_aggregate_json, render_aggregate_text
 from .workflows.aggregate import (
     DEFAULT_REPORT_PREFIX,
@@ -88,19 +89,14 @@ from .workflows.aggregate import (
     "declared target set the gate cannot tell a missing required target from "
     "an intentionally absent one.",
 )
-@output_options(
-    ["text", "json"],
-    default="text",
-    format_help="Output format for the aggregated result.",
-)
+@export_options(["text", "json"], default_format="text")
 @verbose_option
 def aggregate_cmd(
     reports_dir: Path,
     manifest: Path | None,
     run_plan_path: Path | None,
     discovered_only: bool,
-    fmt: str,
-    output: Path | None,
+    exports: ExportSet,
     verbose: bool,
 ) -> None:
     """Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
@@ -145,15 +141,14 @@ def aggregate_cmd(
     except AggregateError as exc:
         raise click.UsageError(str(exc)) from exc
 
-    text = (
-        json.dumps(render_aggregate_json(result), indent=2)
-        if fmt == "json"
-        else render_aggregate_text(result)
+    emit_export_set(
+        exports,
+        lambda fmt: (
+            json.dumps(render_aggregate_json(result), indent=2)
+            if fmt == "json"
+            else render_aggregate_text(result)
+        ),
     )
-    if output is not None:
-        _safe_write_output(output, text)
-    else:
-        click.echo(text)
 
     sys.exit(result.exit_code())
 

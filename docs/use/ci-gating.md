@@ -35,7 +35,7 @@ flowchart LR
     PR --> V2["Verdict/gate recomputed<br/>if promotion changed anything"]
     V2 --> E["6 · Exit code<br/>(legacy or severity scheme)"]
     CC["Contract coverage<br/>(evidence completeness)"] -.->|max, orthogonal| E
-    V2 -.-> R["Report rendering<br/>(--view, --format)"]
+    V2 -.-> R["Report rendering<br/>(--view, -o)"]
 ```
 
 ## The order of operations
@@ -118,13 +118,13 @@ each is visible in the report under a different field
 (`contract_relevance`, `suppressed_count`, `contract_coverage_failures`).
 
 **Display filtering is outside the pipeline.** `--view` (its `show=...`
-token, and its report-mode tokens), `--format oneline`'s one-line summary,
-and `--format` change what the report *renders*, never the verdict or the
+token, and its report-mode tokens), `-o oneline=...`'s one-line summary,
+and the export format change what the report *renders*, never the verdict or the
 exit code.
 
 !!! tip "No `--profile ci-gate` shortcut any more"
     A `--profile ci-gate` used to bundle the common gating knobs
-    (`--depth headers --format review --severity-preset default`); it was
+    (`--depth headers -o review=... --severity-preset default`); it was
     removed (ADR-068 D5 / plan Phase 7e) because it bundled evidence depth,
     report rendering, and gate policy behind one word. State the three flags
     directly, or put them in `.abicheck.yml` so every run picks them up

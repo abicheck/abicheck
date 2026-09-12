@@ -182,8 +182,8 @@ class TestEveryDepthRungReachesTheFanOut:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert code != 64, out
         assert "not supported for directory/package" not in out
@@ -212,8 +212,8 @@ class TestEveryDepthRungReachesTheFanOut:
             str(new_dir / member),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         release_code, out = _invoke(
             "compare",
@@ -221,8 +221,8 @@ class TestEveryDepthRungReachesTheFanOut:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert release_code == scalar_code, out
 
@@ -247,8 +247,8 @@ class TestEveryDepthRungReachesTheFanOut:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         if LADDER.index(evidence) >= LADDER.index(requested):
             data = _release_json(out)
@@ -282,8 +282,8 @@ class TestEveryDepthRungReachesTheFanOut:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert captured == [requested]
 
@@ -338,8 +338,8 @@ class TestLiveMemberShortfallMatchesTheScalarPath:
             str(new_dir / "libfoo.so"),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         release_code, out = _invoke(
             "compare",
@@ -347,8 +347,8 @@ class TestLiveMemberShortfallMatchesTheScalarPath:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert release_code == scalar_code, out
 
@@ -378,8 +378,8 @@ class TestDepthShortfallIsExplainedNotSilent:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert code == 7, out
         assert "Requested --depth evidence was not reached in: libfoo.so" in out
@@ -399,8 +399,8 @@ class TestDepthShortfallIsExplainedNotSilent:
             str(new_dir),
             "--depth",
             requested,
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert "dump --sources" in out
         assert "compare the library individually" in out
@@ -438,8 +438,8 @@ class TestTheReportAgreesWithTheProcessExit:
             str(new_dir),
             "--depth",
             "build",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         data = _release_json(out)
         assert data["exit"]["code"] == code, data["exit"]
@@ -459,10 +459,10 @@ class TestTheReportAgreesWithTheProcessExit:
             str(new_dir),
             "--depth",
             "build",
-            "--format",
-            "json",
-            "--output-dir",
-            str(out_dir),
+            "-o",
+            "json=-",
+            "-o",
+            f"json={out_dir}/",
         )
         summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
         assert summary["exit"]["code"] == code, summary["exit"]
@@ -473,7 +473,7 @@ class TestTheReportAgreesWithTheProcessExit:
         """The complementary half: the fix must not stamp the axis on runs
         that never pinned a rung."""
         old_dir, new_dir = live_release_dirs
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         data = _release_json(out)
         assert code == 0, out
         assert data["exit"]["code"] == 0
@@ -508,10 +508,8 @@ class TestEveryReleaseFormatCarriesTheShortfall:
             str(new_dir),
             "--depth",
             "build",
-            "--format",
-            fmt,
             "-o",
-            str(out),
+            f"{fmt}={out}",
         )
         assert code == 7, fmt
         text = out.read_text(encoding="utf-8")
@@ -545,10 +543,8 @@ class TestEveryReleaseFormatCarriesTheShortfall:
             str(new_dir),
             "--depth",
             "build",
-            "--format",
-            fmt,
             "-o",
-            str(out),
+            f"{fmt}={out}",
         )
         text = out.read_text(encoding="utf-8")
         assert "Contributes 7 to the release exit code" in text, text[:600]
@@ -562,9 +558,7 @@ class TestEveryReleaseFormatCarriesTheShortfall:
         pin must leave the document exactly as it was."""
         old_dir, new_dir = live_release_dirs
         out = tmp_path / f"clean.{fmt}"
-        code, _ = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", fmt, "-o", str(out)
-        )
+        code, _ = _invoke("compare", str(old_dir), str(new_dir), "-o", f"{fmt}={out}")
         assert code == 0, fmt
         text = out.read_text(encoding="utf-8")
         if fmt == "json":

@@ -125,7 +125,7 @@ companion-command consolidation this page describes; see the
 
 ```bash
 abicheck deps tree ./build/libfoo.so
-abicheck deps tree /usr/bin/myapp --format json -o deps.json
+abicheck deps tree /usr/bin/myapp -o json=deps.json
 abicheck deps tree ./app --sysroot /path/to/container/rootfs
 ```
 
@@ -136,7 +136,7 @@ Exit codes: `0` all dependencies resolved, `1` missing dependencies/symbols.
 ```bash
 abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
 abicheck deps compare usr/lib/libfoo.so.1 \
-  --old-root ./image-v1 --new-root ./image-v2 --format json
+  --old-root ./image-v1 --new-root ./image-v2 -o json=-
 ```
 
 `--old-root`/`--new-root` (each default `/`) point at the two sysroots to
@@ -255,10 +255,10 @@ table above — it keeps every one of these flags as a real CLI option.
 defaults into one token. It was removed outright (ADR-068 D5 / plan
 Phase 7e): it bundled evidence depth, report rendering, and CI gate policy
 behind one word, and a rendering choice may never carry a gate setting.
-There is no direct config-key replacement — state `--depth`, `--format`,
+There is no direct config-key replacement — state `--depth`, `-o`,
 and `--severity-preset` (or `.abicheck.yml`'s `severity:` block)
 independently. `quick`'s one-line summary survives as the first-class
-`--format oneline` choice; see [Output Formats](output-formats.md).
+`-o oneline=...` choice; see [Output Formats](output-formats.md).
 
 ### GitHub Action
 
