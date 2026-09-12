@@ -228,7 +228,7 @@ success means one `COVERED` row per current ground-truth entry, with no
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
-`case60_base_class_position_changed`, `case69_trivial_to_nontrivial`, and
+`case60_base_class_position_changed`, and
 `case89_inline_accessor_renamed_pimpl_member` (downgrades `BREAKING` to
 `API_BREAK` — a reduced-evidence signal loss consistent with this lane's
 existing pattern, not a new detector bug).
