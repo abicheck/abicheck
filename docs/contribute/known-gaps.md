@@ -8536,3 +8536,142 @@ generalized test builds its snapshots in-process; a live castxml/clang dump
 of two builds differing only in a version script is owned by the
 `integration` lane. The sibling name-shape defects stay under
 `classification.name_shape_as_contract_membership`.
+
+## `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
+
+`one-comparison-product.md`'s own framing, recorded rather than fixed here:
+`--bundle-facts-out` asks a *comparison* to capture a baseline. Capturing
+the OLD side's per-library snapshots into a `BundleFacts` document is a
+**dump** operation — it reads one release and writes facts about it, and it
+does not need a NEW side at all. It lives on `compare` only because that is
+the one command that knows how to turn a directory or package into a set of
+per-library snapshots; `dump` takes exactly one artifact, and a directory
+operand there is interpreted as a stored `ProjectSnapshot` *package*, not as
+a release to fan out over.
+
+**The two options, and why neither landed in this pass.** Adding the `dump`
+fan-out is the right shape: `abicheck dump RELEASE_DIR --format bundle-facts`
+would make baseline capture a first-class dump, `compare` would consume the
+document it already consumes, and `--bundle-facts-out` could be retired
+rather than reimplemented. What it needs is the whole release input-resolution
+chain — package/debug-package/devel-package extraction, library discovery and
+canonical-key matching, stored-`ProjectSnapshot` variant materialization,
+`--dso-only` classification — and every one of those functions is currently
+`frontends`/flat-`cli_*`-classified (`cli_compare_release_matrix.
+_prepare_compare_release_inputs` and its helpers), with `click.UsageError`
+raises inside them. `dump`'s own execution path is `workflows`-classified, so
+the `engine-cli-boundary` gate forbids it from reaching any of that, and the
+fan-out cannot be written without either duplicating the chain or moving it.
+
+That move is the *same* work `one-comparison-product.md` item 4 asks for on
+its own terms (relocating `frontends/cli/release_compare_request.py`'s call
+chain into `workflows` with typed errors), which is why the ordering here is
+a real dependency rather than a deferral: the `dump` fan-out is a
+straightforward composition once that chain is engine-side, and an
+open-coded duplicate of it before then is exactly the second parallel path
+this repository's architecture rules forbid.
+
+**That dependency is now satisfied** (same PR): the chain is
+`abicheck/workflows/release_inputs.py`, it raises the typed
+`errors.ReleaseOperandError`, and `abicheck.service.resolve_release_compare`
+reaches it with no Click context. So the `dump` fan-out is no longer
+*blocked* -- it is simply not written yet, and writing it is a new command
+surface (`dump`'s own operand arity, `--format bundle-facts`, the ADR-054
+root-surface bar for any new spelling, and the retirement path for
+`--bundle-facts-out`) rather than a refactor. Recorded here as the next
+slice, with the blocker removed, instead of left reading as unreachable.
+
+**Until then, `--bundle-facts-out` stays where it is, and stays honest about
+what it is:** a capture ridden on a comparison. It is not reimplemented, not
+widened, and not given a second spelling. When the `dump` fan-out lands, the
+flag becomes a deprecated alias for it rather than a separate producer —
+`abicheck/cli_compare_release_helpers.py`'s `write_bundle_facts_out` already
+takes the already-resolved per-library snapshots and nothing else, so it is
+the reusable half and moves as-is.
+
+## A directory/package `compare` renders only json/markdown/junit; `bundles:` cannot state scope policy
+
+Two halves of `one-comparison-product.md`'s bundle-parity item that this
+pass did *not* close, recorded with what each actually needs. The rest of
+that item did land (`assurance.require_complete` accepted, `--write`
+repeatable, the machine document no longer implicitly truncated) — see the
+changelog entry and `tests/test_one_comparison_product_parity.py`.
+
+**1. The format set.** `compare` renders
+`json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`; a directory or
+package operand renders `json`/`markdown`/`junit`/`oneline` and rejects the
+rest
+(`frontends/cli/commands/compare.py`'s `_RELEASE_FORMATS`). The rejection is
+loud rather than silent, and it is not arbitrary — the missing formats are
+the ones whose renderers take a single `DiffResult`:
+
+- `sarif` needs one result set with stable per-finding locations; a release
+  has N of them and the fan-out discards each member's `DiffResult` before
+  rendering (`_strip_diff_results_and_adjust_verdict`, to bound peak memory
+  across a whole release). Producing a real release SARIF means either
+  keeping every member's findings live or projecting SARIF per member and
+  merging runs — a design choice, not a wiring gap.
+- `html` and `review` are narrative renderings of *one* comparison (a
+  verdict badge, an OLD→NEW headline, a release recommendation, a
+  root-cause graph). `review` in particular is a PR-comment digest whose
+  aggregate shape ("which of 40 libraries broke, and how badly") is a
+  product question nobody has answered yet.
+`oneline` was the fourth of that list and is **closed**: it never needed a
+`DiffResult` at all (it is a count summary, and the release summary already
+carries every count), so `report/release_oneline.py` folds the per-library
+counts through the same `format_stat_line` a single-pair `compare` renders
+and the release path accepts `--format oneline`/`--write oneline=...` like
+any other.
+
+So library count still changes which of `sarif`/`html`/`review` are
+available -- a real parity gap, stated here rather than implied by a usage
+error -- and no longer changes anything about `oneline`.
+
+**2. Scope policy at bundle level.** ADR-065's scope policy is fully
+expressible for a directory/package `compare` — `--select`,
+`--select-required` and `.abicheck.yml`'s `scope.on_incomplete` all apply to
+a release operand, and `--select-required` naming an absent member really
+does floor the exit code (verified live). What has no expression is the
+*project-config* bundle surface: `buildsource/project_targets.py`'s
+`BundleSpec` accepts only `targets:` and `checks:`, so a `bundles:` entry
+cannot state required members beyond its own membership list, nor its own
+permitted-incompleteness policy, nor a selection narrower than the whole
+bundle. A project that wants "these four of the six must be present, the
+other two may be missing" has to say it per invocation rather than in the
+config the Action reads. That is a `BundleSpec` schema addition plus a
+`check-target` input, in the ADR-047 project-targets layer — not a
+`compare` change, which is why it is listed separately from the format set
+above.
+
+## Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
+
+Found while verifying an unrelated change, reproduced on a clean tree, not
+fixed here (it is nobody's feature and touches eight tests across two
+modules that the change under review did not otherwise touch).
+
+`cli_compare_release_pairwise.py` echoes one note to **stderr** when the
+per-worker memory budget clamps the release fan-out's parallelism ("Note:
+parallel release workers reduced 4 -> 3 to fit available memory ..."). Several
+release CLI tests capture with a bare `CliRunner()` -- which merges stderr
+into `result.output` -- and then `json.loads(result.output)`. When the clamp
+fires, the note lands ahead of the document and the parse raises
+`JSONDecodeError`, so the test fails for a reason that has nothing to do with
+what it asserts.
+
+It only fires under real memory pressure, which is why it is invisible most
+of the time and then shows up as a cluster of unrelated-looking failures on a
+loaded machine (e.g. the whole suite under `pytest -n 8` on a 16 GiB box).
+Reproduced deterministically on a clean tree with
+`ABICHECK_RELEASE_JOB_MEM_GIB=1000 pytest
+tests/test_release_evaluation_config.py::TestReleaseFanOutAcceptsContractUnresolvedPack`.
+
+Affected (as of this writing): `tests/test_release_evaluation_config.py`'s
+`TestReleaseFanOutAcceptsContractUnresolvedPack::test_now_applies_with_contract`
+and six tests in `tests/test_release_package_inventory_cli.py`
+(`TestPackageArchiveInventoryProvesAbsence`, `TestSupportPromiseFindingsCli`).
+
+The fix is per-test and mechanical: render to a file (`-o PATH`) and parse
+that, the way `tests/test_one_comparison_product_parity.py` already does
+where `--output-dir`'s own stdout line would otherwise interfere, or capture
+stderr separately. Asserting on the note, or suppressing it, would be the
+wrong fix -- it is a real diagnostic a user should see.

@@ -749,6 +749,7 @@ def _release_summary_effective_config_block(
     on_incomplete_scope: str = "",
     fail_on_removed_library: bool | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -842,12 +843,10 @@ def _release_summary_effective_config_block(
         surface_metrics_enabled=True,
         reconcile_build_context_enabled=True,
     )
-    # No result/require_complete_analysis/scope at this release-summary
-    # scope, but on_incomplete_scope/fail_on_removed_library ARE (Codex
-    # review, PR #1192, fourth round) -- read from `gate.*` below, not the
-    # now-removed `ec_result.on_incomplete_scope` this used to set instead.
+    # No result/scope at this release-summary scope, but require_complete_analysis/on_incomplete_scope/fail_on_removed_library ARE (Codex review, PR #1192 fourth round for the latter two; PR #1238 for the first, once `assurance.require_complete` started applying to a release at all) -- read from `gate.*` below, not the now-removed `ec_result.on_incomplete_scope` this used to set instead.
     gate = EffectiveGate.from_severity(
         severity_config,
+        require_complete_analysis=require_complete_analysis,
         on_incomplete_scope=on_incomplete_scope or None,
         fail_on_removed_library=fail_on_removed_library,
     )
@@ -855,7 +854,11 @@ def _release_summary_effective_config_block(
     return effective_config_digest(ec_fields), ec_fields
 
 
-def _release_md_library_findings(library_results: list[dict[str, object]]) -> list[str]:
+def _release_md_library_findings(
+    library_results: list[dict[str, object]],
+    *,
+    display_cap: int | None = None,
+) -> list[str]:
     """Per-library findings (kind/symbol/description) -- symbol names
     included. R2 (CLI-audit): the release Markdown report's own
     ``## Libraries`` table is counts only; reuses ``entry["findings"]`` --
@@ -910,25 +913,44 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
         if not findings and not has_impact:
             continue
         lines += ["", f"### `{lib['library']}` Findings", ""]
-        for f in cast(list[dict[str, object]], findings or []):
+        all_findings = cast(list[dict[str, object]], findings or [])
+        # The presentation cap lives here, at render time, not in the
+        # projection every format shares: a human summary may be bounded, a
+        # machine document may not be silently truncated (see
+        # `cli_compare_release_matrix._release_findings_cap_is_explicit`).
+        shown = (
+            all_findings if display_cap is None else all_findings[:display_cap]
+        )
+        rendered_truncated = len(shown) < len(all_findings)
+        for f in shown:
             symbol = f.get("symbol")
             lines.append(
                 f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
             )
             lines.extend(release_finding_detail_lines(f))
-        if lib.get("findings_truncated"):
-            # `--format json` is *not* a complete-list source (Codex review,
-            # PR #1016): the release JSON's own `findings` field is this
-            # same `_MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection --
-            # a reader following that advice would see the identical
-            # truncated list again. `--output-dir` is the only source that
-            # writes each library's real, uncapped `DiffResult` in the same
-            # shape (a per-library `compare` re-run is the other option).
-            lines.append(
-                "  - _...additional findings omitted; see `--output-dir` "
-                "(or compare this library individually) for the complete "
-                "list._"
-            )
+        if rendered_truncated or lib.get("findings_truncated"):
+            # `--format json` *is* a complete-list source now, unless this
+            # run explicitly asked for a cap (`--max-findings-per-library`
+            # or the env var), which is what this note distinguishes. It
+            # used not to be: the release JSON carried the identical capped
+            # projection, so a reader following the old advice met the same
+            # truncated list again.
+            complete_report = lib.get("complete_report")
+            if lib.get("findings_truncated"):
+                where = (
+                    f"`{complete_report}`"
+                    if complete_report
+                    else "`--output-dir` (or compare this library individually)"
+                )
+                lines.append(
+                    f"  - _...additional findings omitted; see {where} for "
+                    "the complete list._"
+                )
+            else:
+                lines.append(
+                    "  - _...additional findings omitted from this summary; "
+                    "`--format json` carries the complete list._"
+                )
         if has_impact:
             # `--view impact`'s aggregate counterpart (Codex review, PR
             # #1154 follow-up: "Reject unsupported impact views instead of

@@ -45,9 +45,25 @@ if TYPE_CHECKING:
 
 @dataclass
 class PipelineContext:
-    """Shared state passed through the pipeline."""
+    """Shared state passed through the pipeline.
 
-    old: AbiSnapshot
+    *old* is the **baseline**, and it is genuinely optional: a
+    ``compare --no-baseline`` audit resolves exactly one snapshot and
+    declares that no prior surface exists (ADR-065's ``declared_absent``),
+    so there is no second side for an evolution step to read. ``None`` is
+    that state, stated once here rather than re-encoded by every consumer
+    -- and deliberately *not* spelled as "the candidate compared against
+    itself", which is what this pipeline used to receive and which made a
+    pre-existing, never-observed-to-change condition read as an observed
+    ``persistent`` one.
+
+    Two derived properties express the only two things a step ever needs to
+    know about that: :attr:`baseline_present` (may an evolution question be
+    asked at all?) and :attr:`baseline_or_empty` (what the OLD side
+    contributes to a step that unions or looks up across both).
+    """
+
+    old: AbiSnapshot | None
     new: AbiSnapshot
     suppression: SuppressionList | None = None
     # Glob patterns identifying contractually frozen namespaces (e.g.
@@ -118,6 +134,54 @@ class PipelineContext:
     # context of its own without one -- recording is then skipped, never
     # faked.
     disposition_ledger: DispositionLedger | None = None
+    #: Lazily-built stand-in for an absent baseline; see
+    #: :attr:`baseline_or_empty`. Never a substitute for a real snapshot --
+    #: it declares, exports and knows nothing.
+    _empty_baseline: AbiSnapshot | None = None
+
+    @property
+    def baseline_present(self) -> bool:
+        """Whether this run has a baseline to evaluate evolution against.
+
+        ``False`` for a ``compare --no-baseline`` audit. Every step in this
+        pipeline that *derives a finding from the OLD->NEW delta* -- the
+        late detectors, the pattern/namespace/template passes, the
+        versioned-scheme overlay -- returns early instead of asking that
+        question against a copy of the candidate and receiving a
+        manufactured "nothing changed". (Those steps test ``ctx.old is
+        None`` directly, which also narrows the type for the body below;
+        this property is the readable spelling for a caller that only needs
+        the fact.)
+        """
+        return self.old is not None
+
+    @property
+    def baseline_or_empty(self) -> AbiSnapshot:
+        """The OLD side for a step that unions or looks up across both.
+
+        With a baseline that is :attr:`old`. Without one it is an **empty**
+        snapshot -- a baseline that does not exist declares nothing,
+        exports nothing and carries no graph -- so a union
+        (``surface(old) | surface(new)``) reduces to the candidate's own
+        and a membership test ("did this declaration exist before?")
+        correctly answers no. Deliberately *not* :attr:`new`: substituting
+        the candidate would answer that second question "yes, unchanged"
+        about a history nobody observed, which is the whole class of claim
+        the self-compare this pipeline used to receive was making.
+
+        Only steps that union or look up use this; a step that would
+        *compare* the two sides returns early on ``ctx.old is None``
+        instead and does not run at all.
+        """
+        if self.old is not None:
+            return self.old
+        # Cached: several steps read this more than once, and each read
+        # would otherwise build a fresh stand-in.
+        if self._empty_baseline is None:
+            from .model import AbiSnapshot
+
+            self._empty_baseline = AbiSnapshot(library=self.new.library, version="")
+        return self._empty_baseline
 
 
 # diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol

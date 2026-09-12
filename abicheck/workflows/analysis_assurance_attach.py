@@ -42,7 +42,7 @@ __all__ = ["attach_analysis_assurance"]
 
 
 def attach_analysis_assurance(
-    result: DiffResult, old: AbiSnapshot, new: AbiSnapshot
+    result: DiffResult, old: AbiSnapshot | None, new: AbiSnapshot
 ) -> None:
     """Compute *result*'s assurance rollup from *old*/*new* and store it.
 
@@ -60,5 +60,7 @@ def attach_analysis_assurance(
         new,
         old_pack=getattr(old, "build_source", None),
         new_pack=getattr(new, "build_source", None),
-        same_content=partial(same_persisted_content, old, new),
+        same_content=(
+            partial(same_persisted_content, old, new) if old is not None else None
+        ),
     )

@@ -1364,7 +1364,22 @@ class TestAnalysisAssuranceCliIntegration:
         res = _compare(tmp_path, _breaking_pair(), "--require-complete-analysis")
         assert res.exit_code == 4, res.output
 
-    def test_config_rejected_for_directory_release_compares(self, tmp_path: Path) -> None:
+    def test_config_accepted_for_directory_release_compares(
+        self, tmp_path: Path
+    ) -> None:
+        """It used to be a usage error here, and only here.
+
+        ``assurance.require_complete`` was rejected outright for a
+        directory/package operand ("the per-library fan-out has no single
+        analysis_assurance result to gate on"), which made the setting's
+        meaning depend on the input shape. The fan-out now folds each
+        member's own 0/1 assurance floor with ``max()`` -- the identical
+        contribution a single-pair ``compare`` of that member computes --
+        so the setting is accepted. Behaviour equality between the two
+        shapes is pinned in
+        ``tests/test_one_comparison_product_parity.py``; this only pins
+        that the rejection is gone.
+        """
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -1378,8 +1393,7 @@ class TestAnalysisAssuranceCliIntegration:
                 *_assurance_config_args(tmp_path),
             ],
         )
-        assert res.exit_code != 0
-        assert "assurance.require_complete" in res.output
+        assert "assurance.require_complete is not supported" not in res.output
 
 
 # ``scan --against --require-complete-analysis``'s own CLI-integration

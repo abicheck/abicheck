@@ -238,7 +238,6 @@ def _reject_flags_unsupported_for_set_inputs(
     diagnostic_comparison: bool,
     audit_suppressions: bool,
     include_labels: dict[Path, str] | None,
-    require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
     suppress: Path | None = None,
     budget: str | None = None,
@@ -271,7 +270,6 @@ def _reject_flags_unsupported_for_set_inputs(
         audit_suppressions=audit_suppressions,
         suppress=suppress,
         include_labels=include_labels,
-        require_complete_analysis=require_complete_analysis,
         budget=budget,
         pdb_path=pdb_path,
     )

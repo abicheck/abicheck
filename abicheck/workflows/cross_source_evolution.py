@@ -267,6 +267,46 @@ def _run_one_side(
     return evaluated, by_identity
 
 
+def compute_candidate_cross_source_findings(new: AbiSnapshot) -> list[Change]:
+    """Run every migrated cross-source check against *new* alone.
+
+    The no-baseline counterpart of :func:`compute_cross_source_evolution`
+    (``compare --no-baseline``, ADR-068 D2/D3): the candidate is the only
+    snapshot that exists, so each check is run once, against real
+    candidate-side evidence, and every finding it produces is a
+    full-confidence observation about *this build*.
+
+    Every finding is stamped :attr:`~abicheck.policy.evidence_status.
+    CrossSourceEvolution.NOT_EVALUATED`, unconditionally. That is the whole
+    point of this function existing rather than
+    ``compute_cross_source_evolution(new, new)``: the two axes an audit must
+    keep apart are *confidence in the observation* (high -- the check ran
+    against the candidate's own evidence and said so) and *ability to
+    establish history* (none -- there is no prior surface to have been
+    present or absent in). A self-compare conflates them, answering
+    ``PERSISTENT`` -- "present on both sides" -- about a baseline nobody
+    supplied and nobody observed, which is a manufactured claim of exactly
+    the shape ``vision.md`` forbids. ``NOT_EVALUATED`` is the same state
+    this module already assigns whenever one side's evidence cannot
+    confirm or deny a finding; a *declared-absent* side is the limiting
+    case of that, not a different vocabulary.
+
+    An unevaluated check contributes nothing, the same way it does in the
+    two-sided fold: a check whose evidence gate closed leaves no findings,
+    and "not run" is recorded as an absent finding rather than a clean one.
+    """
+    results: list[Change] = []
+    for check in sorted(CROSS_SOURCE_EVOLUTION_CHECKS):
+        evaluated, findings = _run_one_side(new, check)
+        if not evaluated:
+            continue
+        for key in sorted(findings, key=repr):
+            change = findings[key]
+            change.cross_source_evolution = CrossSourceEvolution.NOT_EVALUATED
+            results.append(change)
+    return results
+
+
 def compute_cross_source_evolution(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Run every migrated cross-source check on *old* and *new* independently
     and return one evolution-stated :class:`Change` per distinct identity

@@ -298,7 +298,7 @@ class ContractEvaluationStage:
 
 
 def build_contract_stage(
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
     *,
     scope_to_public_surface: bool,
@@ -306,22 +306,43 @@ def build_contract_stage(
     pp_ctx: PipelineContext,
     contract_mode: str | None = None,
 ) -> ContractEvaluationStage:
-    """Resolve the contract mode and collect both sides' evidence once.
+    """Resolve the contract mode and collect the sides' evidence once.
 
-    This is the expensive half of contract evaluation -- two public-surface
-    resolutions (when post-processing did not already compute them), two
+    This is the expensive half of contract evaluation -- the public-surface
+    resolutions (when post-processing did not already compute them), the
     export-surface resolutions, and the provider-evidence ledger -- and it
     runs only when the caller opted into ``contract_evaluation=True``, which
     is off by default.
+
+    *old* is ``None`` for a ``compare --no-baseline`` audit, where the
+    baseline is declared absent (ADR-065 ``declared_absent``). The OLD side
+    then contributes an **empty, unresolvable** surface -- a baseline that
+    does not exist declares nothing, and nothing about it is provable --
+    and, more importantly, **no OLD-side provider record at all**. That
+    second half is what keeps the coverage ledger honest: Phase 3's own
+    convention is that "not consulted" is an absent entry, never a failed
+    one, so the ledger answers this run's coverage from the candidate's
+    evidence alone. Under the self-compare this path used to run, the
+    candidate's own records were filed under *both* sides, which reported
+    the declared-absent side as fully covered. The coverage question an
+    audit actually asks -- "does this build carry the evidence the selected
+    domain requires?" -- is unchanged and still answered, which is why
+    ``--contract public`` against a headerless candidate still exits ``1``.
+
+    Only the candidate can produce a finding on that path (no delta was
+    evaluated, so there are no removals), so no decision ever consults the
+    empty OLD surface: :func:`~abicheck.contract_evaluation.
+    _authoritative_surface` routes to the OLD side only for a finding whose
+    subject is the old declaration.
     """
     from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
     from .contract_evidence_collect import collect_contract_evidence
     from .contract_relevance_types import coerce_contract_mode
-    from .export_surface import compute_export_surface
-    from .surface import compute_public_surface
+    from .export_surface import ExportSurface, compute_export_surface
+    from .surface import PublicSurface, compute_public_surface
     from .type_reachability import directly_referenced_stdlib_type_spellings
 
-    surf_old = pp_ctx.surf_old
+    surf_old = pp_ctx.surf_old if old is not None else PublicSurface()
     surf_new = pp_ctx.surf_new
     if surf_old is None or surf_new is None:
         # FilterNonPublicSurface only populates pp_ctx.surf_old/surf_new on
@@ -330,7 +351,7 @@ def build_contract_stage(
         # never computes them, so compute independently here (mirroring
         # that step's own call) rather than leave contract evaluation
         # entirely unresolvable for those runs.
-        surf_old = compute_public_surface(old)
+        surf_old = compute_public_surface(old) if old is not None else PublicSurface()
         surf_new = compute_public_surface(new)
 
     # ADR-049 D7 precedence: an explicit `--contract` (EXPLICIT_CLI) outranks
@@ -367,7 +388,7 @@ def build_contract_stage(
     # re-reading the binaries" guarantee Phase 4 advertises (Codex review,
     # fresh evidence). The cost is one export-table match per side, paid only
     # under `--contract`, which is off by default.
-    exports_old = compute_export_surface(old)
+    exports_old = compute_export_surface(old) if old is not None else ExportSurface()
     exports_new = compute_export_surface(new)
 
     # Independent of the mode/header resolutions above: a per-side signature
@@ -429,8 +450,12 @@ def build_contract_stage(
         and force_public_symbols
     ):
         committed_roots = committed_exports | frozenset(force_public_symbols)
-    directly_referenced_stdlib_old = directly_referenced_stdlib_type_spellings(
-        old, exclude_export_only_roots=True, committed_roots=committed_roots
+    directly_referenced_stdlib_old = (
+        directly_referenced_stdlib_type_spellings(
+            old, exclude_export_only_roots=True, committed_roots=committed_roots
+        )
+        if old is not None
+        else frozenset()
     )
     directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(
         new, exclude_export_only_roots=True, committed_roots=committed_roots
@@ -447,7 +472,10 @@ def build_contract_stage(
         new,
         surf_old,
         surf_new,
-        exports_old=exports_old,
+        # `None` rather than the empty stand-in above: an absent baseline must
+        # leave the OLD `export_table` provider *unrecorded*, not recorded as
+        # an unavailable one -- see this function's own docstring.
+        exports_old=exports_old if old is not None else None,
         exports_new=exports_new,
         public_surface_allowlist=pp_ctx.public_surface_allowlist,
         force_public_symbols=force_public_symbols,
@@ -462,7 +490,11 @@ def build_contract_stage(
     )
 
     conflicts = [
-        *detect_exported_but_undeclared(exports_old, side="old"),
+        *(
+            detect_exported_but_undeclared(exports_old, side="old")
+            if old is not None
+            else ()
+        ),
         *detect_exported_but_undeclared(exports_new, side="new"),
         # Baseline = the "old" side's own declared-public symbols, computed
         # with no manifest overlay (``surf_old``/``surf_new`` above are the
@@ -470,11 +502,17 @@ def build_contract_stage(
         # narrowing is applied later, in post-processing, never to these).
         # `committed_exports` is the resolved allowlist (`None` when no
         # manifest/forced-public overlay is in effect at all).
-        *detect_manifest_narrowing_since_baseline(
-            surf_old.public_symbols,
-            surf_new.public_symbols,
-            committed_roots,
-            side="new",
+        # "Narrowed since the baseline" needs a baseline: with OLD declared
+        # absent, every committed symbol would read as newly narrowed.
+        *(
+            detect_manifest_narrowing_since_baseline(
+                surf_old.public_symbols,
+                surf_new.public_symbols,
+                committed_roots,
+                side="new",
+            )
+            if old is not None
+            else ()
         ),
     ]
 

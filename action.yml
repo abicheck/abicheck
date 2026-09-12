@@ -220,11 +220,13 @@ inputs:
       "castxml" (default), "clang" (clang -ast-dump=json; explicit opt-in
       for clang-only hosts), or "hybrid" (runs both and merges them; needs
       both tools installed on the runner, never auto-selected). Applies to
-      dump, and compare mode with a single-pair (non-directory, non-package)
-      operand — the per-library fan-out a directory/package compare uses
-      never threads this L2 context to each pair's header dump, so a value
-      other than "auto" (the no-op default) is a hard error there (shared
-      `compile_context_options`, ADR-037 D3). Same as the
+      dump and compare mode, on single-pair and directory/package
+      (release) operands alike — the per-library release fan-out threads
+      this both-sides L2 context to every pair's header dump
+      (`cli_resolve.resolve_directory_compile_context`), so it is
+      forwarded, not rejected, for a directory/package operand. (Only a
+      *sided* old=/new= frontend override has no per-library-pair meaning
+      across a release; this input has no sided spelling.) Same as the
       ABICHECK_AST_FRONTEND env var.
     required: false
   gcc-path:
@@ -233,10 +235,10 @@ inputs:
       single-pair compare (including the audit-only shape), it folds into
       a synthesized .abicheck.yml compile: block forwarded via --config
       (together with gcc-prefix, gcc-options, sysroot, and nostdinc, when
-      any of those are also set). Applies to dump, and compare mode with a
-      single-pair (non-directory, non-package) operand — a directory/
-      package compare rejects it with an error (same restriction as
-      ast-frontend above). Combining any of this group with build-config
+      any of those are also set). Applies to dump and compare mode, on
+      single-pair and directory/package (release) operands alike (same
+      scope as ast-frontend above). Combining any of this group with
+      build-config
       is supported: the synthesized compile: block is merged into a copy
       of the named build-config, and this Action's input wins on a key
       conflict.
@@ -247,9 +249,8 @@ inputs:
       synthesized compile: block gcc-path describes above, on every mode
       that accepts it (a full gcc-path wins if both are set, since the
       merged compile.compiler config key can only hold one). Applies to
-      dump, and compare mode with a single-pair (non-directory,
-      non-package) operand — a directory/package compare rejects it with
-      an error (same restriction as ast-frontend above).
+      dump and compare mode, on single-pair and directory/package
+      (release) operands alike (same scope as ast-frontend above).
     required: false
   gcc-options:
     description: >
@@ -270,21 +271,20 @@ inputs:
       narrowing from an earlier Action version, where the CLI's own
       now-removed --compiler-option flag once forwarded such a flag
       verbatim (a raw CLI arg is not subject to compile.options' own
-      whitespace-free-atom contract). Applies to dump, and compare mode
-      with a single-pair (non-directory, non-package) operand — a
-      directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      whitespace-free-atom contract). Applies to dump and compare mode, on
+      single-pair and directory/package (release) operands alike (same
+      scope as ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --sysroot CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --sysroot CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as ast-frontend above).'
     required: false
   nostdinc:
     description: >
       Do not search standard system include paths. On dump and single-pair
       compare this folds into the same synthesized compile: block gcc-path
-      describes above. Applies to dump, and compare mode with a
-      single-pair (non-directory, non-package) operand — a directory/package
-      compare rejects it with an error (same restriction as ast-frontend above).
+      describes above. Applies to dump and compare mode, on single-pair and
+      directory/package (release) operands alike (same scope as
+      ast-frontend above).
     required: false
     default: 'false'
 
@@ -466,7 +466,20 @@ inputs:
       source explicitly to collect those (there is no risk-driven auto
       escalation). --depth source analyses the whole current library
       target unless since/changed-path seeds a narrower changed scope. Maps
-      to --depth.
+      to --depth. For a compare directory/package (release) operand, every
+      rung is forwarded per member exactly as for a single pair. build and
+      source are reachable there without any inline evidence input when the
+      members are pre-dumped snapshots that already carry it (dump
+      --sources/--build-info); what a release operand does not support is
+      the inline sources/build-info/compile-db inputs themselves, which are
+      rejected with an error before the run since the per-library fan-out
+      never collects them. Note what pinning a rung does and does not
+      guarantee: a shortfall is reported (ADR-064's exit-7 evidence-contract
+      axis) only for a pinned build/source rung on a side this run extracts
+      live. A member that is already a serialized snapshot was never
+      extracted by this run, so no shortfall is reported for it -- a
+      successful run is therefore not by itself proof that every member
+      carried the requested evidence.
     required: false
   since:
     description: >

@@ -157,19 +157,22 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump mode, and compare mode with a single-pair operand — both the two-sided and audit-only shapes): `auto`, `castxml`, `clang`, or `hybrid`. Like `dump` and single-pair `compare`, this Action folds it into a synthesized `.abicheck.yml` `compile:` block forwarded via `--config` instead (along with gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc/lang, when any of those are also set — combining this group with `build-config` is supported: the synthesized `compile:` block merges into a copy of the named build-config, and this Action's input wins on a key conflict). Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context on any mode (set `.abicheck.yml`'s `compile.ast_frontend_fallback`/`compile.frontend_context` directly instead if `extra-args` isn't reaching the mode you need — those two flags have no CLI of their own on any mode). Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
-| `gcc-path` | — | Path to cross-compiler binary (dump mode, and compare mode with a single-pair operand) — see `ast-frontend` above for how this reaches every mode now that the underlying `--compiler` CLI flag is gone from all of them |
-| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode, and compare mode with a single-pair operand) — same note as gcc-path above; a full gcc-path wins if both are set, since the merged `compile.compiler` config key can only hold one |
-| `gcc-options` | — | Extra flags for the header frontend (dump mode, and compare mode with a single-pair operand) — folds into the same synthesized `compile:` block `ast-frontend` above describes. A whitespace-containing flag (e.g. `-DMSG="hello world"`) is rejected with a clear error, since a raw CLI arg isn't subject to `compile.options`' own one-atom-per-entry, whitespace-free contract. |
-| `sysroot` | — | Alternative system root (dump/deps-tree modes, and compare mode with a single-pair operand) — same note as gcc-path above for dump/compare; `deps-tree` keeps its own direct `--sysroot` forwarding, unaffected (it is not part of this compile-context group at all) |
-| `nostdinc` | `false` | Skip standard include paths (dump mode, and compare mode with a single-pair operand) — same note as gcc-path above |
+| `ast-frontend` | `auto` (resolves to castxml, fail-closed) | L2 header-AST frontend (dump mode, and compare mode on any operand shape — single-pair two-sided, audit-only, and directory/package release alike): `auto`, `castxml`, `clang`, or `hybrid`. Like `dump` and single-pair `compare`, this Action folds it into a synthesized `.abicheck.yml` `compile:` block forwarded via `--config` instead (along with gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc/lang, when any of those are also set — combining this group with `build-config` is supported: the synthesized `compile:` block merges into a copy of the named build-config, and this Action's input wins on a key conflict). Pass `--allow-ast-frontend-fallback`/`--frontend-context` via `extra-args` for the opt-in castxml→clang fallback or SYCL/DPC++ device context on any mode (set `.abicheck.yml`'s `compile.ast_frontend_fallback`/`compile.frontend_context` directly instead if `extra-args` isn't reaching the mode you need — those two flags have no CLI of their own on any mode). Same as `ABICHECK_AST_FRONTEND`. See [Header-Backend Capabilities](../reference/header-backend-capabilities.md) for the full resolution contract (fallback triggers, the device-context exception, and how an env pin interacts with both). |
+| `gcc-path` | — | Path to cross-compiler binary (dump and compare modes, any operand shape) — see `ast-frontend` above for how this reaches every mode now that the underlying `--compiler` CLI flag is gone from all of them |
+| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump and compare modes, any operand shape) — same note as gcc-path above; a full gcc-path wins if both are set, since the merged `compile.compiler` config key can only hold one |
+| `gcc-options` | — | Extra flags for the header frontend (dump and compare modes, any operand shape) — folds into the same synthesized `compile:` block `ast-frontend` above describes. A whitespace-containing flag (e.g. `-DMSG="hello world"`) is rejected with a clear error, since a raw CLI arg isn't subject to `compile.options`' own one-atom-per-entry, whitespace-free contract. |
+| `sysroot` | — | Alternative system root (dump/deps-tree modes, and compare mode on any operand shape) — same note as gcc-path above for dump/compare; `deps-tree` keeps its own direct `--sysroot` forwarding, unaffected (it is not part of this compile-context group at all) |
+| `nostdinc` | `false` | Skip standard include paths (dump and compare modes, any operand shape) — same note as gcc-path above |
 
-A directory/package (release/bundle) `compare` operand does not support
-these six inputs — the per-library fan-out never threads this L2 compile
-context to each pair's header dump, and the Action fails fast if any of
-them is set for that shape. Compare libraries individually to use them;
-see the [GitHub Action Inputs/Outputs
-Reference](../reference/github-action-inputs.md) for the exact wording.
+A directory/package (release/bundle) `compare` operand supports these six
+inputs too: the per-library fan-out threads this both-sides L2 compile
+context to every pair's header dump, so the Action forwards the same
+synthesized `compile:` block it forwards for a single pair. (It used to
+reject them for that shape — a guard that outlived the CLI restriction it
+restated, leaving a release comparison through this Action less capable
+than the same comparison run through the CLI.) See the [GitHub Action
+Inputs/Outputs Reference](../reference/github-action-inputs.md) for the
+exact wording.
 
 ### Full-stack dependency validation (Linux ELF)
 

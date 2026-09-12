@@ -910,7 +910,7 @@ def _overlay_evidence(
 
 
 def collect_contract_evidence(
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
     surf_old: PublicSurface,
     surf_new: PublicSurface,
@@ -928,12 +928,20 @@ def collect_contract_evidence(
     the block rather than recorded as failed -- "not consulted" and "consulted
     and unavailable" are different facts, and Section 4.1 forbids persisting
     "this provider was required under one policy" as if it were observed.
+
+    *old* is ``None`` for a run whose baseline is declared absent
+    (``compare --no-baseline``). The same rule then applies to the whole OLD
+    side: no record is filed for it at all. A declared-absent baseline was
+    never consulted and cannot be short of evidence, so recording it as a
+    failed -- or, worse, as a fully covered -- provider would both be
+    inventions. Every consumer of this block already reads an absent entry
+    as "not consulted", so nothing downstream needs a fourth state.
     """
     entries: list[ProviderEvidenceEntry] = [
-        public_header_evidence(old, surf_old, "old"),
+        *([public_header_evidence(old, surf_old, "old")] if old is not None else []),
         public_header_evidence(new, surf_new, "new"),
     ]
-    if exports_old is not None:
+    if exports_old is not None and old is not None:
         entries.append(export_table_evidence(old, exports_old, "old"))
     if exports_new is not None:
         entries.append(export_table_evidence(new, exports_new, "new"))
@@ -941,8 +949,9 @@ def collect_contract_evidence(
     # source that scopes everything out, not an absent one -- the same
     # distinction `post_processing` and `SuppressionConfig` already draw
     # (Codex review, fresh evidence).
+    sides = _SIDES if old is not None else ("new",)
     if public_surface_allowlist is not None:
-        for side in _SIDES:
+        for side in sides:
             entries.append(
                 _overlay_evidence(
                     PROVIDER_POST_MANIFEST,
@@ -952,7 +961,7 @@ def collect_contract_evidence(
                 )
             )
     if force_public_symbols:
-        for side in _SIDES:
+        for side in sides:
             entries.append(
                 _overlay_evidence(
                     PROVIDER_FORCED_PUBLIC,

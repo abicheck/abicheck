@@ -618,9 +618,21 @@ class TestDirVsDir:
         assert "findings_truncated" not in lib
         assert "_diff_result" not in lib
 
-    def test_json_output_findings_capped_and_flagged_truncated(
+    def test_json_output_is_complete_when_no_cap_was_requested(
         self, tmp_path: Path
     ) -> None:
+        """The machine document carries every finding by default.
+
+        It used to carry the same 10-entry presentation projection the
+        Markdown summary renders, flagged ``findings_truncated`` -- so a
+        consumer of ``--format json`` got a lossy document nobody asked to
+        truncate, and (per ``_release_md_library_findings``'s own note at
+        the time) no complete source to fall back to unless the run also
+        passed ``--output-dir``. A truncated *human* summary is fine; an
+        implicitly truncated machine document is not. The explicit-cap
+        counterpart is ``test_max_findings_per_library_overrides_the_
+        default_cap`` below, which still truncates and still flags it.
+        """
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         new_dir = tmp_path / "new"
@@ -642,18 +654,14 @@ class TestDirVsDir:
         assert code == 4
         lib = json.loads(out)["libraries"][0]
         assert lib["breaking"] == 15
-        assert len(lib["findings"]) == 10
-        assert lib["findings_truncated"] is True
-        # Codex review ("a presentation default masquerading as a
-        # contract"): the cut kinds must be visible without rerunning at a
-        # higher cap, same as `scan --against`'s own `findings_truncated_kinds`.
-        # 15 `func_removed` fill the cap's first 10 slots (5 cut); the
-        # library's own `public_surface_shrank` quality finding never gets a
-        # slot at all (the cap is already spent), so it's cut too.
-        assert lib["findings_truncated_kinds"] == {
-            "func_removed": 5,
-            "public_surface_shrank": 1,
-        }
+        # Every gating finding: the 15 removals plus the library's own
+        # `public_surface_shrank` quality finding, which the old default cap
+        # cut outright (the 10 slots were already spent on removals).
+        assert len(lib["findings"]) == 16
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
+        kinds = {f["kind"] for f in lib["findings"]}
+        assert "func_removed" in kinds and "public_surface_shrank" in kinds
 
     def test_max_findings_per_library_overrides_the_default_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

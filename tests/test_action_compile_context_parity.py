@@ -73,14 +73,19 @@ _COMPILE_CONTEXT_END = (
 _DUMP_COMPILE_CONTEXT_START = "add_compile_context_flags true"
 _DUMP_COMPILE_CONTEXT_END = "add_compile_context_flags true"
 
-# compare's region (Phase 7) starts at the gating comment (these inputs are
-# gated to the single-pair path, since the release fan-out can't thread a
-# CompileContext to each pair's header dump) and ends at the single-pair
-# branch's call to the shared helper.
+# compare's region (Phase 7) starts at the explanatory comment above its
+# call to the shared helper and ends at that call. It is one unconditional
+# call now, not an operand-shape branch: the guard that used to reject the
+# compile-context inputs for a directory/package operand restated a CLI
+# restriction that had already been lifted (the release fan-out threads the
+# both-sides compile context to every pair's header dump via
+# `cli_resolve.resolve_directory_compile_context`), so both operand shapes
+# synthesize the same overlay -- which is what the release-style cases in
+# `TestCompareModeCompileContext` below now assert.
 _COMPARE_COMPILE_CONTEXT_START = (
-    "# The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc/lang)"
+    "# The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/nostdinc)"
 )
-_COMPARE_COMPILE_CONTEXT_END = "else\n    add_compile_context_flags true\n  fi"
+_COMPARE_COMPILE_CONTEXT_END = "\n  add_compile_context_flags true\n"
 
 # add_compile_context_flags() itself (Phase 7): extracted verbatim, since
 # dump's and compare's regions both call it now instead of forwarding flags
@@ -998,79 +1003,6 @@ class TestCompileContextForwardingParity:
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 
-    def test_compare_fails_loud_for_compile_context_against_release_style_operand(
-        self,
-    ) -> None:
-        """Regression (Codex review): the CLI hard-rejects these flags for
-        directory/package operands (a UsageError, exit 64) since the
-        per-library release fan-out never threads a CompileContext to each
-        pair's header dump. A prior fix gated them to the single-pair path
-        but only warned and continued for a directory operand — silently
-        running the comparison with headers parsed under the wrong
-        macros/sysroot/frontend instead of the intended cross-compile
-        context. Must fail loud instead (a second Codex round), matching
-        the evidence-flags guard's already-established treatment of the
-        same "explicitly-configured input the fan-out can't honor" shape."""
-        env = {
-            **_FULL_ENV,
-            "INPUT_OLD_LIBRARY": str(RUN_SH.parent),  # any real directory
-            "INPUT_NEW_LIBRARY": "new.so",
-        }
-        result = _run_region_raw(
-            _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
-        )
-        assert result.returncode != 0
-        assert "not support" in result.stdout
-
-    def test_compare_release_style_succeeds_when_context_unset(self) -> None:
-        """Companion: a plain directory/package compare with no compile-
-        context inputs configured must still succeed (only fails when a
-        flag was actually configured and would be dropped)."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert "not support" not in stderr
-
-    def test_compare_release_style_succeeds_with_ast_frontend_auto(self) -> None:
-        """Regression (Codex review, second round): "auto" is the
-        documented no-op spelling of ast-frontend -- it resolves to the
-        same default castxml selection as leaving the input unset entirely
-        (see the input's description in action.yml), so a workflow that
-        spells it out explicitly requests nothing the release fan-out
-        could actually drop. Must not trip the fail-loud guard, unlike a
-        real frontend choice such as "clang"."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AST_FRONTEND": "auto",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert "not support" not in stderr
-        assert "--ast-frontend" not in cmd
-
-    def test_compare_release_style_fails_with_ast_frontend_clang(self) -> None:
-        """Companion: an actual, non-"auto" frontend choice still trips
-        the guard -- only the documented no-op spelling is exempt."""
-        result = _run_region_raw(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AST_FRONTEND": "clang",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert result.returncode != 0
-        assert "not support" in result.stdout
-
     def test_dump_default_lang_does_not_synthesize_an_overlay(self) -> None:
         """CodeRabbit review, PR #1146, finding #6: action.yml maps an
         omitted `lang` Action input to INPUT_LANG=c++ -- that is the
@@ -1097,38 +1029,6 @@ class TestCompileContextForwardingParity:
         )
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["lang"] == "c"
-
-    def test_compare_release_style_succeeds_with_default_lang(self) -> None:
-        """Companion to test_compare_release_style_succeeds_with_ast_frontend_
-        auto above, for the release-operand rejection predicate: the
-        default INPUT_LANG=c++ must not by itself reject a directory/
-        package compare -- only an actual override (a non-"c++" value)
-        should."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_LANG": "c++",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert "not support" not in stderr
-
-    def test_compare_release_style_fails_with_non_default_lang(self) -> None:
-        """Companion: an actual, non-default lang choice still trips the
-        release-operand guard."""
-        result = _run_region_raw(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_LANG": "c",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert result.returncode != 0
-        assert "not support" in result.stdout
 
 
 class TestCompileContextMergesWithExplicitBuildConfig:

@@ -253,8 +253,23 @@ def reject_unsupported_options(
         # (see _reject_set_input_flags's own comment for the full reasoning).
         suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
-        require_complete_analysis=require_complete_analysis,
     )
+    if require_complete_analysis:
+        # `_reject_set_input_flags` stopped rejecting this once the live
+        # directory/package fan-out learned to fold each member's own
+        # assurance floor with `max()`. That fold reads per-member
+        # `DiffResult`s; a stored-BundleFacts OLD side has none -- its
+        # whole release arrives as one already-folded document with no
+        # per-member analysis-assurance rollup to aggregate -- so the
+        # setting is rejected here, for this operand only, rather than
+        # accepted and silently ignored.
+        raise click.UsageError(
+            "assurance.require_complete is not supported when OLD_INPUT is a "
+            "stored BundleFacts document: the stored side carries no "
+            "per-library analysis-assurance rollup for the run to gate on. "
+            "Compare against the live directory/package release, or compare "
+            "the specific library individually, to use it."
+        )
     if any(
         kwargs.get(name) is not None
         for name in (

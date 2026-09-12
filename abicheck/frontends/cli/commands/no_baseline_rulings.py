@@ -247,8 +247,9 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     ),
     "diagnostic_comparison": (
         "--diagnostic-comparison",
-        "ADR-050's escape hatch downgrades an incomparable-pair failure; a "
-        "self-compare is trivially comparable",
+        "ADR-050's escape hatch downgrades an incomparable-pair failure; with "
+        "the baseline declared absent there is no second contract to be "
+        "incomparable with, so the check never runs",
     ),
     "bundle_facts_out": (
         "--bundle-facts-out",

@@ -48,26 +48,37 @@ __all__ = [
 
 
 def _detect_evidence_tiers(
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
 ) -> tuple[list[str], bool, bool, bool, bool, bool, bool]:
     """Detect which evidence tiers are available from the snapshots.
 
     Returns (tiers, has_elf, has_dwarf, has_dwarf_advanced, has_pe, has_macho, has_headers).
+
+    *old* is ``None`` for a ``compare --no-baseline`` audit. Every question
+    below is a *union* over the sides ("was this kind of evidence available
+    anywhere in this run?"), so an absent baseline contributes nothing and
+    the candidate's own evidence is the whole answer -- which is why each
+    clause reads ``has_old and ...`` rather than substituting a stand-in
+    snapshot for the missing side.
     """
-    has_elf = old.elf is not None or new.elf is not None
-    has_dwarf = (old.dwarf is not None and old.dwarf.has_dwarf) or (
+    has_old = old is not None
+    if old is None:
+        # Never read: every use below is guarded by `has_old`. Bound so the
+        # clauses stay readable (and type-check) without `assert`s.
+        old = new
+    has_elf = (has_old and old.elf is not None) or new.elf is not None
+    has_dwarf = (has_old and old.dwarf is not None and old.dwarf.has_dwarf) or (
         new.dwarf is not None and new.dwarf.has_dwarf
     )
     has_dwarf_advanced = (
-        old.dwarf_advanced is not None and old.dwarf_advanced.has_dwarf
+        has_old and old.dwarf_advanced is not None and old.dwarf_advanced.has_dwarf
     ) or (new.dwarf_advanced is not None and new.dwarf_advanced.has_dwarf)
-    has_pe = (
-        getattr(old, "pe", None) is not None or getattr(new, "pe", None) is not None
+    has_pe = (has_old and getattr(old, "pe", None) is not None) or (
+        getattr(new, "pe", None) is not None
     )
-    has_macho = (
-        getattr(old, "macho", None) is not None
-        or getattr(new, "macho", None) is not None
+    has_macho = (has_old and getattr(old, "macho", None) is not None) or (
+        getattr(new, "macho", None) is not None
     )
     # HEADER_AWARE requires that the surface was actually parsed from public
     # headers (castxml/AST). DWARF-only and symbols-only dumps populate the
@@ -80,14 +91,20 @@ def _detect_evidence_tiers(
     # surface (the library-API and unit-test construction path), so the
     # presence of declarations is taken as header-level evidence there.
     from_headers = bool(
-        getattr(old, "from_headers", False) or getattr(new, "from_headers", False)
+        (has_old and getattr(old, "from_headers", False))
+        or getattr(new, "from_headers", False)
     )
     has_declarations = bool(
-        old.functions
-        or old.types
-        or old.enums
-        or old.typedefs
-        or old.variables
+        (
+            has_old
+            and (
+                old.functions
+                or old.types
+                or old.enums
+                or old.typedefs
+                or old.variables
+            )
+        )
         or new.functions
         or new.types
         or new.enums
@@ -100,7 +117,7 @@ def _detect_evidence_tiers(
         or has_macho
         or has_dwarf
         or has_dwarf_advanced
-        or getattr(old, "elf_only_mode", False)
+        or (has_old and getattr(old, "elf_only_mode", False))
         or getattr(new, "elf_only_mode", False)
     )
     if from_headers:
@@ -218,7 +235,7 @@ def _determine_confidence_level(
 
 def compute_confidence(
     detector_results: list[DetectorResult],
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
 ) -> tuple[list[str], Confidence, list[str], EvidenceTier]:
     """Compute evidence tiers, confidence level, and coverage warnings.

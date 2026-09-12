@@ -390,6 +390,7 @@ def resolve_release_exit_decision(
     verdict_or_severity_contribution: int,
     removed_required_library: bool = False,
     contract_coverage_contribution: int = 0,
+    analysis_assurance_contribution: int = 0,
     evidence_contract_error_contribution: int = 0,
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
@@ -494,6 +495,18 @@ def resolve_release_exit_decision(
     outrank a real ``4``/``8`` decided by a *different* member without
     being named as the reason.
 
+    *analysis_assurance_contribution* is ``.abicheck.yml``'s
+    ``assurance.require_complete``, aggregated across the release's members
+    with ``max()`` by the caller -- the same ``0``/``1`` orthogonal floor a
+    single-pair ``compare`` folds, and passed here rather than computed so
+    this stays a pure resolver like every other axis. It participates in
+    exactly the branches ``contract_coverage_contribution`` does, and for
+    the same reason: **library count must not change what the setting
+    means**, so a release of one library and that library compared on its
+    own must reach the same exit code. It had no slot here at all until
+    now, which is why the release fan-out rejected the setting outright
+    instead of honouring it.
+
     *incomplete_scope_contribution*/*no_comparison_completed_contribution*
     (ADR-065 D6/D7, S2) are two more ``0``/``1`` fold participants, shaped
     exactly like *contract_coverage_contribution*: folded with ``max()``
@@ -593,6 +606,7 @@ def resolve_release_exit_decision(
             ExitReason.EVIDENCE_CONTRACT_ERROR,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             removed_required_library_contribution=(
                 removed_required_library_code if removal_is_active else 0
             ),
@@ -624,6 +638,7 @@ def resolve_release_exit_decision(
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
@@ -636,6 +651,7 @@ def resolve_release_exit_decision(
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
@@ -648,12 +664,14 @@ def resolve_release_exit_decision(
             removed_required_library_code,
             ExitReason.REMOVED_REQUIRED_LIBRARY,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
     return resolve_exit_decision(
         compatibility_contribution=0,
         contract_coverage_contribution=contract_coverage_contribution,
+        analysis_assurance_contribution=analysis_assurance_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
     )
