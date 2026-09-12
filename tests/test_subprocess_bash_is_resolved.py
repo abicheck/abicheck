@@ -92,19 +92,68 @@ def _argv_program(node: ast.Call) -> ast.expr | None:
     argv: ast.expr | None = node.args[0] if node.args else None
     if argv is None:
         argv = next((kw.value for kw in node.keywords if kw.arg == "args"), None)
+    if isinstance(argv, ast.Name):
+        # Resolved against the enclosing scope's literal bindings by
+        # `_bare_bash_call_sites`; returned as-is so the tracing lives in one
+        # place rather than being re-derived per caller.
+        return argv
     if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
         return None
     return argv.elts[0]
 
 
+def _literal_argvs(scope: ast.AST) -> dict[str, ast.expr]:
+    """Names bound to a list/tuple literal inside *scope*.
+
+    `cmd = ["bash", ...]` followed by `subprocess.run(cmd)` runs the same
+    program as the inline form, so declaring the indirection benign would
+    leave the gate open to the reported shape's most natural sibling (Codex
+    review, P1 — the first revision did exactly that).
+
+    A name assigned more than once keeps every binding: this is a ban, so a
+    name that is a bare-bash argv on *any* path is reported rather than
+    excused by a later rebinding. Only literal right-hand sides are traced;
+    a name from a parameter, a call, or a comprehension is genuinely opaque
+    to a structural scan and is left to the resolver-and-guard rules.
+    """
+    bound: dict[str, ast.expr] = {}
+    for node in ast.walk(scope):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node is not scope
+        ):
+            continue
+        if not isinstance(node, ast.Assign) or not isinstance(
+            node.value, ast.List | ast.Tuple
+        ):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and node.value.elts:
+                if _is_bare_bash(node.value.elts[0]):
+                    bound[target.id] = node.value
+    return bound
+
+
+def _is_bare_bash(node: ast.expr | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "bash"
+
+
 def _bare_bash_call_sites(source: str) -> list[int]:
     tree = ast.parse(source)
+    scopes: list[ast.AST] = [tree] + [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    bare_names = {name for scope in scopes for name in _literal_argvs(scope)}
     hits = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         program = _argv_program(node)
-        if isinstance(program, ast.Constant) and program.value == "bash":
+        if _is_bare_bash(program):
+            hits.append(node.lineno)
+        elif isinstance(program, ast.Name) and program.id in bare_names:
             hits.append(node.lineno)
     return hits
 
@@ -126,9 +175,30 @@ def _unguarded_resolutions(source: str) -> list[str]:
     """
     offenders: list[str] = []
 
+    def _own_nodes(scope: ast.AST) -> list[ast.AST]:
+        """Every node in *scope* except those owned by a nested function.
+
+        A nested helper is its own call site and carries its own guard --
+        `test_resolver_reports_build_output_end_to_end` guards inside the
+        closure that actually shells out, which is correct, and which a walk
+        that descended into it reported as an unguarded parent.
+        """
+        out: list[ast.AST] = []
+        stack = [scope]
+        while stack:
+            node = stack.pop()
+            out.append(node)
+            for child in ast.iter_child_nodes(node):
+                if isinstance(
+                    child, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+                ):
+                    continue
+                stack.append(child)
+        return out
+
     def _names_called(fn: ast.AST) -> set[str]:
         found = set()
-        for node in ast.walk(fn):
+        for node in _own_nodes(fn):
             if isinstance(node, ast.Call):
                 f = node.func
                 name = (
@@ -138,12 +208,44 @@ def _unguarded_resolutions(source: str) -> list[str]:
                     found.add(name)
         return found
 
+    def _dominating_guard_line(
+        fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> int | None:
+        """Line of a `require_bash()` that runs on every path into the body.
+
+        Only an unconditional statement in the function's own body counts. A
+        guard nested in an `if`/`try`/loop is skipped on the paths that do not
+        take it, and a guard *after* the call has already run the stub -- both
+        satisfy a set-membership test and neither satisfies the rule (Codex
+        review, P1). Structural dominance rather than a real CFG analysis: it
+        is the conservative side, so the worst it does is ask a caller to
+        hoist a guard it already has.
+        """
+        for stmt in fn.body:
+            if (
+                isinstance(stmt, ast.Expr)
+                and isinstance(stmt.value, ast.Call)
+                and getattr(stmt.value.func, "id", None) == "require_bash"
+            ):
+                return stmt.lineno
+        return None
+
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         called = _names_called(node)
-        shells_out = bool(called & _SUBPROCESS_ENTRY_POINTS)
-        if "bash_executable" in called and shells_out and "require_bash" not in called:
+        if "bash_executable" not in called:
+            continue
+        runs = [
+            call.lineno
+            for call in _own_nodes(node)
+            if isinstance(call, ast.Call)
+            and _names_called(call) & _SUBPROCESS_ENTRY_POINTS
+        ]
+        if not runs:
+            continue
+        guard = _dominating_guard_line(node)
+        if guard is None or guard > min(runs):
             offenders.append(node.name)
     return offenders
 
@@ -199,16 +301,49 @@ class TestNoModuleSpellsBashItself:
         ) == [1]
 
     @pytest.mark.parametrize(
+        "traced",
+        [
+            pytest.param(
+                'cmd = ["bash", "-c", s]\nsubprocess.run(cmd)', id="module-scope"
+            ),
+            pytest.param(
+                'def f():\n    cmd = ["bash", p]\n    subprocess.run(cmd)',
+                id="function-scope",
+            ),
+            pytest.param(
+                'def f():\n    cmd = ["bash", p]\n    subprocess.run(args=cmd)',
+                id="traced-through-the-keyword",
+            ),
+            pytest.param(
+                'def f():\n    cmd = [exe, p]\n    cmd = ["bash", p]\n'
+                "    subprocess.run(cmd)",
+                id="bare-on-one-path-only",
+            ),
+        ],
+    )
+    def test_the_scan_follows_a_name_bound_to_the_argv(self, traced: str) -> None:
+        """`cmd = ["bash", ...]; run(cmd)` runs exactly what the inline form runs.
+
+        The first revision declared this shape benign in so many words, which
+        left the ban open to the reported shape's most natural sibling (Codex
+        review, P1).
+        """
+        assert _bare_bash_call_sites(traced) != []
+
+    @pytest.mark.parametrize(
         "benign",
         [
             pytest.param('shutil.which("bash")', id="availability-probe"),
             pytest.param('subprocess.run([exe, "bash", "-n"])', id="not-the-program"),
             pytest.param('x = "bash"', id="plain-assignment"),
             pytest.param('"""a docstring mentioning bash"""', id="prose"),
-            pytest.param("subprocess.run(cmd)", id="argv-is-a-name"),
-            pytest.param("subprocess.run(args=cmd)", id="keyword-argv-is-a-name"),
+            pytest.param("subprocess.run(cmd)", id="untraceable-name"),
+            pytest.param("subprocess.run(args=cmd)", id="untraceable-keyword-name"),
             pytest.param(
                 'subprocess.run(args=[exe, "bash"])', id="keyword-not-the-program"
+            ),
+            pytest.param(
+                'cmd = [exe, "bash"]\nsubprocess.run(cmd)', id="traced-not-the-program"
             ),
         ],
     )
@@ -252,6 +387,56 @@ class TestEveryResolvedCallSiteGuardsFirst:
         assert _unguarded_resolutions(unguarded) == ["f"]
         assert _unguarded_resolutions(indirect) == ["f"]
         assert _unguarded_resolutions(guarded) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(
+                "def f():\n    subprocess.run([bash_executable(), p])\n"
+                "    require_bash()\n",
+                id="guard-after-the-call",
+            ),
+            pytest.param(
+                "def f():\n    if slow:\n        require_bash()\n"
+                "    subprocess.run([bash_executable(), p])\n",
+                id="guard-in-one-branch",
+            ),
+            pytest.param(
+                "def f():\n    try:\n        require_bash()\n    except E:\n"
+                "        pass\n    subprocess.run([bash_executable(), p])\n",
+                id="guard-inside-try",
+            ),
+            pytest.param(
+                "def f():\n    for _ in xs:\n        require_bash()\n"
+                "    subprocess.run([bash_executable(), p])\n",
+                id="guard-inside-loop",
+            ),
+        ],
+    )
+    def test_a_guard_that_does_not_dominate_is_not_a_guard(self, source: str) -> None:
+        """Set membership is not the rule; running first on every path is.
+
+        Each of these satisfies "the function mentions `require_bash`" and
+        none of them protects the call (Codex review, P1).
+        """
+        assert _unguarded_resolutions(source) == ["f"]
+
+    def test_a_nested_helper_carries_its_own_guard(self) -> None:
+        """A closure that guards is not its parent's offence.
+
+        `test_resolver_reports_build_output_end_to_end` guards inside the
+        closure that shells out, which is correct — and which the first
+        dominance revision reported as an unguarded parent, because the walk
+        descended into the nested body.
+        """
+        source = (
+            "def outer():\n"
+            "    def inner():\n"
+            "        require_bash()\n"
+            "        subprocess.run([bash_executable(), p])\n"
+            "    return inner\n"
+        )
+        assert _unguarded_resolutions(source) == []
 
     def test_reasoning_about_the_resolver_is_not_shelling_out(self) -> None:
         """The rule follows the subprocess, not the import or the mention."""
