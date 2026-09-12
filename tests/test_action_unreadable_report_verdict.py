@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -47,6 +48,23 @@ import pytest
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
 RUN_SH = ACTION_DIR / "run.sh"
+
+# POSIX only, for the same reason `test_action_coverage_verdict.py` states: this
+# harness works by putting an *extensionless, shebang-dispatched* `abicheck` on
+# PATH, because `run.sh` resolves the binary by name. Windows has neither the
+# executable bit nor kernel shebang handling, and Git bash's `chmod` is a no-op
+# on NTFS, so the stub is not runnable there — every test in the module then
+# fails identically with the WSL launcher stub's own UTF-16 "no installed
+# distributions" text instead of anything from `run.sh`. The behaviour under
+# test is plain shell with no platform-dependent branch, and the Linux lane
+# exercises all of it.
+#
+# Omitting this marker is what turned the windows-latest unit lane red on this
+# PR: the sibling module documented the pitfall and this one did not copy it.
+pytestmark = pytest.mark.skipif(
+    os.name == "nt" or not RUN_SH.is_file() or shutil.which("bash") is None,
+    reason="needs a POSIX shell that can exec a shebang script from PATH",
+)
 
 
 def _stub_abicheck(tmp_path: Path, *, exit_code: int, payload: bytes | None) -> Path:

@@ -168,7 +168,12 @@ Two predicates close that without weakening anything above:
   (not-comparable pairs it with `reason`, audit-only with its
   `findings`/`suppressed_findings` arrays, and a release envelope may rely on
   `libraries`), so a naive "non-empty string verdict" rule fails working runs.
-  Both directions are pinned in `TestAReadableVerdictSourceIsRequired`.
+  Both directions are pinned in `TestAReadableVerdictSourceIsRequired`. The
+  audit rule requires **both** `findings` and `suppressed_findings` as lists,
+  not either: `no_baseline_audit` reads an absent `suppressed_findings` as
+  "nothing was suppressed", so a half-present pair lets a run whose policy hid
+  every finding publish `AUDIT_CLEAN` — absence cannot establish that policy hid
+  nothing (ADR-067's "record before disposing", applied to the reader).
 
   **"Requested" means every caller-named destination, not the first.**
   `compare`'s `--write` is repeatable (`multiple=True`, ADR-068 D4), so

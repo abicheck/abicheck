@@ -127,8 +127,13 @@ VALIDITY_NO_RESULT = "no_result"
 #: * a not-comparable report: ``verdict`` is ``null`` beside a ``reason``
 #:   object (``report/not_comparable.py``);
 #: * an audit-only report: ``verdict`` is ``null``, and the audit's own result
-#:   is its ``findings``/``suppressed_findings`` arrays
-#:   (``report/no_baseline.py``, which always emits both as lists);
+#:   is its ``findings`` **and** ``suppressed_findings`` arrays --
+#:   ``report/no_baseline.py`` always emits both as lists, and **both** are
+#:   required here rather than either (Codex review, P2). ``no_baseline_audit``
+#:   reads an absent ``suppressed_findings`` as "nothing was suppressed", so
+#:   accepting a document that omits it lets a run whose policy hid every
+#:   finding publish ``AUDIT_CLEAN``. Absence cannot establish that policy hid
+#:   nothing -- ADR-067's "record before disposing" applied to the reader;
 #: * a release envelope: a ``libraries`` array.
 #:
 #: ``run_outcome.compatibility`` is accepted as a verdict source in its own
@@ -157,7 +162,7 @@ def _carries_a_result(document: dict[str, Any]) -> bool:
     # only: each is a whole-document shape, not something nested under `diff`.
     if "verdict" in document and isinstance(document.get("reason"), dict):
         return True
-    if document.get("no_baseline") is True and any(
+    if document.get("no_baseline") is True and all(
         isinstance(document.get(key), list)
         for key in ("findings", "suppressed_findings")
     ):

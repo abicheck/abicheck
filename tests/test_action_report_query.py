@@ -727,12 +727,13 @@ class TestAReadableVerdictSourceIsRequired:
             {"verdict": None, "reason": {"kind": "scope", "message": "x"}},
         ),
         (
-            "audit-only, findings present",
-            {"no_baseline": True, "verdict": None, "findings": []},
-        ),
-        (
-            "audit-only, suppressed only",
-            {"no_baseline": True, "verdict": None, "suppressed_findings": []},
+            "audit-only, both disposition arrays",
+            {
+                "no_baseline": True,
+                "verdict": None,
+                "findings": [],
+                "suppressed_findings": [],
+            },
         ),
         ("release envelope", {"verdict": "NO_CHANGE", "libraries": []}),
         (
@@ -762,6 +763,26 @@ class TestAReadableVerdictSourceIsRequired:
         ("verdict buried a level too deep", {"wrapper": {"verdict": "COMPATIBLE"}}),
         ("null findings, no verdict", {"findings": None}),
         ("no_baseline with no findings array", {"no_baseline": True}),
+        # Both disposition arrays are required, not either: `no_baseline_audit`
+        # reads an absent `suppressed_findings` as "nothing was suppressed", so
+        # a half-present pair lets a fully-suppressed audit read as AUDIT_CLEAN.
+        (
+            "audit missing suppressed_findings",
+            {"no_baseline": True, "verdict": None, "findings": []},
+        ),
+        (
+            "audit missing findings",
+            {"no_baseline": True, "verdict": None, "suppressed_findings": []},
+        ),
+        (
+            "audit with a non-list suppressed_findings",
+            {
+                "no_baseline": True,
+                "verdict": None,
+                "findings": [],
+                "suppressed_findings": None,
+            },
+        ),
         ("empty-string verdict", {"verdict": ""}),
         ("null verdict with no reason and no audit", {"verdict": None}),
         ("severity block alone", {"severity": {"exit_code": 0}}),
