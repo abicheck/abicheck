@@ -339,3 +339,46 @@ def test_the_persisted_projection_is_not_reimplemented_outside_storage() -> None
         and "RUNTIME_ONLY_FIELDS" in p.read_text(encoding="utf-8")
     ]
     assert not offenders, offenders
+
+
+def test_the_supported_entry_point_wires_the_projection_itself() -> None:
+    """Codex review (PR #1229): the content-identity answer has to be
+    passed in, so a caller reaching for `compute_analysis_assurance`
+    directly and omitting it gets the narrower object-identity check —
+    `status="partial"` for one stale snapshot file loaded twice.
+
+    It cannot be defaulted here: the answer is the storage codec's and
+    `policy` has no `storage` edge (`architecture/modules.yaml`), which
+    `scripts/check_architecture.py` enforces. So there is ONE entry point
+    that wires it, and this pins that it does — a programmatic caller
+    following the docstring gets the same answer the CLI does, rather than
+    having to discover the helper.
+    """
+    from abicheck.checker_types import DiffResult
+    from abicheck.workflows.gate import attach_analysis_assurance
+
+    a = _load("v4.json", schema_version=25, from_headers=True)
+    b = _load("v4.json", schema_version=25, from_headers=True)
+    assert degraded_reliability_facts(a), "fixture must be genuinely degraded"
+
+    result = DiffResult(library="libcompat.so.1", old_version="1.0", new_version="1.0")
+    attach_analysis_assurance(result, a, b)
+    assert result.analysis_assurance is not None
+    assert result.analysis_assurance.schema_staleness_status == "clean"
+    # A bare `DiffResult` carries none of the evidence a real run does, so
+    # the rollup is `not_requested` here rather than `complete`; what this
+    # pins is that staleness does not drag it to `partial`, which is the
+    # regression shape (`test_self_compare_of_stored_stale_snapshot_is_
+    # complete_end_to_end` covers `complete` through the real CLI).
+    assert result.analysis_assurance.status != "partial"
+
+    # The must-stay-distinct half: the same entry point still taints a
+    # genuinely differing pair, so wiring the projection is not the same
+    # as switching the check off.
+    other = _load("v4.json", schema_version=45, from_headers=True)
+    differing = DiffResult(
+        library="libcompat.so.1", old_version="1.0", new_version="1.0"
+    )
+    attach_analysis_assurance(differing, a, other)
+    assert differing.analysis_assurance is not None
+    assert differing.analysis_assurance.schema_staleness_status == "degraded"

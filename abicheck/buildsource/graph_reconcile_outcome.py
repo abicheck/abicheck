@@ -167,8 +167,19 @@ def _declaration_marker_is_among_the_changed(
     """
     if not declaring_file or not own_files:
         return True
-    changed = Counter(own_files) - Counter(other_files)
     base = path_basename(declaring_file)
+    matching = [marker for marker in own_files if marker[1] == base]
+    if len(matching) != 1:
+        # Ambiguous rather than absent (Codex review, PR #1229): several
+        # markers naming the recorded file give no way to tell WHICH one
+        # is the declaration's, so one of them changing is equally
+        # consistent with an unmoved declaration whose nested argument
+        # moved. `W<(lambda at wrapper.h:1:2),(lambda at wrapper.h:3:4)>`
+        # declared in `include/wrapper.h` is exactly that. Answering False
+        # withholds the move claim; `markers_differ` stays true, so the
+        # real difference is still reported.
+        return False
+    changed = Counter(own_files) - Counter(other_files)
     return any(marker_base == base for _kind, marker_base in changed.elements())
 
 
@@ -281,10 +292,7 @@ def _classify_outcome(
     # does not reorder, and its full multiset differs.
     markers_reordered = bool(old_markers) and (
         (old_files != new_files and sorted(old_files) == sorted(new_files))
-        or (
-            old_markers != new_markers
-            and sorted(old_markers) == sorted(new_markers)
-        )
+        or (old_markers != new_markers and sorted(old_markers) == sorted(new_markers))
     )
     has_two_sided_files = bool(old_file) and bool(new_file)
     # A recorded declaring file that names NONE of its side's markers
