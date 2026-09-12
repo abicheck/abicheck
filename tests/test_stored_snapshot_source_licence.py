@@ -860,3 +860,90 @@ class TestOnlyAnInlineCollectionInThisRunIsLive:
         embed_mod.embed_build_source(pack_side, None, pack_dir)
         assert pack_side.build_source is not None
         assert pack_side.build_source.live_source_evidence is False
+
+
+class TestEveryDumpExecutionBranchGrantsTheLicence:
+    """The grant is at the join, not at one branch.
+
+    `service.run_dump` was stamped first, then the ABICC front end — and the
+    typed API's two *binary-less* dispatches (`execute_header_only_dump_request`
+    and `execute_source_only_dump_request`, reached when `DumpRequest.input.path`
+    is None) still came back unlicensed, because each is its own `return
+    DumpResult(...)` that never passes through `run_dump` (Codex review, P2).
+    Fixing execution branches one at a time is how that kept recurring, so the
+    licence is granted at `execute_dump_request` — the one function all three
+    branches return through — and this class pins every branch rather than the
+    one that was reported.
+    """
+
+    @staticmethod
+    def _resolved(branch: str) -> Any:
+        """A `ResolvedDumpRequest` whose execution takes *branch*.
+
+        Built through the real `resolve_dump_request`, so the dispatch decision
+        (`side.path is None`, then `is_header_only_evidence`) is the production
+        one rather than a hand-set flag.
+        """
+        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service_dump_pipeline import resolve_dump_request
+
+        if branch == "binary":
+            spec = InputSpec(path=Path("libfoo.so"), version="1.0")
+        elif branch == "header_only":
+            spec = InputSpec(path=None, headers=(Path("pub.hpp"),), version="1.0")
+        else:
+            spec = InputSpec(path=None, sources=Path("src"), version="1.0")
+        return resolve_dump_request(DumpRequest(input=spec))
+
+    @pytest.mark.parametrize("branch", ["binary", "header_only", "source_only"])
+    @pytest.mark.parametrize("from_headers", [True, False])
+    def test_every_branch_is_stamped_conditionally(
+        self, branch: str, from_headers: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each branch's own executor is stubbed; the wrapper under test is real.
+
+        Stubbing at the branch executor (rather than at `execute_dump_request`
+        itself) is what makes this a test of the join: the stub returns an
+        unstamped snapshot, so only the production wrapper can license it. The
+        `from_headers=False` arm keeps the grant conditional, so a DWARF-only
+        dump through any branch is still denied.
+        """
+        import abicheck.service_dump_pipeline as pipeline
+
+        produced = AbiSnapshot(
+            library="libfoo.so", version="1.0", from_headers=from_headers
+        )
+        assert produced.live_source_evidence is False
+
+        class _Outcome:
+            snapshot = produced
+            effective_depth = None
+            resolved_execution_context = None
+            effective_includes: list[Path] = []
+            effective_compile_context = None
+
+        if branch == "binary":
+            monkeypatch.setattr(
+                pipeline, "_resolve_side_snapshot_impl", lambda *a, **kw: _Outcome()
+            )
+            monkeypatch.setattr(
+                pipeline, "enforce_requested_depth", lambda *a, **kw: None
+            )
+            monkeypatch.setattr(
+                pipeline, "side_effective_compile_context", lambda *a, **kw: None
+            )
+        elif branch == "header_only":
+            monkeypatch.setattr(
+                pipeline,
+                "execute_header_only_dump_request",
+                lambda *a, **kw: _Outcome(),
+            )
+        else:
+            monkeypatch.setattr(
+                pipeline,
+                "execute_source_only_dump_request",
+                lambda *a, **kw: _Outcome(),
+            )
+
+        result = pipeline.execute_dump_request(self._resolved(branch))
+        assert result.snapshot.live_source_evidence is from_headers

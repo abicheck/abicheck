@@ -227,7 +227,7 @@ def extraction_read_source_inputs(snapshot: Any) -> bool:
 
 
 def granting_live_source_licence(
-    extract: Callable[..., _T],
+    extract: Callable[..., _T], *, snapshot_attr: str | None = None
 ) -> Callable[..., _T]:
     """Wrap a live-extraction function so its result carries the licence.
 
@@ -249,17 +249,28 @@ def granting_live_source_licence(
     source paths were read. Re-applying is idempotent, which matters because
     the dump pipeline recurses back through its own entry point for the hybrid
     AST frontend.
+
+    *snapshot_attr* is for an operation whose result *holds* the snapshot rather
+    than being one (``DumpResult.snapshot``). It exists so that a pipeline with
+    several execution branches is stamped at the one function they all return
+    through, instead of once per branch: a per-branch grant is what let the
+    typed API's binary-less header-only and source-only dispatches come back
+    unlicensed after the ordinary and ABICC paths had each been fixed
+    individually (Codex review, P2). The rule stays in one place either way.
     """
 
     @functools.wraps(extract)
     def _stamped(*args: Any, **kwargs: Any) -> _T:
         result = extract(*args, **kwargs)
+        target = (
+            result if snapshot_attr is None else getattr(result, snapshot_attr, None)
+        )
         # Conditional, not unconditional: "this run produced it" does not mean
         # "this run read the files it names" (see
         # :func:`extraction_read_source_inputs`). Duck-typed rather than
         # isinstance-checked, per LiveSourceEvidence.
-        if extraction_read_source_inputs(result):
-            result.live_source_evidence = True  # type: ignore[attr-defined]
+        if extraction_read_source_inputs(target):
+            target.live_source_evidence = True  # type: ignore[attr-defined,union-attr]
         return result
 
     return _stamped

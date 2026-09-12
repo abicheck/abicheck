@@ -144,3 +144,16 @@
   so, instead of reporting every source-derived fact as not evaluated. An
   explicit verified context still covers both sources, since it is an assertion
   about the tree rather than about one route to it.
+
+- **The licence is granted at the dump pipeline's join, not per execution
+  branch.** `service.run_dump` was stamped first, then the ABICC front end —
+  and the typed API's two *binary-less* dispatches (a headers-only
+  `DumpRequest`, and a `--sources`/`--build-info`-only one) still returned
+  genuinely live, header-derived snapshots with no licence, because each is its
+  own `return DumpResult(...)` that never passes through `run_dump`. Fixing
+  execution branches one at a time is how that kept recurring, so the grant now
+  sits on `execute_dump_request` — the one function all three branches return
+  through — and every branch is pinned by test rather than only the one that was
+  reported. Still conditional (a DWARF-only dump through any branch is denied)
+  and idempotent, so the already-wrapped `run_dump` composing over it changes
+  nothing.
