@@ -34,7 +34,6 @@ import os
 from pathlib import Path
 
 import pytest
-import yaml
 
 from abicheck.action_config_overlay import (
     apply_sources_root_config_blocks,
@@ -195,18 +194,9 @@ class TestRebaseRelativeConfigPaths:
         ]
 
     def test_absolute_include_dir_is_left_unchanged(self, tmp_path: Path) -> None:
-        # A *genuinely* absolute path on the running platform. "/abs/dir" is
-        # absolute on POSIX but drive-relative on Windows
-        # (`Path("/abs/dir").is_absolute()` is False there), so the rebase
-        # correctly rewrote it to "C:\\abs\\dir" and this test failed on the
-        # windows lane while claiming to be about absolute paths. Anchoring
-        # it to the platform's own root keeps the invariant the name states.
+        # Anchored to the platform's own root, since "/abs/dir" is absolute on POSIX but drive-relative on Windows -- where the rebase correctly rewrote it, failing this test while its name claimed to be about absolute paths.
         absolute = str(Path(tmp_path.anchor or "/") / "abs" / "dir")
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            yaml.safe_dump({"compile": {"include_dirs": [absolute]}}),
-            encoding="utf-8",
-        )
         base = {"compile": {"include_dirs": [absolute]}}
         out = rebase_relative_config_paths(base, found_path=cfg)
         assert out["compile"]["include_dirs"] == [absolute]
