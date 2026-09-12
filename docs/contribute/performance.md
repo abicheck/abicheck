@@ -364,6 +364,64 @@ kernel's own high-water mark, which never misses a spike but is a maximum over
 Both are reported, labelled, with the interval and the observation limits —
 picking one would hide the other's failure mode.
 
+### Measured cost of the full-CLI lanes
+
+All figures local (gcc 13.3.0 / castxml 0.7.0 / clang 18.1.3, 4 CPUs, Linux,
+`--repeat 3` unless stated). Reproduce with the commands in the harness's own
+module docstring. These are *lane* costs, not per-scenario costs; per-scenario
+numbers are in the receipt.
+
+| Lane | Wall | User CPU | Native invocations | Fixture build (setup, excluded) |
+|---|---:|---:|---|---:|
+| `--suite pr` | 44–48 s | 40–43 s | 28 header extractions, 14 include passes, 100 probes | ~0.9 s |
+| `--suite extended` (`--repeat 1`) | ~65 s | — | — | ~4.7 s |
+
+The PR lane's cost is dominated by interpreter startup, not by analysis: the
+lane makes roughly 30 CLI invocations (8 gated steps plus setup and resolution
+steps, times 3 repeats) at ~0.6 s of startup each, so well over a third of the
+lane is spent before any evidence work happens.
+
+Per-scenario gated `full_cli` medians on that fixture (`--repeat 3`), with the
+coefficient of variation that sets the gate's noise floor:
+
+| Scenario | Step | Median | cv |
+|---|---|---:|---:|
+| `dump_l2` | dump | 1.074 s | 6.4% |
+| `compare_live_live` | compare | 1.219 s | 3.9% |
+| `compare_stored_live` | compare | 1.389 s | 5.3% |
+| `compare_stored_stored` | compare | 1.272 s | 15.9% |
+| `compare_no_baseline` | audit | 1.125 s | 11.6% |
+| `compare_two_formats` | render_json | 1.209 s | 9.7% |
+| `compare_two_formats` | render_markdown | 1.239 s | 7.0% |
+| `compare_live_live` (unchanged) | compare | 1.327 s | 6.1% |
+
+Those cv figures (up to ~16%) are why the lane's absolute floor is 0.5 s rather
+than 0: a purely relative 30% tolerance on a ~1.2 s measurement would be only
+~0.36 s, inside what this fixture's own run-to-run variance already covers.
+
+On the extended axes (`--repeat 1`): templates ~1.36 s, 8 headers ~2.48 s,
+32 headers ~10.4 s, and five libraries ~1.1–1.4 s *each*.
+
+**Instrumentation overhead, and a worked example of why ordering matters.**
+Measured by running the identical lane with and without `--no-spy`.
+
+A single unordered pair (spy, then no-spy) gave **+2.1 s wall (+4.6%)** and
++2.3 s CPU — a plausible-looking result, and one it would have been easy to
+publish. Repeating it in **ABBA order** (spy, no-spy, no-spy, spy), so drift
+across the sweep cannot be read as a configuration difference, gave medians of
+45.2 s with the spy against 46.0 s without it: **−0.7 s (−1.6%)**, i.e. the
+*opposite sign*, against a largest within-configuration spread of 2.2 s.
+
+So the honest statement is that the spy's overhead is **not resolvable above
+run-to-run noise on this host**, bounded by roughly ±5% of the lane, and the
+first measurement's +4.6% was noise wearing a plausible number. Mechanically
+that is what one expects: ~142 extra shim invocations per lane, each a `/bin/sh`
+startup plus a `printf` plus an `exec`, against castxml parses that each cost
+hundreds of milliseconds.
+
+Note also that `--no-spy` disables every extraction-count assertion, so it is a
+measurement aid, never a cheaper way to run the lane.
+
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
 `scripts/l2_real_profiles.py` pins the three live integrations declaratively:
