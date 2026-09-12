@@ -1273,6 +1273,9 @@ def compute_analysis_assurance(
     returns (``layer_coverage`` in the native ``compare`` CLI path -- see
     ``cli_compare_helpers._report_compare_result``).
 
+    Prefer ``workflows.gate.attach_analysis_assurance``, which wires
+    *same_content* for you (see ``workflows/analysis_assurance_attach``).
+
     *old_pack*/*new_pack* are the ``BuildSourcePack`` that actually backed
     this comparison's build/source findings -- **not** implicitly re-read
     from ``old.build_source``/``new.build_source`` internally (finding, P1

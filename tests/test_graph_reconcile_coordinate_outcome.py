@@ -501,6 +501,37 @@ class TestMarkerCarriedLocationEvidence:
                 )
                 assert outcome == OUTCOME_RECONCILED, (old_qn, old_file, outcome)
 
+    def test_several_markers_naming_the_recorded_file_are_ambiguous(self) -> None:
+        """Codex review (PR #1229): when more than one marker names the
+        recorded declaring file, nothing says WHICH is the declaration's.
+        `W<(lambda at wrapper.h:1:2),(lambda at wrapper.h:3:4)>` declared in
+        `include/wrapper.h` is consistent with an unmoved declaration whose
+        nested argument moved, so one `wrapper.h` entry appearing in the
+        marker difference cannot be read as the declaration moving.
+
+        Withholding the move claim, not the finding: `markers_differ` stays
+        true, so the real difference is still reported. Over both
+        orientations and both a 2- and a 3-marker name."""
+        pairs = (
+            (
+                "W<(lambda at wrapper.h:1:2),(lambda at wrapper.h:3:4)>",
+                "W<(lambda at wrapper.h:1:2),(lambda at nested_new.h:3:4)>",
+            ),
+            (
+                "W<(lambda at wrapper.h:1:2),(lambda at wrapper.h:3:4),"
+                "(lambda at n.h:5:6)>",
+                "W<(lambda at wrapper.h:1:2),(lambda at nested_new.h:3:4),"
+                "(lambda at n.h:5:6)>",
+            ),
+        )
+        for old_qn, new_qn in pairs:
+            for old_file, new_file in (("include/wrapper.h", ""), ("", "wrapper.h")):
+                outcome = _classify_outcome(
+                    _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
+                    _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
+                )
+                assert outcome == OUTCOME_RECONCILED, (old_qn, old_file, outcome)
+
     def test_the_declarations_own_marker_changing_is_still_a_move(self) -> None:
         """The must-stay-distinct half: when the recorded file's OWN marker
         is the one that changed, that is exactly the declaration moving, so

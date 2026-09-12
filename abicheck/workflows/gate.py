@@ -140,6 +140,7 @@ from ..policy.severity import (
     resolve_severity_config,
 )
 from ..storage.snapshot_encode import same_persisted_content
+from .analysis_assurance_attach import attach_analysis_assurance
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -166,6 +167,7 @@ __all__ = [
     "assurance_floor_diagnostic",
     "categorize_changes",
     "classify_change_object",
+    "attach_analysis_assurance",
     "compute_analysis_assurance",
     "same_persisted_content",
     "compute_exit_code",
