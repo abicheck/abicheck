@@ -45,9 +45,48 @@ from .exit_decision_precedence import (
 )
 
 __all__ = [
+    "release_analysis_assurance_contribution",
     "release_evidence_contract_contribution",
     "resolve_release_exit_decision_for_report",
 ]
+
+
+def release_analysis_assurance_contribution(
+    library_results: list[dict[str, object]],
+    *,
+    require_complete: bool,
+) -> int:
+    """``.abicheck.yml``'s ``assurance.require_complete``, aggregated across
+    a release's members.
+
+    ``max()`` over each member's own ``0``/``1``, computed from the
+    ``analysis_assurance_status`` the fan-out stamps from that member's
+    ``DiffResult`` -- the identical rule
+    :func:`~abicheck.analysis_assurance.analysis_assurance_exit_contribution`
+    applies to a single pair, so **a release of one library and that library
+    compared on its own agree**. Cardinality is an input here, not a
+    different product: one member short of complete analysis floors the
+    release, exactly as it would floor its own single-pair comparison.
+
+    ``0`` unconditionally when *require_complete* is false, which is what
+    keeps the setting purely additive -- a release that never opted in sees
+    no exit-code change whatever any member's status says.
+
+    Derived here rather than passed in, for the same reason
+    :func:`release_evidence_contract_contribution` is: a value every
+    reporter must supply identically is not an argument, and that axis
+    shipped with one of three call sites missed.
+    """
+    if not require_complete:
+        return 0
+    return max(
+        (
+            0 if entry.get("analysis_assurance_status") == "complete" else 1
+            for entry in library_results
+            if isinstance(entry, dict) and "analysis_assurance_status" in entry
+        ),
+        default=0,
+    )
 
 
 def release_evidence_contract_contribution(
@@ -157,6 +196,7 @@ def resolve_release_exit_decision_for_report(
     *,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
+    require_complete_analysis: bool = False,
 ) -> ExitDecision:
     """ADR-064 stage 1b: the release fan-out's persisted, explainable
     ``exit`` block.
@@ -258,6 +298,9 @@ def resolve_release_exit_decision_for_report(
         verdict_or_severity_contribution=verdict_or_severity_contribution,
         removed_required_library=removed_required_library,
         contract_coverage_contribution=contract_coverage_exit_contribution,
+        analysis_assurance_contribution=release_analysis_assurance_contribution(
+            library_results, require_complete=require_complete_analysis
+        ),
         evidence_contract_error_contribution=release_evidence_contract_contribution(
             library_results
         ),

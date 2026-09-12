@@ -181,82 +181,10 @@ def _release_completed_compatibility_verdict(
     return worst
 
 
-def _resolve_release_headers(
-    headers: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...],
-    new_headers_only: tuple[Path, ...],
-    old_header_dir: Path | None,
-    new_header_dir: Path | None,
-) -> tuple[list[Path], list[Path]]:
-    """Resolve per-side headers for compare-release."""
-    old_h: list[Path] = list(old_headers_only) if old_headers_only else list(headers)
-    new_h: list[Path] = list(new_headers_only) if new_headers_only else list(headers)
-    if old_header_dir and not old_headers_only:
-        old_h = [old_header_dir]
-    if new_header_dir and not new_headers_only:
-        new_h = [new_header_dir]
-    return old_h, new_h
 
 
-def _discover_include_roots(header_dir: Path | None) -> list[Path]:
-    """Return common include roots from an extracted devel/header package."""
-    if header_dir is None:
-        return []
-    candidates = [
-        header_dir,
-        header_dir / "usr" / "include",
-        header_dir / "usr" / "local" / "include",
-    ]
-    usr_include = header_dir / "usr" / "include"
-    if usr_include.is_dir():
-        candidates.extend(p for p in usr_include.iterdir() if p.is_dir())
-    seen: set[Path] = set()
-    roots: list[Path] = []
-    for candidate in candidates:
-        if not candidate.is_dir():
-            continue
-        resolved = candidate.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        roots.append(candidate)
-    return roots
 
 
-def _match_release_keys(
-    old_dir: Path,
-    new_dir: Path,
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_files: list[Path],
-    new_files: list[Path],
-    is_package: Callable[[Path], bool],
-) -> tuple[list[str], dict[str, Path], dict[str, Path]]:
-    """Match library keys between old and new, handling direct file pairs.
-
-    ADR-065 S4 deleted this function's old-minus-new / new-minus-old return
-    values. Pairing is all this may answer: *which* members have a
-    counterpart. What an unpaired member *means* -- unmatched, expected but
-    not produced, out of scope, or (only against a proven-complete inventory)
-    removed or added -- is decided exclusively by
-    :func:`~abicheck.workflows.release_scope.build_release_scope_record`, and
-    every consumer reads that record. A second, evidence-free set difference
-    here is how a name miss, a SONAME bump, a partial build and a genuine
-    deletion became one state (D2, the deletion gate)."""
-    direct_file_pair = (
-        old_dir.is_file()
-        and new_dir.is_file()
-        and not is_package(old_dir)
-        and not is_package(new_dir)
-    )
-    if direct_file_pair:
-        return (
-            ["__direct_pair__"],
-            {"__direct_pair__": old_files[0]},
-            {"__direct_pair__": new_files[0]},
-        )
-
-    return sorted(set(old_map) & set(new_map)), old_map, new_map
 
 
 def _resolve_bundle_manifest(
@@ -447,6 +375,21 @@ def _run_bundle_analysis(
     return result
 
 
+#: Four pure helpers that raise nothing moved to ``workflows.
+#: release_inputs`` alongside the rest of release input resolution (ADR-061
+#: gap D) and are re-exported here under their original private names --
+#: there is no Click translation to do for a function that cannot fail.
+from .workflows import release_inputs as _release_inputs  # noqa: E402
+
+# Plain assignments, not `from ... import x as _x`: under mypy's
+# `no_implicit_reexport` a renaming import is not an explicit re-export, and
+# `cli_compare_release.py` imports these names from here.
+_debian_symbols_warning = _release_inputs.debian_symbols_warning
+_discover_include_roots = _release_inputs.discover_include_roots
+_match_release_keys = _release_inputs.match_release_keys
+_resolve_release_headers = _release_inputs.resolve_release_headers
+
+
 def _extract_if_package(
     input_path: Path,
     debug_pkg: Path | None,
@@ -455,105 +398,21 @@ def _extract_if_package(
     is_package: Callable[[Path], bool],
     detect_extractor: Callable[[Path], PackageExtractor | None],
 ) -> tuple[Path, Path | None, Path | None, Path | None, bool]:
-    """Extract package to tempdir if needed, return
-    (lib_dir, debug_dir, header_dir, symbols_file, container_complete).
-
-    *container_complete* (ADR-065 S3) is the primary operand's own
-    :attr:`~abicheck.package.ExtractResult.container_complete`: ``True`` when
-    *input_path* was a package archive this extractor unpacked in full, so a
-    component absent from *lib_dir* is genuinely absent; ``False`` for a
-    directory operand, which proves nothing (D2). *debug_pkg*/*devel_pkg*
-    never affect it -- they carry debug info and headers, not components.
-
-    When *input_path* is a plain directory (not a package archive), it is used
-    as-is for lib_dir.  Side packages (*debug_pkg*, *devel_pkg*) are still
-    extracted in that case so that standalone debug/devel packages paired with
-    an already-extracted directory are not silently ignored.
-
-    *symbols_file* (CLI-audit P2) is the Debian dpkg-gensymbols(1) contract
-    file from *input_path*'s own control.tar.* when it is a .deb -- ``None``
-    for every other package format and for a .deb that ships none. Only the
-    primary package is consulted, not *debug_pkg*/*devel_pkg*: a `-dbg`/`-dev`
-    companion package does not carry the library's own symbols contract.
-    """
-    # Default: treat input_path as an already-extracted library directory.
-    lib_dir: Path = input_path
-    debug_dir: Path | None = None
-    header_dir: Path | None = None
-    symbols_file: Path | None = None
-    container_complete = False
-
-    if is_package(input_path):
-        extractor = detect_extractor(input_path)
-        if extractor is None:
-            raise click.ClickException(f"Unrecognized package format: {input_path}")
-        target = make_temp_dir("abicheck_pkg_")
-        result = extractor.extract(input_path, target)
-        lib_dir = result.lib_dir
-        debug_dir = result.debug_dir
-        header_dir = result.header_dir
-        symbols_file = result.symbols_file
-        container_complete = result.container_complete
-
-    if debug_pkg is not None:
-        dbg_ext = detect_extractor(debug_pkg)
-        if dbg_ext is None:
-            raise click.ClickException(
-                f"Unrecognized debug package format: {debug_pkg}"
-            )
-        dbg_target = make_temp_dir("abicheck_dbg_")
-        dbg_result = dbg_ext.extract(debug_pkg, dbg_target)
-        debug_dir = dbg_result.debug_dir or dbg_result.lib_dir
-
-    if devel_pkg is not None:
-        dev_ext = detect_extractor(devel_pkg)
-        if dev_ext is None:
-            raise click.ClickException(
-                f"Unrecognized devel package format: {devel_pkg}"
-            )
-        dev_target = make_temp_dir("abicheck_dev_")
-        dev_result = dev_ext.extract(devel_pkg, dev_target)
-        header_dir = dev_result.header_dir or dev_result.lib_dir
-
-    return lib_dir, debug_dir, header_dir, symbols_file, container_complete
-
-
-def _debian_symbols_warning(
-    old_symbols_file: Path | None,
-    new_symbols_file: Path | None,
-) -> str | None:
-    """Compare two .deb packages' dpkg-gensymbols(1) contracts, if both sides
-    have one (CLI-audit P2: "Debian .symbols not integrated" -- extraction
-    alone does not make the contract participate in a package compare).
-
-    Returns a formatted diff report to fold into the release warnings list
-    when the contracts disagree, else ``None`` -- purely additive/informational
-    (never gates the compare's verdict/exit code): the binary ABI diff
-    already gates BREAKING/API_BREAK; a symbols-contract mismatch by itself
-    only means the *packaging* metadata (minimum versions, listed symbols)
-    has drifted from what the binary actually exports, which is useful
-    context but not on its own proof of an ABI break (ADR-028 D3's "evidence
-    may add context, never silently delete/invent a break" principle,
-    applied here to a cross-source packaging check the same way
-    cross_source_checks.py's D4 checks apply it to build/source evidence).
-    """
-    if old_symbols_file is None or new_symbols_file is None:
-        return None
-    from .debian_symbols import (
-        diff_symbols_files,
-        format_diff_report,
-        load_symbols_file,
-    )
+    """The Click-translating wrapper over :func:`abicheck.workflows.
+    release_inputs.extract_if_package` -- see that module's docstring for
+    why the extraction itself is engine-side now. Same messages, same exit
+    code."""
+    from .errors import ReleaseOperandContentError
+    from .workflows.release_inputs import extract_if_package
 
     try:
-        old_symbols = load_symbols_file(old_symbols_file)
-        new_symbols = load_symbols_file(new_symbols_file)
-    except (OSError, ValueError) as exc:
-        return f"Debian symbols file could not be parsed: {exc}"
-    diff = diff_symbols_files(old_symbols, new_symbols)
-    if not (diff.removed or diff.added or diff.version_changed):
-        return None
-    return "Debian symbols contract changed:\n" + format_diff_report(diff)
+        return extract_if_package(
+            input_path, debug_pkg, devel_pkg, make_temp_dir, is_package, detect_extractor
+        )
+    except ReleaseOperandContentError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 
 
 
@@ -561,7 +420,7 @@ def _debian_symbols_warning(
 def reject_bundle_facts_out_collision(
     bundle_facts_out: Path | None,
     output: Path | None,
-    secondary_output: Path | None,
+    *secondary_outputs: Path | None,
 ) -> None:
     """Reject ``--bundle-facts-out`` naming the same file as ``--output``/
     ``--write`` (G38 Phase 2).
@@ -571,10 +430,18 @@ def reject_bundle_facts_out_collision(
     own docstring) -- without it, ``--bundle-facts-out result.json --output
     result.json`` silently overwrites the requested baseline with the
     report while still reporting success (Codex review).
+
+    *secondary_outputs* is variadic because ``--write`` is repeatable: every
+    requested artifact's PATH is checked, not just the first. Checking one
+    let ``--write json=a.json --write markdown=b.md --bundle-facts-out
+    b.md`` through.
     """
     if bundle_facts_out is None:
         return
-    for label, other in (("--output/-o", output), ("--write", secondary_output)):
+    for label, other in (
+        ("--output/-o", output),
+        *(("--write", out) for out in secondary_outputs),
+    ):
         if other is not None and bundle_facts_out.resolve() == other.resolve():
             raise click.UsageError(
                 f"--bundle-facts-out's PATH must differ from {label}: writing "
@@ -1059,6 +926,8 @@ def _format_release_summary(
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
+    max_findings: int | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
 
@@ -1091,6 +960,28 @@ def _format_release_summary(
     correct renders from the same already-computed ``library_results``/
     ``bundle_result``/``matrix_result``.
     """
+    if fmt == "oneline":
+        # The "just tell me" flow at release cardinality -- a count fold over
+        # the already-stripped per-library summaries, through the same
+        # `format_stat_line` a single-pair `compare` renders, so the two
+        # cannot drift. See `report/release_oneline.py` for why this is the
+        # one of `compare`'s four remaining formats that generalizes without
+        # a per-member `DiffResult`.
+        from .report.release_oneline import (
+            format_release_oneline,
+            release_global_counts,
+        )
+
+        return format_release_oneline(
+            worst_verdict,
+            library_results,
+            severity_exit_code=severity_exit_code,
+            env_matrix_source_sha256=env_matrix_source_sha256,
+            # Bundle/probe-matrix findings belong to no library, so they are
+            # absent from `library_results` even though `worst_verdict` folds
+            # them -- see `release_global_counts`.
+            release_global=release_global_counts(bundle_result, matrix_result),
+        )
     if fmt == "junit":
         return _format_release_junit(
             diff_pairs, matrix_result, library_results, severity_config=severity_config,
@@ -1112,6 +1003,7 @@ def _format_release_summary(
             scope_terms=scope_terms,
             show_only=show_only,
             env_matrix_source_sha256=env_matrix_source_sha256,
+            require_complete_analysis=require_complete_analysis,
         )
     md = _format_release_markdown(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
@@ -1120,6 +1012,7 @@ def _format_release_summary(
         severity_config=severity_config,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        max_findings=max_findings,
     )
     if demangle:
         from .demangle import demangle_text
@@ -1343,6 +1236,7 @@ def _format_release_json(
     scope_terms: ComparisonScopeTerms | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> str:
     """Render the release summary as a JSON document (``release_schema_
     version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
@@ -1388,11 +1282,20 @@ def _format_release_json(
     from .workflows.release_scope import release_global_ran, unmatched_names
     terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    # The release's own assurance gate (`assurance.require_complete`),
+    # threaded into *every* decision a reader sees, not just the process
+    # exit: the persisted `exit` block, `run_outcome` and
+    # `effective_config_fields["gate.require_complete_analysis"]` are
+    # what a machine consumer accepts or rejects a run on, and a run that
+    # exits 1 while its own report says 0/clean/false is exactly the
+    # disagreement `_exit_compare_release` exists to make impossible
+    # (Codex review, PR #1238, P1).
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict, fail_on_removed, removed_keys, severity_exit_code,
         contract_coverage_exit_contribution, library_results, release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+        require_complete_analysis=require_complete_analysis,
     ).to_dict()
     record = terms.record
     summary: dict[str, object] = {
@@ -1582,6 +1485,7 @@ def _format_release_json(
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        require_complete_analysis=require_complete_analysis,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
@@ -1629,6 +1533,7 @@ def _format_release_markdown(
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    max_findings: int | None = None,
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1772,7 +1677,23 @@ def _format_release_markdown(
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_evidence_contract(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
-    lines += _release_md_library_findings(display_library_results)
+    # The human summary stays bounded even though the shared projection is
+    # now complete -- the cap is a presentation choice, applied here. It is
+    # the **resolved** cap, not the built-in default: `--max-findings-per-
+    # library 20` (or the env var) is documented to control how much the
+    # aggregate summary itemizes, and slicing at the constant ignored it
+    # (Codex review, PR #1238, P2). `resolve_max_release_findings_per_library`
+    # is the one resolver every other consumer of this cap already calls
+    # (it lives in the leaf, so reading it here is not an import cycle), so
+    # the Markdown render cannot disagree with them.
+    from .report.release_display_limits import (
+        resolve_max_release_findings_per_library,
+    )
+
+    lines += _release_md_library_findings(
+        display_library_results,
+        display_cap=resolve_max_release_findings_per_library(max_findings),
+    )
     lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)
     lines += _release_md_matrix_findings(matrix_result, display_matrix_changes)
     lines += render_disposition_audit_section(

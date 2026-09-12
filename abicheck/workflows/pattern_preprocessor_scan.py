@@ -269,6 +269,43 @@ def _preprocessor_scan_fully_covered(result: PreprocessorFactsResult) -> bool:
     )
 
 
+def compute_candidate_pattern_preprocessor_scan(
+    new: AbiSnapshot,
+) -> PatternPreprocessorScanResult:
+    """Run both pre-scans against *new* alone (``compare --no-baseline``).
+
+    The candidate's own scan facts are reported verbatim -- they are real,
+    full-confidence observations about this build. The OLD-side halves are
+    left empty and **every** evolution entry reads ``not_evaluated``: with
+    the baseline declared absent there is no prior surface an escalating
+    pattern, a diverging macro, or a leaked header could have been present
+    or absent in. Stating ``persistent`` there (which a self-compare does)
+    would report history nobody observed; see
+    :func:`~abicheck.workflows.cross_source_evolution.
+    compute_candidate_cross_source_findings` for the same rule on the
+    findings side.
+    """
+    pattern = _run_pattern_scan(new)
+    preproc = _run_preprocessor_scan_for(new)
+    not_evaluated = CrossSourceEvolution.NOT_EVALUATED.value
+    return PatternPreprocessorScanResult(
+        pattern_old={},
+        pattern_new=pattern.to_dict(),
+        pattern_escalation_evolution={
+            f.kind.value: not_evaluated for f in pattern.facts if f.escalates
+        },
+        preprocessor_old={},
+        preprocessor_new=preproc.to_dict(),
+        macro_divergence_evolution={
+            d.macro: not_evaluated for d in preproc.divergences
+        },
+        header_leak_evolution={
+            f"{leak.public_header}|{leak.leaked_header}": not_evaluated
+            for leak in preproc.leaks
+        },
+    )
+
+
 def compute_pattern_preprocessor_scan(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> PatternPreprocessorScanResult:

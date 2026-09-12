@@ -13,27 +13,32 @@ searches for a counterexample:
 the candidate is, whatever evidence it carries or lacks, and whichever
 cross-source checks fire on it --
 
-1. no reported finding may ever read ``introduced`` or ``resolved`` (both
-   assert something about a baseline this run was told does not exist);
-2. the *comparison* half of the change set is always empty (a snapshot
-   compared against itself produces no addition, removal, or modification);
+1. every reported finding reads exactly ``not_evaluated``. This is
+   deliberately stronger than the rule this module first stated ("never
+   ``introduced``/``resolved``"), and the strengthening is the point: while
+   the audit was implemented as a self-diff, ``persistent`` was reachable
+   and permitted, which reported a *history* -- "present on both sides" --
+   for a baseline the run was told does not exist. With the baseline truly
+   absent, no evolution is observable at all, so any state other than
+   ``not_evaluated`` is a manufactured claim;
+2. the *comparison* half of the change set is always empty (no delta was
+   evaluated, so no addition, removal, or modification can exist);
 3. the partition between the two is total and disjoint, so no finding is
    silently dropped by the split itself.
 
 The generator deliberately produces snapshots across the whole evidence
 ladder rather than only ones known to fire a check: an evidence-poor
-candidate is exactly where a check's gate closes and ``not_evaluated`` is
-supposed to appear, and a run reporting *nothing* must satisfy the same
-invariant as one reporting several. The oracle is
-:data:`~abicheck.policy.no_baseline_findings.NO_BASELINE_EVOLUTION_STATES`'s
-complement, checked against the enum directly -- not against the partition
-helper the implementation itself uses to build the finding list, so a bug in
-that helper cannot make this pass vacuously.
+candidate is exactly where a check's gate closes, and a run reporting
+*nothing* must satisfy the same invariant as one reporting several. The
+oracle is the enum itself -- ``{s for s in CrossSourceEvolution if s is not
+NOT_EVALUATED}`` is what must never appear -- checked directly rather than
+against any constant the implementation also reads, so widening the
+implementation cannot silently widen this test's oracle along with it.
 
 The primitive-level half (``AGENTS.md``'s "Primitive-level property tests")
-sits below: ``partition_no_baseline_findings`` and ``d3_violations`` are a
-reusable classification primitive, so they get their own contract tests over
-synthetic ``Change`` objects, decoupled from any snapshot at all.
+sits below: ``partition_no_baseline_findings`` is a reusable classification
+primitive, so it gets its own contract tests over synthetic ``Change``
+objects, decoupled from any snapshot at all.
 """
 
 from __future__ import annotations
@@ -45,9 +50,7 @@ from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin, Variable
 from abicheck.policy.no_baseline_findings import (
-    NO_BASELINE_EVOLUTION_STATES,
     NoBaselineInvariantError,
-    d3_violations,
     is_one_sided_finding,
     partition_no_baseline_findings,
 )
@@ -59,21 +62,30 @@ _HSETTINGS = settings(
     suppress_health_check=[HealthCheck.too_slow],
 )
 
-#: The two states D3 forbids for a ``declared_absent`` OLD -- stated as an
-#: explicit literal set rather than as ``set(CrossSourceEvolution) -
-#: NO_BASELINE_EVOLUTION_STATES``, so that widening the permitted set in the
-#: implementation cannot silently widen this test's oracle along with it.
-_FORBIDDEN_STATES = {CrossSourceEvolution.INTRODUCED, CrossSourceEvolution.RESOLVED}
+#: Every state that asserts something about a baseline, i.e. everything an
+#: audit with no baseline may not report. Derived from the enum itself so a
+#: fifth state added later is forbidden by default rather than falling
+#: through an allowlist -- and derived here, in the test, never read from a
+#: constant the implementation also reads.
+_FORBIDDEN_STATES = {
+    state
+    for state in CrossSourceEvolution
+    if state is not CrossSourceEvolution.NOT_EVALUATED
+}
 
 
-def test_the_two_state_sets_partition_the_enum() -> None:
-    """The oracle and the implementation's permitted set really are
-    complements -- if a fifth state is ever added, this fails rather than
-    letting it fall through both."""
-    assert _FORBIDDEN_STATES | set(NO_BASELINE_EVOLUTION_STATES) == set(
+def test_only_not_evaluated_is_permitted_without_a_baseline() -> None:
+    """The oracle really is "everything except ``not_evaluated``".
+
+    Guards the derivation above: if the enum grows a state, it lands in the
+    forbidden set automatically, and ``persistent`` -- the state the
+    self-diff implementation used to produce and permit -- is forbidden.
+    """
+    assert CrossSourceEvolution.NOT_EVALUATED not in _FORBIDDEN_STATES
+    assert CrossSourceEvolution.PERSISTENT in _FORBIDDEN_STATES
+    assert _FORBIDDEN_STATES | {CrossSourceEvolution.NOT_EVALUATED} == set(
         CrossSourceEvolution
     )
-    assert not (_FORBIDDEN_STATES & set(NO_BASELINE_EVOLUTION_STATES))
 
 
 # ---------------------------------------------------------------------------
@@ -173,14 +185,30 @@ def _candidate_snapshots(draw):
 def test_no_generated_candidate_ever_reports_a_forbidden_evolution_state(
     snapshot: AbiSnapshot,
 ) -> None:
-    """D3's core rule: with OLD declared absent, ``introduced``/``resolved``
-    are unreachable for *any* candidate."""
+    """D3's core rule, in its sharpened form: with OLD declared absent,
+    *every* state except ``not_evaluated`` is unreachable for *any*
+    candidate -- ``persistent`` included."""
     result = run_no_baseline_compare(snapshot)
     for change in result.findings:
         assert change.cross_source_evolution not in _FORBIDDEN_STATES, (
             f"{change.kind.value} reported "
             f"{change.cross_source_evolution} on a declared_absent OLD"
         )
+    # The positive half of the same statement: a cross-source finding does
+    # not merely avoid the forbidden states, it carries the one state that
+    # is true of it. Asserted separately so a future change that stopped
+    # stamping the field at all -- leaving `None`, which passes the
+    # membership check above vacuously -- fails here.
+    for change in result.findings:
+        if change.cross_source_evolution is not None:
+            assert (
+                change.cross_source_evolution is CrossSourceEvolution.NOT_EVALUATED
+            ), f"{change.kind.value} reported {change.cross_source_evolution}"
+    assert all(
+        c.cross_source_evolution is CrossSourceEvolution.NOT_EVALUATED
+        for c in result.findings
+        if not c.candidate_side_enrichment
+    )
 
 
 @given(snapshot=_candidate_snapshots())
@@ -188,7 +216,7 @@ def test_no_generated_candidate_ever_reports_a_forbidden_evolution_state(
 def test_no_generated_candidate_ever_produces_a_comparison_finding(
     snapshot: AbiSnapshot,
 ) -> None:
-    """The identity half of the old blanket assertion, still absolute.
+    """The comparison half of the old blanket assertion, still absolute.
 
     Asserted over ``result.diff.changes`` (everything ``compare()`` emitted)
     rather than over ``result.findings`` (what survived the partition), so a
@@ -200,7 +228,7 @@ def test_no_generated_candidate_ever_produces_a_comparison_finding(
         c for c in result.diff.changes if not is_one_sided_finding(c)
     ]
     assert comparison_findings == [], (
-        "a self-compare produced a comparison finding: "
+        "a run with no baseline produced a comparison finding: "
         f"{[c.kind.value for c in comparison_findings]}"
     )
 
@@ -303,32 +331,25 @@ def test_partition_preserves_order_within_each_half(changes: list[Change]) -> No
 
 @given(changes=_change_lists())
 @_HSETTINGS
-def test_d3_violations_finds_exactly_the_forbidden_states(
-    changes: list[Change],
-) -> None:
-    """The violation detector agrees with the independent oracle.
-
-    Computed here from the enum directly rather than by calling
-    ``is_one_sided_finding``/``NO_BASELINE_EVOLUTION_STATES`` the way the
-    implementation does, so the two can disagree.
-    """
-    expected = [c for c in changes if c.cross_source_evolution in _FORBIDDEN_STATES]
-    assert list(d3_violations(changes)) == expected
-
-
-@given(changes=_change_lists())
-@_HSETTINGS
-def test_check_raises_exactly_when_an_invariant_is_broken(
+def test_check_raises_exactly_when_the_comparison_half_is_non_empty(
     changes: list[Change],
 ) -> None:
     """``check_no_baseline_partition`` raises iff the partition it is handed
-    actually violates one of the two invariants -- never on a legal one, and
-    always on an illegal one."""
+    actually carries a comparison finding -- never on a legal one, and
+    always on an illegal one.
+
+    There is deliberately no second, evolution-state rule to test here any
+    more: the permitted-state allowlist this module used to check
+    (``d3_violations``) existed only because the self-diff could produce
+    ``persistent``. The audit now cannot produce any state but
+    ``not_evaluated``, which the snapshot-level properties above assert
+    directly, so a rule restating it would only be a second place to keep
+    in sync.
+    """
     from abicheck.policy.no_baseline_findings import check_no_baseline_partition
 
     partition = partition_no_baseline_findings(changes)
-    illegal = bool(partition.identity) or bool(d3_violations(partition.one_sided))
-    if illegal:
+    if partition.identity:
         try:
             check_no_baseline_partition(partition)
         except NoBaselineInvariantError:
@@ -341,8 +362,8 @@ def test_the_invariant_error_is_not_an_assert() -> None:
     """The guard must survive ``python -O``.
 
     The original blanket check was an ``assert``, which is stripped under
-    ``-O`` -- so the identity-half violation it existed to catch would have
-    become a silently wrong audit report rather than a loud failure.
+    ``-O`` -- so the comparison-half violation it existed to catch would
+    have become a silently wrong audit report rather than a loud failure.
     Asserted by constructing the violating partition directly, since the
     real pipeline cannot produce one.
     """
@@ -357,7 +378,7 @@ def test_the_invariant_error_is_not_an_assert() -> None:
     try:
         check_no_baseline_partition(partition)
     except NoBaselineInvariantError as exc:
-        assert "non-identity state" in str(exc)
+        assert "state it structurally cannot have" in str(exc)
         assert ChangeKind.FUNC_REMOVED.value in str(exc)
     else:
         raise AssertionError("expected NoBaselineInvariantError")

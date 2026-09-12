@@ -344,23 +344,23 @@ class TestAnalysisAssuranceTruthfulnessCli:
         assert "OK" in result.output
 
 
-class TestAnalysisAssuranceCompleteRejectedForBundle:
-    """Codex review, fresh evidence after the earlier inert-setting finding
-    (PR #1222): ``checks[].analysis.assurance: complete`` on a bundle check
-    was accepted by validation and unconditionally forwarded into
-    ``check-target``'s ``analysis-assurance-complete`` input, which merges
-    ``assurance: {require_complete: true}`` into the resolved config and
-    forwards it to the underlying ``compare`` invocation -- for a bundle
-    check that invocation is the directory/package release fan-out, which
-    ``cli_compare_options.py``'s ``_reject_set_input_flags`` unconditionally
-    rejects ``require_complete_analysis=True`` for (a bundle comparison has
-    no single ``analysis_assurance`` result to gate on). That turned every
-    such bundle check into a hard CLI usage/operational error instead of an
-    actionable rejection. Reject it here, at run-plan generation time, the
-    same way ``allow_new_target`` is already rejected for a bundle check
-    (``test_bundle_check_allow_new_target_is_rejected``) -- bundle-level
-    assurance enforcement is a real, separate feature this fix does not
-    attempt."""
+class TestAnalysisAssuranceCompleteAcceptedForBundle:
+    """``checks[].analysis.assurance: complete`` on a bundle check is
+    ordinary configuration now.
+
+    It was rejected at run-plan generation time (PR #1222) for a real
+    reason: ``check-target`` forwards it as
+    ``assurance: {require_complete: true}`` into the underlying ``compare``
+    invocation, which for a bundle check is the directory/package release
+    fan-out -- and that fan-out rejected the setting outright, turning the
+    bundle check into a hard CLI usage error. The rejection was the
+    actionable answer while that was true. The fan-out now folds each
+    member's own analysis-assurance floor with ``max()``
+    (``policy.release_exit_decision.release_analysis_assurance_
+    contribution``), which is the identical contribution a single-pair
+    ``compare`` of that member computes, so the setting reaches a real gate
+    and the validation-time rejection -- a restriction that existed only
+    because of the input shape -- is gone with it."""
 
     @staticmethod
     def _bundle_config(assurance: str) -> ProjectTargetsConfig:
@@ -386,13 +386,10 @@ class TestAnalysisAssuranceCompleteRejectedForBundle:
             }
         )
 
-    def test_bundle_check_analysis_assurance_complete_is_rejected(self) -> None:
+    def test_bundle_check_analysis_assurance_complete_is_accepted(self) -> None:
         report = validate_project_targets(self._bundle_config("complete"))
-        assert not report.ok
-        assert any(
-            "analysis.assurance: complete is not supported for a bundle check" in e
-            for e in report.errors
-        )
+        assert report.ok, report.errors
+        assert not any("analysis.assurance" in e for e in report.errors)
 
     def test_bundle_check_without_assurance_passes(self) -> None:
         """Negative control: a bundle check declaring no assurance

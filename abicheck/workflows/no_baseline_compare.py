@@ -24,34 +24,36 @@ argument and never confused with :attr:`~abicheck.model.scope_acquisition.
 AcquisitionState.NOT_SUPPLIED` (an *unproven*, possibly-incomplete-scope
 absence).
 
-**How this reports candidate-side facts without a real OLD snapshot**:
-:func:`run_no_baseline_compare` diffs *new* against itself. Two identical
-:class:`~abicheck.model.AbiSnapshot` objects can never produce an addition,
-a removal, or a modification -- so the real detector/suppression/policy
-pipeline (:func:`abicheck.checker.compare`) runs completely unmodified, and
-every candidate-side fact the resulting :class:`~abicheck.checker_types.
-DiffResult` carries (evidence tiers, coverage, analysis assurance) is
-genuine evidence about *new*, not a synthesized stand-in. The empty
-*comparison* change set falls out of the identity comparison by
-construction, rather than from a change-kind filter that could silently
-drift out of sync with the detector registry (a filter is a second place a
-new ``ChangeKind`` would need to be taught about "no-baseline mode";
-identity needs no such maintenance).
+**How this reports candidate-side facts without an OLD snapshot**:
+:func:`run_no_baseline_compare` calls the one comparison verb
+(:func:`abicheck.checker.compare`) with ``old=None``. Baseline presence is
+an *input* to that pipeline, not a different product: facts are collected,
+the applicable checks run, policy is applied and a result is built exactly
+as for a two-sided run -- only the *evolution* stages, the ones that need
+two sides, do not run. Nothing stands in for the missing baseline.
 
-**What identity does *not* make empty.** ADR-068 Phase 2a/2b moved all
-eleven cross-source hygiene checks and the pattern/preprocessor pre-scan
-into ``compare()`` itself, and those stages read one snapshot's evidence
-sources *against each other* -- they carry no baseline, so a self-compare
-fires them exactly as a real comparison would, and their findings are the
-entire reason a single-build audit exists. This module therefore
-*partitions* rather than asserts emptiness: :mod:`abicheck.policy.
-no_baseline_findings` separates the comparison findings (still absolutely
-empty, still enforced) from the candidate-side ones (reported), and
-enforces ADR-068 D3's rule that with OLD ``declared_absent`` a one-sided
-finding may only ever read ``persistent`` or ``not_evaluated``, never
-``introduced``/``resolved``. Before that split, every stored-snapshot
-audit aborted on the old blanket ``assert not diff.changes`` and every
-live one rendered an empty document.
+This used to be implemented as a self-diff (``compare(new, new)``), on the
+reasoning that two identical snapshots can produce no addition, removal or
+modification, so the real pipeline could run unmodified. The empty
+comparison half was indeed exact; the *evolution* half was not. The eleven
+cross-source hygiene checks and the pattern/preprocessor pre-scan
+(ADR-068 Phase 2a/2b) run per side inside ``compare()`` and fold their two
+one-sided results into an OLD->NEW state -- against a copy of the
+candidate, every candidate-side finding therefore came back ``persistent``
+("present on both sides"), which is a claim about a baseline the run was
+explicitly told does not exist. ``old=None`` separates the two axes the
+self-diff conflated: the finding is a full-confidence observation about
+this build (the check ran, on real candidate evidence), and its historical
+evolution is :attr:`~abicheck.policy.evidence_status.CrossSourceEvolution.
+NOT_EVALUATED`, because no history was observable. That is now a
+*structural* property of the run rather than a rule about it -- which is
+why ADR-068 D3's permitted-state allowlist, a second rule set that existed
+only for this mode, is gone.
+
+:mod:`abicheck.policy.no_baseline_findings` still *partitions* the change
+set into the comparison half (provably empty, still enforced -- a
+non-empty one means a detector read state it cannot have) and the
+candidate-side half, which is the audit's reportable content.
 
 The one thing this module does *not* do is decide how the resulting
 :class:`~abicheck.checker_types.DiffResult` gets reported: ``NO_CHANGE`` is
@@ -472,7 +474,7 @@ def run_no_baseline_compare(
 
     extra_changes = _fold_env_matrix(None, new, env_matrix)
     diff = _diff_pair(
-        new,
+        None,
         new,
         suppression=suppression,
         policy=policy,
@@ -496,10 +498,9 @@ def run_no_baseline_compare(
     partition = partition_no_baseline_findings(diff.changes)
     check_no_baseline_partition(partition)
     # The suppressed half gets the identical partition -- a suppressed
-    # comparison finding would be just as impossible on a self-diff, and D3
-    # applies to a finding's evolution state whether or not policy later
-    # hid it, so the same invariants are checked rather than waived for
-    # anything a rule happened to match.
+    # comparison finding would be just as impossible without a baseline, and
+    # the invariant applies whether or not policy later hid a finding, so it
+    # is checked rather than waived for anything a rule happened to match.
     suppressed = partition_no_baseline_findings(
         getattr(diff, "suppressed_changes", ()) or ()
     )

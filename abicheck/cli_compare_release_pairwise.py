@@ -454,6 +454,18 @@ def _compare_one_library(
         entry["evidence_contract_error_contribution"] = (
             EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
         )
+        # `.abicheck.yml`'s `assurance.require_complete`, per member -- the
+        # same orthogonal 0/1 floor, folded with max() into the release exit
+        # by `_exit_compare_release`. Library count must not change what the
+        # setting means: this is exactly the contribution a single-pair
+        # `compare` of the same library would compute, so a release of one
+        # library and that library compared on its own agree. Recorded
+        # unconditionally (the flag's own `require_complete` gate lives in
+        # the fold, not here) so the per-library status is readable in the
+        # release JSON even on a run that did not opt in.
+        entry["analysis_assurance_status"] = getattr(
+            getattr(result, "analysis_assurance", None), "status", None
+        )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -500,6 +512,12 @@ def _compare_one_library(
                 lib_report_path,
                 to_json(result, severity_config=severity_config),
             )
+            # The unambiguous index a truncated machine document owes its
+            # reader: this member's *complete*, uncapped report, by path.
+            # `entry["findings"]` is a capped presentation projection, and a
+            # machine consumer that cannot tell where the rest is has been
+            # handed an implicitly truncated document.
+            entry["complete_report"] = str(lib_report_path)
         return entry
     except Exception as exc:
         # One classification, four outcomes, ordering constraints of its own
@@ -605,7 +623,8 @@ def _suppress_lockstep_soname_findings(
         from .workflows.disposition import supersede_as_suppressed
 
         supersede_as_suppressed(
-            result, unnecessary,
+            result,
+            unnecessary,
             application_point="lockstep_soname_suppression",
             rule_id="lockstep_soname_bump",
             reason=(
@@ -795,7 +814,9 @@ def _compare_release_libraries(
                 f"Unsupported: {entry['library']}: {entry.get('reason', '')}", err=True
             )
         elif v == "failed":
-            click.echo(f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True)
+            click.echo(
+                f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True
+            )
         if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
             worst_verdict, 0
         ):

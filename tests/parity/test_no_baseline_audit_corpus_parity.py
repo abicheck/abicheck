@@ -102,15 +102,21 @@ def test_corpus_covers_every_committed_g20_audit_case() -> None:
 @pytest.mark.parametrize(("case_name", "filename"), G20_AUDIT_FIXTURES)
 def test_no_baseline_manufactures_nothing(case_name: str, filename: str) -> None:
     """Nothing manufactured: every reported finding is genuinely
-    candidate-side, in a D3-permitted state, and never an addition/removal.
+    candidate-side, reports no observed history, and is never an
+    addition/removal.
 
     Checked against the *report*, not against the in-process partition, so
     this proves what a user actually receives rather than re-asserting an
     internal invariant through its own implementation.
-    """
-    from abicheck.policy.no_baseline_findings import NO_BASELINE_EVOLUTION_STATES
 
-    permitted = {state.value for state in NO_BASELINE_EVOLUTION_STATES}
+    ``not_evaluated`` is the only permitted evolution state, and that is
+    the whole statement -- it used to also permit ``persistent``, which was
+    reachable only because the audit ran as a self-diff and so found every
+    hygiene condition "present on both sides" of a baseline that does not
+    exist. The permitted set is spelled literally here rather than imported
+    from the implementation, so the two can disagree.
+    """
+    permitted = {"not_evaluated"}
     report = _no_baseline_report(_fixture_path(case_name, filename))
 
     assert report["no_baseline"] is True
@@ -125,13 +131,15 @@ def test_no_baseline_manufactures_nothing(case_name: str, filename: str) -> None
         evolution = finding["evolution"]
         assert evolution is None or evolution in permitted, (
             f"{case_name}: finding {finding['kind']} reports evolution "
-            f"{evolution!r}; with OLD declared_absent only "
-            f"{sorted(permitted)} are permitted (ADR-068 D3)"
+            f"{evolution!r}; with OLD declared_absent no history is "
+            f"observable, so only {sorted(permitted)} is permitted "
+            "(ADR-068 D3)"
         )
         assert evolution is not None or finding["candidate_side_enrichment"], (
             f"{case_name}: finding {finding['kind']} carries neither a "
             "cross-source evolution state nor a candidate-side-enrichment "
-            "marker, so it is a comparison finding a self-diff cannot produce"
+            "marker, so it is a comparison finding a baseline-less run "
+            "cannot produce"
         )
 
 

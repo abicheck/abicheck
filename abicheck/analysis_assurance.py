@@ -1257,7 +1257,7 @@ def _graph_completeness(
 
 def compute_analysis_assurance(
     result: DiffResult,
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
     *,
     old_pack: BuildSourcePack | None = None,
@@ -1295,6 +1295,14 @@ def compute_analysis_assurance(
     function never has to guess which of the two a caller meant.
     """
     notes: list[str] = []
+    # ``compare --no-baseline``: the baseline is declared absent (ADR-065
+    # ``declared_absent``), so every axis below that asks "do the two sides
+    # agree?" has no second side to ask about. Those axes read
+    # ``not_evaluated`` -- their own existing vocabulary for "this question
+    # was never answered" -- rather than being answered against a copy of
+    # the candidate, which would report perfect agreement about a baseline
+    # nobody supplied. The candidate-side axes (depth, pack accounting,
+    # scope resolution) are unaffected and stay fully computed.
 
     # -- not_comparable short-circuit -------------------------------------
     if result.assurance == "none":
@@ -1310,8 +1318,14 @@ def compute_analysis_assurance(
 
     # -- depth --------------------------------------------------------------
     requested_depth = result.requested_depth
-    effective_depth = result.effective_depth or _weaker_depth(
-        _effective_depth_label(old, old_pack), _effective_depth_label(new, new_pack)
+    effective_depth = result.effective_depth or (
+        _weaker_depth(
+            _effective_depth_label(old, old_pack), _effective_depth_label(new, new_pack)
+        )
+        if old is not None
+        # One side, so the run's effective depth *is* the candidate's own --
+        # not the weaker of it and a stand-in.
+        else _effective_depth_label(new, new_pack)
     )
     depth_satisfied: bool | None = None
     if requested_depth is not None:
@@ -1329,18 +1343,28 @@ def compute_analysis_assurance(
     notes.extend(fs_notes)
 
     # -- L0 binary-context status -----------------------------------------------
-    l0_context_status, l0_notes = _l0_context_status(old, new)
+    l0_context_status, l0_notes = (
+        _l0_context_status(old, new) if old is not None else ("not_evaluated", [])
+    )
     notes.extend(l0_notes)
 
     # -- header-context status ------------------------------------------------
-    header_context_status, hc_notes = _header_context_status(result, old, new)
+    header_context_status, hc_notes = (
+        _header_context_status(result, old, new)
+        if old is not None
+        else ("not_evaluated", [])
+    )
     notes.extend(hc_notes)
 
     # -- DWARF-context status --------------------------------------------------
-    dwarf_context_status, dw_notes = _dwarf_context_status(old, new)
+    dwarf_context_status, dw_notes = (
+        _dwarf_context_status(old, new) if old is not None else ("not_evaluated", [])
+    )
     notes.extend(dw_notes)
 
-    layout_unverified_detectors = _layout_unverified_detectors(old, new)  # E-S1
+    layout_unverified_detectors = (  # E-S1
+        _layout_unverified_detectors(old, new) if old is not None else ()
+    )
     if layout_unverified_detectors:
         notes.append("layout unverified: " + ", ".join(layout_unverified_detectors))
 
@@ -1349,8 +1373,10 @@ def compute_analysis_assurance(
     notes.extend(l3_notes)
 
     # -- schema-staleness status -------------------------------------------
-    schema_staleness_status, staleness_notes = _schema_staleness_status(
-        old, new, same_content=same_content
+    schema_staleness_status, staleness_notes = (
+        _schema_staleness_status(old, new, same_content=same_content)
+        if old is not None
+        else ("not_evaluated", [])
     )
     notes.extend(staleness_notes)
 
