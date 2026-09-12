@@ -276,7 +276,7 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "member selection applies to a directory/package operand",
     ),
     "output_dir": (
-        "-o <format>=<directory>/",
+        "--output <format>=<directory>/",
         "a per-component export applies to the release fan-out; name a file "
         "(or '-') for a single artifact",
     ),

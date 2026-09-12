@@ -67,7 +67,7 @@ def _stub_abicheck(
     stderr: str = "",
     to_stdout: bool = False,
 ) -> Path:
-    """A fake ``abicheck`` on PATH: writes *report* to ``-o``/``--write``.
+    """A fake ``abicheck`` on PATH: writes *report* to every ``-o`` export.
 
     Mirrors what the real CLI does for the two things the mapping reads -- the
     JSON report and the stderr notice -- and nothing else. *to_stdout* is the
@@ -86,8 +86,10 @@ def _stub_abicheck(
         "#!/usr/bin/env bash\n"
         "prev=''\n"
         'for arg in "$@"; do\n'
-        '  if [[ "$prev" == "-o" ]]; then\n'
-        f'    cp "{payload}" "$arg"\n'
+        # `-o` carries FORMAT=DESTINATION (plan slice 7m); a `-`
+        # destination is stdout and writes no file.
+        '  if [[ "$prev" == "-o" && "$arg" == *=* && "$arg" != *=- ]]; then\n'
+        f'    cp "{payload}" "${{arg#*=}}"\n'
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"
@@ -437,7 +439,7 @@ class TestCompareTellsTheTwoAxesApart:
         if to_file:
             body += (
                 "prev=''\nfor arg in \"$@\"; do\n"
-                '  if [[ "$prev" == "-o" ]]; then printf %s '
+                '  if [[ "$prev" == "-o" && "$arg" == *=* && "$arg" != *=- ]]; then printf %s '
                 + json.dumps(text)
                 + ' > "$arg"; fi\n  prev="$arg"\ndone\n'
             )
@@ -720,8 +722,8 @@ class TestADemotedBreakStaysVisible:
                 "#!/usr/bin/env bash\n"
                 "prev=''\n"
                 'for arg in "$@"; do\n'
-                '  if [[ "$prev" == "-o" ]]; then\n'
-                f"    cat > \"$arg\" <<'REPORT'\n{text}\nREPORT\n"
+                '  if [[ "$prev" == "-o" && "$arg" == *=* && "$arg" != *=- ]]; then\n'
+                f"    cat > \"${{arg#*=}}\" <<'REPORT'\n{text}\nREPORT\n"
                 "  fi\n"
                 '  prev="$arg"\n'
                 "done\n"

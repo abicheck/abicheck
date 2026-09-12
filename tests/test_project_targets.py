@@ -1940,7 +1940,7 @@ def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
             "validate",
             str(config_path),
             "-o",
-            f"markdown={out_path}",
+            f"text={out_path}",
         ],
     )
     assert result.exit_code == 0, result.output

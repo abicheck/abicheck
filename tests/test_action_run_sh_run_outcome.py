@@ -58,8 +58,10 @@ def _stub_abicheck(tmp_path: Path, *, exit_code: int, report: dict) -> Path:
         "#!/usr/bin/env bash\n"
         "prev=''\n"
         'for arg in "$@"; do\n'
-        '  if [[ "$prev" == "-o" ]]; then\n'
-        f'    cp "{payload}" "$arg"\n'
+        # `-o` carries FORMAT=DESTINATION (plan slice 7m); a `-`
+        # destination is stdout and writes no file.
+        '  if [[ "$prev" == "-o" && "$arg" == *=* && "$arg" != *=- ]]; then\n'
+        f'    cp "{payload}" "${{arg#*=}}"\n'
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"

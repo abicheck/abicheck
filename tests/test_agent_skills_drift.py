@@ -488,7 +488,7 @@ def test_the_drift_check_actually_has_teeth():
     assert _required_argument_names(COMMAND_OBJECTS[("aggregate",)]) == ["reports_dir"]
     assert _operands(
         COMMAND_OBJECTS[("aggregate",)],
-        "aggregate --manifest t.json --format json reports/".split(),
+        "aggregate --manifest t.json -o json=- reports/".split(),
     ) == ["aggregate", "reports/"]
 
 

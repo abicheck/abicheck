@@ -629,9 +629,7 @@ def _embed_inline_source_side(
     "--view", "view", multiple=True, callback=_validate_view, expose_value=True,
     metavar="TOKEN",
     help="Repeatable rendering selector (ADR-068 D4): never changes the "
-         "verdict, findings, or exit code. Replaces --report-mode/"
-         "--show-only/--demangle/--no-demangle/--explain-patterns/"
-         "--show-filtered/--audit-suppressions. TOKEN: "
+         "verdict, findings, or exit code. TOKEN: "
          "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
          "'show=<tokens>' (severity/element/action filter, same vocabulary "
          "as the old --show-only, repeatable to OR groups together); "

@@ -352,7 +352,9 @@ class TestSetOnlyFlagWarnings:
             # -- the warning must name the surviving config key, not the
             # removed flag (Codex review).
             ({"dso_only": True}, "release.dso_only"),
-            ({"output_dir": Path("out")}, "--output-dir"),
+            # A per-component export is *rejected*, not warned about, since
+            # plan slice 7m -- see
+            # `test_a_directory_export_is_rejected_rather_than_warned` below.
             ({"select": ("libfoo.so",)}, "--select"),
             ({"select_required": ("libfoo.so",)}, "--select-required"),
         ],
@@ -363,6 +365,22 @@ class TestSetOnlyFlagWarnings:
         out = self._warn(capsys, **kwargs)
         assert flag in out
         assert "only apply to directory/package" in out
+
+    def test_a_directory_export_is_rejected_rather_than_warned(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The one member of this group that is not a warning.
+
+        Plan slice 7m: as a knob (`--output-dir`) it promised nothing, so
+        warning and ignoring lost nothing. As a destination inside the one
+        export request it promises an *artifact*, and quietly not producing
+        one is what plan §Non-goals forbids -- so it is a usage error, and
+        the message names the operand shape that would make it meaningful.
+        """
+        import click
+
+        with pytest.raises(click.UsageError, match="per-component export"):
+            self._warn(capsys, output_dir=Path("out"))
 
     def test_several_flags_are_listed_together_in_one_warning(
         self, capsys: pytest.CaptureFixture[str]

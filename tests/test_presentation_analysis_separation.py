@@ -900,12 +900,18 @@ def _run_permutation(
 ) -> tuple[int, dict[str, Any]]:
     """Run one point of the space; return ``(exit_code, canonical facts)``.
 
-    Every case adds its own ``--write json=<path>`` -- itself one of the
-    axes under test, and documented to always render the full, unfiltered
-    report -- so the canonical block can be read back even for a
-    ``--format`` (html/junit/oneline/...) whose primary output is not
-    structured. The extra ``--write`` artifacts on top of it are what vary
-    the ``--write`` axis itself.
+    Every case adds its own ``-o json=<path>`` export -- itself one of the
+    axes under test -- so the canonical block can be read back even for a
+    format (html/junit/oneline/...) whose own output is not structured. The
+    extra exports on top of it are what vary the export-set axis itself.
+
+    Plan slice 7m note: that json export is no longer *contracted
+    unfiltered*. Under the one repeatable ``-o FORMAT=DESTINATION`` a
+    display selector means the same thing for every export (there is no
+    "secondary" to exempt), so a ``--view show=`` case reaches here with a
+    narrowed ``changes`` list -- which is why the show axis is asserted
+    through its own disclosure below rather than against the unfiltered
+    oracle.
     """
     fmt, mode, demangle, patterns, filtered, suppressions, show, extra = case
     extractor = out_dir / "canonical.json"
@@ -931,12 +937,54 @@ def _run_permutation(
         if optional is not None:
             args += ["--view", optional]
     for i, extra_fmt in enumerate(extra):
-        args += ["--write", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
+        args += ["-o", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 4, (case, result.output, result.exception)
-    return result.exit_code, _facts_from_report(
-        json.loads(extractor.read_text(encoding="utf-8"))
-    )
+    payload = json.loads(extractor.read_text(encoding="utf-8"))
+    return result.exit_code, _facts_from_report(payload)
+
+
+def _assert_agrees_with_oracle(
+    case: tuple[Any, ...], facts: dict[str, Any], oracle: dict[str, Any], payload_path: Path
+) -> None:
+    """Check one permutation's canonical facts against the engine oracle.
+
+    Every axis but one is a pure presentation choice, so the facts must
+    equal the oracle outright. ``--view show=`` is the exception by
+    definition -- it is a *display filter*, and since plan slice 7m it
+    filters every export uniformly rather than exempting a "secondary" one.
+    For those points the invariant is stated as disclosure rather than
+    equality: the document names the filter it applied and reports the true
+    pre-filter totals, so the full result stays recoverable from the
+    filtered document itself. Anything the filter cannot touch (the
+    verdict, the suppression and out-of-surface ledgers, the assurance
+    status) must still equal the oracle exactly.
+    """
+    mode, show = case[1], case[6]
+    if show is None:
+        assert facts == oracle, case
+        return
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    if mode == "full":
+        # The shared document states the filter it applied and the totals
+        # over the true pre-filter pool. `leaf`/`impact`/`root-cause` are
+        # their own documents (ADR-061 Phase 2's own scope decision) and
+        # carry their own shapes, so the disclosure is required where it is
+        # defined rather than asserted everywhere by coincidence.
+        assert payload["show_only_filter"] == show.removeprefix("show="), case
+        assert (
+            payload["filtered_summary"]["total_changes"] == facts["changes_count"]
+        ), case
+    for unfilterable in (
+        "verdict",
+        "suppressed_count",
+        "out_of_surface_count",
+        "assurance_status",
+    ):
+        assert facts[unfilterable] == oracle[unfilterable], (case, unfilterable)
+    # A filter narrows; it never invents. Every displayed change is one the
+    # engine really produced.
+    assert set(facts["changes"]) <= set(oracle["changes"]), case
 
 
 class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
@@ -979,7 +1027,9 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         out_dir.mkdir(exist_ok=True)
         for case in rng.sample(_permutations(), 150):
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
-            assert facts == oracle, case
+            _assert_agrees_with_oracle(
+                case, facts, oracle, out_dir / "canonical.json"
+            )
             assert exit_code == 4, case
 
     @pytest.mark.slow
@@ -995,5 +1045,7 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         out_dir.mkdir(exist_ok=True)
         for case in _permutations():
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
-            assert facts == oracle, case
+            _assert_agrees_with_oracle(
+                case, facts, oracle, out_dir / "canonical.json"
+            )
             assert exit_code == 4, case

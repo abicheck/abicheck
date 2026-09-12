@@ -160,15 +160,15 @@ class TestReleaseMarkdownCarriesSymbolNames:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4, out
         assert "additional findings omitted" in out
-        # The note now *does* point at `--format json`, and the sibling test
+        # The note now *does* point at a json export, and the sibling test
         # below proves that advice is true rather than merely stated. Codex
         # review, PR #1016 had banned exactly this wording, correctly at the
         # time: the release JSON then carried the identical
         # `_MAX_RELEASE_FINDINGS_PER_LIBRARY`-capped projection, so a reader
         # following it met the same truncated list again. The cap is a
-        # render-time presentation choice now, so the machine document is
-        # complete unless the run asked otherwise.
-        assert "`--format json` carries the complete list" in out
+        # render-time presentation choice now, and since plan slice 7m a
+        # machine export can no longer be truncated at all.
+        assert "`-o json=...` carries the complete list" in out
 
     def test_truncation_note_matches_the_actual_json_output(
         self, tmp_path: Path
