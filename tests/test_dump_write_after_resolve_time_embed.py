@@ -176,6 +176,17 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
             sources=tmp_path,
             build_info=compile_db,
             compile=CompileContext(frontend="clang"),
+            # Deliberately the NON-default value. Every front end now
+            # defaults `include_dependencies` to False (PR #1258), so a
+            # request that omits it reaches `_write_snapshot_output` already
+            # `filtered` -- and then the "did `resolve_dependency_scope`
+            # run?" contrast below compares `filtered` with `filtered` and
+            # holds no matter what that step does, which is exactly the
+            # vacuous differential AGENTS.md's "a differential test must
+            # prove both of its configurations actually ran" warns about.
+            # Asking for the unfiltered surface here keeps the two states
+            # genuinely distinct, so the flip is still real evidence.
+            include_dependencies=True,
         ),
         depth="source",
     )
@@ -194,7 +205,9 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     # (that step is `_write_snapshot_output`'s own, dump-CLI-only concern —
     # see the module docstring) -- ground truth for the assertion below,
     # so a flip from "full" is genuine evidence that step ran on this
-    # already-embedded snapshot, not a value it already carried in.
+    # already-embedded snapshot, not a value it already carried in. This
+    # holds only because the request above asks for the unfiltered surface
+    # explicitly; see the comment there for why that matters.
     assert snap.dependency_scope == "full"
 
     import abicheck.cli_buildsource as cli_buildsource
