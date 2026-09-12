@@ -157,10 +157,18 @@ Two predicates close that without weakening anything above:
   or stdout; asking for json *is* the request) or a caller-supplied
   `extra-args --write json=PATH`. It does not include the internal sidecar.
   `no_result` is the generalization of `empty`: a document can parse, be
-  non-empty, and still carry no result (`{"error": "write interrupted"}`, a
-  lone `report_schema_version`), which every verdict reader answers empty for —
-  so validity requires one of `report_query.py`'s `RESULT_KEYS` at the root or
-  under `diff`, not merely a non-empty mapping.
+  non-empty, and still carry no verdict anything can read (`{"error": "write
+  interrupted"}`, a lone `report_schema_version`, `{"findings": null}`,
+  `{"no_baseline": true}`). **Validity asks whether a verdict is readable, not
+  whether a key is present.** A presence-only recognizer was tried and was
+  wrong: admitting a document is exactly what masks a missing result, since
+  admission is what licenses the COMPATIBLE fallthrough. `report_query.py`'s
+  `_carries_a_result` names each verdict source instead — and note that three
+  of the four real emitter shapes carry `verdict: null` by design
+  (not-comparable pairs it with `reason`, audit-only with its
+  `findings`/`suppressed_findings` arrays, and a release envelope may rely on
+  `libraries`), so a naive "non-empty string verdict" rule fails working runs.
+  Both directions are pinned in `TestAReadableVerdictSourceIsRequired`.
 - `_assurance_axis_contradictory` catches the one absence that *is* provably
   wrong: an `analysis_assurance` block on a schema ≥ 2.40 with no
   `analysis_assurance_exit_contribution` beside it. `reporter.py` emits those

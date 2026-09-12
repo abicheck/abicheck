@@ -695,71 +695,92 @@ class TestScopeWhereCannotBreakOutOfItsMarkdownSpan:
         assert answer, f"{name!r}: flattened to nothing instead of a placeholder"
 
 
-class TestARecognizedResultIsRequired:
-    """ "Parsed" is not "carries a result" -- and only the second licenses a verdict.
+class TestAReadableVerdictSourceIsRequired:
+    """Validity means "a verdict can be read from this", not "a key is present".
 
-    ``classify_document`` used to answer ``ok`` for any non-empty mapping, so
-    ``{"error": "write interrupted"}`` was treated as a readable report: every
-    verdict reader then answered empty and the caller fell back to a clean
-    claim. Exactly the defect the ``empty`` token was added for, one step up
-    (Codex review, P2).
+    An earlier version of this class pinned the wrong invariant: it asserted
+    that each of a broad set of keys, present with a ``null`` value, made a
+    document valid. That encoded a presence-only recognizer I had defended on
+    the reasoning that extra recognizers "can only ever admit a document --
+    they cannot mask a missing result". The reasoning was wrong, and Codex
+    review showed it: admitting a document is exactly what masks a missing
+    result, because admission is what licenses the COMPATIBLE fallthrough in
+    ``run.sh``. ``{"findings": null}`` and ``{"no_baseline": true}`` both passed
+    and published a clean verdict.
 
-    The risk here runs the other way too -- a missing recognizer fails a
-    *working* run -- so both directions are pinned.
+    So the rules now name verdict *sources* and require them to be readable.
+    Both directions matter: three real shapes carry ``verdict: null`` by
+    design, so a naive "non-empty string verdict" rule would fail working runs.
     """
 
-    @pytest.mark.parametrize(
-        "key",
-        sorted(rq.RESULT_KEYS),
-    )
-    def test_any_single_recognized_key_makes_a_document_a_result(
-        self, tmp_path: Path, key: str
-    ) -> None:
-        # Presence alone, with a null value: `verdict` is legitimately `null` on
-        # an audit-only or not-comparable report, so keying on truthiness would
-        # reject two real shapes.
-        _, out = _ask(tmp_path, {key: None}, "report_validity")
-        assert out.strip() == rq.VALIDITY_OK, f"{key}: rejected a real report shape"
-
-    @pytest.mark.parametrize("key", sorted(rq.RESULT_KEYS))
-    def test_a_recognized_key_under_diff_also_counts(
-        self, tmp_path: Path, key: str
-    ) -> None:
-        # The nested shape reaches every other query through `_either`; the
-        # recognizer has to look in the same two places or it would reject a
-        # document those queries can read perfectly well.
-        _, out = _ask(tmp_path, {"diff": {key: None}}, "report_validity")
-        assert out.strip() == rq.VALIDITY_OK, f"diff.{key}: rejected"
-
-    @pytest.mark.parametrize(
-        "document",
+    #: Every shape a real emitter produces, reduced to the keys that make it a
+    #: result. Each must classify `ok`, or the corresponding real run fails.
+    REAL_SHAPES = (
+        ("two-sided compare", {"verdict": "COMPATIBLE"}),
+        ("two-sided, no-change", {"verdict": "NO_CHANGE"}),
         (
-            {"error": "write interrupted"},
-            {"report_schema_version": "4.4"},
-            {"name": "abicheck"},
-            {"diff": {"note": "x"}},
-            {"diff": "not even a mapping"},
-            {"unrelated": {"verdict": "COMPATIBLE"}},
+            "run_outcome only (ADR-063 D6 canonical source)",
+            {"run_outcome": {"compatibility": "COMPATIBLE"}},
         ),
+        (
+            "not-comparable (null verdict beside a reason)",
+            {"verdict": None, "reason": {"kind": "scope", "message": "x"}},
+        ),
+        (
+            "audit-only, findings present",
+            {"no_baseline": True, "verdict": None, "findings": []},
+        ),
+        (
+            "audit-only, suppressed only",
+            {"no_baseline": True, "verdict": None, "suppressed_findings": []},
+        ),
+        ("release envelope", {"verdict": "NO_CHANGE", "libraries": []}),
+        (
+            "release envelope, sentinel verdict",
+            {"libraries": [{"verdict": "BREAKING"}]},
+        ),
+        ("nested shape", {"diff": {"verdict": "COMPATIBLE"}}),
     )
-    def test_a_resultless_document_is_not_ok(
-        self, tmp_path: Path, document: dict
+
+    @pytest.mark.parametrize(
+        "label,document", REAL_SHAPES, ids=[s[0] for s in REAL_SHAPES]
+    )
+    def test_every_real_emitter_shape_is_ok(
+        self, tmp_path: Path, label: str, document: dict
     ) -> None:
         _, out = _ask(tmp_path, document, "report_validity")
-        assert out.strip() == rq.VALIDITY_NO_RESULT, f"{document}"
+        assert out.strip() == rq.VALIDITY_OK, f"{label}: rejected a real report shape"
 
-    def test_a_nested_verdict_one_level_too_deep_is_not_a_result(
-        self, tmp_path: Path
+    #: Documents that parse, are non-empty, and still carry no readable verdict.
+    #: The last two are Codex's own counterexamples to the presence-only rule.
+    RESULTLESS = (
+        ("error object from a wrapper", {"error": "write interrupted"}),
+        ("schema version alone", {"report_schema_version": "4.4"}),
+        ("unrelated object", {"name": "abicheck", "version": "1.0"}),
+        ("nested but resultless", {"diff": {"note": "x"}}),
+        ("diff not a mapping", {"diff": "not even a mapping"}),
+        ("verdict buried a level too deep", {"wrapper": {"verdict": "COMPATIBLE"}}),
+        ("null findings, no verdict", {"findings": None}),
+        ("no_baseline with no findings array", {"no_baseline": True}),
+        ("empty-string verdict", {"verdict": ""}),
+        ("null verdict with no reason and no audit", {"verdict": None}),
+        ("severity block alone", {"severity": {"exit_code": 0}}),
+        ("exit block alone", {"exit": {"code": 0}}),
+        (
+            "run_outcome with a null compatibility",
+            {"run_outcome": {"compatibility": None}},
+        ),
+        ("libraries not a list", {"libraries": {"liba": {}}}),
+    )
+
+    @pytest.mark.parametrize(
+        "label,document", RESULTLESS, ids=[s[0] for s in RESULTLESS]
+    )
+    def test_a_document_with_no_readable_verdict_is_not_ok(
+        self, tmp_path: Path, label: str, document: dict
     ) -> None:
-        # The recognizer must not be a recursive search: a `verdict` buried
-        # under an arbitrary key is not the report's own verdict, and treating
-        # it as one would admit any document that happens to mention the word.
-        _, out = _ask(
-            tmp_path,
-            {"wrapper": {"diff": {"verdict": "COMPATIBLE"}}},
-            "report_validity",
-        )
-        assert out.strip() == rq.VALIDITY_NO_RESULT
+        _, out = _ask(tmp_path, document, "report_validity")
+        assert out.strip() == rq.VALIDITY_NO_RESULT, f"{label}"
 
     def test_a_resultless_document_still_answers_axis_queries_unchanged(
         self, tmp_path: Path

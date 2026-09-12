@@ -45,9 +45,11 @@ def _run_compare(
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     stub = fake_bin / "abicheck"
-    payload = json.dumps(stub_report if stub_report is not None else {"verdict": "COMPATIBLE"})
+    payload = json.dumps(
+        stub_report if stub_report is not None else {"verdict": "COMPATIBLE"}
+    )
     stub.write_text(
-        "#!/usr/bin/env bash\n" f"cat <<'STUBJSON'\n{payload}\nSTUBJSON\n" "exit 0\n",
+        f"#!/usr/bin/env bash\ncat <<'STUBJSON'\n{payload}\nSTUBJSON\nexit 0\n",
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -68,7 +70,11 @@ def _run_compare(
     }
     return subprocess.run(
         [bash_executable(), str(RUN_SH)],
-        capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
     )
 
 
@@ -110,7 +116,9 @@ def _emitted_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
     every sigil unconditionally would make those assertions fail on
     unrelated, correct output."""
     lines = (result.stdout + result.stderr).splitlines()
-    return [ln for ln in lines if ln.startswith(("::error ", "::warning ", "::notice "))]
+    return [
+        ln for ln in lines if ln.startswith(("::error ", "::warning ", "::notice "))
+    ]
 
 
 def _has_any_error_command(result: subprocess.CompletedProcess[str]) -> bool:
@@ -160,9 +168,8 @@ class TestAnnotateRendererReadsThePersistedReport:
             stub_report=_REPORT_WITH_ANNOTATIONS,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert (
-            "::notice title=ABI Addition::function bar added"
-            in _emitted_lines(result)
+        assert "::notice title=ABI Addition::function bar added" in _emitted_lines(
+            result
         )
 
     def test_annotate_false_emits_nothing(self, tmp_path: Path) -> None:
@@ -242,7 +249,9 @@ class TestAnnotateRendererReadsThePersistedReport:
         assert result.returncode == 0, result.stdout + result.stderr
         assert _emitted_lines(result) == []
 
-    def test_a_malformed_annotation_string_is_never_echoed(self, tmp_path: Path) -> None:
+    def test_a_malformed_annotation_string_is_never_echoed(
+        self, tmp_path: Path
+    ) -> None:
         """Codex review, fresh evidence: if `_json_report_src` ever resolves
         to a report this invocation didn't itself produce (e.g. a stale
         --output-file the abicheck run failed to overwrite), a crafted
@@ -381,10 +390,10 @@ class TestAnnotateRendererReadsThePersistedReport:
         payload = json.dumps(_REPORT_WITH_ANNOTATIONS)
         stub.write_text(
             "#!/usr/bin/env bash\n"
-            "for arg in \"$@\"; do\n"
+            'for arg in "$@"; do\n'
             '  case "$arg" in\n'
             "    --write) _want_next=1; continue ;;\n"
-            "    json=*) if [[ \"${_want_next:-0}\" == 1 ]]; then\n"
+            '    json=*) if [[ "${_want_next:-0}" == 1 ]]; then\n'
             f"      cat > \"${{arg#json=}}\" <<'STUBJSON'\n{payload}\nSTUBJSON\n"
             "    fi ;;\n"
             "  esac\n"
@@ -413,7 +422,11 @@ class TestAnnotateRendererReadsThePersistedReport:
         }
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
         )
         assert write_path.is_file(), result.stdout + result.stderr
         lines = _emitted_lines(result)
@@ -471,7 +484,11 @@ class TestAnnotateRendererReadsThePersistedReport:
         }
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
         )
         # Not deleted, not modified -- the non-destructive half of the fix.
         assert write_path.is_file(), "the pre-existing file must survive"
@@ -500,17 +517,21 @@ class TestRealAbicheckAnnotationsReachTheActionLog:
 
         def _fn(name: str, mangled: str) -> Function:
             return Function(
-                name=name, mangled=mangled, return_type="void",
+                name=name,
+                mangled=mangled,
+                return_type="void",
                 visibility=Visibility.PUBLIC,
             )
 
         old_snap = AbiSnapshot(
-            library="libfoo.so", version="1.0",
+            library="libfoo.so",
+            version="1.0",
             functions=[_fn("foo", "_Z3foov"), _fn("bar", "_Z3barv")],
             from_headers=True,
         )
         new_snap = AbiSnapshot(
-            library="libfoo.so", version="2.0",
+            library="libfoo.so",
+            version="2.0",
             functions=[_fn("foo", "_Z3foov")],
             from_headers=True,
         )
@@ -534,7 +555,11 @@ class TestRealAbicheckAnnotationsReachTheActionLog:
         }
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
         )
         combined = result.stdout + result.stderr
         assert "::error" in combined, combined
@@ -559,9 +584,24 @@ class TestAnnotateNotSupportedOnAuditOnlyShape:
         fake_bin = tmp_path / "fakebin"
         fake_bin.mkdir()
         stub = fake_bin / "abicheck"
-        payload = json.dumps({"findings": []})
+        # The real audit-only document shape, not just a bare `findings` array:
+        # `report/no_baseline.py` always emits `no_baseline: true` and a null
+        # top-level `verdict` beside the findings. The shorter fixture matched
+        # no real abicheck output, and `run.sh` now reports a requested JSON
+        # report carrying no readable verdict as REPORT_UNREADABLE -- so it
+        # failed this test for a reason unrelated to annotate. Being the shape
+        # this test is named for also makes it a stronger fixture.
+        payload = json.dumps(
+            {
+                "audit_report_schema_version": "1.5",
+                "no_baseline": True,
+                "verdict": None,
+                "findings": [],
+                "suppressed_findings": [],
+            }
+        )
         stub.write_text(
-            "#!/usr/bin/env bash\n" f"cat <<'STUBJSON'\n{payload}\nSTUBJSON\n" "exit 0\n",
+            f"#!/usr/bin/env bash\ncat <<'STUBJSON'\n{payload}\nSTUBJSON\nexit 0\n",
             encoding="utf-8",
         )
         stub.chmod(0o755)
@@ -581,8 +621,14 @@ class TestAnnotateNotSupportedOnAuditOnlyShape:
         }
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
         )
         combined = result.stdout + result.stderr
-        assert "annotate is not supported for compare's audit-only shape" in combined, combined
+        assert "annotate is not supported for compare's audit-only shape" in combined, (
+            combined
+        )
         assert not _has_any_error_command(result), combined

@@ -144,6 +144,10 @@ UNUSABLE_PAYLOADS = (
     ("json null", b"null"),
     ("empty object", b"{}"),
     ("parsed but resultless", b'{"error": "write interrupted"}'),
+    # Codex's counterexamples to the presence-only recognizer: both parse, both
+    # are non-empty, and neither carries a verdict anything can read.
+    ("null findings, no verdict", b'{"findings": null}'),
+    ("no_baseline with no findings array", b'{"no_baseline": true}'),
 )
 
 

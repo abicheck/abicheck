@@ -106,33 +106,64 @@ VALIDITY_EMPTY = "empty"
 #: up (Codex review, P2).
 VALIDITY_NO_RESULT = "no_result"
 
-#: Keys whose *presence* (value irrelevant -- ``verdict`` is legitimately
-#: ``null`` on an audit-only or not-comparable report) marks a document as
-#: carrying an abicheck result. Checked at the root and under ``diff``.
+#: What a *verdict* can actually be read from -- the real question validity
+#: has to answer, replacing an earlier presence-only key set.
 #:
-#: Deliberately broad rather than minimal. Every emitter writes a top-level
-#: ``verdict`` (``reporter.py``, ``report/no_baseline.py``,
-#: ``report/not_comparable.py``, the release envelope), so that one key would
-#: do -- but the cost of being wrong is asymmetric. A missing recognizer fails
-#: a *working* run, which is the direction that has already produced one false
-#: positive in this file's history (inferring a contradictory assurance pair
-#: from the schema version alone). Extra recognizers only ever admit a
-#: document; they cannot mask a missing result, because a document carrying
-#: any of these is report-shaped by construction.
-RESULT_KEYS = frozenset(
-    {
-        "verdict",
-        "run_outcome",
-        "no_baseline",
-        "libraries",
-        "exit_axes",
-        "exit",
-        "severity",
-        "findings",
-        "changes",
-        "reason",
-    }
-)
+#: That earlier version accepted any document carrying one of a broad list of
+#: keys, on the reasoning that "extra recognizers can only ever admit a
+#: document -- they cannot mask a missing result". That reasoning was wrong,
+#: and Codex review caught it: admitting a document is *precisely* what masks a
+#: missing result, because admission is what licenses the COMPATIBLE
+#: fallthrough in `run.sh`. ``{"findings": null}`` and ``{"no_baseline": true}``
+#: both passed and published a clean verdict.
+#:
+#: So each rule below names a verdict source and requires it to be *readable*,
+#: not merely present. The four shapes every emitter actually produces are
+#: covered, and three of them legitimately carry ``verdict: null`` -- which is
+#: why "non-empty string verdict" alone would fail working runs:
+#:
+#: * a two-sided ``compare`` report: ``verdict`` is a non-empty string
+#:   (``reporter.py``), as is a release envelope's own sentinel;
+#: * a not-comparable report: ``verdict`` is ``null`` beside a ``reason``
+#:   object (``report/not_comparable.py``);
+#: * an audit-only report: ``verdict`` is ``null``, and the audit's own result
+#:   is its ``findings``/``suppressed_findings`` arrays
+#:   (``report/no_baseline.py``, which always emits both as lists);
+#: * a release envelope: a ``libraries`` array.
+#:
+#: ``run_outcome.compatibility`` is accepted as a verdict source in its own
+#: right (ADR-063 D6 makes it the canonical one, and `_report_compat_verdict`
+#: prefers it), so a document carrying that and no legacy ``verdict`` still
+#: reads.
+
+
+def _is_nonempty_str(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _carries_a_result(document: dict[str, Any]) -> bool:
+    """Whether a verdict can actually be read out of *document*.
+
+    See the commentary above for each rule's emitter and for why presence
+    alone is not enough.
+    """
+    for source in (document, _nested(document)):
+        if _is_nonempty_str(source.get("verdict")):
+            return True
+        outcome = source.get("run_outcome")
+        if isinstance(outcome, dict) and _is_nonempty_str(outcome.get("compatibility")):
+            return True
+    # The three shapes whose `verdict` is null by design. Checked at the root
+    # only: each is a whole-document shape, not something nested under `diff`.
+    if "verdict" in document and isinstance(document.get("reason"), dict):
+        return True
+    if document.get("no_baseline") is True and any(
+        isinstance(document.get(key), list)
+        for key in ("findings", "suppressed_findings")
+    ):
+        return True
+    return isinstance(document.get("libraries"), list)
+
 
 #: Per *version sequence*, the first version whose documents owe an
 #: assurance contribution alongside an assurance block.
@@ -222,17 +253,6 @@ def classify_document(path: str) -> tuple[str, dict[str, Any] | None]:
         # "no result" fact travels through `report_validity` alone.
         return VALIDITY_NO_RESULT, document
     return VALIDITY_OK, document
-
-
-def _carries_a_result(document: dict[str, Any]) -> bool:
-    """Whether *document* holds an abicheck result at all.
-
-    Presence-only, at the root or under ``diff`` -- see :data:`RESULT_KEYS` for
-    why the recognizer set is broad rather than minimal.
-    """
-    if RESULT_KEYS & document.keys():
-        return True
-    return bool(RESULT_KEYS & _nested(document).keys())
 
 
 def _nested(report: dict[str, Any]) -> dict[str, Any]:
