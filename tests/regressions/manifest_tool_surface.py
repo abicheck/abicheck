@@ -246,6 +246,18 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # the tombstones the same PR added. Fixed once in the shared
             # `_warn`/`_fail` helpers.
             "tests/test_action_validate_inputs.py",
+            # PR #1240: the same class one layer out -- the *workflow*
+            # rather than a script it calls. Attacker-controlled free text
+            # (a PR title/body/head ref, an issue or comment body) is
+            # substituted by `${{ }}` before the shell parses the script,
+            # so it must reach a `run:` block only as an `env:` value.
+            # Both existing sites already did that, correctly and with a
+            # comment saying why, but nothing enforced it: the next
+            # workflow to add such a step had no guard. Pairs a repo-wide
+            # structural scan with a real execution of the real step
+            # against hostile payloads, plus a control proving the harness
+            # can detect an injection at all.
+            "tests/test_workflow_untrusted_text_interpolation.py",
         ),
         public_surfaces=("github-action",),
         axes={
