@@ -56,6 +56,7 @@ from .detector_registry import registry
 from .diff_helpers import make_change
 from .model.build_mode_facts import StdlibFamily
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import in_public_surface
 from .policy.classification import Verdict
 
 if TYPE_CHECKING:
@@ -145,7 +146,7 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     it. There is no pairwise comparison here for
     :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
     """
-    from .model import RecordType, Visibility, resolved_fact_value
+    from .model import RecordType, resolved_fact_value
     from .surface import _type_identifiers
 
     record_by_name: dict[str, RecordType] = {rec.name: rec for rec in snap.types}
@@ -160,13 +161,13 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
 
     queue: list[str] = []
     for fn in snap.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         _add_type(queue, fn.return_type)
         for param in fn.params:
             _add_type(queue, getattr(param, "type", None))
     for var in snap.variables:
-        if var.visibility == Visibility.PUBLIC:
+        if in_public_surface(var):
             _add_type(queue, var.type)
 
     public_by_value: set[str] = set()

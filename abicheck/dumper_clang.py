@@ -142,6 +142,7 @@ from .extract.headers.clang.templates import (
     _specialization_spelling,
 )
 from .extract.headers.scope_segments import record_segment as _record_scope_segment
+from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
     AccessLevel,
     EnumType,
@@ -1352,6 +1353,18 @@ class _ClangAstParser:
                     mangled=mangled,
                     type=type_name,
                     visibility=self._visibility(mangled, name),
+                    # See model/surface_facts.py: the export lookup is one
+                    # fact, the header declaration another. ``None`` for a
+                    # header-only dump -- no export table was consulted.
+                    **header_ast_surface_facts(
+                        exported=(
+                            None
+                            if self._no_binary_evidence
+                            else self._visibility(mangled, name)
+                            in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+                        ),
+                        producer="clang",
+                    ),
                     is_const=bool(node.get("constexpr"))
                     or bool(re.search(r"\bconst\b", type_name)),
                     source_location=self._source_location(entry),

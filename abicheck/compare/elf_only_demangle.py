@@ -32,6 +32,7 @@ from collections.abc import Collection, Mapping
 
 from ..demangle import demangle, demangle_batch
 from ..model import Function, Variable, Visibility
+from ..model.surface_facts import is_export_table_only_record
 
 
 def elf_only_demangled_name(mangled: str, visibility: Visibility) -> str | None:
@@ -95,6 +96,6 @@ def prewarm_elf_only_demangling(
         [
             m
             for m, decl in old_map.items()
-            if decl.visibility == Visibility.ELF_ONLY and m not in new_keys
+            if is_export_table_only_record(decl) and m not in new_keys
         ]
     )

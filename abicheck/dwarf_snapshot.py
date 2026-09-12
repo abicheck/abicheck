@@ -53,6 +53,7 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract import dwarf_vtable_completeness as _dvc
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
+    admit_subprogram as _admit_subprogram,
     default_member_access_for_tag as _default_member_access_for_tag,
     format_qualified_type_name as _format_qualified_type_name,
     local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
@@ -65,6 +66,7 @@ from .extract.dwarf_scope import (
     record_scope_segment as _record_scope_segment,
     variable_entity_id as _dwarf_variable_entity_id,
 )
+from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -506,10 +508,10 @@ class _DwarfSnapshotBuilder:
         mangled = linkage_name or name
         qualified_name = f"{scope}::{name}" if scope else name
 
-        # Deleted functions intentionally bypass the exported-symbol check below
-        # so a public API that becomes ``= delete`` is still observable. Do not
-        # let that bypass re-admit transitive stdlib/runtime subprograms into a
-        # non-runtime library's public surface.
+        # Deleted functions intentionally bypass the exported-symbol check so a
+        # `= delete`d public API stays observable -- but that bypass must not
+        # re-admit transitive stdlib/runtime subprograms into a non-runtime
+        # library's public surface.
         if not self._is_abi_relevant_export(
             mangled
         ) or not self._is_abi_relevant_export(qualified_name):
@@ -525,23 +527,14 @@ class _DwarfSnapshotBuilder:
         if _attr_bool(die, "DW_AT_declaration") and not is_deleted:
             return
 
-        # Visibility: must be in ELF exported symbols.
-        # BUT: deleted functions won't have symbols in the new binary, so bypass
-        # the export check — we need them in the snapshot for cross-reference.
-        # A function that is present in the binary (has a real DWARF
-        # definition, already established above — declarations without a
-        # definition returned earlier) with external linkage (DW_AT_external,
-        # i.e. not a C `static`) but absent from the dynamic export set has had
-        # its ELF visibility hidden — recorded as Visibility.HIDDEN rather than
-        # dropped, so it isn't indistinguishable from an outright removal (see
-        # case06_visibility). A function with NO external linkage (a genuine
-        # `static`) was never part of the ABI and is correctly dropped.
-        visibility = Visibility.PUBLIC
-        if not is_deleted and not self._is_exported(mangled, name):
-            if _attr_bool(die, "DW_AT_external"):
-                visibility = Visibility.HIDDEN
-            else:
-                return
+        exported = self._is_exported(mangled, name)
+        visibility = _admit_subprogram(
+            is_deleted=is_deleted,
+            is_exported=exported,
+            is_external=_attr_bool(die, "DW_AT_external"),
+        )
+        if visibility is None:
+            return
 
         # Dedup
         if mangled in self._seen_func_mangles:
@@ -558,6 +551,7 @@ class _DwarfSnapshotBuilder:
                 qualified_name,
                 is_deleted,
                 visibility=visibility,
+                exported=exported,
                 scope_path=scope_path,
                 default_access=default_access,
             )
@@ -573,11 +567,15 @@ class _DwarfSnapshotBuilder:
         qualified_name: str,
         is_deleted: bool,
         visibility: Visibility = Visibility.PUBLIC,
+        exported: bool = True,
         scope_path: ScopePath = (),
         default_access: AccessLevel = AccessLevel.PUBLIC,
     ) -> Function:
         """Construct a :class:`Function` from a (already surface-admitted)
-        ``DW_TAG_subprogram`` DIE. *default_access*: see ``_process_cu``'s
+        ``DW_TAG_subprogram`` DIE. *exported*: the export-set lookup's own
+        answer, which the export fact is taken from (never *visibility* --
+        see ``extract.surface_fact_producers.debug_info_surface_facts``).
+        *default_access*: see ``_process_cu``'s
         identical record-scope-segment default (Codex review, PR #1015).
 
         Pure DWARF→model mapping (N-C): admission/dedup live in
@@ -654,6 +652,7 @@ class _DwarfSnapshotBuilder:
             return_type=ret_type,
             params=params,
             visibility=visibility,
+            **debug_info_surface_facts(exported=exported),
             is_virtual=is_virtual,
             is_extern_c=is_extern_c,
             vtable_index=vtable_index,
@@ -761,6 +760,7 @@ class _DwarfSnapshotBuilder:
                 mangled=mangled,
                 type=type_name,
                 visibility=Visibility.PUBLIC,
+                **debug_info_surface_facts(exported=True),
                 is_const=is_const,
                 # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
                 entity_id=_dwarf_variable_entity_id(

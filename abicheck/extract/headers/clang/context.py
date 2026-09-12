@@ -55,6 +55,7 @@ from ....model.identity import ScopePath
 from ....model.mangled_name import strip_macho_itanium_decoration
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
+from ...surface_fact_producers import header_ast_surface_facts
 from .templates import build_specialization_index
 
 #: Pseudo-files clang attributes builtin / command-line declarations to.
@@ -530,6 +531,41 @@ def visibility(
     if no_binary_evidence:
         return Visibility.PUBLIC
     return Visibility.HIDDEN
+
+
+def visibility_and_surface_facts(
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    mangled: str,
+    name: str = "",
+    *,
+    no_binary_evidence: bool = False,
+) -> tuple[Visibility, dict[str, Any]]:
+    """:func:`visibility` plus the three surface facts that answer separately.
+
+    One resolution, two representations: the legacy enum every existing
+    reader still takes, and the split facts (``model/surface_facts.py``)
+    every new one reads. The export fact is unknown -- never ``False`` --
+    for a header-only dump, which consulted no export table at all.
+    """
+    vis = visibility(
+        exported_dynamic,
+        exported_static,
+        mangled,
+        name,
+        no_binary_evidence=no_binary_evidence,
+    )
+    # `ELF_ONLY` (a `.symtab`-only symbol) is export evidence too -- see the
+    # castxml sibling's note: the fresh producer and the legacy bridge must
+    # agree, or the same symbol reads differently by snapshot vintage.
+    return vis, header_ast_surface_facts(
+        exported=(
+            None
+            if no_binary_evidence
+            else vis in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        ),
+        producer="clang",
+    )
 
 
 def qualified_name(entry: _Decl) -> str:

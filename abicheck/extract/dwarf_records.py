@@ -34,7 +34,7 @@ from ..dwarf_utils import (
     resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
-from ..model import AccessLevel
+from ..model import AccessLevel, Visibility
 
 __all__ = [
     "access_from_dwarf",
@@ -201,3 +201,29 @@ def access_from_dwarf(
     if val == 1:  # DW_ACCESS_public
         return AccessLevel.PUBLIC
     return default  # 0 (absent)
+
+
+def admit_subprogram(
+    *, is_deleted: bool, is_exported: bool, is_external: bool
+) -> Visibility | None:
+    """The surface-admission rule for a defined ``DW_TAG_subprogram``:
+    its :class:`Visibility`, or ``None`` when the DIE must be dropped.
+
+    A subprogram must be in the ELF dynamic export set -- except a deleted
+    one, which is kept for cross-reference precisely because it has no symbol
+    in the new binary. An external-linkage definition (``DW_AT_external``,
+    i.e. not a C ``static``) that is absent from the set had its ELF
+    visibility hidden: recorded rather than dropped, so it stays
+    distinguishable from an outright removal (``catalog/cases/
+    case06_visibility``). One with no external linkage at all was never part
+    of the ABI and is dropped.
+
+    Note what this deliberately does *not* answer: whether the artifact
+    exports the subprogram. A deleted one returns ``PUBLIC`` while having no
+    symbol at all, so the caller passes its own *is_exported* to the export
+    surface fact rather than re-deriving it from this return value -- see
+    ``extract.surface_fact_producers.debug_info_surface_facts``.
+    """
+    if is_deleted or is_exported:
+        return Visibility.PUBLIC
+    return Visibility.HIDDEN if is_external else None

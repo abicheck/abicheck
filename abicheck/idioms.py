@@ -36,8 +36,9 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .model import ParamKind, RecordType, ScopeOrigin, Visibility, resolved_fact_value
+from .model import ParamKind, RecordType, ScopeOrigin, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import in_public_surface
 from .policy.evidence_status import Confidence
 from .surface_graph import SurfaceGraph
 
@@ -169,7 +170,7 @@ def _public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool, boo
         # Use the function's own visibility, not demangled-name membership in
         # public_roots(): a *hidden* C++ overload sharing a public overload's
         # name must not contribute its by-value parameter as "public" evidence.
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         sites: list[tuple[str, int]] = [(fn.return_type, fn.return_pointer_depth)]
         for p in fn.params:
@@ -298,7 +299,7 @@ def _recognise_factory(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     """
     out: dict[str, IdiomTag] = {}
     for fn in graph.snapshot.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         if fn.return_pointer_depth < 1 and not _is_pointer(fn.return_type):
             continue
@@ -386,7 +387,7 @@ def _recognise_callbacks(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
     typedefs = graph.snapshot.typedefs
     for fn in graph.snapshot.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         for p in fn.params:
             ptype = getattr(p, "type", "") or ""
@@ -569,7 +570,7 @@ def _detect_stl_by_value(graph: SurfaceGraph) -> list[AntiPattern]:
     """Collect PUBLIC_API_EXPOSES_STL_BY_VALUE findings for every public function."""
     found: list[AntiPattern] = []
     for fn in graph.snapshot.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         hits: list[str] = []
         if _is_std_by_value(fn.return_type, fn.return_pointer_depth, ParamKind.VALUE):
@@ -666,7 +667,7 @@ def _collect_factory_targets(
     """Gather fully-qualified names of types returned by pointer from public functions."""
     factory_targets: set[str] = set()
     for fn in graph.snapshot.functions:
-        if fn.visibility != Visibility.PUBLIC:
+        if not in_public_surface(fn):
             continue
         if fn.return_pointer_depth >= 1 or _is_pointer(fn.return_type):
             resolved = _resolve_type_name(
