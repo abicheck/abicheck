@@ -798,3 +798,183 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
         # Exactly one grant in the cache module, and it is on the hit path.
         assert cache_src.count("live_source_evidence = True") == 1
         assert "cached.live_source_evidence = True" in cache_src
+
+
+# ── Remaining branches of the two new primitives ─────────────────────────────
+
+
+class TestExpectedInputSetEdgeCases:
+    def test_a_side_declaring_no_roots_is_not_sufficient(self) -> None:
+        """Deny-by-default at the empty end: a snapshot that recorded no source
+        paths has no evidence, so it cannot establish an absence either."""
+        empty = SourceInputSet(licence=SourceReadLicence.live_extraction())
+        assert empty.sufficient is False
+        assert (
+            empty.insufficiency_reason()
+            == "no source inputs were declared for this side"
+        )
+
+    def test_selected_lists_only_the_pending_inputs(self) -> None:
+        inputs = SourceInputSet(
+            inputs=(
+                SourceInput(path="a", disposition=SourceInputDisposition.SELECTED),
+                SourceInput(path="b", disposition=SourceInputDisposition.SCANNED),
+                SourceInput(path="c", disposition=SourceInputDisposition.MISSING),
+            ),
+            licence=SourceReadLicence.live_extraction(),
+        )
+        assert [i.path for i in inputs.selected()] == ["a"]
+
+    def test_an_unstattable_root_is_a_gap_not_a_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A root whose very `is_file()` raises (a path too long, a dead mount)
+        must land as UNREADABLE rather than propagating — the pre-scan is
+        advisory, but it must not claim coverage it does not have."""
+
+        def _boom(self: Path) -> bool:
+            raise OSError(5, "I/O error")
+
+        monkeypatch.setattr(Path, "is_file", _boom)
+        inputs = resolve_source_inputs(
+            [str(tmp_path / "x.h")], licence=SourceReadLicence.live_extraction()
+        )
+        assert [i.disposition for i in inputs.inputs] == [
+            SourceInputDisposition.UNREADABLE
+        ]
+        assert inputs.sufficient is False
+
+    def test_no_changed_filter_keeps_every_candidate(self, tmp_path: Path) -> None:
+        """`changed_paths=None` is "no narrowing", distinct from an empty list."""
+        (tmp_path / "a.hpp").write_text(PACKED_SOURCE)
+        (tmp_path / "b.hpp").write_text(TEMPLATE_SOURCE)
+        result = find_pattern_facts([str(tmp_path)])
+        assert result.files_scanned == 2
+        assert result.sufficient is True
+
+    @pytest.mark.parametrize("disposition", list(SourceInputDisposition))
+    def test_every_disposition_has_a_precedence_rank(
+        self, disposition: SourceInputDisposition
+    ) -> None:
+        """One path can be reached both as an explicit root and through a walk,
+        so every disposition needs a rank; a missing one would raise KeyError
+        mid-scan. Exhaustive so a new member cannot be added without one."""
+        from abicheck.buildsource.source_inputs import _rank
+
+        assert isinstance(_rank(disposition), int)
+
+    def test_a_gap_never_downgrades_to_a_weaker_disposition(
+        self, tmp_path: Path
+    ) -> None:
+        """Precedence in action: a path named as an explicit root *and* found
+        under a directory root keeps the stronger claim."""
+        d = tmp_path / "tree"
+        d.mkdir()
+        f = d / "a.hpp"
+        f.write_text(PACKED_SOURCE)
+        result = find_pattern_facts([str(d), str(f)], changed_paths=["a.hpp"])
+        dispositions = {i.path: i.disposition for i in result.inputs.inputs}
+        assert dispositions[str(f)] is SourceInputDisposition.SCANNED
+
+
+class TestDeclaredSourceHeadersCoversEveryDeclarationKind:
+    """The pattern-scan roots come from *every* declaration's provenance, not
+    only functions: a library whose public surface is types and constants must
+    not silently contribute no roots."""
+
+    def test_variables_records_and_enums_all_contribute_roots(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.model import EnumType, RecordType, Variable
+        from abicheck.workflows.pattern_preprocessor_scan import (
+            _declared_source_headers,
+        )
+
+        var_h = tmp_path / "var.h"
+        rec_h = tmp_path / "rec.h"
+        enum_h = tmp_path / "enum.h"
+        for h in (var_h, rec_h, enum_h):
+            h.write_text(PACKED_SOURCE)
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            variables=[
+                Variable(
+                    name="v",
+                    mangled="v",
+                    type="int",
+                    source_header=str(var_h),
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=32,
+                    source_header=str(rec_h),
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            enums=[
+                EnumType(
+                    name="E",
+                    source_header=str(enum_h),
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        assert _declared_source_headers(snap) == {
+            str(var_h),
+            str(rec_h),
+            str(enum_h),
+        }
+        # And the public-only filter keeps all three, since each is public.
+        assert _declared_source_headers(snap, public_only=True) == {
+            str(var_h),
+            str(rec_h),
+            str(enum_h),
+        }
+
+        # End to end: those roots really are scanned for a live side.
+        snap.live_source_evidence = True
+        other = AbiSnapshot(library="libfoo.so", version="2.0")
+        other.live_source_evidence = True
+        result = compute_pattern_preprocessor_scan(snap, other)
+        assert result.pattern_old["files_scanned"] == 3
+
+
+def test_a_bare_filename_in_the_changed_list_matches_by_basename(
+    tmp_path: Path,
+) -> None:
+    """`_path_changed`'s basename fallback: a changed list holding just
+    `pub.hpp` must still select `<abs>/include/pub.hpp`, since the two are
+    rooted differently and neither is a tail of the other."""
+    inc = tmp_path / "include"
+    inc.mkdir()
+    (inc / "pub.hpp").write_text(PACKED_SOURCE)
+    (inc / "other.hpp").write_text(TEMPLATE_SOURCE)
+
+    result = find_pattern_facts([str(inc)], changed_paths=["pub.hpp"])
+    dispositions = {Path(i.path).name: i.disposition for i in result.inputs.inputs}
+    assert dispositions["pub.hpp"] is SourceInputDisposition.SCANNED
+    assert dispositions["other.hpp"] is SourceInputDisposition.EXCLUDED
+
+
+def test_a_changed_filter_with_no_join_predicate_narrows_nothing(
+    tmp_path: Path,
+) -> None:
+    """`resolve_source_inputs` is scanner-agnostic: a caller that passes
+    `changed_paths` but supplies no `path_changed` predicate has stated no way
+    to join the two, so nothing may be silently excluded on its behalf — the
+    safe direction, since a wrongly-excluded input would read as deliberate
+    scope rather than as a gap."""
+    f = tmp_path / "a.hpp"
+    f.write_text(PACKED_SOURCE)
+    inputs = resolve_source_inputs(
+        [str(f)],
+        changed_paths=["something-else.hpp"],
+        licence=SourceReadLicence.live_extraction(),
+    )
+    assert [i.disposition for i in inputs.inputs] == [SourceInputDisposition.SELECTED]

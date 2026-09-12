@@ -54,3 +54,10 @@
   side's sufficiency. Undecidable identities read `not_evaluated` and are never
   dropped; `persistent`, which rests on two observations, is no longer withheld
   just because a side had a gap elsewhere.
+
+- **A new `AbiSnapshot` field must be deliberately classified as persisted or
+  runtime-only.** `storage/legacy_sections.py`'s completeness gate caught
+  `live_source_evidence` being neither; it is now registered as never appearing
+  in a document, which is the invariant rather than an omission — persisting the
+  source-read licence would let a stored snapshot grant itself permission to
+  re-read today's filesystem.
