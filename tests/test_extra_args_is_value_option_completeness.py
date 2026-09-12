@@ -73,7 +73,7 @@ from pathlib import Path
 
 import click
 import pytest
-from _workflow_exec import bash_executable
+from _workflow_exec import bash_executable, require_bash
 
 from abicheck.cli import main as abicheck_main
 
@@ -118,6 +118,7 @@ def _run_shell(body: str, *, prelude: str = "") -> str:
     """Source ``run.sh``'s helper region plus *prelude*, run *body*, return
     stdout. *prelude* establishes (or deliberately omits) the interpreter
     variables ``_cli_value_options_init`` reads."""
+    require_bash()
     script = RUN_SH.read_text(encoding="utf-8")
     helpers = script[: script.index(_HELPERS_MARKER)]
     with tempfile.NamedTemporaryFile(
@@ -318,6 +319,7 @@ class TestUndeterminedOptionTableFailsClosed:
     )
 
     def _run(self, body: str) -> subprocess.CompletedProcess[str]:
+        require_bash()
         script = RUN_SH.read_text(encoding="utf-8")
         helpers = script[: script.index(_HELPERS_MARKER)]
         with tempfile.NamedTemporaryFile(
@@ -424,6 +426,7 @@ class TestCheckTargetTableSurvivesItsOwnEncoding:
 
     def _recognized(self, py_bin: str, options: list[str]) -> dict[str, bool]:
         """Ask check-target's own membership test about each of *options*."""
+        require_bash()
         text = ACTION_YML.read_text(encoding="utf-8")
         start = text.index('        _ct_cli_value_options=""')
         end = text.index(
@@ -515,6 +518,7 @@ class TestCheckTargetDerivesTheSameWay:
     wrong copies can agree -- and did) but "each equals the real CLI"."""
 
     def _derived(self) -> set[str]:
+        require_bash()
         text = ACTION_YML.read_text(encoding="utf-8")
         start = text.index('        _ct_cli_value_options=""')
         end = text.index(
@@ -566,6 +570,7 @@ class TestCheckTargetDerivesTheSameWay:
     def _run_guard(self, env_assignments: str) -> subprocess.CompletedProcess[str]:
         """Execute check-target's derivation + guard with *env_assignments*
         prepended, so a test can choose which extra-args variable is set."""
+        require_bash()
         text = ACTION_YML.read_text(encoding="utf-8")
         start = text.index('        _ct_cli_value_options=""')
         end = text.index(

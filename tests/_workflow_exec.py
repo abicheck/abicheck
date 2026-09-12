@@ -343,6 +343,26 @@ def is_wsl_launcher_stub(path: str) -> bool:
     return _is_under_windows_system_dir(resolved_name, _windows_system_root())
 
 
+def require_bash() -> None:
+    """Skip the calling test when this machine has no real bash.
+
+    The companion to :func:`bash_executable`'s deliberate ``str`` return: that
+    function still answers ``"bash"`` on a machine with none, because every
+    call site hands it straight to ``subprocess``. A caller that shells out
+    must therefore ask *here* first, or on a stub-only Windows runner it
+    executes the WSL launcher and fails against UTF-16LE prose instead of
+    skipping (Codex review, P2 — the migrated modules had the resolver fixed
+    under them but no guard of their own).
+
+    Called from the bash-invoking helper rather than applied as a module-level
+    mark, so a module's platform-independent tests still run on a machine
+    without bash; skipping those too would be a real coverage loss, not
+    caution.
+    """
+    if not have_bash():
+        pytest.skip("no real bash on this machine (a WSL launcher stub is not one)")
+
+
 def run_step(
     step: dict[str, Any],
     *,

@@ -40,6 +40,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import _workflow_exec
 import pytest
 import yaml
 from _workflow_exec import (
@@ -49,6 +50,7 @@ from _workflow_exec import (
     have_bash,
     is_wsl_launcher_stub,
     make_workspace,
+    require_bash,
     run_step,
     select_real_bash,
 )
@@ -347,3 +349,32 @@ class TestBashResolutionNeverFallsBackToWhatItRejected:
         `have_bash()` is true exactly when what `bash_executable()` returns is
         a real bash. Their disagreement was the whole finding."""
         assert have_bash() is (not is_wsl_launcher_stub(bash_executable()))
+
+
+class TestRequireBashSkipsRatherThanRunsTheStub:
+    """`bash_executable()` still returns a `str` on a machine with no bash --
+    every call site hands it straight to `subprocess` -- so a caller that
+    shells out has to ask `have_bash()` and skip. Without that, the resolver
+    can be perfectly correct and the calling module still fails against the
+    WSL launcher's own error text (Codex review, P2: the migrated modules had
+    the resolver fixed under them but no guard of their own).
+    """
+
+    def test_it_skips_when_no_real_bash_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_workflow_exec, "have_bash", lambda: False)
+        with pytest.raises(BaseException) as excinfo:
+            require_bash()
+        # `pytest.skip` raises `Skipped`, which is a BaseException subclass --
+        # caught by type name so this does not depend on the private import
+        # path of pytest's outcome classes.
+        assert type(excinfo.value).__name__ == "Skipped"
+
+    def test_it_does_not_skip_when_a_real_bash_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other direction, so a guard that always skipped -- which would
+        silently empty every shell-based module -- fails here."""
+        monkeypatch.setattr(_workflow_exec, "have_bash", lambda: True)
+        require_bash()
