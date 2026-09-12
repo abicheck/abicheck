@@ -29,6 +29,8 @@ A leaf: nothing here reaches back into the matching module.
 
 from __future__ import annotations
 
+from collections import Counter
+
 from ..model.graph_identity import (
     closure_location_free_identity,
     closure_marker_locations,
@@ -141,21 +143,33 @@ def _signature_tail(identity: CanonicalIdentity) -> str:
     return identity.normalized_signature.split("\x1f", 1)[-1]
 
 
-def _markers_describe_declaration(
-    declaring_file: str, markers: list[tuple[str, str]]
+def _declaration_marker_is_among_the_changed(
+    declaring_file: str,
+    own_files: list[tuple[str, str]],
+    other_files: list[tuple[str, str]],
 ) -> bool:
-    """Whether *markers* can be read as evidence about where a declaration
-    carrying *declaring_file* lives.
+    """Whether the marker a recorded *declaring_file* identifies is itself
+    one of the markers that CHANGED between the two sides.
 
-    Vacuously true when either is absent -- no file recorded means nothing
-    contradicts the markers, and no marker means there is nothing to read.
-    Otherwise the recorded file must be among the marker basenames: a
-    marker naming some other header describes a nested template argument's
-    location, not the declaration's own.
+    Vacuously true when either the file or the markers are absent -- no
+    recorded file means nothing contradicts the markers, and no marker
+    means there is nothing to read.
+
+    Otherwise the recorded file must appear in this side's own share of
+    the marker difference (Codex review, PR #1229). Requiring merely that
+    SOME marker name the recorded file is too weak once a declaration
+    carries several: `Wrapper<(lambda at wrapper.h:1:2),(lambda at
+    nested_old.h:3:4)>` declared in `include/wrapper.h` satisfies that
+    through its unchanged `wrapper.h` marker, so an unrelated change to
+    the nested one then read as the wrapper moving. The declaration's own
+    marker is the only one that can say the DECLARATION moved; every other
+    marker describes a nested template argument.
     """
-    if not declaring_file or not markers:
+    if not declaring_file or not own_files:
         return True
-    return path_basename(declaring_file) in {base for _kind, base in markers}
+    changed = Counter(own_files) - Counter(other_files)
+    base = path_basename(declaring_file)
+    return any(marker_base == base for _kind, marker_base in changed.elements())
 
 
 def _classify_outcome(
@@ -255,10 +269,22 @@ def _classify_outcome(
         and marker_kinds_align
         and sorted(old_files) != sorted(new_files)
     )
-    markers_reordered = (
-        bool(old_markers)
-        and old_markers != new_markers
-        and sorted(old_markers) == sorted(new_markers)
+    # A reorder shows up in EITHER projection, and both have to be asked
+    # (Codex review, PR #1229). The full discriminator catches a swap of
+    # two markers from one header, where the `(kind, basename)` pairs are
+    # identical. The `(kind, basename)` sequence catches a swap that also
+    # shifted coordinates -- `Pair<(lambda at a.h:1:2),(lambda at
+    # b.h:3:4)>` -> `Pair<(lambda at b.h:7:8),(lambda at a.h:9:10)>` --
+    # where the full tuples no longer form the same multiset at all, so
+    # the stricter projection alone reported "no material identity
+    # change". Pure coordinate churn matches neither: its files sequence
+    # does not reorder, and its full multiset differs.
+    markers_reordered = bool(old_markers) and (
+        (old_files != new_files and sorted(old_files) == sorted(new_files))
+        or (
+            old_markers != new_markers
+            and sorted(old_markers) == sorted(new_markers)
+        )
     )
     has_two_sided_files = bool(old_file) and bool(new_file)
     # A recorded declaring file that names NONE of its side's markers
@@ -273,9 +299,9 @@ def _classify_outcome(
     # keeps the evidence-conflict outcome rather than dropping into
     # coordinate-only's "no material identity change" -- the nested
     # argument's own file really did change.
-    marker_fallback_usable = _markers_describe_declaration(
-        old_file, old_files
-    ) and _markers_describe_declaration(new_file, new_files)
+    marker_fallback_usable = _declaration_marker_is_among_the_changed(
+        old_file, old_files, new_files
+    ) and _declaration_marker_is_among_the_changed(new_file, new_files, old_files)
     moved = (
         (old_file != new_file)
         if has_two_sided_files

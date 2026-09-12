@@ -470,6 +470,52 @@ class TestMarkerCarriedLocationEvidence:
             )
             assert outcome == OUTCOME_RECONCILED, (old_file, new_file, outcome)
 
+    def test_only_the_declarations_own_marker_can_say_it_moved(self) -> None:
+        """Codex review (PR #1229): "some marker names the recorded file"
+        is too weak once a declaration carries several. `Wrapper<(lambda at
+        wrapper.h:1:2),(lambda at nested_old.h:3:4)>` declared in
+        `include/wrapper.h` satisfies that through its UNCHANGED
+        `wrapper.h` marker, so a change to the nested one read as the
+        wrapper moving.
+
+        The recorded file must be among the markers that actually changed.
+        Stated over a 2- and a 3-marker name and both orientations, since
+        the defect is "an unchanged marker vouched for a changed one"."""
+        pairs = (
+            (
+                "W<(lambda at wrapper.h:1:2),(lambda at nested_old.h:3:4)>",
+                "W<(lambda at wrapper.h:1:2),(lambda at nested_new.h:3:4)>",
+            ),
+            (
+                "W<(lambda at wrapper.h:1:2),(lambda at n1_old.h:3:4),"
+                "(lambda at n2.h:5:6)>",
+                "W<(lambda at wrapper.h:1:2),(lambda at n1_new.h:3:4),"
+                "(lambda at n2.h:5:6)>",
+            ),
+        )
+        for old_qn, new_qn in pairs:
+            for old_file, new_file in (("include/wrapper.h", ""), ("", "wrapper.h")):
+                outcome = _classify_outcome(
+                    _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
+                    _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
+                )
+                assert outcome == OUTCOME_RECONCILED, (old_qn, old_file, outcome)
+
+    def test_the_declarations_own_marker_changing_is_still_a_move(self) -> None:
+        """The must-stay-distinct half: when the recorded file's OWN marker
+        is the one that changed, that is exactly the declaration moving, so
+        the tightened rule cannot degrade into "a multi-marker declaration
+        never moves"."""
+        old_qn = "W<(lambda at wrapper_old.h:1:2),(lambda at nested.h:3:4)>"
+        new_qn = "W<(lambda at wrapper_new.h:1:2),(lambda at nested.h:3:4)>"
+        assert (
+            _classify_outcome(
+                _identity(old_qn, "include/wrapper_old.h", f"sig:{old_qn}\x1fs"),
+                _identity(new_qn, "", f"sig:{new_qn}\x1fs"),
+            )
+            == OUTCOME_MOVED
+        )
+
     def test_a_lone_agreeing_declaring_file_still_lets_the_marker_speak(self) -> None:
         """The must-stay-distinct half, so the rule cannot degrade into
         "any recorded file silences the markers": when the recorded file IS
@@ -767,6 +813,48 @@ class TestReorderedMarkersAreNotAMove:
             assert (
                 self._pair(f"P<{a},{b},{c}>", f"P<{c},{a},{b}>") == OUTCOME_RECONCILED
             ), kind
+
+    def test_a_reorder_that_also_shifts_coordinates_is_still_a_permutation(
+        self,
+    ) -> None:
+        """Codex review (PR #1229): a swap whose coordinates also moved
+        breaks the FULL-discriminator multiset, so the stricter projection
+        alone missed it and the pair read
+        `declaration_coordinates_shifted` — "no material identity change" —
+        for markers that plainly traded places.
+
+        Both projections are asked now. Stated over every kind and over 2-
+        and 3-marker names, since the defect is that one projection cannot
+        see every reorder."""
+        for kind in ("lambda", "unnamed struct", "anonymous union", "unnamed enum"):
+            assert (
+                self._pair(
+                    f"P<({kind} at a.h:1:2),({kind} at b.h:3:4)>",
+                    f"P<({kind} at b.h:7:8),({kind} at a.h:9:10)>",
+                )
+                == OUTCOME_RECONCILED
+            ), kind
+            assert (
+                self._pair(
+                    f"P<({kind} at a.h:1:2),({kind} at b.h:3:4),({kind} at c.h:5:6)>",
+                    f"P<({kind} at c.h:7:8),({kind} at a.h:9:10),({kind} at b.h:1:1)>",
+                )
+                == OUTCOME_RECONCILED
+            ), kind
+
+    def test_coordinate_churn_across_several_headers_is_not_a_permutation(self) -> None:
+        """The must-stay-distinct complement for the widened rule: each
+        marker keeping its own position while its coordinates shift is the
+        coordinate-only churn this outcome exists for, however many
+        markers and headers are involved — the files sequence does not
+        reorder, so neither projection sees a permutation."""
+        assert (
+            self._pair(
+                "P<(lambda at a.h:1:2),(lambda at b.h:3:4)>",
+                "P<(lambda at a.h:7:8),(lambda at b.h:9:10)>",
+            )
+            == OUTCOME_COORDINATES_ONLY
+        )
 
     def test_coordinate_churn_in_one_header_is_still_not_a_permutation(self) -> None:
         """The must-stay-distinct complement, and the reason the whole
