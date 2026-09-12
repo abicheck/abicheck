@@ -196,7 +196,19 @@ Two predicates close that without weakening anything above:
   which an earlier draft of this check did.
 
 Either one publishes `verdict: REPORT_UNREADABLE` and fails the step
-unconditionally; no `fail-on-*` input waives it. **Don't "simplify" this by
+unconditionally; no `fail-on-*` input waives it.
+
+**The contradiction check's verdict is scoped to exit 0, and that is deliberate.**
+`_resolve_clean_exit_verdict` runs only there, so at a nonzero exit a
+self-contradictory report keeps the compatibility verdict the dispatch derived
+(`BREAKING`, `API_BREAK`, ...) and the `FINAL_EXIT` check supplies the failure
+and the error annotation. Do not "fix" that by overriding the verdict on every
+exit path: at exit 2 the report's compatibility result is readable and
+established, the two axes are orthogonal, and replacing a real break with "no
+result was established" would *discard* evidence — the opposite of what this
+value exists for. What the late check must never be relied on for is the exit-0
+path, where there is no other readable result and the fallthrough would publish
+`COMPATIBLE`; that is why the check is duplicated there rather than moved. **Don't "simplify" this by
 making the axis predicates fail closed instead** — that is the forgeable-prose
 path this section rules out, reached from the other direction.
 

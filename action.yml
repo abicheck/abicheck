@@ -917,9 +917,17 @@ outputs:
       requested was absent, truncated, unparseable, not a JSON object, an empty
       one, or a document that parsed cleanly while carrying no abicheck result
       at all (no verdict, no run_outcome, no findings) -- so nothing read this
-      run's result. Also covers a report whose analysis_assurance block has no
-      analysis_assurance_exit_contribution beside it on a schema that emits the
-      two together, which makes it internally inconsistent rather than passing.
+      run's result. At exit 0 it also covers a report whose analysis_assurance
+      block has no analysis_assurance_exit_contribution beside it on a schema
+      that emits the two together, which makes it internally inconsistent
+      rather than passing. That last case is scoped to exit 0 deliberately: at
+      a nonzero exit the report's own compatibility verdict IS readable, and the
+      two axes are orthogonal, so the real verdict (BREAKING/API_BREAK/...) is
+      published rather than erased -- replacing an established break with "no
+      result" would discard evidence, which is the opposite of this value's
+      purpose. The inconsistency still fails the step unconditionally and still
+      emits its own error annotation on every exit path; only the verdict label
+      differs.
       Fails the step unconditionally and is never waived by a fail-on-* input:
       none of those is a statement that an unread result should be reported as a
       pass. Distinct from ERROR, which is abicheck reporting its own failure

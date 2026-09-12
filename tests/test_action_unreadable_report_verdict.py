@@ -655,3 +655,67 @@ class TestEveryRepeatableWriteDestinationIsChecked:
         )
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
+
+
+class TestAContradictoryReportAtANonZeroExit:
+    """At a nonzero exit the compatibility verdict is readable — so it is kept.
+
+    `_resolve_clean_exit_verdict` runs only at exit 0, so a self-contradictory
+    report at exit 2 keeps the verdict the dispatch derived and the `FINAL_EXIT`
+    check supplies the failure. Codex review raised this as the exit-0 finding
+    generalized, and the code/doc mismatch it named was real — `action.yml`
+    promised `REPORT_UNREADABLE` for this report shape without qualifying by
+    exit path. I fixed that by scoping the documentation, not by overriding the
+    verdict: at exit 2 the report's compatibility result IS established and
+    readable, the two axes are orthogonal, and replacing a real break with "no
+    result was established" would discard evidence — the exact opposite of what
+    this value exists for.
+
+    The decision is pinned here so a later round does not quietly reverse it:
+    the step still fails and still explains itself, which is what the axis owes.
+    """
+
+    def _contradictory_at(
+        self, tmp_path: Path, *, exit_code: int, verdict: str
+    ) -> dict:
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=exit_code,
+            payload=json.dumps(
+                {
+                    "report_schema_version": "2.41",
+                    "verdict": verdict,
+                    "analysis_assurance": {"status": "complete"},
+                }
+            ).encode(),
+        )
+        return _run_action(tmp_path, _compare_env(tmp_path), bindir)
+
+    @pytest.mark.parametrize("exit_code,verdict", ((2, "API_BREAK"), (4, "BREAKING")))
+    def test_the_real_compatibility_verdict_survives(
+        self, tmp_path: Path, exit_code: int, verdict: str
+    ) -> None:
+        outputs = self._contradictory_at(tmp_path, exit_code=exit_code, verdict=verdict)
+        assert outputs["verdict"] == verdict, outputs
+        assert outputs["verdict"] != "REPORT_UNREADABLE", outputs
+
+    @pytest.mark.parametrize("exit_code,verdict", ((2, "API_BREAK"), (4, "BREAKING")))
+    def test_the_step_still_fails_and_still_explains_itself(
+        self, tmp_path: Path, exit_code: int, verdict: str
+    ) -> None:
+        # Keeping the verdict must not cost the gate or the diagnostic: those
+        # are what the assurance axis owes regardless of which label is
+        # published.
+        outputs = self._contradictory_at(tmp_path, exit_code=exit_code, verdict=verdict)
+        assert outputs["_exit"] == 1, outputs
+        assert "analysis_assurance_exit_contribution" in outputs["_stdout"], outputs[
+            "_stdout"
+        ]
+
+    def test_exit_zero_still_publishes_report_unreadable(self, tmp_path: Path) -> None:
+        # The contrast that makes the scoping coherent: at exit 0 there is no
+        # other readable result, so the fallthrough would publish COMPATIBLE and
+        # the verdict override is required.
+        outputs = self._contradictory_at(tmp_path, exit_code=0, verdict="COMPATIBLE")
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
