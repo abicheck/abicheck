@@ -413,10 +413,24 @@ def closure_location_free_identity(identity: str) -> str:
     return _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.sub(_replace, normalized)
 
 
-def closure_marker_locations(identity: str) -> tuple[tuple[str, str], ...]:
-    """The declaring-file *basename* of every closure/anonymous-tag marker
-    in *identity*, **in source order** (``"w<(lambda at /a/foo.h:4:37)>"``
-    -> ``("foo.h",)``); empty for an identity carrying no marker.
+def closure_marker_locations(
+    identity: str,
+) -> tuple[tuple[str, str, str, str], ...]:
+    """Every closure/anonymous-tag marker in *identity* as
+    ``(kind, basename, line, col)``, **in source order**
+    (``"w<(lambda at /a/foo.h:4:37)>"`` -> ``(("lambda", "foo.h", "4",
+    "37"),)``); empty for an identity carrying no marker.
+
+    The ``line``/``col`` halves are what tell a *permutation* of markers
+    from coordinate churn (Codex review, PR #1229): two same-kind markers
+    from the SAME header (``Pair<(lambda at same.h:1:2),(lambda at
+    same.h:3:4)>``) have identical ``(kind, basename)`` pairs, so swapping
+    them looked like no change at all and the pair claimed "no material
+    identity change" -- while it is a template-argument reorder, exactly
+    the case a differing basename already reports. Consumers project this
+    tuple to what their own question needs: a MOVE is about the file, so
+    it reads ``(kind, basename)``; a PERMUTATION is about which marker sits
+    where, so it reads all four.
 
     The complement of :func:`closure_location_free_identity`: that function
     drops the basename along with the ``:line:col`` discriminator, and its
@@ -473,7 +487,12 @@ def closure_marker_locations(identity: str) -> tuple[tuple[str, str], ...]:
     # agree on which text IS a marker.
     quoted_spans = _quoted_spans(normalized)
     return tuple(
-        (" ".join(match.group(1).split()), _basename(match.group(0).rsplit(":", 3)[-3]))
+        (
+            " ".join(match.group(1).split()),
+            _basename(match.group(0).rsplit(":", 3)[-3]),
+            match.group(0).rsplit(":", 3)[-2],
+            match.group(0).rsplit(":", 3)[-1],
+        )
         for match in _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.finditer(normalized)
         if not any(start <= match.start() < end for start, end in quoted_spans)
     )

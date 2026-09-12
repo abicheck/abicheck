@@ -488,8 +488,8 @@ class TestMixedMarkerSpellings:
 
         for spelling in self._SPELLINGS:
             assert closure_marker_locations(spelling) == (
-                ("lambda", "a.h"),
-                ("lambda", "b.h"),
+                ("lambda", "a.h", "1", "2"),
+                ("lambda", "b.h", "3", "4"),
             ), spelling
 
     def test_order_is_source_order_not_scan_order(self) -> None:
@@ -499,10 +499,10 @@ class TestMixedMarkerSpellings:
 
         assert closure_marker_locations(
             "Pair<(lambda at a.h:1:2),(lambda:b.h:3:4)>"
-        ) == (("lambda", "a.h"), ("lambda", "b.h"))
+        ) == (("lambda", "a.h", "1", "2"), ("lambda", "b.h", "3", "4"))
         assert closure_marker_locations(
             "Pair<(lambda:b.h:3:4),(lambda at a.h:1:2)>"
-        ) == (("lambda", "b.h"), ("lambda", "a.h"))
+        ) == (("lambda", "b.h", "3", "4"), ("lambda", "a.h", "1", "2"))
 
     def test_mixed_spellings_of_one_unmoved_pair_are_not_a_move(self) -> None:
         """The consumer half: two coordinate-only versions referencing the
@@ -594,7 +594,7 @@ class TestQuotedMarkerLookalikes:
 
         assert closure_marker_locations(
             'Mix<(lambda at real.h:1:2),"lambda:fake.h:9:9">'
-        ) == (("lambda", "real.h"),)
+        ) == (("lambda", "real.h", "1", "2"),)
         outcome = _classify_outcome(
             _identity(
                 'Mix<(lambda at old.h:1:2),"lambda:fake.h:9:9">', "", "sig:x\x1fs"
@@ -623,7 +623,7 @@ class TestQuotedMarkerLookalikes:
             "ns::Widget",
         ):
             stripped = closure_location_free_identity(identity)
-            for _kind, basename in closure_marker_locations(identity):
+            for _kind, basename, _line, _col in closure_marker_locations(identity):
                 assert basename not in stripped, (identity, basename, stripped)
 
 
@@ -703,6 +703,47 @@ class TestReorderedMarkersAreNotAMove:
         for kind in ("lambda", "unnamed struct", "anonymous union", "unnamed enum"):
             a, b = f"({kind} at a.h:1:2)", f"({kind} at b.h:3:4)"
             assert self._pair(f"Pair<{a},{b}>", f"Pair<{b},{a}>") == OUTCOME_RECONCILED
+
+    def test_markers_from_one_header_swapping_places_is_still_a_permutation(
+        self,
+    ) -> None:
+        """Codex review (PR #1229): two same-kind markers declared in the
+        SAME header have identical `(kind, basename)` pairs, so a swap of
+        them was invisible and the pair read
+        `declaration_coordinates_shifted` — "no material identity change" —
+        although it is the same template-argument reorder a differing
+        basename already reports.
+
+        The permutation question therefore reads the whole discriminator,
+        `line`/`col` included, while the move question keeps reading only
+        the file. Checked over every kind, and over 2- and 3-marker names,
+        since the defect is "the permutation projection was too coarse"."""
+        for kind in ("lambda", "unnamed struct", "anonymous union", "unnamed enum"):
+            a = f"({kind} at same.h:1:2)"
+            b = f"({kind} at same.h:3:4)"
+            c = f"({kind} at same.h:5:6)"
+            assert self._pair(f"P<{a},{b}>", f"P<{b},{a}>") == OUTCOME_RECONCILED, kind
+            assert (
+                self._pair(f"P<{a},{b},{c}>", f"P<{c},{a},{b}>") == OUTCOME_RECONCILED
+            ), kind
+
+    def test_coordinate_churn_in_one_header_is_still_not_a_permutation(self) -> None:
+        """The must-stay-distinct complement, and the reason the whole
+        discriminator is safe to read here: genuine coordinate churn does
+        not merely REORDER the discriminators, it changes them, so the
+        sorted sequences differ and the pair is still the coordinate-only
+        shift this outcome exists for.
+
+        Includes a case sharing one coordinate with the old side, so the
+        rule cannot degrade into "any repeated-basename name is a
+        permutation"."""
+        a, b = "(lambda at same.h:1:2)", "(lambda at same.h:3:4)"
+        assert self._pair(
+            f"P<{a},{b}>", "P<(lambda at same.h:7:8),(lambda at same.h:9:9)>"
+        ) == (OUTCOME_COORDINATES_ONLY)
+        assert self._pair(f"P<{a},{b}>", f"P<{a},(lambda at same.h:9:9)>") == (
+            OUTCOME_COORDINATES_ONLY
+        )
 
     def test_a_marker_kind_change_at_one_file_is_a_rename_not_a_move(self) -> None:
         """CodeRabbit review (PR #1229): carrying the kind in the multiset

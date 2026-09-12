@@ -212,14 +212,30 @@ def _classify_outcome(
     # change nothing shows. A move means some marker now names a different
     # FILE, which presupposes the markers still correspond -- so the kinds
     # must line up before their basenames mean anything.
-    marker_kinds_align = sorted(kind for kind, _ in old_markers) == sorted(
-        kind for kind, _ in new_markers
+    #
+    # The two questions read DIFFERENT projections of the same marker
+    # tuple, and that is what keeps them from answering each other's
+    # (Codex review, PR #1229). A move is about the FILE, so it compares
+    # `(kind, basename)` -- including `line`/`col` there would report
+    # ordinary coordinate churn as a move. A permutation is about which
+    # marker sits where, so it compares all four: two same-kind markers
+    # from one header (`Pair<(lambda at same.h:1:2),(lambda at
+    # same.h:3:4)>`) have identical `(kind, basename)` pairs, so a swap of
+    # them was invisible and the pair claimed "no material identity
+    # change" -- while it is the same template-argument reorder a
+    # differing basename already reports. Pure coordinate churn stays
+    # distinguishable because its discriminators do not merely reorder:
+    # the sorted sequences differ too.
+    old_files = [(kind, base) for kind, base, _, _ in old_markers]
+    new_files = [(kind, base) for kind, base, _, _ in new_markers]
+    marker_kinds_align = sorted(kind for kind, _ in old_files) == sorted(
+        kind for kind, _ in new_files
     )
     markers_differ = (
         bool(old_markers)
         and len(old_markers) == len(new_markers)
         and marker_kinds_align
-        and sorted(old_markers) != sorted(new_markers)
+        and sorted(old_files) != sorted(new_files)
     )
     markers_reordered = (
         bool(old_markers)
