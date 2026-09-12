@@ -365,7 +365,9 @@ class TestLoadBundleFactsLibraryOverrides:
         manifest = tmp_path / "manifest.yaml"
         manifest.write_text("libreal.so:\n  ? [a, b]\n  : 1\n")
 
-        with pytest.raises(BundleFactsLibraryOverridesError, match="invalid YAML"):
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="unhashable mapping key"
+        ):
             load_bundle_facts_library_overrides(manifest)
 
     def test_invalid_utf8_manifest_is_a_clean_error(self, tmp_path: Path) -> None:

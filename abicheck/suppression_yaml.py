@@ -15,6 +15,18 @@
 """Raw-scalar YAML helpers for ``suppression.py``, split out to stay under
 the file-size cap (CLAUDE.md). No dependency on ``suppression.py`` itself,
 so the import direction stays one-way.
+
+**Deliberately does not use** :mod:`abicheck.model.yaml_strict`, the strict
+loader every hard-load-error *manifest* format here shares. A suppression
+document's duplicate key is not an error: this format resolves YAML merge
+keys (``<<:``) and follows ``yaml.safe_load``'s own last-value-wins mapping
+semantics on purpose, because the raw-node pass below has to agree, index
+for index and value for value, with the mapping ``safe_load`` actually
+built (see :func:`_raw_node_lookup`'s direct-over-merged precedence rules).
+Swapping in the strict loader would change which suppression files load at
+all -- a change to the accepted input of a user-facing format, not a
+diagnostics cleanup -- so it stays on the plain ``SafeLoader`` and is out of
+scope for that consolidation.
 """
 
 from __future__ import annotations

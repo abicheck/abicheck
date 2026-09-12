@@ -121,59 +121,20 @@ _SUPPORTED_FRONTEND_CONTEXTS = frozenset({"host", "device"})
 
 
 def _load_yaml_strict(text: str, *, source: str) -> Any:
-    """Parse *text* as YAML, raising :class:`ManifestValidationError` on a
-    duplicate mapping key anywhere in the document.
+    """Parse *text* as YAML, raising :class:`ManifestValidationError` on any
+    malformed document — a syntax error, a duplicate mapping key, an
+    unhashable (sequence/mapping) key, or an out-of-range implicit scalar.
 
-    ``yaml.safe_load`` alone silently accepts ``{a: 1, a: 2}`` with
-    last-value-wins semantics (PyYAML's ``SafeConstructor.construct_mapping``
-    never checks for a repeated key). A ``SafeLoader`` subclass overriding
-    ``construct_mapping`` to check for repeats is the standard, minimal way
-    to close this without hand-rolling a YAML parser.
+    The strict loader itself is :mod:`abicheck.model.yaml_strict`, shared with
+    every other hard-load-error manifest format here; this wrapper only
+    supplies the ``ManifestValidationError`` vocabulary and the *source*
+    prefix ``--dump-manifest``'s callers expect.
     """
-    try:
-        import yaml
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise ImportError(
-            "PyYAML is required for --dump-manifest support. "
-            "Install it with: pip install pyyaml"
-        ) from exc
+    from .model.yaml_strict import load_strict_yaml
 
-    class _StrictLoader(yaml.SafeLoader):
-        pass
-
-    def _construct_mapping(loader: Any, node: Any, deep: bool = False) -> dict[Any, Any]:
-        seen: set[Any] = set()
-        mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
-            key = loader.construct_object(key_node, deep=True)
-            if key in seen:
-                raise ManifestValidationError(
-                    f"{source}: duplicate key {key!r} in the same mapping "
-                    f"(line {key_node.start_mark.line + 1})"
-                )
-            seen.add(key)
-            mapping[key] = loader.construct_object(value_node, deep=True)
-        return mapping
-
-    _StrictLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
+    return load_strict_yaml(
+        text, error=lambda message: ManifestValidationError(f"{source}: {message}")
     )
-
-    try:
-        # `_StrictLoader` subclasses `yaml.SafeLoader` and only replaces its
-        # mapping constructor with the duplicate-key check above; bandit's B506
-        # flags every `Loader=` it cannot name-match against
-        # `SafeLoader`/`CSafeLoader`, subclasses included.
-        return yaml.load(text, Loader=_StrictLoader)  # nosec B506
-    # `_construct_mapping`'s own duplicate-key error must reach the caller as
-    # itself, never re-wrapped as "invalid YAML" by the handler below. Today
-    # that is already true by inheritance (`AbicheckError`/`ValueError`, not
-    # `yaml.YAMLError`); this arm pins it so widening the handler below cannot
-    # silently reclassify a schema violation.
-    except ManifestValidationError:  # pylint: disable=try-except-raise
-        raise
-    except yaml.YAMLError as exc:
-        raise ManifestValidationError(f"{source}: invalid YAML: {exc}") from exc
 
 
 def _reject_unknown_fields(

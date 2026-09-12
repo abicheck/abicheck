@@ -70,12 +70,11 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-import yaml
-
 from .change_registry_types import Verdict
 from .compatibility_evaluation_config import ImmutableIdentity
 from .errors import PackManifestError
 from .model.change_catalog.kinds import ChangeKind
+from .model.yaml_strict import load_strict_yaml
 from .policy_file import parse_severity_value
 
 
@@ -97,54 +96,6 @@ _VALID_CHANGE_KIND_SLUGS: frozenset[str] = frozenset(k.value for k in ChangeKind
 #: silently discarding the pack author's actual intent (Codex review).
 _TOP_LEVEL_MANIFEST_FIELDS: frozenset[str] = frozenset(
     {"id", "version", "kind", "assignments"}
-)
-
-
-class _StrictLoader(yaml.SafeLoader):
-    """A ``SafeLoader`` that rejects a duplicate key in the same mapping.
-
-    ``yaml.safe_load`` alone silently accepts ``{func_removed: break,
-    func_removed: ignore}`` with last-value-wins semantics (PyYAML's
-    ``SafeConstructor.construct_mapping`` never checks for a repeat) -- for a
-    hard-load-error manifest format, that would silently drop the earlier,
-    contradictory assignment instead of raising (Codex review). Mirrors
-    ``dump_manifest.py``'s own ``_StrictLoader``/``_construct_mapping`` for
-    the identical ADR-050 D3 gap; kept as a second, independent copy rather
-    than a shared import since that one is private to its own module and this
-    manifest format has no other coupling to ``dump_manifest.py``.
-    """
-
-
-def _construct_strict_mapping(
-    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[Any, Any]:
-    seen: set[Any] = set()
-    mapping: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=True)
-        # A complex YAML key (e.g. `? [a, b] : value`) constructs to an
-        # unhashable list -- `key in seen`/`seen.add(key)` would otherwise
-        # raise a raw TypeError instead of the documented PackManifestError
-        # (Codex review).
-        try:
-            hash(key)
-        except TypeError as exc:
-            raise PackManifestError(
-                f"unhashable mapping key {key!r} "
-                f"(line {key_node.start_mark.line + 1}): {exc}"
-            ) from exc
-        if key in seen:
-            raise PackManifestError(
-                f"duplicate key {key!r} in the same mapping "
-                f"(line {key_node.start_mark.line + 1})"
-            )
-        seen.add(key)
-        mapping[key] = loader.construct_object(value_node, deep=True)
-    return mapping
-
-
-_StrictLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_strict_mapping
 )
 
 
@@ -610,26 +561,13 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
             f"{manifest_path}: pack manifest is not valid UTF-8 ({exc})"
         ) from exc
 
-    try:
-        # `_StrictLoader` *is* a `yaml.SafeLoader` subclass (it only adds the
-        # duplicate-key check above); bandit's B506 flags any `Loader=` it
-        # cannot name-match against `SafeLoader`/`CSafeLoader`, subclasses
-        # included, so this is the safe-loader path, not an arbitrary-object one.
-        document: Any = yaml.load(raw_text, Loader=_StrictLoader)  # nosec B506
-    except PackManifestError as exc:
-        raise PackManifestError(f"{manifest_path}: {exc}") from exc
-    except yaml.YAMLError as exc:
-        raise PackManifestError(f"{manifest_path}: invalid YAML ({exc})") from exc
-    except ValueError as exc:
-        # PyYAML's implicit timestamp resolver constructs a real
-        # datetime.date/datetime for a timestamp-shaped scalar -- an
-        # out-of-range value (e.g. "2020-99-99") raises a raw ValueError
-        # from that stdlib constructor, not yaml.YAMLError, and would
-        # otherwise escape this loader's documented PackManifestError
-        # contract (Codex review, fresh evidence).
-        raise PackManifestError(
-            f"{manifest_path}: invalid YAML scalar ({exc})"
-        ) from exc
+    # Strict loading (duplicate key, unhashable key, invalid implicit
+    # scalar, syntax error -- all as PackManifestError) is
+    # `abicheck.model.yaml_strict`'s job, shared with every other hard-load-error
+    # manifest format here rather than kept as a second private copy.
+    document: Any = load_strict_yaml(
+        raw_text, error=lambda message: PackManifestError(f"{manifest_path}: {message}")
+    )
 
     if not isinstance(document, dict):
         raise PackManifestError(
