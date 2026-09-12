@@ -46,8 +46,10 @@ entry is checked, not just written" discipline `check_ai_readiness.py`'s
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_classification import CLASSIFICATION_BUG_CLASSES
 from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
+from .manifest_performance import PERFORMANCE_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
@@ -149,65 +151,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "test when a call site is found to pass it positionally."
                 ),
                 reference="PR #1231",
-            ),
-        ),
-    ),
-    BugClass(
-        id="classification.name_shape_as_contract_membership",
-        invariant=(
-            "A symbol's spelling answers how it is *represented* and what "
-            "convention it follows -- never whether it is in the "
-            "compatibility contract. Two corollaries the report layer must "
-            "honour: (a) a name-derived bucket (RTTI/vtable, "
-            "internal-namespace-by-convention, version segment) may be "
-            "counted and described, but never presented as evidence that a "
-            "finding is not a public break -- a vtable change on a public, "
-            "user-derivable class is one, and a `vN` segment states an API "
-            "version, not a stability promise; (b) when a name *is* parsed "
-            "for a scope-convention answer, only the scope that OWNS the "
-            "entity counts. A mangled name embeds its parameter types, so a "
-            "whole-string scan attributes a parameter's namespace to the "
-            "function, and an entity merely named like a convention "
-            "namespace is not in one."
-        ),
-        fixed_by=(1231,),
-        seed_tests=(
-            "tests/test_symbol_origin_ownership_properties.py",
-            "tests/test_surface_breakdown.py",
-            "tests/test_policy_experimental_namespaces.py",
-            "tests/test_diff_namespaces.py",
-        ),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Corollary (b) is now structural (the real Itanium "
-                    "nested-name parser resolves the owner) and generated "
-                    "against an independent oracle -- the seed test builds "
-                    "each mangled name from known components with its own "
-                    "encoder rather than re-deriving the answer through the "
-                    "parser under test. Two residual gaps. First, the "
-                    "fallback for shapes that parser does not model "
-                    "(constructors, destructors, operators) is still a "
-                    "textual scan of the region before the first `E`; it errs "
-                    "safe (a template argument's own `E` truncates it early, "
-                    "under-detecting rather than over-detecting) and is "
-                    "covered only by enumerated sibling cases -- teaching the "
-                    "structural parser those productions is the real fix. "
-                    "Second, and larger: corollary (a) is enforced only by "
-                    "making the report stop *claiming* membership it cannot "
-                    "establish. The positive half -- classifying these "
-                    "findings against a resolved contract -- is ADR-049's "
-                    "`--contract` machinery, which the surface breakdown does "
-                    "not consult at all; the JSON `abi_surface_breakdown` "
-                    "block still uses the `rtti_churn`/`internal_churn` key "
-                    "names, kept for report-schema stability and now "
-                    "contradicted by the prose beside them. A third, adjacent "
-                    "defect from the same report is tracked separately in "
-                    "docs/contribute/known-gaps.md: `Visibility.PUBLIC` used "
-                    "as a proxy for declaration presence, which is an "
-                    "evidence-selection problem rather than a naming one."
-                ),
-                reference="docs/contribute/known-gaps.md",
             ),
         ),
     ),
@@ -1383,103 +1326,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
-        id="classification.default_branch_asserts_more_than_inputs",
-        invariant=(
-            "A classifier's final, unguarded `return` may not be the "
-            "strongest claim in its vocabulary. Every outcome must be an "
-            "affirmative classification whose claim is entailed by the "
-            "inputs; a pair that cannot be placed gets its own explicit "
-            "\"cannot place\" outcome, never the label with the most "
-            "specific prose. The guard is a property over generated "
-            "input pairs asserting entailment (an outcome claiming a "
-            "name or location change may only be returned where the "
-            "names or locations actually differ), not a fixed example "
-            "per branch \u2014 and it must hold for the *catalog* text and "
-            "verdict tier of the kind emitted, not only for the rendered "
-            "sentence, since a render-time rewrite leaves the claim "
-            "standing everywhere else."
-        ),
-        # v19 oneAPI scan: `graph_reconcile_outcome.classify` fell through
-        # to OUTCOME_RECONCILED ("both the qualified name and the
-        # declaring-file evidence changed together", severity risk) for
-        # every pair that was neither renamed, moved, nor coordinate-only.
-        # All 234 of a oneTBB header graph's reconciled calls were
-        # `source_decl` pairs whose qualified name, source_relative and
-        # two-sided declaring file were byte-identical; 13 findings had
-        # `old_value == new_value`. PR #1232 corrected the rendered prose
-        # for that population and the claim survived in the ChangeKind's
-        # own `impact` text and RISK verdict, which is why prose was not
-        # the fix.
-        fixed_by=(1232,),
-        seed_tests=(
-            "tests/test_graph_reconcile_outcome_properties.py",
-            "tests/test_graph_reconcile_coordinate_outcome.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "name_evidence": ("identical", "coordinates_only", "renamed"),
-            "location_evidence": (
-                "identical",
-                "differing",
-                "absent_both",
-                "absent_one",
-            ),
-            "kind": ("type", "source_decl"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "The entailment property is stated for this one "
-                    "classifier. No mechanical sweep finds other "
-                    "classifiers whose final branch returns the "
-                    "strongest label in their vocabulary; a second "
-                    "instance elsewhere would still be found by hand."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md",
-            ),
-        ),
-    ),
-    BugClass(
-        id="perf.pure_content_digest_recomputed_per_consumer",
-        invariant=(
-            "A pure, expensive, content-derived value reached by several "
-            "independent consumers within one run must be computed at "
-            "most once per distinct input, not once per consumer. The "
-            "guard is a count of the expensive work actually performed "
-            "during a real run, bounded by the number of distinct inputs "
-            "— never an assertion that one named consumer uses the cache, "
-            "which forecloses exactly that call site and says nothing "
-            "about the next one added."
-        ),
-        # v19 oneAPI scan: every graph-shaped compare regressed ~1.7-1.8x
-        # against v18 (oneTBB pair 431s -> 740s, self-compare 406s -> 726s).
-        # cProfile put 404s of a 620s run inside
-        # `serialization.snapshot_content_digest` at n=6 over two snapshots;
-        # v18 was n=2. A fourth `same_persisted_content` caller had been
-        # added without anyone noticing the third, and nothing anywhere
-        # measured the count.
-        fixed_by=(1245,),
-        seed_tests=("tests/test_snapshot_digest_recomputation.py",),
-        public_surfaces=("cli", "python-api"),
-        axes={
-            "front_end": ("cli", "typed_api"),
-            "pairing": ("content-identical", "genuinely-different"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "The bound is enforced for the pairwise `compare` "
-                    "paths that open a digest scope. Other snapshot-digest "
-                    "consumers outside one — `workflows/"
-                    "bundle_stored_pair_compare.py`'s stored-pair route — "
-                    "are correct but unmemoized, and no gate fails if a "
-                    "future front end forgets to open a scope."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md",
-            ),
-        ),
-    ),
-    BugClass(
         id="invariant.blanket_assertion_over_widened_population",
         invariant=(
             'A whole-set assertion ("this collection is always empty") '
@@ -1536,7 +1382,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
     _ANALYSIS_BUG_CLASSES
+    + CLASSIFICATION_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
+    + PERFORMANCE_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + REPORT_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES
