@@ -68,8 +68,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 from ..buildsource.graph_facts import (
     CONF_HIGH,
     CONF_UNKNOWN,
@@ -79,6 +77,7 @@ from ..buildsource.graph_facts import (
     GraphNode,
 )
 from ..errors import UseCaseManifestError
+from ..model.yaml_strict import load_strict_yaml
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
@@ -93,61 +92,6 @@ if TYPE_CHECKING:
 #: replay, or consumer (ADR-057 slice 1) one in the ADR-046 D2 merge
 #: (``GraphFact.producer``).
 USE_CASE_PROVENANCE = "declared_use_case"
-
-
-class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
-    """``yaml.SafeLoader`` with one behavior change: a mapping that repeats a
-    key is a load error instead of the PyYAML default of silently keeping
-    only the last value.
-
-    A manifest author who accidentally repeats a field (two ``entrypoints:``
-    lines in one use-case entry, most plausibly from a copy-paste) would
-    otherwise have part of their declared coverage silently dropped with no
-    signal at all — exactly the "coverage quietly disappears" failure mode
-    :func:`load_use_case_manifest`'s docstring already promises this module
-    never allows. Scoped to this loader class alone (not a process-wide
-    ``yaml`` monkeypatch), so it affects nothing outside this module.
-    """
-
-
-def _construct_mapping_rejecting_duplicates(
-    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[Any, Any]:
-    """PyYAML's own ``SafeConstructor.construct_mapping`` already rejects an
-    unhashable key (e.g. ``- {[a, b]: x}``, a YAML sequence used as a
-    mapping key) with a ``ConstructorError`` — a check this override must
-    keep, not just the duplicate-key check it adds, or a syntactically
-    valid-but-unhashable-keyed document raises a bare ``TypeError`` that
-    escapes ``load_use_case_manifest``'s ``except yaml.YAMLError`` and the
-    documented :class:`~abicheck.errors.UseCaseManifestError` contract
-    entirely (Codex review, fresh evidence)."""
-    mapping: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        try:
-            hash(key)
-        except TypeError as exc:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found unhashable key: {key!r}",
-                key_node.start_mark,
-            ) from exc
-        if key in mapping:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found duplicate key: {key!r}",
-                key_node.start_mark,
-            )
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_DuplicateKeyCheckingLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    _construct_mapping_rejecting_duplicates,
-)
 
 
 def use_case_node_id(name: str) -> str:
@@ -271,8 +215,8 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     Raises :class:`~abicheck.errors.UseCaseManifestError` for a structurally
     malformed document (not a list, a non-mapping entry, a missing/blank
     ``use_case`` name), a syntactically invalid one, one that repeats a
-    mapping key (:class:`_DuplicateKeyCheckingLoader`), or one that isn't
-    valid UTF-8 — the same hard-load-error discipline
+    mapping key or uses an unhashable one
+    (:mod:`abicheck.model.yaml_strict`), or one that isn't valid UTF-8 — the same hard-load-error discipline
     ``policy_file.py``/``suppression.py`` already use for user-supplied
     YAML, since silently skipping or overwriting a malformed entry could
     make a use case's declared coverage quietly disappear.
@@ -286,35 +230,29 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     raised a bare ``UnicodeDecodeError`` instead of the documented
     exception type).
 
-    Also wraps a bare ``ValueError`` from PyYAML's own implicit-resolver
-    scalar constructors (Codex review, fresh evidence): a value that looks
-    like a YAML timestamp but has an invalid component (``2023-99-99`` —
-    no such month) is resolved to the timestamp tag by PyYAML's *resolver*
-    before construction even reaches this loader's own overrides, and its
-    built-in timestamp constructor raises a plain ``ValueError`` (not a
-    ``yaml.YAMLError`` subclass) for an out-of-range date/time part — a
-    document shape neither the syntax nor the UTF-8 guard above catches.
+    An out-of-range implicit scalar (``2023-99-99`` — timestamp-shaped, no
+    such month) is wrapped too: PyYAML's *resolver* tags it before
+    construction, and its built-in timestamp constructor raises a plain
+    ``ValueError``, not a ``yaml.YAMLError``. That translation now lives in
+    :func:`~abicheck.model.yaml_strict.load_strict_yaml`, alongside the identical
+    one every other manifest format needed.
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
-        # `_DuplicateKeyCheckingLoader` subclasses `yaml.SafeLoader` and only
-        # replaces its mapping constructor with the duplicate-key check;
-        # bandit's B506 flags every `Loader=` it cannot name-match against
-        # `SafeLoader`/`CSafeLoader`, subclasses included (same annotation as
-        # `dump_manifest._load_strict_yaml`).
-        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)  # nosec B506
     except UnicodeError as exc:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: {path}: not valid UTF-8: {exc}"
         ) from exc
-    except yaml.YAMLError as exc:
-        raise UseCaseManifestError(
-            f"impact-use-cases.yaml: {path}: invalid YAML syntax: {exc}"
-        ) from exc
-    except ValueError as exc:
-        raise UseCaseManifestError(
-            f"impact-use-cases.yaml: {path}: invalid scalar value: {exc}"
-        ) from exc
+    # Strict loading (duplicate key, unhashable key, invalid implicit
+    # scalar, syntax error) is `abicheck.model.yaml_strict`'s job -- shared with
+    # every other hard-load-error manifest format here; only the
+    # `UseCaseManifestError` vocabulary is this module's.
+    raw = load_strict_yaml(
+        text,
+        error=lambda message: UseCaseManifestError(
+            f"impact-use-cases.yaml: {path}: {message}"
+        ),
+    )
     return parse_use_case_manifest(raw)
 
 

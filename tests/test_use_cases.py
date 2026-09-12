@@ -215,7 +215,7 @@ def test_load_use_case_manifest_wraps_a_yaml_syntax_error(tmp_path: Path) -> Non
     exception type for any invalid manifest."""
     manifest = tmp_path / "impact-use-cases.yaml"
     manifest.write_text("- use_case: [unterminated flow sequence\n")
-    with pytest.raises(UseCaseManifestError, match="invalid YAML syntax"):
+    with pytest.raises(UseCaseManifestError, match="invalid YAML"):
         load_use_case_manifest(manifest)
 
 
@@ -237,10 +237,12 @@ def test_load_use_case_manifest_wraps_an_invalid_timestamp_scalar(
     with an invalid component (no such month) makes PyYAML's own
     timestamp constructor raise a bare ValueError, not a yaml.YAMLError --
     a document shape neither the syntax nor the UTF-8 guard catches
-    (Codex review, fresh evidence)."""
+    (Codex review, fresh evidence). Translated by the shared
+    ``yaml_strict`` loader since the three copies of that translation were
+    consolidated."""
     manifest = tmp_path / "impact-use-cases.yaml"
     manifest.write_text("- use_case: 2023-99-99\n")
-    with pytest.raises(UseCaseManifestError, match="invalid scalar value"):
+    with pytest.raises(UseCaseManifestError, match="invalid YAML scalar"):
         load_use_case_manifest(manifest)
 
 
@@ -275,7 +277,7 @@ def test_load_use_case_manifest_wraps_an_unhashable_key(tmp_path: Path) -> None:
     constructor already performs."""
     manifest = tmp_path / "impact-use-cases.yaml"
     manifest.write_text("- {[a, b]: x}\n")
-    with pytest.raises(UseCaseManifestError, match="unhashable key"):
+    with pytest.raises(UseCaseManifestError, match="unhashable mapping key"):
         load_use_case_manifest(manifest)
 
 

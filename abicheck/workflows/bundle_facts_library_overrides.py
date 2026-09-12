@@ -71,6 +71,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..compile_context import CompileContext
+from ..model.yaml_strict import load_strict_yaml
 
 #: Recognized keys inside one library's own mapping. The compile-context
 #: fields mirror `CompileContext`'s own field names exactly (rather than the
@@ -345,12 +346,10 @@ def load_bundle_facts_library_overrides(
 
     The file-reading counterpart of :func:`parse_bundle_facts_library_overrides`
     above, kept in this ``workflows``-classified module rather than the
-    ``frontends``-layer CLI dispatch code that calls it (Codex review):
-    ``dump_manifest`` (the ``_load_yaml_strict`` duplicate-key-checking YAML
-    loader below, shared with ``--dump-manifest``) is classified ``extract``,
-    and ``frontends`` may not import ``extract`` directly
-    (``architecture/modules.yaml``'s ``may_import: [model, workflows,
-    report]``) -- only ``workflows`` may. Threads the manifest's own resolved
+    ``frontends``-layer CLI dispatch code that calls it (Codex review).
+    Strict parsing itself is :mod:`abicheck.model.yaml_strict`, the one
+    duplicate-key-checking loader ``--dump-manifest`` and every other
+    hard-load-error manifest format here share. Threads the manifest's own resolved
     parent directory through as *base_dir*, so a relative ``headers``/
     ``includes``/``sysroot`` path inside the manifest anchors to the manifest
     file itself rather than the calling process's current working directory.
@@ -360,16 +359,11 @@ def load_bundle_facts_library_overrides(
     document, or any schema violation :func:`parse_bundle_facts_library_overrides`
     itself raises.
     """
-    from ..dump_manifest import _load_yaml_strict
-    from ..errors import ManifestValidationError
-
     try:
-        raw = _load_yaml_strict(
-            manifest_path.read_text(encoding="utf-8"), source=str(manifest_path)
-        )
+        text = manifest_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         # Codex review, fresh evidence: a manifest file containing invalid
-        # UTF-8 raises here, before _load_yaml_strict ever runs -- and
+        # UTF-8 raises here, before parsing ever runs -- and
         # UnicodeDecodeError is a ValueError subclass, so without this it
         # was still caught, but by dispatch()'s generic ``except
         # (SnapshotError, ValueError, OSError)`` clause, exiting 1 instead
@@ -378,29 +372,27 @@ def load_bundle_facts_library_overrides(
         raise BundleFactsLibraryOverridesError(
             f"--bundle-facts-library-manifest {manifest_path}: cannot decode as UTF-8: {exc}"
         ) from exc
-    except ManifestValidationError as exc:
-        raise BundleFactsLibraryOverridesError(
-            f"--bundle-facts-library-manifest {manifest_path}: {exc}"
-        ) from exc
-    except TypeError as exc:
-        # Codex review, fresh evidence: a syntactically valid YAML mapping
-        # can use a non-scalar (list/dict) node as a *key* -- e.g.
-        # `? [a, b]\n: 1`. `_load_yaml_strict`'s own duplicate-key set
-        # (`seen: set[Any] = set(); key in seen; seen.add(key)`) raises a
-        # raw, untranslated `TypeError: unhashable type` for that, before
-        # parse_bundle_facts_library_overrides() ever runs its own
-        # non-string-key check below -- and dispatch()'s CLI boundary
-        # catches ValueError, not TypeError, so this previously leaked a
-        # traceback instead of the clean exit-64 usage error every other
-        # malformed manifest input here produces.
-        raise BundleFactsLibraryOverridesError(
-            f"--bundle-facts-library-manifest {manifest_path}: invalid YAML: {exc}"
-        ) from exc
+
+    # A duplicate mapping key, an unhashable (sequence/mapping) key -- e.g.
+    # `? [a, b]\n: 1`, which an earlier hand-rolled duplicate-key set turned
+    # into a raw `TypeError` -- an out-of-range implicit scalar, and a
+    # syntax error all arrive as BundleFactsLibraryOverridesError:
+    # `load_strict_yaml` normalizes every malformed-document failure into
+    # the caller's own error type, so none of them can reach dispatch()'s
+    # CLI boundary (which catches ValueError, not TypeError) as a raw
+    # traceback.
+    try:
+        raw = load_strict_yaml(
+            text,
+            error=lambda message: BundleFactsLibraryOverridesError(
+                f"--bundle-facts-library-manifest {manifest_path}: {message}"
+            ),
+        )
     except RecursionError as exc:
         # Codex review, fresh evidence: a well-formed but sufficiently
         # deeply nested manifest (~1,500 nested sequences reproduces it)
         # exhausts Python's own recursion limit inside PyYAML's/
-        # _load_yaml_strict's recursive-descent parsing, before this
+        # `load_strict_yaml`'s recursive-descent parsing, before this
         # function's own translation layer or parse_bundle_facts_library_
         # overrides() ever run -- and dispatch()'s CLI boundary catches
         # ValueError, not RecursionError, so this previously leaked a raw

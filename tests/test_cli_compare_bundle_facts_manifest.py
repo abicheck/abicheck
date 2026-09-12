@@ -330,10 +330,14 @@ class TestBundleFactsLibraryManifest:
     def test_unhashable_yaml_key_is_a_clean_usage_error(self, tmp_path: Path) -> None:
         """Codex review, fresh evidence: a syntactically valid YAML mapping
         can use a non-scalar (list) node as a key (``? [a, b]\\n: 1``),
-        which raises a raw, untranslated ``TypeError`` inside the
+        which raised a raw, untranslated ``TypeError`` inside the
         duplicate-key-checking loader -- confirm it now surfaces as the
         same clean exit-64 usage error every other malformed manifest here
-        produces, all the way through the real CLI."""
+        produces, all the way through the real CLI.
+
+        The shared strict loader (:mod:`abicheck.model.yaml_strict`) names
+        the offending key rather than reporting a generic "invalid YAML",
+        so the message assertion below is on that wording."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -359,7 +363,7 @@ class TestBundleFactsLibraryManifest:
         )
 
         assert code == 64, out
-        assert "invalid YAML" in out
+        assert "unhashable mapping key" in out
 
     def test_per_library_headers_reach_compare_release_against_bundle_facts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
