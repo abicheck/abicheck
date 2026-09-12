@@ -936,10 +936,22 @@ class TestWrapRunDumpWithDependencyScope:
 
         return _fn
 
-    def test_default_include_dependencies_true_tags_full(self):
+    def test_default_tags_filtered_matching_the_cli(self):
+        """The ``include_dependencies`` default is ``False``, so an omitted
+        keyword tags ``"filtered"`` -- the same surface
+        ``dump --include-system-declarations``'s own ``default=False`` gives.
+        It used to default to ``True``/``"full"``, which made the typed API
+        and the CLI disagree from identical inputs and left a CLI baseline
+        uncomparable against a typed-API candidate."""
         snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
         result = run_dump(Path("/lib.so"), "elf")
+        assert result.dependency_scope == "filtered"
+
+    def test_explicit_include_dependencies_true_tags_full(self):
+        snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+        result = run_dump(Path("/lib.so"), "elf", include_dependencies=True)
         assert result.dependency_scope == "full"
 
     def test_include_dependencies_false_filters(self):
@@ -963,9 +975,10 @@ class TestWrapRunDumpWithDependencyScope:
         result = run_dump(Path("/lib.so"), "elf")
         assert result.dependency_scope is None
 
-    def test_default_include_dependencies_true_suppresses_streaming_prune(self):
-        """A full/unscoped request (``include_dependencies=True``, the
-        default) must suppress the opt-in streaming pruner
+    def test_include_dependencies_true_suppresses_streaming_prune(self):
+        """A full/unscoped request (``include_dependencies=True``, now an
+        explicit opt-in rather than the default) must suppress the opt-in
+        streaming pruner
         (dumper_clang_streaming.py) for the inner call's dynamic extent --
         otherwise the pruner could silently drop dependency-header
         functions/variables even though this wrapper was about to keep them
@@ -992,7 +1005,7 @@ class TestWrapRunDumpWithDependencyScope:
 
         run_dump = wrap_run_dump_with_dependency_scope(_fn)
         assert not streaming_prune_suppressed()  # not leaked before the call
-        run_dump(Path("/lib.so"), "elf")  # include_dependencies defaults True
+        run_dump(Path("/lib.so"), "elf", include_dependencies=True)
         assert observed == [True]
         assert not streaming_prune_suppressed()  # not leaked after the call
 

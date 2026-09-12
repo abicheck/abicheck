@@ -288,7 +288,7 @@ class TestCanonicalEvidenceTier:
         """Stat and leaf JSON projections also carry the canonical tier."""
         f = _pub_func("api", "_Z3apiv")
         r = compare(_snap(functions=[f]), _snap(functions=[f]))
-        stat = json.loads(reporter.to_json(r, stat=True))
+        stat = json.loads(reporter.to_stat_json(r))
         leaf = json.loads(reporter.to_json(r, report_mode="leaf"))
         assert stat["evidence_tier"] == "header_aware"
         assert leaf["evidence_tier"] == "header_aware"

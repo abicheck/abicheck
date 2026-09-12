@@ -359,15 +359,18 @@ def _render_output(
 ) -> str:
     """Render comparison result in the requested output format.
 
-    No ``stat``/``show_recommendation`` parameters (CLI cleanup phase two,
-    PR 1): the one-line summary is reached only via ``fmt ==
-    service_render.ONELINE_FORMAT`` (``--format oneline``). The release
-    recommendation is unconditional for every CLI
-    invocation -- achieved by explicitly passing ``show_recommendation=True``
-    below, not by changing :func:`service.render_output`'s own default
-    (which stays ``False``, the pre-removal Tier-2 Python API default, per
-    Codex review, fresh evidence -- a direct caller that omits the keyword
-    must keep getting the behaviour it always got).
+    No ``stat`` parameter: the one-line summary is reached only via ``fmt ==
+    service_render.ONELINE_FORMAT`` (``--format oneline``), and the
+    summary-only JSON via ``service.to_stat_json``.
+
+    ``show_recommendation=True`` is still passed explicitly below even though
+    :func:`service.render_output`'s own default is now ``True`` as well. It is
+    redundant, deliberately: this wrapper states the CLI's own contract (the
+    release recommendation is unconditional for every CLI invocation) rather
+    than inheriting it, so a future change to the library default cannot alter
+    CLI output without a test here failing first. It previously *compensated*
+    for a ``False`` default, which is the divergence the defaults-alignment
+    pass removed.
     """
     from ...service import render_output
     return render_output(

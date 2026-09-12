@@ -382,6 +382,33 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="config.front_end_default_divergence",
+        invariant=(
+            "An option offered by more than one front end carries the same "
+            "default in each, so a caller that states nothing gets the same "
+            "behavior whichever front end it used."
+        ),
+        fixed_by=(1258,),
+        seed_tests=("tests/test_front_end_default_parity.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "SHARED_OPTION_DEFAULTS is hand-maintained and currently "
+                    "names one option (include_dependencies). The parity "
+                    "assertion itself is general -- it reads the Click "
+                    "parameter's own default off the real command and "
+                    "compares it against each typed surface -- but nothing "
+                    "enumerates *which* options are reachable from more than "
+                    "one front end, so a newly shared option is covered only "
+                    "once added to that tuple. Deriving the list (every Click "
+                    "dest that also names an InputSpec field or a "
+                    "run_dump/DumpRequest keyword) would close it."
+                ),
+                reference="PR #1258",
+            ),
+        ),
+    ),
+    BugClass(
         id="config.propagation_completeness",
         invariant=(
             "An accepted configuration value either reaches every "

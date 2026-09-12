@@ -104,11 +104,23 @@ class InputSpec:
     version: str = ""
     pdb: Path | None = None
     debug_roots: tuple[Path, ...] = ()
-    # Mirrors `dump --include-system-declarations`/`compare --include-system-declarations`
-    # (dumper_scoping.py): default True preserves the historical unfiltered
-    # behavior for any caller that doesn't opt in; `run_compare` (and the
-    # CLI's `--include-system-declarations` default False) sets it explicitly.
-    include_dependencies: bool = True
+    # Mirrors `dump --include-system-declarations`/`compare
+    # --include-system-declarations` (dumper_scoping.py), **including its
+    # default**: toolchain/system-header declarations are excluded unless a
+    # caller opts in, exactly as the CLI flag's own `default=False` does.
+    #
+    # This default used to be `True`, to preserve the historical unfiltered
+    # behavior for a caller that omits it. That made the two front ends
+    # disagree about what "I didn't ask for anything" means, and the
+    # disagreement was not cosmetic: dumping `liba.so` with one C++ header
+    # yields 10 functions / `dependency_scope="filtered"` through the CLI and
+    # 5,597 functions / `"full"` through `DumpRequest`, from identical inputs.
+    # Since `comparability.check_contracts_comparable` refuses to compare a
+    # `filtered` side against a `full` one, a user who dumped a baseline with
+    # the CLI and a candidate with the typed API -- passing the flag on
+    # neither, as the mismatch error itself advises -- got `scope_mismatch`
+    # and no verdict. Aligning the default is what makes that advice true.
+    include_dependencies: bool = False
     # ADR-055 D1: this side's inline build/source evidence (mirrors
     # `--sources`/`--build-info`, side-scoped like the CLI's own
     # `old=`/`new=` sided values) -- `run_compare_request` embeds them via
@@ -191,7 +203,7 @@ class InputSpec:
         version: str = "",
         pdb: Path | str | None = None,
         debug_roots: Iterable[Path | str] | None = None,
-        include_dependencies: bool = True,
+        include_dependencies: bool = False,
         sources: Path | str | None = None,
         build_info: Path | str | None = None,
         build_targets: Iterable[str] | None = None,
