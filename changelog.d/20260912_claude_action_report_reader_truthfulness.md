@@ -30,6 +30,16 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **Three more ways a report could be accepted without supplying a result.** A
+  structural fallback keyed on a *present* `verdict` key re-admitted the
+  arbitrary strings the vocabulary check rejects, so `{"verdict": "write
+  interrupted", "reason": {}}` passed on the strength of its `reason` object; a
+  `libraries` array was accepted as a verdict source although nothing reads it,
+  letting a release whose members reported `BREAKING` publish `COMPATIBLE`; and
+  the stdout-mode check was gated on the destination inventory being empty, so
+  an `extra-args --write json=` destination suppressed it and a valid secondary
+  masked an unusable stdout report. All three now require the thing they claim
+  to establish.
 - **An `extra-args --output` override is honoured when locating the report.**
   `extra-args` can override this script's own `-o`, and Click's last-wins rule
   makes the override the real destination, so keying on the `output-file` input

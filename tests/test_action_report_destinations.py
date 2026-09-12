@@ -612,3 +612,96 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         env = self._env(tmp_path, "", None)
         outputs = _run_action(tmp_path, env, bindir)
         assert outputs.get("verdict") == "BREAKING", outputs
+
+
+class TestStdoutModeIsJudgedEvenBesideAWriteDestination:
+    """A valid `--write json=` secondary must not excuse an unusable stdout report.
+
+    `format: json` with no `output-file` is the documented stdout mode. The
+    stdout validation was gated on *the destination inventory being empty*, but
+    adding `extra-args --write json=b.json` makes it non-empty while stdout is
+    still where the requested report goes -- so the check was skipped and a valid
+    secondary masked an unusable stdout document. That is the same masking this
+    whole area exists to close, reintroduced one branch over (CodeRabbit review,
+    Major; Codex flagged the sibling shape).
+
+    The condition is now the *mode* -- json format, no effective output path --
+    and the stdout report is judged by its own captured file rather than through
+    `_json_report_src`, whose fallback would reach the secondary in exactly the
+    case a missing stdout report presents.
+    """
+
+    def _env(self, tmp_path: Path, secondary: Path | None) -> dict[str, str]:
+        env = {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+        }
+        if secondary is not None:
+            env["INPUT_EXTRA_ARGS"] = f"--write json={secondary}"
+        return env
+
+    def _stub(self, tmp_path: Path, *, stdout: str, secondary: Path | None) -> Path:
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        lines = ["#!/usr/bin/env bash"]
+        if secondary is not None:
+            blob = tmp_path / "secondary.json"
+            blob.write_text(
+                json.dumps({"report_schema_version": "4.4", "verdict": "COMPATIBLE"}),
+                encoding="utf-8",
+            )
+            lines.append(f'cp "{blob}" "{secondary}"')
+        if stdout:
+            out = tmp_path / "stdout.txt"
+            out.write_text(stdout, encoding="utf-8")
+            lines.append(f'cat "{out}"')
+        lines.append("exit 0")
+        stub = bindir / "abicheck"
+        stub.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return bindir
+
+    @pytest.mark.parametrize(
+        "stdout,label",
+        (
+            ("", "printed nothing"),
+            ("Killed\n", "not json"),
+            ("{}", "empty object"),
+            ('{"error": "write interrupted"}', "no result"),
+            ('{"verdict": "COMPATIBLE"', "truncated"),
+        ),
+    )
+    def test_a_valid_secondary_does_not_excuse_stdout(
+        self, tmp_path: Path, stdout: str, label: str
+    ) -> None:
+        secondary = tmp_path / "b.json"
+        bindir = self._stub(tmp_path, stdout=stdout, secondary=secondary)
+        outputs = _run_action(tmp_path, self._env(tmp_path, secondary), bindir)
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", (label, outputs)
+        assert outputs["_exit"] == 1, (label, outputs)
+
+    def test_a_good_stdout_report_beside_a_secondary_still_passes(
+        self, tmp_path: Path
+    ) -> None:
+        # Control: the combination itself must remain usable, or the fix is
+        # satisfiable by rejecting stdout mode whenever a --write is present.
+        secondary = tmp_path / "b.json"
+        bindir = self._stub(
+            tmp_path,
+            stdout=json.dumps({"report_schema_version": "4.4", "verdict": "BREAKING"}),
+            secondary=secondary,
+        )
+        outputs = _run_action(tmp_path, self._env(tmp_path, secondary), bindir)
+        assert outputs.get("verdict") == "BREAKING", outputs
+
+    def test_plain_stdout_mode_is_unchanged(self, tmp_path: Path) -> None:
+        # No secondary at all: the pre-existing stdout path must behave as before.
+        bindir = self._stub(
+            tmp_path,
+            stdout=json.dumps({"report_schema_version": "4.4", "verdict": "BREAKING"}),
+            secondary=None,
+        )
+        outputs = _run_action(tmp_path, self._env(tmp_path, None), bindir)
+        assert outputs.get("verdict") == "BREAKING", outputs

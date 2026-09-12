@@ -737,8 +737,21 @@ class TestAReadableVerdictSourceIsRequired:
         ),
         ("release envelope", {"verdict": "NO_CHANGE", "libraries": []}),
         (
-            "release envelope, sentinel verdict",
-            {"libraries": [{"verdict": "BREAKING"}]},
+            # A real release document carries the ROLLED-UP verdict itself --
+            # `_format_release_json` emits `"verdict": worst_verdict` beside
+            # `libraries` on every one. This entry used to be
+            # `{"libraries": [{"verdict": "BREAKING"}]}`, which no emitter
+            # writes; it was an unfaithful fixture of mine, and it broke when
+            # the `libraries`-only rule was correctly removed. Fixed here rather
+            # than by keeping the rule (Codex review, P2) -- the fifth time on
+            # this PR that a rule change surfaced a fixture resembling no real
+            # abicheck output.
+            "release envelope, per-library rollup",
+            {
+                "release_schema_version": "1.3",
+                "verdict": "BREAKING",
+                "libraries": [{"library": "libfoo", "verdict": "BREAKING"}],
+            },
         ),
         ("nested shape", {"diff": {"verdict": "COMPATIBLE"}}),
     )
@@ -1069,3 +1082,114 @@ class TestTheVerdictVocabularyTracksTheRealEmitters:
         # any string, which is the defect the vocabulary replaced.
         for outsider in ("write interrupted", "compatible", "OK", ""):
             assert outsider not in rq.KNOWN_VERDICTS, outsider
+
+
+#: A valid `verdict: null` beside the structural evidence, per shape -- what the
+#: real emitters write (`report/not_comparable.py`, `report/no_baseline.py`).
+REAL_NULL_VERDICT_SHAPES = (
+    ("not_comparable", {"verdict": None, "reason": {"kind": "k", "message": "m"}}),
+    (
+        "audit",
+        {
+            "verdict": None,
+            "no_baseline": True,
+            "findings": [],
+            "suppressed_findings": [],
+        },
+    ),
+)
+
+
+class TestStructuralFallbacksCannotBypassTheVocabulary:
+    """`verdict: null` is required by the two structural rules, not just present.
+
+    Both rules exist because their emitters write a literal `null` there and put
+    the result somewhere else (a `reason` object; the two audit arrays). Keyed on
+    mere *presence*, they re-admitted exactly what the vocabulary check rejects:
+    `{"verdict": "write interrupted", "reason": {}}` passed on the strength of
+    the `reason` object alone, and the unusable string then reached the
+    COMPATIBLE fallthrough (Codex review, P2).
+
+    Requiring `is None` is faithful to the emitters rather than stricter than
+    them, which is why the real shapes are asserted alongside.
+    """
+
+    @pytest.mark.parametrize(
+        "label,document",
+        REAL_NULL_VERDICT_SHAPES,
+        ids=[s[0] for s in REAL_NULL_VERDICT_SHAPES],
+    )
+    def test_the_real_null_verdict_shape_still_reads(
+        self, label: str, document: dict
+    ) -> None:
+        assert rq._carries_a_result(document), label
+
+    @pytest.mark.parametrize(
+        "label,document",
+        REAL_NULL_VERDICT_SHAPES,
+        ids=[s[0] for s in REAL_NULL_VERDICT_SHAPES],
+    )
+    @pytest.mark.parametrize("bad", ("write interrupted", "OK", "", "0"))
+    def test_a_non_null_unknown_verdict_is_not_rescued_by_the_structure(
+        self, label: str, document: dict, bad: str
+    ) -> None:
+        assert not rq._carries_a_result({**document, "verdict": bad}), (label, bad)
+
+    @pytest.mark.parametrize(
+        "label,document",
+        REAL_NULL_VERDICT_SHAPES,
+        ids=[s[0] for s in REAL_NULL_VERDICT_SHAPES],
+    )
+    def test_a_real_verdict_beside_the_structure_still_reads(
+        self, label: str, document: dict
+    ) -> None:
+        # Not a regression of the rule above: a *known* verdict is read by the
+        # vocabulary rule that runs first, structure or no structure.
+        assert rq._carries_a_result({**document, "verdict": "BREAKING"}), label
+
+
+class TestALibraryArrayIsNotAVerdictSource:
+    """`{"libraries": [...]}` alone must not be admitted.
+
+    It was, and nothing reads it: neither `compat_verdict` here nor `run.sh`'s
+    `_report_compat_verdict` looks at `libraries`, so admitting a library-only
+    document licensed COMPATIBLE for a release whose members said `BREAKING`
+    (Codex review, P2). A rollup was not the answer either --
+    `cli_compare_release_helpers._format_release_json` emits a top-level
+    `"verdict": worst_verdict`, already rolled up, on *every* release document,
+    so a `libraries` array with no readable verdict beside it is not a shape any
+    emitter produces.
+    """
+
+    @pytest.mark.parametrize(
+        "document",
+        (
+            {"libraries": []},
+            {"libraries": [{"verdict": "BREAKING"}]},
+            {"libraries": [{"library": "libfoo"}]},
+            {"release_schema_version": "1.3", "libraries": [{"verdict": "API_BREAK"}]},
+        ),
+    )
+    def test_a_library_only_document_carries_no_result(self, document: dict) -> None:
+        assert not rq._carries_a_result(document), document
+
+    def test_the_real_release_envelope_still_reads(self) -> None:
+        # The control, and the reason rejecting the rule is safe: a real release
+        # document always carries the rolled-up verdict itself.
+        assert rq._carries_a_result(
+            {
+                "release_schema_version": "1.3",
+                "verdict": "BREAKING",
+                "libraries": [{"library": "libfoo", "verdict": "BREAKING"}],
+            }
+        )
+
+    def test_a_release_envelope_reporting_through_run_outcome_reads(self) -> None:
+        assert rq._carries_a_result(
+            {
+                "release_schema_version": "1.3",
+                "verdict": None,
+                "libraries": [],
+                "run_outcome": {"compatibility": "NO_CHANGE"},
+            }
+        )

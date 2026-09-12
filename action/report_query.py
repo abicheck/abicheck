@@ -136,7 +136,18 @@ VALIDITY_NO_RESULT = "no_result"
 #:   accepting a document that omits it lets a run whose policy hid every
 #:   finding publish ``AUDIT_CLEAN``. Absence cannot establish that policy hid
 #:   nothing -- ADR-067's "record before disposing" applied to the reader;
-#: * a release envelope: a ``libraries`` array.
+#:
+#: A ``libraries`` array is deliberately **not** a rule of its own. It was one,
+#: and it was wrong in the way that matters here: no reader extracts a verdict
+#: from ``libraries`` (neither ``compat_verdict`` nor ``run.sh``'s
+#: ``_report_compat_verdict`` looks at it), so admitting a library-only document
+#: licensed the COMPATIBLE fallthrough for a release whose members said
+#: ``BREAKING`` -- and ``{"libraries": []}`` was admitted too (Codex review,
+#: P2). Nor was a rollup the fix: ``_format_release_json`` emits a top-level
+#: ``"verdict": worst_verdict`` -- already rolled up -- alongside
+#: ``run_outcome`` on *every* release document, so a ``libraries`` array with no
+#: readable verdict beside it is not a shape any emitter produces. The first two
+#: rules already cover every real release envelope.
 #:
 #: ``run_outcome.compatibility`` is accepted as a verdict source in its own
 #: right (ADR-063 D6 makes it the canonical one, and `_report_compat_verdict`
@@ -201,16 +212,26 @@ def _carries_a_result(document: dict[str, Any]) -> bool:
             outcome.get("compatibility")
         ):
             return True
-    # The three shapes whose `verdict` is null by design. Checked at the root
+    # The two shapes whose `verdict` is null by design. Checked at the root
     # only: each is a whole-document shape, not something nested under `diff`.
-    if "verdict" in document and isinstance(document.get("reason"), dict):
+    #
+    # `verdict is None` is required, not merely present: without it these
+    # structural rules re-admitted exactly what the vocabulary check above
+    # rejects -- `{"verdict": "write interrupted", "reason": {}}` bypassed it on
+    # the strength of the `reason` object alone, `_report_compat_verdict`
+    # returned the unusable string, and the COMPATIBLE fallthrough stood
+    # (Codex review, P2). Both emitters write a literal `null` there, so this is
+    # faithful to them rather than stricter.
+    if document.get("verdict") is None and isinstance(document.get("reason"), dict):
         return True
-    if document.get("no_baseline") is True and all(
-        isinstance(document.get(key), list)
-        for key in ("findings", "suppressed_findings")
-    ):
-        return True
-    return isinstance(document.get("libraries"), list)
+    return (
+        document.get("verdict") is None
+        and document.get("no_baseline") is True
+        and all(
+            isinstance(document.get(key), list)
+            for key in ("findings", "suppressed_findings")
+        )
+    )
 
 
 #: Per *version sequence*, the first version whose documents owe an

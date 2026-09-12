@@ -4496,21 +4496,33 @@ _resolve_clean_exit_verdict() {
       _dest_validity=$(_report_query "$_dest" report_validity)
       _reject_unusable_report "$_dest_validity" "$_dest" || return
     done <<<"$(_caller_json_destinations)"
-    # Stdout mode names no destination above (`format: json` with no
-    # `output-file`), so its report can only be reached through
-    # `_json_report_src`. Asked only in that case: with a real destination the
-    # loop has already judged it, and re-asking through the fallback chain is
-    # what let one destination answer for another.
-    if [[ -z "$(_caller_json_destinations)" ]]; then
-      _validity=$(_report_validity)
-      if [[ -z "$_validity" ]]; then
-        # No source to classify at all: the "died between the exit code and the
-        # report" shape, which no valid-JSON fixture can stand in for and which
-        # is the likeliest of these to occur in practice.
+    # Stdout mode names no destination above, so its report is judged here.
+    #
+    # The condition is the *mode* -- json format with no effective output path --
+    # not "the inventory came back empty" (Codex/CodeRabbit review, and my own
+    # bug): `format: json` with no `output-file` plus an `extra-args --write
+    # json=b.json` has a non-empty inventory, so keying on emptiness skipped
+    # stdout validation entirely and let a valid secondary mask an unusable
+    # stdout report. That is the very masking this block was added to close,
+    # reintroduced one branch over.
+    #
+    # And the stdout report is judged by its own captured file rather than
+    # through `_report_validity`, for the same reason: the chain falls through to
+    # a `--write` destination when the capture is absent, which is precisely the
+    # case a missing stdout report presents.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" \
+          && -z "${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}" ]]; then
+      if [[ -z "${_STDOUT_JSON_FILE:-}" ]]; then
+        # `$_STDOUT_JSON_FILE` is only set when stdout actually started with
+        # `{`, so an empty value here is "the run printed no JSON document at
+        # all" -- the "died between the exit code and the report" shape, which
+        # no valid-JSON fixture can stand in for and the likeliest of these in
+        # practice.
         VERDICT="REPORT_UNREADABLE"
-        echo "::error::abicheck exited 0, but the JSON report this run requested is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+        echo "::error::abicheck exited 0, but the JSON report this run requested on stdout is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or output another process consumed."
         return
       fi
+      _validity=$(_report_query "$_STDOUT_JSON_FILE" report_validity)
       _reject_unusable_report "$_validity" "format: json on stdout" || return
     fi
   fi

@@ -184,6 +184,26 @@ Two predicates close that without weakening anything above:
   the option declaration in `frontends/cli/options/secondary_output.py`, not
   against either comment.
 
+  **A structural rule requires `verdict: null`, not a present `verdict` key.**
+  The not-comparable and audit rules exist because their emitters write a
+  literal `null` and put the result elsewhere (a `reason` object; the two audit
+  arrays). Keyed on presence, they re-admitted what the vocabulary check below
+  rejects — `{"verdict": "write interrupted", "reason": {}}` passed on the
+  `reason` object alone. And there is deliberately **no** `libraries` rule: no
+  reader extracts a verdict from that array, and
+  `_format_release_json` emits a rolled-up top-level `verdict` on every release
+  document, so a library-only shape is not one any emitter writes.
+
+  **Stdout mode is judged by the mode, not by an empty destination inventory.**
+  `format: json` with no effective output path sends the requested report to
+  stdout *even when an `extra-args --write json=` names another artifact*, so
+  gating the stdout check on "the inventory is empty" let a valid secondary mask
+  an unusable stdout report — the same masking this section exists to close, one
+  branch over. The stdout document is also validated through its own
+  `$_STDOUT_JSON_FILE` rather than `_report_validity`, whose chain falls through
+  to a `--write` destination in precisely the case a missing stdout report
+  presents.
+
   **A verdict must be one the emitters actually produce.** `KNOWN_VERDICTS`
   in `report_query.py` is checked by membership, not non-emptiness: an
   arbitrary string (`{"verdict": "write interrupted"}`) parses, reads as a
