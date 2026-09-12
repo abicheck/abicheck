@@ -32,9 +32,11 @@ Phase 5 section for the design this page's data comes from.
 | `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.contract_attributes` | `list[str] \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.declared` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.exception_spec` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.exported` | `bool` | castxml, clang, elf, macho, pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.hidden_friend_owner` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_explicit` | `bool \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
@@ -66,8 +68,10 @@ Phase 5 section for the design this page's data comes from.
 | `TypeField.is_volatile` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.access` | `AccessLevel` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.declared` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.exported` | `bool` | castxml, clang, elf, macho, pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))

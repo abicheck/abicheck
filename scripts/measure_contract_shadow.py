@@ -151,10 +151,15 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 30,
+    "exports": 31,
     "all": 0,
 }
-#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30. The +2 to 31 was
+#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30 -> 31. The last
+#: +1 is `export_dropped_declaration_retained` (ADR-071's FN sentinel: a
+#: declaration that stays in byte-identical headers while its dynamic
+#: export goes away). Same reading as every step below -- a real break with
+#: no export table in the corpus to resolve it against, and the case exists
+#: precisely to pin that this break is still reported. The +2 to 31 was
 #: `overaligned_pure_virtual_stays_breaking`, an FN sentinel for a pure
 #: virtual whose declaration-only DIE never reaches `snapshot.functions`, so
 #: the owned-signature check cannot see it; the guard answered from
