@@ -1,0 +1,101 @@
+name: CI audit experiment (isolated)
+on:
+  push:
+    branches: ['ci-audit/2026-09-11-experiments']
+    paths: ['.github/workflows/ci-audit-experiment.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ci-audit-experiment-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install project test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Snapshot source and CI measurements
+        if: runner.os == 'Linux'
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          import collections, datetime, json, os, pathlib, subprocess, urllib.request
+          out = pathlib.Path('ci-audit-output'); out.mkdir(exist_ok=True)
+          subprocess.run(['git','archive','--format=tar.gz','-o',str(out/'source.tar.gz'),'HEAD'],check=True)
+          root='https://api.github.com/repos/abicheck/abicheck'
+          def get(path):
+              req=urllib.request.Request(root+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=45) as response: return json.load(response)
+          data={'source_sha':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'captured_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'workflows':{},'runs':[],'errors':[]}
+          workflows=['ci.yml','examples-validation.yml','agentready.yml','security.yml','eval-suite.yml','performance.yml','mutation.yml','clang-plugin.yml','test-action.yml']
+          for workflow in workflows:
+              try:
+                  runs=get('/actions/workflows/'+workflow+'/runs?per_page=3&status=completed')['workflow_runs']
+                  data['workflows'][workflow]=[]
+                  for run in runs:
+                      r={k:run.get(k) for k in ['id','name','event','conclusion','head_sha','head_branch','created_at','updated_at','run_started_at','run_attempt','html_url']}
+                      jobs=[]
+                      for page in range(1,4):
+                          batch=get('/actions/runs/'+str(run['id'])+'/jobs?per_page=100&page='+str(page))['jobs']
+                          jobs.extend(batch)
+                          if len(batch)<100: break
+                      r['jobs']=[{k:j.get(k) for k in ['id','name','conclusion','status','created_at','started_at','completed_at','labels','runner_name','steps','html_url']} for j in jobs]
+                      data['workflows'][workflow].append(r)
+                      mins=sum((datetime.datetime.fromisoformat(j['completed_at'].replace('Z','+00:00'))-datetime.datetime.fromisoformat(j['started_at'].replace('Z','+00:00'))).total_seconds()/60 for j in jobs if j.get('completed_at') and j.get('started_at'))
+                      print('MEASURED',workflow,run['id'],run['conclusion'],len(jobs),round(mins,2),'job-minutes')
+              except Exception as exc: data['errors'].append([workflow,str(exc)])
+          try:
+              for page in range(1,5):
+                  runs=get('/actions/runs?per_page=100&exclude_pull_requests=true&page='+str(page))['workflow_runs']
+                  data['runs'].extend({k:r.get(k) for k in ['id','name','path','event','head_sha','head_branch','created_at','updated_at','status','conclusion','run_attempt']} for r in runs)
+                  if len(runs)<100: break
+              data['cache_usage']=get('/actions/cache/usage')
+              data['artifacts']=get('/actions/artifacts?per_page=100')
+          except Exception as exc: data['errors'].append(['inventory',str(exc)])
+          (out/'ci-measurements.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
+          print('AUDIT_ERRORS',data['errors'])
+      - name: Profile real stored versus live package comparison
+        shell: python
+        run: |
+          import json, os, pathlib, platform, pstats, subprocess, sys, time
+          out=pathlib.Path('ci-audit-output'); out.mkdir(exist_ok=True)
+          target='tests/test_cli_compare_release_project_snapshot_package.py::TestStoredVersusLiveReleaseParity::test_stored_stored_matches_live_live'
+          rows=[]
+          for label,extra in [('baseline',[]),('profile',['-m','cProfile','-o',str(out/'stored-profile.pstats')])]:
+              cmd=[sys.executable]+extra+['-m','pytest',target,'-q','-o','addopts=','--durations=0','--junitxml='+str(out/(label+'.xml'))]
+              started=time.perf_counter()
+              try:
+                  result=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=240)
+                  text=result.stdout; code=result.returncode
+              except subprocess.TimeoutExpired as exc:
+                  text=str(exc.stdout); code='timeout-240s'
+              elapsed=time.perf_counter()-started
+              (out/(label+'.log')).write_text(text,encoding='utf-8')
+              rows.append({'label':label,'seconds':elapsed,'exit_code':code})
+              print('EXPERIMENT',label,round(elapsed,3),code); print(text[-16000:])
+          if (out/'stored-profile.pstats').exists():
+              with (out/'profile-summary.txt').open('w',encoding='utf-8') as stream:
+                  stats=pstats.Stats(str(out/'stored-profile.pstats'),stream=stream)
+                  stats.strip_dirs().sort_stats('cumulative').print_stats(60)
+              print((out/'profile-summary.txt').read_text(encoding='utf-8'))
+          (out/'experiment.json').write_text(json.dumps({'platform':platform.platform(),'python':sys.version,'cpu_count':os.cpu_count(),'measurements':rows},indent=2),encoding='utf-8')
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-audit-${{ matrix.os }}
+          path: ci-audit-output/
+          retention-days: 3
+          if-no-files-found: error
