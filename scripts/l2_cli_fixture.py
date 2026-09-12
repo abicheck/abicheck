@@ -161,8 +161,18 @@ def _detail_header(lib: int, distinct: bool) -> str:
     )
 
 
-def _simple_header(lib: int, index: int, *, widened: bool) -> str:
-    extra = "  double z;\n" if widened else ""
+def _simple_header(lib: int, index: int, *, broken: bool) -> str:
+    # Both halves of the break are gated by one flag: the widened record and the
+    # removed declaration are the two findings the harness asserts on together.
+    extra = "  double z;\n" if broken else ""
+    # The removal half of EXPECTED_BREAK_KIND_FAMILIES has to drop the
+    # DECLARATION as well as the definition. An earlier version removed only the
+    # definition, which left the header still promising `shape_count()` while the
+    # export table no longer carried it -- a header/binary disagreement, not a
+    # public API removal. It still produced a removal-family finding
+    # (`func_removed_elf_only`), so the suite passed while the fixture was not
+    # what it claimed to be; the real-subprocess fixture test is what caught it.
+    removed = "" if broken else "double shape_count();\n"
     return f"""#pragma once
 #include "detail/core.h"
 namespace l2fx {{
@@ -183,14 +193,14 @@ private:
   detail::Tag tag_;
 }};
 double distance(const Point& a, const Point& b);
-int shape_count();
-}}
+{removed}}}
 }}
 """
 
 
-def _template_header(lib: int, index: int, *, widened: bool) -> str:
-    extra = "  T z;\n" if widened else ""
+def _template_header(lib: int, index: int, *, broken: bool) -> str:
+    extra = "  T z;\n" if broken else ""
+    removed = "" if broken else "double shape_count();\n"
     # Bounded template weight: one class template with several member
     # functions, explicitly instantiated at three arithmetic types, plus a
     # small recursive alias chain. Enough to exercise the instantiation and
@@ -214,7 +224,7 @@ template <typename T> using WrapT = typename Wrap<T>::type;
 extern template struct Vec<float>;
 extern template struct Vec<double>;
 extern template struct Vec<int>;
-struct Point {{ double x; double y;{" double z;" if widened else ""} }};
+struct Point {{ double x; double y;{" double z;" if broken else ""} }};
 class Shape {{
 public:
   virtual ~Shape();
@@ -224,8 +234,7 @@ private:
   Point origin_;
 }};
 double distance(const Point& a, const Point& b);
-int shape_count();
-}}
+{removed}}}
 }}
 """
 
@@ -268,7 +277,7 @@ def _source(spec: FixtureSpec, lib: int, indices: list[int], *, broken: bool) ->
         # header and the definition on the new side, so it really leaves the
         # export table rather than merely losing its declaration.
         if not broken:
-            parts.append("int shape_count() { return 0; }\n")
+            parts.append("double shape_count() { return 0.0; }\n")
         parts.append("}\n")
     parts.append("}\n")
     return "".join(parts)
@@ -287,7 +296,7 @@ def _write_library(
     render = _simple_header if spec.shape == "simple" else _template_header
     for index in indices:
         path = include / f"part{index}.h"
-        path.write_text(render(lib, index, widened=broken))
+        path.write_text(render(lib, index, broken=broken))
         headers.append(path)
     # One aggregate header for the .cpp to include, so the translation unit
     # sees every part without the harness having to generate N sources.
