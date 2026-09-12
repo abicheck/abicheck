@@ -735,15 +735,9 @@ def classify_compare_pair(
         result.requested_depth = context.requested_depth
     elif normalized_request_depth is not None:
         result.requested_depth = normalized_request_depth
-    from .analysis_assurance import compute_analysis_assurance
+    from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
-    result.analysis_assurance = compute_analysis_assurance(
-        result,
-        old,
-        new,
-        old_pack=getattr(old, "build_source", None),
-        new_pack=getattr(new, "build_source", None),
-    )
+    attach_analysis_assurance(result, old, new)
     # ADR-064/PR G2: resolve severity into the same `GateOptions` the
     # release fan-out uses, then the canonical decision. No manual
     # exit-code-scheme selector to pass any more -- the algorithm is purely

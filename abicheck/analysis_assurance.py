@@ -1262,6 +1262,7 @@ def compute_analysis_assurance(
     *,
     old_pack: BuildSourcePack | None = None,
     new_pack: BuildSourcePack | None = None,
+    same_content: Callable[[], bool] | None = None,
 ) -> AnalysisAssurance:
     """Roll up existing pipeline signals into an :class:`AnalysisAssurance`.
 
@@ -1345,7 +1346,9 @@ def compute_analysis_assurance(
     notes.extend(l3_notes)
 
     # -- schema-staleness status -------------------------------------------
-    schema_staleness_status, staleness_notes = _schema_staleness_status(old, new)
+    schema_staleness_status, staleness_notes = _schema_staleness_status(
+        old, new, same_content=same_content
+    )
     notes.extend(staleness_notes)
 
     # -- target accounting (P0.2 root-target scoping rollup) --------------------

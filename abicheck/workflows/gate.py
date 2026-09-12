@@ -139,6 +139,7 @@ from ..policy.severity import (
     missing_contract_exit_code,
     resolve_severity_config,
 )
+from ..storage.snapshot_encode import same_persisted_content
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -166,6 +167,7 @@ __all__ = [
     "categorize_changes",
     "classify_change_object",
     "compute_analysis_assurance",
+    "same_persisted_content",
     "compute_exit_code",
     "compute_gate_decision",
     "coverage_diagnostic_from_summary",

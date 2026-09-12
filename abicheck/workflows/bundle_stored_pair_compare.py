@@ -178,10 +178,13 @@ def compare_stored_bundle_facts_pair(
     operand cardinality (Codex review). Omitted (the default): behavior is
     unchanged from before this parameter existed.
     """
+    from functools import partial
+
     from ..analysis_assurance import compute_analysis_assurance
     from ..bundle_manifest import load_manifest
     from ..policy.depth_projection import project_snapshot_to_depth
     from ..serialization import load_bundle_facts
+    from ..storage.snapshot_encode import same_persisted_content
     from .artifact.execute import enforce_requested_depth
     from .bundle_facts_capture import bundle_snapshot_from_facts
     from .bundle_facts_compare import compare_bundle_from_facts
@@ -347,7 +350,14 @@ def compare_stored_bundle_facts_pair(
             # function's own docstring states.
             diff.requested_depth = depth
             diff.analysis_assurance = compute_analysis_assurance(
-                diff, projected_old_snapshots[key], projected_new_snapshots[key]
+                diff,
+                projected_old_snapshots[key],
+                projected_new_snapshots[key],
+                same_content=partial(
+                    same_persisted_content,
+                    projected_old_snapshots[key],
+                    projected_new_snapshots[key],
+                ),
             )
         per_library_results.append(diff)
 

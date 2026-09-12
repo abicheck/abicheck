@@ -156,3 +156,41 @@ def snapshot_content_digest(snap: AbiSnapshot) -> str:
     the CLI path was found to still be missing this fallback entirely).
     """
     return hashlib.sha256(snapshot_to_json(snap).encode()).hexdigest()
+
+
+def same_persisted_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """Whether *old* and *new* are provably the same persisted content.
+
+    The canonical serialization, compared -- so this cannot disagree with
+    :func:`snapshot_content_digest` about what "content" means, because it
+    IS that digest. Its one consumer is
+    ``policy.analysis_assurance_schema_staleness.schema_staleness_status``,
+    which needs the question answered but sits in a layer that may not
+    import ``storage`` (``architecture/modules.yaml``: ``policy -> model,
+    compare``), so the answer is computed here and passed in.
+
+    It replaced a field-by-field reimplementation of this projection in
+    ``model`` (Codex review, PR #1229, the P1 and four P2s that followed
+    it). Every one of those P2s was the same defect: a nested object whose
+    persisted form is not its raw fields -- a rounded float, a derived id,
+    a codec that reprojects a mapping through fixed keys, an aliased graph
+    the codec writes once -- read as a content difference that the real
+    serializer does not record. There is no such class here: the projection
+    is not reproduced, it is executed.
+
+    Sound in the direction used: equal serialization means every input a
+    pairwise detector reads agrees on both sides, so no pairwise finding is
+    possible. The converse is neither claimed nor needed -- inequality
+    falls through to the ordinary degraded report, the safe direction.
+
+    Fails closed on *any* encoding failure, for the same reason. A
+    snapshot carrying a value the encoder cannot serialize is not provably
+    the same content as anything, and the caller is a status field on an
+    already-degraded path: answering "not provably equal" there costs an
+    over-cautious ``degraded``, while letting the exception out would fail
+    a comparison that used to complete.
+    """
+    try:
+        return snapshot_content_digest(old) == snapshot_content_digest(new)
+    except Exception:
+        return False
