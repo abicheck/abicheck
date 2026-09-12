@@ -1,0 +1,42 @@
+name: Test audit materialization (isolated)
+on:
+  push:
+    branches: ['ci-audit/2026-09-11-experiments']
+    paths: ['.github/workflows/test-audit-materialize.yml']
+permissions:
+  contents: read
+concurrency:
+  group: test-audit-materialize-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: 4bc61cef83cebb8a73e500be74469ce304e6e331
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Export pinned source and dependency wheels for local experiments
+        shell: python
+        run: |
+          import json, pathlib, subprocess, sys, tomllib
+          out=pathlib.Path('test-audit-material');out.mkdir()
+          subprocess.run(['git','archive','--format=tar.gz','-o',str(out/'source.tar.gz'),'HEAD'],check=True)
+          project=tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']
+          requirements=project['dependencies']+project['optional-dependencies']['dev']
+          (out/'requirements.txt').write_text('\n'.join(requirements)+'\n')
+          subprocess.run([sys.executable,'-m','pip','download','--only-binary=:all:','-d',str(out/'wheels'),'-r',str(out/'requirements.txt')],check=True)
+          (out/'metadata.json').write_text(json.dumps({'sha':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'python':sys.version,'purpose':'Read-only test audit and offline experiments; no production changes'},indent=2))
+      - name: Upload source and dependencies
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: abicheck-test-audit-material
+          path: test-audit-material/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
