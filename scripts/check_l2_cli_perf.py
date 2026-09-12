@@ -184,10 +184,20 @@ def _cli(*args: str) -> list[str]:
 
 
 def _header_args(libs: list[fixtures.BuiltLibrary], side: str) -> list[str]:
+    """``--header`` plus the ``--include`` roots those headers need to parse.
+
+    The extra roots are not optional decoration: in a shared-context
+    multi-library fixture the one physical ``detail/core.h`` lives at a common
+    root, so without ``--include`` pointing there the headers do not resolve at
+    all -- and a run that fell back would silently not be the shared arm it is
+    labelled as.
+    """
     out: list[str] = []
     for lib in libs:
         for header in lib.headers:
             out += ["--header", f"{side}={header}"]
+        for extra in lib.extra_includes:
+            out += ["--include", f"{side}={extra}"]
     return out
 
 
@@ -195,6 +205,9 @@ def _dump_argv(lib: fixtures.BuiltLibrary, out: Path) -> list[str]:
     argv = _cli("dump", str(lib.so), "--depth", "headers", "-o", str(out))
     for header in lib.headers:
         argv += ["-H", str(header)]
+    # dump's --include is not side-scoped (there is only one operand).
+    for extra in lib.extra_includes:
+        argv += ["-I", str(extra)]
     return argv
 
 
@@ -1053,6 +1066,25 @@ def _reset_cache(cache_root: Path) -> None:
     cache_root.mkdir(parents=True, exist_ok=True)
 
 
+def _resolved_dependency_roots(fixture: fixtures.BuiltFixture) -> set[str]:
+    """The distinct resolved ``detail/core.h`` paths the new side's libraries parse.
+
+    One entry means a genuinely shared header context; N entries means N distinct
+    ones. Derived from the filesystem rather than from
+    ``FixtureSpec.distinct_contexts`` on purpose -- the flag states the intent,
+    this states what was actually built, and the first version of this fixture
+    had them disagree (every library got its own byte-identical copy, so the
+    "shared" arm shared nothing while the receipt said it did).
+    """
+    roots: set[str] = set()
+    for lib in fixture.new:
+        for candidate in (lib.include_dir, *lib.extra_includes):
+            core = candidate / "detail" / "core.h"
+            if core.exists():
+                roots.add(str(core.resolve()))
+    return roots
+
+
 def _build_fixture_for(
     scenario: Scenario, build_root: Path
 ) -> tuple[fixtures.BuiltFixture | None, dict[str, Any]]:
@@ -1081,11 +1113,12 @@ def _build_fixture_for(
         "input_digest": digest_paths(
             [h for lib in fixture.old + fixture.new for h in lib.headers]
         ),
-        "header_contexts": len(
-            {str(lib.include_dir.name) for lib in fixture.new}
-            if scenario.spec.distinct_contexts
-            else {"shared"}
-        ),
+        # Counted from the RESOLVED dependency header each library parses, not
+        # from a label or an include-directory name: the shared arm is only
+        # shared because every library reaches one physical file, and counting
+        # anything else would report the number the flag claims rather than the
+        # number the fixture has.
+        "header_contexts": len(_resolved_dependency_roots(fixture)),
     }
 
 

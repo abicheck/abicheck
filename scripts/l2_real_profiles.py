@@ -667,7 +667,15 @@ def prepare_script(profile: RealProfile) -> str:
                     repository=profile.repository,
                     side=side,
                     revision=revision,
-                    root=f"{profile.id}_{side}",
+                    # ABSOLUTE, via $ROOT. `git -C <repo> worktree add <path>`
+                    # resolves a RELATIVE path against the repo directory, not
+                    # the caller's cwd -- reproduced with the installed git:
+                    # `git -C repo.git worktree add mytree` creates
+                    # `repo.git/mytree`. Every following command then looks for
+                    # `$ROOT/<root>` and fails. The subshell isolation added
+                    # earlier is what exposed this: before it, the leaked cwd
+                    # happened to mask it.
+                    root=f'"$ROOT"/{profile.id}_{side}',
                 )
                 + " )"
             )

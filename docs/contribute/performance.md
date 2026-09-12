@@ -400,7 +400,14 @@ than 0: a purely relative 30% tolerance on a ~1.2 s measurement would be only
 ~0.36 s, inside what this fixture's own run-to-run variance already covers.
 
 On the extended axes (`--repeat 1`): templates ~1.36 s, 8 headers ~2.48 s,
-32 headers ~10.4 s, and five libraries ~1.1–1.4 s *each*.
+32 headers ~10.4 s, and five libraries ~1.15–1.50 s *each* — the same per-library
+cost whether they share one dependency header or each have their own, because
+the header-frontend invocation count follows the top-level headers rather than
+their dependencies. The shared arm resolves through one physical file at a common
+include root, and `header_contexts` is counted from the resolved paths actually
+built rather than from the flag that asked for them; an earlier version gave each
+library its own byte-identical copy, which (the AST cache keying on resolved
+path) made the "shared" arm a second distinct-path workload.
 
 **One comparison, two artifacts.** `-o FORMAT=DESTINATION` is repeatable and
 every export renders the one completed analysis (ADR-068 slices 7m/7n), so a

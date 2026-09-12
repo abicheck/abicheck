@@ -30,6 +30,7 @@ worth more guarding than the arithmetic is.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -506,9 +507,11 @@ class TestPrepareScript:
         script = profiles.prepare_script(profiles.PVXS)
         # EPICS base must be built before either pvxs side, since pvxs's own
         # makefiles include base's rules. Anchored on the per-side build rather
-        # than a `cd pvxs && make` spelling, which the subshell rewrite changed.
-        assert script.index("epics-base && make") < script.index("make -C pvxs_old")
-        assert script.index("epics-base && make") < script.index("make -C pvxs_new")
+        # than a `cd pvxs && make` spelling, which the subshell rewrite changed;
+        # the side root is $ROOT-anchored since the relative-worktree fix.
+        base = script.index("epics-base && make")
+        assert base < script.index('make -C "$ROOT"/pvxs_old')
+        assert base < script.index('make -C "$ROOT"/pvxs_new')
 
     def test_no_profile_prepares_with_a_depth_source_run(self):
         # A --depth source run is an L4/L5 measurement; its numbers do not
@@ -517,3 +520,73 @@ class TestPrepareScript:
         for profile in profiles.PROFILES.values():
             script = profiles.prepare_script(profile)
             assert "--depth source" not in script
+
+
+class TestPrepareScriptUsesAbsoluteWorktreePaths:
+    """``git worktree add`` with a relative path does not land where you think.
+
+    ``git -C <repo> worktree add <path>`` resolves a *relative* path against the
+    repository directory, not the caller's cwd. Reproduced with the installed
+    git: ``git -C repo.git worktree add --detach mytree HEAD`` creates
+    ``repo.git/mytree``, so every following command looking for ``$ROOT/mytree``
+    fails. Asserted as a property over every rendered command rather than against
+    the one profile that was read first.
+    """
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_worktree_operand_is_root_anchored(self, profile_id):
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        worktree_lines = [ln for ln in script.splitlines() if "worktree add" in ln]
+        assert worktree_lines, "every profile prepares a per-side worktree"
+        for line in worktree_lines:
+            # The operand after the revision/flags must begin at $ROOT.
+            assert '"$ROOT"/' in line.split("worktree add", 1)[1], line
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_no_rendered_path_operand_is_bare_relative(self, profile_id):
+        # The general invariant behind the one bug: the side root never appears
+        # in the script as a bare relative name, in any command, not only the
+        # worktree one (a later consumer would resolve it against a different cwd).
+        profile = profiles.PROFILES[profile_id]
+        script = profiles.prepare_script(profile)
+        for side in ("old", "new"):
+            bare = f"{profile.id}_{side}"
+            for line in script.splitlines():
+                if bare not in line:
+                    continue
+                assert f'"$ROOT"/{bare}' in line, line
+
+    def test_a_relative_worktree_path_really_lands_in_the_repo(self, tmp_path):
+        # The oracle is real git, not the formula this module uses: without it
+        # "relative resolves against the repo" is an assumption, and the fix
+        # would be unverified.
+        import shutil as _shutil
+
+        git = _shutil.which("git")
+        if git is None:  # pragma: no cover - git is present in every dev env
+            pytest.skip("git unavailable")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "f.txt").write_text("x", encoding="utf-8")
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@e",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@e",
+        }
+        subprocess.run([git, "init", "-q"], cwd=src, check=True, env=env)
+        subprocess.run([git, "add", "."], cwd=src, check=True, env=env)
+        subprocess.run([git, "commit", "-qm", "c"], cwd=src, check=True, env=env)
+        caller = tmp_path / "caller"
+        caller.mkdir()
+        proc = subprocess.run(
+            [git, "-C", str(src), "worktree", "add", "--detach", "mytree", "HEAD"],
+            cwd=caller,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert (src / "mytree").is_dir(), "git resolved it against the repo dir"
+        assert not (caller / "mytree").exists(), "and not against the caller's cwd"

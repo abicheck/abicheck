@@ -128,6 +128,11 @@ class BuiltLibrary:
     so: Path
     headers: list[Path]
     include_dir: Path
+    #: Additional include roots this library's headers need to parse -- the
+    #: shared dependency root in a shared-context multi-library fixture. The
+    #: harness must pass these as `--include`, or the shared arm does not
+    #: resolve and silently is not shared.
+    extra_includes: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,17 +142,38 @@ class BuiltFixture:
     new: list[BuiltLibrary]
 
 
-def _detail_header(lib: int, distinct: bool) -> str:
-    # With shared contexts every library gets byte-identical detail content, so
-    # a run can legitimately reuse one parse of it; with distinct contexts the
-    # content differs, so it cannot. That difference is the axis.
+def _detail_header(lib: int | None, distinct: bool) -> str:
+    """The shared dependency header every public header includes.
+
+    *lib* is ``None`` for the genuinely shared context -- one physical file at a
+    common include root, included by every library -- and the library index for a
+    distinct one, where each library gets its own file with its own content.
+
+    The namespace follows the same split. A shared context declares plain
+    ``l2fx::detail``, which is only safe because the harness no longer feeds
+    several libraries' headers to a single parse (``compare_live_live`` uses
+    library 0, and ``multi_library_set`` compares one library at a time). A
+    distinct context declares ``l2fx::detailN`` with a per-library salt, so the
+    two arms differ in content *and* in resolved path.
+
+    Why that matters, and why the first version of this was wrong: the AST cache
+    keys on each header's **resolved path**. Writing byte-identical copies under
+    ``lib0/include/detail/core.h`` and ``lib1/include/detail/core.h`` cannot
+    share anything no matter how identical they are, so the "shared" arm was a
+    second distinct-path workload wearing a different label -- and any conclusion
+    drawn from comparing the two arms was a comparison of like with like.
+    """
+    if lib is None:
+        return (
+            "#pragma once\n"
+            "namespace l2fx {\n"
+            "namespace detail {\n"
+            "struct Tag { int id; long generation; };\n"
+            "enum class Mode { Fast, Exact, Adaptive };\n"
+            "}\n"
+            "}\n"
+        )
     salt = f"    static const int ctx_salt_{lib} = {lib};\n" if distinct else ""
-    # Per-library namespace (`detail0`, `detail1`, ...) with a `detail` alias, so
-    # each library's internals are distinct declarations the way a real set of
-    # independent libraries' internals are. Without this, two libraries' own
-    # `detail/core.h` files declare the same `l2fx::detail::Tag`, and any parse
-    # that sees both fails outright with a redefinition error -- which is exactly
-    # what the first multi-library run did.
     return (
         "#pragma once\n"
         "namespace l2fx {\n"
@@ -287,10 +313,26 @@ def _write_library(
     root: Path, spec: FixtureSpec, lib: int, *, broken: bool, cxx: str
 ) -> BuiltLibrary:
     include = root / f"lib{lib}" / "include"
-    (include / "detail").mkdir(parents=True, exist_ok=True)
-    (include / "detail" / "core.h").write_text(
-        _detail_header(lib, spec.distinct_contexts), encoding="utf-8"
-    )
+    include.mkdir(parents=True, exist_ok=True)
+    # The shared arm resolves `detail/core.h` through ONE physical file at a
+    # common root, reached via an extra -I, so every library's parse of it hits
+    # the same resolved path -- which is the only way the AST cache can share
+    # anything. The distinct arm writes a per-library copy under the library's
+    # own include root. `extra_includes` is what the harness must pass on the
+    # command line for the shared arm to resolve at all.
+    extra_includes: list[Path] = []
+    if spec.distinct_contexts or spec.libraries == 1:
+        (include / "detail").mkdir(parents=True, exist_ok=True)
+        (include / "detail" / "core.h").write_text(
+            _detail_header(lib, spec.distinct_contexts), encoding="utf-8"
+        )
+    else:
+        shared = root / "shared" / "include"
+        (shared / "detail").mkdir(parents=True, exist_ok=True)
+        (shared / "detail" / "core.h").write_text(
+            _detail_header(None, False), encoding="utf-8"
+        )
+        extra_includes.append(shared)
     indices = list(range(spec.headers))
     headers: list[Path] = []
     render = _simple_header if spec.shape == "simple" else _template_header
@@ -320,6 +362,7 @@ def _write_library(
             "-O0",
             "-std=c++17",
             f"-I{include}",
+            *[f"-I{extra}" for extra in extra_includes],
             "-o",
             str(so),
             str(src),
@@ -328,7 +371,12 @@ def _write_library(
         capture_output=True,
         timeout=600,
     )
-    return BuiltLibrary(so=so, headers=headers, include_dir=include)
+    return BuiltLibrary(
+        so=so,
+        headers=headers,
+        include_dir=include,
+        extra_includes=tuple(extra_includes),
+    )
 
 
 def compiler_available(cxx: str = "g++") -> bool:

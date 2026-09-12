@@ -240,6 +240,12 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/dumper_elf_fallback.py",
     "abicheck/dumper_elf_symbols.py",
     "abicheck/dumper_layout_backfill.py",
+    # The module entry point. Every measured command is launched as
+    # `python -m abicheck`, which executes BOTH of these before reaching cli.py --
+    # so the full-CLI lane, whose largest single cost is interpreter startup and
+    # import, was skipped for a change to the exact startup path it measures.
+    "abicheck/__main__.py",
+    "abicheck/__init__.py",
 )
 
 

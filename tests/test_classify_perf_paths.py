@@ -444,3 +444,22 @@ class TestL2ExtractionPathsAreClassified:
         # The extension must not widen to the point where every PR is
         # perf-sensitive; model/ is mostly data shapes.
         assert not classify.changed_files_are_perf_sensitive(["abicheck/model/fact.py"])
+
+
+class TestEntryPointModulesAreClassified:
+    """The process entry point owns measured startup, so it must be sensitive.
+
+    ``abicheck/__main__.py`` and ``abicheck/__init__.py`` run on every single
+    invocation and together dominate the startup phase the full-CLI harness
+    measures (~0.6s of a ~1.2s stored/stored compare). Both were unclassified:
+    adding an import to either could slow every command with no perf job run.
+    """
+
+    @pytest.mark.parametrize("path", ["abicheck/__main__.py", "abicheck/__init__.py"])
+    def test_an_entry_point_module_is_perf_sensitive(self, path):
+        assert classify.changed_files_are_perf_sensitive([path])
+
+    def test_an_ordinary_leaf_model_module_is_still_not_sensitive(self):
+        # Vacuity guard: a pattern broad enough to match everything under
+        # abicheck/ would make the two assertions above meaningless.
+        assert not classify.changed_files_are_perf_sensitive(["abicheck/model/fact.py"])
