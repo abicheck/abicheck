@@ -117,10 +117,10 @@ from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabu
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
-    _classify_outcome,
+    _classify_outcome,  # noqa: F401  # re-export: imported from here by tests/callers
     _project_relative_path,
+    classify,
     coordinate_evidence,
-    move_evidence_established,
 )
 
 if TYPE_CHECKING:
@@ -155,6 +155,16 @@ class ReconciledPair:
     #: every other outcome. See ``graph_reconcile_outcome.
     #: coordinate_evidence`` for why this is recorded rather than gated on.
     coordinate_evidence: str | None = None
+    #: Whether the classification actually ESTABLISHED a declaring-file
+    #: move. Recorded rather than recomputed at render time (Codex review,
+    #: PR #1232): the declaring paths can come from incoming
+    #: ``SOURCE_DECLARES`` edges rather than from the identities, and a
+    #: recomputation that sees only ``old_identity``/``new_identity``
+    #: silently loses that evidence -- under-claiming on exactly the real
+    #: header-graph ``source_decl`` nodes whose ``source_relative`` is
+    #: empty. The outcome and this flag are two halves of one answer and
+    #: must come from one call.
+    move_established: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -399,7 +409,7 @@ class _Reconciler:
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
         old_declaring = self.old_declaring_files.get(oid, "")
         new_declaring = self.new_declaring_files.get(new_id, "")
-        outcome = _classify_outcome(
+        classification = classify(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],
             old_declaring_file=old_declaring,
@@ -416,10 +426,11 @@ class _Reconciler:
                 old_node,
                 new_node,
                 match_kind,
-                outcome,
+                classification.outcome,
                 kind_pass.old_ident[oid],
                 kind_pass.new_ident[new_id],
                 evidence,
+                classification.move_established,
             )
         )
         self.matched_old.add(oid)
@@ -767,9 +778,7 @@ def diff_graph_reconciliation_findings(
         # re-made the claim the classifier had just declined. Same
         # outcome, same ChangeKind, same severity -- only the sentence
         # stops over-claiming, and says which dimension is unresolved.
-        if pair.outcome == OUTCOME_RECONCILED and not move_evidence_established(
-            pair.old_identity, pair.new_identity
-        ):
+        if pair.outcome == OUTCOME_RECONCILED and not pair.move_established:
             prose = (
                 "identity-reconciled (no clean split: the available "
                 "evidence does not establish whether the declaring "

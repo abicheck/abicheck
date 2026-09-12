@@ -702,6 +702,75 @@ class TestCoordinateEvidenceIsStated:
                 text,
             )
 
+    def test_edge_derived_move_evidence_reaches_the_prose(self) -> None:
+        """Codex review (PR #1232): the declaring paths can come from
+        incoming `SOURCE_DECLARES` edges rather than from the identities'
+        own `source_relative`, which is empty for real header-graph
+        `source_decl` nodes. Recomputing the move flag at render time from
+        the identities alone lost that evidence and softened the wording
+        on a pair whose move the edges HAD established -- the opposite
+        over-correction.
+
+        Both halves of the gap are asserted, because the defect lived
+        between them: `classify` must READ the edge-derived paths, and the
+        emission must render the flag it RECORDED rather than recomputing
+        one from the identities alone.
+        """
+        from abicheck.buildsource.entity_identity import (
+            IDENTITY_TIER_CANONICAL,
+            CanonicalIdentity,
+        )
+        from abicheck.buildsource.graph_reconcile import (
+            GraphReconciliation,
+            ReconciledPair,
+            diff_graph_reconciliation_findings,
+        )
+        from abicheck.buildsource.graph_reconcile_outcome import classify
+
+        def _identity(qn: str) -> CanonicalIdentity:
+            return CanonicalIdentity(
+                primary_id=f"id:{qn}",
+                tier=IDENTITY_TIER_CANONICAL,
+                qualified_name=qn,
+                source_relative="",
+                normalized_signature="sig\x1fs",
+                kind="source_decl",
+            )
+
+        old_identity = _identity("Old")
+        new_identity = _identity("New")
+        # Premise: nothing in the identities themselves says where either
+        # side lives, so only the edge-derived paths can establish a move.
+        assert not old_identity.source_relative
+        assert not new_identity.source_relative
+
+        classification = classify(
+            old_identity,
+            new_identity,
+            old_declaring_file="a.h",
+            new_declaring_file="b.h",
+        )
+        assert classification.outcome == OUTCOME_RECONCILED
+        assert classification.move_established
+
+        pair = ReconciledPair(
+            GraphNode(id="decl://old", kind="source_decl", label="Old"),
+            GraphNode(id="decl://new", kind="source_decl", label="New"),
+            "structural_context",
+            classification.outcome,
+            old_identity,
+            new_identity,
+            None,
+            classification.move_established,
+        )
+        findings = diff_graph_reconciliation_findings(
+            GraphReconciliation(reconciled=[pair])
+        )
+        assert len(findings) == 1, findings
+        text = findings[0].description
+        assert "both name and location evidence changed" in text, text
+        assert "no clean split" not in text, text
+
     def test_a_real_rename_and_move_still_says_both_changed(self) -> None:
         """The must-stay-distinct half: when two-sided declaring files DO
         establish the move, the combined claim is true and must still be
