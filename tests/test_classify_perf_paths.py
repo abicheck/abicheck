@@ -440,10 +440,15 @@ class TestL2ExtractionPathsAreClassified:
         ]
         assert uncovered == [], uncovered
 
-    def test_an_unrelated_model_module_stays_unclassified(self):
+    def test_an_unrelated_module_stays_unclassified(self):
         # The extension must not widen to the point where every PR is
-        # perf-sensitive; model/ is mostly data shapes.
-        assert not classify.changed_files_are_perf_sensitive(["abicheck/model/fact.py"])
+        # perf-sensitive. This used to assert `abicheck/model/fact.py` on the
+        # reasoning that "model/ is mostly data shapes" -- which was the wrong
+        # reason and is now the opposite of the contract: those shapes are
+        # constructed, encoded, walked and projected by every measured command,
+        # so the whole ring is classified (TestModelRingIsClassified). The guard
+        # moved to a module no measured path imports.
+        assert not classify.changed_files_are_perf_sensitive(["abicheck/errors.py"])
 
 
 class TestEntryPointModulesAreClassified:
@@ -459,10 +464,12 @@ class TestEntryPointModulesAreClassified:
     def test_an_entry_point_module_is_perf_sensitive(self, path):
         assert classify.changed_files_are_perf_sensitive([path])
 
-    def test_an_ordinary_leaf_model_module_is_still_not_sensitive(self):
+    def test_an_unrelated_module_is_still_not_sensitive(self):
         # Vacuity guard: a pattern broad enough to match everything under
-        # abicheck/ would make the two assertions above meaningless.
-        assert not classify.changed_files_are_perf_sensitive(["abicheck/model/fact.py"])
+        # abicheck/ would make the assertions above meaningless. (This used to
+        # name `abicheck/model/fact.py`, which is now legitimately classified --
+        # see TestModelRingIsClassified.)
+        assert not classify.changed_files_are_perf_sensitive(["abicheck/errors.py"])
 
 
 class TestL2JobCheckoutHardening:
@@ -506,3 +513,44 @@ class TestL2JobCheckoutHardening:
         for uses in remote:
             ref = uses.split("@", 1)[1]
             assert re.fullmatch(r"[0-9a-f]{40}", ref), uses
+
+
+class TestModelRingIsClassified:
+    """Every object the measured L2 pipeline passes between stages lives in `model/`.
+
+    Extraction constructs them, storage encodes them, comparison walks them and
+    reporting projects them, so a change to one of their layouts or to a shared
+    normalization primitive can regress the whole full-CLI workload without
+    touching any other classified path -- and every perf job was skipped for it.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "abicheck/model/semantic_ir.py",
+            "abicheck/model/snapshot.py",
+            "abicheck/model/signature_normalization.py",
+            "abicheck/model/fact.py",
+            "abicheck/model/change_catalog/kinds.py",
+        ],
+    )
+    def test_a_model_module_is_perf_sensitive(self, path):
+        assert classify.changed_files_are_perf_sensitive([path])
+
+    def test_the_whole_subtree_is_covered_not_a_file_list(self):
+        # The invariant is on the ring, not on the modules today's pipeline
+        # happens to touch: a file list here would go stale exactly the way the
+        # pre-`extract/**` one did. Asserted with a name that exists nowhere.
+        assert classify.changed_files_are_perf_sensitive(
+            ["abicheck/model/a_module_added_tomorrow.py"]
+        )
+        assert classify.changed_files_are_perf_sensitive(
+            ["abicheck/model/nested/deeper.py"]
+        )
+
+    def test_a_sibling_tree_is_not_swept_in(self):
+        # Vacuity guard: `abicheck/model/**` must not be a stand-in for
+        # `abicheck/**`.
+        assert not classify.changed_files_are_perf_sensitive(
+            ["abicheck/modelling_helpers.py", "abicheck/errors.py"]
+        )

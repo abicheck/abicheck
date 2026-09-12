@@ -662,13 +662,25 @@ jobs:
 
       - name: Measure base and gate head against it
         if: github.event_name == 'pull_request'
+        # The base sha reaches the shell as an ENVIRONMENT VALUE, never as a
+        # `${{ }}` expansion inside the script. GitHub substitutes an expression
+        # textually before bash ever parses the line, so an interpolated value
+        # is shell source; reading "$BASE_SHA" makes it data. `base.sha` is a
+        # 40-hex commit id today and so not attacker-chosen, which is exactly
+        # the reasoning that makes such a line survive review until the one
+        # value that is controllable appears -- and an injection defense
+        # asserted as workflow text rather than executed is how #705 shipped and
+        # #758 had to follow (tests/test_performance_workflow_injection.py
+        # executes this step against a hostile value instead).
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           # Base and head measured by the SAME harness on the SAME runner, with
           # separate checkouts and separate cache roots. The harness allocates a
           # fresh per-scenario cache root itself, so the two measurements cannot
           # warm each other.
-          git worktree add base_tree "${{ github.event.pull_request.base.sha }}"
+          git worktree add base_tree "$BASE_SHA"
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base_tree[dev]"

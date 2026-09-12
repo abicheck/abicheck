@@ -29,6 +29,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -260,3 +261,207 @@ class TestDurationArgumentsRejectZero:
         # The two families differ on exactly this value: zero is meaningful for a
         # regression floor (pure percentage tolerance) and not for a duration.
         assert harness.parse_args(["--regress-min-delta-seconds", "0"]) is not None
+
+
+class TestMeasuredSubprocessesGetANeutralCwd:
+    """`python -m abicheck` launched from a checkout imports *that* checkout.
+
+    `-m` puts the current directory first on `sys.path`, so a measured CLI run
+    with the harness's own cwd picks up the source tree it was launched from
+    rather than the installed package. The PR-vs-base CI lane is where that
+    bites: it deliberately runs HEAD's harness against BASE's editable install,
+    so a head-rooted cwd made the "base" measurement execute HEAD's product and
+    collapsed the regression comparison into head-versus-head.
+    """
+
+    def test_the_shadowing_mechanism_is_real(self, tmp_path):
+        # The oracle is the interpreter, not this module's reasoning about it:
+        # without it, "cwd shadows the install" is an assumption and the fix is
+        # unverified. A package named `abicheck` in the cwd wins over the
+        # installed one.
+        import subprocess
+        import sys
+
+        pkg = tmp_path / "abicheck"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+        (pkg / "__main__.py").write_text("print('SHADOW')\n", encoding="utf-8")
+        shadowed = subprocess.run(
+            [sys.executable, "-m", "abicheck"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert "SHADOW" in shadowed.stdout, shadowed
+
+        neutral = tmp_path / "neutral"
+        neutral.mkdir()
+        installed = subprocess.run(
+            [sys.executable, "-m", "abicheck", "--version"],
+            cwd=neutral,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert "SHADOW" not in installed.stdout
+        assert installed.returncode == 0, installed.stderr
+
+    def test_every_measured_run_is_given_an_explicit_cwd(self):
+        # Asserted on the call rather than on a comment: the defect is the
+        # *absence* of a cwd argument, which no output can reveal (both
+        # configurations produce a valid-looking receipt).
+        import ast
+        import inspect
+
+        source = inspect.getsource(harness.run_scenario)
+        calls = [
+            node
+            for node in ast.walk(ast.parse(textwrap.dedent(source)))
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "run_measured"
+        ]
+        assert calls, "run_scenario must execute the measured subprocesses"
+        for call in calls:
+            assert "cwd" in {kw.arg for kw in call.keywords}, ast.dump(call)
+
+    def test_the_cwd_is_not_the_harness_own_directory(self):
+        # The fix is only a fix if the directory handed over is a per-scenario
+        # work directory; passing `cwd=Path.cwd()` would satisfy the previous
+        # assertion and change nothing.
+        import ast
+        import inspect
+
+        source = textwrap.dedent(inspect.getsource(harness.run_scenario))
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == "run_measured"
+            ):
+                cwd = next(kw.value for kw in node.keywords if kw.arg == "cwd")
+                assert isinstance(cwd, ast.Name) and cwd.id == "work", ast.dump(cwd)
+
+
+class TestTheUnchangedControlRejectsEveryManufacturedFinding:
+    """On an identical pair, any finding claiming a *difference* is a false positive.
+
+    Checking only the two families the break fixture produces was too narrow to
+    be a control: a regression emitting a parameter, visibility or platform
+    finding left the scenario reading as successful. The allowed set is derived
+    from the product's own RISK/QUALITY partition, not hand-listed, because a
+    risk observation that holds on both sides is a true statement about the
+    fixture -- which the first strict version proved by failing on the real
+    `private_header_leak` the generated fixture legitimately has.
+    """
+
+    def test_an_identical_pair_with_no_findings_passes(self):
+        assert (
+            harness._validate_unchanged({"verdict": "COMPATIBLE", "changes": []}) == []
+        )
+
+    @pytest.mark.parametrize(
+        "kind",
+        ["func_removed", "type_size_changed", "param_added", "elf_soname_changed"],
+    )
+    def test_any_difference_asserting_finding_fails(self, kind):
+        problems = harness._validate_unchanged(
+            {"verdict": "COMPATIBLE", "changes": [{"kind": kind}]}
+        )
+        assert problems, kind
+        assert "false positive" in problems[0]
+
+    def test_a_risk_observation_that_holds_on_both_sides_is_accepted(self):
+        # Derived from the real partition, so this is not a hand-blessed
+        # exception for one kind.
+        from abicheck.checker_policy import RISK_KINDS
+
+        risk = sorted(k.value for k in RISK_KINDS)[:5]
+        assert risk, "the partition must be non-empty or this asserts nothing"
+        for kind in risk:
+            assert (
+                harness._validate_unchanged(
+                    {"verdict": "COMPATIBLE_WITH_RISK", "changes": [{"kind": kind}]}
+                )
+                == []
+            ), kind
+
+    @pytest.mark.parametrize("verdict", ["BREAKING", "SOURCE_BREAK", "API_BREAK"])
+    def test_a_difference_asserting_verdict_fails_on_its_own(self, verdict):
+        problems = harness._validate_unchanged({"verdict": verdict, "changes": []})
+        assert problems and "identical pair" in problems[0]
+
+    def test_the_allowed_set_is_not_accidentally_everything(self):
+        # Vacuity guard on the derivation: if `_surface_state_kinds()` ever
+        # returned every kind, every assertion above would pass while the
+        # control asserted nothing.
+        from abicheck.checker_policy import BREAKING_KINDS
+
+        allowed = harness._surface_state_kinds()
+        assert allowed
+        assert not allowed & {k.value for k in BREAKING_KINDS}
+
+
+class TestTheAuditMustHaveDoneTheL2Work:
+    """Audit *semantics* are satisfied by a binary-only fallback, which is faster.
+
+    The audit report publishes no `analysis_assurance`/`scope`/`*_evidence_depth`
+    block at all, so `_validate_l2_reached` cannot be applied to it; its own
+    `evidence_tiers` list is what proves which tiers the run consumed.
+    """
+
+    def test_a_header_tier_passes(self):
+        assert (
+            harness._validate_audit_reached_l2(
+                {"evidence_tiers": ["elf", "dwarf", "dwarf_advanced", "header"]}
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "tiers",
+        [
+            ["elf"],
+            ["elf", "dwarf"],
+            ["elf", "dwarf", "dwarf_advanced"],
+            [],
+        ],
+    )
+    def test_a_binary_only_fallback_fails(self, tiers):
+        # The "faster because it stopped working" direction, over every shape a
+        # real fallback can take rather than the one observed.
+        problems = harness._validate_audit_reached_l2({"evidence_tiers": tiers})
+        assert problems, tiers
+        assert "header" in problems[0]
+
+    @pytest.mark.parametrize("value", [None, "header", 3, {"header": True}])
+    def test_a_missing_or_malformed_tier_list_fails_rather_than_passing(self, value):
+        # A string containing "header" must not satisfy a membership test.
+        assert harness._validate_audit_reached_l2({"evidence_tiers": value})
+
+    def test_the_audit_step_does_not_accept_a_compatibility_exit(self):
+        # 2 and 4 are compatibility exits; an audit has nothing to compare
+        # against, so producing one is the defect `_validate_audit` rejects --
+        # and accepting it at the step level let the run pass before validation
+        # ever read the report.
+        spec = fixtures.FixtureSpec(
+            shape="simple",
+            headers=1,
+            libraries=1,
+            change="break",
+            distinct_contexts=False,
+        )
+        scenario = harness.scenario_no_baseline(spec)
+        built = fixtures.BuiltFixture(spec=spec, old=[], new=[_stub_library()])
+        steps = scenario.steps(built, Path("/tmp/does-not-need-to-exist"))
+        assert steps
+        for step in steps:
+            assert 2 not in step.ok_exit_codes, step
+            assert 4 not in step.ok_exit_codes, step
+
+
+def _stub_library() -> object:
+    return fixtures.BuiltLibrary(
+        so=Path("/tmp/libstub.so"),
+        headers=[Path("/tmp/stub.h")],
+        include_dir=Path("/tmp"),
+    )

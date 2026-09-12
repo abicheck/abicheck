@@ -246,6 +246,17 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # import, was skipped for a change to the exact startup path it measures.
     "abicheck/__main__.py",
     "abicheck/__init__.py",
+    # ADR-061's innermost ring. Every object the measured L2 pipeline passes
+    # between stages is defined here: extraction constructs them, storage
+    # encodes and decodes them, comparison walks them, reporting projects them.
+    # So a change to one of their layouts or to a shared normalization
+    # primitive (`signature_normalization`, `semantic_ir`, `snapshot`) can
+    # regress the whole full-CLI workload without touching a single file the
+    # list above names -- and every perf job was skipped for it (Codex review).
+    # Whole-subtree, not a file list: the dependency is on the ring, not on the
+    # particular modules today's pipeline happens to touch, and a file list
+    # here would go stale exactly the way the pre-`extract/**` one did.
+    "abicheck/model/**",
 )
 
 

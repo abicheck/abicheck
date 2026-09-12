@@ -128,9 +128,6 @@ DEFAULT_REPEAT = 3
 DEFAULT_REGRESS_TOLERANCE = 0.3
 DEFAULT_REGRESS_MIN_DELTA_SECONDS = 0.5
 DEFAULT_TIMEOUT_SECONDS = 900.0
-#: Refuse to keep a report larger than this -- a runaway renderer filling the
-#: runner's disk is a failure mode a perf lane can actually hit.
-MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 
 #: How many header extractions a correct run of each extraction shape performs,
 #: expressed as a predicate over the observed count rather than an exact number:
@@ -267,134 +264,22 @@ def _dry_run_argv(argv: list[str]) -> list[str]:
     return out + ["--dry-run"]
 
 
-# ── validation (always outside the timed window) ──────────────────────────────
-def _load_report(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _validate_l2_reached(
-    report: dict[str, Any], *, sides: tuple[str, ...]
-) -> list[str]:
-    """The run really reached L2 on every named side, and did not degrade.
-
-    Checks the *resolved* depth rather than trusting that ``--depth headers``
-    was passed: a binary-only fallback still accepts the flag, and that fallback
-    is faster, which is exactly why a timing harness must reject it.
-    """
-    problems: list[str] = []
-    assurance = report.get("analysis_assurance") or {}
-    if assurance.get("effective_depth") != "headers":
-        problems.append(
-            f"effective_depth={assurance.get('effective_depth')!r}, expected 'headers' "
-            "-- the run did not actually perform L2 analysis"
-        )
-    if assurance.get("depth_satisfied") is not True:
-        problems.append(f"depth_satisfied={assurance.get('depth_satisfied')!r}")
-    for side in sides:
-        depth = report.get(f"{side}_evidence_depth")
-        if depth != "headers":
-            problems.append(f"{side}_evidence_depth={depth!r}, expected 'headers'")
-    scope = report.get("scope") or {}
-    if not scope.get("public_headers_applied"):
-        problems.append("scope.public_headers_applied is false -- no public scoping")
-    if scope.get("fell_back"):
-        problems.append("scope.fell_back is true -- public scoping degraded")
-    return problems
-
-
-def _validate_break_findings(report: dict[str, Any]) -> list[str]:
-    kinds = {c.get("kind") for c in report.get("changes") or []}
-    problems = []
-    if report.get("verdict") != "BREAKING":
-        problems.append(f"verdict={report.get('verdict')!r}, expected BREAKING")
-    for family, alternatives in fixtures.EXPECTED_BREAK_KIND_FAMILIES.items():
-        if not kinds & set(alternatives):
-            problems.append(
-                f"no {family}-family finding (expected one of {list(alternatives)}); "
-                f"got {sorted(k for k in kinds if k)}"
-            )
-    return problems
-
-
-def _validate_unchanged(report: dict[str, Any]) -> list[str]:
-    kinds = {c.get("kind") for c in report.get("changes") or []}
-    problems = []
-    for family, alternatives in fixtures.EXPECTED_BREAK_KIND_FAMILIES.items():
-        if kinds & set(alternatives):
-            problems.append(
-                f"unchanged comparison reported a {family}-family finding "
-                f"{sorted(kinds & set(alternatives))} -- a false positive"
-            )
-    return problems
-
-
-def _validate_snapshot(path: Path) -> list[str]:
-    """A dumped snapshot carries real L2 content, not an empty shell.
-
-    Loaded through the product's own ``load_snapshot`` rather than read as raw
-    JSON: the on-disk form is a sectioned envelope, and checking the envelope's
-    keys would pass for a snapshot whose sections are empty -- "a file was
-    written" is precisely the wrong thing for this harness to accept as
-    success.
-    """
-    from abicheck.serialization import load_snapshot
-
-    problems: list[str] = []
-    if not path.exists():
-        return [f"no snapshot written at {path}"]
-    size = path.stat().st_size
-    if size > MAX_OUTPUT_BYTES:
-        problems.append(f"snapshot is {size} bytes, over the {MAX_OUTPUT_BYTES} cap")
-    snapshot = load_snapshot(str(path))
-    names = {f.name for f in snapshot.functions} | {t.name for t in snapshot.types}
-    for declaration in fixtures.EXPECTED_DECLARATIONS:
-        if not any(declaration in name for name in names):
-            problems.append(
-                f"declaration {declaration!r} missing from the snapshot "
-                "-- headers were lost or never parsed"
-            )
-    pack = snapshot.build_source
-    graph = getattr(pack, "source_graph", None) if pack else None
-    if graph is None:
-        problems.append("no source graph: the header-graph attach never ran")
-        return problems
-    passes = graph.extractor_passes or {}
-    for required in ("header_call_graph", "header_include_graph", "header_type_graph"):
-        if not passes.get(required):
-            problems.append(
-                f"extractor pass {required!r} did not run or did not complete"
-            )
-    if graph.degraded_passes:
-        problems.append(f"degraded extractor passes: {sorted(graph.degraded_passes)}")
-    include = (graph.coverage or {}).get("include_edges") or {}
-    if not include.get("collected"):
-        problems.append("include graph was not collected")
-    elif not include.get("count"):
-        problems.append(
-            "include graph collected zero edges -- the fixture's shared detail/ "
-            "header should always produce at least one"
-        )
-    return problems
-
-
-def _validate_audit(report: dict[str, Any]) -> list[str]:
-    """``--no-baseline`` must read as an audit, not as a compatibility verdict."""
-    problems = []
-    if report.get("no_baseline") is not True:
-        problems.append(f"no_baseline={report.get('no_baseline')!r}, expected True")
-    if report.get("verdict") is not None:
-        problems.append(
-            f"verdict={report.get('verdict')!r} -- a no-baseline audit must not "
-            "manufacture a compatibility verdict (there is nothing to compare to)"
-        )
-    outcome = report.get("run_outcome") or {}
-    if outcome.get("compatibility") is not None:
-        problems.append(
-            f"run_outcome.compatibility={outcome.get('compatibility')!r}, expected null"
-        )
-    if not report.get("audit_report_schema_version"):
-        problems.append("no audit_report_schema_version -- this is not an audit report")
-    return problems
+# ── validation (always outside the timed window) ───────────────────────────────
+# Split into `l2_cli_validation.py` once this file crossed the AI-readiness
+# `file-size` gate's 2000-line hard cap -- a mechanical extraction, unchanged
+# function bodies, mirroring the same "what it asserts" / "how it gates" split
+# `tests/test_l2_cli_perf_contracts.py` already makes on the test side.
+from l2_cli_validation import (  # noqa: E402
+    MAX_OUTPUT_BYTES as MAX_OUTPUT_BYTES,
+    _load_report as _load_report,
+    _surface_state_kinds as _surface_state_kinds,
+    _validate_audit as _validate_audit,
+    _validate_audit_reached_l2 as _validate_audit_reached_l2,
+    _validate_break_findings as _validate_break_findings,
+    _validate_l2_reached as _validate_l2_reached,
+    _validate_snapshot as _validate_snapshot,
+    _validate_unchanged as _validate_unchanged,
+)
 
 
 def _check_extraction(
@@ -709,14 +594,22 @@ def scenario_no_baseline(
                     no_baseline=True,
                 ),
                 extraction="one_side",
-                ok_exit_codes=(0, 1, 2, 4),
+                # NOT (0, 1, 2, 4): 2 and 4 are compatibility exits, and an
+                # audit has nothing to compare against, so it must never
+                # produce one (its own `verdict` is null by contract). Accepting
+                # them let a run that manufactured a verdict -- the very thing
+                # `_validate_audit` exists to reject -- pass the step before
+                # validation ever looked at the report (Codex review). 1 stays:
+                # the orthogonal coverage/quality axis is reachable here.
+                ok_exit_codes=(0, 1),
                 output=out,
                 sample_rss=True,
             )
         ]
 
     def validate(work: Path, runs: dict[str, list[CommandRun]]) -> list[str]:
-        return _validate_audit(_load_report(work / "audit.json"))
+        report = _load_report(work / "audit.json")
+        return _validate_audit(report) + _validate_audit_reached_l2(report)
 
     return Scenario(
         id=f"compare_no_baseline[{spec.profile_id}]",
@@ -1389,6 +1282,20 @@ def run_scenario(
                 spy.reset()
             run = run_measured(
                 step.argv,
+                # A NEUTRAL cwd, never the harness's own. `_cli()` runs
+                # `python -m abicheck`, and `-m` puts the *current directory*
+                # first on sys.path -- so launched from an abicheck checkout,
+                # the measured CLI imports that checkout's `abicheck/` package
+                # rather than the installed one. The PR-vs-base CI lane is
+                # exactly where that bites: it runs HEAD's harness against
+                # BASE's editable install, so a head-rooted cwd made the "base"
+                # measurement execute HEAD's product and reduced the regression
+                # comparison to head-versus-head while the receipt correctly
+                # identified the base package (Codex review). A per-scenario
+                # work directory also keeps `.abicheck.yml` discovery from
+                # finding this repository's own config. Every path in `argv` is
+                # absolute, so nothing else depends on the cwd.
+                cwd=work,
                 env=env,
                 timeout=timeout,
                 sample_rss=step.sample_rss and timed,
