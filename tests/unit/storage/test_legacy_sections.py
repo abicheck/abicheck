@@ -27,11 +27,20 @@ from abicheck.storage.package import SECTION_KINDS
 #: `AbiSnapshot`'s own runtime-only fields, which `snapshot_to_dict()`
 #: strips before a document is ever built (`serialization.py`'s own
 #: `d.pop(...)` calls): the three lazy lookup caches and
-#: `from_headers_inferred`.
+#: `from_headers_inferred` and `live_source_evidence`.
+#:
+#: `live_source_evidence` is runtime-only *by design and not merely by
+#: omission*: it is the source-read licence, and persisting it would let a
+#: stored snapshot grant itself permission to re-read whatever now lives at the
+#: `source_header` paths it records — the defect
+#: `buildsource/source_inputs.py`'s contract exists to forbid. Its absence from
+#: every section is therefore the invariant, not an oversight, which is why it
+#: belongs here rather than in a section allowlist.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
     "from_headers_inferred",
+    "live_source_evidence",
     "_func_by_mangled",
     "_var_by_mangled",
     "_type_by_name",

@@ -27,21 +27,20 @@ class.
 This module records *relationships*, not test logic: which files carry the
 generalized test(s) for a class, which issues/PRs it traces back to, which
 public surfaces and axes it has been verified across, and which known
-residual gaps are tracked rather than silently open. It does not replace
-the bug-fix test contract's per-PR gate (`scripts/check_bugfix_test_contract.py`)
-— that gate is enforced at PR time; this registry is what a PR's declared
-answer should reference, and what the *next* PR should search before writing
-a fifth narrow reproducer for a mechanism a class already covers.
+residual gaps are tracked rather than silently open. It does not replace the
+bug-fix test contract's per-PR gate (`scripts/check_bugfix_test_contract.py`),
+enforced at PR time; this registry is what a PR's declared answer should
+reference, and what the *next* PR should search before writing a fifth narrow
+reproducer for a mechanism a class already covers. Entries live here and in
+the `manifest_*.py` siblings, concatenated into `BUG_CLASSES` below.
 
-``tests/test_regressions_manifest.py`` enforces this registry's own
-integrity mechanically — every named `seed_tests` path exists and is a
-real, pytest-collected `test_*.py` file, every `known_gaps` entry names a
-non-empty reference, and, when a `known_gaps` entry sets the optional
-`canary_test` (most current entries leave it `None` — a tracked-but-
-unmonitored residual is honest, not every gap has one), that path
-resolves the same way — the same "a registry entry is checked, not just
-written" discipline `scripts/check_ai_readiness.py`'s `changekind-*` checks
-already apply to `ChangeKind`.
+``tests/test_regressions_manifest.py`` enforces this registry's own integrity
+mechanically — every named `seed_tests` path exists and is a real,
+pytest-collected `test_*.py` file, every `known_gaps` entry names a non-empty
+reference, and an entry's optional `canary_test` (most leave it `None`, which
+is honest — not every gap has one) resolves the same way. Same "a registry
+entry is checked, not just written" discipline `check_ai_readiness.py`'s
+`changekind-*` checks apply to `ChangeKind`.
 """
 
 from __future__ import annotations
@@ -56,11 +55,10 @@ __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 
 
 #: The bug classes named in
-#: `docs/contribute/plans/bug-class-regression-testing.md`'s Phases 2-9,
-#: seeded with the generalized/property test(s) that already exist for
-#: each. A class entry does not claim its phase is *complete* — see that
-#: plan document for what each phase still has open; this registry only
-#: records what already has a home so a future PR can find it.
+#: `docs/contribute/plans/bug-class-regression-testing.md`'s Phases 2-9, seeded
+#: with the generalized/property test(s) that already exist for each. A class
+#: entry does not claim its phase is *complete* — see that plan document for
+#: what each phase still has open; this registry records what has a home.
 _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.ast_wrapper_chain_traversal",

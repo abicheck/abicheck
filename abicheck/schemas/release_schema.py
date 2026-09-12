@@ -75,4 +75,33 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       candidate declared no ``deployment:`` contract at all. A pre-1.2
 #:       consumer reads nothing differently; one that wants the field
 #:       feature-detects the key or requires >= 1.2.
-RELEASE_SCHEMA_VERSION = "1.2"
+#: 1.3 -- ADR-071 (release analysis-assurance fold): a top-level
+#:       ``analysis_assurance`` block (the fold over every compared member:
+#:       its own ``schema_version``, the aggregate ``status``, the member and
+#:       incomplete-member counts, the ``0``/``1`` ``exit_contribution``, and
+#:       the named ``incomplete_members`` rows), plus
+#:       ``analysis_assurance_status``/``analysis_assurance_notes``/
+#:       ``analysis_assurance_exit_contribution`` on each ``libraries[]``
+#:       entry, and the canonical **top-level**
+#:       ``analysis_assurance_exit_contribution`` (the exact sibling of
+#:       ``contract_coverage_exit_contribution``, and the key report schema
+#:       2.40 defined for this axis) -- emitted on the release document and on
+#:       ``--output-dir``'s ``summary.json`` alike, because that top-level key
+#:       is what ``workflows.aggregate.gate._analysis_assurance_exit`` and the
+#:       composite Action's ``gate_mode: deferred`` path read. Emitting the
+#:       floor only inside ``exit``/``analysis_assurance`` left both reading
+#:       ``0`` for a run whose real exit was ``1`` (Codex security review,
+#:       P1). The fold block carries ``notes`` -- one flat, member-attributed
+#:       list in the same shape a scalar ``analysis_assurance.notes`` has --
+#:       because that is the key the composite Action's ``assurance_notes``
+#:       query reads to name what fell short; without it a release run reported
+#:       ``ANALYSIS_INCOMPLETE`` with no reasons where a scalar one named them. Unlike 1.1's unconditional field, all of these are present
+#:       ONLY when ``assurance.require_complete`` was in effect -- the same
+#:       "present only when active" convention the ``severity`` and
+#:       ``contract_coverage_*`` blocks already follow, and what keeps every
+#:       release document produced without the setting byte-identical. The
+#:       ``exit`` block's own ``analysis_assurance_contribution`` is not new
+#:       (ADR-064 stage 1b already wrote it, always ``0`` on a release); it
+#:       can now be nonzero. A pre-1.3 consumer reads nothing differently;
+#:       one that wants the block feature-detects the key or requires >= 1.3.
+RELEASE_SCHEMA_VERSION = "1.3"

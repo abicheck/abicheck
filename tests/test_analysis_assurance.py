@@ -1386,14 +1386,10 @@ class TestAnalysisAssuranceCliIntegration:
         new_dir.mkdir()
         res = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_dir),
-                str(new_dir),
-                *_assurance_config_args(tmp_path),
-            ],
+            ["compare", str(old_dir), str(new_dir), *_assurance_config_args(tmp_path)],
         )
         assert "assurance.require_complete is not supported" not in res.output
+        assert "no single analysis_assurance" not in res.output
 
 
 # ``scan --against --require-complete-analysis``'s own CLI-integration

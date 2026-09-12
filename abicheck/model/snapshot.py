@@ -31,7 +31,7 @@ from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
 from .fact import Fact, bridge_legacy_and_fact
-from .first_wins_index import build_first_wins_index, describe_dropped
+from .first_wins_index import build_first_wins_index, warn_dropped
 from .graph_facts import SurfaceGraphLike
 
 if TYPE_CHECKING:
@@ -696,6 +696,16 @@ class AbiSnapshot:
     # DWARF-only baselines do not produce false API breaks.
     from_headers_inferred: bool = field(default=False, repr=False, compare=False)
 
+    # Runtime-only source-read licence, granted only where the extraction really
+    # *read* the paths it records; `buildsource/source_inputs.py` owns the
+    # contract and the predicate, and `pattern_preprocessor_scan.
+    # snapshot_source_licence` is what consumers ask. Never serialized
+    # (`storage/snapshot_encode.py` drops it), so a loaded snapshot cannot
+    # license itself. Keyword-only per `api.positional_slot_rebinding`.
+    live_source_evidence: bool = field(
+        default=False, repr=False, compare=False, kw_only=True
+    )
+
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(
         default=None, repr=False, compare=False
@@ -749,29 +759,18 @@ class AbiSnapshot:
         """
         if self._type_by_name is not None:
             return
+        owner = f"{self.library}@{self.version}"
         functions = build_first_wins_index(self.functions, lambda f: f.mangled)
-        self._warn_dropped("mangled symbols", functions.dropped)
+        warn_dropped(_model_log, "mangled symbols", owner, functions.dropped)
         self._func_by_mangled = functions.mapping
 
         variables = build_first_wins_index(self.variables, lambda v: v.mangled)
-        self._warn_dropped("mangled variables", variables.dropped)
+        warn_dropped(_model_log, "mangled variables", owner, variables.dropped)
         self._var_by_mangled = variables.mapping
 
         types = build_first_wins_index(self.types, lambda t: t.name)
-        self._warn_dropped("type names", types.dropped)
+        warn_dropped(_model_log, "type names", owner, types.dropped)
         self._type_by_name = types.mapping
-
-    def _warn_dropped(self, subject: str, dropped: dict[str, int]) -> None:
-        """Report the declarations a first-wins index had to drop, if any."""
-        if not dropped:
-            return
-        _model_log.warning(
-            "Duplicate %s skipped (first-wins) in %s@%s: %s",
-            subject,
-            self.library,
-            self.version,
-            describe_dropped(dropped),
-        )
 
     @property
     def function_map(self) -> dict[str, Function]:

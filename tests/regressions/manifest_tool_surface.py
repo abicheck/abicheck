@@ -39,6 +39,218 @@ __all__ = ["TOOL_SURFACE_BUG_CLASSES"]
 
 #: Registered in this order, appended after ``manifest.py``'s own list.
 TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
+    # Two entries from one CI audit, sharing one shape: a configured
+    # limit that is silently inert (a concurrency key that can never
+    # cancel) or silently catastrophic (a safety ceiling handed to the
+    # allocator as a size) on a platform the fast lane does not run on.
+    # Both are found by running abicheck's own delivery surface -- a
+    # workflow job, and the wall clock of a Windows test lane -- never by
+    # comparing two libraries, which is this module's own scope line.
+    BugClass(
+        id="storage.safety_limit_used_as_allocation_size",
+        invariant=(
+            "A safety *ceiling* may bound how much a reader accepts; it "
+            "may never be handed to an allocator as a *size*. Concretely, "
+            "for every supported storage envelope and every content size: "
+            "the peak allocation of a read is a function of the file's "
+            "content, not of the configured cap -- sweeping the cap "
+            "across four orders of magnitude with the content fixed "
+            "leaves the peak flat, while the read still round-trips the "
+            "content exactly and still refuses a file past the cap. "
+            "`read_snapshot_bytes` violated this with "
+            "`f.read(cap + 1 - len(prefix))`, allocating ~1 GiB to read an "
+            "8 KiB snapshot; Linux's overcommitting allocator hid it "
+            "entirely, so it surfaced only as Windows CI wall clock "
+            "(118.03s -> 1.80s on one stored-package comparison test). "
+            "The complement direction is part of the invariant: a reader "
+            "that allocated a constant tiny buffer and truncated would "
+            "satisfy the flatness half alone."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_snapshot_read_allocation.py",),
+        # `()` per the field's own rule: the seed test calls
+        # `abicheck.snapshot_io` directly, never through `abicheck.
+        # service`, so it reaches no documented public surface. A claimed
+        # surface a seed test does not reach conceals exactly the missing
+        # cross-surface coverage this registry exists to surface
+        # (CodeRabbit review).
+        public_surfaces=(),
+        axes={
+            "algorithm": ("none", "gzip", "zstd"),
+            "cap_magnitude": ("4MiB", "64MiB", "1GiB", "2GiB"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant is stated and tested only for the "
+                    "snapshot storage reader. Other bounded readers in "
+                    "the tree take a limit-shaped argument the same way "
+                    "(`snapshot_cache.py`'s archive member reads, the "
+                    "PE/Mach-O section readers, "
+                    "`workflows/bundle_compare_operand.py`'s probe); none "
+                    "is tested against the allocation half of this class, "
+                    "and the platform that exposes it (Windows, a "
+                    "committing allocator) is not where the fast unit "
+                    "lane runs, so a sibling regression would again be "
+                    "invisible on Linux."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="ci.path_filter_omits_own_build_infrastructure",
+        invariant=(
+            "A workflow's `paths:` filter must cover the files that decide "
+            "*how* it runs, not only the inputs it validates: the package "
+            "metadata its jobs pip-install from, the composite actions it "
+            "calls, and the scripts those actions execute in turn. "
+            "Otherwise a change to one of them merges without a single job "
+            "that depends on it having run, and nothing fails -- the "
+            "filter looks careful and is silently incomplete. `ci.yml`'s "
+            "`heavy-parity-gate` already named `pyproject.toml`, "
+            "`action/**`, `.github/actions/**` and `scripts/verify.py` for "
+            "this reason, citing the sharpest case (re-pinning CastXML in "
+            "`action/install-castxml.sh` landing with no CastXML job run); "
+            "three other path-filtered workflows had the identical "
+            "dependency and none of the entries. The dependency set is "
+            "derived from each workflow rather than listed, so a workflow "
+            "that starts using a new script is covered when it does."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_workflow_path_filter_closure.py",),
+        # `()` per the field's own rule: these seed tests read and parse
+        # workflow/config files, they do not invoke the CLI, `abicheck.
+        # service`, or a real workflow run. A claimed surface a seed test
+        # does not reach conceals exactly the missing cross-surface
+        # coverage this registry exists to surface (CodeRabbit review
+        # raised it for the storage entry; the same rule decides all of
+        # them).
+        public_surfaces=(),
+        axes={
+            "dependency": ("package-metadata", "composite-action", "action-script"),
+            "event": ("push", "pull_request"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Dependencies are derived from `run:` text by regex -- "
+                    "an interpreter invocation naming an existing repo "
+                    "file. A script reached indirectly (a Makefile target, "
+                    "a script that execs a sibling, a tool resolved from "
+                    "PATH after `pip install`) is not seen, and neither is "
+                    "a data file a job merely reads. `pixi.lock` is a "
+                    "concrete instance: a pixi-driven job's real dependency "
+                    "set is not derived at all. The `**` glob is also "
+                    "matched permissively on purpose, so an over-broad "
+                    "filter entry is never reported."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="ci.instrumentation_without_a_consumer",
+        invariant=(
+            "Measurement a CI lane collects must have a reader: an upload, "
+            "an artifact, or a gate. Coverage instrumentation costs ~60% "
+            "wall time on every lane that carries it, so a report nobody "
+            "reads is pure loss -- and it reads as diligence, which is why "
+            "it survives review. The macOS unit lane wrote a "
+            "`coverage.xml` the Codecov step (gated to Linux/3.13) never "
+            "took, and the `slow` lane wrote a `coverage-slow.xml` that "
+            "nothing in the repository referenced at all. The sibling half "
+            "of the same class is configuration that cannot take effect: "
+            "`COVERAGE_CORE=sysmon` requested under `branch = true` below "
+            "Python 3.14, where coverage.py warns and silently falls back "
+            "to CTracer -- so what is requested and what runs must either "
+            "agree or the disagreement must be stated where the setting "
+            "is."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_coverage_core_effectiveness.py",),
+        # `()` per the field's own rule: these seed tests read and parse
+        # workflow/config files, they do not invoke the CLI, `abicheck.
+        # service`, or a real workflow run. A claimed surface a seed test
+        # does not reach conceals exactly the missing cross-surface
+        # coverage this registry exists to surface (CodeRabbit review
+        # raised it for the storage entry; the same rule decides all of
+        # them).
+        public_surfaces=(),
+        axes={
+            "half": ("requested-vs-selected-core", "documented-fallback"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the coverage-core half is executable. Nothing "
+                    "asserts the consumer half -- that every `--cov-report` "
+                    "a workflow writes is uploaded, archived or gated -- so "
+                    "a future lane can reintroduce an unread report and "
+                    "only a human reading the diff would notice. The "
+                    "core-effectiveness test also probes the interpreter "
+                    "running the suite, not the pinned Python of each CI "
+                    "lane, so a lane on a different version is checked only "
+                    "through the stated caveat, not by measurement."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="ci.inert_concurrency_group_key",
+        invariant=(
+            "A concurrency group keyed off a value that is unique per run "
+            "makes `cancel-in-progress: true` a no-op: every run lands in "
+            "its own group, so a superseded run is never cancelled and "
+            "instead holds a runner or a queue slot until it finishes. "
+            "Stated behaviourally, for every workflow that opts into "
+            "cancellation: two successive events for the *same* logical "
+            "unit (the same pull request, or the same branch ref) must "
+            "render the same group string even though they differ in "
+            "`run_id` and `sha`, and two *different* units must not. Six "
+            "read-only validation workflows used "
+            "`${{ github.event.pull_request.number || github.run_id }}`, "
+            "correct for a pull request and silently inert for a `push` "
+            "-- a push carries no PR number, so it fell through to "
+            "`run_id`. The complement half of the invariant is load-"
+            'bearing: the literal group `"x"` satisfies the first half '
+            "while cancelling every unrelated run in the repository."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_workflow_concurrency_grouping.py",),
+        # `()` per the field's own rule: these seed tests read and parse
+        # workflow/config files, they do not invoke the CLI, `abicheck.
+        # service`, or a real workflow run. A claimed surface a seed test
+        # does not reach conceals exactly the missing cross-surface
+        # coverage this registry exists to surface (CodeRabbit review
+        # raised it for the storage entry; the same rule decides all of
+        # them).
+        public_surfaces=(),
+        axes={
+            "event": ("pull_request", "push"),
+            "unit": ("same", "different"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The guard evaluates a small GitHub-expression subset "
+                    "(parenthesised groups, `||`, `&&`, `==` against a "
+                    "literal) and models a fixed set of `github.*` context "
+                    "fields; an unmodelled field evaluates as absent "
+                    "rather than raising, so a future group expression "
+                    "using `github.event.merge_group.*`, a function call "
+                    "such as `format(...)`, or a job-level `concurrency:` "
+                    "block (not surveyed at all -- only the workflow-level "
+                    "key is) would be checked loosely or not checked. The "
+                    "class is also asserted only against synthesized "
+                    "contexts; nothing here verifies GitHub's real "
+                    "grouping semantics on a hosted run."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
     BugClass(
         id="trust_boundary.shell_workflow_injection",
         invariant=(
@@ -61,6 +273,18 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # the tombstones the same PR added. Fixed once in the shared
             # `_warn`/`_fail` helpers.
             "tests/test_action_validate_inputs.py",
+            # PR #1240: the same class one layer out -- the *workflow*
+            # rather than a script it calls. Attacker-controlled free text
+            # (a PR title/body/head ref, an issue or comment body) is
+            # substituted by `${{ }}` before the shell parses the script,
+            # so it must reach a `run:` block only as an `env:` value.
+            # Both existing sites already did that, correctly and with a
+            # comment saying why, but nothing enforced it: the next
+            # workflow to add such a step had no guard. Pairs a repo-wide
+            # structural scan with a real execution of the real step
+            # against hostile payloads, plus a control proving the harness
+            # can detect an injection at all.
+            "tests/test_workflow_untrusted_text_interpolation.py",
         ),
         public_surfaces=("github-action",),
         axes={

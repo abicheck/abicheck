@@ -1424,6 +1424,10 @@ def run_compare(
             dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
             fail_on_removed=resolved_cfg.fail_on_removed_library,
             on_incomplete_scope=resolved_cfg.on_incomplete_scope,
+            # ADR-071: the release fan-out honors assurance.require_complete
+            # now (it folds every compared member's own assurance with max),
+            # so the resolved value is forwarded instead of being rejected.
+            require_complete_analysis=require_complete_analysis,
             support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
             select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
@@ -1451,12 +1455,6 @@ def run_compare(
             public_header_dirs=project_config_public_header_dirs(project_cfg),
             collapse_versioned_symbols=collapse_versioned_symbols,
             env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
-            # `.abicheck.yml`'s `assurance.require_complete` -- config-only,
-            # no CLI kwarg, and no longer rejected for a directory/package
-            # operand: the fan-out folds each member's own assurance floor
-            # with max(), the identical contribution a single-pair compare
-            # of that member computes.
-            require_complete_analysis=require_complete_analysis,
             # Codex review (PR #1154 follow-up): --view's derived values were
             # silently dropped from this dispatch -- forwarded raw
             # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);

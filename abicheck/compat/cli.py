@@ -43,6 +43,7 @@ from ..workflows.extraction import (
     looks_like_perl_dump,
     suppress_streaming_prune,
 )
+from ..workflows.pattern_preprocessor_scan import grant_live_source_licence
 from ._errors import (
     _classify_compat_error_exit_code,
     _classify_fs_error,
@@ -311,8 +312,7 @@ def compat_dump_cmd(
         sys.exit(2)
 
     try:
-        # No dependency-scope wrapper downstream here either (Codex review,
-        # PR #840) -- same reasoning as _snapshot_from_compat_input's call.
+        # No dependency-scope wrapper downstream (Codex review, PR #840) -- same reasoning as _snapshot_from_compat_input's call.
         with suppress_streaming_prune():
             snap = dump(
                 so_path,
@@ -1177,7 +1177,7 @@ def _snapshot_from_compat_input(
             nostdinc=nostdinc,
             lang=lang,
         )
-    return snap, desc.version
+    return grant_live_source_licence(snap), desc.version
 
 
 def _load_descriptor_or_dump(

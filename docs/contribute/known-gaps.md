@@ -8537,6 +8537,140 @@ of two builds differing only in a version script is owned by the
 `integration` lane. The sibling name-shape defects stay under
 `classification.name_shape_as_contract_membership`.
 
+## A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
+
+`actions/`' preflight (`action/validate-inputs.sh`) mirrors every one of
+`compare`'s format allowlists so a bad `--format` fails before the
+multi-minute toolchain install rather than after it — except one. A stored
+`BundleFacts` OLD side with a directory/package NEW side renders `json` or
+`markdown` only (`frontends/cli/commands/compare_bundle_facts_rejections.py`),
+narrower than the release allowlist's `json|markdown|junit|oneline` that
+preflight applies when *either* operand is release-style. So
+`format: junit` on that shape passes preflight and then fails in the CLI with
+a usage error (exit 64, surfaced as `VERDICT=ERROR`). A late clear failure,
+not a wrong result — but late.
+
+It is not fixed here because both available fixes are worse than the gap:
+
+- **Classify in shell.** Whether a file *is* a stored `BundleFacts` document
+  is answered by `storage/bundle_facts_codec.looks_like_bundle_facts_document`,
+  a deliberately two-tier classifier (explicit `artifact_type` marker, then a
+  v1-only shape fallback with documented, accepted false positives). A shell
+  re-implementation is exactly the duplication `_is_release_style_operand`'s
+  own comment warns about, and that one is cross-checked against the live CLI
+  by a test — this one could not be, since the classifier operates on decoded
+  JSON, not a path.
+- **Read the document at preflight.** The operand is attacker-controlled in
+  the PR-checkout case, which is the whole reason the decode-node ceiling is
+  config-only and the remedy this PR rewrote says only an explicit `--config`
+  may raise it. Decoding it in a preflight step that runs *before* those
+  limits exist reopens precisely that surface.
+
+A path-extension heuristic (`*.json`/`*.json.gz`/`*.json.zst`) was considered
+and rejected: it would wrongly reject `junit` for a stored `ProjectSnapshot`
+OLD side, which is the same shape on disk. The honest fix is to make the
+narrowing a *CLI-reported capability* the Action can query cheaply (a
+`compare --probe-formats` style answer, or having the CLI validate formats
+before resolving operands), which is a real design slice rather than a guard.
+Until then the Action's `format` input documents the narrowing and says
+plainly that it is not pre-checked. Found by Codex review on PR #1237.
+
+## ADR-071's release assurance fold: what it deliberately does not do
+
+ADR-071 gave `assurance.require_complete` real semantics for a
+directory/package (release) `compare` and for a stored `BundleFacts` operand,
+and retired the four guards that existed only to stay ahead of the missing
+semantics. Three adjacent things were in scope to consider and deliberately
+left out, each for a stated reason rather than for effort:
+
+1. **No per-library `assurance.require_complete` override.** The setting stays
+   project-wide (ADR-071 D4), like `gate.fail_on_removed_library` and the
+   `release.*` keys. A per-member override is a real config-surface question
+   (where does it live — a `release.libraries.<key>` block? a selector? — and
+   how does it interact with the D7 precedence resolver), not a fold detail,
+   and nothing in the reported gap asked for one.
+2. **No per-member `analysis_assurance` *block* in the release report.** Each
+   `libraries[]` entry carries its own `analysis_assurance_status` and the
+   fold names the short members and their notes, but the full per-pair block
+   (target/TU/export accounting, the five context statuses, layout-unverified
+   detectors) is not embedded per member. Doing so would multiply a
+   substantial sub-object across every member of every release document — a
+   report-schema sizing decision of its own. A member that needs the full
+   block is reachable today by comparing that library individually, and the
+   fold's notes name which member to compare.
+3. **The three orthogonal `0`/`1` release axes still fold in three places.**
+   ADR-049's contract-coverage floor, ADR-065 D6's incomplete-scope floor and
+   ADR-071's assurance floor now have the same shape — resolve a decision per
+   run, `max` it across members, carry it to the exit and the report — and
+   each has its own resolver, its own `*_terms` projection and its own
+   parameter threaded through `_format_release_summary`/
+   `_finalize_release_output`/`_exit_compare_release`. That is three near-
+   identical threadings, and the `no_growth` baseline bumps ADR-071 needed in
+   five files are the visible cost of adding the third. The convergence target
+   is the duplication-and-convergence plan's own P0
+   `EffectiveGate`/`EffectiveEvaluationConfig` work — one object carrying every
+   orthogonal axis's decision, threaded once — not a fourth copy of the
+   pattern. **Do not add a fourth `0`/`1` release axis by copying this one;**
+   land that convergence first.
+
+4. **The stored-`BundleFacts` operand's JSON carries no `exit` block.** It
+   folds the axis, exits on it, and — since a Codex P1 on this PR — publishes
+   the canonical top-level `analysis_assurance_exit_contribution` and the fold
+   section in its own report and in every `--output-dir` file, so the gate is
+   no longer lost to `aggregate` or a deferred gate. What it still lacks is an
+   `exit` block of its own, unlike the live release document: a consumer
+   reading `exit.code` from this driver's JSON finds nothing, and has to read
+   the verdict and the individual axis keys instead.
+
+   An earlier revision of this entry used that missing `exit` block to excuse
+   omitting the fold entirely, on the grounds that the section had "nowhere to
+   hang". That was wrong about the half that mattered: the gate-bearing key is
+   a plain top-level scalar and needs no `exit` block at all, which is exactly
+   why the omission was a real gate bypass rather than a cosmetic gap. Giving
+   that driver a real `exit` block remains its own change, and the right one —
+   it would close several adjacent asymmetries at once.
+
+5. **`--depth binary` is not projected onto a stored-`BundleFacts` OLD side,
+   so that operand is stricter than a live one.** `compare_bundle_facts.
+   dispatch` threads `depth=` into the **stored/stored** driver
+   (`workflows.bundle_stored_pair_compare.compare_stored_bundle_facts_pair`)
+   but not into the **stored/live** one
+   (`bundle_side_input.compare_release_against_bundle_facts`, which has no
+   depth parameter at all). At `--depth binary` it clears NEW's headers while
+   the stored OLD snapshot keeps whatever L2/L5 facts its capture recorded, so
+   the comparison is asymmetric in a way live-vs-live at the same depth is not.
+
+   Measured on a three-library fixture, same pair both ways: live-vs-live at
+   `--depth binary` reports `analysis_assurance: partial` with one note
+   (`scope_resolved is False`), while stored-vs-live reports `partial` with
+   three (`header context asymmetric: the new side carries no header/API-level
+   evidence`, `graph completeness unknown`, `contract_coverage is 'partial'`).
+
+   ADR-071 did not cause the asymmetry — it pre-dates this axis and affects
+   *findings* too, not only assurance — but it is what makes the asymmetry
+   gate, so the divergence is worth stating plainly: under
+   `assurance.require_complete` a stored-OLD release at `--depth binary` can be
+   floored where the live equivalent is not. The `partial` is **not** a false
+   finding: the evidence really was asymmetric, and `AGENTS.md`'s "weaker
+   evidence narrows conclusions" says to report that rather than hide it. What
+   is wrong is only that the user asked for binary depth and the stored side
+   did not honour it.
+
+   The fix is to give that driver a real `depth` and project both sides to it
+   before comparing — which moves findings, not just assurance, and so belongs
+   with the stored/live driver's own evidence handling rather than bolted onto
+   this axis. Until then, compare a stored OLD side at its captured depth (omit
+   `--depth`), or use a live OLD tree when you need `--depth binary` to be
+   symmetric. Found by Codex review on PR #1237.
+
+The companion test gap is recorded in `tests/regressions/manifest.py` under
+bug class `gate.per_member_axis_fold`: the order-independence and monotonicity
+properties are stated and generated for the assurance axis only. The coverage
+and scope axes have example-level tests but no property suite of their own, so
+a regression in *their* fold would not be caught by it. Generalizing one
+property harness over all three axes is the real remaining work there, and it
+pairs naturally with the convergence above.
+
 ## `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
 
 `one-comparison-product.md`'s own framing, recorded rather than fixed here:
@@ -8675,3 +8809,85 @@ that, the way `tests/test_one_comparison_product_parity.py` already does
 where `--output-dir`'s own stdout line would otherwise interfere, or capture
 stderr separately. Asserting on the note, or suppressing it, would be the
 wrong fix -- it is a real diagnostic a user should see.
+
+## Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)
+
+The contract — *a path recorded in a snapshot is provenance, not a licence to
+re-read the current filesystem for historical facts* — is stated in
+`abicheck/buildsource/source_inputs.py` and enforced in the one place that
+had violated it: `workflows/pattern_preprocessor_scan.py`, plus the two
+primitives beneath it (`buildsource/pattern_facts.py`'s
+`find_pattern_facts`, which now refuses to stat an unlicensed root, and
+`buildsource/preprocessor_facts.py`, which is simply not invoked for an
+unlicensed side since `clang -E` resolves `#include`s against the filesystem
+it runs on).
+
+Two residuals are deliberately open, both recorded on the
+`evidence.stored_snapshot_rederivation` bug class in
+`tests/regressions/manifest.py`:
+
+1. **No mechanical gate against a future violator.** Nothing stops a new
+   consumer from reading `AbiSnapshot.source_header` (or a compile unit's
+   `source`) and opening it without resolving a licence first — nor a new front
+   end from calling `dumper.dump` directly and forgetting to *grant* one. Both
+   halves of that already bit once: the ABICC-compatible CLI was found doing
+   exactly the second (PR #1236's review round), after `service.run_dump` had
+   already been fixed for the first. The shape of
+   the fix is known — an AST scan in `scripts/check_ai_readiness.py`, the way
+   `fact-field-readers` guards `Fact[T]` reads, with an allowlist of the
+   reader sites that legitimately hold a licence — but it is a gate of its
+   own, not part of this fix, and today there is exactly one such consumer to
+   guard.
+
+2. **The licence is object-level, not content-verified.** A header-derived
+   live extraction grants it for the whole run; it does not digest each source
+   input and re-check that digest at read time. The consequence is the conservative
+   direction (a stored snapshot declines to re-derive even when the tree on
+   disk genuinely *is* the one it was dumped from), which is why it is a gap
+   rather than a defect. Closing it properly means persisting per-input
+   content digests, i.e. an `AbiSnapshot` schema bump inside the ADR-050
+   comparability contract plus a codec and migration — the "persist the facts
+   at dump time" half of the original two-option brief. That is the route to
+   take if stored-versus-stored pattern/preprocessor evolution ever needs to
+   be answerable rather than honestly declined; do not instead widen the
+   licence, which would reintroduce exactly the defect above.
+
+**Closed, and how (one licence per evidence source).** A third residual used
+to sit here: the licence required *header-derived* provenance
+(`extraction_read_source_inputs`), so a dump that collected only L3 build
+evidence (`--sources` with no `-H`) reported its source-derived facts as not
+evaluated even though it genuinely had read its compile units, because nothing
+at the grant point separated that from a *loaded* pack whose paths are as
+historical as a stored snapshot's. The same coarseness had a worse, opposite
+failure the same review round found: a live header dump merged with a
+pre-captured `--build-info` pack was granted one snapshot-wide licence off the
+header AST, and the pattern/preprocessor scans then read the *pack's* recorded
+compile-unit paths from whatever occupies them on this runner — the original
+fabrication, reached through the other evidence source (PR #1236, Codex P2).
+
+Both directions are one defect: a side holds up to two source-evidence sources
+with independent provenance, and one licence cannot be correct for both. So the
+licence is now resolved per source — declared headers via
+`snapshot_source_licence`, an embedded build pack via `build_evidence_licence`,
+which asks the pack itself (`BuildSourcePack.live_source_evidence`, stamped by
+`buildsource/embed.py` only for an inline collection performed in this run and,
+like the snapshot flag, never serialized). A partially-licensed side reports
+what it read and keeps the unlicensed roots in the expected-input account as
+`not_licensed` gaps, so no *absence* is established from the half that was read.
+What remains true is that the grant is *conditional*, which is the point for a
+DWARF-only dump whose `DW_AT_decl_file` paths name the build machine's tree:
+that side never opened them, so it gets no header licence.
+
+Note also the *shape* of the accepted trade-off in the third fix: the
+evolution fold now decides each identity from what is established for that
+identity, which means `persistent` is reported from two observations even
+when both sides had coverage gaps elsewhere. An earlier revision withheld it
+globally. That is not a regression of the earlier fix: an incomplete scan
+cannot un-see a hit, so two observations are the strongest premise the fold
+has, while `introduced`/`resolved` each assert an *absence* and still require
+the relevant side's sufficiency. The lexical scan cannot, however, attribute
+an unread file to a particular `PatternKind`, so a gap in any declared root
+leaves *every* kind's absence unestablished on that side — a per-kind answer
+would need per-kind input attribution the scanner does not have, and is
+recorded as a gap on `coverage.discovery_derived_completeness`.
+

@@ -915,7 +915,26 @@ _ARTIFACT_NAMES = frozenset(
 #:       since an absent key is what a reader takes for a negative. See
 #:       ``model/surface_facts.py`` and the ``Visibility.PUBLIC`` entry in
 #:       ``docs/contribute/known-gaps.md``.
-REPORT_SCHEMA_VERSION = "4.4"  #: 4.4 -- see the comment immediately above.
+#: 4.5 -- additive ``pattern_preprocessor_scan.coverage``: per-check,
+#:       per-side sufficiency (``{check: {"old"|"new": {"established",
+#:       "reason"}}}``) for the three checks that block folds. Each side's
+#:       ``pattern.old``/``pattern.new`` object additionally gains
+#:       ``sufficient`` and an ``inputs`` account (the expected-input set's
+#:       licence, per-disposition counts, and the individual gap entries).
+#:       Each preprocessor side gains ``family_attempted``/
+#:       ``family_succeeded``/``family_truncated`` (preprocessor fact schema
+#:       3): the per-probe-family tallies the ``coverage`` answers are computed
+#:       from, since the run-wide attempted/succeeded/truncated aggregates mix
+#:       the ``-E -dM`` compile-unit probes with the ``-M`` public-header ones
+#:       and so cannot answer either check on its own.
+#:       Additive in the key set, but note the *values* already carried in
+#:       ``escalation_evolution``/``macro_divergence_evolution``/
+#:       ``header_leak_evolution`` change for a stored snapshot: a side whose
+#:       recorded source paths may no longer be re-read reports
+#:       ``not_evaluated`` where a pre-4.5 run reported ``introduced``/
+#:       ``resolved`` from the current runner's filesystem. No verdict,
+#:       severity, or exit code moves -- this block never reached any of them.
+REPORT_SCHEMA_VERSION = "4.5"  #: 4.5 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

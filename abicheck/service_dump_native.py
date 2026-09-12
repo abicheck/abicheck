@@ -46,6 +46,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .buildsource.source_inputs import granting_live_source_licence
 from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import (
@@ -554,7 +555,7 @@ def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
     return _run_dump_uncached(*args, **kwargs)
 
 
-run_dump = wrap_run_dump_with_dependency_scope(_call_run_dump_uncached)
+run_dump = granting_live_source_licence(wrap_run_dump_with_dependency_scope(_call_run_dump_uncached))  # source-read licence: granted at the one shared live extraction every front end funnels through, never in a front end's own wrapper (see buildsource.source_inputs.granting_live_source_licence)
 # CodeRabbit: both functools.wraps() above copy __name__ down the chain from _run_dump_uncached, so run_dump.__name__ read as "_run_dump_uncached" -- wrong for any introspecting caller. __signature__ is unaffected.
 run_dump.__name__ = "run_dump"
 run_dump.__qualname__ = "run_dump"

@@ -66,6 +66,11 @@ from typing import Any
 import click
 
 from ....report.comparison_scope import ComparisonScopeTerms
+
+# Via `report`, which re-exports it: `frontends -> policy` is forbidden
+# (`architecture/modules.yaml`), even for a signature's own annotation.
+from ....report.release_assurance import ReleaseAssuranceDecision
+from ....workflows.release_assurance_members import release_assurance_from_results
 from .compare_bundle_facts_scope import (
     json_scope_fields,
     markdown_scope_lines,
@@ -740,9 +745,30 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             # disk, or a non-directory *parent* path component.
             raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
 
+    # ADR-071 D8: the identical fold, over this driver's own members --
+    # `result.per_library` carries real `DiffResult`s, so both operand shapes
+    # reach one `resolve_release_assurance_decision` and cannot diverge on
+    # what `assurance.require_complete` means. Retires this driver's own
+    # mirror of the release rejection.
+    #
+    # Resolved HERE, ahead of every render and per-library write, not just
+    # before the exit (Codex review, P1): computing it afterwards left the
+    # rendered JSON without the canonical top-level
+    # `analysis_assurance_exit_contribution` and each `--output-dir` report
+    # serialized without the setting, so this driver exited 1 while every
+    # document it published read 0 to `aggregate`/the deferred gate.
+    _require_complete = bool(
+        _bundle_cfg.assurance_require_complete if _bundle_cfg else False
+    )
+    assurance_decision = release_assurance_from_results(
+        getattr(result, "per_library", ()),
+        # Off the same `_bundle_cfg` every other release-shaped setting here
+        # is: the key is config-only and project-wide (D4).
+        require_complete=_require_complete,
+    )
     text = _render(
         result, fmt, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
-        scope_terms=scope_terms,
+        scope_terms=scope_terms, assurance_decision=assurance_decision,
     )
     if output is not None:
         _safe_write_output(Path(output), text)
@@ -760,6 +786,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             new_dir=new_dir,
             new_is_stored=new_is_stored,
             scope_terms=scope_terms,
+            assurance_decision=assurance_decision,
         )
         _safe_write_output(Path(secondary_output), secondary_text)
     if output_dir is not None:
@@ -782,7 +809,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             safe_name = Path(diff.library).name or "library"
             # Codex review: a direct write_text() leaked a traceback for an
             # unwritable output_dir; routed through the shared writer.
-            _safe_write_output(output_dir / f"{safe_name}.json", to_json(diff))
+            # ADR-071 (Codex review, P1): without the setting an incomplete
+            # member's own file reports a clean exit for a run it floored.
+            _safe_write_output(
+                output_dir / f"{safe_name}.json",
+                to_json(diff, require_complete_analysis=_require_complete),
+            )
 
     _exit_compare_release(
         _reported_verdict(result),
@@ -790,6 +822,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         removed_keys=[],
         incomplete_scope_exit_contribution=scope_terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=scope_terms.decision.no_comparison_completed_exit_contribution,
+        assurance_decision=assurance_decision,
     )
 
 
@@ -805,6 +838,7 @@ def _reported_verdict(result: Any) -> str:
 def _render(
     result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
     if fmt == "markdown":
         return _render_markdown(
@@ -813,18 +847,23 @@ def _render(
         )
     return _render_json(
         result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
-        scope_terms=scope_terms,
+        scope_terms=scope_terms, assurance_decision=assurance_decision,
     )
 
 
 def _render_json(
     result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
     from ....report.run_outcome import run_outcome_dict_for_diff_result
     from ....reporter import to_json
 
-    libraries = {diff.library: json.loads(to_json(diff)) for diff in result.per_library}
+    _require = bool(assurance_decision and assurance_decision.require_complete)
+    libraries = {
+        diff.library: json.loads(to_json(diff, require_complete_analysis=_require))
+        for diff in result.per_library
+    }
     # ADR-063 Phase 7 `run_outcome` (`report` builder); ADR-065 S2 adds `scope` + section.
     run_outcome = run_outcome_dict_for_diff_result(result, None, None)
     terms = scope_terms if scope_terms is not None else scope_terms_for(result, {})
@@ -859,6 +898,22 @@ def _render_json(
         ],
         "analysis_errors": list(result.analysis_errors),
     }
+    # ADR-071 D9, present only under the setting (D4): the canonical top-level
+    # `analysis_assurance_exit_contribution` (what `aggregate.gate.
+    # _analysis_assurance_exit` and the deferred gate read) plus the fold
+    # section. The gate-bearing key is a plain scalar needing no `exit` block,
+    # which is why omitting it was a real bypass rather than a cosmetic gap
+    # (Codex review, P1). This document still has no `exit` block of its own --
+    # a separate gap, recorded in known-gaps.md.
+    if assurance_decision is not None and assurance_decision.require_complete:
+        from ....report.release_assurance import release_assurance_terms
+
+        summary["analysis_assurance_exit_contribution"] = (
+            assurance_decision.exit_contribution
+        )
+        summary["analysis_assurance"] = release_assurance_terms(
+            assurance_decision
+        ).section
     # Mirrors the two-sided compare report's env_matrix_source_sha256.
     if result.env_matrix_source_sha256 is not None:
         summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256

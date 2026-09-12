@@ -99,4 +99,46 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="gate.per_member_axis_fold",
+        invariant=(
+            "An orthogonal 0/1 gate axis computed per compared member of a "
+            "directory/package (release) comparison folds across members "
+            "with max() and nothing else: the fold is the identity over one "
+            "member (so a one-member package gates and reports exactly as "
+            "the scalar path does for that pair -- AGENTS.md's 'One model, "
+            "any cardinality'), is independent of member order, never lets a "
+            "clean sibling mask a member that fell short, and is monotonic "
+            "(adding a member never lowers the contribution or improves the "
+            "aggregate status). The decision's reported status and its exit "
+            "contribution are resolved together and must agree, so a report "
+            "can never contradict its own exit code. The axis is also "
+            "strictly additive: a caller that never opts in gets a decision "
+            "byte-identical to one passing an explicit 0."
+        ),
+        fixed_by=(1237,),
+        seed_tests=(
+            "tests/test_release_assurance_properties.py",
+            "tests/test_release_assurance_cli.py",
+        ),
+        public_surfaces=("cli",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Stated and exercised for ADR-071's analysis-assurance "
+                    "axis specifically. The two sibling axes with the same "
+                    "shape -- ADR-049's contract-coverage floor and ADR-065 "
+                    "D6's incomplete-scope floor -- are covered by their own "
+                    "example-level tests only; neither has an order-"
+                    "independence or monotonicity property test of its own, "
+                    "so a regression in *their* fold would not be caught "
+                    "here. Generalizing this class's properties over all "
+                    "three (one shared property harness parameterized by "
+                    "axis) is the real remaining work, not another per-axis "
+                    "copy."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
 )

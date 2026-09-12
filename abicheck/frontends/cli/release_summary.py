@@ -34,6 +34,7 @@ import click
 from ...bundle import BundleDiffResult
 from ...checker import DiffResult
 from ...report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
+from ...report.release_assurance import ReleaseAssuranceTerms
 from .options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
@@ -62,6 +63,7 @@ def _write_release_summary_file(
     pack_application: Any = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    assurance_terms: ReleaseAssuranceTerms | None = None,
     write_output: Callable[[Path, str], None] | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
@@ -191,6 +193,16 @@ def _write_release_summary_file(
         summary_data["env_matrix_source_sha256"] = env_matrix_source_sha256
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section
+    # ADR-071 D6: the same fold section and the same canonical top-level
+    # gate key the primary release JSON carries. This sidecar is what a
+    # consumer collects when `--output-dir` is the artifact, so leaving the
+    # axis only inside `exit` here would be the same gate-loses-its-reason
+    # gap the top-level key exists to close for the primary document.
+    if assurance_terms is not None and assurance_terms.section is not None:
+        summary_data["analysis_assurance"] = assurance_terms.section
+        summary_data["analysis_assurance_exit_contribution"] = (
+            assurance_terms.decision.exit_contribution
+        )
     # ADR-067 C-S2: the same folded release-level `disposition_audit` the
     # primary report carries (`cli_compare_release_helpers._format_release_
     # json`), via the identical shared helper, so this sidecar cannot drift
