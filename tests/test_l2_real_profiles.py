@@ -164,13 +164,17 @@ class TestValidationCatchesDishonestDefinitions:
                 ),
             )
         )
-        assert any("no library is in L2 scope" in p for p in profiles.validate_profile(bad))
+        assert any(
+            "no library is in L2 scope" in p for p in profiles.validate_profile(bad)
+        )
 
     def test_a_profile_stating_no_required_tools_is_rejected(self):
         # Without required tools, availability cannot be checked, so the profile
         # could never report BLOCKED -- it would silently read as runnable.
         bad = self._profile(required_tools=())
-        assert any("could never report BLOCKED" in p for p in profiles.validate_profile(bad))
+        assert any(
+            "could never report BLOCKED" in p for p in profiles.validate_profile(bad)
+        )
 
 
 class TestHistoricalBaselineIsReallyHistorical:
@@ -179,7 +183,10 @@ class TestHistoricalBaselineIsReallyHistorical:
         new = tmp_path / "new"
         old.mkdir()
         new.mkdir()
-        assert profiles.validate_side_headers(old_header_root=old, new_header_root=new) == []
+        assert (
+            profiles.validate_side_headers(old_header_root=old, new_header_root=new)
+            == []
+        )
 
     def test_one_shared_header_root_is_rejected(self, tmp_path):
         # The easy accidental substitution: check out the new revision, build
@@ -199,7 +206,9 @@ class TestHistoricalBaselineIsReallyHistorical:
         real.mkdir()
         link = tmp_path / "alias"
         link.symlink_to(real)
-        assert profiles.validate_side_headers(old_header_root=real, new_header_root=link)
+        assert profiles.validate_side_headers(
+            old_header_root=real, new_header_root=link
+        )
 
 
 class TestStatusReporting:
@@ -268,7 +277,9 @@ class TestDigestTree:
             root = tmp_path / name
             (root / "pvxs").mkdir(parents=True)
             (root / "pvxs" / "data.h").write_text("struct X {};")
-        assert profiles.digest_tree(tmp_path / "a") == profiles.digest_tree(tmp_path / "b")
+        assert profiles.digest_tree(tmp_path / "a") == profiles.digest_tree(
+            tmp_path / "b"
+        )
 
     def test_a_changed_header_changes_the_digest(self, tmp_path):
         root = tmp_path / "a"

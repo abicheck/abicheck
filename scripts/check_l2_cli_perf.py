@@ -371,12 +371,32 @@ def _validate_audit(report: dict[str, Any]) -> list[str]:
     return problems
 
 
-def _check_extraction(run: CommandRun, expectation: str, *, one_side: int) -> list[str]:
-    """Assert a step's observed header-extraction count against its contract."""
+def _check_extraction(
+    run: CommandRun, expectation: str, *, one_side: int | None
+) -> list[str]:
+    """Assert a step's observed header-extraction count against its contract.
+
+    *one_side* is the **independently calibrated** cost of extracting a single
+    operand -- taken from a setup step that really did extract exactly one side
+    -- or ``None`` when no such calibration exists for this scenario.
+
+    That distinction is load-bearing and was a real soundness bug in the first
+    version of this harness: ``one_side`` was seeded from the measured step's
+    *own* observed count, so the "not more than one side" comparison reduced to
+    ``observed > observed`` and could never fail. A self-calibrating assertion
+    is not an assertion. With no calibration available, the upper-bound half is
+    now explicitly **not checked** (and reported as unchecked by the caller)
+    rather than checked against a number derived from the thing under test.
+
+    The lower-bound half needs no calibration and is always checked, because it
+    is the "faster because it stopped working" direction: a stored/live
+    comparison that extracts *nothing* never looked at its live side at all.
+    """
     observed = (run.native_invocations or {}).get("header_extraction")
     if observed is None:
         return ["no native-invocation observation recorded (spy not installed?)"]
     if expectation == "forbidden":
+        # Needs no calibration: the contract is an absolute zero.
         if observed:
             return [
                 f"{observed} header extraction(s) observed on a stored-operand path "
@@ -385,18 +405,41 @@ def _check_extraction(run: CommandRun, expectation: str, *, one_side: int) -> li
     elif expectation == "one_side":
         if observed == 0:
             return ["zero header extractions: the live side was never extracted"]
-        if observed > one_side:
+        if one_side is not None and observed > one_side:
             return [
                 f"{observed} header extraction(s) observed, but one side costs "
-                f"{one_side} -- the stored operand appears to have been re-extracted"
+                f"{one_side} (calibrated from this scenario's own setup dump) -- "
+                "the stored operand appears to have been re-extracted"
             ]
     elif expectation == "both_sides":
-        if observed < one_side * 2:
+        if observed == 0:
+            return ["zero header extractions: neither operand was extracted"]
+        if one_side is not None and observed < one_side * 2:
             return [
                 f"{observed} header extraction(s) observed, expected at least "
-                f"{one_side * 2} for two live operands"
+                f"{one_side * 2} for two live operands (one side costs "
+                f"{one_side}, calibrated from a setup dump)"
             ]
     return []
+
+
+def uncalibrated_contracts(steps: list[Step], one_side: int | None) -> list[str]:
+    """Which extraction contracts could only be partially checked.
+
+    Reported so the receipt never implies a stronger claim than was made: a
+    ``one_side``/``both_sides`` contract with no independent single-side
+    calibration has had its lower bound checked (extraction happened at all) but
+    not its upper bound (it was not more than one side's worth).
+    """
+    if one_side is not None:
+        return []
+    return [
+        f"step {step.name}: contract {step.extraction!r} checked for >0 only -- no "
+        "setup step in this scenario extracts exactly one side, so there is no "
+        "independent calibration for the count bound"
+        for step in steps
+        if step.extraction in ("one_side", "both_sides")
+    ]
 
 
 # ── scenarios ─────────────────────────────────────────────────────────────────
@@ -452,6 +495,16 @@ def scenario_dump(spec: fixtures.FixtureSpec, suites=("pr", "extended")) -> Scen
 def scenario_compare_live_live(
     spec: fixtures.FixtureSpec, suites=("pr", "extended")
 ) -> Scenario:
+    def prepare(fixture: fixtures.BuiltFixture, work: Path) -> list[Step]:
+        # An untimed calibration dump of ONE side, purely so the measured
+        # comparison's "both operands were extracted" assertion has an
+        # independent single-side number to check against. Without it that
+        # assertion could only check ">0" (see _check_extraction's docstring on
+        # why it must not calibrate from the step under test). Costs about a
+        # second of setup, outside every timed window, and buys a real bound
+        # instead of an unchecked one.
+        return _prepare_stored(fixture, work, sides=("old",))
+
     def steps(fixture: fixtures.BuiltFixture, work: Path) -> list[Step]:
         out = work / "live_live.json"
         # Library 0 only, even for a multi-library spec. A single `compare`
@@ -499,7 +552,7 @@ def scenario_compare_live_live(
         id=f"compare_live_live[{spec.profile_id}]",
         description="compare two live binaries, each with its own historical headers",
         spec=spec,
-        prepare=None,
+        prepare=prepare,
         steps=steps,
         validate=validate,
         suites=suites,
@@ -955,9 +1008,15 @@ def _mutate_dependency_header(fixture: fixtures.BuiltFixture) -> None:
     core.write_text(core.read_text() + f"\n// invalidation probe {time.time_ns()}\n")
 
 
-def _one_side_extractions(observed: dict[str, int] | None) -> int:
-    """How many extractions one operand costs, from an observed single-side run."""
-    return max(1, (observed or {}).get("header_extraction", 1))
+def _one_side_extractions(observed: dict[str, int] | None) -> int | None:
+    """One operand's extraction cost, from a setup run that extracted exactly one.
+
+    ``None`` when the observation shows no extraction at all: a setup step that
+    extracted nothing calibrates nothing, and returning a fabricated ``1`` would
+    be the self-calibration bug in a new place.
+    """
+    count = (observed or {}).get("header_extraction", 0)
+    return count if count > 0 else None
 
 
 def run_scenario(
@@ -1058,7 +1117,19 @@ def run_scenario(
 
         measured = scenario.steps(fixture, work)
         runs: dict[str, list[CommandRun]] = {}
-        one_side = 1
+        # Calibrated from the SETUP dumps only -- never from a measured step's
+        # own count, which would make the comparison self-referential (see
+        # _check_extraction's docstring). A setup dump of one library with one
+        # side's headers is exactly "one operand's extraction cost".
+        one_side: int | None = None
+        if keep_spy:
+            for entry in result["steps"]:
+                if entry["scope"] == "setup" and entry["name"].startswith("prep_dump"):
+                    calibrated = _one_side_extractions(entry["native_invocations"])
+                    if calibrated is not None:
+                        one_side = calibrated
+                        break
+        result["one_side_extraction_calibration"] = one_side
         for repetition in range(repeat):
             for step in measured:
                 if (
@@ -1088,8 +1159,6 @@ def run_scenario(
                         f"{list(step.ok_exit_codes)}): {run.stderr.strip()[-600:]}"
                     )
                     return result
-                if step.extraction == "one_side" and repetition == 0:
-                    one_side = _one_side_extractions(run.native_invocations)
                 if keep_spy:
                     problems = _check_extraction(
                         run, step.extraction, one_side=one_side
@@ -1110,6 +1179,9 @@ def run_scenario(
                         return result
 
         # Validation, strictly after every timed window.
+        result["uncalibrated_contracts"] = (
+            uncalibrated_contracts(measured, one_side) if keep_spy else []
+        )
         problems = scenario.validate(work, runs)
         result["validation"] = "passed" if not problems else "failed"
         result["validation_problems"] += problems

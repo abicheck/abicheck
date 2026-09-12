@@ -359,9 +359,9 @@ class TestScenarioThresholdPrecedence:
 
     def test_the_source_label_names_the_scenario_it_came_from(self):
         # So a receipt reader can tell which scenario's exception is in play.
-        assert self._resolve(scenario="report_html", spec_tolerance=2.0).source.endswith(
-            "report_html"
-        )
+        assert self._resolve(
+            scenario="report_html", spec_tolerance=2.0
+        ).source.endswith("report_html")
 
     def test_the_plain_default_is_labelled_as_such(self):
         resolved = self._resolve()

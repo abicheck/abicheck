@@ -113,7 +113,11 @@ class TestInvocationClassification:
     def test_extraction_and_probe_are_never_the_same_bucket(self):
         # The specific conflation that would break every extraction-count
         # assertion: a cold run makes three castxml calls and only one is a parse.
-        castxml_calls = ["--version", "-dumpmachine", "--castxml-output=1 -o /t.xml /t.hpp"]
+        castxml_calls = [
+            "--version",
+            "-dumpmachine",
+            "--castxml-output=1 -o /t.xml /t.hpp",
+        ]
         kinds = [receipt_mod.classify_invocation("castxml", a) for a in castxml_calls]
         assert kinds.count("header_extraction") == 1
         assert kinds.count("probe") == 2
@@ -137,9 +141,12 @@ def _run(extraction_counts: dict[str, int]) -> object:
 
 class TestExtractionContracts:
     def test_a_stored_path_with_no_extraction_passes(self):
-        assert harness._check_extraction(
-            _run({"header_extraction": 0}), "forbidden", one_side=2
-        ) == []
+        assert (
+            harness._check_extraction(
+                _run({"header_extraction": 0}), "forbidden", one_side=2
+            )
+            == []
+        )
 
     def test_a_stored_path_that_extracts_fails(self):
         # The product defect this harness exists to detect, not work around.
@@ -156,9 +163,12 @@ class TestExtractionContracts:
         )
 
     def test_one_side_accepts_exactly_one_side(self):
-        assert harness._check_extraction(
-            _run({"header_extraction": 2}), "one_side", one_side=2
-        ) == []
+        assert (
+            harness._check_extraction(
+                _run({"header_extraction": 2}), "one_side", one_side=2
+            )
+            == []
+        )
 
     def test_one_side_rejects_both_sides(self):
         problems = harness._check_extraction(
@@ -184,6 +194,64 @@ class TestExtractionContracts:
         # claim it had verified a compiler-free path.
         problems = harness._check_extraction(_run({}), "forbidden", one_side=2)
         assert problems and "no native-invocation observation" in problems[0]
+
+    def test_the_forbidden_contract_needs_no_calibration(self):
+        # An absolute zero is checkable without knowing what one side costs.
+        assert harness._check_extraction(
+            _run({"header_extraction": 3}), "forbidden", one_side=None
+        )
+
+    def test_an_uncalibrated_one_side_contract_still_catches_zero(self):
+        # The "faster because it stopped working" direction needs no
+        # calibration, so it is always checked.
+        problems = harness._check_extraction(
+            _run({"header_extraction": 0}), "one_side", one_side=None
+        )
+        assert problems and "never extracted" in problems[0]
+
+    def test_an_uncalibrated_one_side_contract_does_not_check_the_upper_bound(self):
+        # The soundness fix: with no independent single-side calibration the
+        # count bound is NOT checked, rather than checked against a number
+        # derived from the thing under test. An assertion that calibrates itself
+        # reduces to `observed > observed` and can never fail, which is what the
+        # first version of this harness shipped.
+        assert (
+            harness._check_extraction(
+                _run({"header_extraction": 99}), "one_side", one_side=None
+            )
+            == []
+        )
+
+    def test_an_uncalibrated_both_sides_contract_still_catches_zero(self):
+        problems = harness._check_extraction(
+            _run({"header_extraction": 0}), "both_sides", one_side=None
+        )
+        assert problems and "neither operand" in problems[0]
+
+    def test_a_calibrated_failure_message_says_where_the_number_came_from(self):
+        # So a reader can tell a real calibrated bound from an unchecked one.
+        problems = harness._check_extraction(
+            _run({"header_extraction": 4}), "one_side", one_side=2
+        )
+        assert problems and "calibrated from" in problems[0]
+
+    def test_calibration_rejects_a_setup_run_that_extracted_nothing(self):
+        # Returning a fabricated 1 there would be the self-calibration bug in a
+        # new place.
+        assert harness._one_side_extractions({"header_extraction": 0}) is None
+        assert harness._one_side_extractions({}) is None
+        assert harness._one_side_extractions({"header_extraction": 2}) == 2
+
+    def test_uncalibrated_contracts_are_reported_not_hidden(self):
+        steps = [
+            harness.Step("a", ["x"], extraction="one_side"),
+            harness.Step("b", ["x"], extraction="both_sides"),
+            harness.Step("c", ["x"], extraction="forbidden"),
+            harness.Step("d", ["x"], extraction="any"),
+        ]
+        reported = harness.uncalibrated_contracts(steps, None)
+        assert {r.split()[1].rstrip(":") for r in reported} == {"a", "b"}
+        assert harness.uncalibrated_contracts(steps, 2) == []
 
     def test_every_contract_name_has_a_stated_meaning(self):
         # So a receipt reader never sees a bare contract label they cannot
@@ -215,7 +283,10 @@ class TestFasterBecauseItStoppedWorking:
     def test_a_binary_only_fallback_is_rejected(self):
         problems = harness._validate_l2_reached(
             _l2_report(
-                analysis_assurance={"effective_depth": "binary", "depth_satisfied": False},
+                analysis_assurance={
+                    "effective_depth": "binary",
+                    "depth_satisfied": False,
+                },
                 old_evidence_depth="binary",
                 new_evidence_depth="binary",
             ),
@@ -283,9 +354,14 @@ class TestFasterBecauseItStoppedWorking:
         assert any("false positive" in p for p in problems)
 
     def test_the_unchanged_control_passes_with_no_break_findings(self):
-        assert harness._validate_unchanged(
-            _l2_report(verdict="COMPATIBLE", changes=[{"kind": "private_header_leak"}])
-        ) == []
+        assert (
+            harness._validate_unchanged(
+                _l2_report(
+                    verdict="COMPATIBLE", changes=[{"kind": "private_header_leak"}]
+                )
+            )
+            == []
+        )
 
 
 class TestNoBaselineAuditSemantics:
@@ -315,7 +391,9 @@ class TestNoBaselineAuditSemantics:
         assert any("run_outcome.compatibility" in p for p in problems)
 
     def test_a_non_audit_report_is_rejected(self):
-        problems = harness._validate_audit(self._audit(audit_report_schema_version=None))
+        problems = harness._validate_audit(
+            self._audit(audit_report_schema_version=None)
+        )
         assert any("not an audit report" in p for p in problems)
 
 
@@ -339,8 +417,18 @@ class TestGating:
             "id": "s",
             "status": "ok",
             "steps": [
-                {"name": "startup", "scope": "startup_only", "gated": False, "wall_seconds": 0.6},
-                {"name": "compare", "scope": "full_cli", "gated": True, "wall_seconds": 1.2},
+                {
+                    "name": "startup",
+                    "scope": "startup_only",
+                    "gated": False,
+                    "wall_seconds": 0.6,
+                },
+                {
+                    "name": "compare",
+                    "scope": "full_cli",
+                    "gated": True,
+                    "wall_seconds": 1.2,
+                },
             ],
         }
         assert harness.gated_points([scenario]) == {("s", "compare"): 1.2}
@@ -388,7 +476,9 @@ class TestGating:
         # because "nothing was gated" is itself a failure.
         assert (
             harness.check_regressions(
-                {("s", "compare"): 99.0}, {("s", "compare"): bad}, GateThreshold(0.3, 0.5)
+                {("s", "compare"): 99.0},
+                {("s", "compare"): bad},
+                GateThreshold(0.3, 0.5),
             )
             == []
         )
@@ -410,13 +500,20 @@ class TestGating:
 class TestRequiredCoverage:
     def test_a_full_run_claims_coverage(self):
         measured = [_scenario(f"{shape}[p]") for shape in harness.REQUIRED_PR_SHAPES]
-        assert harness.required_coverage_failures(measured, harness.REQUIRED_PR_SHAPES) == []
+        assert (
+            harness.required_coverage_failures(measured, harness.REQUIRED_PR_SHAPES)
+            == []
+        )
 
     def test_a_missing_required_shape_fails(self):
         # "Не называй чистым pass run, где обязательный case не измерен": five
         # green scenarios are not a pass when the sixth never ran.
-        measured = [_scenario(f"{shape}[p]") for shape in harness.REQUIRED_PR_SHAPES[:-1]]
-        failures = harness.required_coverage_failures(measured, harness.REQUIRED_PR_SHAPES)
+        measured = [
+            _scenario(f"{shape}[p]") for shape in harness.REQUIRED_PR_SHAPES[:-1]
+        ]
+        failures = harness.required_coverage_failures(
+            measured, harness.REQUIRED_PR_SHAPES
+        )
         assert len(failures) == 1
         assert harness.REQUIRED_PR_SHAPES[-1] in failures[0]
 
@@ -430,7 +527,10 @@ class TestRequiredCoverage:
             _scenario(f"{shape}[templates-h8-l2-break-distinct]")
             for shape in harness.REQUIRED_PR_SHAPES
         ]
-        assert harness.required_coverage_failures(measured, harness.REQUIRED_PR_SHAPES) == []
+        assert (
+            harness.required_coverage_failures(measured, harness.REQUIRED_PR_SHAPES)
+            == []
+        )
 
     def test_the_pr_suite_really_contains_every_required_shape(self):
         # Guards the registry against the test above passing vacuously: the
@@ -440,7 +540,7 @@ class TestRequiredCoverage:
 
 
 class TestCacheServiceClassification:
-    """"Warm" must be proven by counters, never by run order."""
+    """ "Warm" must be proven by counters, never by run order."""
 
     def _runs(self, cold: int, warm: int) -> dict:
         return {
@@ -471,12 +571,16 @@ class TestDryRunArgv:
     def test_the_output_flag_is_stripped(self):
         # compare rejects --dry-run together with -o (exit 64); the first version
         # of this harness tripped exactly that.
-        argv = harness._dry_run_argv(["abicheck", "compare", "a", "b", "-o", "/out.json"])
+        argv = harness._dry_run_argv(
+            ["abicheck", "compare", "a", "b", "-o", "/out.json"]
+        )
         assert "-o" not in argv and "/out.json" not in argv
         assert argv[-1] == "--dry-run"
 
     def test_the_long_spelling_is_stripped_too(self):
-        argv = harness._dry_run_argv(["compare", "a", "--output", "/out.json", "--depth", "headers"])
+        argv = harness._dry_run_argv(
+            ["compare", "a", "--output", "/out.json", "--depth", "headers"]
+        )
         assert "/out.json" not in argv
         assert ["--depth", "headers"] == argv[-3:-1]
 
@@ -534,6 +638,10 @@ class TestRealL2Execution:
         assert live_only == one_side, (
             "a stored/live comparison must cost one side's extraction, not two"
         )
+        # And the harness calibrated from that same setup dump rather than from
+        # the measured step itself, so its own assertion was not self-referential.
+        assert result["one_side_extraction_calibration"] == one_side
+        assert result["uncalibrated_contracts"] == []
 
     @requires_toolchain
     def test_an_unexpected_extraction_on_a_forbidden_path_fails_the_scenario(
@@ -551,7 +659,9 @@ class TestRealL2Execution:
             return out
 
         scenario.steps = steps
-        result = harness.run_scenario(scenario, repeat=1, timeout=900, rss_interval=0.05)
+        result = harness.run_scenario(
+            scenario, repeat=1, timeout=900, rss_interval=0.05
+        )
         assert result["status"] == "failed"
         assert any("re-extracted" in p for p in result["validation_problems"])
 
@@ -585,9 +695,13 @@ class TestRealL2Execution:
                 harness._load_report(work / "binary_only.json"), sides=("old", "new")
             ),
         )
-        result = harness.run_scenario(scenario, repeat=1, timeout=900, rss_interval=0.05)
+        result = harness.run_scenario(
+            scenario, repeat=1, timeout=900, rss_interval=0.05
+        )
         assert result["status"] == "failed"
-        assert any("did not actually perform L2" in p for p in result["validation_problems"])
+        assert any(
+            "did not actually perform L2" in p for p in result["validation_problems"]
+        )
 
     @requires_toolchain
     def test_the_whole_pr_suite_passes_and_writes_a_valid_receipt(self, tmp_path):
@@ -646,7 +760,14 @@ class TestRealL2Execution:
         base = tmp_path / "base.json"
         assert (
             harness.main(
-                ["--repeat", "1", "--scenario", "stored_stored", "--json-out", str(base)]
+                [
+                    "--repeat",
+                    "1",
+                    "--scenario",
+                    "stored_stored",
+                    "--json-out",
+                    str(base),
+                ]
             )
             == 0
         )
@@ -679,7 +800,14 @@ class TestRealL2Execution:
         empty.write_text(json.dumps({"scenarios": []}))
         assert (
             harness.main(
-                ["--repeat", "1", "--scenario", "stored_stored", "--baseline", str(empty)]
+                [
+                    "--repeat",
+                    "1",
+                    "--scenario",
+                    "stored_stored",
+                    "--baseline",
+                    str(empty),
+                ]
             )
             == 1
         )
@@ -703,7 +831,9 @@ class TestRequireToolchain:
         assert harness.main([]) == 0
         assert "SKIP" in capsys.readouterr().out
 
-    def test_require_toolchain_turns_that_skip_into_a_failure(self, monkeypatch, capsys):
+    def test_require_toolchain_turns_that_skip_into_a_failure(
+        self, monkeypatch, capsys
+    ):
         # A CI job claiming to cover this backend must not report a pass over a
         # run that measured nothing.
         monkeypatch.setattr(sys, "platform", "darwin")
@@ -713,6 +843,8 @@ class TestRequireToolchain:
     def test_a_missing_compiler_is_also_covered(self, monkeypatch, capsys):
         monkeypatch.setattr(sys, "platform", "linux")
         monkeypatch.setattr(fixtures, "compiler_available", lambda cxx="g++": False)
-        monkeypatch.setattr(harness.fixtures, "compiler_available", lambda cxx="g++": False)
+        monkeypatch.setattr(
+            harness.fixtures, "compiler_available", lambda cxx="g++": False
+        )
         assert harness.main(["--require-toolchain"]) == 1
         assert "no g++" in capsys.readouterr().out

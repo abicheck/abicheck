@@ -90,7 +90,13 @@ def _base(
     attach_ms: float = 20.0,
     total_ms: float = 121.0,
 ) -> dict:
-    return {(size, backend): {"dump_ms": dump_ms, "attach_ms": attach_ms, "total_ms": total_ms}}
+    return {
+        (size, backend): {
+            "dump_ms": dump_ms,
+            "attach_ms": attach_ms,
+            "total_ms": total_ms,
+        }
+    }
 
 
 def _pt(
@@ -259,12 +265,16 @@ class TestNonGateableValuesCannotSilentlyPass:
     drops out of the gated set and is reported, rather than passing.
     """
 
-    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+    @pytest.mark.parametrize(
+        "bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0]
+    )
     def test_a_bad_baseline_value_is_not_gated(self, bad):
         base = {(10, "clang"): {"dump_ms": bad, "attach_ms": 20.0, "total_ms": 121.0}}
         assert hg_gate.gateable_metrics(_pt(), base) == ["attach_ms", "total_ms"]
 
-    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+    @pytest.mark.parametrize(
+        "bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0]
+    )
     def test_a_bad_measured_value_is_not_gated(self, bad):
         assert hg_gate.gateable_metrics(_pt(dump_ms=bad), _base()) == [
             "attach_ms",
@@ -277,7 +287,9 @@ class TestNonGateableValuesCannotSilentlyPass:
         # a NaN baseline must not come back as "no failures, all good".
         base = {(10, "clang"): {"dump_ms": bad, "attach_ms": 20.0, "total_ms": 121.0}}
         assert hg_gate.check_regressions([_pt(dump_ms=1e9)], base, _th()) == []
-        assert any("dump_ms" in u for u in hg_gate.ungated_metrics([_pt(dump_ms=1e9)], base))
+        assert any(
+            "dump_ms" in u for u in hg_gate.ungated_metrics([_pt(dump_ms=1e9)], base)
+        )
 
     def test_a_missing_measured_metric_is_reported_not_gated(self):
         point = {"size": 10, "backend": "clang", "attach_ms": 20.0, "total_ms": 121.0}
@@ -288,7 +300,9 @@ class TestNonGateableValuesCannotSilentlyPass:
     def test_a_non_numeric_value_is_rejected(self):
         # A string where a float belongs (a hand-edited report) must not raise
         # a TypeError mid-gate either -- it is simply not gateable.
-        base = {(10, "clang"): {"dump_ms": "fast", "attach_ms": 20.0, "total_ms": 121.0}}
+        base = {
+            (10, "clang"): {"dump_ms": "fast", "attach_ms": 20.0, "total_ms": 121.0}
+        }
         assert "dump_ms" not in hg_gate.gateable_metrics(_pt(), base)
 
     def test_a_bool_is_not_a_measurement(self):
@@ -404,7 +418,9 @@ class TestMatchedPoints:
         # matched_points must agree with check_regressions' own skip
         # conditions -- otherwise main()'s final "N checked" count would
         # include a point check_regressions never actually gated.
-        base = {(10, "clang"): {"dump_ms": 0.0, "attach_ms": -1.0, "total_ms": float("nan")}}
+        base = {
+            (10, "clang"): {"dump_ms": 0.0, "attach_ms": -1.0, "total_ms": float("nan")}
+        }
         assert hg_gate.matched_points([_pt()], base) == []
 
     def test_matching_honors_the_selected_metric_subset(self):
@@ -423,10 +439,14 @@ class TestResolveThresholds:
     def test_default_applies_to_every_metric(self):
         resolved = hg_gate.resolve_thresholds(self._args([]))
         assert set(resolved) == set(_ALL)
-        assert all(t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE for t in resolved.values())
+        assert all(
+            t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE for t in resolved.values()
+        )
 
     def test_an_explicit_cli_tolerance_is_marked_explicit(self):
-        resolved = hg_gate.resolve_thresholds(self._args(["--regress-tolerance", "0.1"]))
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-tolerance", "0.1"])
+        )
         assert {t.source for t in resolved.values()} == {"explicit"}
         assert all(t.tolerance == 0.1 for t in resolved.values())
 
@@ -441,7 +461,9 @@ class TestResolveThresholds:
 
     def test_a_per_metric_min_delta_override_keeps_the_shared_tolerance(self):
         resolved = hg_gate.resolve_thresholds(
-            self._args(["--regress-tolerance", "0.2", "--regress-min-delta-ms-total", "50"])
+            self._args(
+                ["--regress-tolerance", "0.2", "--regress-min-delta-ms-total", "50"]
+            )
         )
         assert resolved["total_ms"].tolerance == 0.2
         assert resolved["total_ms"].min_delta == 50.0

@@ -42,7 +42,9 @@ _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-_spec = importlib.util.spec_from_file_location("perf_receipt", _SCRIPTS / "perf_receipt.py")
+_spec = importlib.util.spec_from_file_location(
+    "perf_receipt", _SCRIPTS / "perf_receipt.py"
+)
 assert _spec and _spec.loader
 pr = importlib.util.module_from_spec(_spec)
 sys.modules["perf_receipt"] = pr
@@ -55,7 +57,13 @@ requires_linux = pytest.mark.skipif(not _LINUX, reason="/proc-based, Linux only"
 class TestRunIdentity:
     def test_it_records_what_a_comparison_needs(self):
         identity = pr.run_identity(harness="t")
-        for key in ("product_sha", "python_version", "platform", "cpu_quota", "memory_limit"):
+        for key in (
+            "product_sha",
+            "python_version",
+            "platform",
+            "cpu_quota",
+            "memory_limit",
+        ):
             assert key in identity
 
     def test_no_secrets_or_bulk_environment_are_captured(self):
@@ -105,7 +113,9 @@ class TestDigestPaths:
         # same profile.
         (tmp_path / "a.h").write_text("x")
         (tmp_path / "b.h").write_text("x")
-        assert pr.digest_paths([tmp_path / "a.h"]) != pr.digest_paths([tmp_path / "b.h"])
+        assert pr.digest_paths([tmp_path / "a.h"]) != pr.digest_paths(
+            [tmp_path / "b.h"]
+        )
 
     def test_an_unreadable_path_does_not_raise(self, tmp_path):
         assert pr.digest_paths([tmp_path / "missing.h"])
@@ -181,9 +191,7 @@ class TestNativeInvocationSpy:
         spy = self._spy(tmp_path)
         weird = tmp_path / "a dir with spaces"
         weird.mkdir()
-        pr.run_measured(
-            ["g++", "--version", f"-I{weird}"], env=spy.env(), timeout=60
-        )
+        pr.run_measured(["g++", "--version", f"-I{weird}"], env=spy.env(), timeout=60)
         assert spy.counts()["g++"] == 1
 
 
@@ -252,7 +260,10 @@ class TestTreeRssSampler:
 
     def test_an_immediate_exit_reports_a_reason_rather_than_zero(self):
         run = pr.run_measured(
-            [sys.executable, "-c", "pass"], timeout=60, sample_rss=True, rss_interval=5.0
+            [sys.executable, "-c", "pass"],
+            timeout=60,
+            sample_rss=True,
+            rss_interval=5.0,
         )
         assert run.rss is not None
         if run.rss.sample_count == 0:
@@ -290,7 +301,9 @@ class TestTimeoutCleanup:
         # A castxml grandchild outliving its parent would keep burning CPU and
         # skew every later measurement on the same host, and the RSS sampler
         # would keep attributing it to an abandoned tree.
-        marker = Path(os.environ.get("TMPDIR", "/tmp")) / f"perf_receipt_probe_{os.getpid()}"
+        marker = (
+            Path(os.environ.get("TMPDIR", "/tmp")) / f"perf_receipt_probe_{os.getpid()}"
+        )
         marker.unlink(missing_ok=True)
         run = pr.run_measured(
             [
@@ -338,7 +351,10 @@ class TestReceiptEnvelope:
         out = tmp_path / "r.json"
         with pytest.raises(ValueError):
             pr.write_receipt(
-                out, pr.build_receipt(harness="t", profile="pr", scenarios=[{"w": float("nan")}])
+                out,
+                pr.build_receipt(
+                    harness="t", profile="pr", scenarios=[{"w": float("nan")}]
+                ),
             )
 
     def test_a_written_receipt_round_trips(self, tmp_path):

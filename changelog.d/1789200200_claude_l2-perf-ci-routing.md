@@ -33,3 +33,13 @@
   immediately. Found by the one measurement the flag exists to enable — the
   harness's own instrumentation overhead — which could therefore not be taken at
   all.
+
+- **The full-CLI harness's extraction-count assertion calibrated itself.**
+  `one_side` — the cost of extracting a single operand, against which
+  "this stored/live comparison did not re-extract the stored side" is checked —
+  was seeded from the measured step's *own* observed count, so the comparison
+  reduced to `observed > observed` and could never fail. It is now calibrated
+  only from an untimed setup dump that really did extract exactly one side;
+  where no such calibration exists, the upper bound is explicitly **not**
+  checked and is reported as unchecked, rather than checked against a number
+  derived from the thing under test.
