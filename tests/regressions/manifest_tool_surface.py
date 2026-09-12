@@ -405,6 +405,130 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="cli_surface.copied_option_table_went_stale",
+        invariant=(
+            "Where a surface outside the CLI enumerates CLI options in its "
+            "own source (the composite Action's `extra-args` tokenizer), "
+            "that enumeration is checked against live Click introspection "
+            "in BOTH directions and over EVERY command the surface can "
+            "invoke. A missing entry and a surplus entry are different "
+            "bugs with asymmetric costs, not two spellings of one: a "
+            "missing entry under-recognizes an option, so a value that "
+            "resembles a flag is read as one and a guard rejects argv the "
+            "real CLI accepts -- a false REJECTION of a valid check, which "
+            "is the shipped harm (#1222). A surplus entry -- a name the CLI "
+            "no longer takes a value for -- has the reverse shape: it "
+            "swallows the following real flag as its value, so a guard "
+            "reading for that flag answers 'absent'; the run still dies on "
+            "the unknown option, so its cost is a degraded diagnostic "
+            "rather than a false pass. Neither direction is the 'safe' one, "
+            "contrary to what both lists' own docstrings claimed. A "
+            "one-directional or single-command check is therefore not a "
+            "weaker form of this invariant; it is a check that cannot see "
+            "either defect. Corollary: an enumeration justified by 'the CLI "
+            "is not available to introspect here' must have that premise "
+            "checked against the real execution order -- it was false for "
+            "both of this class's own call sites, which run post-install."
+        ),
+        # Both halves of the escape history, in order (Codex review, PR
+        # #1234): #1222 is where the first instance surfaced (one missing
+        # `--used-by-manifest`) and where the one-directional, `compare`-only
+        # guard was written; #1234 is where the generalized fix landed -- the
+        # bidirectional, multi-command invariant plus the 17 discrepancies it
+        # found (12 surplus, 4 non-`compare` omissions, the stale `-j`
+        # cluster terminal). Recording only #1222 would point a future audit
+        # at the change that did NOT contain the generalized fix.
+        fixed_by=(1222, 1234),
+        seed_tests=(
+            "tests/test_extra_args_is_value_option_completeness.py",
+            "tests/test_action_run_sh_helpers.py",
+        ),
+        # Deliberately `()` (Codex review, PR #1234). An earlier revision
+        # claimed `("action",)`, which this field's own contract forbids
+        # twice over: the vocabulary is `github-action`, and that value is
+        # reserved for "a real execution of a workflow/composite-action
+        # step". Neither seed test is one -- the completeness test reads the
+        # two shells' source and introspects Click, and the helper test
+        # `source`s individual functions out of `run.sh` and calls them
+        # directly. A claimed surface no seed test reaches conceals exactly
+        # the missing cross-surface coverage this field exists to expose
+        # (the same rule Codex's PR #885 review established), so the gap is
+        # recorded below instead of papered over here.
+        public_surfaces=(),
+        axes={
+            "direction": ("missing-entry", "surplus-entry"),
+            "command": ("compare", "dump", "deps tree", "deps compare"),
+            "spelling": ("long-option", "short-option", "short-cluster"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No seed test executes the real composite Action, so "
+                    "`public_surfaces` is `()`: the invariant is proven "
+                    "against the shells' source and against individually "
+                    "sourced helper functions, never against a workflow "
+                    "step. `.github/workflows/test-action.yml` is where an "
+                    "end-to-end cell would live (an `extra-args` string "
+                    "whose value resembles a flag, asserting the step "
+                    "neither mis-tokenizes nor falsely rejects it). Until "
+                    "one exists, a defect that only manifests through the "
+                    "composite Action's own environment -- `INPUT_*` "
+                    "quoting, the `CMD+=($INPUT_EXTRA_ARGS)` word-split "
+                    "under a real runner's IFS -- is outside what these "
+                    "tests can see."
+                ),
+                reference="docs/contribute/plans/action-cli-surface-drift.md",
+            ),
+            KnownGap(
+                description=(
+                    "Closed for the tokenizers (ADR-070 D3, plan Phase 3a): "
+                    "both hand-maintained `case` lists are deleted, and each "
+                    "tokenizer now queries the *installed* abicheck once per "
+                    "run -- scoped to the command it will actually invoke, so "
+                    "a union cannot reintroduce the surplus-entry failure "
+                    "mode. An enumeration that does not exist cannot drift, "
+                    "and a live query is additionally correct for the "
+                    "abicheck version the workflow installed, which no "
+                    "committed snapshot can be. **Residual:** the derivation "
+                    "must fail closed when the installed abicheck cannot be "
+                    "introspected and `extra-args` is non-empty, because an "
+                    "opaque-token fallback is NOT safe: "
+                    "`extra-args: --version --dry-run` is argv the CLI "
+                    "accepts as --version's own value, so treating tokens as "
+                    "opaque invents a --dry-run, skips this script's own "
+                    "output/sidecar injection, and lets a full comparison run "
+                    "with no report written (Codex review, PR #1234 -- it "
+                    "disproved this entry's own first formulation). That path "
+                    "is exercised only by tests, so a future edit adding "
+                    '"just a small static list" there would reinstate this '
+                    "class where nothing would notice -- which is why tests "
+                    "assert both that it stays empty and that 'undetermined' "
+                    "stays distinguishable from 'no option takes a value'. "
+                    "`action/validate-inputs.sh`'s pre-install format choice "
+                    "sets remain transcribed (plan Phase 3b); they have never "
+                    "drifted, so that is prevention rather than a fix."
+                ),
+                reference="docs/contribute/plans/action-cli-surface-drift.md",
+            ),
+            KnownGap(
+                description=(
+                    "Scoped to option *tables*. The sibling class -- a guard "
+                    "whose prose reasoning about the CLI went stale -- is "
+                    "`cli_surface.capability_guard_diverged_from_pipeline`, "
+                    "and that entry's own first known gap (no sweep run "
+                    "beyond `compare`'s set-input guards) is what the "
+                    "Action-layer audit in the plan above partially "
+                    "discharges: it found two more stale guards, in "
+                    "`action/run.sh` rather than in the CLI, plus five "
+                    "justification comments citing deleted modules. Those "
+                    "fixes are owned separately and are NOT closed by this "
+                    "entry's seed tests."
+                ),
+                reference="docs/contribute/plans/action-cli-surface-drift.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="cli_surface.capability_guard_diverged_from_pipeline",
         invariant=(
             "A front-end guard may reject an input the pipeline behind it "

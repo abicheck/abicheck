@@ -1745,46 +1745,144 @@ _is_release_style_operand() {
   return 1
 }
 
-# Whether *name* is a compare CLI option that consumes a following
-# token as its own value (Click `nargs=1`, not a boolean flag) -- the full
-# option table, current as of this commit (`python -c "...click
-# introspection over abicheck.cli.main.commands['compare']..."`, see this
-# function's own git history for the exact one-liner). Every value-taking
-# option, across both short and long
-# spellings, is listed; anything not listed here is treated as a flag/
-# unknown token.
+# ---------------------------------------------------------------------------
+# Value-taking CLI options, derived from the INSTALLED abicheck (ADR-070 D3)
+# ---------------------------------------------------------------------------
 #
-# This is a hand-maintained snapshot, not derived at run time (the Action
-# has no live `abicheck --help-all` to introspect before it even knows
-# which dependency-source install produced a `python`/`abicheck` on PATH) --
-# it can go stale if a future PR adds a new value-taking CLI option without
-# updating this list. That staleness is the same *safe* direction as the
-# rest of this tokenizer's own documented limits (see `_extra_args_options`
-# below): treating an unlisted value-taking option as a bare flag means its
-# value token is misread as a flag/unknown token of its own, which can only
-# cause a false positive in a caller checking for one specific flag name --
-# never a false negative that lets a real conflicting combination through
-# unnoticed.
-_extra_args_is_value_option() {
-  case "$1" in
-    --abi3 | --ast-frontend | --budget | \
-    --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
-    --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
-    --debug-format | --debug-info | --debug-root | --debuginfod-url | \
-    --depth | --devel-pkg | --dump-manifest | --format | \
-    --frontend-context | --header | --include | --instantiation-manifest | \
-    --lang | --ld-library-path | --manifest | --max-findings | \
-    --max-findings-per-library | --output | --output-dir | --pack | \
-    --pdb-path | --policy | --post-manifest | --probe-matrix | \
-    --public-header-dir | --required-symbol | \
-    --search-path | --select | --select-required | --severity-preset | --since | --sources | \
-    --suppress | --sysroot | --use-cases | --used-by | --used-by-manifest | \
-    --variant | --version | --view | \
-    --write | -H | -I | -o)
-      return 0
-      ;;
+# `_extra_args_is_value_option NAME` answers whether NAME consumes a following
+# token as its own value (Click `nargs != 0`, not a boolean flag) for the
+# command this run actually invokes. The `extra-args` tokenizer needs that to
+# tell a real flag from some other option's literal value.
+#
+# This was two hand-maintained `case` lists (here and in
+# `actions/check-target/action.yml`), justified by a comment claiming no live
+# `abicheck` was reachable at run time. That claim was false: `action.yml`
+# installs abicheck at step 3 and runs this script at step 4, and
+# `$_PY_BIN_HAS_ABICHECK` below already proves the import works. The lists
+# drifted exactly as an unowned copy does -- twelve option names retired from
+# the CLI entirely, four live `dump`/`deps` options missing, and a `-j`
+# cluster terminal `compare` has never had -- none of which the guarding test
+# could see, because it checked one direction against one command. See
+# `docs/contribute/plans/action-cli-surface-drift.md` and ADR-070.
+#
+# Deriving is not merely tidier than a snapshot, it is *more correct*: the
+# answer matches the abicheck version the workflow installed, which may be
+# older or newer than this Action's own checkout. No committed artifact can be
+# right about that. (`action/validate-inputs.sh` is the one shell here that
+# genuinely runs pre-install; a generated artifact is permitted there, and
+# only there.)
+#
+# Scoped to the command `MODE` selects rather than a union over all of them:
+# `--compression` is real on `dump` and absent from `compare`, so a union
+# would reintroduce the surplus-entry failure mode (a name treated as
+# value-taking on a command that has no such option swallows the next real
+# flag as its value).
+_cli_command_path() {
+  case "${MODE:-compare}" in
+    dump) printf 'dump' ;;
+    deps-tree) printf 'deps tree' ;;
+    deps-compare) printf 'deps compare' ;;
+    *) printf 'compare' ;;
   esac
-  return 1
+}
+
+# Holds the derived set as `|--a|--b|...|` so membership is one pure-bash
+# substring test (no associative arrays, which are bash 4+; this file targets
+# stock bash 3.2 per the conventions in `action/AGENTS.md`).
+_CLI_VALUE_OPTIONS=""
+_CLI_VALUE_OPTIONS_READY="false"
+# "true" only once a real query succeeded; `false` means UNDETERMINED, which
+# `_require_cli_value_options_or_fail` turns into a hard failure when it
+# matters. Never conflate it with "this command has no value-taking options".
+_CLI_VALUE_OPTIONS_DERIVED="false"
+
+# Populate `$_CLI_VALUE_OPTIONS` once. Called eagerly at top level, after the
+# interpreter preflight establishes `$_PY_BIN_HAS_ABICHECK`, so that every
+# later `$(_extra_args_options)` *command substitution* inherits the result
+# rather than re-deriving it -- a subshell cannot write the cache back to its
+# parent. The lazy call from `_extra_args_is_value_option` is the fallback for
+# a direct invocation of these helpers (unit tests source only this file's
+# function-definition region, which ends before that preflight).
+#
+# Runs under the same `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every
+# other `abicheck`-importing call in this file: this imports a real abicheck
+# submodule, and doing so from the untrusted checkout would reopen the
+# sys.path/sitecustomize code-execution path that isolation exists to close.
+_cli_value_options_init() {
+  [[ "$_CLI_VALUE_OPTIONS_READY" == "true" ]] && return 0
+  _CLI_VALUE_OPTIONS_READY="true"
+  if [[ "${_PY_BIN_HAS_ABICHECK:-false}" != "true" || -z "${_PY_SAFE_DIR:-}" || -z "${_PY_BIN:-}" ]]; then
+    # Undetermined, NOT "nothing is value-taking" -- see
+    # `_require_cli_value_options_or_fail` below for why that distinction is
+    # load-bearing and why this cannot be an opaque-token fallback.
+    # Deliberately also NOT a baked list, which would reinstate exactly the
+    # drift this derivation removes, in the one path production never
+    # exercises.
+    _CLI_VALUE_OPTIONS_DERIVED="false"
+    return 0
+  fi
+  local _derived _rc=0
+  # shellcheck disable=SC2016  # the inline script is deliberately unexpanded.
+  _derived=$( (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+import click
+from abicheck.cli import main
+
+node = main
+for segment in sys.argv[1:]:
+    commands = getattr(node, "commands", None)
+    if not commands or segment not in commands:
+        raise SystemExit("no such command: " + " ".join(sys.argv[1:]))
+    node = commands[segment]
+for param in node.params:
+    if isinstance(param, click.Option) and not param.is_flag and param.nargs != 0:
+        for spelling in param.opts:
+            print(spelling)
+' $(_cli_command_path)) ) || _rc=$?
+  if [[ "$_rc" -ne 0 || -z "$_derived" ]]; then
+    _CLI_VALUE_OPTIONS_DERIVED="false"
+    return 0
+  fi
+  _CLI_VALUE_OPTIONS="|$(printf '%s' "$_derived" | tr '\n' '|')"
+  _CLI_VALUE_OPTIONS_DERIVED="true"
+}
+
+# Fail the run when the option table could not be derived AND `extra-args`
+# actually needs one (Codex review, PR #1234, P2 -- this replaces an
+# opaque-token fallback an earlier revision of ADR-070 D3 wrongly prescribed
+# as safe).
+#
+# **Why an opaque fallback is not safe, concretely.** Treating every token as
+# opaque is not merely "under-recognition". `extra-args: --version --dry-run`
+# is argv Click accepts by consuming `--dry-run` as `--version`'s own value,
+# leaving `dry_run=False` and running a perfectly normal comparison (verified
+# directly against the installed CLI). An opaque tokenizer instead reports a
+# real `--dry-run` flag -- so `_extra_args_has_dry_run_flag` answers true,
+# this script skips its `--write json=`/`-o` injection as it must for a real
+# dry run, and the comparison then runs for real while the requested output
+# is never written and the report-reading floors go blind. That is a silent
+# wrong outcome, not a visible one, and it is an *over*-detection of
+# `--dry-run` rather than under-detection of anything.
+#
+# So the undetermined case fails loudly instead. Scoped to a non-empty
+# `extra-args` on purpose: with no `extra-args` there is nothing to tokenize
+# and no decision to get wrong, so a runner whose `python3` cannot import
+# abicheck keeps working exactly as before for every invocation that does not
+# use the escape hatch. That keeps this from being a blanket hard failure on
+# the documented self-hosted mismatch `$_PY_BIN_HAS_ABICHECK` already warns
+# about (see its own `::warning::`), while still refusing to guess precisely
+# when a guess would change what runs.
+_require_cli_value_options_or_fail() {
+  [[ "${_CLI_VALUE_OPTIONS_DERIVED:-false}" == "true" ]] && return 0
+  [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
+  echo "::error::extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
+  exit 1
+}
+
+_extra_args_is_value_option() {
+  _cli_value_options_init
+  [[ -n "$_CLI_VALUE_OPTIONS" ]] || return 1
+  [[ "$_CLI_VALUE_OPTIONS" == *"|$1|"* ]]
 }
 
 # Expand Click-style clustered short flags (`-vH` for `-v -H`) into their
@@ -1792,11 +1890,14 @@ _extra_args_is_value_option() {
 # is exactly such a cluster; returns 1 (no output) otherwise, so the caller
 # falls through to treating the token as an ordinary opaque one.
 #
-# The only short options on compare are one boolean flag (`-v`)
-# and four value-taking ones (`-H`/`-I`/`-j`/`-o`, mirroring
+# The only short options across every command this Action invokes are one
+# boolean flag (`-v`) and three value-taking ones (`-H`/`-I`/`-o`, mirroring
 # `_extra_args_is_value_option` above) -- so the only cluster shape that
 # needs expanding is zero or more `v`s followed by exactly one of those
-# four, with nothing else after it. A cluster with anything else attached
+# three, with nothing else after it. (`-j` was listed here as a fourth until
+# the option-table audit: `compare` has no `-j` at all -- `jobs` was retired
+# with ADR-068 D5 -- so expanding a `-vj` cluster invented an option Click
+# itself would reject.) A cluster with anything else attached
 # after the value char (`-vHfoo`, an *attached* inline value) is left
 # unexpanded on purpose: Click parses that form as `-v -Hfoo`, which does
 # NOT consume a following token as `-H`'s value at all, so leaving the
@@ -1815,10 +1916,13 @@ _extra_args_expand_short_clusters() {
   esac
   _rest="${_tok#-}"
   _last="${_rest: -1}"
-  case "$_last" in
-    H | I | o | j) ;;
-    *) return 1 ;;
-  esac
+  # Derived, not listed (ADR-070 D3): a cluster is only worth expanding when
+  # its last character is a value-taking short option, which is exactly what
+  # `_extra_args_is_value_option` now answers from the installed CLI. The
+  # hand-listed form of this set carried `j` long after `compare` lost `-j`
+  # with `jobs` (ADR-068 D5), so it expanded `-vj` into an option Click
+  # itself rejects.
+  _extra_args_is_value_option "-$_last" || return 1
   _flags="${_rest%?}"
   _n=${#_flags}
   for ((_k = 0; _k < _n; _k++)); do
@@ -2227,6 +2331,16 @@ if [[ -n "$_PY_BIN" ]] \
 elif [[ -n "$_PY_BIN" ]]; then
   echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
 fi
+
+# Derive the value-taking CLI options for this run's command ONCE, here, now
+# that `$_PY_BIN_HAS_ABICHECK` and `$_PY_SAFE_DIR` both exist and `$MODE` is
+# resolved. Every later `$(_extra_args_options)` runs in a command-substitution
+# subshell, which inherits this but cannot populate it, so deriving eagerly
+# turns what would be one Python call per tokenizer invocation into one per
+# run. When it cannot be derived at all, `_require_cli_value_options_or_fail`
+# decides whether that is fatal -- it is, exactly when `extra-args` is set.
+_cli_value_options_init
+_require_cli_value_options_or_fail
 
 # ---------------------------------------------------------------------------
 # `against`/`estimate`/`audit`/`mode: scan` retirement (ADR-068's
