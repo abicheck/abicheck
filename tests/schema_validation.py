@@ -35,6 +35,7 @@ place (both are things this suite really does — see
 """
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any
 
@@ -56,9 +57,17 @@ def validator_for(schema: Any, format_checker: Any = None) -> Any:
     key = (json.dumps(schema, sort_keys=True, default=str), id(format_checker))
     validator = _VALIDATORS.get(key)
     if validator is None:
-        cls = jsonschema.validators.validator_for(schema)
-        cls.check_schema(schema)  # raises SchemaError, exactly as validate() does
-        validator = cls(schema, format_checker=format_checker)
+        # Deep-copy before handing the schema to the validator: a validator
+        # keeps a reference to the mapping it was built from, so a caller that
+        # later mutates its own schema in place would silently change what the
+        # entry stored under the *old* content key enforces -- and the next
+        # caller presenting an unmutated schema of that original content would
+        # be served it. Keyed on content, so the cached copy must be the
+        # content the key names, forever (Codex review, PR #1252).
+        frozen = copy.deepcopy(schema)
+        cls = jsonschema.validators.validator_for(frozen)
+        cls.check_schema(frozen)  # raises SchemaError, exactly as validate() does
+        validator = cls(frozen, format_checker=format_checker)
         _VALIDATORS[key] = validator
     return validator
 

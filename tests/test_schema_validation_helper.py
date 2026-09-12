@@ -27,6 +27,8 @@ malformed schema, a `format_checker`).
 """
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 jsonschema = pytest.importorskip("jsonschema")
@@ -118,6 +120,49 @@ def test_a_schema_mutated_in_place_is_not_served_a_stale_validator() -> None:
 
     schema["properties"]["a"] = {"type": "integer"}
     validate_instance({"a": 1}, schema)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        # Every shape of in-place edit a caller can make to its own schema:
+        # tightening, loosening, adding a constraint, removing one, and
+        # rewriting a nested subschema.
+        lambda s: s["properties"].__setitem__("a", {"type": "string"}),
+        lambda s: s.__setitem__("required", ["a"]),
+        lambda s: s["properties"]["a"].__setitem__("minimum", 100),
+        lambda s: s.__setitem__("additionalProperties", False),
+        lambda s: s["properties"].clear(),
+    ],
+    ids=["retype", "add_required", "add_bound", "close", "empty"],
+)
+def test_a_later_caller_is_never_served_a_validator_a_mutation_changed(mutate) -> None:
+    """The sibling case of the test above, and the one that actually escaped
+    (Codex review, PR #1252): a validator keeps a reference to the mapping it
+    was built from, so mutating that mapping changed what the entry stored
+    under the *original* content key enforced. The mutating caller then got
+    correct answers (its new content is a new key) while an unrelated later
+    caller presenting an equal, unmutated schema got the mutated behaviour.
+
+    The oracle is the library over the original content, and the check is
+    made for every mutation shape rather than the one that was reported."""
+    original = {"type": "object", "properties": {"a": {"type": "integer"}}}
+    probes: list[object] = [{"a": 1}, {"a": "x"}, {"a": 1, "b": 2}, {}]
+
+    live = copy.deepcopy(original)
+    validate_instance({"a": 1}, live)  # populate the cache from this dict
+    mutate(live)
+    validate_instance({"a": 1} if _reference({"a": 1}, live) == "ok" else {}, live)
+
+    # A different caller, an equal but never-mutated schema: must behave
+    # exactly as the library does for that content.
+    fresh = copy.deepcopy(original)
+    disagreements = [
+        (probe, _reference(probe, original), _under_test(probe, fresh))
+        for probe in probes
+        if _reference(probe, original) != _under_test(probe, fresh)
+    ]
+    assert not disagreements
 
 
 def test_bool_is_not_accepted_where_an_integer_is_required() -> None:

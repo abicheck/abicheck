@@ -99,3 +99,75 @@ def test_the_staleness_oracle_is_content_keyed_not_existence_keyed(tmp_path: Pat
     stray = target.parent / "stray-generated-file.md"
     stray.write_text("not from the render\n", encoding="utf-8")
     assert gen.check_trees(rendered, roots), "an extra owned file is drift too"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        FileNotFoundError(2, "No such file or directory"),
+        NotADirectoryError(20, "Not a directory"),
+        OSError(5, "Input/output error"),
+    ],
+    ids=["missing", "not_a_dir", "generic"],
+)
+def test_a_concurrent_writer_does_not_abort_pytest_configuration(
+    monkeypatch: pytest.MonkeyPatch, error: OSError
+) -> None:
+    """`check_trees` enumerates the tree and then reads each file, so a file
+    another process removes in between raises. That can only happen while a
+    writer is mid-`write_trees` (it removes each owned directory before
+    restoring it) — and this runs from `pytest_configure`, so letting it
+    escape aborts the whole session.
+
+    Stated over several `OSError` shapes rather than the one the race
+    produces: the distinction that matters is "the tree is being rebuilt
+    underneath us", not which errno the filesystem reported.
+    """
+    calls: list[str] = []
+
+    def exploding_check(rendered: dict[str, str], *args: object, **kwargs: object):
+        calls.append("check")
+        if len(calls) == 1:  # only the unlocked fast path races
+            raise error
+        return []
+
+    monkeypatch.setattr(gen, "check_trees", exploding_check)
+    monkeypatch.setattr(gen, "write_trees", lambda *a, **k: calls.append("write"))
+
+    _materialize_generated_skill_trees()  # must not raise
+
+    # It treated the race as "possibly stale" and went to the lock, where the
+    # re-check found the tree settled — so no redundant destructive rewrite.
+    assert calls == ["check", "check"]
+
+
+def test_a_real_interleaving_is_survived(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The same property against the real `check_trees` walking a tree that is
+    genuinely disappearing under it, rather than a raised stand-in."""
+    rendered = gen.render_all()
+    root = tmp_path / "skills"
+    gen.write_trees(rendered, (root,))
+    owned = sorted(p for p in root.rglob("*") if p.is_file())
+    assert owned, "fixture must contain files or this test is vacuous"
+
+    real_check = gen.check_trees
+    state = {"n": 0}
+
+    def racing_check(r: dict[str, str], *args: object, **kwargs: object):
+        state["n"] += 1
+        if state["n"] == 1:
+            # Stand in for a concurrent `write_trees`: enumerate, then delete.
+            victim = owned[0]
+            original = victim.read_bytes()
+            victim.unlink()
+            try:
+                return real_check(r, (root,))
+            finally:
+                victim.write_bytes(original)
+        return []
+
+    monkeypatch.setattr(gen, "check_trees", racing_check)
+    monkeypatch.setattr(gen, "write_trees", lambda *a, **k: None)
+
+    _materialize_generated_skill_trees()  # must not raise
+    assert state["n"] >= 1

@@ -380,7 +380,7 @@ def _materialize_generated_skill_trees() -> None:
     except gen.SkillGenerationError:
         return  # a skills-src authoring error; let the real gen/AI-readiness checks report it
 
-    def _write_if_stale() -> None:
+    def _is_stale() -> bool:
         # Content-keyed, not "have I already run": `check_trees` compares every
         # owned file's bytes against the render, so a tree that is already
         # correct is left untouched and a stale or partially-written one is
@@ -388,17 +388,30 @@ def _materialize_generated_skill_trees() -> None:
         # xdist workers sharing one checkout (the first writes, the rest
         # verify and no-op) and remote workers with their own filesystem
         # (each writes its own, because its own check fails).
-        if not gen.check_trees(rendered):
-            return
-        gen.write_trees(rendered)
+        try:
+            return bool(gen.check_trees(rendered))
+        except OSError:
+            # `check_trees` enumerates then reads, so a file that another
+            # process removes between those two steps raises here. That can
+            # only happen while a writer is mid-`write_trees`, which means the
+            # trees really are being rebuilt: answer "stale" and let the
+            # locked path settle it, rather than letting a transient
+            # FileNotFoundError abort pytest configuration outright
+            # (Codex review, PR #1252).
+            return True
+
+    def _write_if_stale() -> None:
+        if _is_stale():
+            gen.write_trees(rendered)
 
     # Unconditional rewriting was not merely redundant work: `write_trees`
     # removes each owned skill directory before restoring it, so every extra
     # writer reopened a window in which a concurrent reader -- another worker's
     # test, a parallel session, a restarted worker -- sees the tree absent.
     # Checking first closes that window in the common case; the lock still
-    # serializes the writers that remain.
-    if not gen.check_trees(rendered):
+    # serializes the writers that remain, and the re-check *inside* the lock is
+    # what decides, so this unlocked one can only ever cost a lock acquisition.
+    if not _is_stale():
         return
     if filelock is not None:
         try:
