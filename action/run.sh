@@ -2216,6 +2216,33 @@ _effective_format() {
   printf '%s' "$_found"
 }
 
+# The real `--output` path `abicheck` writes to, accounting for `extra-args`
+# overriding this script's own `-o "$OUTPUT_FILE"` flag -- the exact sibling of
+# `_effective_format` above, and for the same reason: `CMD` carries this
+# script's own flags first and `$INPUT_EXTRA_ARGS` last, and Click keeps the
+# last occurrence of a repeated option.
+#
+# Needed by `_caller_json_destinations`, which asks "where did the caller ask
+# for a report". Keying that on `$OUTPUT_FILE` alone got it wrong in both
+# directions (Codex review, P2, reproduced): `format: json` with
+# `extra-args: --output report.json` and no `output-file` input names no
+# destination at all, so a perfectly valid report was validated as the *stdout*
+# shape -- where the capture is empty, because output went to a file -- and a
+# working run published REPORT_UNREADABLE. And when both are given, the
+# destination inventory validated the superseded path while the real report
+# landed elsewhere.
+#
+# Prints nothing when neither is set: that is genuine stdout mode.
+_effective_output_file() {
+  local _name _value _found="${OUTPUT_FILE:-}"
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      --output | -o) _found="$_value" ;;
+    esac
+  done <<<"$(_extra_args_options)"
+  printf '%s' "$_found"
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -3483,6 +3510,11 @@ fi
 # (dump has no `$FORMAT` at all; deps-tree/deps-compare have one but no
 # sidecar-injection decision that needs it early).
 _EFFECTIVE_FORMAT="$(_effective_format)"
+# The real `-o/--output` destination, same reasoning and same timing as the
+# format above -- see `_effective_output_file`'s own docstring. Assigned here so
+# the pre-run fingerprint bookkeeping and the destination inventory both use the
+# path `abicheck` will actually write, not the superseded input value.
+_EFFECTIVE_OUTPUT_FILE="$(_effective_output_file)"
 
 echo "::group::abicheck $MODE"
 printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
@@ -3560,8 +3592,8 @@ else:
 ' "$_fingerprint_path") 2>/dev/null
 }
 _output_file_pre_fp=""
-if [[ -n "${OUTPUT_FILE:-}" ]]; then
-  _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
+if [[ -n "${_EFFECTIVE_OUTPUT_FILE:-}" ]]; then
+  _output_file_pre_fp="$(_file_fingerprint "$_EFFECTIVE_OUTPUT_FILE")"
 fi
 _extra_write_json_path="$(_extra_args_write_json_path || true)"
 _extra_write_json_pre_fp=""
@@ -3591,8 +3623,9 @@ fi
 # `_json_report_src`'s `$_STDOUT_JSON_FILE` branch, and the caller asked for
 # it on stdout, not at a path.
 _caller_json_destinations() {
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" ]]; then
-    printf '%s\n' "$OUTPUT_FILE"
+  local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" ]]; then
+    printf '%s\n' "$_primary"
   fi
   _extra_args_write_json_paths
 }
@@ -3736,10 +3769,11 @@ _json_report_src() {
   # misses an `extra-args --format json` override), while the isolated
   # extraction tests above set only `$FORMAT` and rely on the fallback to
   # keep behaving exactly as before this fix.
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+  local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" && -s "$_primary" ]] \
      && { [[ -z "${_output_file_pre_fp+x}" ]] \
-          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
-    echo "${OUTPUT_FILE}"
+          || [[ "$(_file_fingerprint "$_primary")" != "$_output_file_pre_fp" ]]; }; then
+    echo "$_primary"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then

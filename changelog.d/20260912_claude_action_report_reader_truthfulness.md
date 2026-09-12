@@ -30,6 +30,13 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **An `extra-args --output` override is honoured when locating the report.**
+  `extra-args` can override this script's own `-o`, and Click's last-wins rule
+  makes the override the real destination, so keying on the `output-file` input
+  alone both failed working runs (an override with no input named no
+  destination, and the run was judged as the stdout shape) and validated a
+  superseded path while the report landed elsewhere. Both the destination
+  inventory and the report-reading chain now resolve the effective path.
 - **An unrecognized `verdict` string is no longer read as a result.** The
   reader accepted any non-empty verdict, so `{"verdict": "write interrupted"}`
   parsed as a readable result and then matched none of the tiers the Action

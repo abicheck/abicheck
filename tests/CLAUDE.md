@@ -104,6 +104,18 @@ finishes in ~45 seconds.
   since it runs at *collection* time on every lane. Direct tests in
   `test_canonical_lane.py`, split out so the (already large) consumer module
   doesn't grow past the file-size cap just to host them.
+- `_action_run_sh_harness.py` — runs the *whole* of `action/run.sh` against a
+  shebang-dispatched `abicheck` stub on PATH, with a real `$GITHUB_OUTPUT` and
+  `$GITHUB_STEP_SUMMARY`. Shared by `test_action_unreadable_report_verdict.py`
+  and `test_action_report_destinations.py`; import it rather than copying the
+  stub. Four separate review findings on one PR turned out to be *fixtures*
+  unfaithful to the real emitter (a stub silently ignoring `--write`, an audit
+  report stubbed as a bare `{"findings": []}`), so a second copy of this
+  harness is a second place for that to happen unnoticed. Carries
+  `REQUIRES_POSIX_SHELL`, the module-level skip every consumer applies as its
+  `pytestmark` — the stub needs the executable bit and kernel shebang
+  dispatch, neither of which Windows has; omitting that marker in one of two
+  sibling modules is what turned a windows-latest lane red.
 - `_workflow_exec.py` — executes a workflow's `run:` steps for real, in a
   throwaway workspace with a real `$GITHUB_OUTPUT` and a sentinel tree *outside*
   it. Use it whenever a security property of a workflow step matters: asserting

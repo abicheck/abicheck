@@ -217,6 +217,20 @@ Two predicates close that without weakening anything above:
   one shape naming no destination — is the only case that falls back to the
   chain.
 
+  **The primary destination is `_effective_output_file`, not `$OUTPUT_FILE`.**
+  `extra-args` can carry its own `-o`/`--output`, and since `CMD` puts this
+  script's flags first and `extra-args` last, Click's last-wins rule makes the
+  override the real destination — the exact sibling of the `--format` override
+  `_effective_format` already resolved. Keying on the input alone failed both
+  ways: an override with no `output-file` input named no destination, so a
+  file-writing run was validated as the *stdout* shape and a working run
+  published `REPORT_UNREADABLE`; with both given, the superseded path was
+  validated while the report landed elsewhere. `_json_report_src` resolves the
+  same effective path, and it has to: fixing only the inventory leaves a report
+  that validates and is then never *read*, which falls through to COMPATIBLE —
+  this PR's original defect. Mutation-tested in exactly that split
+  (`TestAnExtraArgsOutputOverrideIsHonoured`).
+
   **A requested destination must also be *fresh*.** Parseability alone says a
   document is there, not that this invocation wrote it; a leftover from an
   earlier step or one a PR author committed satisfies the former and not the
