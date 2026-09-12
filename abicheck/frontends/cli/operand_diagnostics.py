@@ -24,7 +24,7 @@ plain resolved values and either raise ``click.UsageError`` or warn -- so a
 leaf module is their natural home, and it also removes the reason
 ``cli_compare_helpers`` had to import them from a command module behind a
 ``# cycle`` comment. ``commands/compare.py`` re-exports both names, so that
-import path (and ``frontends/cli/moved.py``'s mapping) is unchanged.
+import path is unchanged.
 """
 
 from __future__ import annotations

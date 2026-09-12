@@ -17,9 +17,8 @@
 ADR-061 Phase 4. This file declares the Click root group and nothing else --
 every command body, every shared runtime helper and every process-exit
 decision lives in :mod:`abicheck.frontends.cli`. What remains here is the
-group, its `--version`/SIGTERM wiring, the registration imports whose only
-purpose is the ``@main.command(...)`` side effect, and one lazy
-compatibility shim.
+group, its `--version`/SIGTERM wiring, and the registration imports whose
+only purpose is the ``@main.command(...)`` side effect.
 
 ``abicheck.cli`` was for a long time the documented import path for ~80
 private helpers that had physically moved to sibling modules, kept resolvable

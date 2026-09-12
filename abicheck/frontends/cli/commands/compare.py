@@ -72,7 +72,7 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
-from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers and frontends/cli/moved.py both resolve these names here
+from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers resolves these names here
     _reject_application_operand as _reject_application_operand,
     _warn_unused_set_flags as _warn_unused_set_flags,
 )
