@@ -586,13 +586,13 @@
     },
     {
       "path": "abicheck/compatibility_evaluation_config.py",
-      "baseline_lines": 1030,
+      "baseline_lines": 1041,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 7 (ADR-066 D4/S2): the new `versioning: VersioningPolicy` field folds its type check into the existing generic per-section validation loop rather than a standalone `if isinstance(...)` block, so the added footprint is one import line, a doc comment, the field declaration, and one tuple entry -- the irreducible cost of a new typed field on this dataclass, not new standalone logic. The evaluators and the per-field D7 wiring logic that would otherwise have grown this file further live in new sibling modules instead (`abicheck/policy/versioning_policy.py`, `abicheck/compatibility_evaluation_versioning_wiring.py`).",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised by 7 (ADR-066 D4/S2): the new `versioning: VersioningPolicy` field folds its type check into the existing generic per-section validation loop rather than a standalone `if isinstance(...)` block, so the added footprint is one import line, a doc comment, the field declaration, and one tuple entry -- the irreducible cost of a new typed field on this dataclass, not new standalone logic. The evaluators and the per-field D7 wiring logic that would otherwise have grown this file further live in new sibling modules instead (`abicheck/policy/versioning_policy.py`, `abicheck/compatibility_evaluation_versioning_wiring.py`). Raised 1030 -> 1041 (ADR-069, Codex review): `SurfaceConfig` gains `experimental_namespaces` -- the field, its `__post_init__` canonicalization (the same `_canonical_tuple` block its `internal_namespaces` sibling already has, since D7's equivalent-input equality guarantee requires it) and a four-line comment. Recorded rather than omitted because the key changes which findings a run emits: without the field, two comparisons producing different `EXPERIMENTAL_*` overlays persisted *equal* `resolved_config` objects, so ADR-049 Phase 4's audit/replay receipt described a configuration that was not the one that ran. This is a typed-config dataclass; a new configuration axis has nowhere else to live.",
       "review_by": "2026-11-30"
     },
     {
@@ -619,24 +619,24 @@
     },
     {
       "path": "abicheck/contract_context.py",
-      "baseline_lines": 857,
+      "baseline_lines": 858,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. This PR's own earlier round (commits 857adc5c5/faca80b12/2160d6ab8/b8270aff9) had already grown this file to 836 lines without updating this baseline (recorded here as part of the same fix, since this file was already being touched). Raised 818 -> 857 total (836 pre-existing + 21 from this fix, PR #1222 fresh Codex review, \"Record the config provenance for the assurance gate\"): `with_resolved_gate` now stamps `field_provenance[\"gate.require_complete_analysis\"]` (`layer=PROJECT_CONFIG`) whenever an explicit `require_complete_analysis=True` is passed -- that field has no D7 resolver of its own (no CLI override, no pack route), so `True` can only ever have come from `.abicheck.yml`'s `assurance.require_complete`, and this function can name that source itself without the caller constructing and threading a `ValueProvenance` object (which would have needed a forbidden `frontends -> policy` import in this fix's actual caller, `cli_compare_receipt.py`). This is the one function that already assembles the persisted gate's own provenance dict (the sibling severity-provenance fold sits right beside it); no smaller diff, and no other module owns this assembly to move it to.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. This PR's own earlier round (commits 857adc5c5/faca80b12/2160d6ab8/b8270aff9) had already grown this file to 836 lines without updating this baseline (recorded here as part of the same fix, since this file was already being touched). Raised 818 -> 857 total (836 pre-existing + 21 from this fix, PR #1222 fresh Codex review, \"Record the config provenance for the assurance gate\"): `with_resolved_gate` now stamps `field_provenance[\"gate.require_complete_analysis\"]` (`layer=PROJECT_CONFIG`) whenever an explicit `require_complete_analysis=True` is passed -- that field has no D7 resolver of its own (no CLI override, no pack route), so `True` can only ever have come from `.abicheck.yml`'s `assurance.require_complete`, and this function can name that source itself without the caller constructing and threading a `ValueProvenance` object (which would have needed a forbidden `frontends -> policy` import in this fix's actual caller, `cli_compare_receipt.py`). This is the one function that already assembles the persisted gate's own provenance dict (the sibling severity-provenance fold sits right beside it); no smaller diff, and no other module owns this assembly to move it to. Raised 857 -> 858 (ADR-069, Codex review): one net line for the `experimental_namespaces`/`_stated` parameter pair, its resolution, its provenance row and its forwarding through `build_persisted_context` -- the irreducible cost of recording one more configuration axis in the persisted receipt. The assembly logic itself is unchanged.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/contract_context_io.py",
-      "baseline_lines": 852,
+      "baseline_lines": 864,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 852 -> 864 (ADR-069, Codex review): the serialize/deserialize half of the same field. `hints` gains `experimental_namespaces` (always emitted, so a reader never has to tell \"absent\" from \"empty\") and the decoder reads it back through the existing `_sequence` validator. A field the codec dropped would look identical to one that was never recorded, which is the failure the round-trip test in `tests/test_policy_experimental_namespaces.py` now forecloses. This module *is* the codec; there is no other owner for a persisted field's encoding.",
       "review_by": "2026-11-30"
     },
     {

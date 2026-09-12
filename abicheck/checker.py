@@ -1306,6 +1306,10 @@ def compare(
             policy_file=policy_file,
             suppression=suppression,
             internal_namespaces=_internal_namespaces(policy_file),
+            experimental_namespaces=_experimental_namespaces(policy_file),
+            experimental_namespaces_stated=bool(
+                policy_file is not None and policy_file.experimental_namespaces_stated
+            ),
         )
 
     # E-S3: `[]` (never omitted) when the stage ran and found nothing;

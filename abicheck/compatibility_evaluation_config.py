@@ -658,6 +658,11 @@ class SurfaceConfig:
     #: Consumed set-wise, so canonicalized (sorted+deduped) the same way as
     #: ``overlays``/``packs`` for D7's equivalent-input equality guarantee.
     internal_namespaces: tuple[str, ...] = ()
+    #: ADR-069's `experimental_namespaces:` key -- a separate axis from
+    #: `internal_namespaces` above, recorded here because it changes which
+    #: findings a run emits, so omitting it let two differing comparisons
+    #: persist equal `resolved_config` receipts. Canonicalized like its sibling.
+    experimental_namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_digested_items_or_none(
@@ -668,6 +673,13 @@ class SurfaceConfig:
             "internal_namespaces",
             _canonical_tuple(
                 self.internal_namespaces, key=lambda s: s, element_type=str
+            ),
+        )
+        object.__setattr__(
+            self,
+            "experimental_namespaces",
+            _canonical_tuple(
+                self.experimental_namespaces, key=lambda s: s, element_type=str
             ),
         )
 

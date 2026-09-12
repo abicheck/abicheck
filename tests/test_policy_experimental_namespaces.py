@@ -335,3 +335,75 @@ class TestExperimentalFindingsAreAnOverlay:
         )
         assert without.verdict == with_overlay.verdict
         assert without.verdict.value == "BREAKING"
+
+
+class TestPersistedEvaluationContextRecordsTheKey:
+    """ADR-049 Phase 4's audit/replay receipt must describe the run.
+
+    `experimental_namespaces` changes which findings a comparison emits, so two
+    runs differing only in it must not persist equal `resolved_config` objects
+    — otherwise `contract_context.evaluation_context` documents a configuration
+    that is not the one that ran, and `replay_original_decisions` replays it
+    (Codex review, PR #1231). Same defect class as the effective-config digest
+    omission above: a new configuration axis reaching the engine but not every
+    place that *records* configuration.
+    """
+
+    @staticmethod
+    def _context(policy_file: PolicyFile | None):
+        from abicheck.checker import compare
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        fn = Function(
+            name="foo",
+            mangled="_ZN2ns2v03fooEv",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
+        old = AbiSnapshot(library="libt.so.1", version="1.0", functions=[fn])
+        new = AbiSnapshot(library="libt.so.1", version="1.0", functions=[])
+        return compare(
+            old, new, policy_file=policy_file, contract_evaluation=True
+        ).contract_context
+
+    def test_the_configured_value_is_recorded(self) -> None:
+        ctx = self._context(PolicyFile(experimental_namespaces=["v0"]))
+        surface = ctx.evaluation_context.resolved_config.surface
+        assert surface.experimental_namespaces == ("v0",)
+
+    def test_two_runs_differing_only_in_the_key_are_distinguishable(self) -> None:
+        default = self._context(None).evaluation_context.resolved_config
+        configured = self._context(
+            PolicyFile(experimental_namespaces=["v0"])
+        ).evaluation_context.resolved_config
+        assert default.surface != configured.surface
+        assert default != configured
+
+    def test_provenance_names_the_policy_file(self) -> None:
+        ctx = self._context(PolicyFile(experimental_namespaces=["v0"]))
+        prov = ctx.evaluation_context.resolved_config.provenance
+        assert "surface.experimental_namespaces" in prov
+
+    def test_an_explicit_empty_list_still_earns_provenance(self) -> None:
+        """`[]` is a statement, not an absence -- the same distinction
+        `internal_namespaces_stated` draws."""
+        stated = PolicyFile(experimental_namespaces=[], experimental_namespaces_stated=True)
+        prov = self._context(stated).evaluation_context.resolved_config.provenance
+        assert "surface.experimental_namespaces" in prov
+        default = self._context(None).evaluation_context.resolved_config.provenance
+        assert "surface.experimental_namespaces" not in default
+
+    def test_the_value_survives_a_json_round_trip(self) -> None:
+        """The receipt is only useful if it persists; a field the codec drops
+        looks identical to one that was never recorded."""
+        from abicheck.contract_context_io import (
+            persisted_context_from_dict,
+            persisted_context_to_dict,
+        )
+
+        ctx = self._context(PolicyFile(experimental_namespaces=["v0"]))
+        restored = persisted_context_from_dict(persisted_context_to_dict(ctx))
+        assert (
+            restored.evaluation_context.resolved_config.surface.experimental_namespaces
+            == ("v0",)
+        )
