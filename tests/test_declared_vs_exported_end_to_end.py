@@ -97,6 +97,12 @@ def _public_only_build() -> AbiSnapshot:
     )
 
 
+_EXPORT_AXIS_KINDS = {
+    ChangeKind.FUNC_EXPORT_REMOVED_STILL_DECLARED,
+    ChangeKind.VAR_EXPORT_REMOVED_STILL_DECLARED,
+}
+
+
 def _kinds(result) -> set[ChangeKind]:
     return {c.kind for c in result.changes}
 
@@ -268,3 +274,78 @@ def test_a_pre_bump_snapshot_loads_both_facts_as_unknown_and_is_unchanged(tmp_pa
     # index still loses the declaration.
     assert ChangeKind.FUNC_EXPORT_REMOVED_STILL_DECLARED not in _kinds(result)
     assert ChangeKind.FUNC_VISIBILITY_CHANGED in _kinds(result)
+
+
+# --------------------------------------------------------------------------
+# Three answers, checked separately
+# --------------------------------------------------------------------------
+
+
+def test_verdict_gate_and_exit_code_each_say_breaking():
+    """The semantic verdict, the gate decision and the process exit code
+    are three separately configurable answers; a single assertion on one
+    of them would not show that the reclassified finding still gates."""
+    from abicheck.policy.severity import (
+        SeverityConfig,
+        SeverityLevel,
+        compute_exit_code,
+    )
+
+    result = compare(_default_build(), _public_only_build())
+    assert result.verdict == Verdict.BREAKING
+    # Gate: the finding is scored, not dropped -- an unevaluated finding
+    # would silently contribute nothing here.
+    assert [c for c in result.changes if c.kind in _EXPORT_AXIS_KINDS]
+    # Exit code, computed independently of the verdict, under a severity
+    # configuration that treats an ABI break as an error.
+    assert (
+        compute_exit_code(
+            result.changes,
+            SeverityConfig(abi_breaking=SeverityLevel.ERROR),
+            policy="strict_abi",
+        )
+        == 4
+    )
+
+
+def test_the_export_axis_kind_dedupes_against_a_plain_removal_of_the_same_symbol():
+    """Must-merge: the two kinds describe one event seen with different
+    evidence, so a second detector's plain `FUNC_REMOVED` for that very
+    symbol must collapse onto it rather than double-report."""
+    from abicheck.diff_helpers import make_change
+    from abicheck.finding_identity import resolve_change_identity
+
+    export_axis = make_change(
+        ChangeKind.FUNC_EXPORT_REMOVED_STILL_DECLARED,
+        symbol=_ADD_MANGLED,
+        name=_ADD,
+        old_value="public",
+        new_value="hidden",
+    )
+    plain = make_change(
+        ChangeKind.FUNC_REMOVED,
+        symbol=_ADD_MANGLED,
+        description=f"Public function removed: {_ADD}",
+        old_value=_ADD,
+    )
+    assert resolve_change_identity(export_axis) == resolve_change_identity(plain)
+
+
+def test_it_stays_distinct_from_the_same_kind_on_a_different_symbol():
+    """Must-not-merge: the other half of the claim above, which
+    "collapse everything" would also satisfy."""
+    from abicheck.diff_helpers import make_change
+    from abicheck.finding_identity import resolve_change_identity
+
+    def _one(symbol: str, name: str):
+        return make_change(
+            ChangeKind.FUNC_EXPORT_REMOVED_STILL_DECLARED,
+            symbol=symbol,
+            name=name,
+            old_value="public",
+            new_value="hidden",
+        )
+
+    assert resolve_change_identity(_one(_ADD_MANGLED, _ADD)) != resolve_change_identity(
+        _one(_SEARCH_MANGLED, _SEARCH)
+    )
