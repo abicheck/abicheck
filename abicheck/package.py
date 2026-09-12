@@ -430,11 +430,20 @@ def looks_like_zip(path: Path) -> bool:
     return _magic(path, 4) in tuple(m[:4] for m in _ZIP_MAGICS)
 
 
-def _zip_entry_names(path: Path, limit: int = 200) -> list[str]:
-    """Up to *limit* member names of a zip container; ``[]`` if unreadable."""
+def _zip_entry_names(path: Path) -> list[str]:
+    """Every member name of a zip container; ``[]`` if unreadable.
+
+    Deliberately uncapped. An earlier revision read only the first 200
+    names, which made detection depend on where a builder happened to place
+    the metadata directory: wheel tools commonly append `*.dist-info/` after
+    the package payload, so a large wheel's own marker fell outside the
+    window and the archive was rejected (Codex review, PR #1253). The whole
+    list is the zip's already-parsed central directory -- bounded by member
+    count, not by uncompressed size -- so there is nothing to bound here.
+    """
     try:
         with zipfile.ZipFile(path) as zf:
-            return zf.namelist()[:limit]
+            return zf.namelist()
     except (OSError, zipfile.BadZipFile, ValueError):
         return []
 

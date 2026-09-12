@@ -101,13 +101,26 @@ class DetachedDebugFileResolver:
     Phase 7n): a debug package, a directory of debug files, and a detached
     debug file. The first two were always resolvable -- a package through
     the release extractor, a directory through the build-id-tree/path-mirror
-    resolvers below, which only ever search *inside* a root. This resolver
-    is the third: an entry of ``debug_roots`` that is a *file* is the
-    artifact itself, not somewhere to look for one.
+    resolvers, which only ever search *inside* a root. This resolver is the
+    third: an entry of ``debug_roots`` that is a *file* is the artifact
+    itself, not somewhere to look for one.
 
     First in the chain, because an explicitly named artifact outranks
     whatever the binary happens to carry or whatever a distro tree happens
     to hold -- that is what naming it means.
+
+    **DWARF only, deliberately.** A named ``.pdb`` or ``.dwp`` is refused at
+    the front end (``options/evidence_roles.unsupported_detached_debug``)
+    rather than resolved here, because no extraction path consumes one: the
+    ELF dump reads ``DebugArtifact.dwarf_path`` and nothing else, and the PE
+    dump never consults ``debug_roots`` at all. Returning one would have
+    been worse than ignoring it -- this resolver runs first, so a named PDB
+    would have ended the chain before ``EmbeddedDwarfResolver`` ran, and a
+    binary carrying perfectly good DWARF would have been compared with no
+    debug evidence and reported clean (Codex review, PR #1253). The
+    directory form (``--debug-info old=<dir>``) still reaches ``PDBResolver``
+    exactly as it always did; wiring the named-file form into the PE and
+    split-DWARF extraction paths is a real capability, and a separate one.
 
     **Identity is checked, not assumed.** A sidecar whose GNU build-id
     contradicts the binary's is not this binary's debug info, so it is
@@ -141,16 +154,15 @@ class DetachedDebugFileResolver:
         for candidate in debug_roots or []:
             if not candidate.is_file():
                 continue
-            kind = classify_detached_debug_file(candidate)
-            if kind is None:
-                _logger.debug("Not a debug artifact, skipping: %s", candidate)
+            if classify_detached_debug_file(candidate) != "dwarf":
+                # Not DWARF (or not a debug artifact at all): leave the rest
+                # of the chain to run rather than ending it with something
+                # no extraction path reads. See the class docstring.
+                _logger.debug("No usable detached DWARF in %s", candidate)
                 continue
-            if kind != "pdb" and self._build_id_conflict(binary_path, candidate, build_id):
+            if self._build_id_conflict(binary_path, candidate, build_id):
                 continue
-            source = f"detached debug file ({candidate})"
-            if kind == "pdb":
-                return DebugArtifact(pdb_path=candidate, source=source)
-            if kind == "dwp":
-                return DebugArtifact(dwp_path=candidate, source=source)
-            return DebugArtifact(dwarf_path=candidate, source=source)
+            return DebugArtifact(
+                dwarf_path=candidate, source=f"detached debug file ({candidate})"
+            )
         return None

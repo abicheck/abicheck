@@ -194,8 +194,8 @@ def _resolve_and_check_dump_debug_format(
 # absorbed --debug-root in Phase 7n (one role, several transports).
 @click.option("--debug-info", "debug_roots", multiple=True, type=click.Path(path_type=Path),
               help="Separate debug info: a directory to search (build-id tree, "
-                   "path mirror, dSYM bundles) or a detached debug file (.debug "
-                   "sidecar, .dwp, .pdb) -- told apart by content, not name. "
+                   "path mirror, dSYM bundles) or a detached DWARF debug file (a "
+                   ".debug sidecar) -- told apart by content, not name. "
                    "Repeatable. A debug *package* is a release transport "
                    "(`compare --debug-info`), rejected here rather than ignored.")
 # ── Multi-TU manifest (ADR-050 D3) ────────────────────────────────────────────

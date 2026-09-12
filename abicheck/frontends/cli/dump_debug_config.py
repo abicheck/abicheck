@@ -236,7 +236,7 @@ def resolve_stored_bundle_lang(
 
 
 def reject_debug_package_operands(debug_roots: tuple[Path, ...]) -> None:
-    """Reject a debug *package* named to ``dump --debug-info`` (plan 7n).
+    """Reject a ``dump --debug-info`` operand no extraction path reads (7n).
 
     ``--debug-info`` carries one evidence role over three transports, and
     ``dump`` resolves two of them: a directory to search and a detached
@@ -247,10 +247,16 @@ def reject_debug_package_operands(debug_roots: tuple[Path, ...]) -> None:
     names where the capability lives, rather than a value the resolver
     would search for a ``.build-id`` tree inside and silently find nothing
     in (ADR-068 D4's "no silent no-op" rule, same as this module's
-    siblings).
+    siblings). The same rule refuses a named PDB or DWARF-package file on
+    either command -- see
+    ``options/evidence_roles.unsupported_detached_debug``.
     """
-    from ...frontends.cli.options.evidence_roles import unsided_debug_packages
+    from ...frontends.cli.options.evidence_roles import (
+        reject_unsupported_detached_debug,
+        unsided_debug_packages,
+    )
 
+    reject_unsupported_detached_debug(debug_roots)
     packages = unsided_debug_packages(debug_roots)
     if not packages:
         return

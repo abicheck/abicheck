@@ -526,28 +526,29 @@ class TestDetachedDebugResolution:
         artifact = resolve_debug_info(binary, debug_roots=[root], build_id=build_id)
         assert artifact is not None and artifact.dwarf_path == found
 
-    def test_a_mismatched_build_id_is_refused(self, tmp_path: Path, caplog) -> None:
+    def test_a_mismatched_build_id_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A sidecar that describes a *different* build is not this binary's
-        debug info, and using it would describe the wrong ABI. The check runs
-        only on evidence it can observe -- see the next test."""
-        from abicheck.extract.detached_debug import DetachedDebugFileResolver
+        debug info, and using it would describe the wrong ABI."""
+        from abicheck.extract import detached_debug
 
         binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"])
         sidecar = _elf_with_sections(tmp_path / "other.debug", [".debug_info"])
-        resolver = DetachedDebugFileResolver()
-        # The sidecar carries no build-id note of its own, so nothing is
+        resolver = detached_debug.DetachedDebugFileResolver()
+        # The synthetic sidecar carries no build-id note, so nothing is
         # provable and it is accepted (absence is not a mismatch).
         assert resolver.resolve(binary, build_id="ab" * 10, debug_roots=[sidecar])
-        # With a real, contradicting one, it is refused.
-        monkey = "0" * 40
-        original = DetachedDebugFileResolver._build_id_conflict
-        try:
-            DetachedDebugFileResolver._build_id_conflict = staticmethod(  # type: ignore[method-assign]
-                lambda b, d, i: True
-            )
-            assert resolver.resolve(binary, build_id=monkey, debug_roots=[sidecar]) is None
-        finally:
-            DetachedDebugFileResolver._build_id_conflict = original  # type: ignore[method-assign]
+        # With a real, contradicting one, it is refused. `monkeypatch` so the
+        # staticmethod is restored as a staticmethod -- a hand-rolled
+        # save/restore rebinds it as an instance method and leaks into every
+        # later test in the session.
+        monkeypatch.setattr(
+            detached_debug.DetachedDebugFileResolver,
+            "_build_id_conflict",
+            staticmethod(lambda _b, _d, _i: True),
+        )
+        assert resolver.resolve(binary, build_id="0" * 40, debug_roots=[sidecar]) is None
 
     def test_absent_build_id_evidence_never_manufactures_a_mismatch(
         self, tmp_path: Path
@@ -558,6 +559,136 @@ class TestDetachedDebugResolution:
         sidecar = _elf_with_sections(tmp_path / "s", [".debug_info"])
         assert not DetachedDebugFileResolver._build_id_conflict(binary, sidecar, None)
         assert not DetachedDebugFileResolver._build_id_conflict(binary, sidecar, "zz")
+
+
+class TestUnconsumableTransportsAreRefused:
+    """A named PDB or DWARF-package file is refused, not silently ignored.
+
+    Codex review, PR #1253: the ELF dump reads only
+    ``DebugArtifact.dwarf_path`` and the PE dump never consults
+    ``debug_roots``, so resolving one of these would have meant a stripped
+    binary compared with none of the requested debug evidence and reported
+    clean. Worse still, this resolver runs *first*, so it would have ended
+    the chain before ``EmbeddedDwarfResolver`` ever looked at the binary's
+    own DWARF.
+    """
+
+    @pytest.mark.parametrize("kind", ["pdb", "dwp"])
+    def test_the_resolver_yields_to_the_chain_instead_of_ending_it(
+        self, tmp_path: Path, kind: str
+    ) -> None:
+        """The false-clean path, closed at its source.
+
+        This resolver is first in the chain, so returning an artifact no
+        extraction path reads would have stopped `EmbeddedDwarfResolver`
+        from ever looking at the binary's own DWARF. Answering ``None``
+        is what lets the rest of the chain run.
+        """
+        from abicheck.extract.detached_debug import DetachedDebugFileResolver
+
+        binary = _elf_with_sections(tmp_path / "libfoo.so", [".debug_info"])
+        artifact = tmp_path / "sidecar"
+        if kind == "pdb":
+            artifact.write_bytes(b"Microsoft C/C++ MSF 7.00" + b"\x00" * 16)
+        else:
+            _elf_with_sections(artifact, [".debug_info.dwo"])
+        resolved = DetachedDebugFileResolver().resolve(binary, debug_roots=[artifact])
+        assert resolved is None
+
+    def test_a_named_dwarf_sidecar_is_still_returned(self, tmp_path: Path) -> None:
+        """The negative control: narrowing to DWARF did not narrow to nothing."""
+        from abicheck.extract.detached_debug import DetachedDebugFileResolver
+
+        binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"])
+        sidecar = _elf_with_sections(tmp_path / "sidecar", [".debug_info"])
+        resolved = DetachedDebugFileResolver().resolve(binary, debug_roots=[sidecar])
+        assert resolved is not None and resolved.dwarf_path == sidecar
+
+    @pytest.mark.parametrize("kind", ["pdb", "dwp"])
+    @pytest.mark.parametrize("command", ["compare", "dump"])
+    def test_naming_one_is_a_usage_error_on_both_commands(
+        self, tmp_path: Path, command: str, kind: str
+    ) -> None:
+        artifact = tmp_path / "artifact-no-suffix"
+        if kind == "pdb":
+            artifact.write_bytes(b"Microsoft C/C++ MSF 7.00" + b"\x00" * 16)
+        else:
+            _elf_with_sections(artifact, [".debug_info.dwo"])
+        old = _snapshot(tmp_path / "old.json", funcs=["foo"], version="1.0")
+        new = _snapshot(tmp_path / "new.json", funcs=["foo"], version="2.0")
+        operands = [str(old), str(new)] if command == "compare" else [
+            str(_elf_with_sections(tmp_path / "libfoo.so", [".text"]))
+        ]
+        res = _run(command, *operands, "--debug-info", str(artifact))
+        assert res.exit_code == 64, res.output
+        assert "silently ignored" in res.output
+
+    @pytest.mark.parametrize("command", ["compare", "dump"])
+    def test_a_directory_of_pdbs_is_still_accepted(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """The supported spelling the error names must keep working."""
+        root = tmp_path / "pdbs"
+        root.mkdir()
+        (root / "libfoo.pdb").write_bytes(b"Microsoft C/C++ MSF 7.00")
+        old = _snapshot(tmp_path / "old.json", funcs=["foo"], version="1.0")
+        new = _snapshot(tmp_path / "new.json", funcs=["foo"], version="2.0")
+        operands = [str(old), str(new)] if command == "compare" else [
+            str(_elf_with_sections(tmp_path / "libfoo.so", [".text"])), "--dry-run"
+        ]
+        res = _run(command, *operands, "--debug-info", str(root))
+        assert res.exit_code != 64, res.output
+
+
+class TestClassificationHasNoPositionalWindow:
+    """Neither role's classifier may make position part of the contract.
+
+    Both defects here are the same shape and were found together (Codex
+    review, PR #1253): a bounded read that happened to cover the
+    discriminator in the fixtures, and not in a real artifact. So both are
+    stated as "the discriminator is last", which is what a cap fails.
+    """
+
+    def test_a_wheel_whose_metadata_trails_its_payload_is_still_a_wheel(
+        self, tmp_path: Path
+    ) -> None:
+        """Wheel builders commonly append `*.dist-info/` after the payload."""
+        members = {f"foo/mod{i}.py": b"x" for i in range(500)}
+        members["foo-1.0.dist-info/WHEEL"] = b"Wheel-Version: 1.0\n"
+        pkg = _write_zip(tmp_path / "big-wheel", members)
+        assert is_package(pkg)
+        assert detect_extractor(pkg) is not None
+        assert classify_header_transport(pkg) is HeaderTransport.PACKAGE
+
+    def test_a_matrix_whose_results_precede_its_discriminators_classifies(
+        self, tmp_path: Path
+    ) -> None:
+        """`load_matrix_snapshot` accepts any key order, so this must too."""
+        path = tmp_path / "m.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "results": [{"configuration_id": "c", "probe_id": "p"}] * 20000,
+                    "library": "libfoo.so",
+                    "version": "1.0",
+                    "spec_name": "probes",
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert path.stat().st_size > 512 * 1024, "fixture must exceed any plausible window"
+        assert classify_build_info_transport(path) is BuildInfoTransport.PROBE_MATRIX
+
+    def test_a_huge_compile_database_is_still_not_a_matrix(
+        self, tmp_path: Path
+    ) -> None:
+        """The negative control: a top-level array is ruled out on sight."""
+        path = tmp_path / "compile_commands.json"
+        path.write_text(
+            json.dumps([{"directory": "/b", "command": "cc -c a.c", "file": "a.c"}] * 20000),
+            encoding="utf-8",
+        )
+        assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
 
 
 # ── 5. the whole public invocation, under non-conventional names ─────────────

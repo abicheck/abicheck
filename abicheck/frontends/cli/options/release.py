@@ -238,7 +238,7 @@ def debug_resolution_options(func: F) -> F:
         type=SIDED_PATH_PARAM,
         help="Separate debug info for a side, in any of its three transports: "
         "a directory to search (build-id tree, path mirror, dSYM bundles), a "
-        "detached debug file (a .debug sidecar, a .dwp, a .pdb), or a debug "
+        "detached DWARF debug file (a .debug sidecar), or a debug "
         "package (RPM/Deb/tar; directory/package inputs only). Which one an "
         "operand is comes from its content, not its name. Applies to both "
         "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "

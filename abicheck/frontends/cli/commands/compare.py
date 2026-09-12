@@ -77,6 +77,7 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
     _warn_unused_set_flags as _warn_unused_set_flags,
 )
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
+from ..options.evidence_roles import reject_unsupported_detached_debug
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
@@ -849,6 +850,12 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.
     normalize_sided_options(kwargs)
+    # Phase 7n: --debug-info's detached-file transport is DWARF-only; a named
+    # PDB/DWP is refused here rather than resolved and then ignored.
+    reject_unsupported_detached_debug(
+        [*kwargs.get("debug_roots", ()), *kwargs.get("debug_roots_old", ()),
+         *kwargs.get("debug_roots_new", ())]
+    )
 
     # ADR-068 D4/Phase 5: resolve --view (frontends.cli.options.view) into
     # the same report_mode/show_only/demangle/explain_patterns dest names

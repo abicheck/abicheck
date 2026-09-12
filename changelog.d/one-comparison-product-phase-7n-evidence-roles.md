@@ -15,9 +15,12 @@
   package-extraction stage, so a debug package there is a usage error naming
   `compare --debug-info` rather than a silently ignored value.
 - **`--debug-info` resolves a debug artifact named directly.** A detached
-  `.debug` sidecar, a `.dwp`, or a `.pdb` given as a value is used as the
-  artifact itself rather than searched inside as a directory, and outranks
-  the resolver chain's other strategies — that is what naming it means. A
+  `.debug` sidecar given as a value is used as the artifact itself rather
+  than searched inside as a directory, and outranks the resolver chain's
+  other strategies — that is what naming it means. Naming a `.pdb` or a
+  DWARF-package file is a usage error pointing at the directory form: no
+  extraction path reads one, so accepting it would mean a stripped binary
+  compared with none of the requested evidence and reported clean. A
   sidecar whose GNU build-id contradicts the binary's is refused rather than
   used to describe a different build; a build-id missing on either side
   proves nothing and is accepted, so absent evidence never manufactures a
@@ -32,10 +35,18 @@
   `schema: abicheck.probe-matrix/v1` discriminator. Snapshots captured before
   it existed stay classifiable through their long-standing required-key
   contract, and the key is ignored on load, so both directions of the round
-  trip are unaffected.
+  trip are unaffected. Classification parses the whole document rather than
+  a bounded prefix, so JSON member order is never part of the contract.
 
 ### Removed
 
 - `compare --debug-root`, `compare --devel-pkg`, `compare --probe-matrix` and
   `dump --debug-root` are gone, with no hidden alias: each exits `64`. See the
   Changed entries above for the input that carries each one's capability.
+
+### Fixed
+
+- Wheel and conda detection reads the archive's whole central directory
+  rather than its first 200 members, so a large wheel whose `*.dist-info/`
+  entries follow the package payload — the common layout — is still
+  recognised as one.

@@ -67,12 +67,6 @@ PROBE_MATRIX_SCHEMA = "abicheck.probe-matrix/v1"
 #: default, so a document missing one was never loadable as a matrix).
 _PROBE_MATRIX_REQUIRED_KEYS = frozenset({"library", "version", "spec_name"})
 
-#: Bounded read for the document sniff below: a probe matrix embeds a whole
-#: ``AbiSnapshot`` per probe result and can be tens of megabytes, and this is
-#: a *classification* step, not the load.
-_DOCUMENT_SNIFF_BYTES = 64 * 1024
-
-
 class DebugTransport(Enum):
     """How a ``--debug-info`` operand carries its debug evidence."""
 
@@ -115,25 +109,48 @@ def is_evidence_package(path: Path) -> bool:
     return is_package(path)
 
 
-def _document_prefix(path: Path) -> str | None:
-    """*path*'s leading text, or ``None`` when it is not a readable text file."""
+def _json_object_or_none(path: Path) -> dict[str, object] | None:
+    """*path* parsed as a top-level JSON **object**, or ``None``.
+
+    Two steps, in this order, and the order is the point:
+
+    1. a one-character sniff for the first non-whitespace byte. A top-level
+       ``[`` (a ``compile_commands.json``) or anything that is not ``{`` is
+       ruled out without parsing it at all, which is what keeps the common
+       ``--build-info`` operands cheap;
+    2. a real parse of the whole document for what survives.
+
+    An earlier revision parsed a bounded 64 KiB prefix and fell back to
+    searching that prefix for key *names*, which quietly made JSON member
+    order part of the transport contract: a matrix whose ``results`` array
+    (it embeds a snapshot per probe result) came before its discriminators
+    pushed them past the window, so the document was misread as compile
+    context -- even though ``load_matrix_snapshot`` accepts it whatever the
+    key order (Codex review, PR #1253). There is no window now. The cost is
+    bounded by step 1 to documents that really are top-level objects, which
+    is what a probe matrix is and what this classifier hands to a full parse
+    a moment later anyway.
+    """
     try:
         with open(path, "rb") as f:
-            raw = f.read(_DOCUMENT_SNIFF_BYTES)
-    except OSError:
+            while head := f.read(1):
+                if not head.isspace():
+                    break
+            else:
+                return None
+            if head != b"{":
+                return None
+            f.seek(0)
+            data = json.load(f)
+    except (OSError, ValueError):
         return None
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError:
-        # A truncated multi-byte character at the sniff boundary is not a
-        # decoding failure of the document -- only of this window.
-        return raw.decode("utf-8", errors="ignore")
+    return data if isinstance(data, dict) else None
 
 
 def is_probe_matrix_document(path: Path) -> bool:
     """Whether *path* is a probe-matrix snapshot, read from the document.
 
-    Two accepted discriminators, in this order:
+    Two accepted discriminators, neither of them a filename:
 
     1. an explicit ``"schema": "abicheck.probe-matrix/v1"`` member, which
        every snapshot written from Phase 7n on carries;
@@ -142,37 +159,35 @@ def is_probe_matrix_document(path: Path) -> bool:
        object), which is what keeps a snapshot captured before that tag
        existed classifiable.
 
-    Neither is a filename, and neither collides with ``--build-info``'s own
-    operands: a build directory is a directory, a compile database is a
-    top-level JSON *array*, and a capture pack is a directory holding a
-    ``manifest.json``.
-
-    Parsed from a bounded prefix rather than the whole file, so a matrix
-    carrying a snapshot per probe result is not fully loaded twice. A
-    document too large for the window falls back to the key sniff below,
-    which does not need valid JSON to answer.
+    Neither collides with ``--build-info``'s own operands: a build directory
+    is a directory, a compile database is a top-level JSON *array*, and a
+    capture pack is a directory holding a ``manifest.json``.
     """
     if path.is_dir():
         return False
-    prefix = _document_prefix(path)
-    if prefix is None or not prefix.lstrip().startswith("{"):
-        return False
-    try:
-        data = json.loads(prefix)
-    except ValueError:
-        # Truncated by the sniff window (or genuinely malformed): fall back
-        # to the top-level key names, which appear in the object's own head.
-        # Deliberately requires *every* discriminator key, so a compile
-        # database or any other JSON document mentioning one of them in
-        # passing is not misread as a matrix.
-        if f'"{PROBE_MATRIX_SCHEMA}"' in prefix:
-            return True
-        return all(f'"{key}"' in prefix for key in _PROBE_MATRIX_REQUIRED_KEYS)
-    if not isinstance(data, dict):
+    data = _json_object_or_none(path)
+    if data is None:
         return False
     if data.get("schema") == PROBE_MATRIX_SCHEMA:
         return True
     return _PROBE_MATRIX_REQUIRED_KEYS.issubset(data.keys())
+
+
+def detached_debug_kind(path: Path) -> str | None:
+    """Which kind of detached debug artifact *path* is: ``"dwarf"``,
+    ``"dwp"``, ``"pdb"``, or ``None`` for a file carrying no debug evidence.
+
+    A thin pass-through to ``extract.detached_debug``, which owns the
+    section/magic reading. It exists because ADR-061 does not let a
+    ``frontends`` module import ``extract``, and the CLI needs this answer
+    to refuse a transport no extraction path can consume
+    (``options/evidence_roles.unsupported_detached_debug``) -- so the
+    dependency runs through this layer, the same way every other
+    classification in this module does.
+    """
+    from ..extract.detached_debug import classify_detached_debug_file
+
+    return classify_detached_debug_file(path)
 
 
 def classify_debug_transport(path: Path) -> DebugTransport:
@@ -248,6 +263,7 @@ __all__ = [
     "classify_build_info_transport",
     "classify_debug_transport",
     "classify_header_transport",
+    "detached_debug_kind",
     "is_evidence_package",
     "is_probe_matrix_document",
 ]
