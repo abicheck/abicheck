@@ -168,7 +168,16 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "is."
         ),
         fixed_by=(1240,),
-        seed_tests=("tests/test_coverage_core_effectiveness.py",),
+        seed_tests=(
+            "tests/test_coverage_core_effectiveness.py",
+            # The consumer half, left as a known gap by PR #1240 and closed
+            # immediately after. Closing it found a third site that PR's own
+            # inspection had missed -- the integration lane, whose producer
+            # runs on Linux *and* macOS while its Codecov upload is gated to
+            # ubuntu -- which is the argument for making a rule executable
+            # rather than writing it down.
+            "tests/test_workflow_coverage_consumers.py",
+        ),
         # `()` per the field's own rule: these seed tests read and parse
         # workflow/config files, they do not invoke the CLI, `abicheck.
         # service`, or a real workflow run. A claimed surface a seed test
@@ -178,16 +187,23 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         # them).
         public_surfaces=(),
         axes={
-            "half": ("requested-vs-selected-core", "documented-fallback"),
+            "half": (
+                "requested-vs-selected-core",
+                "documented-fallback",
+                "report-has-a-consumer",
+            ),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "Only the coverage-core half is executable. Nothing "
-                    "asserts the consumer half -- that every `--cov-report` "
-                    "a workflow writes is uploaded, archived or gated -- so "
-                    "a future lane can reintroduce an unread report and "
-                    "only a human reading the diff would notice. The "
+                    "The consumer half checks each *matrix combination*, "
+                    "which needs every step's `if:` evaluated against it, so "
+                    "it inherits `_gha_expressions`' deliberate subset: an "
+                    "unmodelled context field or function evaluates falsy "
+                    "rather than raising, and a step gated on one this "
+                    "evaluator does not know is checked loosely. A matrix "
+                    "built from an expression cannot be expanded statically "
+                    "at all and is scanned as one nameless combination. The "
                     "core-effectiveness test also probes the interpreter "
                     "running the suite, not the pinned Python of each CI "
                     "lane, so a lane on a different version is checked only "

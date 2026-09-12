@@ -1,6 +1,6 @@
 # CI cost and assurance — closing the audit's remaining items
 
-**Status:** Proposed. Phases 0 and 6 landed in PR #1240; Phases 1–5 not started.
+**Status:** Proposed. Phases 0 and 6 landed in PR #1240; Phase 2's platform-safe half landed as a follow-up; Phases 1, 3, 4 and 5 not started.
 
 Origin: a CI audit that profiled this repository's workflows and found one
 real product performance bug plus a family of *inert configuration* — settings
@@ -70,17 +70,26 @@ as stated would **silently drop Linux execution of those 20 tests**, because the
 dedicated job has no Linux lane. The genuine duplication is macOS and Windows
 only.
 
-**Target.** Either exclude the file from the generic selector *only* where the
-dedicated job also runs (`--ignore` gated on `runner.os`), or add a Linux lane
-to the dedicated job and exclude the file from the generic selector everywhere.
-Both preserve today's platform coverage exactly; the first is smaller.
+**Landed** (the first of the two options). The generic integration step was
+split per OS: Linux keeps the file, macOS and Windows exclude it and leave it
+to the dedicated job. Platform coverage is unchanged — the file still runs
+everywhere it ran before, once.
 
-**Before changing anything:** both selectors carry `ABICHECK_MIN_EXECUTED`
-floors (20 on the generic Linux lane, 5 on the dedicated job). Removing tests
-from a selection moves the executed count those floors gate, and *collected* is
-not *executed* — most of the 654 are compiler-gated. Measure executed IDs per
-platform first. This phase buys correctness of ownership, not a measured
-runtime saving.
+This phase originally said to measure executed IDs per platform first, because
+`ABICHECK_MIN_EXECUTED` gates the executed count and *collected* is not
+*executed*. Reading the floors settled it without that measurement: the two
+lanes that now exclude the file sit at a `'1'` floor (macOS and Windows, both
+"> 0" guards against a missing toolchain), so dropping 20 tests from a
+selection that still collects hundreds cannot trip them, and Linux — the only
+lane with a real floor, `'20'` against a known ~195 — is untouched. The
+caution was warranted in general and did not apply here.
+
+The same split fixed a second defect in the same step, found by the guard
+written for Phase 0's own known gap: the step collected
+`coverage-integration.xml` on Linux *and* macOS while the Codecov upload is
+gated to `ubuntu-24.04`, so macOS paid ~60% instrumentation overhead for a
+report nobody read. Same class as the two sites Phase 0 fixed by inspection,
+and the one it missed.
 
 ## Phase 3 — make the coverage-core request live, or retire it
 
