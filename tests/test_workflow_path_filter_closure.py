@@ -118,11 +118,26 @@ def _required_paths(text: str) -> set[str]:
         # Every such job installs *this* package; its dependency bounds,
         # entry points and optional extras all live in pyproject.toml.
         required.add("pyproject.toml")
-    for action in _LOCAL_ACTION.findall(text):
-        action_yml = REPO_ROOT / action / "action.yml"
+    # To a fixed point, because a local action may itself use another one:
+    # scanning only the direct manifests would leave a nested action, and
+    # every file *it* executes, outside the filter (CodeRabbit review). No
+    # such nesting exists in this repository today -- which is exactly why
+    # the traversal has to be written now rather than when the first one
+    # appears and silently is not covered. The visited set makes a cycle
+    # terminate instead of recursing forever.
+    pending, visited = list(_LOCAL_ACTION.findall(text)), set()
+    while pending:
+        action = pending.pop()
+        if action in visited:
+            continue
+        visited.add(action)
         required.add(f"{action}/action.yml")
-        if action_yml.is_file():
-            required |= _executed_files(read_repo_text(action_yml))
+        action_yml = REPO_ROOT / action / "action.yml"
+        if not action_yml.is_file():
+            continue
+        action_text = read_repo_text(action_yml)
+        required |= _executed_files(action_text)
+        pending += _LOCAL_ACTION.findall(action_text)
     return required
 
 

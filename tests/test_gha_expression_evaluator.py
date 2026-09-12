@@ -39,7 +39,13 @@ changes that answer. Literals stay literals; only *references* go absent.
 from __future__ import annotations
 
 import pytest
-from _gha_expressions import condition_holds, evaluate, render, runner_os_for
+from _gha_expressions import (
+    ABSENT,
+    condition_holds,
+    evaluate,
+    render,
+    runner_os_for,
+)
 
 _CTX = {
     "github.event_name": "push",
@@ -63,8 +69,17 @@ _CTX = {
     ],
 )
 def test_unmodelled_expressions_are_absent_not_present(expr: str) -> None:
-    """The direction that matters: never truthy by accident."""
-    assert evaluate(expr, _CTX) is False
+    """The direction that matters: never truthy by accident.
+
+    Asserted as `is ABSENT` rather than `is False`. The distinction is the
+    whole point -- pinning the literal `False` here is what let
+    `<unmodelled> == false` compare equal and read as active (see
+    `TestAbsentSurvivesComparison`), so a test demanding that identity would
+    forbid the fix. Falsiness, the property callers actually depend on, is
+    asserted alongside it.
+    """
+    assert evaluate(expr, _CTX) is ABSENT
+    assert not evaluate(expr, _CTX)
     assert condition_holds(expr, _CTX) is False
     assert condition_holds("${{ " + expr + " }}", _CTX) is False
 
@@ -133,3 +148,47 @@ def test_an_unmodelled_runner_label_raises_rather_than_guessing() -> None:
     that platform, which is a wrong answer rather than a missing one."""
     with pytest.raises(ValueError, match="unmodelled runner label"):
         runner_os_for("freebsd-14")
+
+
+class TestAbsentSurvivesComparison:
+    """Absence must stay distinguishable from the literal `false`.
+
+    The first review here fixed `_atom` to stop returning a truthy raw token
+    for an unmodelled reference. Returning `False` moved the fail-open one
+    level out instead of closing it: `false` is *also* what the literal
+    `false` evaluates to, so `<unmodelled> == false` compared equal and the
+    condition read as active again (second CodeRabbit review). An unknown is
+    neither demonstrably equal to something nor demonstrably unequal, so
+    both comparisons answer False.
+    """
+
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            "steps.probe.outputs.result == false",
+            "steps.probe.outputs.result != true",
+            "steps.probe.outputs.result != 'x'",
+            "failure() == false",
+            "cancelled() != true",
+            "contains(github.event.head_commit.message, 'x') == false",
+            "github.event.nothing.here == false",
+            "bareword != 'x'",
+            "false == steps.probe.outputs.result",
+            "'x' != steps.probe.outputs.result",
+        ],
+    )
+    def test_a_comparison_against_an_unmodelled_operand_never_holds(
+        self, expr: str
+    ) -> None:
+        assert condition_holds(expr, _CTX) is False
+
+    def test_a_modelled_comparison_against_false_still_works(self) -> None:
+        """The fix must not make every `== false` unanswerable: a value this
+        evaluator does model compares normally."""
+        ctx = {**_CTX, "matrix.allow-prereleases": False}
+        assert condition_holds("matrix.allow-prereleases == false", ctx) is True
+        assert condition_holds("matrix.allow-prereleases != false", ctx) is False
+
+    def test_an_unmodelled_reference_renders_empty_rather_than_as_false(self) -> None:
+        """`render` must not start spelling absence as the text `<absent>`."""
+        assert render("x-${{ steps.nope.outputs.v }}", _CTX) == "x-"

@@ -54,11 +54,91 @@ TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOTED_NAMES = frozenset({"REPO_ROOT", "WORKFLOW_DIR", "ROOT", "PROJECT_ROOT"})
 
 
-def _is_repo_rooted(node: ast.AST) -> bool:
-    """True when `node` is built out of a repository-root constant, however
-    many `/` joins and attribute hops deep."""
+#: Helpers that hand back repository-rooted paths. A name bound from one of
+#: these is as repository-rooted as `REPO_ROOT / x` is.
+_REPO_ROOTED_CALLS = frozenset({"workflow_paths", "workflow_texts"})
+
+
+def _bindings(node: ast.AST) -> tuple[list[ast.expr], ast.expr | None]:
+    """The targets a statement binds and the value it binds them from."""
+    if isinstance(node, ast.Assign):
+        return list(node.targets), node.value
+    if isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value:
+        return [node.target], node.value
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return [node.target], node.iter
+    return [], None
+
+
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _own_nodes(scope: ast.AST) -> list[ast.AST]:
+    """Every node inside *scope* except those belonging to a nested function.
+
+    Scoping matters: collected per module, a name bound from a repository
+    path in one function marks every same-named local elsewhere, and this
+    suite really does reuse short names like `candidate` for a repo-derived
+    value in one test and a `tmp_path` child in another -- a false positive
+    that fails the build.
+    """
+    own: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        own.append(node)
+        if not isinstance(node, _SCOPES):
+            stack.extend(ast.iter_child_nodes(node))
+    return own
+
+
+def _repo_rooted_aliases(scope: ast.AST, inherited: frozenset[str]) -> frozenset[str]:
+    """Names in *scope* that hold a repository-rooted path.
+
+    Walking only the call target missed the two spellings this suite reaches
+    for first -- `path = REPO_ROOT / "f.yml"` then `path.read_text()`, and
+    `for path in workflow_paths(): path.read_text()` -- so the guard read
+    them as unrooted and let a bare read through. A guard that fails open on
+    the *natural* spelling of the thing it forbids is worse than none, which
+    is the same lesson `_gha_expressions` learned one review earlier
+    (CodeRabbit review).
+
+    Iterated to a fixed point, so a chain (`a = REPO_ROOT / x; b = a / y`)
+    resolves regardless of statement order.
+    """
+    aliases = set(inherited)
+    nodes = _own_nodes(scope)
+    while True:
+        grown = False
+        for node in nodes:
+            targets, value = _bindings(node)
+            if value is None or not _is_repo_rooted(value, aliases):
+                continue
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name) and sub.id not in aliases:
+                        aliases.add(sub.id)
+                        grown = True
+        if not grown:
+            return frozenset(aliases)
+
+
+def _is_repo_rooted(
+    node: ast.AST, aliases: frozenset[str] | set[str] = frozenset()
+) -> bool:
+    """True when `node` is built out of a repository-root constant, a helper
+    that returns one, or a local name bound from either -- however many `/`
+    joins and attribute hops deep."""
     for sub in ast.walk(node):
-        if isinstance(sub, ast.Name) and sub.id in _REPO_ROOTED_NAMES:
+        if isinstance(sub, ast.Name) and (
+            sub.id in _REPO_ROOTED_NAMES or sub.id in aliases
+        ):
+            return True
+        if (
+            isinstance(sub, ast.Call)
+            and isinstance(sub.func, ast.Name)
+            and sub.func.id in _REPO_ROOTED_CALLS
+        ):
             return True
     return False
 
@@ -83,12 +163,11 @@ def _encoding_is_stated(call: ast.Call) -> bool:
     return len(call.args) >= 4
 
 
-def _unencoded_repo_reads(path: Path) -> list[str]:
-    """Every repository-rooted text read in *path* that leaves the encoding
-    to the host's locale, as `file:line: source` strings."""
-    tree = ast.parse(path.read_text(encoding=ENCODING))
+def _reads_in_scope(scope: ast.AST, aliases: frozenset[str], name: str) -> list[str]:
+    """Unencoded repository-rooted reads written directly in *scope*, then
+    recursively in each function nested inside it under its own aliases."""
     findings = []
-    for node in ast.walk(tree):
+    for node in _own_nodes(scope):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -98,12 +177,22 @@ def _unencoded_repo_reads(path: Path) -> list[str]:
             target = node.args[0] if node.args else None
         else:
             continue
-        if target is None or not _is_repo_rooted(target):
+        if target is None or not _is_repo_rooted(target, aliases):
             continue
         if _encoding_is_stated(node):
             continue
-        findings.append(f"{path.name}:{node.lineno}: {ast.unparse(node)[:90]}")
-    return findings
+        findings.append(f"{name}:{node.lineno}: {ast.unparse(node)[:90]}")
+    for node in _own_nodes(scope):
+        if isinstance(node, _SCOPES):
+            findings += _reads_in_scope(node, _repo_rooted_aliases(node, aliases), name)
+    return sorted(findings, key=lambda f: int(f.split(":")[1]))
+
+
+def _unencoded_repo_reads(path: Path) -> list[str]:
+    """Every repository-rooted text read in *path* that leaves the encoding
+    to the host's locale, as `file:line: source` strings."""
+    tree = ast.parse(path.read_text(encoding=ENCODING))
+    return _reads_in_scope(tree, _repo_rooted_aliases(tree, frozenset()), path.name)
 
 
 def test_no_test_reads_checked_in_text_with_a_platform_dependent_encoding() -> None:
@@ -119,32 +208,45 @@ def test_no_test_reads_checked_in_text_with_a_platform_dependent_encoding() -> N
     )
 
 
-def test_the_scan_can_actually_see_an_unencoded_read() -> None:
-    """Guards the AST scan: a matcher that recognised nothing would make the
-    assertion above vacuously true."""
-    module = ast.parse(
-        "from x import REPO_ROOT\n"
-        "a = (REPO_ROOT / 'f.yml').read_text()\n"
-        "b = open(REPO_ROOT / 'f.yml')\n"
-        "b2 = open(REPO_ROOT / 'f.bin', 'rb')\n"
-        "c = (REPO_ROOT / 'f.yml').read_text(encoding='utf-8')\n"
-        "d = (tmp_path / 'f.yml').read_text()\n"
-    )
-    calls = [n for n in ast.walk(module) if isinstance(n, ast.Call)]
-    flagged = []
-    for node in calls:
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == "read_text":
-            target = func.value
-        elif isinstance(func, ast.Name) and func.id == "open":
-            target = node.args[0]
-        else:
-            continue
-        if _is_repo_rooted(target) and not _encoding_is_stated(node):
-            flagged.append(node.lineno)
-    assert flagged == [2, 3], (
-        "expected the bare repo-rooted reads on lines 2 and 3 -- and not the "
-        f"binary open, the stated encoding, or the tmp_path read; got {flagged}"
+#: Every shape the scan must judge, and the verdict it owes each. Lines are
+#: 1-based and must stay in step with the source below.
+_SCAN_FIXTURE = """from x import REPO_ROOT, workflow_paths
+a = (REPO_ROOT / 'f.yml').read_text()
+b = open(REPO_ROOT / 'f.yml')
+b2 = open(REPO_ROOT / 'f.bin', 'rb')
+c = (REPO_ROOT / 'f.yml').read_text(encoding='utf-8')
+d = (tmp_path / 'f.yml').read_text()
+path = REPO_ROOT / 'g.yml'
+e = path.read_text()
+for looped in workflow_paths():
+    f = looped.read_text()
+for ok in workflow_paths():
+    g = ok.read_text(encoding='utf-8')
+"""
+
+#: Bare repository-rooted reads: direct (2, 3), through an assigned alias (8),
+#: and through a loop variable bound from a repo-rooted helper (10).
+_SCAN_FIXTURE_EXPECTED = [2, 3, 8, 10]
+
+
+def test_the_scan_can_actually_see_an_unencoded_read(tmp_path: Path) -> None:
+    """Guards the AST scan itself: a matcher that recognised nothing would
+    make the assertion above vacuously true.
+
+    Driven through `_unencoded_repo_reads` -- the real function -- rather
+    than a hand-rolled copy of its matching, so the two cannot drift. The
+    alias cases are the ones a review found the scan blind to: walking only
+    the call target missed `path = REPO_ROOT / ...` and
+    `for path in workflow_paths():`, which are how this suite most naturally
+    spells the very thing the guard forbids.
+    """
+    fixture = tmp_path / "sample.py"
+    fixture.write_text(_SCAN_FIXTURE, encoding="utf-8")
+    flagged = [int(f.split(":")[1]) for f in _unencoded_repo_reads(fixture)]
+    assert flagged == _SCAN_FIXTURE_EXPECTED, (
+        "the scan must flag the direct and aliased bare reads and nothing "
+        "else -- not the binary open, the stated encodings, or the tmp_path "
+        f"read; got {flagged}"
     )
 
 

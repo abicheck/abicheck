@@ -284,7 +284,12 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "(no repository-rooted read leaves the encoding to the platform) "
             "plus non-vacuity (some checked-in workflow really does contain "
             "a byte cp1252 rejects), because the structural rule alone would "
-            "pass the day the repository became pure ASCII."
+            "pass the day the repository became pure ASCII. The scan must "
+            "also follow *aliases*: a review found it walking only the call "
+            "target, so `path = REPO_ROOT / x` and `for path in "
+            "workflow_paths():` -- the two spellings this suite reaches for "
+            "first -- went unflagged, and adding alias tracking immediately "
+            "turned up two more unencoded reads of checked-in files."
         ),
         fixed_by=(1244,),
         seed_tests=("tests/test_repo_text_reads_state_their_encoding.py",),
@@ -303,8 +308,8 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "it is built from a root constant this suite actually "
                     "uses (`REPO_ROOT`, `WORKFLOW_DIR`, `ROOT`, "
                     "`PROJECT_ROOT`). A test that re-derives the root into a "
-                    "differently-named local, or reaches checked-in content "
-                    "through a fixture-returned path, is not covered -- the "
+                    "root constant it does not know, or reaches checked-in "
+                    "content through a fixture-returned path, is not covered -- the "
                     "same shape as reading it with `subprocess` or "
                     "`importlib.resources`. Nothing here runs on a real "
                     "cp1252 host either: the failure is reproduced locally "

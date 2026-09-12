@@ -368,7 +368,7 @@ class TestPackagesAreNotInterpolatedIntoTheShell:
         assert result.returncode == 1
 
     def test_action_yml_passes_packages_through_env(self) -> None:
-        action = yaml.safe_load((ACTION_DIR / "action.yml").read_text())
+        action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
         (step,) = action["runs"]["steps"]
         assert step["env"]["INPUT_PACKAGES"] == "${{ inputs.packages }}"
         assert "${{" not in step["run"]

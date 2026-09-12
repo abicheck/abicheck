@@ -45,16 +45,31 @@ from typing import Any
 
 import yaml
 from _gha_expressions import condition_holds, runner_os_for
-from _workflow_files import read_repo_text, workflow_paths
+from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
 
 #: `--cov-report=xml` writes `coverage.xml`; `--cov-report=xml:NAME` writes NAME.
 _COV_REPORT = re.compile(r"--cov-report=xml(?::([\w.\-]+))?")
 
 
 def _matrix_combinations(job: dict[str, Any]) -> list[dict[str, Any]]:
-    """Expand a job's matrix the way GitHub does: the cross product of its
-    list-valued keys, plus each `include` entry. A job with no matrix has one
-    nameless combination, so jobs are handled uniformly."""
+    """Expand a job's matrix the way GitHub does.
+
+    The cross product of the list-valued axes, then `exclude` applied as
+    *partial* match, then `include` — which is not simply "append". GitHub
+    merges an include entry into every existing combination it is compatible
+    with (it adds keys, or restates values already there) and appends it as a
+    new combination only when it would *overwrite* an original axis value.
+    Appending unconditionally, as this did, produced a standalone
+    `{'coverage': True}` leg for an include that should have merged, and
+    ignored `exclude` entirely (CodeRabbit review).
+
+    Neither shape exists in this repository today: `ci.yml`'s includes all
+    set `os` to a value outside the base axis, which GitHub does append, and
+    no workflow uses `exclude` — so the old code was accidentally right for
+    the current tree and would have gone wrong on the first compatible
+    include anyone added. A job with no matrix has one nameless combination,
+    so jobs are handled uniformly.
+    """
     matrix = (job.get("strategy") or {}).get("matrix") or {}
     if not isinstance(matrix, dict):
         # A matrix built from an expression (`matrix: ${{ fromJson(...) }}`)
@@ -70,8 +85,27 @@ def _matrix_combinations(job: dict[str, Any]) -> list[dict[str, Any]]:
         dict(zip(keys, values, strict=True))
         for values in itertools.product(*(matrix[k] for k in keys))
     ] or [{}]
+
+    for removed in matrix.get("exclude") or []:
+        if isinstance(removed, dict):
+            # A partial exclude removes every combination it matches on the
+            # keys it names, leaving the rest alone.
+            combos = [
+                c for c in combos if any(c.get(k) != v for k, v in removed.items())
+            ]
+
     for extra in matrix.get("include") or []:
-        if isinstance(extra, dict):
+        if not isinstance(extra, dict):
+            continue
+        # Compatible == does not overwrite any *original axis* value. An
+        # include key absent from the axes always merges; one that restates
+        # the axis value it already has merges too.
+        merged_into_any = False
+        for combo in combos:
+            if all(k not in keys or combo.get(k) == v for k, v in extra.items()):
+                combo.update(extra)
+                merged_into_any = True
+        if not merged_into_any:
             combos.append(dict(extra))
     return combos
 
@@ -180,3 +214,100 @@ def test_a_platform_scoped_consumer_does_not_cover_every_platform() -> None:
     macos = _context({"os": "macos-latest"})
     assert _has_consumer(steps, steps[0], "c.xml", linux)
     assert not _has_consumer(steps, steps[0], "c.xml", macos)
+
+
+class TestMatrixExpansionFollowsGitHub:
+    """`_matrix_combinations` decides which legs the guard above inspects, so
+    a leg it invents or loses is a finding invented or lost.
+
+    Stated as its own contract rather than only through the workflows this
+    repository happens to have today: neither `exclude` nor a *compatible*
+    `include` appears in the current tree, so every assertion here would be
+    unreachable from the real workflows -- which is precisely why the
+    behaviour was wrong and nothing noticed (CodeRabbit review).
+    """
+
+    def test_the_cross_product_is_every_axis_combination(self) -> None:
+        combos = _matrix_combinations(
+            {"strategy": {"matrix": {"os": ["a", "b"], "py": ["1", "2"]}}}
+        )
+        assert sorted(map(str, combos)) == sorted(
+            str({"os": o, "py": p}) for o in ("a", "b") for p in ("1", "2")
+        )
+
+    def test_a_job_without_a_matrix_is_one_nameless_combination(self) -> None:
+        assert _matrix_combinations({}) == [{}]
+
+    def test_an_include_adding_a_new_key_merges_into_every_combination(self) -> None:
+        """GitHub merges rather than appends here. Appending produced a
+        standalone `{'cov': True}` leg with no `os` at all, which the guard
+        would then evaluate every `if:` against."""
+        combos = _matrix_combinations(
+            {"strategy": {"matrix": {"os": ["a", "b"], "include": [{"cov": True}]}}}
+        )
+        assert combos == [{"os": "a", "cov": True}, {"os": "b", "cov": True}]
+
+    def test_an_include_restating_an_axis_value_merges_only_there(self) -> None:
+        combos = _matrix_combinations(
+            {
+                "strategy": {
+                    "matrix": {"os": ["a", "b"], "include": [{"os": "a", "cov": True}]}
+                }
+            }
+        )
+        assert combos == [{"os": "a", "cov": True}, {"os": "b"}]
+
+    def test_an_include_overwriting_an_axis_value_is_appended(self) -> None:
+        """The one shape this repository does use: `ci.yml` adds windows and
+        macOS legs to an `os: [ubuntu-latest]` axis."""
+        combos = _matrix_combinations(
+            {
+                "strategy": {
+                    "matrix": {"os": ["a"], "include": [{"os": "z", "cov": True}]}
+                }
+            }
+        )
+        assert combos == [{"os": "a"}, {"os": "z", "cov": True}]
+
+    def test_a_partial_exclude_removes_every_combination_it_matches(self) -> None:
+        combos = _matrix_combinations(
+            {
+                "strategy": {
+                    "matrix": {
+                        "os": ["a", "b"],
+                        "py": ["1", "2"],
+                        "exclude": [{"os": "a"}],
+                    }
+                }
+            }
+        )
+        assert combos == [{"os": "b", "py": "1"}, {"os": "b", "py": "2"}]
+
+    def test_exclude_is_applied_before_include(self) -> None:
+        """GitHub's documented order. Reversing it would let an include
+        resurrect a leg the author excluded."""
+        combos = _matrix_combinations(
+            {
+                "strategy": {
+                    "matrix": {
+                        "os": ["a", "b"],
+                        "exclude": [{"os": "a"}],
+                        "include": [{"cov": True}],
+                    }
+                }
+            }
+        )
+        assert combos == [{"os": "b", "cov": True}]
+
+    def test_the_real_unit_tests_matrix_still_expands_to_its_five_legs(self) -> None:
+        """The regression this must not cause: the live matrix is exactly the
+        shape the old append-everything code got right by luck."""
+        doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
+        combos = _matrix_combinations(doc["jobs"]["unit-tests"])
+        assert [(c["os"], c["python-version"]) for c in combos] == [
+            ("ubuntu-latest", "3.12"),
+            ("ubuntu-latest", "3.13"),
+            ("ubuntu-latest", "3.14"),
+            ("windows-latest", "3.13"),
+            ("macos-latest", "3.13"),
+        ]
