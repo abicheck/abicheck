@@ -56,8 +56,8 @@ steps:
     # `changes` list, so `change_kinds` isn't used here (see the other
     # workflows' `expect_json` for that shape).
     json_variant:
-      - --format
-      - json
+      - -o
+      - json=-
     expect_json:
       verdict: BREAKING
       bundle_verdict: BREAKING

@@ -69,8 +69,9 @@ from .buildsource.validation_input import (
     ValidationInputKind,
     classify_validation_input,
 )
-from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_options import output_options, verbose_option
+from .cli import _setup_verbosity, emit_export_set, main
+from .cli_options import export_options, verbose_option
+from .frontends.cli.options.export import ExportSet
 from .workflows.extraction import (
     BindingsFile,
     BindingsFileError,
@@ -129,11 +130,7 @@ def project_group() -> None:
     type=click.Path(exists=True, path_type=Path),
     default=".abicheck.yml",
 )
-@output_options(
-    ["text", "json"],
-    default="text",
-    format_help="Output format for the validation report.",
-)
+@export_options(["text", "json"], default_format="text")
 @click.option(
     "--toolchain-bindings",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -152,8 +149,7 @@ def project_group() -> None:
 @verbose_option
 def project_validate_cmd(
     input_path: Path,
-    fmt: str,
-    output: Path | None,
+    exports: ExportSet,
     toolchain_bindings: Path | None,
     verbose: bool,
 ) -> None:
@@ -233,12 +229,9 @@ def project_validate_cmd(
     else:
         ok, payload, text = _validate_use_case_manifest(target)
 
-    rendered = json.dumps(payload, indent=2) if fmt == "json" else text
-
-    if output is not None:
-        _safe_write_output(output, rendered)
-    else:
-        click.echo(rendered)
+    emit_export_set(
+        exports, lambda fmt: json.dumps(payload, indent=2) if fmt == "json" else text
+    )
 
     sys.exit(0 if ok else 1)
 
@@ -482,11 +475,7 @@ def _parse_build_output_specs(
         "targets: are declared yet)."
     ),
 )
-@output_options(
-    ["json", "text"],
-    default="json",
-    format_help="Output format for the generated run-plan.",
-)
+@export_options(["json", "text"], default_format="json")
 @verbose_option
 def project_plan_cmd(
     config: Path,
@@ -495,8 +484,7 @@ def project_plan_cmd(
     head_sha: str,
     toolchain_bindings: Path | None,
     allow_empty: bool,
-    fmt: str,
-    output: Path | None,
+    exports: ExportSet,
     verbose: bool,
 ) -> None:
     """Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
@@ -639,20 +627,17 @@ def project_plan_cmd(
     for w in report.warnings:
         click.echo(f"warning: {w}", err=True)
 
-    if fmt == "json":
-        text = json.dumps(plan.to_dict(), indent=2)
-    else:
+    def _render_plan(fmt: str) -> str:
+        if fmt == "json":
+            return json.dumps(plan.to_dict(), indent=2)
         lines = [f"run-plan: {len(plan.checks)} check(s)"]
         lines.extend(
             f"  - {c.check_id} (required={c.required}, gate_mode={c.gate_mode})"
             for c in plan.checks
         )
-        text = "\n".join(lines)
+        return "\n".join(lines)
 
-    if output is not None:
-        _safe_write_output(output, text)
-    else:
-        click.echo(text)
+    emit_export_set(exports, _render_plan)
 
     sys.exit(0 if report.ok else 1)
 
@@ -690,18 +675,13 @@ def project_plan_cmd(
         "(same values as `compare --policy`)."
     ),
 )
-@output_options(
-    ["json", "text"],
-    default="json",
-    format_help="Output format for the derived history.",
-)
+@export_options(["json", "text"], default_format="json")
 @verbose_option
 def project_history_cmd(
     snapshots: tuple[Path, ...],
     versions: tuple[str, ...],
     policy: str,
-    fmt: str,
-    output: Path | None,
+    exports: ExportSet,
     verbose: bool,
 ) -> None:
     """Derive per-API lifecycle events from an ordered chain of SNAPSHOTS
@@ -766,9 +746,9 @@ def project_history_cmd(
     except (OSError, ValueError) as exc:
         raise click.UsageError(f"cannot load snapshot: {exc}") from exc
 
-    if fmt == "json":
-        text = json.dumps(result.to_dict(), indent=2)
-    else:
+    def _render_history(fmt: str) -> str:
+        if fmt == "json":
+            return json.dumps(result.to_dict(), indent=2)
         lines = [
             f"longitudinal history: {result.library} "
             f"({len(result.entries)} snapshot(s))"
@@ -790,11 +770,8 @@ def project_history_cmd(
                 f"  - {g.from_version} -> {g.to_version}: {g.detail}"
                 for g in result.gaps
             )
-        text = "\n".join(lines)
+        return "\n".join(lines)
 
-    if output is not None:
-        _safe_write_output(output, text)
-    else:
-        click.echo(text)
+    emit_export_set(exports, _render_history)
 
     sys.exit(0)

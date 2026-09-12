@@ -102,7 +102,7 @@ class TestReleaseAnnotationsPersistence:
         old_foo, new_foo = _breaking_pair("libfoo.so")
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4
         data = json.loads(out)
         [lib] = data["libraries"]
@@ -122,7 +122,7 @@ class TestReleaseAnnotationsPersistence:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 0
         data = json.loads(out)
         [lib] = data["libraries"]
@@ -163,7 +163,7 @@ class TestReleaseAnnotationsPersistence:
         )
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--format", "json"],
+            ["compare", str(old_dir), str(new_dir), "-o", "markdown=json=-"],
         )
         assert result.exit_code == 4
         assert len(calls) == 1, f"expected exactly one compare per library, got {calls}"
@@ -194,7 +194,7 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"json={write_path}",
         )
         assert code == 4
@@ -237,7 +237,7 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"json={write_path}",
         )
         assert code == 4
@@ -258,11 +258,9 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
             "-o",
-            str(same_path),
-            "--write",
+            f"json={same_path}",
+            "-o",
             f"json={same_path}",
         )
         assert code == 64
@@ -285,7 +283,7 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"sarif={write_path}",
         )
         assert code == 64
@@ -310,7 +308,7 @@ class TestReleaseWriteSecondaryOutput:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--write",
+            "-o",
             f"junit={write_path}",
         )
         assert code == 4

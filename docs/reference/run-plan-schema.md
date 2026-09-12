@@ -232,7 +232,7 @@ string is rejected as malformed input, not silently honored.
 ```bash
 abicheck project plan [CONFIG] [--build-output PROFILE=DIR ...] \
     [--project OWNER/REPO] [--head-sha SHA] [--allow-empty] \
-    [--format json|text] [-o OUTPUT]
+    [-o json=...|text] [-o OUTPUT]
 ```
 
 `CONFIG` defaults to `.abicheck.yml`. `--build-output` is repeatable — one

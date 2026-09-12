@@ -81,7 +81,7 @@ can tell an intentional export from an accidental one.
   (`__attribute__((visibility("hidden")))`) or `static`, or, if it's
   genuinely meant to be public, add it to `include/greet.h` so the audit
   stops flagging it and the contract is explicit.
-- Want machine-readable output for CI? Add `--format json` — the same
+- Want machine-readable output for CI? Add `-o json=-` — the same
   finding shows up under `crosscheck.counts_by_check.exported_not_public`.
 - Want this to also catch a *removed* export against a previous release?
   See [`compare-release`](../compare-release/README.md) — that's a

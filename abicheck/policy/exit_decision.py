@@ -79,8 +79,8 @@ landed too: the typed `dry_run_estimate.ScanResult` API persists a real
 (`abicheck.workflows.scan_abort_result.scan_abort_result_fields`, prior
 gate/coverage/assurance contributions preserved across a *late*
 `_BudgetOverflow` via `attach_prior_on_budget_overflow`), and the native
-`scan` CLI's own `--format json` invocation gets the same report shape on
-either abort via `cli_scan._emit_scan_abort_report` (`--format text` is
+`scan` CLI's own `-o json=...` invocation gets the same report shape on
+either abort via `cli_scan._emit_scan_abort_report` (`-o text=...` is
 unaffected, per that design's own account of what remained genuinely open).
 See ADR-064's own "Stage 1b, further split" section for the full account.
 The atomic `--exit-code-scheme` removal remains stage 2.

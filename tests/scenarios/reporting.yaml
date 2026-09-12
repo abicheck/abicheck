@@ -13,7 +13,7 @@ scenarios:
       GitHub Code Scanning. The tool must emit valid SARIF 2.1.0 with one result
       per finding, so breaks surface as code-scanning alerts.
     flow:
-      - abicheck compare old.json new.json --format sarif -o abi.sarif
+      - abicheck compare old.json new.json -o sarif=abi.sarif
     expected:
       exit_code: 4
       sarif: true
@@ -31,7 +31,7 @@ scenarios:
       versioned contract: it must carry report_schema_version, a top-level
       verdict, and a per-finding changes list a decision script can branch on.
     flow:
-      - abicheck compare old.json new.json --format json -o abi.json
+      - abicheck compare old.json new.json -o json=abi.json
     expected:
       exit_code: 4
       verdict: BREAKING
@@ -51,7 +51,7 @@ scenarios:
       dashboard (GitLab CI, Jenkins, Azure DevOps); each finding is a testcase
       and breaks are failures.
     flow:
-      - abicheck compare old.json new.json --format junit -o abi-junit.xml
+      - abicheck compare old.json new.json -o junit=abi-junit.xml
     expected:
       exit_code: 4
       output_contains: "<testsuites"
@@ -66,7 +66,7 @@ scenarios:
       A reviewer wants a readable, shareable report (embedded CSS, no external
       assets) attached to a release or PR.
     flow:
-      - abicheck compare old.json new.json --format html -o abi.html
+      - abicheck compare old.json new.json -o html=abi.html
     expected:
       exit_code: 4
       output_contains: "<!DOCTYPE html>"
@@ -86,7 +86,7 @@ scenarios:
       scoping could not be confirmed. This is the "presentation" layer over the
       machine-readable JSON decision contract.
     flow:
-      - "abicheck compare old.json new.json --format review >> $GITHUB_STEP_SUMMARY"
+      - "abicheck compare old.json new.json -o review=- >> $GITHUB_STEP_SUMMARY"
     expected:
       exit_code: 4
       output_contains: "ABI review"

@@ -46,7 +46,7 @@ g++ -shared -fPIC -g old/libcore.cpp -o old/libcore.so
 g++ -shared -fPIC -g old/libutil.cpp -o old/libutil.so
 g++ -shared -fPIC -g new/libcore.cpp -o new/libcore.so
 g++ -shared -fPIC -g new/libutil.cpp -o new/libutil.so
-abicheck compare old/ new/ --format markdown
+abicheck compare old/ new/ -o markdown=-
 ```
 
 ## Expected abicheck finding

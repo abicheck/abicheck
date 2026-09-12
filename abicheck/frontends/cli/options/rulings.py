@@ -361,50 +361,23 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         '`assurance: "none"` everywhere. Whether a given OLD/NEW pair '
         "happens to be incomparable varies per run, not per project."
     ),
-    "--format": _keep(
-        "Which renderer this invocation's report goes through. A per-run "
-        "presentation choice by construction -- the same project renders "
-        "markdown for a PR comment and SARIF for code scanning."
-    ),
     "--output": _keep(
-        "Where this invocation's report is written. Same per-run reasoning "
-        "as --format, whose output it holds."
-    ),
-    "--write": _keep(
-        "Emits a second output format from the same comparison run to its "
-        "own file (e.g. --write json=abi.json alongside a --format markdown "
-        "report), so a CI caller no longer has to re-invoke abicheck a "
-        "second time. One FORMAT=PATH operand rather than the "
-        "--secondary-format/--secondary-output pair it replaced. A per-run "
-        "rendering choice, not a stable project setting. Audited against "
-        "--format/-o for a merge -- the most plausible one left, since "
-        "`--write markdown=r.md` and `--format markdown -o r.md` do coincide "
-        "-- and ruled distinct: --format with no -o renders to *stdout*, "
-        "which --write cannot express at all (its grammar requires a PATH). "
-        "Collapsing them would delete the piping case, and inventing a "
-        "path-less --write value to recover it would be one flag carrying "
-        "two grammars to save one option."
-    ),
-    "--output-dir": _keep(
-        "Where the directory/package fan-out's per-library reports are "
-        "written. Audited against -o/--output for a merge and ruled "
-        "distinct: -o names one file for one report, this names a "
-        "directory receiving N. A genuine per-run output location."
-    ),
-    "--max-findings-per-library": _keep(
-        "Directory/package fan-out only: caps how many findings the "
-        "aggregate summary itemizes per library (default 10, or "
-        "$ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY). Guard 1: a per-run "
-        "report-size knob, not a stable project property -- a CI job wants "
-        "to raise it for one large release without touching .abicheck.yml, "
-        "mirroring `scan --max-findings`'s identical, already-ruled knob. "
-        "Guard 2: not a duplicate spelling of anything else -- --output-dir "
-        "already gives an *uncapped* escape hatch, this is the capped "
-        "primary summary's own budget. Guard 3: never disables analysis or "
-        "changes a verdict/exit code -- it only bounds how much of an "
-        "unchanged finding set the aggregate document displays; "
-        "findings_truncated_kinds still discloses the exact shape of what "
-        "was cut."
+        "The one export request: -o FORMAT=DESTINATION, repeatable, with "
+        "'-' for stdout. Which artifacts this invocation produces, and "
+        "where -- a per-run presentation choice by construction, since the "
+        "same project renders markdown for a PR comment and SARIF for code "
+        "scanning from the identical analysis. Plan slice 7m rewrote this "
+        "ruling when it collapsed four mechanisms into this one: --format "
+        "(the renderer), the path-only -o (one destination), --write "
+        "FORMAT=PATH (a second artifact) and --output-dir (the "
+        "per-component fan-out) were four ways to answer one question, and "
+        "are now one grammar plus two destination shapes ('-' and a "
+        "trailing '/'). Phase 7k's own reason for declining the "
+        "--write/--format merge -- that --format with no -o renders to "
+        "stdout, which --write's PATH-only grammar could not express -- is "
+        "what '-' dissolves. Guard 2 in particular is now *satisfied* "
+        "rather than argued: there is exactly one spelling for 'produce "
+        "this artifact there', so no two of them can drift."
     ),
     "--view": _keep(
         "ADR-068 D4 / Phase 5: the single 'render which parts, how' "
@@ -521,7 +494,12 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "Same ruling as `compare --config`, including its ADR-032 D5 role as the only authorization for executing a `build.query`."
     ),
     "--output": _keep(
-        "Same ruling as `compare --output`: where this invocation's artifact is written."
+        "Where this invocation's snapshot is written. Deliberately NOT "
+        "`compare --output`'s grammar: this names a *snapshot* destination, "
+        "not a report format and destination, so plan slice 7m's "
+        "FORMAT=DESTINATION export request left it alone -- `dump` produces "
+        "one artifact of one kind, and there is no 'which projection' "
+        "question here to answer."
     ),
     "--version": _keep("Same ruling as `compare --version`: labels *these* operands."),
     "--dry-run": _keep(

@@ -176,8 +176,8 @@ class TestCompareRequestGateOptions:
                 str(new),
                 "--severity-preset",
                 "info-only",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert cli_result.exit_code == 0, cli_result.output

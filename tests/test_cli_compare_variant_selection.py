@@ -318,7 +318,7 @@ class TestRemediationNamesOnlyLiveFlags:
             _write_package(old_pkg, {"liba.so": old_libs["liba.so"]})
             self._multi_variant_package(new_pkg)
 
-        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "-o", "json=-")
         assert ec == 64, out
         self._assert_advice_lands(out, "compare")
 

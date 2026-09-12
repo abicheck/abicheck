@@ -157,7 +157,7 @@ class TestCompareUsesResolvedDebugArtifacts:
         out = tmp_path / "result.json"
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_so), str(new_so), "--format", "json", "-o", str(out)],
+            ["compare", str(old_so), str(new_so), "-o", f"json={out}"],
         )
         assert result.exit_code == 0, result.output
         data = json.loads(out.read_text())
@@ -175,10 +175,15 @@ class TestCompareUsesResolvedDebugArtifacts:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_so), str(new_so),
-                "--debug-root", f"old={old_debug_root}",
-                "--debug-root", f"new={new_debug_root}",
-                "--format", "json", "-o", str(out),
+                "compare",
+                str(old_so),
+                str(new_so),
+                "--debug-root",
+                f"old={old_debug_root}",
+                "--debug-root",
+                f"new={new_debug_root}",
+                "-o",
+                f"json={out}",
             ],
         )
         assert result.exit_code == 4, result.output

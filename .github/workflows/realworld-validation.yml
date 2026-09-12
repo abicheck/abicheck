@@ -126,8 +126,7 @@ jobs:
             "inputs/debs/${runtime_deb}" \
             --devel-pkg "old=inputs/debs/${devel_deb}" \
             --devel-pkg "new=inputs/debs/${devel_deb}" \
-            --format json \
-            -o reports/realworld/zlib-deb-self.json
+            -o json=reports/realworld/zlib-deb-self.json
           python - <<'PY'
           import json
           data = json.load(open("reports/realworld/zlib-deb-self.json"))
@@ -165,8 +164,7 @@ jobs:
             --devel-pkg "old=inputs/debs/${devel_deb}" \
             --devel-pkg "new=inputs/debs/${devel_deb}" \
             --contract public \
-            --format json \
-            -o reports/realworld/zlib-deb-self-contract.json
+            -o json=reports/realworld/zlib-deb-self-contract.json
           python - <<'PY'
           import json
           data = json.load(open("reports/realworld/zlib-deb-self-contract.json"))

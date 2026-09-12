@@ -61,6 +61,7 @@ MOVED: dict[str, str] = {
     "_validate_show_only": "abicheck.frontends.cli.runtime",
     "_warn_all_suppressed": "abicheck.frontends.cli.runtime",
     "_write_or_echo": "abicheck.frontends.cli.runtime",
+    "emit_export_set": "abicheck.frontends.cli.runtime",
     # `dump` command input translation.
     "_load_dump_manifest_or_reject": "abicheck.frontends.cli.commands.dump",
     "_resolve_and_check_dump_debug_format": "abicheck.frontends.cli.commands.dump",

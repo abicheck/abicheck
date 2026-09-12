@@ -1094,8 +1094,11 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
         write_path = tmp_path / "sec.json"
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--write", f"json={write_path}",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            f"json={write_path}",
         )
         assert code == 0
         assert write_path.is_file()
@@ -1127,7 +1130,7 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         code, out, _ = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-"
         )
 
         assert code == 0
@@ -1154,8 +1157,13 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
 
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
-            "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -1384,10 +1392,10 @@ class TestReleaseFanoutParity:
         _write_snap(new_dir / "libbar.json", _snap())
 
         rel = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "-o", "markdown=json=-"]
         )
         cmp = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "-o", "markdown=json=-"]
         )
         assert rel.exit_code == cmp.exit_code == 4
         assert json.loads(rel.output) == json.loads(cmp.output)
@@ -1402,8 +1410,13 @@ class TestReleaseFanoutParity:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
         code, _, _ = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--output-dir", str(out_dir), "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "-o",
+            f"json={out_dir}/",
         )
         assert code == 4
         # Per-library reports were written under --output-dir (two-level output).

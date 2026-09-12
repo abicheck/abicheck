@@ -1335,10 +1335,10 @@ jobs:
           # step above), not as CLI flags here.
           set +e
           abicheck aggregate reports --run-plan run-plan.json \
-            --format json -o aggregate-result.json
+            -o json=aggregate-result.json
           code=$?
           abicheck aggregate reports --run-plan run-plan.json \
-            --format text
+            -o text=-
           echo "exit-code=$code" >> "$GITHUB_OUTPUT"
           exit $code
 

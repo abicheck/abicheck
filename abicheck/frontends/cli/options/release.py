@@ -174,25 +174,16 @@ def release_options(func: F) -> F:
         "'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info "
         "new=b-dbg.rpm). Directory/package inputs only (ADR-040).",
     )(func)
-    func = click.option(
-        "--max-findings-per-library",
-        "max_findings_per_library",
-        type=click.IntRange(min=1),
-        default=None,
-        help="Directory/package inputs only: cap on findings embedded in "
-        "each library's findings/findings_view lists in the release "
-        "summary (default 10, or $ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY "
-        "when set) -- mirrors `scan --max-findings`. Raising it never "
-        "changes the verdict/exit code -- only how much of each library's "
-        "diff the aggregate release summary itemizes; --output-dir remains "
-        "the way to see every library's full, unfiltered report "
-        "unconditionally. When truncated, "
-        "findings_truncated_kinds/findings_view_truncated_kinds still "
-        "report a kind -> count breakdown of what was cut. A genuine "
-        "per-run report-size knob (D5 guard 2: it disables no analysis, it "
-        "only bounds how much of an unchanged finding set one document "
-        "itemizes), unlike this group's config-only topology flags above.",
-    )(func)
+    # Plan slice 7m: ``--max-findings-per-library`` retired here. It was
+    # never a decision worth making -- its own help text told the reader to
+    # use ``--output-dir`` for the complete report -- so the cap is now a
+    # *consequence* of which export was asked for: a machine export
+    # (json/sarif/junit) is never truncated at all, and a human summary stays
+    # bounded at ``report.release_display_limits.
+    # MAX_RELEASE_FINDINGS_PER_LIBRARY`` with the same
+    # ``findings_truncated_kinds`` disclosure. The uncapped per-library
+    # artifacts the flag pointed at are still one export away
+    # (``-o json=reports/``).
     # one-comparison-product.md Phase 7: ``--support-promise`` is gone from
     # `compare`'s CLI. ADR-065 D1/D6 (and the flag's own help text) called it
     # "a contract-policy field" -- a project's declared support promise is

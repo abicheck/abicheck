@@ -59,7 +59,7 @@ SCENARIO_BREAKING = {
 
 class TestShim:
     def test_declared_outputs_cover_every_spelling(self):
-        argv = ["compare", "a", "b", "-o", "r.json", "--output-dir=out"]
+        argv = ["compare", "a", "b", "-o", "markdown=markdown=r.json", "--output-dir=out"]
         assert shim._declared_outputs(argv) == ["r.json", "out"]
 
     def test_an_attached_short_option_value_is_recognized(self):
@@ -74,11 +74,11 @@ class TestShim:
 
     def test_a_long_option_is_not_split_as_an_attached_value(self):
         """`--output-dir` must not be read as `-o` plus `utput-dir`."""
-        assert shim._declared_outputs(["compare", "--output-dir", "out"]) == ["out"]
+        assert shim._declared_outputs(["compare", "-o", "markdown=json=out/"]) == ["out"]
 
     def test_write_declares_the_path_half_of_its_operand(self):
         """``--write`` is ``FORMAT=PATH``: only the second half is a path."""
-        assert shim._declared_outputs(["compare", "--write", "json=r.json"]) == [
+        assert shim._declared_outputs(["compare", "-o", "markdown=json=r.json"]) == [
             "r.json"
         ]
         assert shim._declared_outputs(["compare", "--write=json=r.json"]) == ["r.json"]
@@ -95,9 +95,7 @@ class TestShim:
         argv = [
             "compare",
             "-o",
-            "human/report.json",
-            "--write",
-            "json=machine/report.json",
+            "markdown=json=machine/report.json",
         ]
         snaps = shim._snapshot_outputs(argv, cwd, dest, tmp_path / "run")
         paths = [s["path"] for s in snaps]
@@ -112,7 +110,7 @@ class TestShim:
         run = tmp_path / "run"
         dest = run / "captured" / "0.outputs"
         dest.mkdir(parents=True)
-        snaps = shim._snapshot_outputs(["compare", "-o", "r.json"], cwd, dest, run)
+        snaps = shim._snapshot_outputs(["compare", "-o", "markdown=markdown=r.json"], cwd, dest, run)
         assert (run / snaps[0]["path"]).is_file()
 
     def test_a_missing_output_is_recorded_as_absent(self, tmp_path):
@@ -120,7 +118,7 @@ class TestShim:
         dest = run / "captured" / "0.outputs"
         dest.mkdir(parents=True)
         snaps = shim._snapshot_outputs(
-            ["compare", "-o", "nope.json"], tmp_path, dest, run
+            ["compare", "-o", "markdown=markdown=nope.json"], tmp_path, dest, run
         )
         assert snaps == [{"requested": "nope.json", "status": "absent"}]
 
@@ -754,7 +752,7 @@ class TestShimShortOptionClusters:
 
     def test_a_following_option_is_not_recorded_as_a_path(self):
         """`-o --format json` otherwise put a phantom `--format` in the record."""
-        assert shim._declared_outputs(["compare", "a", "b", "-o", "--format"]) == []
+        assert shim._declared_outputs(["compare", "a", "b", "-o", "markdown=markdown=--format"]) == []
 
 
 class TestInterposerSpellings:

@@ -1100,8 +1100,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1138,8 +1138,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         assert result.exit_code == 4  # BREAKING
@@ -1176,8 +1176,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         assert result.exit_code == 0
@@ -1205,10 +1205,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
                 "-o",
-                str(out_path),
+                f"junit={out_path}",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1256,12 +1254,10 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                f"junit={out_path}",
                 "--suppress",
                 str(supp_path),
-                "-o",
-                str(out_path),
             ],
         )
         # With suppression, verdict may be NO_CHANGE or COMPATIBLE
@@ -1296,8 +1292,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         assert result.exit_code == 4  # BREAKING
@@ -1334,8 +1330,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         root = xml_fromstring(result.output)
@@ -1370,8 +1366,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
                 "--policy",
                 "sdk_vendor",
             ],
@@ -1408,8 +1404,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
                 "--view",
                 "show=breaking",
             ],
@@ -1435,8 +1431,8 @@ class TestJUnitCLICompare:
                 "compare",
                 "/nonexistent/old.json",
                 "/nonexistent/new.json",
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         # Should fail on missing file, NOT on unrecognized format
@@ -1479,8 +1475,8 @@ class TestJUnitCLICompare:
                 "compare",
                 str(tmp_path / "old.json"),
                 str(tmp_path / "new.json"),
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
             ],
         )
         # Must parse as valid XML regardless of exit code

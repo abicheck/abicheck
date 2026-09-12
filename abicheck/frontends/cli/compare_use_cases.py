@@ -43,7 +43,7 @@ def reject_use_cases_without_carrying_output(
     rejected for set inputs to avoid -- sarif/junit/html never read
     ``DiffResult.use_case_impact``, and the one-line format (``--format
     oneline``) has no room for it either. Asked across *every* rendered
-    output, primary or any ``--write`` (repeatable per ADR-068 D4/Phase 5 --
+    output, primary or any ``-o`` (repeatable per ADR-068 D4/Phase 5 --
     "one output carrying it" is satisfied by the primary render OR any
     secondary write); only when none does is the manifest genuinely resolved
     for nothing (Codex review).
@@ -60,7 +60,7 @@ def reject_use_cases_without_carrying_output(
     detail = (
         f"no output this run renders ({rendered}) carries use-case "
         "attribution, so the manifest would be resolved and its result "
-        "dropped. Use --format json/markdown/review, or add --write "
+        "dropped. Use -o json=.../markdown/review, or add --write "
         "json=PATH to get one output that carries it alongside the "
         f"{fmt} report."
     )

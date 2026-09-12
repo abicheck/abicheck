@@ -783,7 +783,7 @@ def render_dump_dry_run(
     ``-MD``-depfile digest that only exists once a real L2 extraction
     actually runs. Text-only, like every other dry-run (ADR-043 D9,
     ``--format`` is inert against ``--dry-run`` everywhere, not just here) —
-    the former standalone command's ``--format json``/``-o`` machine-readable
+    the former standalone command's ``-o json=...``/``-o`` machine-readable
     output has no CLI replacement; see ADR-054's D4 for the accepted
     trade-off and the equivalent two-line Python snippet (calling
     ``dump_manifest.load_manifest`` + ``comparability.compute_extraction_contract``

@@ -1481,8 +1481,8 @@ class TestRunPlanGenerateCli:
                 str(config),
                 "--build-output",
                 f"linux={build_dir}",
-                "--format",
-                "text",
+                "-o",
+                "markdown=text=-",
             ],
         )
         assert result.exit_code == 0

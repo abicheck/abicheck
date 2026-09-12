@@ -62,7 +62,7 @@ ACCEPT_UNRESOLVED = "warn"
 #: Both halves are reachable from `compare` and `scan --against`, which have
 #: `--format` and `--pack`.
 CLI_MITIGATION = (
-    "Use --format json for the full contract_coverage_failures ledger, "
+    "Use -o json=... for the full contract_coverage_failures ledger, "
     "or set contract.unresolved=warn to accept incomplete coverage."
 )
 
@@ -113,7 +113,7 @@ def coverage_failure_diagnostic(
 ) -> str | None:
     """Why this run's exit code was affected by coverage, or ``None``.
 
-    Only ``--format json`` carries ``contract_coverage_failures``; markdown,
+    Only ``-o json=...`` carries ``contract_coverage_failures``; markdown,
     review, html, sarif, and junit do not. Without this, a compatible
     comparison under a domain that cannot close prints "safe to merge" and
     exits 1 with nothing anywhere saying why (Codex review).
@@ -210,7 +210,7 @@ def _coverage_message(
 #: notice would be a second copy of what the report states -- but only when
 #: the *full* report is rendered. The ``"oneline"`` fmt (CLI cleanup
 #: phase two, PR 1 -- see ``service_render.ONELINE_FORMAT``; ``--stat``'s
-#: sole surviving use, reachable directly via ``--format oneline``) is a
+#: sole surviving use, reachable directly via ``-o oneline=...``) is a
 #: summary that omits both ledger keys, so a run rendering it is ledgerless
 #: whatever else it also renders (Codex review, originally about ``--stat``'s
 #: `to_stat_json`, same reasoning now applies to `to_stat`).
@@ -228,13 +228,13 @@ def report_carries_the_ledger(
     """Does *every* output this invocation renders already state the ledger?
 
     The condition for staying quiet, and it has to hold for all of them:
-    `--format json --write markdown=abi.md` writes a second report that
+    `-o json=... -o markdown=abi.md` writes a second report that
     carries none of the ledger, so answering from the primary alone let the
     markdown say the change is safe while the process exited 1 (Codex
     review). Getting this wrong in the permissive direction is exactly what
     makes a run fail with no explanation anywhere. ``secondary_fmts`` (ADR-068
-    D4/Phase 5: ``--write`` is repeatable now) covers every secondary
-    artifact, not just one -- one non-ledger-bearing ``--write`` among
+    D4/Phase 5: ``-o`` is repeatable now) covers every secondary
+    artifact, not just one -- one non-ledger-bearing ``-o`` among
     several is exactly the same gap a single one used to be.
 
     The internal one-line format is the same problem one level in: it is a

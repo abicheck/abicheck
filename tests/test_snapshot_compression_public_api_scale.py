@@ -311,7 +311,7 @@ def test_compare_cli_diffs_compressed_snapshots_at_production_scale(tmp_path, su
     save_snapshot(new_snap, new_p)
 
     result = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "--format", "json"]
+        main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"]
     )
     assert result.exit_code in (0, 2, 4), result.output
     payload = json.loads(result.stdout)

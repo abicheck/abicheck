@@ -34,7 +34,7 @@ binary itself — the one users actually have. A distro package, a release
 asset, or a previously published snapshot all work:
 
 ```bash
-abicheck compare released/libfoo.so build/libfoo.so --depth headers --format json
+abicheck compare released/libfoo.so build/libfoo.so --depth headers -o json=-
 ```
 
 ## From a stored snapshot
@@ -49,7 +49,7 @@ abicheck dump build/libfoo.so \
 
 # later — the baseline carries its own header evidence, so scope the live side
 abicheck compare baseline.abi.json build/libfoo.so \
-  --header new=include/foo/api.h --depth headers --format json
+  --header new=include/foo/api.h --depth headers -o json=-
 ```
 
 `dump` hard-fails an explicit `--depth headers` that header evidence never
@@ -72,7 +72,7 @@ abicheck compare OLD NEW \
   --header new=include/foo/api.h \
   --include old=../old-side/include/ \
   --include new=include/ \
-  --depth headers --format json
+  --depth headers -o json=-
 ```
 
 **Scope each side to its own headers — and to its own include path.** A bare

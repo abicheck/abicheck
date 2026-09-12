@@ -375,8 +375,8 @@ class TestReleaseSelectionCli:
             str(new_dir),
             "--select",
             "libfoo.json",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert code == 0
         data = json.loads(out)
@@ -402,8 +402,8 @@ class TestReleaseSelectionCli:
             "libmissing.json",
             "--config",
             str(cfg),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert code == 1
         data = json.loads(out)

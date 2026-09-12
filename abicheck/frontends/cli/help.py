@@ -91,7 +91,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Output & reporting",
             "options": [
                 "--output",
-                "--format",
                 "--view",
                 "--config",
                 "--verbose",
@@ -153,8 +152,11 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             # extracted/--no-bundle-analysis are gone too, with no config
             # replacement (ADR-068 D5 -- neither survives its three guards).
             "name": "Release (directory/package inputs)",
+            # Plan slice 7m: --output-dir is gone from this panel -- the
+            # per-component fan-out is a destination shape inside --output's
+            # own export request (`-o json=reports/`), so it is documented
+            # where every other export is.
             "options": [
-                "--output-dir",
                 "--debug-info",
                 "--devel-pkg",
                 "--instantiation-manifest",

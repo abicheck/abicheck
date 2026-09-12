@@ -674,7 +674,7 @@ def no_baseline_markdown_report(result: NoBaselineCompareResult) -> str:
 
 
 def render_no_baseline_oneline(doc: NoBaselineDocument) -> str:
-    """The one-sentence ``--format oneline`` projection of *doc*."""
+    """The one-sentence ``-o oneline=...`` projection of *doc*."""
     count = len(doc.findings)
     noun = "finding" if count == 1 else "findings"
     # A suppressed finding is named even in the one-line view: "0 findings"

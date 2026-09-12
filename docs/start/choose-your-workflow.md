@@ -135,7 +135,7 @@ build, but they change *what you run* or *how you read the result*:
 
 ## 4) Which report?
 
-`--format markdown` (default) for PR/terminal review, `html` for a standalone
+`-o markdown=...` (default) for PR/terminal review, `html` for a standalone
 shareable report, `json` for CI logic/agents, `sarif` for GitHub Code
 Scanning, `junit` for CI test dashboards. Full reference, including the
 narrower bundle/package-compare format set:

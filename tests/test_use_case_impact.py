@@ -367,8 +367,13 @@ class TestStatKeepsItsSummaryOnlyShape:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--format", "oneline", "--use-cases", str(manifest),
+                "compare",
+                str(old),
+                str(new),
+                "-o",
+                "markdown=oneline=-",
+                "--use-cases",
+                str(manifest),
             ],
         )
         assert result.exit_code == 64, result.output
@@ -386,9 +391,15 @@ class TestStatKeepsItsSummaryOnlyShape:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--format", "oneline", "--use-cases", str(manifest),
-                "--write", f"sarif={tmp_path / 'r.sarif'}",
+                "compare",
+                str(old),
+                str(new),
+                "-o",
+                "oneline=-",
+                "-o",
+                f"sarif={tmp_path / 'r.sarif'}",
+                "--use-cases",
+                str(manifest),
             ],
         )
         assert result.exit_code == 64, result.output
@@ -449,8 +460,15 @@ class TestStatKeepsItsSummaryOnlyShape:
         manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "--use-cases", str(manifest),
-             "--format", fmt],
+            [
+            "compare",
+            str(old),
+            str(new),
+            "--use-cases",
+            str(manifest),
+            "-o",
+            f"{fmt}=-",
+        ],
         )
         assert "--use-cases is not supported" not in result.output, result.output
 
@@ -460,7 +478,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         # The rejection must not have narrowed the one-line format itself.
         old, new = self._pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--format", "oneline"]
+            main, ["compare", str(old), str(new), "-o", "markdown=oneline=-"]
         )
         assert result.exit_code == 4, result.output
         assert "use_case_impact" not in result.output

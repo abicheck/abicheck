@@ -83,8 +83,13 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
         config_path.write_text("debug:\n  pdb_path: C:/symbols/foo.pdb\n")
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path),
-            "--config", str(config_path), "--format", "json",
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--config",
+            str(config_path),
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -107,8 +112,13 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
         config_path.write_text("debug:\n  pdb_path: C:/symbols/foo.pdb\n")
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path),
-            "--config", str(config_path), "--format", "json",
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--config",
+            str(config_path),
+            "-o",
+            "json=-",
         )
 
         # Never the pdb_path usage error; the run may still fail for
@@ -124,7 +134,7 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
         _write_snapshot(new_path, "foo")
 
         code, _out = _invoke(
-            "compare", str(old_path), str(new_path), "--format", "json",
+            "compare", str(old_path), str(new_path), "-o", "json=-",
         )
 
         assert code == 4
@@ -142,8 +152,13 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
         config_path.write_text("debug:\n  pdb_path: C:/symbols/foo.pdb\n")
 
         code, out = _invoke(
-            "compare", str(old_path), str(new_path),
-            "--config", str(config_path), "--format", "json",
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--config",
+            str(config_path),
+            "-o",
+            "json=-",
         )
 
         assert not (code == 64 and "debug.pdb_path" in out), out
@@ -173,8 +188,13 @@ class TestDebugPdbPathRejectedForReleaseFanOut:
         config_path.write_text("debug:\n  pdb_path: C:/symbols/foo.pdb\n")
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--config", str(config_path), "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(config_path),
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -194,7 +214,7 @@ class TestDebugPdbPathRejectedForReleaseFanOut:
         _write_fake_pe(new_dir / "widget.dll")
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-",
         )
 
         assert not (code == 64 and "debug.pdb_path" in out), out

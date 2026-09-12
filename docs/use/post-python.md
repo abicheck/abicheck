@@ -76,7 +76,7 @@ abicheck compare libmylib.v1.so libmylib.v2.so --post-manifest manifest.json
   breaks clients regardless of the export set.
 
 See exactly what was demoted with `--view filtered` (text) or under the
-`surface_scope` key (`--format json`):
+`surface_scope` key (`-o json=...`):
 
 ```bash
 abicheck compare libmylib.v1.so libmylib.v2.so \

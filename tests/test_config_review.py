@@ -92,7 +92,7 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "markdown"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=markdown=-"],
         )
         # markdown requests demangling by default -> stub rewrites the symbol.
         assert "foo()" in result.output
@@ -102,7 +102,7 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"],
         )
         assert "_Z3foov" in result.output
 
@@ -110,7 +110,7 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "sarif"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=sarif=-"],
         )
         assert "_Z3foov" in result.output
 
@@ -124,7 +124,7 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "html"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=html=-"],
         )
         assert "foo()" in result.output
         assert '<abbr title="_Z3foov">foo()</abbr>' in result.output
@@ -138,8 +138,8 @@ class TestDemangleTriState:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--format",
-                "markdown",
+                "-o",
+                "markdown=markdown=-",
                 "--view",
                 "no-demangle",
             ],
@@ -153,7 +153,7 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json", "--view", "demangle"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=json=-", "--view", "demangle"],
         )
         assert "_Z3foov" in result.output
         assert "foo()" not in result.output
@@ -499,8 +499,8 @@ class TestScopedExitRespectsSeverity:
                     "never_existed",
                     "--severity-preset",
                     "default",
-                    "--format",
-                    "json",
+                    "-o",
+                    "markdown=json=-",
                 ],
             )
             .stdout
@@ -583,8 +583,8 @@ class TestScopedExitRespectsSeverity:
                 str(new_p),
                 "--required-symbol",
                 "_Z10kept_entryv",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
                 "--severity-preset",
                 "default",
             ],

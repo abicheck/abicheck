@@ -26,7 +26,7 @@ without trimming anything to fit.
 The rule the tables encode is an inversion of Click's default: an option
 this path cannot honour is a **usage error** (exit 64), never a silent
 no-op. A dropped flag is how a CI job comes to believe a `--contract`, a
-`--write`, or a `--variant` took effect when nothing read it, and every
+`-o`, or a `--variant` took effect when nothing read it, and every
 entry below exists because some option did exactly that.
 
 ``tests/test_compare_no_baseline_options.py`` holds the exhaustiveness
@@ -198,7 +198,7 @@ def _old_sided_message(spelling: str) -> str:
 #:
 #: This table exists because "accepted but never read" is the single defect
 #: this whole module has now produced four separate times -- ``--contract``,
-#: ``--sources``/``--build-info``/``--depth``/``--dry-run``, ``--write``,
+#: ``--sources``/``--build-info``/``--depth``/``--dry-run``, ``-o``,
 #: and ``--include-system-declarations`` (see ``docs/contribute/known-gaps.md``).
 #: Each was found by reading the code, never by a failing test, because a
 #: dropped option produces no output at all. Fixing them one at a time
@@ -276,15 +276,9 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "member selection applies to a directory/package operand",
     ),
     "output_dir": (
-        "--output-dir",
-        "per-library output applies to the release fan-out; use -o/--output "
-        "or --write for a single artifact",
-    ),
-    "max_findings_per_library": (
-        "--max-findings-per-library",
-        "the per-library findings cap applies to the release fan-out's "
-        "aggregate summary; a single-artifact audit has only one library "
-        "and no such summary to cap",
+        "-o <format>=<directory>/",
+        "a per-component export applies to the release fan-out; name a file "
+        "(or '-') for a single artifact",
     ),
     # -- applicable, simply not wired yet ---------------------------------
     "abi3": (

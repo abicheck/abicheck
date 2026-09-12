@@ -63,11 +63,11 @@ first is a positive determination, the second is evidence running out. See
 The one-line summary carries the counts inline:
 
 ```console
-$ abicheck compare old.so new.so --suppress suppressions.yaml --format oneline
+$ abicheck compare old.so new.so --suppress suppressions.yaml -o oneline=-
 NO_CHANGE: no changes (0 total) [audit: 100 detected, 0 gating, 100 suppressed]
 ```
 
-The JSON report (`--format json`) carries a `disposition_audit` block with
+The JSON report (`-o json=...`) carries a `disposition_audit` block with
 the same counts plus the rules that produced
 them; the review digest renders it as a table; the sticky PR comment carries a
 counts row and rule attribution; SARIF, JUnit and HTML each carry the counts in

@@ -145,8 +145,8 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -184,8 +184,8 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -286,7 +286,7 @@ class TestEndToEndJsonReport:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"],
         )
         assert result.exit_code == 4, result.output
         payload = json.loads(result.output)
@@ -315,8 +315,8 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert legacy.exit_code == 4, legacy.output
@@ -346,8 +346,8 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
                 "--config",
                 str(cfg),
             ],
@@ -380,8 +380,8 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
                 "--severity-preset",
                 "strict",
             ],
@@ -407,8 +407,8 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "exports",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         ctx = json.loads(typed.output)["contract_context"]["evaluation_context"]
@@ -432,13 +432,11 @@ class TestEndToEndJsonReport:
                 "compare",
                 str(old_p),
                 str(new_p),
-                # --contract auto asks for a decision without naming a domain,
-                # so the legacy alias below is what actually selects one.
                 "--contract",
                 "auto",
                 "--scope-public-headers",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
@@ -493,11 +491,12 @@ class TestShowFilteredAuditLedger:
                 str(old_p),
                 str(new_p),
                 "--scope-public-headers",
-                "--view", "filtered",
+                "--view",
+                "filtered",
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert "Filtered as non-public ABI surface" in result.output
@@ -537,9 +536,10 @@ class TestShowFilteredAuditLedger:
                 str(old_p),
                 str(new_p),
                 "--scope-public-headers",
-                "--view", "filtered",
-                "--format",
-                "json",
+                "--view",
+                "filtered",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert "InternalCache" in result.output
@@ -574,10 +574,10 @@ class TestReleaseFanOutContractParity:
                 str(new_dir),
                 "--contract",
                 "public",
-                "--format",
-                "json",
-                "--output-dir",
-                str(out_dir),
+                "-o",
+                "json=-",
+                "-o",
+                f"json={out_dir}/",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -610,10 +610,10 @@ class TestReleaseFanOutContractParity:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--format",
-                "json",
-                "--output-dir",
-                str(out_dir),
+                "-o",
+                "json=-",
+                "-o",
+                f"json={out_dir}/",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -649,10 +649,10 @@ class TestReleaseFanOutContractParity:
                 str(new_dir),
                 "--contract",
                 "public",
-                "--format",
-                "json",
-                "--output-dir",
-                str(out_dir),
+                "-o",
+                "json=-",
+                "-o",
+                f"json={out_dir}/",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -701,8 +701,8 @@ class TestReleaseFanOutContractParity:
                 str(new_dir),
                 "--pack",
                 str(pack_path),
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -803,8 +803,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(app),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -844,8 +844,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -895,8 +895,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(app),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -965,8 +965,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(app),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 1, result.output

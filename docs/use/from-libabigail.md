@@ -79,7 +79,7 @@ the severity-aware scheme).
 | `--debug-info-dir1 DIR` / `--d1` | `--debug-root old=DIR` | Sidecar/split debug trees |
 | `--debug-info-dir2 DIR` / `--d2` | `--debug-root new=DIR` | `--debug-root DIR` applies to both sides |
 | *(no equivalent)* | `.abicheck.yml` `debug.debuginfod: true` | Fetch debug info from a debuginfod server |
-| `--stat` | `--format oneline` | One-line summary instead of the full report; purely a rendering choice — pair with whatever `--depth` you already use, since `--format` never changes coverage/findings |
+| `--stat` | `-o oneline=-` | One-line summary instead of the full report; purely a rendering choice — pair with whatever `--depth` you already use, since the export format never changes coverage/findings |
 | `--leaf-changes-only` / `-l` | `--view leaf` | Root-type-grouped leaf view |
 | `--impacted-interfaces` | `--view impact` | Impact summary appended to the report |
 | `--no-added-syms` | `--view show=removed,changed` | Display-only filter; verdict and exit code unchanged |
@@ -89,7 +89,7 @@ the severity-aware scheme).
 | `--verbose` | `-v` / `--verbose` | |
 
 Output formats: where `abidiff` emits its text report, `abicheck compare`
-defaults to Markdown and adds `--format json|sarif|html|junit` — see
+defaults to Markdown and adds `-o json=...|sarif|html|junit` — see
 [Output Formats](output-formats.md).
 
 ## Snapshot workflow: `abidw` → `abicheck dump`

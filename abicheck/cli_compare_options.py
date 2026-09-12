@@ -87,7 +87,7 @@ def _reject_set_input_flags(
 
     ``--pack`` is not one of these -- its own, separate resolution (CLI
     cleanup phase two, "PR B" slice 1) decides what to accept or reject.
-    ``--write`` (``secondary_fmt``/``secondary_output``) is not one of these
+    ``-o`` (``secondary_fmt``/``secondary_output``) is not one of these
     either, as of CLI cleanup phase two, PR E: the release engine now
     supports it directly (``compare_release_cmd``'s own
     ``secondary_output_options``/``reject_incoherent_secondary_output``
@@ -336,7 +336,7 @@ def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> N
     baseline artifact, and a single-pair compare has no library map to
     build one from -- silently accepting it would report success while
     leaving automation believing a baseline was written when none was,
-    unlike ``--dso-only``/``--output-dir``, which are merely
+    unlike ``--dso-only``/a per-component export, which are merely
     inert conveniences here.
     """
     if bundle_facts_out is not None:
@@ -373,7 +373,7 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     per-format default.
 
     Shared by the primary render (:func:`_normalize_compare_options`) and
-    the ``--write`` render in :func:`run_compare`, each resolved
+    the ``-o`` render in :func:`run_compare`, each resolved
     against its own format — a machine primary format paired with a text
     secondary format (or vice versa) must not inherit the other's default.
     """

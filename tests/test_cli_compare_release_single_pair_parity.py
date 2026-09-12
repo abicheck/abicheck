@@ -206,7 +206,7 @@ class TestReleaseSummaryEffectiveConfigNeverDivergesFromSinglePair:
         new_path = _write_snap(new_dir / "libfoo.json", new_snap)
 
         _, baseline_out = _invoke(
-            "compare", str(old_path), str(new_path), "--format", "json"
+            "compare", str(old_path), str(new_path), "-o", "json=-"
         )
         baseline_fields = json.loads(baseline_out)["effective_config_fields"]
 

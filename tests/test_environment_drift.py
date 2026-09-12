@@ -853,8 +853,13 @@ class TestPlatformBaselineFloorCliEndToEnd:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--config", str(cfg_p), "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--config",
+                str(cfg_p),
+                "-o",
+                "markdown=json=-",
             ],
         )
         # promote_baseline_violation_findings promotes this finding to
@@ -876,8 +881,13 @@ class TestPlatformBaselineFloorCliEndToEnd:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--config", str(cfg_p), "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--config",
+                str(cfg_p),
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert result.exit_code == 0, result.output

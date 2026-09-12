@@ -202,7 +202,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(new_dir / "libfoo.json", new_snap)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json"
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
         )
         assert code == 4, out
         data = json.loads(out)

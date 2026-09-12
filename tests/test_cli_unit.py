@@ -80,7 +80,7 @@ class TestCompareMarkdown:
         old_p, new_p = _write_snapshots(tmp_path)
         out = tmp_path / "report.md"
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", str(out)])
+        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", f"markdown={out}"])
         assert result.exit_code == 0
         assert out.exists()
         assert "Report written to" in result.output
@@ -92,7 +92,7 @@ class TestCompareJson:
     def test_json_output(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "--format", "json"])
+        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"])
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert "verdict" in parsed
@@ -106,7 +106,11 @@ class TestCompareSarif:
         out = tmp_path / "results.sarif"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "sarif", "-o", str(out),
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            f"sarif={out}",
         ])
         assert result.exit_code == 4
         content = json.loads(out.read_text(encoding="utf-8"))
@@ -120,8 +124,13 @@ class TestCompareSarif:
         out = tmp_path / "results.sarif"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "sarif",
-            "--view", "root-cause", "-o", str(out),
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            f"sarif={out}",
+            "--view",
+            "root-cause",
         ])
         assert result.exit_code == 4
         content = json.loads(out.read_text(encoding="utf-8"))
@@ -140,7 +149,11 @@ class TestCompareHtml:
         out = tmp_path / "report.html"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "html", "-o", str(out),
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            f"html={out}",
         ])
         assert result.exit_code == 0
         assert out.exists()
@@ -150,7 +163,11 @@ class TestCompareHtml:
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "html",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            "markdown=html=-",
         ])
         assert result.exit_code == 0
         assert "<html" in result.output.lower()
@@ -262,8 +279,13 @@ class TestCompareWrite:
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--write", f"json={secondary_out}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            "markdown=-",
+            "-o",
+            f"json={secondary_out}",
         ])
         assert result.exit_code == 4
         assert "# ABI Report" in result.output
@@ -277,9 +299,15 @@ class TestCompareWrite:
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--view", "show=added",
-            "--write", f"json={secondary_out}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            "markdown=-",
+            "-o",
+            f"json={secondary_out}",
+            "--view",
+            "show=added",
         ])
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
@@ -294,9 +322,15 @@ class TestCompareWrite:
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--view", "leaf",
-            "--write", f"json={secondary_out}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            "markdown=-",
+            "-o",
+            f"json={secondary_out}",
+            "--view",
+            "leaf",
         ])
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
@@ -313,8 +347,13 @@ class TestCompareWrite:
         secondary_out = tmp_path / "secondary.md"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "json",
-            "--write", f"markdown={secondary_out}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            "json=-",
+            "-o",
+            f"markdown={secondary_out}",
         ])
         assert result.exit_code == 4
         secondary_text = secondary_out.read_text(encoding="utf-8")
@@ -356,9 +395,13 @@ class TestCompareWrite:
             secondary_out = tmp_path / "secondary.sarif"
             runner = CliRunner()
             result = runner.invoke(main, [
-                "compare", str(old_p), str(new_p),
-                "--format", "json", "--output", str(primary_out),
-                "--write", f"sarif={secondary_out}",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"json={primary_out}",
+                "-o",
+                f"sarif={secondary_out}",
             ])
         finally:
             for mod, name, orig_fn in originals:
@@ -387,8 +430,11 @@ class TestCompareWrite:
         runner = CliRunner()
         for operand in ("json", "=out.json", "json="):
             result = runner.invoke(main, [
-                "compare", str(old_p), str(new_p), "--format", "markdown",
-                "--write", operand,
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"markdown={operand}",
             ])
             assert result.exit_code == 64, operand
             assert "FORMAT=PATH" in result.output, operand
@@ -409,8 +455,13 @@ class TestCompareWrite:
         destination.mkdir()
         primary = tmp_path / "primary.md"
         result = CliRunner().invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "markdown",
-            "-o", str(primary), "--write", f"json={destination}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            f"markdown={primary}",
+            "-o",
+            f"json={destination}",
         ])
         assert result.exit_code == 64, result.output
         assert "is a directory" in result.output
@@ -419,7 +470,11 @@ class TestCompareWrite:
     def test_write_rejects_an_unrenderable_format(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         result = CliRunner().invoke(main, [
-            "compare", str(old_p), str(new_p), "--write", "text=out.txt",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            "markdown=text=out.txt",
         ])
         assert result.exit_code == 64
         assert "not a renderable format here" in result.output
@@ -431,9 +486,13 @@ class TestCompareWrite:
         same_path = tmp_path / "report"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--format", "markdown",
-            "-o", str(same_path),
-            "--write", f"json={same_path}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "-o",
+            f"markdown={same_path}",
+            "-o",
+            f"json={same_path}",
         ])
         assert result.exit_code == 64
         assert "--write's PATH must differ from --output/-o" in result.output
@@ -447,8 +506,12 @@ class TestCompareWrite:
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--dry-run",
-            "--write", f"json={secondary_out}",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--dry-run",
+            "-o",
+            f"json={secondary_out}",
         ])
         assert result.exit_code == 64
         assert "--dry-run cannot be combined with --write" in result.output

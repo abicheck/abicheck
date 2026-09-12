@@ -69,7 +69,7 @@ def test_every_supported_format_renders_through_the_cli(
     Asserted structurally per format rather than by "exit code is 0": a
     command that printed nothing at all would pass the weaker check.
     """
-    result = invoke_cli("compare", "--no-baseline", str(candidate), "--format", fmt)
+    result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", f"{fmt}=-")
     assert result.exit_code == 0, result.output
     if fmt in ("json", "sarif"):
         payload = json.loads(result.stdout)
@@ -92,7 +92,7 @@ def test_an_unsupported_format_is_a_usage_error_that_names_the_ruling(
     ruling on these rather than promising a later phase is that the user is
     told why, and pointed somewhere that works.
     """
-    result = invoke_cli("compare", "--no-baseline", str(candidate), "--format", fmt)
+    result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", f"{fmt}=-")
     assert result.exit_code == _EXIT_USAGE, result.output
     assert f"--format {fmt}" in result.output
     assert "compatibility comparison" in result.output
@@ -107,7 +107,7 @@ def test_an_unsupported_write_format_names_write_not_format(
         "compare",
         "--no-baseline",
         str(candidate),
-        "--write",
+        "-o",
         f"html={tmp_path / 'x.html'}",
     )
     assert result.exit_code == _EXIT_USAGE, result.output
@@ -127,9 +127,9 @@ def test_write_emits_each_format_from_one_run(candidate: Path, tmp_path: Path) -
         "compare",
         "--no-baseline",
         str(candidate),
-        "--write",
+        "-o",
         f"json={out_json}",
-        "--write",
+        "-o",
         f"sarif={out_sarif}",
     )
     assert result.exit_code == 0, result.output
@@ -152,7 +152,7 @@ def test_write_creates_a_missing_parent_directory(
     """
     target = tmp_path / "does" / "not" / "exist" / "audit.json"
     result = invoke_cli(
-        "compare", "--no-baseline", str(candidate), "--write", f"json={target}"
+        "compare", "--no-baseline", str(candidate), "-o", f"json={target}"
     )
     assert result.exit_code == 0, result.output
     assert json.loads(target.read_text())["no_baseline"] is True
@@ -245,7 +245,7 @@ def test_dry_run_rejects_output_and_write(candidate: Path, tmp_path: Path) -> No
         "--no-baseline",
         str(candidate),
         "--dry-run",
-        "--write",
+        "-o",
         f"json={tmp_path / 'x.json'}",
     )
     assert with_write.exit_code == _EXIT_USAGE, with_write.output
@@ -276,14 +276,14 @@ def test_dry_run_agrees_with_the_real_run_on_a_stored_candidate(
 
 def test_findings_alone_never_gate(candidate: Path) -> None:
     """The fixture reports a finding and the command still exits 0."""
-    result = invoke_cli("compare", "--no-baseline", str(candidate), "--format", "json")
+    result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", "json=-")
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["findings"], "fixture precondition"
 
 
 def test_output_file_receives_the_report(candidate: Path, tmp_path: Path) -> None:
     target = tmp_path / "audit.md"
-    result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", str(target))
+    result = invoke_cli("compare", "--no-baseline", str(candidate), "-o", f"markdown={target}")
     assert result.exit_code == 0, result.output
     assert target.read_text().startswith("# ABI audit:")
 
@@ -538,8 +538,8 @@ def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) 
         str(binary),
         "--version",
         "new=9.9",
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["new_version"] == "9.9"
@@ -769,9 +769,9 @@ def test_the_audit_accepts_a_project_snapshot_package_directory(
     stored = example_catalog.case_dir(case) / "snapshot.abi.json"
 
     from_package = invoke_cli(
-        "compare", "--no-baseline", str(package), "--format", "json"
+        "compare", "--no-baseline", str(package), "-o", "json=-"
     )
-    from_file = invoke_cli("compare", "--no-baseline", str(stored), "--format", "json")
+    from_file = invoke_cli("compare", "--no-baseline", str(stored), "-o", "json=-")
     assert from_package.exit_code == from_file.exit_code == 0, from_package.output
 
     kinds_of = lambda out: sorted(f["kind"] for f in json.loads(out)["findings"])  # noqa: E731
@@ -860,7 +860,7 @@ def test_a_discovered_configs_scope_reaches_the_audit_runner(
         return original(candidate, **kwargs)
 
     monkeypatch.setattr(cmd, "run_no_baseline_compare", spy)
-    result = invoke_cli("compare", "--no-baseline", str(snapshot), "--format", "json")
+    result = invoke_cli("compare", "--no-baseline", str(snapshot), "-o", "json=-")
     assert result.exit_code == 0, result.output
     assert seen["scope"] is public, (
         "the discovered config's scope.public must reach the audit runner; "
@@ -894,7 +894,7 @@ def test_a_discovered_configs_deployment_reaches_the_audit_runner(
         return original(candidate, **kwargs)
 
     monkeypatch.setattr(cmd, "run_no_baseline_compare", spy)
-    result = invoke_cli("compare", "--no-baseline", str(snapshot), "--format", "json")
+    result = invoke_cli("compare", "--no-baseline", str(snapshot), "-o", "json=-")
     assert result.exit_code == 0, result.output
     matrix = seen["env_matrix"]
     assert isinstance(matrix, EnvironmentMatrix)

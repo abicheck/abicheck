@@ -739,7 +739,7 @@ class TestCompareCommand:
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
-        result = _invoke("compare", str(old_f), str(new_f), "--format", "json")
+        result = _invoke("compare", str(old_f), str(new_f), "-o", "markdown=json=-")
         assert result.exit_code == 0
 
     def test_output_to_file(self, tmp_path: Path) -> None:
@@ -752,7 +752,7 @@ class TestCompareCommand:
             str(old_f),
             str(new_f),
             "-o",
-            str(out),
+            f"markdown={out}",
         )
         assert result.exit_code == 0
         assert out.exists()
@@ -852,8 +852,8 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--format",
-            "sarif",
+            "-o",
+            "markdown=sarif=-",
         )
         assert result.exit_code == 0
         assert "$schema" in result.output or "sarif" in result.output.lower()
@@ -873,7 +873,7 @@ class TestCompareCommand:
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
-        result = _invoke("compare", str(old_f), str(new_f), "--format", "oneline")
+        result = _invoke("compare", str(old_f), str(new_f), "-o", "markdown=oneline=-")
         assert result.exit_code == 4
         assert "\n" not in result.stdout.strip()  # stderr carries the scope warning
 
@@ -1146,8 +1146,8 @@ class TestCompareReleaseCommand:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=markdown=-",
         )
         assert result.exit_code == 0
         assert "ABI Release Comparison" in result.output
@@ -1197,8 +1197,8 @@ class TestCompareReleaseCommand:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "junit",
+            "-o",
+            "markdown=junit=-",
         )
         assert result.exit_code == 0
         assert "testsuite" in result.output
@@ -1215,10 +1215,8 @@ class TestCompareReleaseCommand:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
             "-o",
-            str(out),
+            f"json={out}",
         )
         assert result.exit_code == 0
         assert out.exists()
@@ -1235,8 +1233,8 @@ class TestCompareReleaseCommand:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=markdown=-",
         )
         assert result.exit_code == 0
         # ADR-065 D2: a live directory cannot prove `libgone` removed, so the
@@ -1337,7 +1335,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         assert result.exit_code == 0
         # The mixed stdout+stderr `.output` may carry pre-JSON warnings (real
@@ -1404,7 +1402,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
 
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -1421,7 +1419,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         out = tmp_path / "rep.md"
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "-o", str(out),
+            "compare", str(old), str(new), "--used-by", str(app), "-o", f"markdown={out}",
         )
         assert result.exit_code == 0
         assert out.exists()
@@ -1508,8 +1506,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--severity-preset", "default",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--severity-preset",
+            "default",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -1558,7 +1563,7 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "sarif",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=sarif=-",
         )
         data = json.loads(result.stdout)
         sarif_results = data["runs"][0]["results"]
@@ -1595,8 +1600,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--severity-preset", "default",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--severity-preset",
+            "default",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -1662,9 +1674,17 @@ class TestUsedByScoping:
             MagicMock(side_effect=[breaking_res, compatible_res]),
         )
         result = _invoke(
-            "compare", str(old), str(new),
-            "--used-by", str(app1), "--used-by", str(app2),
-            "--severity-preset", "info-only", "--format", "json",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app1),
+            "--used-by",
+            str(app2),
+            "--severity-preset",
+            "info-only",
+            "-o",
+            "markdown=json=-",
         )
         data = json.loads(result.stdout)
         assert result.exit_code == 0  # full-library result: no real changes
@@ -1707,9 +1727,17 @@ class TestUsedByScoping:
             MagicMock(side_effect=[res1, res2]),
         )
         result = _invoke(
-            "compare", str(old), str(new),
-            "--used-by", str(app1), "--used-by", str(app2),
-            "--severity-preset", "default", "--format", "json",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app1),
+            "--used-by",
+            str(app2),
+            "--severity-preset",
+            "default",
+            "-o",
+            "markdown=json=-",
         )
         data = json.loads(result.stdout)
         # Full-library diff is empty and the consumer scope never feeds the
@@ -1752,9 +1780,17 @@ class TestUsedByScoping:
             MagicMock(side_effect=[res1, res2]),
         )
         result = _invoke(
-            "compare", str(old), str(new),
-            "--used-by", str(app1), "--used-by", str(app2),
-            "--severity-preset", "default", "--format", "json",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app1),
+            "--used-by",
+            str(app2),
+            "--severity-preset",
+            "default",
+            "-o",
+            "markdown=json=-",
         )
         data = json.loads(result.stdout)
         # Workstream D-S1: the real gate/exit code reflect only the empty
@@ -1781,7 +1817,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "html",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=html=-",
         )
         assert result.exit_code == 0
         assert "<" in result.stdout  # HTML markup emitted
@@ -1820,7 +1856,7 @@ class TestUsedByScoping:
         )
         self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "markdown",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=markdown=-",
         )
         assert result.exit_code == 4  # the full-library BREAKING verdict
         assert "Consumer-scoped verdict: COMPATIBLE" in result.stdout
@@ -1868,8 +1904,13 @@ class TestUsedByScoping:
         )
         self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "oneline",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=oneline=-",
         )
         assert result.exit_code == 4  # the full-library BREAKING verdict
         # The verdict label leads with the full-library result (BREAKING),
@@ -1920,8 +1961,13 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "oneline",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=oneline=-",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
@@ -1949,8 +1995,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "oneline", "--view", "show=compatible",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=oneline=-",
+            "--view",
+            "show=compatible",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
@@ -2009,9 +2062,15 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "oneline",
-            "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=oneline=-",
+            "--depth",
+            "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
         # Same defect-4 reasoning as the sibling test above.
@@ -2038,8 +2097,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "markdown", "--severity-preset", "info-only",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=markdown=-",
+            "--severity-preset",
+            "info-only",
         )
         assert result.exit_code == 0
         assert "Consumer-scoped verdict: BREAKING" in result.stdout
@@ -2081,8 +2147,15 @@ class TestUsedByScoping:
         )
         self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--severity-preset", "default",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--severity-preset",
+            "default",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2127,7 +2200,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2153,7 +2226,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2190,8 +2263,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--view", "root-cause",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "root-cause",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2209,8 +2289,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--view", "root-cause",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "root-cause",
         )
         data = json.loads(result.stdout)
         assert data["root_cause_count"] == 1
@@ -2247,8 +2334,15 @@ class TestUsedByScoping:
         res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json", "--view", "root-cause",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--used-by",
+            str(app_path),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "root-cause",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2288,8 +2382,13 @@ class TestUsedByScoping:
         res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--used-by",
+            str(app_path),
+            "-o",
+            "markdown=json=-",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2332,8 +2431,15 @@ class TestUsedByScoping:
         res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json", "--view", "root-cause",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--used-by",
+            str(app_path),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "root-cause",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
@@ -2485,8 +2591,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--config", str(_severity_config(tmp_path, abi_breaking="warning")),
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--config",
+            str(_severity_config(tmp_path, abi_breaking="warning")),
         )
         data = json.loads(result.stdout)
         entry = next(
@@ -2513,8 +2626,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--view", "show=compatible",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "show=compatible",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2537,7 +2657,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         data = json.loads(result.stdout)
         entry = next(
@@ -2571,7 +2691,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         data = json.loads(result.stdout)
         entry = next(
@@ -2591,8 +2711,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--view", "show=compatible",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "show=compatible",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2605,8 +2732,15 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--view", "show=breaking",
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "-o",
+            "markdown=json=-",
+            "--view",
+            "show=breaking",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2636,7 +2770,7 @@ class TestUsedByScoping:
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "compare", str(old), str(new), "--used-by", str(app), "-o", "markdown=json=-",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2962,10 +3096,10 @@ class TestCompareReleaseExtraFlows:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--output-dir",
-            str(out_dir),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
+            "-o",
+            f"json={out_dir}/",
         )
         # Breaking verdict exits 4 but the report dir must still be populated.
         assert result.exit_code == 4
@@ -2985,8 +3119,8 @@ class TestCompareReleaseExtraFlows:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=markdown=-",
             "--config",
             str(cfg),
         )
@@ -3032,8 +3166,8 @@ class TestCompareReleaseExtraFlows:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "markdown",
+            "-o",
+            "markdown=markdown=-",
         )
         # The run completes (degraded) and notes the comparison error.
         assert "Error comparing" in result.output or "ERROR" in result.output

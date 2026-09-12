@@ -230,7 +230,7 @@ CLI_MITIGATION = (
     "Supply the missing evidence for the named members (headers, debug info, "
     "or build data), compare one of them individually to see its full "
     "analysis_assurance block, or drop assurance.require_complete from "
-    ".abicheck.yml to accept a partial analysis. --format json carries the "
+    ".abicheck.yml to accept a partial analysis. -o json=... carries the "
     "release's own analysis_assurance block."
 )
 

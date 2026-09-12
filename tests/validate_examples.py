@@ -639,7 +639,14 @@ def _build_compare_cmd(
     always sets the scoping flag explicitly so verdicts are deterministic.
     """
     cmd = [
-        sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json",
+        sys.executable,
+        "-m",
+        "abicheck.cli",
+        "compare",
+        str(snap1),
+        str(snap2),
+        "-o",
+        "markdown=json=-",
     ]
     if old_build_source is not None:
         cmd += ["--build-info", "old=" + str(old_build_source), "--sources", "old=" + str(old_build_source)]
@@ -691,7 +698,14 @@ def _build_compare_direct_cmd(
     this removes two of those three process starts per case.
     """
     cmd = [
-        sys.executable, "-m", "abicheck.cli", "compare", str(v1_so), str(v2_so), "--format", "json",
+        sys.executable,
+        "-m",
+        "abicheck.cli",
+        "compare",
+        str(v1_so),
+        str(v2_so),
+        "-o",
+        "markdown=json=-",
     ]
     if v1_hdr and v1_hdr.exists():
         cmd += ["-H", "old=" + str(v1_hdr)]

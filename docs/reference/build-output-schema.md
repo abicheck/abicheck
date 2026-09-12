@@ -185,7 +185,7 @@ $ abicheck project validate abicheck-build/
 build-output validation: abicheck-build/
 OK — no errors.
 
-$ abicheck project validate abicheck-build/ --format json
+$ abicheck project validate abicheck-build/ -o json=-
 {
   "root": "abicheck-build/",
   "ok": true,

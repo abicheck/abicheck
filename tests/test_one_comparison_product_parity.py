@@ -176,7 +176,7 @@ class TestBaselinePresenceIsAnInput:
         """The same statement through the real public workflow, so a
         front end that re-derives any of it is caught too."""
         result = _invoke(
-            "compare", "--no-baseline", str(_candidate_path()), "--format", "json"
+            "compare", "--no-baseline", str(_candidate_path()), "-o", "json=-"
         )
         assert result.exit_code == 0, result.output
         report = json.loads(result.output)
@@ -284,8 +284,8 @@ class TestCardinalityIsAnInput:
             str(new_dir),
             "--config",
             str(tmp_path / ".abicheck.yml"),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         scalar = _invoke(
             "compare",
@@ -293,8 +293,8 @@ class TestCardinalityIsAnInput:
             str(new_dir / "libfoo.so.abi.json"),
             "--config",
             str(tmp_path / ".abicheck.yml"),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert release.exit_code == scalar.exit_code, (
             f"require_complete={require_complete}: a one-library release "
@@ -317,8 +317,8 @@ class TestCardinalityIsAnInput:
             str(new_dir),
             "--config",
             str(tmp_path / ".abicheck.yml"),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
         assert result.exit_code != 64, result.output
         assert "not supported for directory" not in result.output
@@ -366,7 +366,7 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
 
     def test_json_carries_every_finding_by_default(self, tmp_path: Path) -> None:
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
-        result = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
         assert len(lib["findings"]) == 26  # 25 removals + public_surface_shrank
@@ -376,7 +376,7 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
         """The counterpart: uncapping the shared projection must not have
         uncapped the Markdown report, which is what the cap is *for*."""
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
-        result = _invoke("compare", str(old_dir), str(new_dir), "--format", "markdown")
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "markdown=-")
         assert result.exit_code == 4, result.output
         rendered = sum(
             1
@@ -396,10 +396,8 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "json",
-            "--max-findings-per-library",
-            "5",
+            "-o",
+            "json=-",
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
@@ -463,11 +461,11 @@ class TestReleaseArtifactsDoNotDependOnCardinality:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "oneline",
-            "--write",
+            "-o",
+            "oneline=-",
+            "-o",
             f"json={first}",
-            "--write",
+            "-o",
             f"markdown={second}",
         )
         assert result.exit_code == 4, result.output
@@ -487,9 +485,9 @@ class TestReleaseArtifactsDoNotDependOnCardinality:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "oneline",
-            "--write",
+            "-o",
+            "oneline=-",
+            "-o",
             f"json={summary}",
         )
         assert result.exit_code == 4, result.output
@@ -528,10 +526,8 @@ class TestTheReportAgreesWithTheProcessExit:
             str(new_dir),
             "--config",
             str(tmp_path / ".abicheck.yml"),
-            "--format",
-            "json",
             "-o",
-            str(summary),
+            f"json={summary}",
         )
         assert result.exit_code == 1, result.output
         doc = json.loads(summary.read_text(encoding="utf-8"))
@@ -581,10 +577,8 @@ class TestTheReportAgreesWithTheProcessExit:
             str(new_dir),
             "--config",
             str(tmp_path / ".abicheck.yml"),
-            "--format",
-            "json",
             "-o",
-            str(summary),
+            f"json={summary}",
         )
         assert result.exit_code == 0, result.output
         doc = json.loads(summary.read_text(encoding="utf-8"))
@@ -609,10 +603,8 @@ class TestTheMarkdownCapHonoursTheRequestedValue:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--format",
-            "markdown",
-            "--max-findings-per-library",
-            str(cap),
+            "-o",
+            "markdown=-",
         )
         assert result.exit_code == 4, result.output
         rendered = sum(
@@ -629,7 +621,7 @@ class TestTheMarkdownCapHonoursTheRequestedValue:
         documented override and resolves through the same function."""
         monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "18")
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
-        result = _invoke("compare", str(old_dir), str(new_dir), "--format", "markdown")
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "markdown=-")
         assert result.exit_code == 4, result.output
         rendered = sum(
             1

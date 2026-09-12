@@ -170,7 +170,7 @@ class TestReleaseFanOutBuildsTheHeaderGraph:
         old_dir, new_dir, inc = two_library_release
         seen = _graphs_attached(
             monkeypatch,
-            ["compare", str(old_dir), str(new_dir), "-H", str(inc), "--format", "json"],
+            ["compare", str(old_dir), str(new_dir), "-H", str(inc), "-o", "markdown=json=-"],
         )
         assert set(seen) == {"libfoo.so", "libbar.so"}, seen
         assert all(ids for ids in seen.values()), seen
@@ -191,7 +191,7 @@ class TestReleaseFanOutBuildsTheHeaderGraph:
         old_dir, new_dir, inc = two_library_release
         via_release = _graphs_attached(
             monkeypatch,
-            ["compare", str(old_dir), str(new_dir), "-H", str(inc), "--format", "json"],
+            ["compare", str(old_dir), str(new_dir), "-H", str(inc), "-o", "markdown=json=-"],
         )
         via_single = {}
         for name in ("libfoo.so", "libbar.so"):
@@ -204,8 +204,8 @@ class TestReleaseFanOutBuildsTheHeaderGraph:
                         str(new_dir / name),
                         "-H",
                         str(inc),
-                        "--format",
-                        "json",
+                        "-o",
+                        "markdown=json=-",
                     ],
                 )
             )

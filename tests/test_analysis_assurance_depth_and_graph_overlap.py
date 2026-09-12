@@ -164,8 +164,8 @@ class TestRequestedDepthPropagation:
                 str(new_p),
                 "--depth",
                 "source",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
@@ -206,7 +206,7 @@ class TestRequestedDepthPropagation:
 
         res = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json"],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=json=-"],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
         payload = json.loads(res.output[res.output.index("{") :])

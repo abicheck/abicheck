@@ -25,7 +25,7 @@ that happens once, before the document is built, exactly as D9 (renderers
 are pure projections) requires. :func:`format_stat_line` is the lower-level
 formatter shared with a second caller that has no ``ReportDocument`` to
 build one from: ``cli_compare_fold._ScopedFold.into_oneline`` (CLI cleanup
-phase two, PR 1's ``--format oneline`` + ``--used-by``/``--required-symbol``
+phase two, PR 1's ``-o oneline=...`` + ``--used-by``/``--required-symbol``
 scoped-gate fix) renders the identical layout from a *scoped* verdict/counts
 pair instead of a whole-library comparison result.
 """

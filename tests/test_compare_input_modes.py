@@ -620,8 +620,15 @@ class TestCompareSoOutputFormats:
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
-        args = ["compare", str(old_elf), str(new_elf), "-H", str(hdr),
-                "--format", fmt]
+        args = [
+        "compare",
+        str(old_elf),
+        str(new_elf),
+        "-H",
+        str(hdr),
+        "-o",
+        f"{fmt}=-",
+    ]
         if extra_args:
             args.extend(extra_args)
 

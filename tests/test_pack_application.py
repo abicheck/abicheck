@@ -926,7 +926,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "  gate.severity.addition: error\n",
         )
         without_pack = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "-o", "markdown=json=-"]
         )
         assert without_pack.exit_code == 0, without_pack.output
         with_pack = CliRunner().invoke(
@@ -935,8 +935,8 @@ class TestOnlyAppliedFieldsAreAccepted:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
                 "--pack",
                 str(gate),
             ],
@@ -992,8 +992,8 @@ class TestOnlyAppliedFieldsAreAccepted:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
                 "--pack",
                 str(gate),
             ],

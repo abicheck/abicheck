@@ -158,7 +158,7 @@ def test_compare_depth_binary_scaling_stays_subquadratic(tmp_path: Path) -> None
         old, new = pair
         elapsed = _run(
             runner,
-            ["compare", str(old), str(new), "--depth", "binary", "--format", "json"],
+            ["compare", str(old), str(new), "--depth", "binary", "-o", "markdown=json=-"],
         )
         per_size[n] = elapsed
         return elapsed
@@ -202,8 +202,8 @@ def test_compare_depth_headers_scaling_stays_subquadratic(tmp_path: Path) -> Non
                 f"new={new_h}",
                 "--depth",
                 "headers",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         per_size[n] = elapsed

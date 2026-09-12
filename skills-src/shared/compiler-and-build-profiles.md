@@ -71,7 +71,7 @@ that, so the ordinary comparison is still refused (exit `16`, `verdict:
 null`). You must opt in explicitly:
 
 ```bash
-abicheck compare OLD NEW --diagnostic-comparison --format json
+abicheck compare OLD NEW --diagnostic-comparison -o json=-
 ```
 
 That is ADR-050's sanctioned escape hatch: it downgrades the hard failure to

@@ -468,7 +468,7 @@ class TestUseCaseImpactOnCompare:
         old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
         res = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--format", "json"]
+            main, ["compare", str(old), str(new), "-o", "markdown=json=-"]
         )
         assert res.exit_code == 4, res.output
         assert "use_case_impact" not in _json_report(res)

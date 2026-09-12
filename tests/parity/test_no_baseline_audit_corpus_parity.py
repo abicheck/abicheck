@@ -154,7 +154,7 @@ def test_no_baseline_exit_code_is_clean_without_a_contract(
     the exit-3 audit-gate case below a real signal rather than noise.
     """
     path = _fixture_path(case_name, filename)
-    result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
+    result = invoke_cli("compare", "--no-baseline", str(path), "-o", "json=-")
     assert result.exit_code == 0, result.output
 
 
@@ -189,8 +189,8 @@ def test_audit_gate_axis_fires_only_for_api_break_fixtures(
         "compare",
         "--no-baseline",
         str(path),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
         "--severity-preset",
         "default",
     )
@@ -222,7 +222,7 @@ def test_audit_gate_axis_requires_opt_in() -> None:
     """
     for case_name in _AUDIT_GATE_SHOULD_FIRE:
         path = _fixture_path(case_name, "snapshot.abi.json")
-        result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
+        result = invoke_cli("compare", "--no-baseline", str(path), "-o", "json=-")
         assert result.exit_code == 0, (
             f"{case_name}: audit-gate axis fired without --severity-preset "
             f"(exit {result.exit_code}); it must be opt-in:\n{result.output}"
@@ -240,8 +240,8 @@ def test_audit_gate_axis_disabled_by_info_only_preset() -> None:
             "compare",
             "--no-baseline",
             str(path),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--severity-preset",
             "info-only",
         )
@@ -274,8 +274,8 @@ def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> Non
         "compare",
         "--no-baseline",
         str(path),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
         "--severity-preset",
         "default",
     )
@@ -287,8 +287,8 @@ def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> Non
         "compare",
         "--no-baseline",
         str(path),
-        "--format",
-        "json",
+        "-o",
+        "json=-",
         "--severity-preset",
         "default",
         "--policy",

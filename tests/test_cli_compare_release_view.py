@@ -240,8 +240,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -285,8 +290,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -311,7 +321,7 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -332,10 +342,17 @@ class TestReleaseViewShowOnly:
         matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
-            "--format", "json", "--view", "show=breaking",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--probe-matrix",
+            f"old={matrix_old}",
+            "--probe-matrix",
+            f"new={matrix_new}",
+            "-o",
+            "json=-",
+            "--view",
+            "show=breaking",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -360,9 +377,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--view", "show=functions",
-            "--max-findings-per-library", "10",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -393,9 +414,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--view", "show=functions",
-            "--max-findings-per-library", "10",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
@@ -451,9 +476,15 @@ class TestReleaseViewShowOnly:
         out_dir = tmp_path / "out"
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "show=functions", "--view", "impact",
-            "--output-dir", str(out_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=functions",
+            "--view",
+            "impact",
+            "-o",
+            f"json={out_dir}/",
         )
         assert result.exit_code == 4, result.output
         summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
@@ -529,8 +560,13 @@ class TestReleaseViewDemangle:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--view", "demangle",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "demangle",
         )
         assert result.exit_code == 4, result.output
         assert _MANGLED in result.output
@@ -837,8 +873,13 @@ class TestReleaseViewImpactAggregate:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "impact",
         )
         assert result.exit_code == 4, result.output
         data = json.loads(result.output)
@@ -857,7 +898,7 @@ class TestReleaseViewImpactAggregate:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "json",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-",
         )
         assert result.exit_code == 4, result.output
         data = json.loads(result.output)
@@ -885,11 +926,17 @@ class TestReleaseViewImpactAggregate:
         write_path = tmp_path / "full.json"
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json",
-            "--view", "impact",
-            "--view", "show=variables",
-            "--write", f"json={write_path}",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "-o",
+            f"json={write_path}",
+            "--view",
+            "impact",
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         assert result.output.startswith("Report written to")
@@ -928,11 +975,16 @@ class TestReleaseViewImpactJUnitParity:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         with_impact = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "junit", "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "impact",
         )
         without_impact = _invoke(
-            "compare", str(old_dir), str(new_dir), "--format", "junit",
+            "compare", str(old_dir), str(new_dir), "-o", "junit=-",
         )
         assert with_impact.exit_code == 4, with_impact.output
         assert without_impact.exit_code == 4, without_impact.output
@@ -944,8 +996,13 @@ class TestReleaseViewImpactJUnitParity:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "junit", "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "impact",
         )
         assert result.exit_code == 4, result.output
         assert "<?xml" in result.output
@@ -967,8 +1024,13 @@ class TestReleaseViewImpactJUnitParity:
         new_snap_path = new_dir / "libfoo.json"
 
         single_pair = _invoke(
-            "compare", str(old_snap_path), str(new_snap_path),
-            "--format", "junit", "--view", "impact",
+            "compare",
+            str(old_snap_path),
+            str(new_snap_path),
+            "-o",
+            "junit=-",
+            "--view",
+            "impact",
         )
         assert single_pair.exit_code == 4, single_pair.output
         assert "<?xml" in single_pair.output
@@ -992,9 +1054,13 @@ class TestReleaseViewShowOnlySecondaryWriteStaysFull:
         write_path = tmp_path / "secondary.json"
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "show=variables",
-            "--write", f"json={write_path}",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=variables",
+            "-o",
+            f"json={write_path}",
         )
         assert result.exit_code == 4, result.output
 
@@ -1029,10 +1095,15 @@ class TestReleaseViewShowOnlySecondaryWriteStaysFull:
         write_path = tmp_path / "secondary.json"
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json",
-            "--view", "show=variables",
-            "--write", f"markdown={write_path}",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "-o",
+            f"markdown={write_path}",
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
 
@@ -1060,13 +1131,18 @@ class TestReleaseViewShowOnlyJUnit:
     ) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        baseline = _invoke("compare", str(old_dir), str(new_dir), "--format", "junit")
+        baseline = _invoke("compare", str(old_dir), str(new_dir), "-o", "junit=-")
         assert baseline.exit_code == 4, baseline.output
         assert 'failures="1"' in baseline.output
 
         filtered = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "junit", "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "show=variables",
         )
         # show_only is presentation-only -- the exit code (computed from the
         # real, unfiltered DiffResult) is unaffected even though the JUnit
@@ -1081,8 +1157,13 @@ class TestReleaseViewShowOnlyJUnit:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--format", "junit", "--view", "show=functions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         assert 'failures="1"' in result.output
@@ -1103,10 +1184,17 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
         matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
-            "--format", "json", "--view", "show=api-break",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--probe-matrix",
+            f"old={matrix_old}",
+            "--probe-matrix",
+            f"new={matrix_new}",
+            "-o",
+            "json=-",
+            "--view",
+            "show=api-break",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -1122,10 +1210,17 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
         matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
 
         json_result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
-            "--format", "json", "--view", "show=breaking",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--probe-matrix",
+            f"old={matrix_old}",
+            "--probe-matrix",
+            f"new={matrix_new}",
+            "-o",
+            "json=-",
+            "--view",
+            "show=breaking",
         )
         assert json_result.exit_code == 4, json_result.output
         doc = json.loads(json_result.output)
@@ -1149,10 +1244,15 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
         matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--probe-matrix", f"old={matrix_old}",
-            "--probe-matrix", f"new={matrix_new}",
-            "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--probe-matrix",
+            f"old={matrix_old}",
+            "--probe-matrix",
+            f"new={matrix_new}",
+            "-o",
+            "json=-",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -1178,9 +1278,13 @@ class TestReleaseViewShowOnlyOutputDirStaysFull:
         output_dir = tmp_path / "out"
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "show=variables",
-            "--output-dir", str(output_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=variables",
+            "-o",
+            f"json={output_dir}/",
         )
         assert result.exit_code == 4, result.output
 

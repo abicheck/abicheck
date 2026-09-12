@@ -20,7 +20,7 @@ standard dashboards.
 
 Usage::
 
-    abicheck compare old.so new.so --format junit -o results.xml
+    abicheck compare old.so new.so -o junit=results.xml
 
 Mapping rules:
 

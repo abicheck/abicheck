@@ -1450,8 +1450,8 @@ class TestAnalysisAssuranceOutOfBandPack:
                 str(new_p),
                 "--build-info",
                 "old=" + str(pack_dir),
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
@@ -1642,8 +1642,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--format",
-                "sarif",
+                "-o",
+                "markdown=sarif=-",
                 *_assurance_config_args(tmp_path),
             ],
         )
@@ -1672,8 +1672,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--format",
-                "junit",
+                "-o",
+                "markdown=junit=-",
                 *_assurance_config_args(tmp_path),
             ],
         )
@@ -1714,8 +1714,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--format",
-                "sarif",
+                "-o",
+                "markdown=sarif=-",
             ],
         )
         assert res.exit_code == 0, res.output

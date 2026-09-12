@@ -6614,8 +6614,8 @@ non-multiple option — a second, JSON-targeted `--write` this script
 appended would always lose to the user's own later one and never execute.
 When that user-supplied `--write` targets `json=`, `_extra_args_write_json_
 path` already recovers it, so `_json_report_src` still finds structured
-evidence. When it targets a **non-JSON** format (`--write text=...`,
-`--write markdown=...`, ...), there is no JSON anywhere, and ADR-049's
+evidence. When it targets a **non-JSON** format (`-o text=...`,
+`-o markdown=...`, ...), there is no JSON anywhere, and ADR-049's
 unconditional contract-coverage/analysis-assurance floors plus the
 severity-category gate genuinely go blind for that one run — accepted, not
 fixed, per `action/AGENTS.md`'s own "Known, accepted limitation"
@@ -6724,7 +6724,7 @@ candidate's shape, both verified live against `main` at `fd6ba681`:
   `scan libgreet.so --header include` reports
   `crosscheck:exported_not_public present … undeclared_export=1` and
   `[warning] exported_not_public: 1`, while
-  `compare --no-baseline libgreet.so --header include --format json`
+  `compare --no-baseline libgreet.so --header include -o json=...`
   exits 0 with `"changes": []`, no `verdict`, and no cross-source or
   `pattern_preprocessor_scan` block in the document at all.
 
@@ -7681,7 +7681,7 @@ is now `compare`'s alone to answer" — see below). Verified live against the
 ```
 $ gcc -shared -fPIC -g old.c -o libold.so      # struct Point { int x, y; }
 $ gcc -shared -fPIC -g new.c -o libnew.so      # struct Point { int x, y, z; }
-$ abicheck compare libold.so libnew.so --depth binary --format json
+$ abicheck compare libold.so libnew.so --depth binary -o json=-
 ```
 
 reports `verdict: BREAKING` with a `type_size_changed` finding ("Size
@@ -7911,7 +7911,7 @@ Auditing a real ELF shared library raises an **uncaught**
 bare CLI call:
 
 ```console
-$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 --format json
+$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 -o json=-
 abicheck.policy.no_baseline_findings.NoBaselineInvariantError: a snapshot
 compared against itself must never produce a comparison finding -- if this
 fires, a detector is reading non-identity state. Offending findings:
@@ -8069,7 +8069,7 @@ template and varies only `--depth`, leaving `--headers`/`--sources`/
 deeper inputs and skip pattern-scan/L3 collection. The retired `scan`
 command exposed this as a checkable `coverage` array
 (`layer`/`status` rows) plus a `pattern_scan.files_scanned` field; verified
-live, `compare --format json` emits neither at any `--depth`. `compare
+live, `compare -o json=...` emits neither at any `--depth`. `compare
 --depth binary` does reach the same verdict/exit code on the scenario's
 fixture, but nothing currently asserts it *skipped* the deeper collection
 rather than merely projecting an already-collected superset down afterward
@@ -8754,7 +8754,7 @@ the ones whose renderers take a single `DiffResult`:
 `DiffResult` at all (it is a count summary, and the release summary already
 carries every count), so `report/release_oneline.py` folds the per-library
 counts through the same `format_stat_line` a single-pair `compare` renders
-and the release path accepts `--format oneline`/`--write oneline=...` like
+and the release path accepts `-o oneline=...`/`-o oneline=...` like
 any other.
 
 So library count still changes which of `sarif`/`html`/`review` are

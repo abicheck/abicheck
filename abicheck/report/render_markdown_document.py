@@ -27,7 +27,7 @@ passed the architecture check's new-file 800-line ceiling, the same reason
 ``render_html.py``/``render_html_document.py`` are two files) is Markdown's
 counterpart to that HTML split. Two views land here:
 
-- ``--format review``'s digest (``build_review_digest_document``/
+- ``-o review=...``'s digest (``build_review_digest_document``/
   ``render_review_digest_document``) -- already had the cleanest compute/
   render pair in ``reporter_markdown.py`` (``compute_review_digest`` ->
   ``render_markdown.render_review_digest``) of anything in that module, and
@@ -196,7 +196,7 @@ def build_review_digest_document(
     report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
-    """The ``--format review`` digest as a ``ReportDocument``.
+    """The ``-o review=...`` digest as a ``ReportDocument``.
 
     *severity_config* is forwarded to :func:`~abicheck.reporter_markdown.
     compute_review_digest` unchanged -- see that function's own docstring

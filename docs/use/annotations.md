@@ -39,7 +39,7 @@ Markdown summary will appear in the **Job Summary** panel.
 ## How it works
 
 The CLI's `compare`/`compare-release` no longer render annotations
-themselves at all — every `compare --format json` report persists a
+themselves at all — every `compare -o json=...` report persists a
 top-level `annotations` array (see "Persisted alongside the report" below),
 computed unconditionally regardless of any flag or input. The composite
 Action reads that array straight off the report and prints
@@ -67,9 +67,9 @@ independent of `annotate`/`annotate-additions`.
 
 [gh-summary]: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary
 
-### Persisted alongside the report (`--format json`)
+### Persisted alongside the report (`-o json=...`)
 
-Since report schema 2.43, every `compare --format json` report carries
+Since report schema 2.43, every `compare -o json=...` report carries
 a top-level `annotations` array — one already-classified,
 already-formatted entry (`{"level": "error"|"warning"|"notice",
 "annotation": "::error file=...,line=...,title=...::message",
@@ -200,7 +200,7 @@ pass:
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 \
   --header old=v1/foo.h --header new=v2/foo.h \
-  --format json --output report.json
+  -o json=- --output report.json
 
 python3 -c '
 import json, sys
@@ -309,7 +309,7 @@ zero configuration beyond the single input.
    the file path matches a file changed in the PR. Step-level annotations
    (without file/line) always appear in the Actions log.
 5. **Hit the 50-annotation limit?** If you have more than 50 issues, lower-severity
-   ones are dropped. Use `--format json` or check the Job Summary for the
+   ones are dropped. Use `-o json=...` or check the Job Summary for the
    complete list.
 
 ### Annotations appear but not inline

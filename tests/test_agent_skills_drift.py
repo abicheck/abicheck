@@ -571,7 +571,7 @@ def _emitted_top_level_fields(tmp_path) -> set[str]:
         out = tmp_path / f"r{index}.json"
         runner.invoke(
             cli_main,
-            ["compare", str(old), str(new), "--format", "json", "-o", str(out), *extra],
+            ["compare", str(old), str(new), "-o", f"json={out}", *extra],
         )
         if out.is_file():
             emitted |= set(json.loads(out.read_text(encoding="utf-8")))

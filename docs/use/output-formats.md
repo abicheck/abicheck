@@ -16,11 +16,11 @@ abicheck supports multiple output formats for different use cases:
 
 | Format | Flag | Best for |
 |--------|------|----------|
-| Markdown | `--format markdown` (default) | Human review, PRs, terminals |
-| JSON | `--format json` | CI pipelines, machine processing |
-| SARIF | `--format sarif` | GitHub Code Scanning, SAST platforms |
-| HTML | `--format html` | Standalone reports, ABICC migration |
-| JUnit XML | `--format junit` | GitLab CI, Jenkins, Azure DevOps test dashboards |
+| Markdown | `-o markdown=-` (default) | Human review, PRs, terminals |
+| JSON | `-o json=-` | CI pipelines, machine processing |
+| SARIF | `-o sarif=-` | GitHub Code Scanning, SAST platforms |
+| HTML | `-o html=-` | Standalone reports, ABICC migration |
+| JUnit XML | `-o junit=-` | GitLab CI, Jenkins, Azure DevOps test dashboards |
 
 All five formats support the report filtering options described below.
 The ABICC-compatible XML output (via `abicheck compat check`) includes
@@ -196,27 +196,27 @@ output.
 **JUnit XML**: The `show_only` parameter filters which test cases appear in the
 output. Filtered-out changes are omitted entirely.
 
-## One-line summary (`--format oneline`)
+## One-line summary (`-o oneline=...`)
 
 `--stat` was removed (CLI cleanup phase two, PR 1). For a compact one-line
-summary in a CI log, use `--format oneline`:
+summary in a CI log, use `-o oneline=...`:
 
 ```bash
-$ abicheck compare old.json new.json --format oneline
+$ abicheck compare old.json new.json -o oneline=-
 BREAKING: 3 breaking, 1 risk (42 total) [12 redundant hidden]
 ```
 
 (This used to be reachable only via the built-in `quick` `--profile`;
 `--profile` was removed outright — ADR-068 D5 / plan Phase 7e — and
-`oneline` promoted to a first-class `--format` choice instead of losing the
+`oneline` promoted to a first-class export format instead of losing the
 capability.)
 
-For a machine-readable summary, use plain `--format json` and read the
+For a machine-readable summary, use plain `-o json=...` and read the
 `summary` object — it is already present in the full JSON report alongside
 `changes`, so there is no separate summary-only shape to ask for:
 
 ```bash
-$ abicheck compare old.json new.json --format json
+$ abicheck compare old.json new.json -o json=-
 {"library": "libfoo", "verdict": "BREAKING", "summary": {...}, "changes": [...]}
 ```
 
@@ -234,7 +234,7 @@ abicheck compare old.json new.json --view leaf
 Groups findings that share a root cause under one entry, instead of listing
 every change individually — e.g. an internal helper's `func_removed` finding
 and the `internal_symbol_required_by_public_api` overlay finding that names
-it both land in the same group. Supported for `--format json`/`markdown`
+it both land in the same group. Supported for the `json`/`markdown`
 (the default rendered text output), and `sarif` (as additive `properties`,
 see below); `junit` still renders as `full` (no testsuite grouping
 equivalent yet — JUnit's `<testcase>` model already groups by symbol, not
@@ -245,7 +245,7 @@ a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
 
 ```bash
-abicheck compare old.json new.json --view root-cause --format json
+abicheck compare old.json new.json --view root-cause -o json=-
 ```
 
 ```json
@@ -285,7 +285,7 @@ SARIF/code-scanning consumer keeps working unchanged) but adds
 yourself by `rootCauseId` if you want the same buckets JSON/markdown show:
 
 ```bash
-abicheck compare old.so new.so --view root-cause --format sarif
+abicheck compare old.so new.so --view root-cause -o sarif=-
 ```
 
 ```json
@@ -313,32 +313,38 @@ table per library (JSON's per-library `impact_table` field; a Markdown
 single-comparison table above — there is no one aggregate table across
 libraries, since each library's root-cause changes are its own.
 
-## A second output format from the same run (`--write`)
+## Several artifacts from the same run
 
-`compare` computes its comparison once; `--write FORMAT=PATH` renders that
-same result into a second format/file, instead of requiring a second
-`abicheck compare` invocation to get a different format:
+`compare` computes its comparison once, and `-o` is repeatable: every export
+renders that same result, so asking for more artifacts never re-runs the
+analysis and never changes the verdict or the exit code.
 
 ```bash
 # A markdown report for humans, plus a JSON artifact for tooling —
 # one comparison, two outputs.
 abicheck compare old.json new.json \
-  --format markdown \
-  --write json=report.json
+  -o markdown=- \
+  -o json=report.json
 ```
 
-- One `FORMAT=PATH` operand: the format and its destination are stated
-  together, so neither half can be given without the other.
-- `PATH` must point at a different file than `--output`/`-o` — otherwise the
-  secondary render would silently overwrite the primary report.
-- The secondary render always emits the full, unfiltered report: it ignores
-  `--view show=...`, which describes only the primary format's display.
+- One `FORMAT=DESTINATION` operand per export: the format and its
+  destination are stated together, so neither half can be given without the
+  other, and `-` is the stdout destination.
+- At most one export may name `-`: two documents interleaved on one stream
+  would produce neither.
+- No two exports may resolve to the same destination — the second would
+  silently overwrite the first, so it is a usage error, caught before the
+  comparison runs.
+- Every export renders the same document under the same display options.
+  A `--view show=...` filter applies to all of them; the complete
+  disposition, suppression and `filtered_summary` accounting stays in every
+  machine projection regardless, so nothing is hidden by narrowing what is
+  displayed.
 - Also works for a directory/package (release) comparison: the per-library
-  fan-out renders its second format from the same already-computed
+  fan-out renders every requested format from the same already-computed
   per-library results, without re-running any library's comparison. Only
-  `json`/`markdown`/`junit` are available there (the same set `--format`
-  itself accepts for a release operand) — `sarif`/`html`/`review` still
-  require a single-pair comparison.
+  `json`/`markdown`/`junit`/`oneline` are available there —
+  `sarif`/`html`/`review` still require a single-pair comparison.
 
 The bundled GitHub Action uses this to get JSON for its sticky PR comment
 without re-running the whole comparison a second time.
@@ -640,7 +646,7 @@ a `CoverageFailure` has no `kind`/`symbol`/`source_location` for
 
 ## JSON schema and stability guarantees
 
-The `compare --format json` document is a **stable, machine-readable contract**.
+The `compare -o json=...` document is a **stable, machine-readable contract**.
 It is described by a versioned [JSON Schema](https://json-schema.org/) (draft
 2020-12) that ships inside the package at
 `abicheck/schemas/compare_report.schema.json` and is importable:
@@ -686,14 +692,14 @@ Every JSON report carries a top-level `report_schema_version` field
 > `dump` — that one versions the on-disk ABI surface, and its current value
 > lives on its own fact-owner page
 > ([Snapshot format](../reference/snapshot-format.md)), not here.
-> `abicheck dump --format json` writes a **snapshot** (carrying `schema_version`),
+> `abicheck dump -o snapshot.abi.json` writes a **snapshot** (carrying `schema_version`),
 > not a report, so it has no `report_schema_version`. A report and a snapshot can
 > carry different version numbers at the same time; consumers should read
 > whichever field belongs to the file they loaded.
 >
 > **Retired third shape (historical).** Before ADR-068 Phase 6 deleted the
-> `scan` command outright (no alias, no deprecation window), `scan --format
-> json` emitted a **third, separate shape**: a `ScanOutcome` object (`mode`,
+> `scan` command outright (no alias, no deprecation window), `scan`'s own
+> JSON output emitted a **third, separate shape**: a `ScanOutcome` object (`mode`,
 > `level`, `risk`, `verdict`, `exit_code`, …) carrying its own top-level
 > `scan_schema_version` field (`MAJOR.MINOR`) — independent of, and not
 > interchangeable with, `report_schema_version`. Through `1.30` the typed
@@ -714,8 +720,8 @@ Every JSON report carries a top-level `report_schema_version` field
 >
 > `compare` has two report-schema version markers today, one per report
 > shape: `report_schema_version` above for a two-sided `compare` report, and
-> **`audit_report_schema_version`** for `compare --no-baseline --format
-> json`'s single-build audit document (`AUDIT_REPORT_SCHEMA_VERSION`,
+> **`audit_report_schema_version`** for `compare --no-baseline -o
+> json=...`'s single-build audit document (`AUDIT_REPORT_SCHEMA_VERSION`,
 > `abicheck/report/no_baseline_document.py`). The audit document
 > deliberately carries *only* its own marker and never
 > `report_schema_version`: the compare report's schema tells consumers to
@@ -767,15 +773,17 @@ report rather than as a live command reference.
 `scan --against`'s `diff` block itemized the comparison's gating findings
 (`findings`) and any `--suppress`-silenced ones (`suppressed`), each capped at
 20 entries by default so a large diff could not blow up the always-on scan
-output — `compare --format json` remains the way to see every finding
+output — `compare -o json=...` remains the way to see every finding
 unconditionally. The cap was raised or lowered per run with `scan
 --max-findings N`, or globally via the (now-removed) `ABICHECK_MAX_BASELINE_
-FINDINGS` environment variable. **There is no current scalar-`compare`
-equivalent of this per-run finding cap** — a plain `compare`/`compare
---no-baseline` invocation itemizes every finding uncapped. The nearest live
-relative is `compare`'s own `--max-findings-per-library`, but that caps each
-*library*'s finding list only in the multi-library/release fan-out path
-(`compare release-1.0/ release-2.0/`), not a single-pair comparison.
+FINDINGS` environment variable. **There is no current `compare` equivalent of
+this per-run finding cap, and deliberately so** — a machine export is never
+truncated, so a plain `compare`/`compare --no-baseline` invocation itemizes
+every finding uncapped. In the multi-library/release fan-out
+(`compare release-1.0/ release-2.0/`) the *human* summary still bounds each
+library's itemized findings, automatically and unconfigurably: complete data
+is what a machine export is for, and every library's own complete report is
+one export away (`-o json=reports/`).
 
 When either list is actually truncated, the block sets the existing
 `findings_truncated`/`suppressed_truncated` booleans (schema 1.8+) and, since
@@ -789,19 +797,18 @@ Each entry in `suppressed` also carries `suppression_rule` (which
 `breaking`/`api_break`/`risk`/`compatible` bucket the finding would have
 counted as had `--suppress` not withheld it) — a suppressed finding's report
 entry always says more than "suppressed", so a reader can tell a suppressed
-ABI break apart from a suppressed cosmetic note. The retired `scan --against
---format text` printed the same information: an always-present
+ABI break apart from a suppressed cosmetic note. The retired `scan --against`'s own text output printed the same information: an always-present
 `suppressed=N` count in the "Baseline comparison" line, and
 `--show-suppressed` itemized each one.
 
 Since schema 1.11, any `findings`/`suppressed` entry for a removal whose ELF
 symbol linkage was captured also carries `symbol_binding`
 (`global`/`weak`/`local`/`unique`/`other`) — the same field
-`compare --format json`/SARIF emit (see `binding:` under
+`compare -o json=...`/SARIF emit (see `binding:` under
 [Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
 match/no-match was auditable from the retired `scan --against` too.
 
-Since schema 3.5, every `compare --format json` report carries an
+Since schema 3.5, every `compare -o json=...` report carries an
 unconditional top-level `finding_evolution` object: `counts` (one entry per
 `FindingEvolution` state — `introduced`/`resolved`/`persistent`/
 `not_evaluated`) and `resolved` (findings that no longer appear in this
@@ -863,7 +870,7 @@ real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
 shapes, which never reach policy classification).
 
 Since schema 1.14, the block also discloses the active `--policy`
-audit trail — previously a `scan --format json` reader could see a
+audit trail — previously a `scan --against` JSON reader could see a
 downgraded verdict with no way to tell which rule produced it, unlike the
 `compare`/report path. `policy_overrides` (a `ChangeKind -> verdict` map)
 and `policy_reclassify` (the active, non-expired selector-scoped
@@ -959,7 +966,7 @@ jsonschema.validate(report, load_compare_report_schema())
 
 ### `aggregate`'s own report shape
 
-`abicheck aggregate --format json` is a **separate document**, not a
+`abicheck aggregate -o json=-` is a **separate document**, not a
 `compare`/`scan` report — it's versioned by its own
 `aggregate_schema_version` and describes a fan-in over already-produced
 reports rather than one comparison. Its five independent axes
@@ -1003,7 +1010,7 @@ the `release_recommendation` key, so CI and agents can gate on it — **check
 `state` first**, before ever reading `version_bump`:
 
 ```bash
-abicheck compare old.so new.so -H include/ --format json \
+abicheck compare old.so new.so -H include/ -o json=- \
   | jq -r '.release_recommendation
       | if .state == "actionable" then
           "release: bump \(.version_bump), soname \(.soname_action)"
@@ -1059,7 +1066,7 @@ abicheck supports [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/)
 ### Usage
 
 ```bash
-abicheck compare old.json new.json --format sarif -o results.sarif
+abicheck compare old.json new.json -o sarif=results.sarif
 ```
 
 ### GitHub Code Scanning integration
@@ -1106,7 +1113,7 @@ jobs:
 
       - name: Compare ABI
         run: |
-          abicheck compare old.json new.json --format sarif -o abi.sarif
+          abicheck compare old.json new.json -o sarif=abi.sarif
         continue-on-error: true
 
       - name: Upload SARIF
@@ -1190,8 +1197,8 @@ others.
 ### Usage
 
 ```bash
-abicheck compare old.json new.json --format junit -o results.xml
-abicheck compare release-1.0/ release-2.0/ --format junit -o abi-tests.xml
+abicheck compare old.json new.json -o junit=results.xml
+abicheck compare release-1.0/ release-2.0/ -o junit=abi-tests.xml
 ```
 
 ### How it works
@@ -1271,7 +1278,7 @@ Function foo::legacy() was removed
 ```yaml
 abi-check:
   script:
-    - abicheck compare old.so new.so -H include/ --format junit -o abi-results.xml || true
+    - abicheck compare old.so new.so -H include/ -o junit=abi-results.xml || true
   artifacts:
     when: always
     reports:
@@ -1283,7 +1290,7 @@ abi-check:
 ```groovy
 stage('ABI Check') {
     steps {
-        sh 'abicheck compare old.so new.so -H include/ --format junit -o abi-results.xml'
+        sh 'abicheck compare old.so new.so -H include/ -o junit=abi-results.xml'
     }
     post {
         always {
@@ -1299,7 +1306,7 @@ stage('ABI Check') {
 - task: CmdLine@2
   inputs:
     script: |
-      abicheck compare old.so new.so -H include/ --format junit -o abi-results.xml
+      abicheck compare old.so new.so -H include/ -o junit=abi-results.xml
   continueOnError: true
 
 - task: PublishTestResults@2
@@ -1331,7 +1338,7 @@ Evidence coverage:
 ```
 
 The same rows are emitted as a structured `layer_coverage` array in the
-`--format json` report (schema `report_schema_version` 2.0+; the key was
+`-o json=...` report (schema `report_schema_version` 2.0+; the key was
 `evidence_coverage` in 1.x), so machine consumers can key off layer status
 and confidence.
 
@@ -1348,7 +1355,7 @@ Evidence metrics:
 ```
 
 The same numbers are emitted as a structured `evidence_metrics` object in the
-`--format json` report (schema `report_schema_version` 2.1+), keyed by the D9
+`-o json=...` report (schema `report_schema_version` 2.1+), keyed by the D9
 metric names:
 
 ```json

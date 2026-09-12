@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://abicheck.github.io/abicheck/reference/schemas/v1/audit_report.schema.json",
   "title": "abicheck single-build audit report",
-  "description": "Schema for the JSON document produced by `abicheck compare --no-baseline CANDIDATE --format json` (ADR-068 D2's single-build audit). Deliberately a separate schema from compare_report.schema.json, not a version of it: an audit has one operand and reports no compatibility verdict, so `verdict` is always null and means \"no comparison was performed\" -- not compare_report's ADR-050 D2 meaning, \"the comparability gate rejected this pair\", which is why that schema requires a `reason` alongside a null verdict and this one must not. Versioned independently via audit_report_schema_version; additive changes (new optional keys, new enum members) bump the MINOR component, breaking changes bump the MAJOR component.",
+  "description": "Schema for the JSON document produced by `abicheck compare --no-baseline CANDIDATE -o json=-` (ADR-068 D2's single-build audit). Deliberately a separate schema from compare_report.schema.json, not a version of it: an audit has one operand and reports no compatibility verdict, so `verdict` is always null and means \"no comparison was performed\" -- not compare_report's ADR-050 D2 meaning, \"the comparability gate rejected this pair\", which is why that schema requires a `reason` alongside a null verdict and this one must not. Versioned independently via audit_report_schema_version; additive changes (new optional keys, new enum members) bump the MINOR component, breaking changes bump the MAJOR component.",
   "type": "object",
   "required": [
     "audit_report_schema_version",

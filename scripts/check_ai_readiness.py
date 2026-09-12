@@ -1365,8 +1365,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # `_public_provenance_set` from it function-locally).
         #
         # `cli_inputs` joins the same SCC (ADR-038 C.8): its `inputs validate`
-        # command reuses the shared `-o/--format` pair via
-        # `cli_options.output_options` (module-load import), and `cli_options`
+        # command reuses the shared `-o FORMAT=DESTINATION` export request via
+        # `cli_options.export_options` (module-load import), and `cli_options`
         # is already a member of this cluster — so `cli -> cli_inputs ->
         # cli_options -> ... -> cli` closes through already-member modules,
         # not a new dependency direction. No init deadlock.
@@ -1461,8 +1461,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "appcompat",
                 "cli",
                 # `cli_aggregate` joins this SCC exactly like `cli_inputs`: its
-                # `aggregate` command reuses the shared `-o/--format` pair via
-                # `cli_options.output_options` (module-load import), and
+                # `aggregate` command reuses the shared `-o FORMAT=DESTINATION` export request via
+                # `cli_options.export_options` (module-load import), and
                 # `cli_options` is already a member — so `cli -> cli_aggregate ->
                 # cli_options -> ... -> cli` closes through already-member
                 # modules, not a new dependency direction. No init deadlock.
@@ -1487,8 +1487,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # three former standalone groups it replaces
                 # (`cli_build_output`/`cli_project_targets`/`cli_run_plan`)
                 # did: its `project validate`/`validate-build`/`plan`
-                # commands reuse the shared `-o/--format` pair via
-                # `cli_options.output_options` (module-load import), and
+                # commands reuse the shared `-o FORMAT=DESTINATION` export request via
+                # `cli_options.export_options` (module-load import), and
                 # `cli_options` is already a member — so `cli -> cli_project
                 # -> cli_options -> ... -> cli` closes through already-member
                 # modules, not a new dependency direction. No init deadlock.
@@ -3089,7 +3089,7 @@ _REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
         "policy_options",
         "severity_options",
         "scope_options",
-        "output_options",
+        "export_options",
     }
 )
 

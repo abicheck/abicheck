@@ -937,9 +937,13 @@ class TestCompareExitDecisionIntegration:
         res = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--required-symbol", "_Z5pub_av",  # pub_a survives; pub_b was removed
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert res.exit_code == 4, res.output
@@ -967,9 +971,13 @@ class TestCompareExitDecisionIntegration:
         res = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--required-symbol", "_Z5pub_bv",  # pub_b was removed
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_bv",
+                "-o",
+                "markdown=json=-",
             ],
         )
         assert res.exit_code != 0, res.output
@@ -1002,10 +1010,14 @@ class TestCompareExitDecisionIntegration:
         res = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--required-symbol", "_Z5pub_av",  # survives -- clean scoped gate
-                "--format", "json",
-                *_assurance_config_args(tmp_path),  # elf-only pair: incomplete
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_av",
+                "-o",
+                "markdown=json=-",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code == 1, res.output

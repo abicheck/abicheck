@@ -385,7 +385,7 @@ def test_sc_baseline_pin(tmp_path: Path) -> None:
     # is the direct replacement.)
     v1 = _save(_lib("1", [_fn("a"), _fn("b")]), tmp_path / "v1.json")
     v2 = _save(_lib("2", [_fn("a")]), tmp_path / "v2.json")
-    res = _cli("compare", v1, v2, "--format", "json")
+    res = _cli("compare", v1, v2, "-o", "json=-")
     assert res.exit_code == 4
     payload = json.loads(res.output)
     assert payload["verdict"] == "BREAKING"
@@ -526,8 +526,8 @@ def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
         "compare",
         o,
         n,
-        "--format",
-        "json",
+        "-o",
+        "json=-",
         "--probe-matrix",
         "old=" + om,
         "--probe-matrix",
@@ -647,8 +647,8 @@ def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
         str(cdb),
         "--depth",
         "binary",
-        "--format",
-        "json",
+        "-o",
+        "json=-",
     )
     assert res.exit_code == 4, res.output
     doc = json.loads(res.stdout)
@@ -834,8 +834,8 @@ def test_sc_cxx_std_floor(tmp_path: Path) -> None:
         "compare",
         o,
         n,
-        "--format",
-        "json",
+        "-o",
+        "json=-",
         "--probe-matrix",
         "old=" + om,
         "--probe-matrix",

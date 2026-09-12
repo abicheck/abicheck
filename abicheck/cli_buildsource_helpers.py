@@ -82,7 +82,7 @@ def _echo(message: str) -> None:
     """The CLI's sink for `buildsource.evidence_report`'s report lines.
 
     stderr, deliberately: the D7 coverage/capability report must cover every
-    output format without polluting a ``--format json`` stdout that a consumer
+    output format without polluting a ``-o json=...`` stdout that a consumer
     pipes into a parser.
     """
     click.echo(message, err=True)

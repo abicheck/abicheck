@@ -699,8 +699,8 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
                 str(new_dir),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
             ],
         )
         # Compatible addition-only change, but `public` cannot prove its own
@@ -718,8 +718,8 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
                 str(new_dir),
                 "--contract",
                 "public",
-                "--format",
-                "json",
+                "-o",
+                "markdown=json=-",
                 "--pack",
                 str(pack),
             ],

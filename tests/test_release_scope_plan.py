@@ -316,7 +316,7 @@ class TestScopePlanIsExecutionAuthoritative:
             side_effect=_narrow_to_libfoo_only,
         ):
             code, out = _invoke(
-                "compare", str(old_dir), str(new_dir), "--format", "json"
+                "compare", str(old_dir), str(new_dir), "-o", "json=-"
             )
 
         assert code == 0
@@ -368,8 +368,8 @@ class TestExplicitSelectionFoldedIntoScopePlan:
                 str(new_dir),
                 "--select",
                 "libfoo.json",
-                "--format",
-                "json",
+                "-o",
+                "json=-",
             )
 
         assert code == 0

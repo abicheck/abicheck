@@ -1716,10 +1716,10 @@ PYEOF
 # a name-suffix-only check here would misidentify such an operand, Codex
 # review, PR #557). `compare` fans such an operand out through the release
 # engine internally regardless of the Action's MODE. Since CLI cleanup phase
-# two, PR E, the release engine supports --write directly (json/markdown/
-# junit, the same set --format itself accepts there) -- this helper is no
-# longer needed to skip the --write PR-comment JSON injection, but stays in
-# use for the release-only flags below (--output-dir, --dso-only, ...).
+# two, PR E, the release engine renders every requested export directly
+# (json/markdown/junit) -- this helper is no longer needed to skip the
+# PR-comment JSON export injection, but stays in use for the release-only
+# flags below (--dso-only, ...).
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -1879,7 +1879,7 @@ for param in node.params:
 # leaving `dry_run=False` and running a perfectly normal comparison (verified
 # directly against the installed CLI). An opaque tokenizer instead reports a
 # real `--dry-run` flag -- so `_extra_args_has_dry_run_flag` answers true,
-# this script skips its `--write json=`/`-o` injection as it must for a real
+# this script skips its `-o json=` injection as it must for a real
 # dry run, and the comparison then runs for real while the requested output
 # is never written and the report-reading floors go blind. That is a silent
 # wrong outcome, not a visible one, and it is an *over*-detection of
@@ -2048,51 +2048,92 @@ _extra_args_options() {
   [[ -n "$_pending" ]] && printf '%s\t\n' "$_pending"
 }
 
-# Whether the user's own `extra-args` passthrough already requests
-# `--write` (documented, supported usage — `extra-args` is a general CLI
-# escape hatch).
+# Every export the user's own `extra-args` passthrough requests, one per
+# line as FORMAT<TAB>DESTINATION (documented, supported usage — `extra-args`
+# is a general CLI escape hatch).
+#
+# Plan slice 7m: `abicheck` has exactly one report-output flag now,
+# `-o FORMAT=DESTINATION`, repeatable, with `-` for stdout. The three
+# separate scanners this file used to carry (`--format`, `--write`, and
+# `-o`'s own path, each with its own last-wins reasoning) collapse into this
+# one parse, because the CLI they were modelling collapsed the same way.
+# Attached short forms (`-oFMT=DEST`, `-voFMT=DEST`) are recovered through
+# `_attached_output_value`, exactly as `_effective_output_file` already did.
 #
 # Fed through a `<<<` here-string rather than `< <(...)` process
 # substitution (Codex review, P1, fresh evidence): this file's own
 # conventions prefer a here-string over process substitution where one
-# works, for the stock bash 3.2 contributors and macOS runners carry (this
-# and its three siblings below are the only new process-substitution use
-# this refactor introduced).
-_extra_args_has_write_flag() {
-  local _name _value
+# works, for the stock bash 3.2 contributors and macOS runners carry.
+_extra_args_exports() {
+  local _name _value _operand _fmt _dest
   while IFS=$'\t' read -r _name _value; do
-    [[ "$_name" == "--write" ]] && return 0
+    _operand=""
+    case "$_name" in
+      --output | -o) _operand="$_value" ;;
+      -*)
+        if _operand="$(_attached_output_value "$_name")"; then
+          :
+        else
+          _operand=""
+        fi
+        ;;
+    esac
+    [[ -n "$_operand" ]] || continue
+    # Split on the FIRST '=' only, the same rule the CLI's own parser uses,
+    # so a Windows destination (`json=C:\out\r.json`) and a destination
+    # containing further '=' both survive intact.
+    _fmt="${_operand%%=*}"
+    _dest="${_operand#*=}"
+    [[ "$_fmt" != "$_operand" ]] || continue
+    printf '%s\t%s\n' "$_fmt" "$_dest"
   done <<<"$(_extra_args_options)"
-  return 1
 }
 
-# Would injecting our own internal `--write json=$PR_JSON` conflict with a
-# `--write` the user's own `extra-args` already requests? $1 is "release"
-# for a directory/package operand, "single" otherwise.
+# Whether `extra-args` names any export of its own.
+_extra_args_has_export() {
+  [[ -n "$(_extra_args_exports)" ]]
+}
+
+# Every export the real invocation carries.
 #
-# This used to be a blanket "any user --write at all" check, on the theory
-# that `--write` was a scalar Click option where a repeated occurrence
-# silently drops the earlier one -- but `--write` is documented and
-# live-verified as *repeatable* for a single-pair/audit-only operand
-# (`compare --help-all`: "Repeatable: pass --write more than once to emit
-# several artifacts from the same analysis"; confirmed live: `--write
-# markdown=a.md --write json=b.json` produces both files, and even two
-# `--write json=...` at different paths both render). So for a single-pair
-# or audit-only run, the ONLY real conflict is the user's own `--write`
-# already being `json=...` -- appending a second, redundant JSON write
-# would work but serves no purpose (`_extra_args_write_json_path` already
-# recovers that same path for `_json_report_src` to read). A release
-# (directory/package) operand is the one genuine constraint: only one
-# `--write` is supported there at all (Codex review, PR #1210, round 9 --
-# the blanket check previously left every audit-only scan combining
-# `extra-args: --write markdown=...`/`--write sarif=...` with no JSON
-# sidecar at all, publishing the generic COMPATIBLE/ERROR-adjacent verdict
-# `_resolve_clean_exit_verdict` needs a real report to avoid).
-_extra_args_write_would_conflict() {
-  if [[ "$1" == "release" ]]; then
-    _extra_args_has_write_flag
-    return
+# Plan slice 7m: the `format:`/`output-file:` inputs are a convenience for
+# stating *one* export; `extra-args -o` is the escape hatch that states the
+# whole set. When the caller reaches for it, this script injects none of its
+# own -- `-o` is repeatable and two exports to one destination is a usage
+# error rather than a silent last-wins override, so appending ours to theirs
+# would either duplicate a destination they named or force a stdout report
+# they did not ask for. That also reproduces what the retired
+# `extra-args --format`/`--output` override did: the caller's value is the
+# effective one.
+#
+# A caller who wants both a stdout report and a file says so in their own
+# set (`-o json=- -o json=b.json`), which is one operand more explicit and
+# one mechanism fewer than the `--format`-plus-`--write` pair it replaces.
+_effective_exports() {
+  if ! _extra_args_has_export; then
+    printf '%s\t%s\n' "${FORMAT:-markdown}" "${OUTPUT_FILE:--}"
   fi
+  _extra_args_exports
+}
+
+# Would injecting our own internal `-o json=$PR_JSON` sidecar be redundant
+# given the exports the caller's own `extra-args` already requests? $1 is
+# "release" for a directory/package operand, "single" otherwise.
+#
+# The sidecar's destination is a fresh `mktemp` path, so it can never
+# *collide* with a caller's export -- what would make it pointless is the
+# caller already naming a json destination this script can read instead
+# (`_extra_args_write_json_path` recovers it for `_json_report_src`).
+#
+# Plan slice 7m collapsed the old per-operand-shape distinction into that
+# one rule. It existed because `--write` was capped at one occurrence for a
+# release operand while being repeatable for a single pair; the release
+# fan-out now renders every requested export from the same already-computed
+# per-library results, so the shape no longer decides anything. $1 is still
+# accepted so every call site keeps naming the operand shape it is reasoning
+# about, and so a future release-only rule has somewhere to live.
+_extra_args_write_would_conflict() {
+  : "${1:-single}"
   [[ -n "$(_extra_args_write_json_path)" ]]
 }
 
@@ -2111,7 +2152,7 @@ _extra_args_write_would_conflict() {
 # args --config` workflow never collided -- a real regression Phase 7d's
 # flag-to-config demotion introduced, not a pre-existing edge case.
 # Checked once, right before `extra-args` is appended, the same call-site
-# shape `_extra_args_has_write_flag`/`_extra_args_has_dry_run_flag` already
+# shape `_extra_args_has_export`/`_extra_args_has_dry_run_flag` already
 # use; fails loud with an actionable message (use `build-config:` instead)
 # rather than silently doing the wrong thing -- merging a *third*,
 # argv-quoting-fragile config source into the overlay was judged a
@@ -2125,18 +2166,17 @@ _extra_args_has_config_flag() {
   return 1
 }
 
-# Same shape as `_extra_args_has_write_flag` above, for the sibling defect
+# Same shape as `_extra_args_has_export` above, for the sibling defect
 # (Codex review, P2, fresh evidence): `INPUT_DRY_RUN` is a dedicated Action
 # input, but an *effective* dry run reached only through `extra-args
 # --dry-run` leaves `INPUT_DRY_RUN` false, so the compare command
 # assembly still takes its non-dry-run branch and forwards `-o
-# "$OUTPUT_FILE"`/injects `--write json=$PR_JSON` -- both of which the CLI
-# itself rejects alongside a real `--dry-run` (`dry_run.
-# reject_dry_run_with_output`/`frontends.cli.options.secondary_output.
-# reject_incoherent_secondary_output`), turning what should be a clean
-# dry-run preview into a usage error (exit 64). Checked before the PR_JSON
-# sidecar injection in both modes, the same way `_extra_args_has_write_flag`
-# already is.
+# "$FORMAT=$OUTPUT_FILE"`/injects `-o json=$PR_JSON` -- both of which the CLI
+# itself rejects alongside a real `--dry-run`
+# (`frontends.cli.options.export.reject_dry_run_with_exports`), turning what
+# should be a clean dry-run preview into a usage error (exit 64). Checked
+# before the PR_JSON sidecar injection in both modes, the same way
+# `_extra_args_has_export` already is.
 _extra_args_has_dry_run_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
@@ -2151,57 +2191,37 @@ _extra_args_has_dry_run_flag() {
 # genuinely lacks raises `compare`'s own real, correct Click usage error,
 # the same outcome any unsupported `extra-args` flag has always gotten.
 
-# Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
-# extra-args, printing it (and nothing else) when found. Empty output means
-# "no such flag" -- callers treat that as "cannot tell", same as every other
+# Extract the user-supplied `-o json=PATH` destinations from extra-args,
+# printing them (one per line) when found. Empty output means "no such
+# export" -- callers treat that as "cannot tell", same as every other
 # report-discovery helper here.
 #
-# Why this exists (Codex review, PR #798): when the primary FORMAT isn't
-# json and the user's own extra-args already carries `--write`,
-# `_extra_args_has_write_flag` above correctly suppresses the internal
-# `PR_JSON` injection (so the two `--write`s don't collide and Click's
-# last-flag-wins doesn't silently drop the user's own path) -- but that
-# means `_json_report_src` had no JSON source to fall back to at all, so
-# `annotate: true` silently emitted nothing even though the user's own
-# `--write` destination held a perfectly good report the whole time. This
-# recovers that path so `_json_report_src` can read it directly, instead of
-# either rejecting the combination outright or (worse) silently doing
-# nothing.
+# Why this exists (Codex review, PR #798): when the caller's own exports
+# suppress this script's internal `PR_JSON` injection (so two exports do not
+# collide), `_json_report_src` would otherwise have no JSON source to fall
+# back to at all, and `annotate: true` would silently emit nothing even
+# though the caller's own export destination held a perfectly good report
+# the whole time. This recovers those paths so `_json_report_src` can read
+# one directly, instead of either rejecting the combination outright or
+# (worse) silently doing nothing.
 #
-# `--write` is **repeatable**: `compare` declares it with `multiple=True`
-# (`frontends/cli/options/secondary_output.py`'s `deco_multi`, ADR-068 D4's
-# "one analysis, several artifacts"), and its own help text gives
-# `--write json=a.json --write markdown=b.md` as the example. Every named
-# artifact is written, so every `json=` destination among them is a real,
-# caller-requested report.
-#
-# This comment used to say the opposite -- "a scalar (non-`multiple=True`)
-# Click option ... resolves to the *last* occurrence" (Codex review, P2, PR
-# #1071) -- and the function cleared an already-found `json=` path whenever a
-# later `--write` named another format, to match that supposed last-wins
-# resolution. The claim was stale (the singular `deco` shape still exists in
-# that factory, but `compare` does not use it) and the clearing was a real
-# defect: `--write json=a.json --write markdown=b.md` reported *no* requested
-# JSON path at all, so a missing or truncated `a.json` left an exit-0 run
-# publishing a clean verdict (Codex review, P2). Verified against the option
-# declaration rather than either comment, since the two contradicted.
-#
-# `_extra_args_write_json_paths` prints every one, newline-separated, so
-# `_json_report_expected` can require all of them; the singular
-# `_extra_args_write_json_path` keeps its one-value contract for
-# `_json_report_src`, which only needs *a* readable report to read from.
+# Every named export is written, so every `json=` destination among them is
+# a real, caller-requested report -- which is why this prints all of them
+# (`_json_report_expected` requires all) rather than resolving a "winner".
+# An earlier revision of the `--write` scanner this replaces *cleared* an
+# already-found path whenever a later flag named another format, modelling a
+# last-wins rule that never applied to a repeatable option; that was a real
+# defect (a missing or truncated report left an exit-0 run publishing a
+# clean verdict, Codex review, P2). A destination of `-` is stdout, not a
+# file, and is skipped: there is no path there for anyone to read.
 _extra_args_write_json_paths() {
-  local _name _value _found=1
-  while IFS=$'\t' read -r _name _value; do
-    if [[ "$_name" == "--write" ]]; then
-      case "$_value" in
-        json=*)
-          printf '%s\n' "${_value#json=}"
-          _found=0
-          ;;
-      esac
-    fi
-  done <<<"$(_extra_args_options)"
+  local _fmt _dest _found=1
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ "$_fmt" == "json" ]] || continue
+    [[ "$_dest" != "-" ]] || continue
+    printf '%s\n' "$_dest"
+    _found=0
+  done <<<"$(_extra_args_exports)"
   return $_found
 }
 
@@ -2212,29 +2232,72 @@ _extra_args_write_json_path() {
   printf '%s' "$_first"
 }
 
-# The real `--format` value `abicheck` runs with, accounting for `extra-args`
-# overriding this script's own `--format "$FORMAT"` flag.
+# The format `abicheck` really renders its primary report in.
 #
-# Each mode's own command-assembly section puts `--format "$FORMAT"` (derived
-# from the Action's `format:` input) on `CMD` first and `$INPUT_EXTRA_ARGS`
-# last; Click resolves a repeated option by keeping only the *last*
-# occurrence. So `format: text` with `extra-args: --format json` really does
-# run with JSON output, even though this script's own `$FORMAT` variable
-# still reads "text" everywhere else. Every JSON-detection site gating on
-# `$FORMAT == json` (`_STDOUT_JSON_FILE`'s own stdout capture,
-# `_json_report_src`'s `OUTPUT_FILE` branch) needs this *effective* value,
-# not the nominal one, or it silently fails to recognize a report that is
-# genuinely JSON on disk/stdout (ADR-064's own "effective-format-override"
-# gap, previously left as a documented limitation rather than fixed).
+# The primary is the export that goes to stdout when there is one (that is
+# the report this script captures and reads), else the first requested. Every
+# JSON-detection site gating on `$FORMAT == json` (`_STDOUT_JSON_FILE`'s own
+# stdout capture, `_json_report_src`'s `OUTPUT_FILE` branch) needs this
+# *effective* value, not the nominal one, or it silently fails to recognize a
+# report that is genuinely JSON on disk/stdout (ADR-064's own
+# "effective-format-override" gap).
 #
-# Falls back to the nominal `$FORMAT` when extra-args carries no `--format`
-# of its own -- the ordinary, unoverridden case.
+# It differs from the nominal `$FORMAT` exactly when the caller's own exports
+# shadow this script's -- `format: text` with `extra-args: -o json=-` really
+# does run with JSON on stdout, because our own `text=-` is not injected
+# beside it (see `_effective_exports`).
 _effective_format() {
-  local _name _value _found="${FORMAT:-}"
-  while IFS=$'\t' read -r _name _value; do
-    [[ "$_name" == "--format" ]] && _found="$_value"
-  done <<<"$(_extra_args_options)"
-  printf '%s' "$_found"
+  local _fmt _dest _first="" _stdout=""
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ -n "$_first" ]] || _first="$_fmt"
+    if [[ "$_dest" == "-" && -z "$_stdout" ]]; then
+      _stdout="$_fmt"
+    fi
+  done <<<"$(_effective_exports)"
+  if [[ -n "$_stdout" ]]; then
+    printf '%s' "$_stdout"
+  else
+    printf '%s' "${_first:-${FORMAT:-}}"
+  fi
+}
+
+# The path `abicheck` really writes its primary report to -- the exact
+# sibling of `_effective_format` above, over the same resolved export set,
+# and empty whenever that primary goes to stdout.
+#
+# Needed by `_caller_json_destinations`, which asks "where did the caller ask
+# for a report". Keying that on `$OUTPUT_FILE` alone got it wrong in both
+# directions (Codex review, P2, reproduced): `format: json` with
+# `extra-args: -o json=report.json` and no `output-file` input named no
+# destination at all, so a perfectly valid report was validated as the
+# *stdout* shape -- where the capture is empty, because output went to a
+# file -- and a working run published REPORT_UNREADABLE. And when both are
+# given, the destination inventory validated the superseded path while the
+# real report landed elsewhere.
+_effective_output_file() {
+  local _fmt _dest _first=""
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ "$_dest" != "-" ]] || continue
+    [[ -n "$_first" ]] || _first="$_dest"
+  done <<<"$(_effective_exports)"
+  printf '%s' "$_first"
+}
+
+# Whether this run prints a report to stdout at all.
+#
+# Deliberately *not* `[[ -z "$(_effective_output_file)" ]]`: since `-o` is
+# repeatable, a run can legitimately do both -- `format: json` (stdout) plus
+# an `extra-args -o json=b.json` file -- and the two facts answer different
+# questions. Keying the stdout-mode judgement on "no file destination" is
+# how a valid secondary once masked an unusable stdout report
+# (Codex/CodeRabbit review); this predicate is what keeps that closed under
+# a grammar where both are ordinary at once.
+_report_goes_to_stdout() {
+  local _fmt _dest
+  while IFS=$'\t' read -r _fmt _dest; do
+    [[ "$_dest" == "-" ]] && return 0
+  done <<<"$(_effective_exports)"
+  return 1
 }
 
 # The attached `-o` value in an opaque bare token, or failure when it holds none.
@@ -2259,53 +2322,6 @@ _attached_output_value() {
   done
   [[ "$_rest" == o?* ]] || return 1
   printf '%s' "${_rest#o}"
-}
-
-# The real `--output` path `abicheck` writes to, accounting for `extra-args`
-# overriding this script's own `-o "$OUTPUT_FILE"` flag -- the exact sibling of
-# `_effective_format` above, and for the same reason: `CMD` carries this
-# script's own flags first and `$INPUT_EXTRA_ARGS` last, and Click keeps the
-# last occurrence of a repeated option.
-#
-# Needed by `_caller_json_destinations`, which asks "where did the caller ask
-# for a report". Keying that on `$OUTPUT_FILE` alone got it wrong in both
-# directions (Codex review, P2, reproduced): `format: json` with
-# `extra-args: --output report.json` and no `output-file` input names no
-# destination at all, so a perfectly valid report was validated as the *stdout*
-# shape -- where the capture is empty, because output went to a file -- and a
-# working run published REPORT_UNREADABLE. And when both are given, the
-# destination inventory validated the superseded path while the real report
-# landed elsewhere.
-#
-# Prints nothing when neither is set: that is genuine stdout mode.
-_effective_output_file() {
-  local _name _value _found="${OUTPUT_FILE:-}"
-  while IFS=$'\t' read -r _name _value; do
-    case "$_name" in
-      --output | -o) _found="$_value" ;;
-      # Click's *attached* short forms, bare (`-oPATH`) or clustered
-      # (`-voPATH`, `-vvoPATH`). `_extra_args_options` leaves these opaque bare
-      # tokens on purpose -- an attached value consumes no following token, so
-      # for every other consumer "unexpanded" is already the right answer -- but
-      # here the attached value IS the answer, and dropping it sent a
-      # file-writing run down the stdout path (Codex review, P2 twice: first the
-      # bare form, then the clustered one, both confirmed directly against the
-      # installed Click parser).
-      #
-      # Delegated to `_attached_output_value` rather than matched with a glob:
-      # `-v*o?*` would also swallow `-vHofoo`, which Click reads as `-v -Hofoo`
-      # -- a header value, not an output path. Recognizing the form needs the
-      # same knowledge of which short options exist that
-      # `_extra_args_expand_short_clusters` already encodes, so it gets a named
-      # function instead of a third ad-hoc pattern.
-      -*)
-        if _value="$(_attached_output_value "$_name")"; then
-          _found="$_value"
-        fi
-        ;;
-    esac
-  done <<<"$(_extra_args_options)"
-  printf '%s' "$_found"
 }
 
 # ---------------------------------------------------------------------------
@@ -3305,19 +3321,18 @@ elif [[ "$MODE" == "compare" ]]; then
   # when the operands are directories/packages — surfaced as VERDICT=ERROR
   # below via the generic CLI-error detection, no separate fallback needed.
   FORMAT="${INPUT_FORMAT:-markdown}"
-  CMD+=(--format "$FORMAT")
 
   # Computed here, not only after extra-args are appended to CMD below, so
   # the PR_JSON sidecar-injection decision a few lines down (which runs
   # before that later, general-purpose computation) can already see an
-  # `extra-args --format` override -- see `_effective_format`'s own
-  # docstring (Codex review, PR #998, fresh evidence: the general-purpose
-  # computation runs too late for this mode's own injection decision).
+  # `extra-args` export set -- see `_effective_format`'s own docstring
+  # (Codex review, PR #998, fresh evidence: the general-purpose computation
+  # runs too late for this mode's own injection decision).
   _EFFECTIVE_FORMAT="$(_effective_format)"
 
   # dry-run performs no analysis and writes nothing, so it is mutually
-  # exclusive with -o/--output AND --write on
-  # the CLI -- skip both entirely when set, rather than passing them and
+  # exclusive with any -o export to a file on the CLI -- so a dry run
+  # exports to stdout only, rather than passing a file destination and
   # letting the CLI reject the combination.
   DRY_RUN="${INPUT_DRY_RUN:-false}"
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -3346,28 +3361,29 @@ elif [[ "$MODE" == "compare" ]]; then
     if [[ "${_EFFECTIVE_FORMAT:-$FORMAT}" == "sarif" && -z "$OUTPUT_FILE" ]]; then
       OUTPUT_FILE="abicheck-results.sarif"
     fi
-    if [[ -n "$OUTPUT_FILE" ]]; then
-      CMD+=(-o "$OUTPUT_FILE")
+    # Plan slice 7m: one export request, so one flag -- the format and its
+    # destination are the two halves of a single `-o FORMAT=DESTINATION`
+    # operand, with `-` for stdout. Injected only when `extra-args` names no
+    # export of its own: `-o` is repeatable and two exports to one
+    # destination is a usage error, not a last-wins override, so a caller
+    # who states their own export set owns it whole.
+    if ! _extra_args_has_export; then
+      CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
     fi
 
-    # Render a second, always-unfiltered JSON report from this same run for
-    # the sticky PR comment (--write), instead of re-invoking
-    # abicheck a second time just to get JSON. Only needed when the primary
-    # format isn't already JSON — a json primary is reused as-is (see
-    # _can_reuse_primary_json below).
+    # Export a second JSON report from this same run for the sticky PR
+    # comment, instead of re-invoking abicheck a second time just to get
+    # JSON. Only needed when the primary format isn't already JSON — a json
+    # primary is reused as-is (see _can_reuse_primary_json below).
     #
-    # CLI cleanup phase two, PR E: the per-library release fan-out
-    # (directory/package operands) now supports --write directly --
-    # json/markdown/junit only, the same set --format itself accepts there,
-    # which is exactly what this injection ever requests. The release
-    # engine renders the JSON from the same already-computed per-library
-    # results its primary (markdown, by default) render uses, without
-    # re-running any library's comparison, matching how --write already
-    # worked for a single-pair operand. Unlike single-pair, though, "only
-    # one --write is supported there" (compare --help-all) -- so whether
-    # injecting our own would conflict with the user's own extra-args
-    # --write genuinely depends on which operand shape this is; see
-    # _extra_args_write_would_conflict's own docstring.
+    # The per-library release fan-out (directory/package operands) renders
+    # json/markdown/junit, which is exactly what this injection ever
+    # requests. It renders the JSON from the same already-computed
+    # per-library results its stdout (markdown, by default) render uses,
+    # without re-running any library's comparison -- the same "one analysis,
+    # several artifacts" property a single-pair export set has. Whether
+    # injecting our own would conflict with the caller's own exports is
+    # _extra_args_write_would_conflict's question; see its docstring.
     #
     # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT`: a `format:
     # json` step whose own extra-args overrides to a non-json format really
@@ -3387,7 +3403,7 @@ elif [[ "$MODE" == "compare" ]]; then
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
        && ! _extra_args_write_would_conflict "$_write_kind"; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-      CMD+=(--write "json=$PR_JSON")
+      CMD+=(-o "json=$PR_JSON")
     fi
   fi
 
@@ -3489,14 +3505,17 @@ elif [[ "$MODE" == "deps-tree" ]]; then
     echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
-  CMD+=(--format "$FORMAT")
-
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
+    # A dry run writes no report, so its only export is stdout -- and only
+    # when the caller named none of their own (plan slice 7m).
+    if ! _extra_args_has_export; then
+      CMD+=(-o "$FORMAT=-")
+    fi
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if [[ -n "$OUTPUT_FILE" ]]; then
-      CMD+=(-o "$OUTPUT_FILE")
+    if ! _extra_args_has_export; then
+      CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
     fi
   fi
 
@@ -3518,14 +3537,17 @@ elif [[ "$MODE" == "deps-compare" ]]; then
     echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
-  CMD+=(--format "$FORMAT")
-
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
+    # A dry run writes no report, so its only export is stdout -- and only
+    # when the caller named none of their own (plan slice 7m).
+    if ! _extra_args_has_export; then
+      CMD+=(-o "$FORMAT=-")
+    fi
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-    if [[ -n "$OUTPUT_FILE" ]]; then
-      CMD+=(-o "$OUTPUT_FILE")
+    if ! _extra_args_has_export; then
+      CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
     fi
   fi
 
@@ -3834,8 +3856,19 @@ _json_report_src() {
   # misses an `extra-args --format json` override), while the isolated
   # extraction tests above set only `$FORMAT` and rely on the fallback to
   # keep behaving exactly as before this fix.
+  # The stdout capture comes first when this run really prints a report
+  # there. Plan slice 7m made "stdout *and* a file" an ordinary single
+  # request (`-o json=- -o json=b.json`), and stdout is the primary report
+  # in that set -- the same tie-break `_effective_format` applies -- so
+  # reading a file export in preference to it would answer from the wrong
+  # artifact. `-o` is repeatable and every export renders the same
+  # completed comparison, so the two agree in every ordinary case; the one
+  # they disagree in is a partially-written run, which is exactly when
+  # answering from the artifact the reader was shown matters.
   local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" && -s "$_primary" ]] \
+  if [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
+    echo "${_STDOUT_JSON_FILE}"
+  elif [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" && -s "$_primary" ]] \
      && { [[ -z "${_output_file_pre_fp+x}" ]] \
           || [[ "$(_file_fingerprint "$_primary")" != "$_output_file_pre_fp" ]]; }; then
     echo "$_primary"
@@ -4003,14 +4036,14 @@ _emit_annotations() {
     # nothing (Codex review, fresh evidence).
     #
     # Gated on the effective format, not the nominal one (Codex review, PR
-    # #998, fresh evidence): `format: json` overridden by `extra-args
-    # --format text` (say, alongside its own `--write markdown=...`) really
+    # #998, fresh evidence): `format: json` replaced by an `extra-args`
+    # export set naming only `-o text=-`/`-o markdown=...` really
     # does leave no JSON report anywhere -- `_src` above is correctly
     # empty -- but the nominal check here suppressed this very diagnostic
     # explaining why, since it still believed the primary was JSON.
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && _extra_args_has_write_flag \
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && _extra_args_has_export \
        && [[ -z "$(_extra_args_write_json_path)" ]]; then
-      echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own --write targets a non-json format -- no JSON report is available to render annotations from. Use format: json, or point --write at json=PATH instead."
+      echo "::notice title=abicheck annotate::annotate/annotate-additions requested, but the primary format isn't json and extra-args' own exports target no json destination -- no JSON report is available to render annotations from. Use format: json, or add -o json=PATH to extra-args instead."
     fi
     return 0
   fi
@@ -4585,20 +4618,21 @@ _resolve_clean_exit_verdict() {
     done <<<"$(_caller_json_destinations)"
     # Stdout mode names no destination above, so its report is judged here.
     #
-    # The condition is the *mode* -- json format with no effective output path --
-    # not "the inventory came back empty" (Codex/CodeRabbit review, and my own
-    # bug): `format: json` with no `output-file` plus an `extra-args --write
-    # json=b.json` has a non-empty inventory, so keying on emptiness skipped
-    # stdout validation entirely and let a valid secondary mask an unusable
-    # stdout report. That is the very masking this block was added to close,
-    # reintroduced one branch over.
+    # The condition is the *mode* -- json format and a report really going to
+    # stdout -- not "the inventory came back empty" (Codex/CodeRabbit review,
+    # and my own bug): `format: json` with no `output-file` plus an
+    # `extra-args -o json=b.json` has a non-empty inventory, so keying on
+    # emptiness skipped stdout validation entirely and let a valid secondary
+    # mask an unusable stdout report. That is the very masking this block was
+    # added to close, reintroduced one branch over. Since plan slice 7m a run
+    # can name both at once as ordinary usage, so the two facts get two
+    # predicates (`_report_goes_to_stdout` / `_effective_output_file`).
     #
     # And the stdout report is judged by its own captured file rather than
     # through `_report_validity`, for the same reason: the chain falls through to
     # a `--write` destination when the capture is absent, which is precisely the
     # case a missing stdout report presents.
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" \
-          && -z "${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}" ]]; then
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" ]] && _report_goes_to_stdout; then
       if [[ -z "${_STDOUT_JSON_FILE:-}" ]]; then
         # `$_STDOUT_JSON_FILE` is only set when stdout actually started with
         # `{`, so an empty value here is "the run printed no JSON document at
@@ -5085,7 +5119,7 @@ _SARIF_UPLOAD_FORMAT_MISMATCH=0
 if [[ "${FORMAT:-}" == "sarif" && "${INPUT_UPLOAD_SARIF:-false}" == "true" \
    && "${_EFFECTIVE_FORMAT:-$FORMAT}" != "sarif" ]]; then
   _SARIF_UPLOAD_FORMAT_MISMATCH=1
-  echo "::warning title=abicheck upload-sarif::format: sarif and upload-sarif: true were requested, but extra-args overrode --format away from sarif, so the real output is not SARIF. Skipping the SARIF upload (report-path withheld) rather than uploading mismatched content."
+  echo "::warning title=abicheck upload-sarif::format: sarif and upload-sarif: true were requested, but extra-args' own exports replaced it with a non-sarif format, so the real output is not SARIF. Skipping the SARIF upload (report-path withheld) rather than uploading mismatched content."
 fi
 
 # ---------------------------------------------------------------------------
@@ -5466,7 +5500,73 @@ _build_json_cmd() {
   local i
   for ((i = 0; i < ${#CMD[@]}; i++)); do
     case "${CMD[$i]}" in
-      --format | -o | --output | --output-file)
+      -o | --output | --output-file)
+        # Plan slice 7m: one export flag, so one case. Every export from
+        # the primary run is dropped and replaced by this rerun's single
+        # `-o json=$PR_JSON` below -- both the format half and the
+        # destination half now travel in the same operand, so there is no
+        # longer a separate `--format` (or `--write`) occurrence to strip.
+        #
+        # Dropping *every* export, not just the primary one, matters
+        # (Codex review, fresh evidence): this function is only ever
+        # reached after the caller's "$PR_JSON already populated" check
+        # came back empty, i.e. the primary run aborted before writing it
+        # (NOT_COMPARABLE and other early refusals render nothing --
+        # confirmed live). Keeping the primary run's own `-o
+        # json=$PR_JSON` sidecar would re-add the identical destination
+        # this rerun also targets, which the CLI hard-rejects as an export
+        # collision, so the rerun always failed and the comment was
+        # silently skipped with a misleading "no JSON report produced"
+        # warning. An export to some other path is equally pointless to
+        # keep for a run whose only output anyone reads is $PR_JSON.
+        ((i++))  # skip the flag's value too
+        ;;
+      --view)
+        # ADR-068 D4/Phase 5: --show-only's replacement token. A
+        # `--view show=...` occurrence is a display filter ("limit
+        # displayed changes", does NOT affect exit codes) -- keeping it
+        # would hide gated breaks from the comment while the check still
+        # fails red, so drop it (and its value) so the comment sees the
+        # full change set the gate acted on. Every other --view token
+        # (leaf/impact/root-cause/demangle/no-demangle/patterns) changes
+        # no content, only how it's grouped/spelled/explained, so it is
+        # kept -- the loop below falls through to the default case for it.
+        if [[ "${CMD[$((i + 1))]:-}" == show=* ]]; then
+          ((i++))  # drop the token and its value
+        else
+          PR_CMD_JSON+=("${CMD[$i]}")
+        fi
+        ;;
+      --view=show=*) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+_build_json_cmd() {
+  PR_CMD_JSON=()
+  local i
+  for ((i = 0; i < ${#CMD[@]}; i++)); do
+    case "${CMD[$i]}" in
+      -o | --output | --output-file)
+        # Plan slice 7m: one export flag, so one case. Every export from
+        # the primary run is dropped and replaced by this rerun's single
+        # `-o json=$PR_JSON` below -- both the format half and the
+        # destination half now travel in the same operand, so there is no
+        # longer a separate `--format` (or `--write`) occurrence to strip.
+        #
+        # Dropping *every* export, not just the primary one, matters
+        # (Codex review, fresh evidence): this function is only ever
+        # reached after the caller's "$PR_JSON already populated" check
+        # came back empty, i.e. the primary run aborted before writing it
+        # (NOT_COMPARABLE and other early refusals render nothing --
+        # confirmed live). Keeping the primary run's own `-o
+        # json=$PR_JSON` sidecar would re-add the identical destination
+        # this rerun also targets, which the CLI hard-rejects as an export
+        # collision, so the rerun always failed and the comment was
+        # silently skipped with a misleading "no JSON report produced"
+        # warning. An export to some other path is equally pointless to
+        # keep for a run whose only output anyone reads is $PR_JSON.
         ((i++))  # skip the flag's value too
         ;;
       --view)
@@ -5513,7 +5613,7 @@ _build_json_cmd() {
         ;;
     esac
   done
-  PR_CMD_JSON+=(--format json -o "$PR_JSON")
+  PR_CMD_JSON+=(-o "json=$PR_JSON")
 }
 
 _maybe_post_pr_comment() {

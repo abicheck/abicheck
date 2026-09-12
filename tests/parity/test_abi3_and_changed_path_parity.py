@@ -80,7 +80,7 @@ def test_compare_abi3_stays_advisory(tmp_path: Path) -> None:
     effect the run still exits 0, and the finding stays a RISK kind."""
     path = write_snapshot(_abi3_snapshot(), tmp_path / "foo.abi3.so.abi.json")
     result = invoke_cli(
-        "compare", str(path), str(path), "--abi3", "3.9", "--format", "json"
+        "compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"
     )
     assert result.exit_code == 0, result.output
     report = json.loads(result.stdout)
@@ -100,7 +100,7 @@ def test_compare_abi3_on_a_non_extension_is_an_evidence_contract_error(
     axis `compare` already has (ADR-064): exit 7, not a fabricated finding."""
     path = write_snapshot(_plain_snapshot(), tmp_path / "libfoo.abi.json")
     result = invoke_cli(
-        "compare", str(path), str(path), "--abi3", "3.9", "--format", "json"
+        "compare", str(path), str(path), "--abi3", "3.9", "-o", "json=-"
     )
     assert result.exit_code == 7, result.output
     report = json.loads(result.stdout)
@@ -155,7 +155,7 @@ def test_compare_accepts_the_changed_path_options(flag: str, tmp_path: Path) -> 
     path = write_snapshot(_plain_snapshot(), tmp_path / "snap.abi.json")
     value = "origin/main" if flag == "--since" else "src/foo.h"
     result = invoke_cli(
-        "compare", str(path), str(path), flag, value, "--format", "json"
+        "compare", str(path), str(path), flag, value, "-o", "json=-"
     )
     assert result.exit_code == 0, result.output
     report = json.loads(result.stdout)

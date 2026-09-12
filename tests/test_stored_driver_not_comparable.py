@@ -131,8 +131,8 @@ class TestNotComparableMemberIsRecordedNotRaised:
             "compare",
             str(old),
             str(new),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
             "--config",
             str(cfg),
         )
@@ -170,7 +170,7 @@ class TestZeroOverlapPairRendersItsScope:
             ),
             new,
         )
-        code, out = _invoke("compare", str(old), str(new), "--format", "json")
+        code, out = _invoke("compare", str(old), str(new), "-o", "json=-")
         assert code == 1, out
         doc = json.loads(out[out.index("{") :])
         scope = doc["comparison_scope"]
@@ -189,6 +189,6 @@ class TestZeroOverlapPairRendersItsScope:
         save_bundle_facts(
             capture_bundle_facts({"libnew.so": _elf_snap("libnew.so")}), new
         )
-        code, out = _invoke("compare", str(old), str(new), "--format", "markdown")
+        code, out = _invoke("compare", str(old), str(new), "-o", "markdown=-")
         assert code == 1, out
         assert "no comparison completed" in out

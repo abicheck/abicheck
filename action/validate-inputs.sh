@@ -199,8 +199,8 @@ case "$MODE" in
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: $MODE does not accept a directory or package for new-library ('$NEW_LIBRARY') — deps tree/deps compare analyse exactly one binary, they have no per-library fan-out. Point new-library at a single binary."
     fi
-    if [[ -n "$FORMAT" ]] && ! _cli_choice_allows "$MODE" --format "$FORMAT"; then
-      _fail "mode: $MODE does not support format: $FORMAT — only $(_cli_choice_list "$MODE" --format) are supported."
+    if [[ -n "$FORMAT" ]] && ! _cli_choice_allows "$MODE" -o "$FORMAT"; then
+      _fail "mode: $MODE does not support format: $FORMAT — only $(_cli_choice_list "$MODE" -o) are supported."
     fi
     ;;
   compare)
@@ -248,7 +248,8 @@ case "$MODE" in
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-version -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-version, or drop old-version for this audit-only run."
       fi
     fi
-    # compare's full --format choice set is json|markdown|sarif|html|junit|
+    # compare's full renderable-format set (behind `-o FORMAT=DESTINATION`)
+    # is json|markdown|sarif|html|junit|
     # review (`abicheck compare --help-all`); a directory/package operand
     # fans out through the release engine, which narrows that to
     # cli.py's _RELEASE_FORMATS = {json, markdown, junit} (sarif/html/review
@@ -276,14 +277,14 @@ case "$MODE" in
               && "$FORMAT" != "junit" && "$FORMAT" != "oneline" ]]; then
           _fail "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'junit', and 'oneline' are available for compare --no-baseline (html and review are two-sided-only renderers). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports html/review, instead."
         fi
-      elif ! _cli_choice_allows compare --format "$FORMAT"; then
+      elif ! _cli_choice_allows compare -o "$FORMAT"; then
         # Derived (ADR-070 D3, Phase 3b) -- this was a seven-way transcription
-        # of `compare --format`'s own click.Choice set. The two narrower checks
+        # of `compare -o`'s own declared format set. The two narrower checks
         # above are NOT derived and must not be: they are claims about which
         # renderer a given comparison *shape* supports, i.e. restriction
         # mirrors in ADR-070 D1/D2's sense, not choice sets. Generating them
         # would dress a mirror up as a derived fact. They are Phase 2 work.
-        _fail "mode: compare does not support format: $FORMAT — only $(_cli_choice_list compare --format) are supported."
+        _fail "mode: compare does not support format: $FORMAT — only $(_cli_choice_list compare -o) are supported."
       fi
     fi
     # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/

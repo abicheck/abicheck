@@ -895,8 +895,11 @@ class TestCompareReleaseTarPackages:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_tar), str(new_tar),
-            "--format", "json",
+            "compare",
+            str(old_tar),
+            str(new_tar),
+            "-o",
+            "markdown=json=-",
         ])
         # Should succeed — NO_CHANGE since snapshots are identical
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
@@ -922,8 +925,12 @@ class TestCompareReleaseTarPackages:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(tar), str(tar),
-            "--format", "json", "--keep-extracted",
+            "compare",
+            str(tar),
+            str(tar),
+            "-o",
+            "markdown=json=-",
+            "--keep-extracted",
         ])
         assert result.exit_code == 64, f"Exit {result.exit_code}: {result.output}"
 
@@ -953,8 +960,11 @@ class TestCompareReleaseDirectoryPassthrough:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "markdown=json=-",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -2337,8 +2347,11 @@ class TestCompareReleaseWheelPackages:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_whl), str(new_whl),
-            "--format", "json",
+            "compare",
+            str(old_whl),
+            str(new_whl),
+            "-o",
+            "markdown=json=-",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -4145,8 +4158,13 @@ class TestCompareReleaseDsoOnly:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--config", str(cfg),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "markdown=json=-",
+            "--config",
+            str(cfg),
         ])
         # Flag accepted (no usage error); zero pairs is exit 1 `no_comparison_completed` (ADR-065 D7)
         assert result.exit_code == 1, f"Exit {result.exit_code}: {result.output}"
@@ -4180,8 +4198,11 @@ class TestExtractedTempDirsAlwaysCleanedUp:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(archive), str(archive),
-            "--format", "json",
+            "compare",
+            str(archive),
+            str(archive),
+            "-o",
+            "markdown=json=-",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
         assert "Extracted files kept in:" not in result.output

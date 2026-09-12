@@ -705,7 +705,7 @@ class AggregateResult:
             # shape this function otherwise renders, which always carries a
             # real `Verdict`). Codex review, fresh evidence: the previous
             # `assert t.compatibility_verdict is not None` below made
-            # `abicheck aggregate --format text` crash outright on any such
+            # `abicheck aggregate -o text=...` crash outright on any such
             # target, including the text invocation `check-project.yml`
             # itself runs.
             forced_gate = ""

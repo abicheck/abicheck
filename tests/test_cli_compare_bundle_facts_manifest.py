@@ -122,12 +122,12 @@ class TestBundleFactsLibraryManifest:
         code, out = _invoke(
             "compare",
             str(facts_path),
-            str(new_so),  # the .so FILE itself, not new_dir
+            str(new_so),
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -179,8 +179,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -219,8 +219,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -259,8 +259,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -293,8 +293,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -320,8 +320,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -354,8 +354,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -412,8 +412,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -468,8 +468,8 @@ class TestBundleFactsLibraryManifest:
             str(manifest),
             "--depth",
             "binary",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -560,8 +560,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--depth",
             "binary",
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out
@@ -594,8 +594,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 64, out
@@ -652,8 +652,8 @@ class TestBundleFactsLibraryManifest:
             "--include-system-declarations",
             "--bundle-facts-library-manifest",
             str(manifest),
-            "--format",
-            "json",
+            "-o",
+            "json=-",
         )
 
         assert code == 0, out

@@ -518,10 +518,8 @@ class TestIncompleteScopePolicyIsInTheDigest:
                     str(new),
                     "--config",
                     str(cfg),
-                    "--format",
-                    "json",
                     "-o",
-                    str(out),
+                    f"json={out}",
                 ],
             )
             docs[policy] = json.loads(out.read_text())
@@ -539,10 +537,8 @@ class TestIncompleteScopePolicyIsInTheDigest:
                 "compare",
                 str(new / "liba.so.json"),
                 str(new / "liba.so.json"),
-                "--format",
-                "json",
                 "-o",
-                str(single),
+                f"json={single}",
             ],
         )
         fields = json.loads(single.read_text())["effective_config_fields"]

@@ -196,7 +196,7 @@ report text uses ABICC-style phrasing rather than a bare `API_BREAK` verdict str
 Source-level-only breaks (e.g. `case31_enum_rename`, `case34_access_level`) will
 appear as warnings in the compat HTML/text report.
 
-Use `abicheck compare --format json` for precise machine-readable `API_BREAK` verdicts.
+Use `abicheck compare -o json=-` for precise machine-readable `API_BREAK` verdicts.
 
 ---
 

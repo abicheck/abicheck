@@ -1373,8 +1373,8 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
             str(new_path),
             "--contract",
             "exports",
-            "--format",
-            "json",
+            "-o",
+            "markdown=json=-",
         ],
     )
     result_explicit = CliRunner().invoke(
@@ -1385,8 +1385,8 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
             str(new_path),
             "--contract",
             "exports",
-            "--format",
-            "json",
+            "-o",
+            "markdown=json=-",
         ],
     )
     assert result_implicit.exit_code == result_explicit.exit_code

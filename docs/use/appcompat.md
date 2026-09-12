@@ -106,7 +106,7 @@ missing-symbol/relevant-change count; the `json` format adds a top-level
 `missing_versions`/`relevant_change_count`) and a `consumer_scope` object
 (`{"verdict": ..., "scope": "used_by", "exit_code": ..., ...}`) — `verdict`
 itself is always the full-library one. (Exact rendering depends on
-`--format`; see `abicheck compare --help` for the full output-format list.)
+`-o`; see `abicheck compare --help` for the full export-format list.)
 
 ---
 
@@ -143,7 +143,7 @@ problem in CI.
 | `-H` / `--header` | Public header file or directory (repeatable, side-aware with `old=`/`new=`) |
 | `-I` / `--include` | Extra include directory for castxml (repeatable, side-aware) |
 | `--lang` | Language mode: `c++` (default) or `c` |
-| `--format` | Output format: `markdown` (default), `json`, `sarif`, `html`, `junit`, `review` |
+| `-o FORMAT=DESTINATION` | Export the report: `markdown` (default), `json`, `sarif`, `html`, `junit`, `review`; `-` is stdout, repeatable |
 | `-o` / `--output` | Write report to file |
 | `--scope-public-headers` / `--no-scope-public-headers` | Restrict findings to the public-header ABI surface (on by default) |
 | `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
@@ -345,7 +345,7 @@ depend on it directly.
   (`"... is reachable from public entry train: ..."`, no app name), since
   that finding is also rendered in the unscoped, full-library report.
 
-In `--format json`, the structured chain is `impact_proof_path` — an
+In `-o json=...`, the structured chain is `impact_proof_path` — an
 alternating list of node/edge dicts — alongside `affected_public_roots`
 (the public entry point name(s)) and `impact_is_direct`. These live on the
 `ImpactAssessment.proof_path` object described in the [Impact
@@ -388,7 +388,7 @@ Check if your application works with a library update in CI:
     abicheck compare libfoo.so.1 ./build/libfoo.so.2 \
       --used-by ./build/myapp \
       -H include/foo.h \
-      --format json -o appcompat.json
+      -o json=appcompat.json
 ```
 
 ---

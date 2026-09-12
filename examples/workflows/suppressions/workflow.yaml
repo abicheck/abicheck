@@ -58,8 +58,8 @@ steps:
     # rather than by grepping prose. The documented command above is still
     # what runs first.
     json_variant:
-      - --format
-      - json
+      - -o
+      - json=-
     expect_json:
       verdict: COMPATIBLE
       suppression.suppressed_count: 1
