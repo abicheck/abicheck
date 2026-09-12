@@ -394,6 +394,15 @@ class TestX86IsaBaseline:
 
 class TestObjectAlignmentReduced:
     def test_reduced(self):
+        # `_snap(old)` with no declared-alignment argument is already the
+        # no-evidence-on-either-side case (symbols-only / stripped-without-
+        # headers): corroboration is impossible, so the weak address-derived
+        # signal is kept as a best-effort finding. A second test named
+        # `test_declared_alignment_unknown_falls_back_to_address_heuristic`
+        # used to state exactly that with a byte-identical body; its name
+        # described this test rather than a distinct input, and the partial-
+        # evidence boundary it sounded like it covered already has its own
+        # test (`test_declared_alignment_known_one_side_only_falls_back`).
         old = _elf(symbols=[_obj("g_table", alignment=64)])
         new = _elf(symbols=[_obj("g_table", alignment=8)])
         r = compare(_snap(old), _snap(new))
@@ -661,13 +670,10 @@ class TestObjectAlignmentReduced:
         )
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
 
-    def test_declared_alignment_unknown_falls_back_to_address_heuristic(self):
-        # No declared-alignment evidence on either side (e.g. symbols-only /
-        # stripped-without-headers) — corroboration is impossible, so the weak
-        # address-derived signal is kept as a best-effort finding.
-        old = _elf(symbols=[_obj("g_table", alignment=64)])
-        new = _elf(symbols=[_obj("g_table", alignment=8)])
-        r = compare(_snap(old), _snap(new))
+
+        # ... and the mirror image, so the test cannot pass by only ever
+        # checking whichever side the implementation happens to test first.
+        r = compare(_snap(old), _snap(new, [_var("g_table", 64)]))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
     def test_declared_alignment_known_one_side_only_falls_back(self):

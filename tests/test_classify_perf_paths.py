@@ -171,6 +171,18 @@ class TestMain:
         # adding a "performance" label re-triggers the lane, but nothing
         # ever checked the label name -- a "performance" label on a PR
         # touching no listed path silently did not force a run.
+        #
+        # A `test_force_label_survives_a_later_push_with_no_event_label` with
+        # a byte-identical body used to sit below this one, for the other
+        # half of that finding: a synchronize push carries no
+        # `github.event.label` (that field exists only on labeled/unlabeled
+        # events) while `pull_request.labels` still lists it. That half is
+        # not observable here at all -- this CLI has no event-label input,
+        # so `--current-labels` alone IS the no-event-label case and the two
+        # tests were one test. It is a *workflow-wiring* claim, and it is now
+        # asserted as one by
+        # `TestWorkflowWiring::test_current_labels_comes_from_pull_request_labels`
+        # below, which nothing covered before.
         gh_output = tmp_path / "gh_output.txt"
         rc, _ = self._run(
             ["--force-label", "performance", "--current-labels", "performance"],
@@ -217,26 +229,6 @@ class TestMain:
         )
         assert rc == 0
         assert gh_output.read_text() == "run=false\n"
-
-    def test_force_label_survives_a_later_push_with_no_event_label(
-        self, capsys, monkeypatch, tmp_path
-    ) -> None:
-        # Regression guard for the actual Codex finding: a synchronize push
-        # to an already-'performance'-labeled PR carries no
-        # github.event.label (that field only exists on labeled/unlabeled
-        # events) but pull_request.labels still lists it -- the workflow
-        # now passes that current set unconditionally, so the force-run
-        # must still apply here, not just on the original labeling push.
-        gh_output = tmp_path / "gh_output.txt"
-        rc, _ = self._run(
-            ["--force-label", "performance", "--current-labels", "performance"],
-            stdin="README.md\n",
-            env={"GITHUB_OUTPUT": str(gh_output)},
-            capsys=capsys,
-            monkeypatch=monkeypatch,
-        )
-        assert rc == 0
-        assert gh_output.read_text() == "run=true\n"
 
     def test_files_from_file_is_read_instead_of_stdin(
         self, capsys, monkeypatch, tmp_path
@@ -338,3 +330,65 @@ class TestRenameDetectionInvocation:
         assert "abicheck/checker.py" in changed
         assert "abicheck/core/checker.py" in changed
         assert classify.changed_files_are_perf_sensitive(changed) is True
+
+
+class TestWorkflowWiring:
+    """`performance.yml` must feed the classifier the PR's *current* label
+    set on every pull_request sub-event.
+
+    The CLI half of Codex's force-label finding has unit coverage above, but
+    the half that actually caused it -- where the label set comes from -- had
+    none: a workflow that sourced labels from `github.event.label.name` would
+    pass the unit tests unchanged and still stop force-running on every push
+    after the labeling one. Asserted against the workflow text because that
+    wiring has no other executable surface here.
+    """
+
+    @staticmethod
+    def _workflow() -> str:
+        root = Path(__file__).resolve().parent.parent
+        return (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+
+    @classmethod
+    def _effective_lines(cls) -> list[str]:
+        """Workflow lines with comments stripped.
+
+        Load-bearing: this file *documents* the rejected
+        `github.event.label.name` spelling in a comment, so a naive substring
+        search over the raw text reports the very thing it is checking for
+        absent. Caught by the assertion below failing on its first run --
+        which is the useful kind of test failure, and the reason this helper
+        exists rather than a looser assertion.
+        """
+        out = []
+        for raw in cls._workflow().splitlines():
+            body = raw.split("#", 1)[0]
+            if body.strip():
+                out.append(body)
+        return out
+
+    def test_current_labels_comes_from_pull_request_labels(self) -> None:
+        lines = self._effective_lines()
+        # The PR's whole current label set, not the single delivered event's.
+        assert any("github.event.pull_request.labels.*.name" in ln for ln in lines)
+        # `github.event.label` exists only on labeled/unlabeled events, so
+        # sourcing from it is what made the force-run stop after the first
+        # push. It must not appear in any executed expression.
+        offenders = [ln.strip() for ln in lines if "github.event.label" in ln]
+        assert offenders == [], offenders
+
+    def test_classifier_is_invoked_with_current_labels(self) -> None:
+        text = self._workflow()
+        assert "--current-labels" in text
+        assert "--force-label performance" in text
+
+    def test_current_labels_is_not_gated_on_a_labeled_event(self) -> None:
+        """The env value must be assigned unconditionally -- a conditional
+        expression keyed on the event name is how it would silently go empty
+        on a synchronize push."""
+        line = next(
+            ln for ln in self._workflow().splitlines() if "CURRENT_LABELS:" in ln
+        )
+        assert "labeled" not in line
+        assert "github.event_name" not in line
+        assert "&&" not in line and "||" not in line

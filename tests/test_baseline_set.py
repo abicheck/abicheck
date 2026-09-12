@@ -599,10 +599,28 @@ def test_resolve_target_no_expected_baseline_generation_skips_the_check(
     tmp_path: Path,
 ) -> None:
     # None (the default) means "no expectation" -- never stale_generation
-    # regardless of what the manifest records, including a manifest that
-    # never declared a generation at all.
-    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
+    # regardless of what the manifest records. Both halves of "regardless"
+    # are exercised: a manifest that declares a generation, and one that
+    # never declared any.
+    #
+    # The declaring half is new. Without it this test's body was identical
+    # to `test_resolve_target_no_expected_project_ref_skips_the_check`'s,
+    # because `_write_manifest` already records a `project_ref` by default
+    # but leaves `baseline_generation` absent -- so the two tests made
+    # genuinely different claims while supplying only the one input that
+    # happened to serve both, and the more interesting case for *this*
+    # claim (an expectation-free caller ignoring a generation the manifest
+    # really does declare) had no input at all.
+    _write_manifest(
+        tmp_path, baseline_generation=7, artifacts=[_target_artifact("libpvxs")]
+    )
     (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    declared = resolve_target(
+        tmp_path, target="libpvxs", profile=PROFILE, required=True
+    )
+    assert declared.outcome == ResolveOutcome.RESOLVED
+
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs")])
     result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
     assert result.outcome == ResolveOutcome.RESOLVED
 

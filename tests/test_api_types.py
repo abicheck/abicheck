@@ -234,20 +234,19 @@ class TestCompareRequestValidate:
         assert len(errors) == 1
         assert "android" in errors[0] and "--sources" in errors[0]
 
-    def test_android_frontend_with_sources_accepted(self):
-        req = CompareRequest(
-            old=InputSpec.of("a"),
-            new=InputSpec.of("b"),
-            frontend="android",
-            has_sources=True,
-        )
-        assert req.validation_errors() == []
-
     def test_android_frontend_with_legacy_has_sources_accepted(self):
         # ADR-055 D1: has_sources=True (no inline InputSpec.sources/build_info)
         # is the one combination that's actually reachable -- it reuses a
         # pre-captured header-abi dump outside run_compare_request's own
         # inline evidence collection.
+        #
+        # A `test_android_frontend_with_sources_accepted` with a
+        # byte-identical body sat above this one; its name suggested it
+        # covered inline `InputSpec.sources`, which it did not -- that route
+        # is covered by
+        # `test_android_frontend_with_inputspec_sources_accepted_at_validation_time`
+        # below. Removed rather than renamed: two names for one assertion is
+        # what made the gap look filled.
         req = CompareRequest(
             old=InputSpec.of("a"),
             new=InputSpec.of("b"),

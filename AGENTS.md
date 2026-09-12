@@ -1121,6 +1121,146 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   `test_gzip_round_trip_at_production_scale` (same chokepoints/scale, no known incident to
   reproduce, added purely to keep this bullet true for every supported algorithm) for the
   pattern to follow for the next storage/serialization boundary.
+- **A differential test must prove both of its configurations actually ran.** A
+  test whose claim is "configuration A and configuration B agree" (pruning
+  off vs. on, one backend vs. another, cache cold vs. warm) asserts nothing
+  if B was served A's cached result — it then compares A with itself and
+  passes no matter what B would have done. This is not hypothetical: both
+  double-`dump()` tests in `tests/test_clang_header_backend_integration.py`
+  derived their "fresh" AST-cache root from the same `tmp_path`, so the
+  second run hit the first's on-disk cache, the streaming pruner never
+  parsed anything, and the equivalence and method-count assertions were
+  vacuously true. A *sibling* test proving the mechanism can engage on the
+  same repro does not repair this — it says nothing about whether this
+  comparison engaged it. So: give each configuration a genuinely distinct
+  cache root (and clear any in-process memo alongside it — a disk-cache miss
+  alone does not force a reparse), and assert **within the same test** that
+  the path under comparison executed, by observing the mechanism rather than
+  its output (`_PruneSpy` there wraps the real loader and records its call
+  count and reported prune count). The same rule applies before sharing an
+  expensive fixture between two configurations: sharing immutable *inputs* is
+  fine, sharing the *output* whose equivalence is the claim is the bug above.
+- **An autouse fixture's cost is charged to every test, so its allocation
+  must be O(1).** `tests/conftest.py`'s `_isolate_snapshot_cache` is autouse;
+  it originally allocated a pytest *numbered* directory, which enumerates
+  every existing sibling to choose the next number — so a worker that had run
+  N tests paid a scan of N entries to start test N+1, roughly quadratic over
+  a session, charged even to tests that only compare two enum values. Measured
+  two ways: the allocator alone costs 5.8ms vs. 0.07ms per call against a
+  directory holding 8000 siblings, and end to end a 1107-test subset runs in
+  1.7-2.2s instead of 2.3-2.9s (0/8000/20000 pre-existing siblings) — the
+  allocator's own margin is larger than the end-to-end one, so read the
+  end-to-end figure as the claim. It now uses `tempfile.mkdtemp` inside
+  pytest's own base temp dir: the same guarantee (a distinct, empty,
+  test-owned directory, under pytest's retention policy) from an atomic
+  random name. The isolation itself is **not** the thing to economize on —
+  `tests/test_conftest_cache_isolation.py` states that contract as
+  invariants specifically so the next round of "make this faster" cannot
+  reach for a shared session-wide cache directory, whose cross-test cache
+  hits would surface as unrelated mystery failures.
+- **A matrix test needs an oracle, not just a type check.** A parametrized
+  sweep asserting only that the result is *one of* the valid enum members
+  pins nothing: `TestExhaustiveMatrix` in
+  `tests/test_policy_override_matrix.py` emitted 1,608 such cases that an
+  implementation returning `COMPATIBLE` for every input — and one returning
+  `BREAKING` for every input — both passed in full (verified by
+  substitution). Nor is a test that asserts `A & B ⊆ A` about policy; it is
+  set algebra, true for any two sets including two wrong ones (four such
+  tests were removed). Write the expectation as an *independent second
+  derivation* of the documented behavior (`_expected_verdict` there derives
+  from the intrinsic `*_KINDS` partitions and the two named downgrade sets,
+  deliberately **not** from `policy_kind_sets`, which is what the function
+  under test folds over), batch the sweep so a failure names every
+  disagreeing case at once, and add a vacuity guard on the oracle itself —
+  an oracle accidentally reduced to a constant makes the whole matrix pass
+  while asserting nothing, which is the original failure in a new place.
+- **Don't re-run the whole repository to test argument dispatch.** A check
+  that scans every first-party file has exactly one owner — for the
+  readiness gate, the dedicated `ai-readiness` CI job, which runs
+  `verify.py --profile pr --only ai-readiness` with no skips. A unit test
+  that drove nearly that whole registry over the live tree in order to
+  assert `main()` returns 0 cost ~5m in a measured run and added no signal
+  the owning job did not already have. `tests/test_ai_readiness_main_dispatch.py`
+  keeps `main()`'s own contract (selection, `--only`/`--skip` composition,
+  error-vs-warning exit codes, JSON agreeing with the human report) against
+  the *real* `main()` over a small instrumented registry, and each check's
+  own live-tree test stays in `tests/test_ai_readiness.py`, where it belongs.
+
+  Two sibling live-tree assertions were examined and deliberately **kept**
+  in the unit lane: `test_fact_detector_misuse.py`'s
+  `test_no_violation_in_real_repo` and `test_fact_field_readers.py`'s
+  `test_no_unlisted_violation_in_real_repo`. Unlike the `main()` case they
+  assert something substantive (the tree is clean; the baseline holds no
+  stale entry), so relocating them would stop a contributor learning
+  locally that they introduced a violation. Their cost was attacked at its
+  cause instead — see the next bullet. Note also what measurement ruled
+  out: sharing one parsed-AST inventory across the eleven test modules that
+  each walk `abicheck/**/*.py` sounds like the win and is not. Reading and
+  parsing all 787 files costs ~1.1s in total against ~43s for those two
+  tests — the scan logic dominates by roughly 40x, so a shared parse would
+  have bought ~2s of 43s.
+- **When a live-tree gate is slow, profile it before relocating the test
+  that runs it.** `fact-detector-misuse`'s scan took 25.5s over 787 files,
+  and profiling said why: `fact_equality_misuse_sites` computes
+  `_def_containing_qualnames`, `_locally_bound_constructor_shadow_names`
+  and `_lexical_function_parents`, then calls `_fact_aliases`, which
+  computes all three again — four, two and two full `ast.walk`s per file,
+  and the bulk of the scan's 13.7M `walk` calls. `_memoize_per_tree` in
+  `scripts/fact_detector_misuse_scope.py` caches each on the tree node's
+  own `__dict__` (not a module-level `id(tree)` dict, which would leak for
+  the life of the process and could serve a stale entry once an address is
+  reused), taking the scan to 19.0s with **byte-identical** output across
+  all 787 files. Prefer that to moving or deleting the test: the unit lane
+  and the `ai-readiness` job both get faster, no coverage moves, and no
+  lane-policy decision is needed. Two conditions make such a cache safe and
+  both were checked rather than assumed — every decorated helper is pure,
+  and no caller mutates a returned mapping. One caution, recorded because
+  it caught a real gap in the first version of the accompanying test:
+  `tests/test_fact_detector_misuse_memoization.py` initially had 77 tests
+  that a `key = ()` mutation — dropping the second argument from the cache
+  key — passed in full, because every real caller happens to pass the one
+  memoized spans object per tree. An untested key is not an unnecessary
+  key: `test_cache_key_includes_the_second_argument` now calls the helper
+  twice on one tree with two genuinely different span arguments, and a
+  cache-that-caches-nothing mutation is caught separately, since output
+  equivalence alone cannot distinguish a correct cache from an absent one.
+
+- **A duplicate test body is a review queue, not a deletion list.** An audit of
+  this suite reported 61 same-module clone groups; re-screening with
+  `scripts/find_duplicate_tests.py` (body + parameters + decorators) found 29,
+  and the count is not the point — the *kind* of clone is. Clones across two
+  differently-named classes are usually intentional: each class states a
+  distinct claim and the body coincides, and `test_signature_normalization.py`
+  has two such pairs that each already name their counterpart in a comment, so
+  removing them would trade a stated regression guard for no measurable time.
+  The category worth reading is same class or module scope with **different
+  names**, because a test whose name promises input X while its body tests
+  input Y is worse than a duplicate — it makes a gap look filled. All nine such
+  groups were worked through; four were one assertion under two names, and the
+  other five each hid something:
+  `_strip_param_signature`'s "pointer parameter is not mistaken for a wrapper"
+  asserted an input the function's own docstring says never reaches that
+  branch (now a function-pointer parameter, which no other case in the file
+  supplied); a `baseline_generation` test never had a manifest that declared
+  one; `test_sc_offline_snapshot` could not be removed at all, because
+  `tests/test_scenarios.py` separately asserts one `test_sc_*` per automated
+  catalog scenario, so it was strengthened to assert the offline property
+  instead of inheriting it from the helper; an `l3l4l5` clone claimed the
+  header/build pass-name alias while exercising no alias; and a
+  `classify_perf_paths` clone named a *workflow-wiring* claim no CLI argument
+  can express, which turned out to be genuinely untested — `performance.yml`
+  sourcing the PR's whole current label set rather than the delivered event's
+  is now asserted, and both regressions it guards against were confirmed by
+  mutating the workflow.
+  Two cautions from that pass. **Mutate before claiming a gap:** one group
+  looked like a missing one-sided-evidence case in the ELF alignment detector,
+  and a mutation test showed `test_declared_alignment_known_one_side_only_
+  falls_back` already covered it — the speculative test was withdrawn and the
+  clone folded instead. And when asserting against workflow *text*, strip
+  comments first: the first version of the `performance.yml` assertion failed
+  because the file documents the rejected `github.event.label.name` spelling in
+  a comment, so a raw substring search reported the very thing it was checking
+  for absent.
 
 ## Line-coverage floor
 
