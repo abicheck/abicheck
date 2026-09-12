@@ -521,11 +521,21 @@ over it.
 - **The cluster-terminal set is derived too.** `_extra_args_expand_short_
   clusters` asks `_extra_args_is_value_option "-$_last"` instead of listing
   `H | I | o`, which is what had carried `j`.
-- **Fallback** (ADR-070 D3): when the interpreter cannot import abicheck, the
-  set stays empty — every token opaque, the under-recognition direction — with
-  one `::warning::` naming the cost. Deliberately *not* a small static list,
-  which is the drift this removes, reintroduced in the one path production
-  never exercises.
+- **Fails closed, does not fall back** (ADR-070 D3, corrected after review).
+  The first implementation treated an undeterminable table as "nothing is
+  value-taking", on the reasoning that under-recognition is safe. Codex's
+  counterexample disproved it: `extra-args: --version --dry-run` is argv the
+  CLI accepts as `--version`'s own value (`dry_run=False`), so an opaque
+  tokenizer invents a `--dry-run`, the Action skips its `--write json=`/`-o`
+  injection as it must for a real dry run, and a full comparison then runs
+  with the requested output never written. Silent, and an *over*-detection —
+  the direction argument was wrong too. So an undetermined table is fatal,
+  **scoped to a non-empty `extra-args`**: with nothing to tokenize there is no
+  decision to get wrong, which keeps a runner whose `python3` cannot import
+  abicheck working for every invocation that does not use the escape hatch. A
+  static list stays forbidden there.
+  `_CLI_VALUE_OPTIONS_DERIVED` exists to keep "no answer" distinguishable from
+  "no option takes a value"; conflating them was the original defect.
 
 **What the tests had to become.** The Phase 1 test parsed the `case` bodies,
 so it could not survive their deletion — and replacing it mattered more than
@@ -533,10 +543,11 @@ patching it. `tests/test_extra_args_is_value_option_completeness.py` now
 *executes* the shell functions and compares against live Click introspection:
 per-mode set equality, the command-scoping property stated separately, a
 roll-call of the twelve retired names, end-to-end tokenizer behaviour for both
-drift directions, the cluster terminals, and the fallback (new surface the
-lists never had). Two mutations were run to confirm the invariants bite:
-changing `dump`'s scoping to `compare` fails 3 tests; adding a baked fallback
-list fails 2.
+drift directions, the cluster terminals, and the fail-closed path (new surface the lists never
+had, including that the error message names the counterexample — otherwise the
+next maintainer to hit it "fixes" it by reinstating the fallback). Two
+mutations were run to confirm the invariants bite: changing `dump`'s scoping to
+`compare` fails 3 tests; adding a baked fallback list fails 2.
 
 `tests/test_action_run_sh_helpers.py`'s harness needed extending. Its
 `_helpers_region()` stops at run.sh's `# Build the abicheck command` marker —

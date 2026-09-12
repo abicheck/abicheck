@@ -1,8 +1,10 @@
 # ADR-070: The Action Layer Does Not Encode CLI Semantics
 
 **Date:** 2026-09-12
-**Status:** Proposed — not implemented. Records the boundary rule and the
-migration it forces. Extends
+**Status:** Accepted — D3 implemented for both `extra-args` tokenizers
+(`action/run.sh`, `actions/check-target/action.yml`, which no longer carry a
+hand-maintained option list); D1, D2 and D4 not yet implemented. Records the
+boundary rule and the migration it forces. Extends
 [037](037-cli-interface-contract.md)'s D10.1 front-end/engine boundary one
 layer outward (from `cli*.py`-vs-Tier-1 to the composite Action-vs-CLI) and
 constrains what
@@ -104,13 +106,35 @@ today may succeed after this lands, which is why this needs an ADR rather
 than a routine edit (`AGENTS.md`'s Authority rule). Each deleted guard is a
 documented migration note, not a silent widening.
 
-**A fallback must exist for D3.** When the resolved interpreter cannot import
-abicheck — a documented self-hosted-runner case that already warns
-(`action/run.sh:2095`) — the derivation has no answer. It must degrade in the
-*under-recognition* direction (treat a token as opaque), whose worst case is
-a visible false rejection or the already-documented `--write`-sidecar gap,
-never a silent wrong analysis. It must say so in the log rather than fall
-back to a baked list, which would reintroduce exactly what D3 removes.
+**D3 fails closed; it does not fall back.** When the resolved interpreter
+cannot import abicheck — a documented self-hosted-runner case that already
+warns (`action/run.sh:2095`) — the derivation has no answer, and an
+*undetermined* option table is not the same thing as "no option takes a
+value".
+
+An earlier revision of this ADR prescribed exactly that conflation, claiming
+an opaque-token fallback degrades in the "under-recognition direction, whose
+worst case is visible … never a silent wrong analysis". **That was wrong, and
+a reviewer's counterexample disproved it** (Codex, PR #1234, P2):
+`extra-args: --version --dry-run` is argv the CLI accepts by consuming
+`--dry-run` as `--version`'s own value, leaving `dry_run=False` and running a
+normal comparison — verified directly against the installed CLI. An opaque
+tokenizer reports a real `--dry-run` instead, so the Action skips its
+`--write json=`/`-o` injection as it must for a genuine dry run, the
+comparison then runs in full, and the requested output is never written while
+the report-reading floors go blind. That is silent, and it is an
+*over*-detection of `--dry-run` rather than under-detection of anything — so
+the direction argument was wrong too, not merely the severity.
+
+The rule is therefore: **an undetermined table is fatal when, and only when,
+`extra-args` is non-empty.** With no `extra-args` there is nothing to tokenize
+and no decision to get wrong, so a runner whose `python3` cannot import
+abicheck keeps working for every invocation that does not use the escape
+hatch; that scoping is what keeps this from being a blanket hard failure on a
+mismatch the script already merely warns about. Guessing is refused precisely
+where a guess would change what runs. A baked static list stays forbidden
+here — it would reintroduce what D3 removes, in the one code path production
+never exercises.
 
 **Non-goals.** This ADR does not change the Action's input surface, its
 outputs, its exit-code interpretation (the audit found all seven values

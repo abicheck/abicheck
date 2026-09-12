@@ -286,10 +286,27 @@ class TestShortClusterTerminalsAreDerivedToo:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestFallbackWhenTheCliCannotBeIntrospected:
-    """ADR-070 D3 requires a fallback, and requires it to degrade in one
-    specific direction. This is new surface the hand-maintained lists did not
-    have, so it is tested rather than assumed."""
+class TestUndeterminedOptionTableFailsClosed:
+    """ADR-070 D3 fails closed rather than guessing -- and that is a
+    *correction* of this branch's own earlier design, worth stating because
+    the wrong version looked principled.
+
+    The first implementation treated an undeterminable table as "nothing is
+    value-taking", reasoning that under-recognition is the safe direction. A
+    reviewer's counterexample (Codex, PR #1234, P2) disproved it:
+    ``extra-args: --version --dry-run`` is argv the CLI accepts by consuming
+    ``--dry-run`` as ``--version``'s own value, leaving ``dry_run=False``. An
+    opaque tokenizer invents a ``--dry-run`` that is not there, so the Action
+    skips its ``--write json=``/``-o`` injection as it must for a real dry
+    run -- and a full comparison then runs while the requested output is never
+    written. Silent, and an *over*-detection, so the direction argument was
+    wrong as well as the severity.
+
+    An undetermined table is therefore fatal -- but only when ``extra-args``
+    is non-empty, since with nothing to tokenize there is no decision to get
+    wrong and a runner whose interpreter cannot import abicheck should keep
+    working.
+    """
 
     _NO_CLI_PRELUDE = (
         "\nMODE=compare\n"
@@ -299,45 +316,76 @@ class TestFallbackWhenTheCliCannotBeIntrospected:
         "trap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
     )
 
-    def test_every_token_becomes_opaque(self) -> None:
-        """Under-recognition, not a guess: nothing is value-taking, so a
-        value is never swallowed. The cost is a visible false rejection or the
-        documented ``--write`` sidecar gap, never a silently wrong analysis."""
-        out = _run_shell(
-            "_extra_args_is_value_option --policy && echo VALUE || echo OPAQUE",
-            prelude=self._NO_CLI_PRELUDE,
-        )
-        assert out.strip() == "OPAQUE"
-
-    def test_the_fallback_does_not_resurrect_a_baked_list(self) -> None:
-        """The failure this test exists to prevent is a well-meaning future
-        edit adding "just a small static fallback list" -- which is the drift
-        ADR-070 D3 removes, reintroduced in the one code path nothing
-        exercises in production."""
-        out = _run_shell(
-            "_cli_value_options_init\nprintf '%s' \"$_CLI_VALUE_OPTIONS\"",
-            prelude=self._NO_CLI_PRELUDE,
-        )
-        assert out == "", f"fallback produced a non-empty option set: {out!r}"
-
-    def test_the_fallback_is_announced(self) -> None:
-        """Silence here would make a degraded run indistinguishable from a
-        healthy one."""
+    def _run(self, body: str) -> subprocess.CompletedProcess[str]:
         script = RUN_SH.read_text(encoding="utf-8")
         helpers = script[: script.index(_HELPERS_MARKER)]
         with tempfile.NamedTemporaryFile(
             "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
         ) as handle:
-            handle.write(helpers + self._NO_CLI_PRELUDE + "\n_cli_value_options_init\n")
+            handle.write(helpers + self._NO_CLI_PRELUDE + "\n" + body + "\n")
             path = handle.name
         try:
-            result = subprocess.run(
+            return subprocess.run(
                 ["bash", path], capture_output=True, text=True, encoding="utf-8"
             )
         finally:
             os.unlink(path)
-        assert "::warning::" in result.stderr
-        assert "cannot introspect" in result.stderr
+
+    def test_extra_args_with_an_undetermined_table_is_fatal(self) -> None:
+        result = self._run(
+            'INPUT_EXTRA_ARGS="--version --dry-run"\n'
+            "_cli_value_options_init\n"
+            "_require_cli_value_options_or_fail\n"
+            "echo UNREACHABLE"
+        )
+        assert result.returncode == 1
+        assert "UNREACHABLE" not in result.stdout
+        assert "::error::" in result.stderr
+
+    def test_the_error_explains_why_guessing_was_refused(self) -> None:
+        """If the message only named the symptom, the next maintainer hitting
+        it would "fix" it by reinstating the fallback."""
+        result = self._run(
+            'INPUT_EXTRA_ARGS="--policy x"\n'
+            "_cli_value_options_init\n_require_cli_value_options_or_fail"
+        )
+        assert "--version --dry-run" in result.stderr
+        assert (
+            "cannot determine which abicheck CLI options take a value" in result.stderr
+        )
+
+    def test_without_extra_args_it_is_not_fatal(self) -> None:
+        result = self._run(
+            'INPUT_EXTRA_ARGS=""\n'
+            "_cli_value_options_init\n_require_cli_value_options_or_fail\n"
+            "echo CONTINUED"
+        )
+        assert result.returncode == 0
+        assert "CONTINUED" in result.stdout
+
+    def test_undetermined_is_not_spelled_as_an_empty_option_set(self) -> None:
+        """``_CLI_VALUE_OPTIONS_DERIVED`` must distinguish "no answer" from
+        "no option takes a value" -- conflating them was the original defect."""
+        result = self._run(
+            "_cli_value_options_init\nprintf '%s' \"$_CLI_VALUE_OPTIONS_DERIVED\""
+        )
+        assert result.stdout == "false"
+
+    def test_the_undetermined_path_does_not_carry_a_baked_list(self) -> None:
+        result = self._run(
+            "_cli_value_options_init\nprintf '%s' \"$_CLI_VALUE_OPTIONS\""
+        )
+        assert result.stdout == "", result.stdout
+
+    def test_a_real_derivation_agrees_with_click_on_the_counterexample(self) -> None:
+        """The positive half: with the table derived, the tokenizer's answer for
+        the disproving input matches Click's own parse."""
+        out = _run_shell(
+            'INPUT_EXTRA_ARGS="--version --dry-run" _extra_args_has_dry_run_flag '
+            "&& echo DRYRUN || echo NOT_DRYRUN",
+            prelude=_real_prelude("compare"),
+        )
+        assert out.strip() == "NOT_DRYRUN"
 
 
 @pytest.mark.skipif(

@@ -1658,6 +1658,10 @@ _cli_command_path() {
 # stock bash 3.2 per the conventions in `action/AGENTS.md`).
 _CLI_VALUE_OPTIONS=""
 _CLI_VALUE_OPTIONS_READY="false"
+# "true" only once a real query succeeded; `false` means UNDETERMINED, which
+# `_require_cli_value_options_or_fail` turns into a hard failure when it
+# matters. Never conflate it with "this command has no value-taking options".
+_CLI_VALUE_OPTIONS_DERIVED="false"
 
 # Populate `$_CLI_VALUE_OPTIONS` once. Called eagerly at top level, after the
 # interpreter preflight establishes `$_PY_BIN_HAS_ABICHECK`, so that every
@@ -1675,14 +1679,13 @@ _cli_value_options_init() {
   [[ "$_CLI_VALUE_OPTIONS_READY" == "true" ]] && return 0
   _CLI_VALUE_OPTIONS_READY="true"
   if [[ "${_PY_BIN_HAS_ABICHECK:-false}" != "true" || -z "${_PY_SAFE_DIR:-}" || -z "${_PY_BIN:-}" ]]; then
-    # ADR-070 D3's required fallback. Deliberately NOT a baked list, which
-    # would reinstate the drift this derivation removes. Leaving the set
-    # empty means every token reads as opaque -- the *under-recognition*
-    # direction, whose worst cases are visible (a guard rejecting argv the
-    # CLI accepts, with its own message explaining why) or already-documented
-    # (the `--write` sidecar gap in this file's own AGENTS.md), never a
-    # silently wrong analysis.
-    echo "::warning::cannot introspect the installed abicheck for its value-taking CLI options (interpreter '${_PY_BIN:-<none found on PATH>}' cannot import abicheck, or ran before the private temporary directory existed) -- every extra-args token will be treated as opaque. A combination this script would normally diagnose (its own synthesized --config versus an extra-args --config, or an extra-args --write suppressing the internal JSON sidecar) may instead surface as a plain CLI usage error, or leave the report-reading floors without a sidecar. Install abicheck into the interpreter that 'command -v python3' resolves on this runner to restore it." >&2
+    # Undetermined, NOT "nothing is value-taking" -- see
+    # `_require_cli_value_options_or_fail` below for why that distinction is
+    # load-bearing and why this cannot be an opaque-token fallback.
+    # Deliberately also NOT a baked list, which would reinstate exactly the
+    # drift this derivation removes, in the one path production never
+    # exercises.
+    _CLI_VALUE_OPTIONS_DERIVED="false"
     return 0
   fi
   local _derived _rc=0
@@ -1704,10 +1707,43 @@ for param in node.params:
             print(spelling)
 ' $(_cli_command_path)) ) || _rc=$?
   if [[ "$_rc" -ne 0 || -z "$_derived" ]]; then
-    echo "::warning::introspecting the installed abicheck for '$(_cli_command_path)' value-taking options failed (exit ${_rc}) -- every extra-args token will be treated as opaque; see the note above for what that costs." >&2
+    _CLI_VALUE_OPTIONS_DERIVED="false"
     return 0
   fi
   _CLI_VALUE_OPTIONS="|$(printf '%s' "$_derived" | tr '\n' '|')"
+  _CLI_VALUE_OPTIONS_DERIVED="true"
+}
+
+# Fail the run when the option table could not be derived AND `extra-args`
+# actually needs one (Codex review, PR #1234, P2 -- this replaces an
+# opaque-token fallback an earlier revision of ADR-070 D3 wrongly prescribed
+# as safe).
+#
+# **Why an opaque fallback is not safe, concretely.** Treating every token as
+# opaque is not merely "under-recognition". `extra-args: --version --dry-run`
+# is argv Click accepts by consuming `--dry-run` as `--version`'s own value,
+# leaving `dry_run=False` and running a perfectly normal comparison (verified
+# directly against the installed CLI). An opaque tokenizer instead reports a
+# real `--dry-run` flag -- so `_extra_args_has_dry_run_flag` answers true,
+# this script skips its `--write json=`/`-o` injection as it must for a real
+# dry run, and the comparison then runs for real while the requested output
+# is never written and the report-reading floors go blind. That is a silent
+# wrong outcome, not a visible one, and it is an *over*-detection of
+# `--dry-run` rather than under-detection of anything.
+#
+# So the undetermined case fails loudly instead. Scoped to a non-empty
+# `extra-args` on purpose: with no `extra-args` there is nothing to tokenize
+# and no decision to get wrong, so a runner whose `python3` cannot import
+# abicheck keeps working exactly as before for every invocation that does not
+# use the escape hatch. That keeps this from being a blanket hard failure on
+# the documented self-hosted mismatch `$_PY_BIN_HAS_ABICHECK` already warns
+# about (see its own `::warning::`), while still refusing to guess precisely
+# when a guess would change what runs.
+_require_cli_value_options_or_fail() {
+  [[ "${_CLI_VALUE_OPTIONS_DERIVED:-false}" == "true" ]] && return 0
+  [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
+  echo "::error::extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
+  exit 1
 }
 
 _extra_args_is_value_option() {
@@ -2168,8 +2204,10 @@ fi
 # resolved. Every later `$(_extra_args_options)` runs in a command-substitution
 # subshell, which inherits this but cannot populate it, so deriving eagerly
 # turns what would be one Python call per tokenizer invocation into one per
-# run. See `_cli_value_options_init` for the fallback when it is unavailable.
+# run. When it cannot be derived at all, `_require_cli_value_options_or_fail`
+# decides whether that is fatal -- it is, exactly when `extra-args` is set.
 _cli_value_options_init
+_require_cli_value_options_or_fail
 
 # ---------------------------------------------------------------------------
 # `against`/`estimate`/`audit`/`mode: scan` retirement (ADR-068's
