@@ -13,21 +13,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Stored-`ProjectSnapshot`-package operand resolution for one release side.
+"""The CLI boundary for stored-package operand resolution -- one translation.
 
-One responsibility: turn a release operand that *is* a stored package
-directory into the canonical-key -> `Path` map the release fan-out already
-builds from a live directory of `.so` files (ADR-062 A1.7), and translate
-the engine errors that can come out of it into CLI usage errors.
+The resolution itself -- turning a release operand that *is* a stored
+`ProjectSnapshot` package directory into the canonical-key -> `Path` map the
+fan-out already builds from a live directory of `.so` files (ADR-062 A1.7),
+including the side-correct ``--variant`` remediation ADR-068 Phase 7j asks
+for -- moved to :func:`abicheck.workflows.release_inputs.
+resolve_release_package_side` (ADR-061 gap D, closed). It had to: it raised
+a real ``click.UsageError`` from inside the resolution, which is one of the
+two things that kept the release request/plan off ``abicheck.service``.
 
-Split out of ``cli_compare_release_matrix.py`` (Codex review, PR #1184):
-that module sits at its `architecture/debt.yaml` ``no_growth`` baseline with
-no headroom, and AGENTS.md is explicit that the way to shrink such an entry
-is to *move responsibility out to a properly-owned module*, never to raise
-the baseline. The responsibility is a real one rather than a slice made to
-fit, since ADR-068 plan Phase 7j gave it a second job beyond unpacking:
-rendering the side-correct `--variant` remediation the engine deliberately
-cannot (see :class:`~abicheck.errors.AmbiguousVariantSelectionError`).
+The remediation example moved *with* it rather than staying behind. That is
+not a weakening of :class:`~abicheck.errors.AmbiguousVariantSelectionError`'s
+own "the engine names no flag" rule -- the rule exists because a bare
+``--variant ID`` applies to both sides and is unsafe advice when only one is
+ambiguous, and the engine function now takes the ``side`` it needs to render
+the safe form. What is left here is the single translation of the typed
+:class:`~abicheck.errors.ReleaseOperandUsageError` into a
+``click.UsageError``, so the CLI keeps exiting ``64`` with the same text.
+
+It was split out of ``cli_compare_release_matrix.py`` (Codex review, PR
+#1184), which sits at its `architecture/debt.yaml` ``no_growth`` baseline
+with no headroom, and AGENTS.md is explicit that the way to shrink such an
+entry is to move responsibility out to a properly-owned module. That is
+still why the file exists; what it owns is now smaller.
 
 It lives here, in ADR-061's ``frontends`` ring, rather than as a new flat
 ``cli_*`` root sibling -- ``scripts/check_architecture.py`` rejects the
@@ -61,52 +71,23 @@ def _resolve_release_package_side(
     *,
     side: str,
 ) -> dict[str, Path] | None:
-    """``None`` when *side_dir* is not a stored `ProjectSnapshot` package
-    directory -- the caller falls back to its existing live-discovery path
-    unchanged. Otherwise, *side_dir* is unpacked via
-    `workflows.release_package.resolve_release_package_map` into
-    the same canonical-key -> `Path` shape `_build_match_map` builds from a
-    live directory of `.so` files (ADR-062 A1.7), so `_match_release_keys`'s
-    own ``set(old_map) & set(new_map)`` matches a stored-side library
-    against a live-side or another stored-side one by the identical key.
+    """The Click-translating wrapper over :func:`abicheck.workflows.
+    release_inputs.resolve_release_package_side`.
 
-    *side* is ``"old"`` or ``"new"`` -- the `--variant` prefix naming *this*
-    operand. It is used only to render an ambiguous-variant error's
-    remediation example, which is why it lives here and not in the engine:
-    see :class:`~abicheck.errors.AmbiguousVariantSelectionError`.
+    The resolution itself, including the side-correct ``--variant``
+    remediation example, moved to that engine module so the release
+    request/plan is resolvable with no Click context (ADR-061 gap D's
+    "Remaining scope" note, which named this function's ``click.UsageError``
+    raises as one of the two things blocking it). This wrapper exists only
+    to keep a usage error a usage error for a CLI caller: same message,
+    same exit ``64``.
     """
-    if not side_dir.is_dir():
-        return None
-    from ...workflows.release_package import resolve_release_package_map
-    from ...workflows.storage import is_project_snapshot_package_dir
+    from ...errors import ReleaseOperandError
+    from ...workflows.release_inputs import resolve_release_package_side
 
-    if not is_project_snapshot_package_dir(side_dir):
-        return None
-    from ...errors import AmbiguousVariantSelectionError, SnapshotError
-
-    dest_root = make_temp_dir("abicheck_relpkg_")
     try:
-        resolved: dict[str, Path] = resolve_release_package_map(
-            side_dir, variant_id=variant_id, dest_root=dest_root
+        return resolve_release_package_side(
+            side_dir, variant_id, make_temp_dir, side=side
         )
-        return resolved
-    except AmbiguousVariantSelectionError as exc:
-        # The engine states the fact and carries the ids but names no flag,
-        # because only here is it known *which side* this package is --
-        # and a bare `--variant ID` would apply to both sides, so it is not
-        # safe advice when only one side is ambiguous (Codex review, PR
-        # #1184, second round). Append the side-correct example, and only
-        # when there is a real id to name: a package declaring zero
-        # variants has nothing to select.
-        example = (
-            f" (e.g. --variant {side}={exc.variant_ids[0]})" if exc.variant_ids else ""
-        )
-        raise click.UsageError(f"{exc}{example}") from exc
-    except (KeyError, ValueError, OSError, SnapshotError) as exc:
-        # Ambiguous variant, a same-key collision (ValueError), a missing/
-        # unreadable ref (OSError), an object absent from objects/ entirely
-        # (KeyError, DirectoryObjectStore.get's own error on a truncated
-        # package; CodeRabbit review), or a corrupt document (SnapshotError)
-        # are all usage errors, translated like `_build_match_map`'s own
-        # `AmbiguousLibraryMatchError` (Codex review).
+    except ReleaseOperandError as exc:
         raise click.UsageError(str(exc)) from exc

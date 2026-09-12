@@ -189,7 +189,7 @@ run, folded with the same `max` discipline:
 | Axis | Contributes | When |
 |---|---|---|
 | Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
-| Analysis assurance (P0.4) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete` |
+| Analysis assurance (P0.4) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete` (on a release operand: any member's own status) |
 | Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
 
@@ -267,9 +267,20 @@ to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
 demote a real ABI break to "warnings only", and it never rewrites the
 compatibility verdict, any finding, or the severity gate's own contribution.
 
-`assurance.require_complete: true` is single-pair only. A directory/package
-(release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out).
+`assurance.require_complete: true` applies at any cardinality. A
+directory/package (release) `compare` folds **each member's own** `0`/`1`
+contribution with `max()` -- the identical contribution a single-pair
+`compare` of that member computes -- so a release of one library and that
+library compared on its own reach the same exit code, and one member short
+of complete analysis floors the release. It used to be rejected outright for
+a directory/package operand ("no single `analysis_assurance` result to gate
+on"), which made the setting's meaning depend on the input shape.
+
+The one operand that still rejects it is a **stored BundleFacts** OLD side:
+that side arrives as one already-folded document with no per-member
+analysis-assurance rollup to aggregate, so the setting is refused rather
+than accepted and silently ignored. Compare against the live
+directory/package release, or the specific library, to use it.
 
 **Without `assurance.require_complete: true` every pre-existing invocation's
 exit code is unchanged**, exactly as `--contract`'s own coverage axis

@@ -158,6 +158,66 @@ Where/how a result is rendered — the invocation-level output choice.
 | `fmt` | `str` | `'text'` |
 | `path` | `Path \| None` | `None` |
 
+## `ReleaseComparePlan`
+
+*request*'s resolved pre-execution outcome.
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `request` | `ReleaseCompareRequest` | *(required)* |
+| `scope` | `ReleaseScopePlan` | *(required)* |
+| `gate` | `GateOptions` | *(required)* |
+| `old_debug_dir` | `Path \| None` | *(required)* |
+| `new_debug_dir` | `Path \| None` | *(required)* |
+| `old_headers` | `tuple[Path, ...]` | *(required)* |
+| `new_headers` | `tuple[Path, ...]` | *(required)* |
+| `old_includes` | `tuple[Path, ...]` | *(required)* |
+| `new_includes` | `tuple[Path, ...]` | *(required)* |
+| `warnings` | `tuple[str, ...]` | *(required)* |
+| `old_unclassified` | `dict[str, str]` | `{}` |
+| `new_unclassified` | `dict[str, str]` | `{}` |
+| `old_inventory` | `PackageInventory \| None` | `None` |
+| `new_inventory` | `PackageInventory \| None` | `None` |
+| `degraded` | `StoredDegradedMembers \| None` | `None` |
+| `temp_dirs` | `tuple[Path, ...]` | `()` |
+
+## `ReleaseCompareRequest`
+
+A fully-specified directory/package release-comparison *resolution* request -- the release fan-out's counterpart to :class:`abicheck.workflows.contracts.CompareRequest`, scoped to the pre-execution half (:func:`resolve_release_compare_plan` resolves it; it does not itself run any per-library dump/compare).
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `old_dir` | `Path` | *(required)* |
+| `new_dir` | `Path` | *(required)* |
+| `debug_info1` | `Path \| None` | `None` |
+| `debug_info2` | `Path \| None` | `None` |
+| `devel_pkg1` | `Path \| None` | `None` |
+| `devel_pkg2` | `Path \| None` | `None` |
+| `include_private_dso` | `bool` | `False` |
+| `dso_only` | `bool` | `False` |
+| `headers` | `tuple[Path, ...]` | `()` |
+| `old_headers_only` | `tuple[Path, ...]` | `()` |
+| `new_headers_only` | `tuple[Path, ...]` | `()` |
+| `includes` | `tuple[Path, ...]` | `()` |
+| `old_includes_only` | `tuple[Path, ...]` | `()` |
+| `new_includes_only` | `tuple[Path, ...]` | `()` |
+| `config_includes` | `tuple[Path, ...]` | `()` |
+| `old_variant` | `str \| None` | `None` |
+| `new_variant` | `str \| None` | `None` |
+| `release_selection` | `ReleaseSelection \| None` | `None` |
+| `pack_application` | `_GatePackApplicationLike \| None` | `None` |
+| `severity_preset` | `str \| None` | `None` |
+| `severity_abi_breaking` | `str \| None` | `None` |
+| `severity_potential_breaking` | `str \| None` | `None` |
+| `severity_quality_issues` | `str \| None` | `None` |
+| `severity_addition` | `str \| None` | `None` |
+| `on_incomplete_scope` | `str` | `'warn'` |
+| `fail_on_removed_library` | `bool` | `False` |
+
 ## `ResolvedComparePair`
 
 Both sides of a comparison, resolved and ready to classify.
@@ -185,6 +245,16 @@ Classify an already-resolved pair — the second half of ``run_compare_request``
 | `pair` | `ResolvedComparePair` | *(required)* |
 
 **Returns:** `CompareResult`
+
+## `cleanup_release_compare_plan`
+
+Remove every directory :func:`resolve_release_compare_plan` allocated for *plan* (``plan.temp_dirs``) -- the direct-call counterpart of ``compare_release_cmd``'s own tracked ``_make_temp_dir``/ ``_cleanup_temp_dirs`` pair (Codex review, PR #1215: a direct caller that lets a package/debug-package/devel-package/stored-package operand use the default ``make_temp_dir`` factory would otherwise leak the extracted directories for the process's lifetime, since nothing else ever removes them). A no-op, per entry, when a directory is already gone.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `plan` | `ReleaseComparePlan` | *(required)* |
+
+**Returns:** `None`
 
 ## `collect_metadata`
 
@@ -343,6 +413,18 @@ Auto-detect input type and return an ABI snapshot.
 | `public_include_search_dirs` | `list[Path] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
+
+## `resolve_release_compare`
+
+Resolve *request* into a :class:`ReleaseComparePlan` -- the same four-step sequence (``_prepare_compare_release_inputs`` -> ``release_inventory_evidence`` -> ``resolve_release_scope_plan`` -> ``resolve_release_gate_options``), plus each side's stored-degraded markers, that ``compare_release_cmd`` itself now calls this function to perform, rather than repeating inline.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `ReleaseCompareRequest` | *(required)* |
+| *(keyword-only below)* | | |
+| `make_temp_dir` | `Callable[[str], Path] \| None` | `None` |
+
+**Returns:** `ReleaseComparePlan`
 
 ## `run_compare`
 

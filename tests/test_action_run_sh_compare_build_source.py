@@ -342,12 +342,14 @@ class TestCompareModeForwardsCrossCompilerFlags:
 
 class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
     """The CLI's per-library release fan-out (directory/package operands --
-    e.g. check-target's kind: bundle) rejects --sources/--build-info/
-    --depth outright (_reject_evidence_flags_for_set_inputs) -- forwarding
-    them here would turn every bundle comparison into a hard usage error
-    instead of running it (Codex review, PR #625). --config is NOT one of
-    the rejected flags (_EVIDENCE_SET_INPUT_FLAGS lists only depth/sources/
-    build_info) -- the release fan-out still consumes the project
+    e.g. check-target's kind: bundle) rejects --sources/--build-info
+    outright (_reject_evidence_flags_for_set_inputs) -- forwarding them
+    here would turn every bundle comparison into a hard usage error
+    instead of running it (Codex review, PR #625). --depth left that set
+    (_EVIDENCE_SET_INPUT_FLAGS lists only sources/build_info/dump_manifest
+    now): every rung of the public ladder is forwarded, with the floor
+    enforced per member downstream. --config is NOT one of the rejected
+    flags either -- the release fan-out still consumes the project
     .abicheck.yml, so it must keep reaching the CLI even for a directory
     operand (Codex review, second round)."""
 
@@ -369,7 +371,7 @@ class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
         )
         assert "--sources" not in cmd
         assert "--build-info" not in cmd
-        assert "--depth" not in cmd
+        assert "--depth headers" in cmd
         assert "--config /cfg.yml" in cmd
 
     def test_directory_old_library_alone_also_skips_evidence_flags(
@@ -387,34 +389,48 @@ class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
             },
             tmp_path,
         )
-        assert "--depth" not in cmd
+        assert "--sources" not in cmd
+        assert "--build-info" not in cmd
+        assert "--depth headers" in cmd
 
 
 class TestCompareModeFailsFastOnUnservableDirectoryEvidenceRequest:
-    """A directory/package operand can never actually collect build/source
-    evidence (the CLI's per-library release fan-out rejects it outright),
-    so silently dropping a real evidence request there would let the
-    comparison run without the evidence and still report a clean/normal
-    result -- e.g. missing a source-only break. Must fail loud instead
-    (Codex review, PR #625)."""
+    """A directory/package operand can never *collect inline* build/source
+    evidence (the CLI's per-library release fan-out rejects
+    --sources/--build-info/--dump-manifest outright), so silently dropping
+    such a request would let the comparison run without the evidence and
+    still report a clean/normal result -- e.g. missing a source-only break.
+    Must fail loud instead (Codex review, PR #625).
 
-    def test_depth_source_against_directory_operand_fails(self, tmp_path: Path) -> None:
+    Scoped to those *inputs*, never to a ``--depth`` rung (Codex review, PR
+    #1233): a member may itself be a pre-dumped snapshot carrying embedded
+    L3/L4/L5 evidence, which satisfies ``build``/``source`` with no inline
+    collection at all, so rejecting those rungs here denied a genuinely
+    reachable configuration -- the same stale-guard defect this PR removes
+    elsewhere. See ``test_action_run_sh_release_capability_parity.py``."""
+
+    def test_depth_source_against_directory_operand_is_forwarded(
+        self, tmp_path: Path
+    ) -> None:
+        """Reachability is a property of the members, not of the operand's
+        cardinality: a directory of pre-dumped snapshots reaches ``source``,
+        and a member that cannot says so as its own error downstream."""
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "source"}, tmp_path
         )
-        assert result.returncode != 0
-        assert not captured.is_file(), "abicheck stub must never be invoked"
+        assert "--depth source" in cmd
 
-    def test_depth_build_against_directory_operand_fails(self, tmp_path: Path) -> None:
+    def test_depth_build_against_directory_operand_is_forwarded(
+        self, tmp_path: Path
+    ) -> None:
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "build"}, tmp_path
         )
-        assert result.returncode != 0
-        assert not captured.is_file()
+        assert "--depth build" in cmd
 
     def test_explicit_sources_against_directory_operand_fails_even_without_depth(
         self, tmp_path: Path
@@ -443,26 +459,32 @@ class TestCompareModeFailsFastOnUnservableDirectoryEvidenceRequest:
     ) -> None:
         """binary/headers never needed sources/build-info to begin with --
         nothing requested is actually unservable, so this must keep working,
-        not regress into the new fail-fast path."""
+        not regress into the new fail-fast path. It is now *forwarded*
+        rather than dropped: the CLI rejects no rung on this path any more
+        (`_resolve_depth_for_set_inputs`), so the rung a workflow pinned is
+        the rung each member is held to."""
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
         cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "headers"}, tmp_path
         )
-        assert "--depth" not in cmd
+        assert "--depth headers" in cmd
 
 
 class TestCompareModeDirectoryDepthAsymmetry:
-    """D1/D2: the CLI now accepts an explicit ``--depth binary`` for a
-    directory/package operand (it requests strictly less evidence than the
-    per-library fan-out already collects by default, so there is nothing
-    about it the fan-out can't provide) -- the Action must forward it rather
-    than drop it. ``--depth headers`` is still rejected by the CLI on this
-    path (no per-library evidence-floor enforcement yet), so it stays
-    dropped, but now with a visible ``::notice::`` instead of vanishing
-    silently (the prior behaviour, asymmetric with the neighbouring
-    compile-context guard, which always fails loud for what it can't
-    honour)."""
+    """The CLI accepts every rung of the public ladder for a
+    directory/package operand (``_resolve_depth_for_set_inputs`` rejects
+    none: the floor is enforced per member by ``enforce_requested_depth``
+    and the ceiling by ``policy.depth_projection``), so the Action forwards
+    the rung verbatim rather than dropping it -- every rung, ``build`` and
+    ``source`` included, since a member may be a pre-dumped snapshot that
+    already carries the evidence. What fails loud here is the inline
+    evidence *inputs* (``--sources``/``--build-info``/``--compile-db``,
+    rejected by ``_reject_evidence_flags_for_set_inputs``), never a rung.
+    The ``headers`` rung's former ``::notice::``-and-drop is gone with the
+    CLI restriction it restated -- see
+    ``tests/test_action_run_sh_release_capability_parity.py`` for the
+    class-level invariant."""
 
     def test_depth_binary_against_directory_operand_is_forwarded(
         self, tmp_path: Path
@@ -474,7 +496,7 @@ class TestCompareModeDirectoryDepthAsymmetry:
         )
         assert "--depth binary" in cmd
 
-    def test_depth_headers_against_directory_operand_emits_notice(
+    def test_depth_headers_against_directory_operand_is_forwarded(
         self, tmp_path: Path
     ) -> None:
         new_dir = tmp_path / "new-bundle"
@@ -483,10 +505,9 @@ class TestCompareModeDirectoryDepthAsymmetry:
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "headers"}, tmp_path
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "::notice::" in result.stdout
-        assert "--depth headers" in result.stdout
+        assert "does not honour --depth headers" not in result.stdout
         cmd = captured.read_text(encoding="utf-8").strip()
-        assert "--depth" not in cmd
+        assert "--depth headers" in cmd
 
     def test_depth_binary_uppercase_is_still_forwarded(self, tmp_path: Path) -> None:
         """Codex review, PR #1016: INPUT_DEPTH is a raw, unvalidated Action
@@ -501,32 +522,32 @@ class TestCompareModeDirectoryDepthAsymmetry:
         )
         assert "--depth binary" in cmd
 
-    def test_depth_build_uppercase_against_directory_operand_still_fails(
+    def test_depth_build_uppercase_is_lowercased_and_forwarded(
         self, tmp_path: Path
     ) -> None:
-        """The fail-loud guard for build/source must not be case-sensitive
-        either -- a case mismatch there would silently skip the guard
-        entirely (defeating its purpose) rather than merely dropping the
-        flag, letting the comparison run without the requested evidence."""
+        """Case-insensitive like every other rung -- INPUT_DEPTH is a raw
+        Action input and the CLI's own ``DepthParam.convert()`` accepts
+        every case variant, so no spelling may be the one that drops it."""
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "BUILD"}, tmp_path
         )
-        assert result.returncode != 0
-        assert not captured.is_file(), "abicheck stub must never be invoked"
+        assert "--depth build" in cmd
 
-    def test_depth_headers_uppercase_still_emits_notice(self, tmp_path: Path) -> None:
+    def test_depth_headers_uppercase_is_lowercased_and_forwarded(
+        self, tmp_path: Path
+    ) -> None:
+        """Same case-insensitivity contract as ``binary`` above: INPUT_DEPTH
+        is a raw Action input and the CLI's own ``DepthParam.convert()``
+        accepts every case variant, so the forwarded token is the
+        lowercased rung."""
         new_dir = tmp_path / "new-bundle"
         new_dir.mkdir()
-        result, captured = _run_compare_raw(
+        cmd = _run_compare(
             {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "Headers"}, tmp_path
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::notice::" in result.stdout
-        assert "--depth headers" in result.stdout
-        cmd = captured.read_text(encoding="utf-8").strip()
-        assert "--depth" not in cmd
+        assert "--depth headers" in cmd
 
 
 def _run_baseline_compare_raw(

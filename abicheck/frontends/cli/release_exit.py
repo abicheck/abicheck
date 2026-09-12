@@ -57,6 +57,7 @@ def _exit_compare_release(
     release_global_verdict: str = "NO_CHANGE",
     incomplete_scope_exit_contribution: int = 0,
     no_comparison_completed_exit_contribution: int = 0,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Exit a directory/package ``compare`` with the release's own status code.
 
@@ -81,8 +82,16 @@ def _exit_compare_release(
     rank a proven removal below the evidence axis in one implementation
     only.
 
+    *require_complete_analysis* is ``.abicheck.yml``'s
+    ``assurance.require_complete``, forwarded so the resolver can fold each
+    member's own assurance floor with ``max()``. The release fan-out used
+    to reject the setting outright ("no single ``analysis_assurance``
+    result to gate on"); there is one per member, and the aggregate is the
+    same ``max()`` every other orthogonal ``0``/``1`` axis here already
+    uses, so library count no longer changes what the setting means.
+
     *library_results* is the per-member list the resolver reads the
-    evidence-contract and operational-error axes off. ``compare
+    evidence-contract, assurance and operational-error axes off. ``compare
     --bundle-facts`` has no such list (its whole release is one folded
     result) and passes none; its ``"ERROR"`` sentinel reaches the resolver
     through *worst_verdict* instead, which is why that resolver takes the
@@ -112,6 +121,7 @@ def _exit_compare_release(
         release_global_verdict,
         incomplete_scope_contribution=incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=no_comparison_completed_exit_contribution,
+        require_complete_analysis=require_complete_analysis,
     )
     # Emitted here rather than by each caller: a release document is
     # rendered before the exit is taken, and the fan-out has already

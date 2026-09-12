@@ -92,7 +92,10 @@ from ..runtime import (
 )
 from .dump import dump_cmd
 
-_RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
+#: `oneline` joined the set once `report/release_oneline.py` gave it a real
+#: aggregate render (it needs no per-member `DiffResult`, unlike the three
+#: still missing -- see `docs/contribute/known-gaps.md`).
+_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
 
 
 def reject_release_incompatible_view_mode(
@@ -242,32 +245,24 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # render markdown to the requested sarif/html/review path instead of
     # erroring.
     #
-    # ADR-068 D4/Phase 5: --write is repeatable on `compare` now, but the
-    # per-library release engine was never generalized to multiple secondary
-    # artifacts -- reject a second --write rather than silently rendering
-    # only the first; unpack a single one back to the singular secondary_fmt/
-    # secondary_output pair compare_release_cmd's own decorator still declares.
-    secondary_writes = kwargs.pop("secondary_writes", ())
-    if len(secondary_writes) > 1:
-        raise click.UsageError(
-            "Only one --write is supported when comparing directories or "
-            "packages (the per-library release engine does not yet "
-            "support multiple secondary artifacts) -- compare one library "
-            "at a time (a single old/new .so pair) to use more than one "
-            "--write."
-        )
-    secondary_fmt, secondary_output = secondary_writes[0] if secondary_writes else (None, None)
-    kwargs["secondary_fmt"] = secondary_fmt
-    kwargs["secondary_output"] = secondary_output
-    if secondary_fmt is not None and secondary_fmt not in _RELEASE_FORMATS:
-        raise click.UsageError(
-            f"--write {secondary_fmt}=... is not available when comparing "
-            "directories or packages: sarif/html/review require a "
-            "single-pair (non-directory, non-package) comparison. Choose "
-            f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
-            "library at a time (a single old/new .so pair) to use --write "
-            f"{secondary_fmt}=..."
-        )
+    # ADR-068 D4/Phase 5: `--write` is repeatable, and the release engine
+    # now renders every one of them from the same already-computed result
+    # (one analysis, several artifacts) -- so the operand is forwarded whole
+    # rather than unpacked to a single pair and the extras rejected. The
+    # per-write PATH-uniqueness and --output collision checks are Click's
+    # own callback and `reject_incoherent_secondary_writes`', shared with
+    # `compare`; only the *format* restriction below is release-specific.
+    secondary_writes = kwargs.get("secondary_writes", ())
+    for secondary_fmt, _ in secondary_writes:
+        if secondary_fmt not in _RELEASE_FORMATS:
+            raise click.UsageError(
+                f"--write {secondary_fmt}=... is not available when comparing "
+                "directories or packages: sarif/html/review require a "
+                "single-pair (non-directory, non-package) comparison. Choose "
+                f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
+                "library at a time (a single old/new .so pair) to use --write "
+                f"{secondary_fmt}=..."
+            )
     from ....cli_compare_release import compare_release_cmd
 
     assert compare_release_cmd.callback is not None

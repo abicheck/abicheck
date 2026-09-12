@@ -686,24 +686,20 @@ class TestCompareReleaseErrorPaths:
         new_pkg.write_bytes(b"not-a-tarball")
 
         runner = CliRunner()
-        # ADR-061 gap D (c098e033) moved this dispatch into
-        # frontends/cli/release_compare_request.py, which imports
-        # is_package/detect_extractor at module level (deliberately, per
-        # that module's own documented convention -- "a test can patch
-        # abicheck.frontends.cli.release_compare_request.<name>", matching
-        # every other module-level binding in this release fan-out) rather
-        # than the function-local import cli_compare_release.py itself
-        # still uses elsewhere. Patch the module that actually binds the
-        # name now, or this silently falls through to the real
-        # is_package/detect_extractor against a corrupt-but-real-tarball-
-        # named fixture -- order-dependent on whether release_compare_
-        # request.py has already been imported with its real binding by an
-        # earlier test (Codex review, reproduced).
+        # ADR-061 gap D, closed: the request/plan and the input resolution
+        # it calls now live in `workflows.release_request`/`workflows.
+        # release_inputs` (they used to be under `frontends/cli/`), so the
+        # module that *binds* `is_package`/`detect_extractor` is the former.
+        # Patch the module that actually binds the name, or this silently
+        # falls through to the real ones against a corrupt-but-real-tarball-
+        # named fixture -- order-dependent on whether the module has already
+        # been imported with its real binding by an earlier test (Codex
+        # review, reproduced).
         with patch(
-            "abicheck.frontends.cli.release_compare_request.is_package",
+            "abicheck.workflows.release_request.is_package",
             return_value=True,
         ), patch(
-            "abicheck.frontends.cli.release_compare_request.detect_extractor",
+            "abicheck.workflows.release_request.detect_extractor",
             return_value=None,
         ):
             result = runner.invoke(main, [

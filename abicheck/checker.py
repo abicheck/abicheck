@@ -548,7 +548,7 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 def _run_post_processing(
     changes: list[Change],
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
     suppression: SuppressionList | None,
     policy_file: PolicyFile | None,
@@ -873,7 +873,7 @@ def env_matrix_content_digest(env_matrix: EnvironmentMatrix | None) -> str | Non
 
 
 def compare(
-    old: AbiSnapshot,
+    old: AbiSnapshot | None,
     new: AbiSnapshot,
     suppression: SuppressionList | None = None,
     *,
@@ -899,11 +899,48 @@ def compare(
     new_source_licence: SourceReadLicence | None = None,
     acknowledgments: AcknowledgmentList | None = None,
 ) -> DiffResult:
-    """Diff two AbiSnapshots and return a DiffResult with verdict.
+    """Compare a candidate snapshot against a baseline and return a DiffResult.
+
+    **Cardinality and baseline presence are inputs, not different
+    products.** *old* is optional: ``None`` states that no prior surface
+    exists (``compare --no-baseline``; ADR-065's ``declared_absent``
+    acquisition state), and this one function still runs the pipeline --
+    facts, applicable checks, policy, result -- with only the *evolution*
+    stages skipped, because those are the only ones that need two sides.
+    Nothing is substituted for the missing baseline: there is no synthetic
+    self-comparison, so no finding can be reported with an observed
+    OLD->NEW state that nobody observed. Concretely, with ``old=None``:
+
+    * the pairwise detector registry, the SONAME policy, build-context
+      reconciliation, the NumPy C-API envelope delta, the surface-metric
+      and pattern-verdict modulations and every OLD->NEW post-processing
+      detector do not run -- each asks a question a single build cannot
+      answer, and each would have answered "no change" against a copy of
+      the candidate;
+    * the cross-source hygiene checks and the pattern/preprocessor pre-scan
+      *do* run, against the candidate's own evidence, and every finding
+      they produce is stamped :attr:`~abicheck.policy.evidence_status.
+      CrossSourceEvolution.NOT_EVALUATED`. Confidence in the observation is
+      unchanged (the check ran, on real evidence); what is unavailable is
+      the ability to establish history, and that is what the evolution
+      state says;
+    * contract evaluation still runs when asked for, over the candidate's
+      evidence alone -- no OLD-side provider record is filed, so the
+      coverage ledger answers this run's coverage honestly instead of
+      reporting a declared-absent side as fully covered;
+    * comparability (ADR-050) is not checked -- two sides are what a
+      contract mismatch is between -- and ``old_version``/
+      ``old_symbol_count`` carry no baseline value;
+    * ``verdict`` is :attr:`Verdict.NO_CHANGE`, which is the honest reading
+      of "policy scored nothing because no evolution was evaluated"; a
+      caller that publishes an audit (``workflows.no_baseline_compare``)
+      nulls the compatibility-shaped fields rather than presenting it as a
+      compatibility claim.
 
     Args:
-        old: Old ABI snapshot.
-        new: New ABI snapshot.
+        old: Baseline ABI snapshot, or ``None`` for a single-build audit
+            with the baseline declared absent (see above).
+        new: Candidate ABI snapshot.
         suppression: Optional suppression list to filter known changes.
         policy: Policy profile name to use for verdict classification.
             Available: "strict_abi" (default), "sdk_vendor", "plugin_abi".
@@ -978,9 +1015,7 @@ def compare(
             ``changes``. **On by default**, evidence-gated per check/side;
             never changes a finding's default verdict.
         old_source_licence: Per-side provenance-verified source-read licence
-            (``new_source_licence`` likewise): a caller that established a
-            *stored* snapshot's recorded paths really are its own tree. Without
-            one such a side reads ``not_evaluated`` (``source_inputs.py``).
+            (so is *new_source_licence*); see ``buildsource/source_inputs.py``.
         pattern_preprocessor_scan: ADR-068 D3/D4/D5 (plan §3 #6/#8, Phase
             2b). Runs the lexical pattern pre-scan and the preprocessor
             pre-scan (``workflows.pattern_preprocessor_scan``) on
@@ -1014,7 +1049,13 @@ def compare(
         two places to keep in sync for no added safety on the supported
         paths.
     """
-    mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
+    # A contract mismatch is a disagreement *between two sides*; with the
+    # baseline declared absent there is no second contract to disagree with.
+    mismatch = (
+        check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
+        if old is not None
+        else None
+    )
     assurance: Literal["none"] | None = "none" if mismatch is not None else None
     # E-S2 (cli-cleanup-phase-two.md Block 5): `assurance`'s per-dimension
     # breakdown -- see comparability.dimension_assurance's own doc.
@@ -1028,14 +1069,23 @@ def compare(
     # of the escape hatch ("the caller can still see a result but knows not
     # to trust it").
     comparability_warnings = [mismatch.reason] if mismatch is not None else []
-    contract_coverage = _contract_coverage_status(old, new)
+    contract_coverage = (
+        _contract_coverage_status(old, new) if old is not None else None
+    )
 
     # Discover any diff_* detector modules not already imported above, then run
     # all registered detectors via the self-registering registry. ensure_loaded
     # is a no-op for the modules checker already imports (they fix the canonical
     # registration order); it only catches newly-added modules.
     _detector_registry.ensure_loaded()
-    changes, detector_results = _detector_registry.run_all(old, new)
+    # Every registered detector answers an OLD->NEW question. With no
+    # baseline there is nothing for one to read, and running them against a
+    # copy of the candidate would produce exactly the empty change set this
+    # branch produces directly -- but by way of a comparison that was never
+    # requested, which is what made the audit's evolution states dishonest.
+    changes, detector_results = (
+        _detector_registry.run_all(old, new) if old is not None else ([], [])
+    )
 
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix
     # findings from diff_matrix(), which need multi-config inputs compare() does
@@ -1046,9 +1096,16 @@ def compare(
 
     # ADR-068 D3 / plan P2 -- first cross-source check migrated onto compare().
     if cross_source_checks:
-        from .workflows.cross_source_evolution import compute_cross_source_evolution
+        from .workflows.cross_source_evolution import (
+            compute_candidate_cross_source_findings,
+            compute_cross_source_evolution,
+        )
 
-        changes.extend(compute_cross_source_evolution(old, new))
+        changes.extend(
+            compute_cross_source_evolution(old, new)
+            if old is not None
+            else compute_candidate_cross_source_findings(new)
+        )
 
     # ADR-067 C-S1: one conserved policy-disposition ledger per comparison,
     # built before the first disposition can be applied and threaded into every
@@ -1130,7 +1187,7 @@ def compare(
     # review #498). Authority-rule-safe: it only clears a finding the build
     # defines prove is a non-change (see diff_reconcile).
     reconciled: list[Change] = []
-    if reconcile_build_context:
+    if reconcile_build_context and old is not None:
         kept, reconciled = reconcile_build_context_findings(kept, old, new)
 
     # Declared-runtime-floor and wheel-packaging contracts (ADR-020b / G10 /
@@ -1158,34 +1215,36 @@ def compare(
     # requirement compare() has no access to and stays a standalone,
     # programmatic-use function (same "not yet wired into the CLI path"
     # precedent as G10's package.parse_manylinux_glibc_floor).
-    from .diff_numpy_capi import diff_numpy_capi_surfaces
+    if old is not None:
+        from .diff_numpy_capi import diff_numpy_capi_surfaces
 
-    kept.extend(
-        _filter_suppressed_changes(
-            diff_numpy_capi_surfaces(
-                getattr(old, "numpy_capi", None), getattr(new, "numpy_capi", None)
-            ),
-            suppression,
-            suppressed,
-            ledger,
+        kept.extend(
+            _filter_suppressed_changes(
+                diff_numpy_capi_surfaces(
+                    getattr(old, "numpy_capi", None), getattr(new, "numpy_capi", None)
+                ),
+                suppression,
+                suppressed,
+                ledger,
+            )
         )
-    )
 
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
-    kept = _apply_soname_policy(
-        kept,
-        verdict_redundant,
-        suppressed,
-        suppression,
-        old,
-        new,
-        versioned_scheme_soname_relink_required=(
-            pp_ctx.versioned_scheme_soname_relink_required
-        ),
-        stage=stage,
-        ledger=ledger,
-    )
+    if old is not None:
+        kept = _apply_soname_policy(
+            kept,
+            verdict_redundant,
+            suppressed,
+            suppression,
+            old,
+            new,
+            versioned_scheme_soname_relink_required=(
+                pp_ctx.versioned_scheme_soname_relink_required
+            ),
+            stage=stage,
+            ledger=ledger,
+        )
 
     # ADR-068 plan F-9 (Codex review, PR #1172, round 12): a RESOLVED
     # finding must stay visible in `kept` but never drive the verdict --
@@ -1215,7 +1274,7 @@ def compare(
     # header-provenance notion, so it stays gated on the header flag — a POST
     # manifest surface is an explicit contract and does not depend on it.
     scope_confidence, scope_notes = _compute_scope_confidence(
-        old, new, scope_to_public_surface, pp_ctx
+        old if old is not None else new, new, scope_to_public_surface, pp_ctx
     )
 
     # A POST manifest allowlist scopes the comparison just as much as header
@@ -1229,7 +1288,7 @@ def compare(
     # ADR-027 A1/D1.2: aggregate surface-metric drift (opt-in --surface-metrics).
     # COMPATIBLE informational roll-ups; suppressible like any finding and never
     # breaking, so they leave the verdict unchanged unless NO_CHANGE flips to COMPATIBLE.
-    if surface_metrics:
+    if surface_metrics and old is not None:
         kept, verdict = _apply_surface_metrics(
             old,
             new,
@@ -1252,7 +1311,7 @@ def compare(
     # --pattern-verdicts); a no-op that leaves `kept`/`verdict` untouched
     # otherwise.
     pattern_modulations: list[dict[str, object]] = []
-    if pattern_verdicts:
+    if pattern_verdicts and old is not None:
         kept, verdict, pattern_modulations = _apply_pattern_verdicts_step(
             old,
             new,
@@ -1380,9 +1439,13 @@ def compare(
     env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
     result = DiffResult(
-        old_version=old.version,
+        # `""` (an AbiSnapshot's own "no version declared" value), not
+        # `None`: this field is typed `str`, and a declared-absent baseline
+        # has no version to report. A report that publishes an audit nulls
+        # the compatibility-shaped fields wholesale anyway.
+        old_version=old.version if old is not None else "",
         new_version=new.version,
-        library=old.library,
+        library=(old.library if old is not None else new.library),
         changes=kept,
         verdict=verdict,
         suppressed_count=len(suppressed),
@@ -1401,7 +1464,7 @@ def compare(
         policy_file=policy_file,
         redundant_changes=redundant_for_report,
         redundant_count=true_redundant_count,
-        old_symbol_count=_old_public_symbol_count(old),
+        old_symbol_count=(_old_public_symbol_count(old) if old is not None else None),
         confidence=confidence,
         evidence_tiers=evidence_tiers,
         coverage_warnings=coverage_warnings + comparability_warnings,
@@ -1422,17 +1485,12 @@ def compare(
         contract_conflicts=contract_conflicts,
         acknowledgments=acknowledgments,
     )
-    # Phase 2b (plan §3 #6/#8, ADR-068 D3/D4/D5): the folded pattern +
-    # preprocessor pre-scan result -- read-only report data, computed after
-    # `result` exists (same "attach after construction" shape as
-    # `disposition_ledger`/`unacknowledged_additions_review` below) since it
-    # never participates in verdict scoring.
     if pattern_preprocessor_scan:
         from .workflows.pattern_preprocessor_scan import (
-            compute_pattern_preprocessor_scan,
+            compute_pattern_preprocessor_scan_for,
         )
 
-        result.pattern_preprocessor_scan = compute_pattern_preprocessor_scan(
+        result.pattern_preprocessor_scan = compute_pattern_preprocessor_scan_for(
             old,
             new,
             old_source_licence=old_source_licence,
@@ -1456,8 +1514,8 @@ def compare(
             result,
             acknowledgments,
             getattr(policy_file, "acknowledgment_policy", None),
-            component=old.library,
-            baseline=old.version,
+            component=(old.library if old is not None else new.library),
+            baseline=(old.version if old is not None else None),
             release_label=new.version,
         )
 

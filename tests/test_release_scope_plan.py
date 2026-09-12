@@ -312,7 +312,7 @@ class TestScopePlanIsExecutionAuthoritative:
             )
 
         with patch(
-            "abicheck.frontends.cli.release_compare_request.resolve_release_scope_plan",
+            "abicheck.workflows.release_request.resolve_release_scope_plan",
             side_effect=_narrow_to_libfoo_only,
         ):
             code, out = _invoke(
@@ -359,7 +359,7 @@ class TestExplicitSelectionFoldedIntoScopePlan:
             return plan
 
         with patch(
-            "abicheck.frontends.cli.release_compare_request.resolve_release_scope_plan",
+            "abicheck.workflows.release_request.resolve_release_scope_plan",
             side_effect=_spy,
         ):
             code, out = _invoke(

@@ -64,6 +64,7 @@ def _write_release_summary_file(
     scope_terms: ComparisonScopeTerms | None = None,
     write_output: Callable[[Path, str], None] | None = None,
     env_matrix_source_sha256: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -126,8 +127,17 @@ def _write_release_summary_file(
         on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        require_complete_analysis=require_complete_analysis,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    # `require_complete_analysis` reaches this sidecar's own decision too,
+    # not only the process exit -- the same reason the release JSON threads
+    # it (Codex review, PR #1238, P1): this file is what a consumer reads
+    # when `--output-dir` is the artifact it collects, and it must not report
+    # `exit.code: 0` for a run that exited `1`. It is also exactly the shape
+    # of the bug the evidence-contract axis already hit here once, which is
+    # why `release_evidence_contract_contribution` is derived inside the
+    # resolver rather than passed in.
     exit_dict = resolve_release_exit_decision_for_report(
         worst_verdict,
         fail_on_removed,
@@ -138,6 +148,7 @@ def _write_release_summary_file(
         release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+        require_complete_analysis=require_complete_analysis,
     ).to_dict()
     record = terms.record
     # This sidecar is documented/contracted to always be full and

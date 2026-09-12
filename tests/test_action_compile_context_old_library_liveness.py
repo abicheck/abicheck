@@ -57,16 +57,16 @@ _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 
 # compare's region (Phase 7) starts at the gating comment (these inputs are
-# gated to the single-pair path, since the release fan-out can't thread a
-# CompileContext to each pair's header dump) and ends at the single-pair
-# branch's call to the shared helper. Covers both the two-sided shape and
+# no longer gated by operand shape: the release fan-out threads the
+# both-sides compile context to each pair's header dump too) and ends at
+# its call to the shared helper. Covers both the two-sided shape and
 # the audit-only shape (old-library/abi-baseline both omitted) -- both live
 # in this same branch since ADR-068's Action-input-lifecycle amendment
 # retired `mode: scan` outright.
 _COMPARE_COMPILE_CONTEXT_START = (
-    "# The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc/lang)"
+    "# The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/nostdinc)"
 )
-_COMPARE_COMPILE_CONTEXT_END = "else\n    add_compile_context_flags true\n  fi"
+_COMPARE_COMPILE_CONTEXT_END = "\n  add_compile_context_flags true\n"
 
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
