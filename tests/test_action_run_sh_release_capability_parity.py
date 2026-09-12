@@ -64,10 +64,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_action_run_sh_compare_build_source import (
-    _bash_executable,  # noqa: F401  (re-exported for the harness below)
-    _run_compare_raw,
-)
+from _workflow_exec import bash_executable, require_bash
+from test_action_run_sh_compare_build_source import _run_compare_raw
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.sh"
@@ -180,9 +178,10 @@ def _compare_result(
 
 
 def _run_validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    require_bash()
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     return subprocess.run(
-        [_bash_executable(), str(VALIDATE_SH)],
+        [bash_executable(), str(VALIDATE_SH)],
         capture_output=True,
         text=True,
         env={**base_env, "INPUT_MODE": "compare", **env_extra},

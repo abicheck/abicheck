@@ -61,6 +61,9 @@ from _pytest.outcomes import Skipped
 
 TESTS_DIR = Path(__file__).resolve().parent
 
+#: The retired private clone. Banned as a name, not merely as a definition.
+_CLONE_NAME = "_bash_executable"
+
 
 #: Callables whose first positional argument is an argv sequence.
 _SUBPROCESS_ENTRY_POINTS = frozenset(
@@ -226,9 +229,7 @@ def _unguarded_resolutions(source: str) -> list[str]:
                     found.add(name)
         return found
 
-    def _dominating_guard_line(
-        fn: ast.FunctionDef | ast.AsyncFunctionDef,
-    ) -> int | None:
+    def _dominating_guard_line(fn: ast.AST) -> int | None:
         """Line of a `require_bash()` that runs on every path into the body.
 
         Only an unconditional statement in the function's own body counts. A
@@ -239,7 +240,7 @@ def _unguarded_resolutions(source: str) -> list[str]:
         is the conservative side, so the worst it does is ask a caller to
         hoist a guard it already has.
         """
-        for stmt in fn.body:
+        for stmt in getattr(fn, "body", []):
             if (
                 isinstance(stmt, ast.Expr)
                 and isinstance(stmt.value, ast.Call)
@@ -248,9 +249,16 @@ def _unguarded_resolutions(source: str) -> list[str]:
                 return stmt.lineno
         return None
 
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    tree = ast.parse(source)
+    # The module body is a scope like any other, and a stricter one: a
+    # resolved subprocess at module level runs during *collection*, so a guard
+    # placed in some function cannot help it and the whole module dies on a
+    # stub-only runner (Codex review, P2). Reported under "<module>".
+    for node in [tree] + [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]:
         called = _names_called(node)
         if "bash_executable" not in called:
             continue
@@ -264,17 +272,39 @@ def _unguarded_resolutions(source: str) -> list[str]:
             continue
         guard = _dominating_guard_line(node)
         if guard is None or guard > min(runs):
-            offenders.append(node.name)
+            offenders.append(getattr(node, "name", "<module>"))
     return offenders
 
 
 def _private_clone_lines(source: str) -> list[int]:
-    return [
-        node.lineno
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name == "_bash_executable"
-    ]
+    """Every *mention* of the private clone name, not only its definition.
+
+    A definitions-only scan is blind to the migration's own wreckage: deleting
+    a clone changes the defining module's exported surface, and a sibling that
+    imported the name (`from test_action_run_sh_helpers import
+    _bash_executable`) then fails at *collection*, before any test runs. Two
+    modules did exactly that here and no rule in this file objected, because
+    each held a reference and no definition (Codex review, P1).
+
+    So the rule is the name itself: it may not appear as a definition, an
+    import, or a call anywhere under `tests/`. This walks the AST rather than
+    grepping, because a docstring or comment discussing the retired clones --
+    this module's own included -- is not a mention.
+    """
+    hits: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == _CLONE_NAME
+        ):
+            hits.append(node.lineno)
+        elif isinstance(node, ast.Name) and node.id == _CLONE_NAME:
+            hits.append(node.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr == _CLONE_NAME:
+            hits.append(node.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            hits.extend(node.lineno for a in node.names if a.name == _CLONE_NAME)
+    return sorted(set(hits))
 
 
 class TestNoModuleSpellsBashItself:
@@ -305,6 +335,36 @@ class TestNoModuleSpellsBashItself:
             "how a module drifts out of a fix applied to the original: "
             f"{offenders}"
         )
+
+    @pytest.mark.parametrize(
+        "reference",
+        [
+            pytest.param(
+                "def _bash_executable() -> str:\n    return 'x'\n", id="definition"
+            ),
+            pytest.param(
+                "from test_action_run_sh_helpers import _bash_executable",
+                id="import-of-a-deleted-clone",
+            ),
+            pytest.param("subprocess.run([_bash_executable()])", id="call"),
+            pytest.param("helpers._bash_executable()", id="qualified-call"),
+        ],
+    )
+    def test_the_ban_is_on_the_name_not_only_the_definition(
+        self, reference: str
+    ) -> None:
+        """Deleting a clone changes its module's exported surface.
+
+        The definitions-only rule was blind to the sibling that *imported* the
+        deleted name, which fails at collection before any test runs — two
+        modules in this very migration (Codex review, P1).
+        """
+        assert _private_clone_lines(reference) == [1]
+
+    def test_prose_about_the_retired_clones_is_not_a_mention(self) -> None:
+        """Otherwise this module, whose subject is that name, bans itself."""
+        assert _private_clone_lines('"""a docstring about _bash_executable"""') == []
+        assert _private_clone_lines("# a comment about _bash_executable\n") == []
 
     def test_the_scan_would_catch_a_reintroduced_call_site(self) -> None:
         """The structural rule is not vacuous: it fires on the shape it bans."""
@@ -447,6 +507,17 @@ class TestEveryResolvedCallSiteGuardsFirst:
         none of them protects the call (Codex review, P1).
         """
         assert _unguarded_resolutions(source) == ["f"]
+
+    def test_a_module_level_resolution_is_a_scope_of_its_own(self) -> None:
+        """A resolved subprocess at import time runs during collection.
+
+        No function's guard can protect it, so the module body is scanned as
+        its own scope and reported under `<module>` (Codex review, P2).
+        """
+        unguarded = 'subprocess.run([bash_executable(), "-c", s])\n'
+        guarded = 'require_bash()\nsubprocess.run([bash_executable(), "-c", s])\n'
+        assert _unguarded_resolutions(unguarded) == ["<module>"]
+        assert _unguarded_resolutions(guarded) == []
 
     def test_a_nested_helper_carries_its_own_guard(self) -> None:
         """A closure that guards is not its parent's offence.
