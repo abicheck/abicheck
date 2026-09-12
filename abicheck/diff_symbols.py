@@ -27,7 +27,7 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
-from .compare.export_transition import check_export_lost
+from .compare.export_transition import check_export_lost, check_variable_export_lost
 from .compare.fact_comparison import compare_facts
 from .compare.functions import function_identity_index
 from .detector_registry import registry
@@ -139,9 +139,9 @@ from .model import (
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import (
-    declaration_confirmed_absent,
     is_abi_visible,
     is_export_confirmed_absent,
+    is_export_table_only_record,
     surface_fact_summary,
 )
 from .name_classification import is_local_rtti_symbol
@@ -151,8 +151,10 @@ from .name_classification import is_local_rtti_symbol
 # exports *or* one the promised contract carries -- the union the old
 # ``(PUBLIC, ELF_ONLY)`` tuple spelled out, plus the combination the enum
 # could not represent at all (promised, declared, and not exported).
-# `declaration_confirmed_absent` is the export-table-only half of the old
-# ``== ELF_ONLY`` test. See model/surface_facts.py.
+# The *other* half of the old ``== ELF_ONLY`` test -- "this record came from
+# an export table alone", which is a producer question rather than one of the
+# three facts -- is `is_export_table_only_record`. See model/surface_facts.py
+# for why the split deliberately does not answer that one.
 
 
 # Sentinel the dumper writes for the type/return type of a symbol whose
@@ -223,7 +225,7 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
         if (
             is_abi_visible(v)
             and (
-                not declaration_confirmed_absent(v)
+                not is_export_table_only_record(v)
                 or is_abi_relevant_elf_symbol(
                     k,
                     filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
@@ -283,7 +285,7 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
         if (
             is_abi_visible(v)
             and (
-                not declaration_confirmed_absent(v)
+                not is_export_table_only_record(v)
                 or is_abi_relevant_elf_symbol(
                     k,
                     filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
@@ -324,7 +326,7 @@ def _check_removed_function(
         # the old enum, does not also assert anything about the
         # declaration). See model/surface_facts.py.
         and is_export_confirmed_absent(f_hidden)
-        and not (elf_only_mode and declaration_confirmed_absent(f_old))
+        and not (elf_only_mode and is_export_table_only_record(f_old))
     ):
         return make_change(
             ChangeKind.FUNC_VISIBILITY_CHANGED,
@@ -344,7 +346,7 @@ def _check_removed_function(
         )
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
-        if (elf_only_mode and declaration_confirmed_absent(f_old))
+        if (elf_only_mode and is_export_table_only_record(f_old))
         else ChangeKind.FUNC_REMOVED
     )
     return make_change(
@@ -1207,6 +1209,11 @@ def _check_variable(
     misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
     """
     changes = _check_variable_alignment(mangled, v_old, v_new)
+    # The export axis is independent of every type/qualifier comparison below
+    # and must survive their early returns -- an unknown "?" type on a
+    # stripped side says nothing about whether the symbol is still exported --
+    # so it is folded in first (compare/export_transition.py).
+    changes += check_variable_export_lost(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
         return changes

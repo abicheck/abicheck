@@ -751,13 +751,13 @@
     },
     {
       "path": "abicheck/diff_symbols.py",
-      "baseline_lines": 1972,
+      "baseline_lines": 1975,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1957 -> 1972: this module's public-surface filters (`_PUBLIC_VIS`, the two `!= Visibility.ELF_ONLY` gates, the removal/visibility-change classification) now each name the question they ask -- `is_abi_visible`, `declaration_confirmed_absent`, `is_export_confirmed_absent` from `model/surface_facts.py` -- rather than matching a conflated enum against a tuple, and removal findings carry the three facts they rest on (`surface_facts=surface_fact_summary(...)`). The new detector this split required did *not* land here: `check_export_lost` (the binary-axis finding for a matched pair whose export vanished while its declaration stayed) lives in the new `compare/export_transition.py`, since it belongs to the export axis rather than the signature axis every other check in this file compares. What remains is call-site wiring plus the import block.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1957 -> 1972: this module's public-surface filters (`_PUBLIC_VIS`, the two `!= Visibility.ELF_ONLY` gates, the removal/visibility-change classification) now each name the question they ask -- `is_abi_visible`, `declaration_confirmed_absent`, `is_export_confirmed_absent` from `model/surface_facts.py` -- rather than matching a conflated enum against a tuple, and removal findings carry the three facts they rest on (`surface_facts=surface_fact_summary(...)`). The new detector this split required did *not* land here: `check_export_lost` (the binary-axis finding for a matched pair whose export vanished while its declaration stayed) lives in the new `compare/export_transition.py`, since it belongs to the export axis rather than the signature axis every other check in this file compares. What remains is call-site wiring plus the import block. Raised again 1972 -> 1975 in the same change (Codex review, P1): `_check_variable` now also folds in the variable half of the export-transition detector, which had to run before that function's several early returns (an unknown \"?\" type on a stripped side says nothing about export presence). The detector itself, both halves, lives in `compare/export_transition.py`; these three lines are the call plus its comment.",
       "review_by": "2026-11-30"
     },
     {

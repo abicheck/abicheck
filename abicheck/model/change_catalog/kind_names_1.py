@@ -121,6 +121,12 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "default→hidden: symbol gone from ABI",
     ),
     (
+        "VAR_VISIBILITY_CHANGED",
+        "var_visibility_changed",
+        "a variable's export vanished while its declaration stayed -- the "
+        "FUNC_VISIBILITY_CHANGED counterpart for data symbols",
+    ),
+    (
         "FUNC_VISIBILITY_PROTECTED_CHANGED",
         "func_visibility_protected_changed",
         "default↔protected: interposition semantics changed, symbol still exported",

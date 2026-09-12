@@ -120,8 +120,8 @@ from .model import AbiSnapshot, Visibility
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import (
     binary_exported,
-    declaration_confirmed_absent,
     is_confirmed_true,
+    is_export_table_only_record,
     is_legacy_derived,
 )
 
@@ -296,7 +296,7 @@ def _symbol_evidence_sufficient(
     """
     fn = snapshot.function_map.get(symbol)
     if fn is not None:
-        if declaration_confirmed_absent(fn):
+        if is_export_table_only_record(fn):
             return False
         if fn.is_variadic is None:
             # Codex review, fresh evidence: diff_symbols._check_variadic_
@@ -331,7 +331,7 @@ def _symbol_evidence_sufficient(
         return all(not _type_spelling_is_unresolved(p.type) for p in fn.params)
     var = snapshot.variable_map.get(symbol)
     if var is not None:
-        if declaration_confirmed_absent(var):
+        if is_export_table_only_record(var):
             return False
         return not _type_spelling_is_unresolved(var.type)
     return False

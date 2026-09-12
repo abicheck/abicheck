@@ -84,6 +84,7 @@ __all__ = [
     "is_confirmed_false",
     "is_confirmed_true",
     "is_export_confirmed_absent",
+    "is_export_table_only_record",
     "is_legacy_derived",
     "is_header_declared",
     "is_unknown",
@@ -235,6 +236,42 @@ def in_public_surface(decl: SurfaceFactBearing) -> bool:
     if is_confirmed_false(exported):
         return False
     return is_confirmed_true(declared_in_headers(decl))
+
+
+def is_export_table_only_record(decl: SurfaceFactBearing) -> bool:
+    """Whether this record was *produced* from an export table alone — the
+    one question the legacy :class:`Visibility` answers and these three
+    facts deliberately do not.
+
+    ``ELF_ONLY`` carries two different things, and only one of them is a
+    fact about the entity. "Not declared in the available headers" is fact
+    (a), and it is split out above. But it *also* says which producer built
+    the record, and therefore how much the record contains at all: an
+    export-table stub has a ``"?"`` return type, no parameters, and a raw
+    mangled spelling for its name, because there was no header AST to
+    source any of that from. Several consumers ask that second question —
+    which ``ChangeKind`` a removal gets (``FUNC_REMOVED_ELF_ONLY`` is the
+    weaker-evidence variant), whether a name needs demangling for display,
+    whether a signature is rich enough to cross-check, whether ``origin``
+    is ``EXPORT_ONLY`` — and none of them is answered by (a).
+
+    A DWARF-derived record is the case that proves it: its fact (a) is
+    *unknown* too (debug info is not header evidence), yet it is emphatically
+    not an export-table stub — it has a real signature, a source location
+    and a demangled name. Reading "(a) is not established" as "export-table
+    only" therefore misfiles every DWARF declaration, which is exactly what
+    an earlier revision of this split did (it flipped
+    ``FUNC_REMOVED_ELF_ONLY`` to ``FUNC_REMOVED`` for the headerless
+    binary-to-binary comparison ``catalog/cases/
+    case97_api_depends_on_consumer_env`` pins).
+
+    So this stays keyed on the legacy enum, on purpose. It is not a fourth
+    boolean merging the three facts back together — it answers a different
+    question from all three, and it is here rather than spelled as a bare
+    ``visibility is ELF_ONLY`` at each call site so that reason lives in
+    one place.
+    """
+    return getattr(decl, "visibility", None) is Visibility.ELF_ONLY
 
 
 def is_legacy_derived(fact: Fact[bool]) -> bool:

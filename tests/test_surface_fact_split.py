@@ -216,6 +216,150 @@ class TestExportLostWhileDeclarationRemains:
         assert kinds & {ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY}
 
 
+class TestExportLossIsDetectedForEveryDeclarationKind:
+    """The export axis is not a function-only axis.
+
+    Registered because the first revision of this split implemented the
+    transition detector for functions only: a variable whose export vanished
+    while its declaration stayed then matched on both sides and produced *no
+    finding at all*, trading one wrong finding (a source removal) for a
+    missing one (a real binary break). Codex review, P1.
+    """
+
+    @staticmethod
+    def _decl(owner: str, exported: Fact[bool] | None) -> Function | Variable:
+        """One declared, promised declaration of either kind, whose only
+        variable is the export fact."""
+        facts: dict[str, object] = {
+            "declared_in_headers_fact": _TRUE,
+            "in_public_contract_fact": _TRUE,
+            "binary_exported_fact": exported,
+        }
+        if owner == "variable":
+            return Variable(
+                name="g_registry",
+                mangled="_Z10g_registry",
+                type="int",
+                **facts,  # type: ignore[arg-type]
+            )
+        return _fn(**facts)
+
+    @staticmethod
+    def _pair(owner: str, old_decl: object, new_decl: object) -> tuple[object, object]:
+        old_snap, new_snap = _snap("1.0"), _snap("2.0")
+        for snap, decl in ((old_snap, old_decl), (new_snap, new_decl)):
+            if owner == "variable":
+                snap.variables = [decl]  # type: ignore[list-item]
+            else:
+                snap.functions = [decl]  # type: ignore[list-item]
+        return old_snap, new_snap
+
+    @pytest.mark.parametrize(
+        ("owner", "kind"),
+        [
+            ("function", ChangeKind.FUNC_VISIBILITY_CHANGED),
+            ("variable", ChangeKind.VAR_VISIBILITY_CHANGED),
+        ],
+    )
+    def test_a_lost_export_on_a_surviving_declaration_is_reported(
+        self, owner: str, kind: ChangeKind
+    ) -> None:
+        old_snap, new_snap = self._pair(
+            owner, self._decl(owner, _TRUE), self._decl(owner, _FALSE)
+        )
+        changes = compare(old_snap, new_snap).changes  # type: ignore[arg-type]
+        kinds = {c.kind for c in changes}
+        assert kind in kinds, [c.kind for c in changes]
+        # And never as a removal: the declaration did not go anywhere.
+        assert not kinds & {
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.FUNC_REMOVED_ELF_ONLY,
+            ChangeKind.VAR_REMOVED,
+        }
+        stamped = [c for c in changes if c.kind is kind]
+        assert stamped[0].surface_facts == {
+            "declared_in_headers": "true",
+            "in_public_contract": "true",
+            "binary_exported": "false",
+        }
+
+    @pytest.mark.parametrize("unknown", [f for f in _UNKNOWNS if f is not None])
+    @pytest.mark.parametrize("owner", ["function", "variable"])
+    def test_unknown_new_side_evidence_is_never_an_observed_transition(
+        self, owner: str, unknown: Fact[bool]
+    ) -> None:
+        """ "Exported before, unknown now" is a gap in this run's evidence, not
+        an observed transition, and must never be rendered as one."""
+        old_snap, new_snap = self._pair(
+            owner, self._decl(owner, _TRUE), self._decl(owner, unknown)
+        )
+        kinds = {c.kind for c in compare(old_snap, new_snap).changes}  # type: ignore[arg-type]
+        assert ChangeKind.FUNC_VISIBILITY_CHANGED not in kinds
+        assert ChangeKind.VAR_VISIBILITY_CHANGED not in kinds
+
+
+class TestTheQuestionDecidesTheFact:
+    """Each consumer reads the fact its own question needs.
+
+    Two call sites where the union predicate was the wrong one, both found in
+    review: ``dlsym`` resolvability is (c) alone, and an export-named surface
+    metric counts (c), not public membership.
+    """
+
+    def test_dlsym_resolvable_names_need_a_confirmed_export(self) -> None:
+        from abicheck.appcompat import _snapshot_export_names
+
+        promised_unexported = _fn(
+            name="inline_api",
+            mangled="inline_api",
+            is_extern_c=True,
+            declared_in_headers_fact=_TRUE,
+            in_public_contract_fact=_TRUE,
+            binary_exported_fact=_FALSE,
+        )
+        exported = _fn(
+            name="real_api",
+            mangled="real_api",
+            is_extern_c=True,
+            declared_in_headers_fact=_TRUE,
+            in_public_contract_fact=_TRUE,
+            binary_exported_fact=_TRUE,
+        )
+        names = _snapshot_export_names(_snap("1.0", promised_unexported, exported))
+        assert "real_api" in names
+        assert "inline_api" not in names, (
+            "dlsym cannot resolve a promised-but-unexported declaration, so it "
+            "must not satisfy a required entrypoint"
+        )
+
+    def test_export_named_metrics_count_the_export_fact(self) -> None:
+        from abicheck.surface_graph import compute_surface_metrics
+
+        snap = _snap(
+            "1.0",
+            _fn(
+                name="exported",
+                mangled="_Z8exportedv",
+                declared_in_headers_fact=_TRUE,
+                in_public_contract_fact=_TRUE,
+                binary_exported_fact=_TRUE,
+            ),
+            _fn(
+                name="inline_only",
+                mangled="_Z11inline_onlyv",
+                declared_in_headers_fact=_TRUE,
+                in_public_contract_fact=_TRUE,
+                binary_exported_fact=_FALSE,
+            ),
+        )
+        metrics = compute_surface_metrics(snap)
+        assert metrics.public_functions == 2
+        assert metrics.exported_symbols == 1, (
+            "an export-named counter must not count a promised, unexported "
+            "declaration as a binary export"
+        )
+
+
 class TestPublicInlineWithoutExport:
     """(2) A public inline function with no export is not reported as
     removed -- on either side, and regardless of which side holds it."""

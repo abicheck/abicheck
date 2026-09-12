@@ -58,6 +58,7 @@ class ChangeKind(str, Enum):
     FUNC_STATIC_CHANGED = 'func_static_changed'
     FUNC_CV_CHANGED = 'func_cv_changed'
     FUNC_VISIBILITY_CHANGED = 'func_visibility_changed'
+    VAR_VISIBILITY_CHANGED = 'var_visibility_changed'
     FUNC_VISIBILITY_PROTECTED_CHANGED = 'func_visibility_protected_changed'
     FUNC_PURE_VIRTUAL_ADDED = 'func_pure_virtual_added'
     FUNC_VIRTUAL_BECAME_PURE = 'func_virtual_became_pure'

@@ -73,6 +73,7 @@ These changes are immediately incompatible with existing compiled binaries.
 |------|-------------|
 | `var_removed` | Exported global variable removed. Callers crash at load time with an undefined symbol error. |
 | `var_type_changed` | Global variable type changed. Callers reading the variable will interpret memory incorrectly — wrong size, alignment, or layout. |
+| `var_visibility_changed` | An exported global variable is no longer exported by the binary while its declaration remains in the headers. The declaration still compiles, so nothing in the source signals it, but an already-linked consumer fails to resolve the symbol at load time. The counterpart of `func_visibility_changed` for data symbols. |
 | `var_became_const` | A non-const variable became const. The linker may move it to `.rodata` — existing binaries writing to it receive `SIGSEGV`. |
 | `var_lost_const` | A const variable lost its `const` qualifier. Callers may have inlined the value at compile time (ODR violation) — stale values or crashes. |
 

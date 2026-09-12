@@ -357,6 +357,11 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
     _E("func_visibility_changed", _B,
        impact="Symbol hidden from dynamic linking; old binaries can't find it at load time.",
        description_template="Function visibility changed to hidden: {name}"),
+    _E("var_visibility_changed", _B,
+       impact="Data symbol no longer exported for dynamic linking while its "
+              "declaration remains; an already-linked consumer that resolves "
+              "it fails at load time, and nothing in the headers signals it.",
+       description_template="Variable no longer exported by the binary: {name}"),
     _E("hidden_friend_added", _C, is_addition=True,
        impact="A new in-class `friend` declaration was added. Pure "
               "addition: existing code keeps compiling, no symbol "

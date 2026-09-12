@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from ..checker_types import Change
 from ..diff_helpers import make_change
-from ..model import Function
+from ..model import Function, Variable
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.surface_facts import (
     is_binary_exported,
@@ -34,7 +34,19 @@ from ..model.surface_facts import (
     surface_fact_summary,
 )
 
-__all__ = ["check_export_lost"]
+__all__ = ["check_export_lost", "check_variable_export_lost"]
+
+
+def _export_was_lost(old: Function | Variable, new: Function | Variable) -> bool:
+    """Confirmed exported before, confirmed not exported now.
+
+    Both halves must be *confirmed* (``PRESENT``/``PARTIAL`` with a real
+    value): "exported before, unknown now" is a gap in this run's evidence,
+    not an observed transition, and rendering it as one would manufacture a
+    finding out of missing evidence -- the failure mode the whole split
+    exists to close.
+    """
+    return is_binary_exported(old) and is_export_confirmed_absent(new)
 
 
 def check_export_lost(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
@@ -56,7 +68,7 @@ def check_export_lost(mangled: str, f_old: Function, f_new: Function) -> list[Ch
     one. Findings whose old side was never exported, or whose new side still
     is, produce nothing here.
     """
-    if not (is_binary_exported(f_old) and is_export_confirmed_absent(f_new)):
+    if not _export_was_lost(f_old, f_new):
         return []
     # A removal reported elsewhere is not this: the caller only reaches here
     # for a *matched* pair, i.e. a declaration present on both sides.
@@ -74,5 +86,39 @@ def check_export_lost(mangled: str, f_old: Function, f_new: Function) -> list[Ch
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
             entity_id=f_old.entity_id or f_new.entity_id,
             surface_facts=surface_fact_summary(f_new),
+        )
+    ]
+
+
+def check_variable_export_lost(
+    mangled: str, v_old: Variable, v_new: Variable
+) -> list[Change]:
+    """:func:`check_export_lost` for data symbols.
+
+    Not an optional symmetry: a variable whose export disappears breaks an
+    already-linked consumer exactly as a function's does, and before the
+    split that break *was* reported -- as ``VAR_REMOVED``, because the
+    unexported new side dropped out of the public index. Now that the
+    declaration keeps its place there, the pair matches and nothing else in
+    ``_check_variable`` compares export presence, so without this the run
+    would report no change at all (Codex review, P1) -- trading one wrong
+    finding for a missing one.
+    """
+    if not _export_was_lost(v_old, v_new):
+        return []
+    return [
+        make_change(
+            ChangeKind.VAR_VISIBILITY_CHANGED,
+            symbol=mangled,
+            name=v_old.name,
+            description=(
+                f"Variable no longer exported by the binary, but still "
+                f"declared in the available headers: {v_old.name}"
+            ),
+            old_value=v_old.visibility.value,
+            new_value=v_new.visibility.value,
+            symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
+            entity_id=v_old.entity_id or v_new.entity_id,
+            surface_facts=surface_fact_summary(v_new),
         )
     ]

@@ -32,7 +32,7 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.binary_naming import strip_vendor_hash
 from .model.change_catalog.kinds import ChangeKind
-from .model.surface_facts import declaration_confirmed_absent
+from .model.surface_facts import is_export_table_only_record
 
 _INTERNAL_NAME_PATTERNS = (
     "internal",
@@ -65,7 +65,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f
         for f in old.functions
         if (
-            declaration_confirmed_absent(f)
+            is_export_table_only_record(f)
             and is_abi_relevant_elf_symbol(
                 f.name,
                 filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
