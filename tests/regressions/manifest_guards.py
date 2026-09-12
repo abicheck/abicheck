@@ -220,7 +220,7 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             "(ABICHECK_MIN_EXECUTED) cannot see it -- the sibling fixtures "
             "that still build satisfy the floor while the broken ones vanish."
         ),
-        fixed_by=(),
+        fixed_by=(1252,),
         seed_tests=("tests/test_compile_failure_contract.py",),
         public_surfaces=(),
         axes={
