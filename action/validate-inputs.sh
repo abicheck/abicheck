@@ -105,6 +105,47 @@ _fail() {
   exit 1
 }
 
+# ---------------------------------------------------------------------------
+# CLI choice sets, read from the generated surface file (ADR-070 D3, Phase 3b)
+# ---------------------------------------------------------------------------
+#
+# This shell runs BEFORE Python setup, by design: an unsupported input
+# combination should fail in seconds, not after a multi-minute toolchain
+# install. So unlike `action/run.sh`'s tokenizer (which runs post-install and
+# queries the CLI directly, ADR-070 D3 / plan Phase 3a), it cannot ask -- and
+# is the one shell permitted a committed generated artifact.
+#
+# `action/cli-surface.txt` is produced by `scripts/gen_action_cli_surface.py`
+# from the real `click.Choice` sets, and `--check` fails CI when it drifts, so
+# a new/removed/renamed choice cannot silently diverge from what this script
+# accepts the way the hand-maintained option tables did.
+#
+# Resolved relative to this script, not the caller's cwd: the Action invokes
+# it by absolute path from `$GITHUB_ACTION_PATH`, and tests invoke it from a
+# fixture directory.
+_CLI_SURFACE_FILE="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/cli-surface.txt"
+
+# Whether *value* ($3) is an accepted choice for option *spelling* ($2) on
+# Action mode *label* ($1).
+#
+# A missing or unreadable surface file is NOT treated as "accept anything":
+# that would turn a packaging mistake into silently skipped validation, which
+# is the failure mode this whole ADR is about. It fails loudly instead --
+# cheaply, since the file ships inside the Action itself and its absence means
+# the Action is broken, not that the runner is unusual.
+_cli_choice_allows() {
+  if [[ ! -r "$_CLI_SURFACE_FILE" ]]; then
+    _fail "internal: $_CLI_SURFACE_FILE is missing or unreadable, so this step cannot validate '$2' values. Regenerate it with 'python scripts/gen_action_cli_surface.py'; it is expected to ship with the Action."
+  fi
+  grep -qxF "CHOICE $1 $2 $3" "$_CLI_SURFACE_FILE"
+}
+
+# The accepted values for *label*/*spelling*, comma-separated, for an error
+# message -- so a message can never list a different set than the check used.
+_cli_choice_list() {
+  sed -n "s/^CHOICE $1 $2 //p" "$_CLI_SURFACE_FILE" | paste -sd, - | sed "s/,/, /g"
+}
+
 _warn() {
   printf '%s\n' "::warning::$(_sanitize_annotation "$1")"
 }
@@ -147,17 +188,14 @@ case "$MODE" in
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: dump does not accept a directory or package for new-library ('$NEW_LIBRARY') — dump snapshots exactly one library, it has no per-library fan-out. Dump each library individually (one step per binary, or a matrix), or switch to mode: compare with a directory/package operand, which fans out to a per-library comparison automatically."
     fi
-    # ADR-059: mirrors the CLI's own --compression choices
-    # (cli_options.snapshot_compression_option) -- forwarded to `dump`
+    # ADR-059: the CLI's own --compression choices -- forwarded to `dump`
     # unvalidated otherwise, so a typo'd value would only surface after a
-    # multi-minute toolchain install and build (Codex review).
-    if [[ -n "$SNAPSHOT_COMPRESSION" ]]; then
-      case "$SNAPSHOT_COMPRESSION" in
-        auto | none | gzip | zstd) ;;
-        *)
-          _fail "snapshot-compression '$SNAPSHOT_COMPRESSION' is not recognized. Use 'auto', 'none', 'gzip', or 'zstd'."
-          ;;
-      esac
+    # multi-minute toolchain install and build (Codex review). Derived from
+    # the generated surface rather than transcribed (ADR-070 D3, Phase 3b);
+    # the list used to read `auto | none | gzip | zstd` inline here.
+    if [[ -n "$SNAPSHOT_COMPRESSION" ]] \
+       && ! _cli_choice_allows dump --compression "$SNAPSHOT_COMPRESSION"; then
+      _fail "snapshot-compression '$SNAPSHOT_COMPRESSION' is not recognized. Use one of: $(_cli_choice_list dump --compression)."
     fi
     ;;
   deps-tree | deps-compare)
@@ -168,8 +206,8 @@ case "$MODE" in
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: $MODE does not accept a directory or package for new-library ('$NEW_LIBRARY') — deps tree/deps compare analyse exactly one binary, they have no per-library fan-out. Point new-library at a single binary."
     fi
-    if [[ -n "$FORMAT" && "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
-      _fail "mode: $MODE does not support format: $FORMAT — only 'markdown', 'json', and 'html' are supported."
+    if [[ -n "$FORMAT" ]] && ! _cli_choice_allows "$MODE" --format "$FORMAT"; then
+      _fail "mode: $MODE does not support format: $FORMAT — only $(_cli_choice_list "$MODE" --format) are supported."
     fi
     ;;
   compare)
@@ -245,10 +283,14 @@ case "$MODE" in
               && "$FORMAT" != "junit" && "$FORMAT" != "oneline" ]]; then
           _fail "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'junit', and 'oneline' are available for compare --no-baseline (html and review are two-sided-only renderers). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports html/review, instead."
         fi
-      elif [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "sarif" \
-            && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" \
-            && "$FORMAT" != "oneline" ]]; then
-        _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', 'review', and 'oneline' are supported."
+      elif ! _cli_choice_allows compare --format "$FORMAT"; then
+        # Derived (ADR-070 D3, Phase 3b) -- this was a seven-way transcription
+        # of `compare --format`'s own click.Choice set. The two narrower checks
+        # above are NOT derived and must not be: they are claims about which
+        # renderer a given comparison *shape* supports, i.e. restriction
+        # mirrors in ADR-070 D1/D2's sense, not choice sets. Generating them
+        # would dress a mirror up as a derived fact. They are Phase 2 work.
+        _fail "mode: compare does not support format: $FORMAT — only $(_cli_choice_list compare --format) are supported."
       fi
     fi
     # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/

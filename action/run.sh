@@ -3678,9 +3678,11 @@ elif query == "severity_exit":
     print(_severity().get("exit_code", 0))
 elif query == "compat_verdict":
     # The *compatibility* axis's own verdict, which a severity scheme never
-    # rewrites -- `scan_engine` explicitly leaves a BREAKING/API_BREAK label
-    # alone when the gate demotes the exit code, and `compare` reports
-    # `result.verdict` unconditionally. It is therefore the only signal that
+    # rewrites -- `compare` reports `result.verdict` unconditionally, and the
+    # gate's own demotion of the exit code never touches that label.
+    # cli-mirror: abicheck/policy/exit_decision.py::ExitDecision
+    # (This used to cite `scan_engine`, deleted with ADR-068's retirement of
+    # `scan`; the rule it described is `compare`'s own.) It is therefore the only signal that
     # tells a genuinely clean run from a break the user chose not to gate on.
     #
     # Read from an abicheck-native JSON report's own `verdict` key alone.
@@ -4070,12 +4072,15 @@ _scope_incomplete() {
   [[ "$(_report_query "$_src" scope_incomplete)" == "1" ]]
 }
 
-# scan's own evidence-contract axis (ADR-037 D5 -- a *pinned*
-# --depth/--source-method whose required source evidence was never
-# collected, `scan_engine._EvidenceContractError`) has its own dedicated
-# process exit code (`_EXIT_EVIDENCE_CONTRACT_ERROR = 7` in `cli_scan.py`)
-# as of 2026-09-03, checked directly in the `case $ABICHECK_EXIT in ...`
-# dispatch below -- no helper predicate needed. Earlier revisions tried a
+# The evidence-contract axis (ADR-037 D5 -- a *pinned* --depth whose required
+# source evidence was never collected) has its own dedicated process exit code,
+# checked directly in the `case $ABICHECK_EXIT in ...` dispatch below -- no
+# helper predicate needed.
+# cli-mirror: abicheck/policy/exit_decision_precedence.py::EXIT_EVIDENCE_CONTRACT_ERROR
+# (Previously cited `scan_engine._EvidenceContractError` and
+# `_EXIT_EVIDENCE_CONTRACT_ERROR = 7` "in cli_scan.py". Both modules were
+# deleted with ADR-068's retirement of `scan`; the constant is engine-level
+# now, and the value is unchanged at 7.) Earlier revisions tried a
 # stderr marker line, then a marker-file path passed as an environment
 # variable; both were shown forgeable by a PR-controlled build script
 # running as part of this very scan's own evidence collection (three Codex
@@ -5125,9 +5130,11 @@ _maybe_post_pr_comment() {
   { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; } && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
-  # scan's own _BudgetOverflow handler (abicheck/cli_scan.py) exits 5 before
-  # _emit_scan_report ever runs, so neither --write nor a JSON
-  # primary output was written -- there is no report to reuse, and
+  # A budget overflow exits 5 before any report is emitted, so neither --write
+  # nor a JSON primary output was written -- there is no report to reuse, and
+  # cli-mirror: abicheck/cli_compare_fold.py::_exit_on_budget_overflow
+  # (Previously cited `abicheck/cli_scan.py`'s `_BudgetOverflow` handler, a
+  # module ADR-068 deleted; `compare` owns the exit-5 path now.)
   # re-running would just re-execute the same budget-limited (and
   # potentially expensive) scan only to hit the identical overflow again
   # with nothing new to show for it (Codex review).
