@@ -298,3 +298,55 @@ def test_a_derived_graph_id_is_compared_as_persisted() -> None:
     assert _same_content(a, b)
     assert snapshot_content_digest(a) != snapshot_content_digest(c)
     assert not _same_content(a, c)
+
+
+def test_graph_aliasing_is_itself_persisted_content() -> None:
+    """Codex review (PR #1229): when `surface_graph` and
+    `build_source.source_graph` hold the IDENTICAL object,
+    `storage.surface_graph_codec` writes the graph once at the top level
+    and drops the nested copy — so an aliased snapshot and a
+    structurally-equal unaliased one are different persisted content.
+
+    Field-by-field equality cannot see that difference (reporting two
+    distinct-but-equal objects as equal is its whole job), which made this
+    the one case failing in the *unsafe* direction: `_same_content` said
+    `True` for two snapshots whose digests differ, so neither the
+    staleness status nor the digest-driven byte-identical warning would
+    have said anything. All three alias combinations are checked against
+    the digest."""
+    import dataclasses
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.policy.analysis_assurance_schema_staleness import _same_content
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    shared = SourceGraphSummary().finalize()
+
+    def _snap(*, aliased: bool) -> AbiSnapshot:
+        snap = AbiSnapshot(version="1.0", library="libfoo.so.1")
+        pack = BuildSourcePack.empty(root="/p")
+        if aliased:
+            snap.surface_graph = shared
+            pack.source_graph = shared
+        else:
+            snap.surface_graph = dataclasses.replace(shared)
+            pack.source_graph = dataclasses.replace(shared)
+        snap.build_source = pack
+        return snap
+
+    aliased, unaliased = _snap(aliased=True), _snap(aliased=False)
+    assert aliased.surface_graph is aliased.build_source.source_graph
+    assert unaliased.surface_graph is not unaliased.build_source.source_graph
+    assert unaliased.surface_graph == unaliased.build_source.source_graph, (
+        "the two graphs must be structurally EQUAL or this proves nothing"
+    )
+
+    assert snapshot_content_digest(aliased) != snapshot_content_digest(unaliased)
+    assert not _same_content(aliased, unaliased)
+    assert not _same_content(unaliased, aliased)
+
+    # Matching shapes still agree, so the check cannot degrade into
+    # "anything with a graph is always different".
+    assert _same_content(_snap(aliased=True), _snap(aliased=True))
+    assert _same_content(_snap(aliased=False), _snap(aliased=False))

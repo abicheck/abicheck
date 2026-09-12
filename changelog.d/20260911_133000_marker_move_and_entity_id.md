@@ -53,3 +53,8 @@
   `to_dict` serializes `graph_id or compute_graph_id()`, so an unset id and
   the computed one are the same content — while a stale stored id is
   genuinely different, which is why it is normalized rather than excluded.
+- **Graph aliasing is compared as persisted content.** When a snapshot's
+  `surface_graph` and its pack's `source_graph` are one shared object the
+  codec writes the graph once and drops the nested copy, so an aliased
+  snapshot and a structurally-equal unaliased one are different persisted
+  content — the one case where content identity was claiming too much.

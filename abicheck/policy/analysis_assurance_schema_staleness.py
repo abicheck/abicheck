@@ -102,6 +102,7 @@ from typing import TYPE_CHECKING
 from ..model.snapshot_persistence import (
     persisted_field_value,
     persisted_from_headers,
+    shares_one_graph_object,
     unpersisted_fields_for,
 )
 from .analysis_assurance_degraded_facts import degraded_reliability_facts
@@ -575,6 +576,13 @@ def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     # was merely inferred, so an inferred True and an explicit True are
     # different persisted content even though both read True here.
     if persisted_from_headers(old) != persisted_from_headers(new):
+        return False
+    # Aliasing is itself persisted content: the codec writes one shared
+    # graph once and drops the nested copy, so an aliased snapshot and a
+    # structurally-equal unaliased one serialize differently. Field-by-field
+    # equality cannot see that -- reporting two distinct-but-equal objects
+    # as equal is its whole job (Codex review, PR #1229).
+    if shares_one_graph_object(old) != shares_one_graph_object(new):
         return False
     return _all_fields_equal(old, new)
 

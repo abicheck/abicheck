@@ -43,6 +43,7 @@ __all__ = [
     "UNPERSISTED_FIELDS_BY_TYPE",
     "persisted_field_value",
     "persisted_from_headers",
+    "shares_one_graph_object",
     "unpersisted_fields_for",
 ]
 
@@ -122,3 +123,21 @@ def persisted_field_value(owner: object, field_name: str, value: object) -> obje
         return value
     computed = getattr(owner, method, None)
     return computed() if callable(computed) else value
+
+
+def shares_one_graph_object(snap: AbiSnapshot) -> bool:
+    """Whether *snap*'s surface graph and its pack's source graph are the
+    IDENTICAL object.
+
+    The codec's encoding depends on it: when the two attribute paths hold
+    one object, ``storage.surface_graph_codec`` writes the graph once at
+    the top level and drops ``build_source.source_graph`` entirely, so an
+    aliased snapshot and a structurally-equal-but-unaliased one are
+    *different persisted content* (Codex review, PR #1229). Field-by-field
+    equality cannot see that difference -- two distinct objects comparing
+    equal is exactly what it is built to report as equal -- so the shape
+    has to be compared separately.
+    """
+    graph = getattr(snap, "surface_graph", None)
+    pack = getattr(snap, "build_source", None)
+    return graph is not None and getattr(pack, "source_graph", None) is graph
