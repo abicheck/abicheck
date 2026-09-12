@@ -38,6 +38,7 @@ import itertools
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -205,6 +206,89 @@ class StepResult:
         }
 
 
+def _is_under_windows_system_dir(path: str, system_root: str) -> bool:
+    """Pure predicate: is *path* inside a Windows system directory?
+
+    Split out of :func:`is_wsl_launcher_stub` so the rule can be exercised
+    directly, on any platform, against real directories a test builds -- the
+    public wrapper's ``os.name`` guard otherwise makes the whole decision
+    unreachable off Windows, and patching ``os.name`` to reach it breaks
+    ``pathlib`` (``Path()`` picks its flavour from exactly that).
+    """
+    resolved = Path(path).resolve()
+    for sub in ("System32", "SysWOW64", "Sysnative"):
+        directory = Path(system_root, sub)
+        if directory.exists() and resolved.is_relative_to(directory.resolve()):
+            return True
+    return False
+
+
+def select_real_bash(candidates: Sequence[str], *, system_root: str) -> str | None:
+    """The first of *candidates* that is not Windows' WSL launcher stub.
+
+    ``None`` when every candidate is a stub, or there are none -- an explicit
+    "this machine has no bash", never a fallback to the very thing just
+    rejected (Codex review, P2: the previous revision rejected the stub and
+    then returned the bare string ``"bash"``, which resolves straight back to
+    it).
+
+    Takes the candidate list rather than reading ``PATH`` so the selection
+    rule is testable without a Windows runner, and scans the whole list
+    rather than the first hit so a real Git Bash listed *after* the stub is
+    still found -- ``shutil.which`` answers with the first match only, so
+    rejecting that one used to end the search instead of continuing past it.
+    """
+    for candidate in candidates:
+        if not _is_under_windows_system_dir(candidate, system_root):
+            return candidate
+    return None
+
+
+def _path_bash_candidates() -> list[str]:
+    """Every ``bash`` on ``PATH``, in PATH order -- not just the first.
+
+    Asked per directory so ``shutil.which`` still applies ``PATHEXT`` while
+    the search continues past an early stub.
+    """
+    found: list[str] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        hit = shutil.which("bash", path=entry)
+        if hit and hit not in found:
+            found.append(hit)
+    return found
+
+
+def _windows_system_root() -> str:
+    return os.environ.get("SystemRoot") or r"C:\Windows"
+
+
+def _real_bash() -> str | None:
+    """A real bash, or ``None`` when this machine has none.
+
+    The single resolution both :func:`bash_executable` and :func:`have_bash`
+    answer from, so they cannot disagree about whether a usable bash exists.
+    They did, and that disagreement was the defect: ``have_bash()`` reported
+    True on a stub-only machine because ``is_wsl_launcher_stub("bash")`` is
+    False for an unresolved name and ``shutil.which("bash")`` then found the
+    stub, so callers ran every step against WSL's error text instead of
+    skipping.
+    """
+    if os.name != "nt":
+        # Kept as the bare name on POSIX: it is what every caller has always
+        # passed, and there is no stub to disambiguate away from.
+        return "bash" if shutil.which("bash") else None
+    for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if candidate and Path(candidate).exists():
+            return candidate
+    return select_real_bash(_path_bash_candidates(), system_root=_windows_system_root())
+
+
 def bash_executable() -> str:
     """A real bash, bypassing Windows' WSL launcher stub.
 
@@ -226,28 +310,13 @@ def bash_executable() -> str:
 
     ``GIT_BASH_PATH`` is honoured first so a runner with Git installed
     somewhere unusual can point at it.
+
+    Still a ``str`` on a machine with no bash, because every call site passes
+    it straight to ``subprocess``: a caller that needs to know asks
+    :func:`have_bash` and skips, and a missing skip guard should surface as
+    that caller's own failure rather than a ``None`` crashing elsewhere.
     """
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).exists():
-            return candidate
-    # Last resort: a PATH lookup that *rejects* the launcher stub rather than
-    # returning a bare "bash" and letting the caller run it. Preferring the
-    # two Git-for-Windows paths above is not enough on its own -- a runner
-    # with Git installed anywhere else fell through to `"bash"`, which is the
-    # stub, and every test in the calling module then failed against UTF-16LE
-    # WSL prose with no stated reason (the windows-latest unit lane, where
-    # this is what `test_action_cli_surface_generated` and
-    # `test_extra_args_is_value_option_completeness` were actually hitting).
-    found = shutil.which("bash")
-    if found and not is_wsl_launcher_stub(found):
-        return found
-    return "bash"
+    return _real_bash() or "bash"
 
 
 def is_wsl_launcher_stub(path: str) -> bool:
@@ -260,16 +329,18 @@ def is_wsl_launcher_stub(path: str) -> bool:
     on a machine with a distro actually installed, would *succeed* -- which
     is still not the bash these tests mean, since it would run the steps
     inside WSL against Linux paths.
+
+    A bare command name is resolved through ``PATH`` first: ``Path("bash")
+    .resolve()`` is relative to the *current directory*, so an unresolved
+    name silently answered False for a stub that is exactly what the name
+    runs.
     """
     if os.name != "nt":
         return False
-    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
-    resolved = Path(path).resolve()
-    return any(
-        resolved.is_relative_to(Path(system_root, sub).resolve())
-        for sub in ("System32", "SysWOW64", "Sysnative")
-        if Path(system_root, sub).exists()
-    )
+    resolved_name = path if ("/" in path or "\\" in path) else shutil.which(path)
+    if not resolved_name:
+        return False
+    return _is_under_windows_system_dir(resolved_name, _windows_system_root())
 
 
 def run_step(
@@ -392,15 +463,14 @@ def outside_is_intact(base: Path) -> bool:
 def have_bash() -> bool:
     """Is a real bash actually available?
 
+    Answers from the same resolution :func:`bash_executable` returns, so the
+    two cannot disagree -- see :func:`_real_bash`. A machine whose only
+    ``bash`` is the WSL launcher has none, and callers skip rather than run
+    every step against WSL's own error text.
+
     The `or os.name != "nt"` this used to carry short-circuited the lookup on
     every POSIX platform, so a machine without bash reported that it had one
     and callers ran the steps instead of skipping — the opposite of what the
     name promises (CodeRabbit review).
     """
-    candidate = bash_executable()
-    if is_wsl_launcher_stub(candidate):
-        # A stub is not a bash. Reporting True here is what turned "this
-        # machine cannot run shell steps" into a module-wide wall of
-        # failures against WSL's own error text instead of a clean skip.
-        return False
-    return Path(candidate).is_file() or shutil.which(candidate) is not None
+    return _real_bash() is not None
