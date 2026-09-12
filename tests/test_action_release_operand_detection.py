@@ -56,7 +56,13 @@ def _function_source() -> str:
     return text[start:end]
 
 
-def _ask(path: Path, *, abicheck_available: bool, cwd: Path) -> bool:
+def _ask(
+    path: Path | str,
+    *,
+    abicheck_available: bool,
+    cwd: Path,
+    workdir: Path | None = None,
+) -> bool:
     """Run the extracted function over *path*, with the probe on or off.
 
     Shells out through `_workflow_exec`'s resolver and its guard, the one
@@ -76,6 +82,7 @@ def _ask(path: Path, *, abicheck_available: bool, cwd: Path) -> bool:
         capture_output=True,
         text=True,
         check=False,
+        cwd=None if workdir is None else str(workdir),
     )
     assert completed.returncode in (0, 1), completed.stderr
     return completed.returncode == 0
@@ -130,6 +137,59 @@ class TestAgreementWithTheRealPredicate:
         assert not is_package(d)
         assert _ask(d, abicheck_available=True, cwd=tmp_path)
         assert _ask(d, abicheck_available=False, cwd=tmp_path)
+
+
+class TestTheProbeResolvesTheOperandNotTheSafeDirectory:
+    """A relative operand is the *normal* Action spelling.
+
+    `old-library`/`new-library` usually arrive relative to the workflow
+    directory, and the probe runs from `$_PY_SAFE_DIR` (which exists to keep
+    the untrusted checkout off `sys.path`, not to relocate the operand). A
+    bare `Path(sys.argv[1])` inside that subshell stats a nonexistent path
+    under the temp dir, answers "not a package", and skips the package-only
+    inputs for an operand `compare` does fan out (Codex review, PR #1259).
+
+    The working directory and the safe directory are deliberately *distinct*
+    here: the first version of this module passed the same `tmp_path` as
+    both and used absolute operands, so it could not have caught this.
+    """
+
+    def test_a_relative_operand_resolves_from_the_working_directory(
+        self, tmp_path: Path
+    ) -> None:
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+        safe_dir = tmp_path / "safe"
+        safe_dir.mkdir()
+        _make_tar_mode(workdir / "operand", "w:gz")
+
+        assert is_package(workdir / "operand")
+        assert _ask(
+            "operand", abicheck_available=True, cwd=safe_dir, workdir=workdir
+        )
+
+    def test_a_relative_non_package_still_answers_no(self, tmp_path: Path) -> None:
+        """The control: anchoring must not make everything a package."""
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+        safe_dir = tmp_path / "safe"
+        safe_dir.mkdir()
+        (workdir / "libfoo.so").write_bytes(b"\x7fELF\x02\x01\x01" + b"\x00" * 64)
+
+        assert not _ask(
+            "libfoo.so", abicheck_available=True, cwd=safe_dir, workdir=workdir
+        )
+
+    def test_a_dotted_relative_operand_resolves_too(self, tmp_path: Path) -> None:
+        workdir = tmp_path / "workspace"
+        (workdir / "nested").mkdir(parents=True)
+        safe_dir = tmp_path / "safe"
+        safe_dir.mkdir()
+        _make_tar_mode(workdir / "nested" / "operand", "w:gz")
+
+        assert _ask(
+            "./nested/operand", abicheck_available=True, cwd=safe_dir, workdir=workdir
+        )
 
 
 class TestThePreInstallFallback:
