@@ -92,3 +92,14 @@
   the only thing that distinguishes "the candidate has none of these
   constructs" from "we could not look".
 
+- **A candidate the scanner cannot examine is a gap, not a filtered file.** The
+  extensionless-header heuristic has to read a file to classify it, and treated
+  a read failure as "binary" — so an unreadable extensionless header (an ACL, a
+  transient I/O error) was dropped by the scannability filter without ever
+  being recorded, and a sibling file scanning successfully let the set report
+  full coverage over a header nobody read. Discovery now classifies tri-state:
+  a real candidate, a file that was never evidence, or a candidate that could
+  not be examined. Only the last is a gap, and only the middle is silent. A
+  candidate whose `is_file()` or classification raises is likewise recorded as
+  unreadable rather than aborting the advisory walk.
+

@@ -107,8 +107,9 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1141,),
         seed_tests=(
-            "tests/test_stored_snapshot_source_licence.py",
+            "tests/test_source_input_completeness.py",
             "tests/test_pattern_preprocessor_scan_coverage.py",
+            "tests/test_preprocessor_probe_families.py",
         ),
         axes={
             "disposition": (
@@ -126,6 +127,8 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "missing_root",
                 "unreadable_file",
                 "unenumerable_directory",
+                "unexaminable_candidate",
+                "unstattable_candidate",
                 "unsupported_node",
             ),
             "fold_state": (
@@ -138,7 +141,12 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "The lexical pattern scan's sufficiency is per *check*, "
+                    "A file the classifier cannot *examine* must be told apart "
+            "from a file that was never evidence: a two-state "
+            "scannable/not-scannable predicate collapses them, and the "
+            "unreadable one then vanishes from the account instead of "
+            "registering as a gap. The lexical pattern scan's sufficiency is "
+            "per *check*, "
                     "but its one check shares a single expected-input set: a "
                     "gap in any declared root makes every PatternKind's "
                     "absence unestablished, since a lexical scan cannot say "

@@ -357,7 +357,7 @@ def resolve_source_inputs(
     changed_paths: Iterable[str] | None = None,
     *,
     licence: SourceReadLicence = WITHHELD_FOR_STORED_SNAPSHOT,
-    is_scannable: Any = None,
+    classify_candidate: Any = None,
     path_changed: Any = None,
     pruned_dirs: frozenset[str] = PRUNED_DIR_SEGMENTS,
 ) -> SourceInputSet:
@@ -370,10 +370,15 @@ def resolve_source_inputs(
     ``licence`` does not permit reading, every root becomes ``NOT_LICENSED``
     and the filesystem is not touched at all.
 
-    ``is_scannable``/``path_changed``/``pruned_dirs`` are the caller's own walk
-    policy (the pattern scanner supplies its suffix allowlist, its tail-match
-    join, and its build-output pruning), so this module stays free of any one
-    scanner's file-type policy.
+    ``classify_candidate``/``path_changed``/``pruned_dirs`` are the caller's own
+    walk policy, so this module stays free of any one scanner's file-type
+    policy. ``classify_candidate`` is deliberately **tri-state**: it returns
+    :attr:`SourceInputDisposition.SELECTED` for a real candidate, ``None`` for a
+    file that was never expected evidence (a ``.md``, a binary blob), and any
+    gap disposition -- in practice ``UNREADABLE`` -- for a candidate it could
+    not examine. A two-state predicate cannot tell the last two apart, and
+    collapsing them is how an unreadable header disappears from the account
+    while the set still reports full coverage.
     """
     root_list = [str(r) for r in roots]
     if not licence.permitted:
@@ -444,12 +449,38 @@ def resolve_source_inputs(
                 base = Path(dirpath)
                 for name in filenames:
                     cand = base / name
-                    if not cand.is_file():
+                    try:
+                        regular = cand.is_file()
+                    except OSError:
+                        # `is_file()` stats, and a stat can fail on its own (an
+                        # ACL, a dead mount, a name the filesystem rejects). A
+                        # candidate we cannot even classify is a gap, never a
+                        # crash: this walk is advisory and must not abort, but it
+                        # must also not quietly shrink its own expected set.
+                        _record(cand, SourceInputDisposition.UNREADABLE)
+                        continue
+                    if not regular:
                         # FIFOs/sockets/devices/broken symlinks are listed by
                         # os.walk; opening one would block or fail. They were
                         # never expected evidence, so they are not gaps.
                         continue
-                    if is_scannable is not None and not is_scannable(cand):
+                    try:
+                        verdict: SourceInputDisposition | None = (
+                            SourceInputDisposition.SELECTED
+                            if classify_candidate is None
+                            else classify_candidate(cand)
+                        )
+                    except OSError:
+                        _record(cand, SourceInputDisposition.UNREADABLE)
+                        continue
+                    if verdict is None:
+                        # Never expected evidence: not a gap, not recorded.
+                        continue
+                    if verdict is not SourceInputDisposition.SELECTED:
+                        # A candidate the classifier could not examine (an
+                        # unreadable extensionless header). Recorded as the gap
+                        # it is, rather than filtered out as uninteresting.
+                        _record(cand, verdict)
                         continue
                     _record(
                         cand,

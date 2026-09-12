@@ -95,6 +95,51 @@ def _looks_binary(path: Path) -> bool:
         return True
 
 
+def _extensionless_is_text(path: Path) -> bool | None:
+    """Tri-state text check for the extensionless heuristic.
+
+    ``True``/``False`` answer "is this small text" only when the file could
+    actually be examined; ``None`` means it could not be read at all, which is a
+    *coverage gap* rather than an answer. :func:`_looks_binary` collapses that
+    third case onto "binary", which is right for its own callers but wrong for
+    discovery: an unreadable extensionless header would be dropped from the
+    expected-input set entirely, and a sibling file scanning successfully would
+    then let the set report full coverage over a header nobody read (Codex
+    review, P2 -- the same silent-drop shape as the ``os.walk`` traversal
+    error).
+    """
+    try:
+        if path.stat().st_size > _EXTENSIONLESS_MAX_BYTES:
+            return False
+    except OSError:
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return b"\x00" not in fh.read(8192)
+    except OSError:
+        return None
+
+
+def classify_walked_file(path: Path) -> SourceInputDisposition | None:
+    """Disposition for one file found under a directory root, or ``None``.
+
+    ``None`` means "never expected evidence" -- a ``.md``, a ``.bin``, an
+    oversized or binary extensionless blob. That is not a gap and must not spoil
+    sufficiency. ``UNREADABLE`` means the opposite: this *was* a candidate and
+    we could not look at it, so it is recorded and does spoil sufficiency.
+    Keeping the two apart is the whole point of the tri-state.
+    """
+    suffix = path.suffix.lower()
+    if suffix in SOURCE_SUFFIXES:
+        return SourceInputDisposition.SELECTED
+    if suffix != "":
+        return None
+    is_text = _extensionless_is_text(path)
+    if is_text is None:
+        return SourceInputDisposition.UNREADABLE
+    return SourceInputDisposition.SELECTED if is_text else None
+
+
 def _is_scannable(path: Path) -> bool:
     """True if a directory-walked file should be lexically scanned.
 
@@ -159,7 +204,7 @@ def resolve_expected_source_inputs(
         roots,
         changed_paths,
         licence=licence,
-        is_scannable=_is_scannable,
+        classify_candidate=classify_walked_file,
         path_changed=_path_changed,
         pruned_dirs=_PRUNED_DIR_SEGMENTS,
     )
