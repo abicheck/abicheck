@@ -979,9 +979,10 @@ outputs:
       report at all, so there is no candidate-side finding -- or absence
       of one -- to claim either way. Distinct from AUDIT_CLEAN, which
       asserts a real audit ran and found nothing; see the command preview
-      in the job log for what a real run would do. Two-sided dry-run is a
-      separate, pre-existing gap this value does not cover -- only the
-      audit-only shape's dry-run behavior is documented here),
+      in the job log for what a real run would do. A two-sided dry run now
+      publishes this same value, for the same reason: a preview performs no
+      comparison, so it has no compatibility result either. That shape used
+      to publish COMPATIBLE, which claimed a result no analysis produced),
       ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
       `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- the same P0.4

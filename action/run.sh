@@ -4253,15 +4253,28 @@ _resolve_clean_exit_verdict() {
   # VERDICT=COMPATIBLE -- "No binary ABI break detected" for a preview that
   # never compared anything, let alone the candidate's own public surface.
   # Checked first and returns early, before the no-baseline-audit report
-  # query (which would find no report to read) and before
-  # `_report_compat_verdict` (same reason). Two-sided dry-run is a
-  # pre-existing, out-of-scope gap this fix does not touch -- see the
-  # verdict output's own description, which documents only the audit-only
-  # shape's dry-run behavior.
-  if [[ "${_NO_BASELINE:-false}" == "true" ]] \
-    && { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; }; then
+  # query (which would find no report to read), before
+  # `_report_compat_verdict` (same reason), and before the requested-report
+  # validation further down.
+  #
+  # **Both compare shapes**, not just the audit-only one. This used to be
+  # gated on `$_NO_BASELINE`, with the two-sided case left as a documented,
+  # pre-existing gap that published COMPATIBLE. The requested-report
+  # validation added in this change turned that gap into an active failure:
+  # `dry-run: true` plus `format: json` writes no report *by design*, so a
+  # perfectly valid two-sided preview was reported as REPORT_UNREADABLE
+  # (Codex review, P2 -- a regression this change introduced, not a
+  # pre-existing one). Widening the early return fixes that and retires the
+  # gap in the truthful direction at the same time: a preview that performed
+  # no analysis has no compatibility result either way, so DRY_RUN is the
+  # honest label for both shapes and COMPATIBLE never was.
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; then
     VERDICT="DRY_RUN"
-    echo "::notice::--dry-run: this is a preview of the command that would run -- no analysis was performed and there is no candidate-side finding to report. Drop --dry-run to run the audit for real."
+    if [[ "${_NO_BASELINE:-false}" == "true" ]]; then
+      echo "::notice::--dry-run: this is a preview of the command that would run -- no analysis was performed and there is no candidate-side finding to report. Drop --dry-run to run the audit for real."
+    else
+      echo "::notice::--dry-run: this is a preview of the command that would run -- no comparison was performed, so there is no compatibility result to report. Drop --dry-run to run the comparison for real."
+    fi
     return
   fi
   # A no-baseline audit's own `verdict` field is always null (no comparison

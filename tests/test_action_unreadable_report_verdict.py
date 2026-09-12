@@ -737,3 +737,57 @@ class TestAContradictoryReportAtANonZeroExit:
         outputs = self._contradictory_at(tmp_path, exit_code=0, verdict="COMPATIBLE")
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
+
+
+class TestADryRunIsNotAMissingReport:
+    """A dry run writes no report *by design* — that is not a failure.
+
+    `compare --dry-run` performs no analysis and only previews the command, so
+    `format: json` plus `dry-run: true` legitimately produces nothing. The
+    requested-report validation added in this change turned that into
+    `REPORT_UNREADABLE` for every two-sided preview — a regression this change
+    introduced, because the pre-existing dry-run early return was gated on the
+    audit-only shape (Codex review, P2).
+
+    Widened to both shapes, and in the truthful direction: the two-sided case
+    used to publish `COMPATIBLE`, which claimed a result no analysis produced.
+    `DRY_RUN` is honest for both.
+    """
+
+    def _dry_run(self, tmp_path: Path, **extra: str) -> dict:
+        # Writes nothing at all, exactly as a real `--dry-run` does.
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=None)
+        return _run_action(tmp_path, _compare_env(tmp_path) | extra, bindir)
+
+    def test_a_two_sided_dry_run_publishes_dry_run(self, tmp_path: Path) -> None:
+        outputs = self._dry_run(tmp_path, INPUT_DRY_RUN="true")
+        assert outputs["verdict"] == "DRY_RUN", outputs
+        assert outputs["verdict"] != "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_two_sided_dry_run_does_not_publish_compatible(
+        self, tmp_path: Path
+    ) -> None:
+        # The other half of the correction: a preview never established a
+        # compatibility result, so COMPATIBLE was wrong before too.
+        outputs = self._dry_run(tmp_path, INPUT_DRY_RUN="true")
+        assert outputs["verdict"] != "COMPATIBLE", outputs
+
+    def test_an_effective_dry_run_via_extra_args_is_also_exempt(
+        self, tmp_path: Path
+    ) -> None:
+        # `extra-args --dry-run` leaves INPUT_DRY_RUN false, so the predicate
+        # has to consult the passthrough as well — the same
+        # nominal-versus-effective split `_effective_format` handles.
+        outputs = self._dry_run(tmp_path, INPUT_EXTRA_ARGS="--dry-run")
+        assert outputs["verdict"] == "DRY_RUN", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_real_run_that_writes_nothing_is_still_caught(
+        self, tmp_path: Path
+    ) -> None:
+        # The control that keeps the exemption narrow: without the dry-run
+        # flag, the identical stub (writing nothing) must still be reported.
+        outputs = self._dry_run(tmp_path)
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        assert outputs["_exit"] == 1, outputs
