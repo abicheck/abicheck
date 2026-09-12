@@ -273,6 +273,14 @@ Two predicates close that without weakening anything above:
   this PR's original defect. Mutation-tested in exactly that split
   (`TestAnExtraArgsOutputOverrideIsHonoured`).
 
+  **The assurance-consistency check is per destination too.** A document that
+  parses can still be unable to say whether the analysis-assurance gate fired,
+  and that is as disqualifying as failing to parse. `_assurance_axis_contradictory`
+  reads the fallback chain — correct at a nonzero exit, where no destination
+  inventory exists — so the exit-0 loop uses `_assurance_axis_contradictory_at`
+  on each requested path, stdout included. Asking only the chain-selected report
+  let a clean primary hide a contradictory secondary.
+
   **A requested destination must also be *fresh*.** Parseability alone says a
   document is there, not that this invocation wrote it; a leftover from an
   earlier step or one a PR author committed satisfies the former and not the

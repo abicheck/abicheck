@@ -30,6 +30,12 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **The assurance-consistency check now runs on every requested destination.**
+  It read whichever report the fallback chain settled on, so with several
+  requested JSON artifacts a clean primary hid a self-contradictory secondary —
+  one claiming a schema that carries `analysis_assurance_exit_contribution`,
+  reporting an `analysis_assurance` block and omitting the contribution. Both
+  passed the readability check and the step published `COMPATIBLE`.
 - **An operational outcome no longer reads as a clean compatibility result.**
   A report whose verdict is `ERROR`, `unsupported`, `failed`, `UNKNOWN` or
   `not_comparable` — or whose `run_outcome.operational` names any failure —

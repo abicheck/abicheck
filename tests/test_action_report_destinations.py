@@ -705,3 +705,100 @@ class TestStdoutModeIsJudgedEvenBesideAWriteDestination:
         )
         outputs = _run_action(tmp_path, self._env(tmp_path, None), bindir)
         assert outputs.get("verdict") == "BREAKING", outputs
+
+
+#: A document that is perfectly parseable and still cannot say whether the
+#: analysis-assurance gate fired: it claims a schema that carries
+#: `analysis_assurance_exit_contribution`, reports an `analysis_assurance`
+#: block, and omits the contribution. `reporter.py` emits the two under one
+#: `if`, so a half-present pair is an inconsistent report.
+_CONTRADICTORY_REPORT = json.dumps(
+    {
+        "report_schema_version": "4.4",
+        "verdict": "COMPATIBLE",
+        "analysis_assurance": {"status": "degraded"},
+    }
+)
+
+_CLEAN_REPORT = json.dumps({"report_schema_version": "4.4", "verdict": "COMPATIBLE"})
+
+
+class TestTheAssuranceAxisIsCheckedPerDestination:
+    """A clean primary must not excuse a self-contradictory secondary.
+
+    The contradiction check read whatever `_json_report_src` settled on, which
+    is right at a nonzero exit (no destination inventory exists there) and wrong
+    for the exit-0 validation: with several requested JSON artifacts, only the
+    primary was asked, both passed `report_validity`, and the step published
+    COMPATIBLE while a requested artifact could not say whether the assurance
+    gate had fired (Codex review, P2).
+
+    This is the same root cause as the validity findings — a *per-destination*
+    question answered through the fallback chain — so the invariant is stated
+    the same way: whichever requested destination is contradictory, the step must
+    refuse to publish a compatibility result.
+    """
+
+    def _env(self, tmp_path: Path, secondary: Path) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "primary.json"),
+            "INPUT_EXTRA_ARGS": f"--write json={secondary}",
+        }
+
+    def _stub(self, tmp_path: Path, primary: str, secondary: str) -> Path:
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        (tmp_path / "p.json").write_text(primary, encoding="utf-8")
+        (tmp_path / "s.json").write_text(secondary, encoding="utf-8")
+        stub = bindir / "abicheck"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            f'cp "{tmp_path / "p.json"}" "{tmp_path / "primary.json"}"\n'
+            f'cp "{tmp_path / "s.json"}" "{tmp_path / "secondary.json"}"\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        return bindir
+
+    @pytest.mark.parametrize(
+        "primary,secondary,label",
+        (
+            (_CLEAN_REPORT, _CONTRADICTORY_REPORT, "secondary contradictory"),
+            (_CONTRADICTORY_REPORT, _CLEAN_REPORT, "primary contradictory"),
+            (_CONTRADICTORY_REPORT, _CONTRADICTORY_REPORT, "both contradictory"),
+        ),
+    )
+    def test_any_contradictory_destination_refuses_a_verdict(
+        self, tmp_path: Path, primary: str, secondary: str, label: str
+    ) -> None:
+        secondary_path = tmp_path / "secondary.json"
+        bindir = self._stub(tmp_path, primary, secondary)
+        outputs = _run_action(tmp_path, self._env(tmp_path, secondary_path), bindir)
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", (label, outputs)
+        assert outputs["_exit"] == 1, (label, outputs)
+
+    def test_two_clean_destinations_are_unaffected(self, tmp_path: Path) -> None:
+        # The control: the multi-destination shape itself must stay usable.
+        secondary_path = tmp_path / "secondary.json"
+        bindir = self._stub(tmp_path, _CLEAN_REPORT, _CLEAN_REPORT)
+        outputs = _run_action(tmp_path, self._env(tmp_path, secondary_path), bindir)
+        assert outputs.get("verdict") == "COMPATIBLE", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_a_report_carrying_neither_key_is_still_fine(self, tmp_path: Path) -> None:
+        # A report with no assurance block and no contribution is the ordinary
+        # green shape — `reporter.py` emits both or neither — so it must not be
+        # inferred contradictory from the schema version alone. An earlier draft
+        # of this check did exactly that and failed every healthy run.
+        secondary_path = tmp_path / "secondary.json"
+        both_absent = json.dumps(
+            {"report_schema_version": "4.4", "verdict": "BREAKING"}
+        )
+        bindir = self._stub(tmp_path, both_absent, both_absent)
+        outputs = _run_action(tmp_path, self._env(tmp_path, secondary_path), bindir)
+        assert outputs.get("verdict") == "BREAKING", outputs

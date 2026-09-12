@@ -4130,6 +4130,23 @@ _assurance_axis_contradictory() {
   [[ "$(_assurance_axis)" == "contradictory" ]]
 }
 
+# The same question asked of ONE named report rather than of whatever
+# `_json_report_src` settled on.
+#
+# The chain-based form above answers for a single document, which is right at a
+# nonzero exit (there is no destination inventory there) and wrong for the
+# exit-0 validation: with several requested JSON artifacts, a clean primary hid
+# a freshly-written secondary that claimed schema >= 2.40, carried an
+# `analysis_assurance` block and omitted its contribution. Both destinations
+# passed `report_validity`, only the primary was asked this, and the step
+# published COMPATIBLE (Codex review, P2, reproduced). A destination is
+# unusable if it cannot say whether the assurance gate fired, exactly as if it
+# could not be parsed.
+_assurance_axis_contradictory_at() {
+  [[ -n "${1:-}" ]] || return 1
+  [[ "$(_report_query "$1" assurance_axis)" == "contradictory" ]]
+}
+
 # ADR-065 S2's completeness axis (D6 under --on-incomplete-scope block, D7
 # -- no comparison completed -- under every setting), read the way
 # `_coverage_gated` reads its own: the structured report's already-folded
@@ -4495,6 +4512,11 @@ _resolve_clean_exit_verdict() {
       fi
       _dest_validity=$(_report_query "$_dest" report_validity)
       _reject_unusable_report "$_dest_validity" "$_dest" || return
+      if _assurance_axis_contradictory_at "$_dest"; then
+        VERDICT="REPORT_UNREADABLE"
+        echo "::error::abicheck exited 0, but the JSON report requested at $(_sanitize_annotation "$_dest") claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        return
+      fi
     done <<<"$(_caller_json_destinations)"
     # Stdout mode names no destination above, so its report is judged here.
     #
@@ -4524,6 +4546,11 @@ _resolve_clean_exit_verdict() {
       fi
       _validity=$(_report_query "$_STDOUT_JSON_FILE" report_validity)
       _reject_unusable_report "$_validity" "format: json on stdout" || return
+      if _assurance_axis_contradictory_at "$_STDOUT_JSON_FILE"; then
+        VERDICT="REPORT_UNREADABLE"
+        echo "::error::abicheck exited 0, but the JSON report it printed on stdout claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        return
+      fi
     fi
   fi
   # A readable report whose assurance key pair is broken, checked HERE rather
