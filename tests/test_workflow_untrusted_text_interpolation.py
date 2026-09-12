@@ -41,11 +41,13 @@ that silently never executed anything would pass both other tests.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable, have_bash
 from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
 
 #: Contexts whose value is free text chosen by whoever opened the PR,
@@ -152,15 +154,28 @@ def _run_body_step(script: str, payload: str, workdir: Path) -> tuple[str | None
     raised `FileNotFoundError` there -- the harness crashed on exactly the
     case it exists to detect, reporting a test error instead of "the attack
     fired". Both outcomes are observations to return, not failures here.
+
+    The environment is replaced rather than extended, so a variable leaking
+    in from the developer's shell cannot change what the step does. On
+    Windows that replacement has to be partial: Git bash is a real POSIX
+    shell but it still needs the host's own `PATH` and `SystemRoot` to find
+    its utilities, and handing it the POSIX-only `PATH` below left the step
+    unable to run at all -- every payload then came back as "nothing was
+    written", which reads exactly like a passing negative control.
+    `test_the_harness_can_execute_a_trivial_step` is what makes that state
+    visible rather than silently reassuring.
     """
+    env = {
+        "PR_BODY": payload,
+        "RUNNER_TEMP": str(workdir),
+        "PATH": "/usr/bin:/bin",
+    }
+    if os.name == "nt":
+        env = {**os.environ, **env, "PATH": os.environ.get("PATH", "")}
     subprocess.run(
-        ["bash", "-c", script],
+        [bash_executable(), "-c", script],
         cwd=workdir,
-        env={
-            "PR_BODY": payload,
-            "RUNNER_TEMP": str(workdir),
-            "PATH": "/usr/bin:/bin",
-        },
+        env=env,
         capture_output=True,
         text=True,
         timeout=30,
@@ -182,6 +197,41 @@ def _real_pr_body_script() -> str:
     pytest.fail("bugfix-test-contract.yml no longer has a PR_BODY step")
 
 
+#: The executing half needs a real POSIX shell. On a Windows runner without
+#: Git for Windows, `bash` resolves to the WSL launcher stub, which prints
+#: its own UTF-16LE "no installed distributions" text and exits 1 -- so an
+#: unguarded run asserts against WSL's output rather than against the step,
+#: reporting a security regression that did not happen. The structural half
+#: above is pure YAML parsing and stays unconditional.
+_needs_bash = pytest.mark.skipif(not have_bash(), reason="needs a real bash")
+
+
+@_needs_bash
+def test_the_harness_can_execute_a_trivial_step(tmp_path: Path) -> None:
+    """Every other result in this module is uninterpretable without this.
+
+    `_run_body_step` reports "nothing was written" both when a payload
+    destroyed the redirect and when the shell never ran at all -- and the
+    negative controls below treat "nothing was written" as *the attack
+    fired*, so a harness that cannot execute anything makes this module
+    report a clean, fully-passing security check while testing nothing.
+    That is not hypothetical: handing Git bash a POSIX-only `PATH` on the
+    Windows lane produced precisely that state.
+
+    So prove the harness works against a script with no payload in it at
+    all, whose only job is to write the file the others look for.
+    """
+    written, pwned = _run_body_step(
+        'printf %s "$PR_BODY" > pr-body.md', "sentinel", tmp_path
+    )
+    assert written == "sentinel", (
+        "the harness could not execute a trivial step, so every other "
+        "result in this module is meaningless -- not evidence of safety"
+    )
+    assert not pwned
+
+
+@_needs_bash
 @pytest.mark.parametrize("payload", HOSTILE_PAYLOADS)
 def test_hostile_pr_body_is_data_not_commands(payload: str, tmp_path: Path) -> None:
     """Executes the attack against the real step rather than asserting the
@@ -191,6 +241,7 @@ def test_hostile_pr_body_is_data_not_commands(payload: str, tmp_path: Path) -> N
     assert written == payload, "the body must land verbatim, as data"
 
 
+@_needs_bash
 @pytest.mark.parametrize("payload", HOSTILE_PAYLOADS)
 def test_the_harness_detects_a_genuinely_unsafe_step(
     payload: str, tmp_path: Path
@@ -211,6 +262,7 @@ def test_the_harness_detects_a_genuinely_unsafe_step(
     pytest.skip(f"payload {payload!r} is inert in this unsafe shape")
 
 
+@_needs_bash
 def test_at_least_one_payload_fires_against_the_unsafe_script(
     tmp_path: Path,
 ) -> None:

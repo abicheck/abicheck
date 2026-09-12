@@ -223,6 +223,50 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="tests.dead_harness_reads_as_a_passing_control",
+        invariant=(
+            "A test harness whose failure mode produces the same observation "
+            "as its success signal must prove it can execute at all, or the "
+            "suite reports safety it never checked. "
+            "`test_workflow_untrusted_text_interpolation` executes hostile PR "
+            "bodies against the real workflow step and reads the attack as "
+            '"the file was not written verbatim" -- which is also exactly '
+            "what a harness that cannot run a shell produces. On the Windows "
+            "lane it handed Git bash a POSIX-only `PATH`, so no step ran, "
+            'every payload came back as "nothing written", and the negative '
+            "controls read that as the attack firing: a fully green "
+            "injection-defence module testing nothing. The fix is a "
+            "precondition that runs a payload-free script whose only job is "
+            "to write the file the other assertions look for, so a dead "
+            "harness fails loudly instead of reassuring."
+        ),
+        fixed_by=(1244,),
+        seed_tests=("tests/test_workflow_untrusted_text_interpolation.py",),
+        # A real `bash` execution of a real workflow step body.
+        public_surfaces=("github-action",),
+        axes={
+            "half": ("harness-liveness-precondition", "hostile-payload-corpus"),
+            "platform": ("posix", "windows-git-bash"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The precondition proves the harness can run *a* script "
+                    "and write *a* file; it does not prove the environment it "
+                    "hands the step matches a real runner's. The POSIX lanes "
+                    "still get a deliberately hermetic environment while "
+                    "Windows inherits the host's, so the two platforms do not "
+                    "execute under identical conditions -- a difference that "
+                    "is stated rather than closed. Nothing here runs on a "
+                    "real Windows host either; the dead-harness shape was "
+                    "reproduced locally by pointing the resolver at a binary "
+                    "that exits cleanly without writing."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="tests.locale_dependent_repo_text_read",
         invariant=(
             "A test that reads the repository's own checked-in text must "
