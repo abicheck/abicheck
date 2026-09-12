@@ -420,7 +420,7 @@ class TestExportsAreOneAnalysis:
         to_file = _run(["compare", str(old), str(new), "-o", f"json={dest}"])
         assert to_stdout.exit_code == to_file.exit_code
         assert _canonical_result(to_stdout.output, "json") == _canonical_result(
-            dest.read_text(), "json"
+            dest.read_text(encoding="utf-8"), "json"
         )
 
     @pytest.mark.parametrize("fmt", RENDERABLE)
@@ -439,7 +439,7 @@ class TestExportsAreOneAnalysis:
                 ["compare", str(old), str(new), "-o", f"{fmt}={dest}", *extra]
             )
             assert dest.exists(), result.output
-            return result.exit_code, _canonical_result(dest.read_text(), fmt)
+            return result.exit_code, _canonical_result(dest.read_text(encoding="utf-8"), fmt)
 
         alone = run_with([], "alone")
         before = run_with(
@@ -475,7 +475,7 @@ class TestExportsAreOneAnalysis:
         assert result.exit_code == 4, result.output
         missing = [fmt for fmt, dest in destinations.items() if not dest.exists()]
         assert missing == []
-        assert all(dest.read_text().strip() for dest in destinations.values())
+        assert all(dest.read_text(encoding="utf-8").strip() for dest in destinations.values())
 
     def test_two_exports_of_one_format_are_identical(
         self, snapshot_pair: tuple[Path, Path], tmp_path: Path
@@ -486,7 +486,7 @@ class TestExportsAreOneAnalysis:
             ["compare", str(old), str(new), "-o", f"json={a}", "-o", f"json={b}"]
         )
         assert result.exit_code == 4, result.output
-        assert a.read_text() == b.read_text()
+        assert a.read_text(encoding="utf-8") == b.read_text(encoding="utf-8")
 
     def test_a_display_filter_applies_to_every_export(
         self, snapshot_pair: tuple[Path, Path], tmp_path: Path
@@ -512,7 +512,7 @@ class TestExportsAreOneAnalysis:
         )
         assert result.exit_code == 4, result.output
         for path in (first, second):
-            doc = json.loads(path.read_text())
+            doc = json.loads(path.read_text(encoding="utf-8"))
             assert doc["show_only_filter"] == "breaking"
             # Narrowing the display never removes the accounting: the
             # complete picture stays available in every machine projection.
