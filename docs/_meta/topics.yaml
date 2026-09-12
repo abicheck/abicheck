@@ -242,7 +242,7 @@ topics:
     canonical_page: use/cli-usage.md
     fact_sources:
       - abicheck/cli.py
-      - abicheck/frontends/cli/options/secondary_output.py
+      - abicheck/frontends/cli/options/export.py
       - abicheck/cli_options.py
       - abicheck/frontends/cli/help.py
       - abicheck/frontends/cli/options/contract.py
@@ -519,7 +519,7 @@ topics:
       - abicheck/sarif.py
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py
-      - abicheck/frontends/cli/options/secondary_output.py
+      - abicheck/frontends/cli/options/export.py
       - abicheck/finding_identity.py
       - abicheck/cli_compare_fold.py
       - abicheck/effective_config_digest.py
