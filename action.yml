@@ -43,7 +43,23 @@ inputs:
       (the replacement for a baseline-less `mode: scan`/`audit: true`
       request — see the mode input's own description). May also be a
       directory or package (RPM, Deb, tar, conda, wheel) — abicheck then
-      fans out to a per-library comparison automatically.
+      fans out to a per-library comparison automatically. May also be a
+      stored `BundleFacts` document written by an earlier run's
+      `--bundle-facts-out` (plain `.json`, a compressed `.json.gz`/`.json.zst`,
+      or the content-addressed archive form): no separate input or flag
+      selects that shape, since `compare` classifies the operand from the
+      file's own content, so pointing this input at such a document is all a
+      stored-OLD-side bundle comparison needs. A real large-toolkit document
+      may exceed the conservative pre-`json.loads()` decode-node ceiling; raise
+      it with `resource_limits.max_bundle_facts_decode_nodes` in a
+      `.abicheck.yml` passed as `build-config` (an explicit, operator-reviewed
+      config — an auto-discovered one may only lower that budget, never raise
+      it, since it can come from the same untrusted checkout being decoded).
+      Producing such a document is `--bundle-facts-out`, which stays an
+      `extra-args` option rather than a first-class input: it names one
+      pipeline stage's output artifact path, and a dedicated input would add a
+      second spelling for something `extra-args` already forwards and
+      validates.
     required: false
   new-library:
     description: >
@@ -642,7 +658,15 @@ inputs:
       compare, two-sided shape, directory/package operand: json, markdown, or
       junit only — sarif/html/review/oneline are rejected with an error (the
       per-library release fan-out has no single report those formats
-      describe). compare, audit-only shape (old-library/abi-baseline both
+      describe). compare against a stored BundleFacts baseline (old-library
+      naming such a document, new-library a directory/package): json or
+      markdown only — that driver renders no junit either. This one narrowing
+      is NOT pre-checked before the dependency install, unlike every other
+      row here: deciding it needs the document's own content (see the
+      `old-library` input), and neither re-implementing that classifier in
+      shell nor reading an untrusted document at preflight is acceptable, so
+      `--format junit` on this shape fails in the CLI instead. Tracked in
+      docs/contribute/known-gaps.md. compare, audit-only shape (old-library/abi-baseline both
       omitted): json, markdown, sarif, junit, or oneline — html and review
       are two-sided-report renderers with no audit-only equivalent and are
       rejected with an error. html is also supported by deps-tree/deps-compare
@@ -766,9 +790,10 @@ inputs:
       CLI override. Applied identically to single-pair compare's two-sided
       and audit-only (`--no-baseline`) shapes before its removal, and
       rejected outright for a directory/package compare's per-library
-      release fan-out, which has no single analysis_assurance result to
-      gate on -- `assurance.require_complete: true` inherits that same
-      single-pair-only scope now that it lives in config instead. Still
+      release fan-out until ADR-071, which gave that operand real semantics:
+      the fan-out folds every compared member's own `analysis_assurance` with
+      `max` into the same exit axis, so `assurance.require_complete: true` is
+      no longer single-pair-only. Still
       declared here so a workflow that sets it gets an explicit `::error::`
       naming that replacement instead of a silently-ignored input; set
       `assurance.require_complete: true` in your `.abicheck.yml` and pass
@@ -875,12 +900,17 @@ outputs:
       completed no comparison at all -- the completeness axis, orthogonal
       to the compatibility verdict, which then covers the compared members
       only; fails the step unconditionally, since no fail-on-* input governs
-      it), ANALYSIS_INCOMPLETE (single-pair
-      operands only, with `.abicheck.yml`'s `assurance.require_complete: true`, when
+      it), ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
+      `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict
-      unchanged; rejected outright for a directory/package operand, so
-      this verdict never applies there), API_BREAK,
+      unchanged. Applies at any operand cardinality since ADR-071: for a
+      directory/package operand it is `max` over every compared member's own
+      contribution, so one member short of complete analysis publishes this
+      verdict for the whole release, and the release JSON's
+      `analysis_assurance` block names which members fell short. It used to
+      be rejected outright for that operand, and this output declared itself
+      single-pair-only on the strength of that rejection), API_BREAK,
       BREAKING, REMOVED_LIBRARY (directory/package
       operands with fail-on-removed-library set), or ERROR.
       For compare's audit-only shape (old-library and abi-baseline both

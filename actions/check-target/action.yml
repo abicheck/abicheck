@@ -328,7 +328,13 @@ inputs:
       is the intended caller (it already validates and carries
       `checks[].analysis.assurance` on the run-plan); a direct check-target
       caller may also set this explicitly. Ignored (no overlay generated)
-      when not exactly 'true'.
+      when not exactly 'true'. Supported for `kind: bundle` too, as of
+      ADR-071: the release fan-out the internal `compare` runs for a bundle
+      folds every compared member's own `analysis_assurance` with `max` into
+      the same exit axis a single-library check uses, so a one-member bundle
+      gates identically to a `kind: target` check and any member that fell
+      short floors the whole bundle. It used to be rejected outright for a
+      bundle (`validate-inputs.sh`), which is the guard ADR-071 retired.
     required: false
     default: 'false'
   extra-args:

@@ -105,6 +105,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     bool,
     str | None,
+    bool,  # require_complete_analysis (ADR-071)
     "SeverityConfig | None",
     "PackApplication | None",
     bool,
@@ -285,6 +286,7 @@ def _compare_one_library(
     include_dependencies: bool = True,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    require_complete_analysis: bool = False,
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
     collect_diff_results: bool = False,
@@ -463,9 +465,11 @@ def _compare_one_library(
         # unconditionally (the flag's own `require_complete` gate lives in
         # the fold, not here) so the per-library status is readable in the
         # release JSON even on a run that did not opt in.
-        entry["analysis_assurance_status"] = getattr(
-            getattr(result, "analysis_assurance", None), "status", None
-        )
+        # ADR-071 D1/D6: which keys this axis owns, and the fail-open status
+        # read behind them, are `stamp_member_assurance`'s (see its docstring).
+        from .workflows.release_assurance_members import stamp_member_assurance
+
+        stamp_member_assurance(entry, result, require_complete=require_complete_analysis)
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -510,7 +514,9 @@ def _compare_one_library(
             # promises the complete list.
             _safe_write_output(
                 lib_report_path,
-                to_json(result, severity_config=severity_config),
+                # ADR-071 (Codex P2): without this an incomplete member's own
+                # `{library}.json` said `exit.code: 0` for a run it floored to `1`.
+                to_json(result, severity_config=severity_config, require_complete_analysis=require_complete_analysis),
             )
             # The unambiguous index a truncated machine document owes its
             # reader: this member's *complete*, uncapped report, by path.
@@ -538,6 +544,7 @@ def _suppress_lockstep_soname_findings(
     output_dir: Path | None,
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> int:
     """Drop ``SONAME_BUMP_UNNECESSARY`` when the release is a coordinated break.
 
@@ -654,7 +661,8 @@ def _suppress_lockstep_soname_findings(
             # contract `_release_md_library_findings` documents).
             _safe_write_output(
                 lib_report_path,
-                to_json(result, severity_config=severity_config),
+                # Same ADR-071 threading as the first write above.
+                to_json(result, severity_config=severity_config, require_complete_analysis=require_complete_analysis),
             )
     return suppressed
 
@@ -686,6 +694,7 @@ def _compare_release_libraries(
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    require_complete_analysis: bool = False,
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
@@ -761,6 +770,7 @@ def _compare_release_libraries(
         include_dependencies,
         contract_evaluation,
         contract_mode,
+        require_complete_analysis,
         severity_config,
         pack_application,
         collect_diff_results,
@@ -830,6 +840,7 @@ def _compare_release_libraries(
         output_dir,
         severity_config,
         show_only,
+        require_complete_analysis=require_complete_analysis,
     )
     if suppressed_soname:
         click.echo(

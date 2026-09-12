@@ -38,10 +38,17 @@ unaffected.
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import click
 
+from ...report.release_assurance import release_assurance_notice
 from .release_evidence_contract import evidence_contract_notice
+
+if TYPE_CHECKING:
+    # Via `report`, which re-exports it: `frontends -> policy` is forbidden
+    # even for a type-only import (`architecture/modules.yaml`).
+    from ...report.release_assurance import ReleaseAssuranceDecision
 
 __all__ = ["_exit_compare_release"]
 
@@ -57,7 +64,7 @@ def _exit_compare_release(
     release_global_verdict: str = "NO_CHANGE",
     incomplete_scope_exit_contribution: int = 0,
     no_comparison_completed_exit_contribution: int = 0,
-    require_complete_analysis: bool = False,
+    assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> None:
     """Exit a directory/package ``compare`` with the release's own status code.
 
@@ -82,13 +89,15 @@ def _exit_compare_release(
     rank a proven removal below the evidence axis in one implementation
     only.
 
-    *require_complete_analysis* is ``.abicheck.yml``'s
-    ``assurance.require_complete``, forwarded so the resolver can fold each
-    member's own assurance floor with ``max()``. The release fan-out used
-    to reject the setting outright ("no single ``analysis_assurance``
-    result to gate on"); there is one per member, and the aggregate is the
-    same ``max()`` every other orthogonal ``0``/``1`` axis here already
-    uses, so library count no longer changes what the setting means.
+    *assurance_decision* carries ``.abicheck.yml``'s
+    ``assurance.require_complete`` and the per-member statuses behind it
+    (ADR-071). The release fan-out used to reject the setting outright ("no
+    single ``analysis_assurance`` result to gate on"); there is one per
+    compared member, and the aggregate is the same ``max()`` every other
+    orthogonal ``0``/``1`` axis here already uses, so library count no
+    longer changes what the setting means. The decision rather than a bare
+    flag, because this function also *formats* the axis's notice, whose
+    wording turns on the resolved code -- see the comment at that call.
 
     *library_results* is the per-member list the resolver reads the
     evidence-contract, assurance and operational-error axes off. ``compare
@@ -111,6 +120,23 @@ def _exit_compare_release(
     )
 
     members = list(library_results or [])
+    if assurance_decision is not None and not members:
+        # `compare --bundle-facts` reaches here with no per-member entry dicts
+        # at all (its whole release arrives as one folded document), but it
+        # *does* run a real comparison per member and therefore has a real
+        # `AnalysisAssurance` for each -- which is why the stored operand is
+        # supported rather than rejected (ADR-071 D8). The resolver derives
+        # this axis from the per-member rows on purpose (see
+        # `release_analysis_assurance_contribution`: a value every reporter
+        # must supply identically is not an argument), so the rows are what
+        # this driver supplies, carrying only the one key this axis reads.
+        # Every other per-member axis reads its own keys with a defaulting
+        # `.get`/membership test, so an assurance-only row contributes `0` to
+        # each of them -- it adds a member to this fold, never to theirs.
+        members = [
+            {"library": m.name, "analysis_assurance_status": m.status}
+            for m in assurance_decision.members
+        ]
     decision = resolve_release_exit_decision_for_report(
         worst_verdict,
         fail_on_removed,
@@ -121,8 +147,38 @@ def _exit_compare_release(
         release_global_verdict,
         incomplete_scope_contribution=incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=no_comparison_completed_exit_contribution,
-        require_complete_analysis=require_complete_analysis,
+        # One parameter, not two: the resolver re-derives the fold from the
+        # per-member `library_results` it already has, while the notice below
+        # needs the member rows behind it -- so this function takes the whole
+        # decision and hands the resolver only the setting that produced it.
+        # Passing both separately would let a caller state a `require_complete`
+        # the notice contradicts.
+        require_complete_analysis=bool(
+            assurance_decision is not None and assurance_decision.require_complete
+        ),
     )
+    # ADR-071's assurance notice, emitted here for the same reason the
+    # evidence-contract one below is (see that comment) -- and *formatted*
+    # here rather than by each caller, which is the part that matters: its
+    # wording turns on the compatibility axis's own exit code ("floored to 1"
+    # vs. "below the compatibility axis's own exit 4, which stands"), and the
+    # resolved decision just above is the only place that number is actually
+    # known. A caller passing its own guess got this wrong: `compare
+    # --bundle-facts` has no severity code to guess from and would have
+    # claimed a floor beside a real break.
+    #
+    # And the base is every OTHER axis, not the compatibility one alone
+    # (Codex review, P2): under a dominant `16`/`8`/`7` the compatibility
+    # contribution can be `0` while the real exit was decided by the
+    # not-comparable/removed-library/evidence axis, so basing the wording on it
+    # claimed "Exit code floored to 1" on a run that actually exited 16.
+    if assurance_decision is not None:
+        assurance_notice = release_assurance_notice(
+            assurance_decision,
+            base_exit=decision.exit_without_analysis_assurance(),
+        )
+        if assurance_notice:
+            click.echo(assurance_notice, err=True)
     # Emitted here rather than by each caller: a release document is
     # rendered before the exit is taken, and the fan-out has already
     # discarded every member's `DiffResult` by then, so nothing downstream

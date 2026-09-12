@@ -507,6 +507,15 @@ def resolve_release_exit_decision(
     now, which is why the release fan-out rejected the setting outright
     instead of honouring it.
 
+    The rule itself (``max`` over each member's own ``0``/``1``) has one
+    owner, ``policy.release_assurance`` (ADR-071), which
+    ``release_exit_decision.release_analysis_assurance_contribution``
+    calls rather than restates -- and it is deliberately the *same* axis
+    ``resolve_compare_exit_decision`` fills for a scalar ``compare``, not a
+    release-only sibling field, so a consumer reading
+    ``analysis_assurance_contribution`` never sees ``0`` for a run this
+    axis actually floored.
+
     *incomplete_scope_contribution*/*no_comparison_completed_contribution*
     (ADR-065 D6/D7, S2) are two more ``0``/``1`` fold participants, shaped
     exactly like *contract_coverage_contribution*: folded with ``max()``
@@ -537,6 +546,7 @@ def resolve_release_exit_decision(
             ExitReason.NOT_COMPARABLE,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            analysis_assurance_contribution=analysis_assurance_contribution,
             # The evidence branch below is unreachable once this returns, so
             # without this a release that is `not_comparable` *and* short of
             # its pinned rung would report `0` for the axis while the member
@@ -596,6 +606,7 @@ def resolve_release_exit_decision(
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
+                analysis_assurance_contribution=analysis_assurance_contribution,
                 evidence_contract_error_contribution=evidence_contract_error_contribution,
                 operational_error_contribution=operational_error_contribution,
                 incomplete_scope_contribution=incomplete_scope_contribution,
@@ -631,6 +642,7 @@ def resolve_release_exit_decision(
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
+                analysis_assurance_contribution=analysis_assurance_contribution,
                 operational_error_contribution=operational_error_contribution,
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,

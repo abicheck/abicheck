@@ -392,6 +392,36 @@ class ExitDecision:
     #: binding the older tail.
     loadability_contribution: int = 0
 
+    def exit_without_analysis_assurance(self) -> int:
+        """The code this decision would have had with no assurance axis.
+
+        ``max`` over every other contribution -- the number ADR-071's own
+        diagnostic must compare itself against when it says whether the axis
+        *floored* the exit or merely contributed below it. The compatibility
+        contribution alone is NOT that number: under a dominant ``16``/``8``/
+        ``7`` it can be ``0`` while the real exit was decided elsewhere, so a
+        diagnostic based on it claims a floor the run never took (Codex review,
+        P2, with that exact counter-example -- ``not_comparable`` carries
+        ``compatibility_contribution=0`` beside ``code=16``).
+
+        Every ``*_contribution`` field is read off the dataclass rather than
+        from a hand-written list, so a field added to this class is included
+        without a second list to keep in sync -- the failure mode
+        ``exit_decision_precedence._dominant_decision``'s own docstring records
+        happening twice for exactly that reason.
+        """
+        from dataclasses import fields
+
+        return max(
+            (
+                getattr(self, f.name)
+                for f in fields(self)
+                if f.name.endswith("_contribution")
+                and f.name != "analysis_assurance_contribution"
+            ),
+            default=0,
+        )
+
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block.
 

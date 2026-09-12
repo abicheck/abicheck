@@ -748,8 +748,8 @@ def _release_summary_effective_config_block(
     scope_public_headers: bool = True,
     on_incomplete_scope: str = "",
     fail_on_removed_library: bool | None = None,
-    env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
+    env_matrix_source_sha256: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``

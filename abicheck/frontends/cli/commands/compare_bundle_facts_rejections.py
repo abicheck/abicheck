@@ -254,22 +254,19 @@ def reject_unsupported_options(
         suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
     )
-    if require_complete_analysis:
-        # `_reject_set_input_flags` stopped rejecting this once the live
-        # directory/package fan-out learned to fold each member's own
-        # assurance floor with `max()`. That fold reads per-member
-        # `DiffResult`s; a stored-BundleFacts OLD side has none -- its
-        # whole release arrives as one already-folded document with no
-        # per-member analysis-assurance rollup to aggregate -- so the
-        # setting is rejected here, for this operand only, rather than
-        # accepted and silently ignored.
-        raise click.UsageError(
-            "assurance.require_complete is not supported when OLD_INPUT is a "
-            "stored BundleFacts document: the stored side carries no "
-            "per-library analysis-assurance rollup for the run to gate on. "
-            "Compare against the live directory/package release, or compare "
-            "the specific library individually, to use it."
-        )
+    # ADR-071 D8: `assurance.require_complete` is deliberately neither
+    # forwarded to `_reject_set_input_flags` nor rejected here. It reached
+    # this module at all only while the live fan-out rejected it; the fold
+    # that replaced that rejection reads each *comparison's* own
+    # `AnalysisAssurance`, not a rollup carried by either operand -- so a
+    # stored-BundleFacts OLD side is no obstacle to it. Every member
+    # comparison this driver runs produces a real `DiffResult` (stored OLD
+    # snapshot against the live NEW artifact) and therefore its own
+    # assurance status, which is exactly what `compare_bundle_facts.dispatch`
+    # folds. What a stored side genuinely cannot do is *manufacture*
+    # evidence it never captured: a shallow stored snapshot yields `partial`,
+    # which the gate then reports and floors on, rather than being silently
+    # ignored.
     if any(
         kwargs.get(name) is not None
         for name in (

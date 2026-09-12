@@ -44,9 +44,19 @@ from _check_target_exec import _BASE_IDENTITY, VALIDATE_SH, _run
     reason="actions/check-target/validate-inputs.sh not found",
 )
 class TestValidateInputsAssuranceBundleInteraction:
-    def test_bundle_kind_rejects_analysis_assurance_complete(
+    def test_bundle_kind_accepts_analysis_assurance_complete(
         self, tmp_path: Path
     ) -> None:
+        """ADR-071: the rejection this used to pin is gone.
+
+        `analysis-assurance-complete` is supported for a bundle now -- the
+        release fan-out folds every compared member's own
+        `analysis_assurance` with `max` into the same exit axis a single
+        library check uses, so there is no unsupported combination left to
+        reject. Inverted rather than deleted: the input must still be
+        *accepted* here, and a silent regression back to exit 64 would
+        otherwise be invisible.
+        """
         result = _run(
             VALIDATE_SH,
             {
@@ -59,8 +69,8 @@ class TestValidateInputsAssuranceBundleInteraction:
             },
             tmp_path,
         )
-        assert result.returncode == 64
-        assert "analysis-assurance-complete is not supported for kind: bundle" in (
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "analysis-assurance-complete is not supported" not in (
             result.stdout + result.stderr
         )
 
