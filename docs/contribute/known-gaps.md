@@ -7660,6 +7660,15 @@ does not re-run the analysis. (Stored/stored would have been the easier operand
 pair and a useless test: the count is zero either way, so it could not
 distinguish one analysis from two.)
 
+### The `clang -M` include pass is unaffected by a warm AST cache — confirmed at `--repeat 3`
+
+Re-confirmed after the cache-lifecycle fix below, now that a multi-repetition run
+actually works: across three repetitions of the cold/warm sequence the header
+*extraction* count goes 2 → 0 (the AST cache serves it) while `include_pass`
+stays at 1 every time. The include graph is recomputed on every run regardless of
+cache state, which is the same finding as the per-header scaling above seen from
+the cache side.
+
 ### A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
 
 Observed once, on a real PVXS comparison, and **not yet reduced to a minimal

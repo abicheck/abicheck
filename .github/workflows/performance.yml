@@ -673,12 +673,21 @@ jobs:
           # may measure different scenarios, and in either case running it would
           # compare two different measurements rather than two products.
           #
-          # `|| true` because a base measurement that cannot be taken is a
-          # report-only run, not a PR failure; the `-s` test below is what
-          # decides whether a gate is possible.
+          # The base measurement's own exit status is recorded, not discarded: a
+          # base run that FAILED its L2 correctness validation still writes a
+          # receipt (deliberately -- a failed run's numbers are diagnostic), and a
+          # failed base is typically *faster* than a correct one, so gating the
+          # head against it would compare against a number no correct run
+          # produces. `|| true` keeps a base that cannot be measured from failing
+          # the PR; the status is surfaced in the summary, and the harness itself
+          # refuses to take gated points from a scenario whose status is not "ok"
+          # (check_l2_cli_perf.gated_points), which is the load-bearing half.
+          base_status=0
           ./base_env/bin/python scripts/check_l2_cli_perf.py \
             --suite pr --repeat 3 --require-toolchain \
-            --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 || true
+            --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 \
+            || base_status=$?
+          echo "base measurement exited ${base_status}" | tee -a base_l2.log
           if [ -s reports/perf/l2_cli_base.json ]; then
             # Interleaved re-measurement of head AFTER base, so the gated
             # comparison is not a completed base sweep against a later head
@@ -692,7 +701,7 @@ jobs:
               --json-out reports/perf/l2_cli_gated.json \
               --markdown | tee reports/perf/l2_cli_regression.txt
           else
-            echo "No base measurement available -- report-only." \
+            echo "No base measurement available (exit ${base_status}) -- report-only." \
               | tee reports/perf/l2_cli_regression.txt
             cat base_l2.log >> reports/perf/l2_cli_regression.txt
           fi

@@ -109,8 +109,14 @@ class RealProfile:
     old_revision: str
     new_revision: str
     libraries: tuple[LibraryTarget, ...]
-    #: Shell commands to prepare the profile. Run outside every timed window.
+    #: Shell commands run ONCE, before either side (clone, dependency builds).
+    #: Run outside every timed window.
     prepare_commands: tuple[str, ...] = ()
+    #: Shell commands run once PER SIDE, with ``{side}`` (``old``/``new``),
+    #: ``{revision}`` and ``{root}`` (that side's own tree) substituted. This is
+    #: what produces the two artifacts a temporal comparison needs -- a profile
+    #: with an empty list here can only ever build one side.
+    per_side_commands: tuple[str, ...] = ()
     #: Tools that must be present, by name on PATH.
     required_tools: tuple[str, ...] = ()
     #: Approximate resource needs, so a lane can decline before starting.
@@ -137,8 +143,12 @@ ONEDAL = RealProfile(
     project="uxlfoundation/oneDAL",
     reference="https://github.com/uxlfoundation/oneDAL/pull/3693",
     repository="https://github.com/uxlfoundation/oneDAL.git",
-    old_revision="<pinned-base-sha>",
-    new_revision="<pinned-head-sha>",
+    # Real, verified revisions: PR #3693's head and its merge base with main,
+    # resolved by fetching refs/pull/3693/head and deepening until the merge base
+    # was reachable. Placeholders here were a silent unrunnability -- see
+    # is_placeholder_revision.
+    old_revision="a689f87d2f37873078598dfdbf069ee45de2c76e",
+    new_revision="0c95622ed2d8a0c981d6a37a635657c44a4c3e1d",
     libraries=(
         LibraryTarget(
             "onedal_core",
@@ -190,12 +200,12 @@ ONEDAL = RealProfile(
             ),
         ),
     ),
-    prepare_commands=(
-        "git clone --filter=blob:none {repository} onedal",
-        "cd onedal && git checkout {old_revision}",
-        "source /opt/intel/oneapi/setvars.sh",
-        "cd onedal && ./dev/download_micromkl.sh",
-        "cd onedal && make -f makefile daal oneapi_c PLAT=lnx32e -j$(nproc)",
+    prepare_commands=("git clone --filter=blob:none {repository} onedal.git",),
+    per_side_commands=(
+        "git -C onedal.git worktree add --detach {root} {revision}",
+        "cd {root} && ./dev/download_micromkl.sh",
+        ". /opt/intel/oneapi/setvars.sh && cd {root} && "
+        "make -f makefile daal oneapi_c PLAT=lnx32e -j$(nproc)",
     ),
     required_tools=("git", "make", "g++", "icpx"),
     approx_build_minutes=120,
@@ -217,8 +227,9 @@ SVS = RealProfile(
     project="intel/ScalableVectorSearch",
     reference="https://github.com/intel/ScalableVectorSearch/pull/387",
     repository="https://github.com/intel/ScalableVectorSearch.git",
-    old_revision="<pinned-base-sha>",
-    new_revision="<pinned-head-sha>",
+    # Real, verified revisions: PR #387's head and its merge base with main.
+    old_revision="8052bd9f0f78b759cad2bc5168ab37c4f66f0670",
+    new_revision="7058e9605a54180aa64fbb7a81a82aa47f07eeff",
     libraries=(
         LibraryTarget(
             "svs_shared",
@@ -232,11 +243,12 @@ SVS = RealProfile(
             context="runtime",
         ),
     ),
-    prepare_commands=(
-        "git clone --filter=blob:none {repository} svs",
-        "cd svs && git checkout {old_revision}",
-        "cd svs && cmake -B build -DCMAKE_BUILD_TYPE=Release -DSVS_BUILD_SHARED=ON",
-        "cd svs && cmake --build build -j$(nproc)",
+    prepare_commands=("git clone --filter=blob:none {repository} svs.git",),
+    per_side_commands=(
+        "git -C svs.git worktree add --detach {root} {revision}",
+        "cmake -S {root} -B {root}/build -DCMAKE_BUILD_TYPE=Release "
+        "-DSVS_BUILD_SHARED=ON",
+        "cmake --build {root}/build -j$(nproc)",
     ),
     required_tools=("git", "cmake", "g++"),
     approx_build_minutes=45,
@@ -288,13 +300,23 @@ PVXS = RealProfile(
             context="ioc",
         ),
     ),
+    # This sequence is the one actually executed locally to produce the measured
+    # PVXS numbers, not a plausible-looking reconstruction -- including the
+    # libevent headers, discovered the hard way when EPICS base built fine and
+    # pvxs then failed partway through on a missing event2/event.h.
     prepare_commands=(
-        "git clone --depth 50 --branch 7.0 https://github.com/epics-base/epics-base.git epics-base",
+        "git clone --depth 50 --branch 7.0 "
+        "https://github.com/epics-base/epics-base.git epics-base",
         "cd epics-base && make -j$(nproc)",
-        "git clone --filter=blob:none {repository} pvxs",
-        "cd pvxs && git checkout {old_revision}",
-        "printf 'EPICS_BASE=%s/epics-base\\n' \"$PWD\" > pvxs/configure/RELEASE.local",
-        "cd pvxs && make -j$(nproc)",
+        "git clone --filter=blob:none {repository} pvxs.git",
+        # PR #216's head is a branch ref, so fetch it explicitly: a plain clone
+        # of the default branch does not contain it.
+        "git -C pvxs.git fetch origin 'refs/pull/216/head:pr216'",
+    ),
+    per_side_commands=(
+        "git -C pvxs.git worktree add --detach {root} {revision}",
+        'printf "EPICS_BASE=%s/epics-base\\n" "$ROOT" > {root}/configure/RELEASE.local',
+        "make -C {root} -j$(nproc)",
     ),
     # libevent's development headers are a real prerequisite, not an optional
     # extra: EPICS base builds fine without them and pvxs then fails partway
@@ -331,11 +353,38 @@ PVXS = RealProfile(
         "Preparation needs libevent development headers (event2/event.h) in "
         "addition to the tools listed -- a missing system dependency, found the "
         "hard way: the first build failed on it after EPICS base had already "
-        "built successfully.",
+        "built successfully. Recorded in system_packages so a reader does not "
+        "rediscover it the same way.",
+        "The prepare sequence above is the one actually executed to produce the "
+        "measured numbers, re-expressed through per_side_commands so it builds "
+        "BOTH revisions. The original version checked out only old_revision -- "
+        "the two sides were built by hand, which is exactly the gap that made it "
+        "possible to ship a temporal profile no script could prepare.",
     ),
 )
 
 PROFILES: dict[str, RealProfile] = {p.id: p for p in (ONEDAL, SVS, PVXS)}
+
+
+#: A revision that is a placeholder rather than an immutable SHA. Rendered into
+#: ``git checkout <pinned-base-sha>``, the shell reads ``<`` as input redirection
+#: and fails before git ever runs -- while the profile still validated as
+#: "structurally valid", which is exactly the kind of silent unrunnability this
+#: module exists to prevent. A placeholder is now both a validation finding and a
+#: BLOCKED status.
+_PLACEHOLDER_REVISION_MARKERS = ("<", ">", "pinned-", "TODO", "FIXME")
+
+
+def is_placeholder_revision(revision: str) -> bool:
+    """True when *revision* is not a usable git revision.
+
+    Deliberately a shape test rather than a git lookup: this module never touches
+    the network, and a profile whose revision cannot even survive shell quoting is
+    unrunnable regardless of what any remote holds.
+    """
+    return not revision.strip() or any(
+        marker in revision for marker in _PLACEHOLDER_REVISION_MARKERS
+    )
 
 
 def validate_profile(profile: RealProfile) -> list[str]:
@@ -377,6 +426,16 @@ def validate_profile(profile: RealProfile) -> list[str]:
         problems.append(
             f"{profile.id}: a temporal scenario needs two different revisions"
         )
+    for side, revision in (
+        ("old", profile.old_revision),
+        ("new", profile.new_revision),
+    ):
+        if is_placeholder_revision(revision):
+            problems.append(
+                f"{profile.id}: {side}_revision {revision!r} is a placeholder, not a "
+                "usable revision -- prepare_script() would render it into a command "
+                "the shell cannot even parse, while this profile still read as valid"
+            )
     if not profile.l2_libraries:
         problems.append(f"{profile.id}: no library is in L2 scope")
     if not profile.required_tools:
@@ -497,6 +556,27 @@ def resolve_status(
             "NOT_RUN",
             reason="not selected by this run (real profiles are periodic/manual only)",
         )
+    unpinned = [
+        f"{side}_revision={revision!r}"
+        for side, revision in (
+            ("old", profile.old_revision),
+            ("new", profile.new_revision),
+        )
+        if is_placeholder_revision(revision)
+    ]
+    if unpinned:
+        # Checked before the tool probe: a profile whose revisions are not pinned
+        # cannot be measured however complete the toolchain is, and reporting
+        # "missing icpx" for it would name the wrong blocker.
+        return ProfileStatus(
+            profile.id,
+            "BLOCKED",
+            reason=(
+                f"revisions are not pinned ({', '.join(unpinned)}) -- a prepare "
+                "script cannot be rendered from a placeholder, so nothing can be "
+                "built or measured"
+            ),
+        )
     absent = missing_tools(profile)
     if absent:
         return ProfileStatus(
@@ -523,25 +603,74 @@ def resolve_status(
 
 
 def prepare_script(profile: RealProfile) -> str:
-    """The profile's prepare commands as one reproducible shell script."""
+    """The profile's prepare commands as one reproducible shell script.
+
+    Two properties the first version of this got wrong, both found by review:
+
+    * **Each command runs in its own subshell.** Appending ``cd svs && git
+      checkout ...`` and then ``cd svs && cmake ...`` into one shell leaves the
+      process inside ``svs``, so the second looks for ``svs/svs`` and fails. Every
+      profile used that repeated-``cd`` shape, so no generated script could
+      complete even its old-side build. A subshell per command means each one
+      starts from the same root, which is also the only reading under which the
+      command list is order-independent enough to be edited safely.
+    * **Both revisions are prepared.** A temporal profile compares an old
+      artifact against a new one, and a script that checks out only
+      ``old_revision`` cannot produce the pair it advertises.
+      ``{side}``/``{revision}`` are substituted per side over
+      ``per_side_commands``, and ``{root}`` names that side's own tree.
+    """
+    if any(
+        is_placeholder_revision(r) for r in (profile.old_revision, profile.new_revision)
+    ):
+        raise ValueError(
+            f"{profile.id}: refusing to render a prepare script with placeholder "
+            "revisions -- it would emit commands the shell cannot parse"
+        )
     lines = [
         "#!/usr/bin/env bash",
         "# Generated from scripts/l2_real_profiles.py -- do not hand-edit.",
         f"# Profile: {profile.id} ({profile.project})",
         f"# Reference: {profile.reference}",
         f"# Approx cost: {profile.approx_build_minutes} build-minutes, "
-        f"{profile.approx_disk_gb}GB disk.",
+        f"{profile.approx_disk_gb}GB disk "
+        f"(for BOTH revisions -- a temporal comparison needs two builds).",
         "# Everything here is SETUP: it is excluded from every measured window.",
         "set -euo pipefail",
+        'ROOT="$(pwd)"',
     ]
-    for command in profile.prepare_commands:
+    if profile.system_packages:
         lines.append(
-            command.format(
+            "# System packages this build needs beyond the tools on PATH: "
+            + " ".join(profile.system_packages)
+        )
+    for command in profile.prepare_commands:
+        # Subshell per command: see the docstring. Each starts at $ROOT, so a
+        # `cd` inside one cannot leak into the next.
+        lines.append(
+            '( cd "$ROOT" && '
+            + command.format(
                 repository=profile.repository,
                 old_revision=profile.old_revision,
                 new_revision=profile.new_revision,
             )
+            + " )"
         )
+    for side, revision in (
+        ("old", profile.old_revision),
+        ("new", profile.new_revision),
+    ):
+        for command in profile.per_side_commands:
+            lines.append(
+                '( cd "$ROOT" && '
+                + command.format(
+                    repository=profile.repository,
+                    side=side,
+                    revision=revision,
+                    root=f"{profile.id}_{side}",
+                )
+                + " )"
+            )
     return "\n".join(lines) + "\n"
 
 

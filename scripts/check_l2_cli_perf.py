@@ -1043,6 +1043,42 @@ def _one_side_extractions(observed: dict[str, int] | None) -> int | None:
     return count if count > 0 else None
 
 
+#: Cache modes whose steps form one *sequence* that must begin cold, with the
+#: steps inside it deliberately sharing whatever the earlier ones warmed.
+_SEQUENCE_CACHE_MODES = frozenset({"cold_then_warm", "invalidation_control"})
+
+
+def _reset_cache(cache_root: Path) -> None:
+    shutil.rmtree(cache_root, ignore_errors=True)
+    cache_root.mkdir(parents=True, exist_ok=True)
+
+
+def _needs_cold_cache(cache_mode: str, step: Step, index: int) -> bool:
+    """Whether the cache must be emptied before this step of this repetition.
+
+    Two different lifecycles, and conflating them was a real defect:
+
+    * ``cold`` — **every** measured step must start cold, so the cache is reset
+      before each one. Otherwise repeat 2 is served by repeat 1's cache and the
+      median describes a warm run under a cold label.
+    * ``cold_then_warm`` / ``invalidation_control`` — the steps form one
+      *sequence* (cold, then warm, then optionally after-a-change) whose whole
+      point is that later steps see what earlier ones warmed. So the cache is
+      reset once per repetition, before the sequence's **first** step, and left
+      alone inside it.
+
+    The original code reset only for ``cache_mode == "cold"``, which meant the
+    sequence modes never reset at all: at ``--repeat 2`` the second repetition's
+    step *named* ``cold`` was served by the first repetition's cache, observed
+    zero header extractions, and failed its own contract. The extended CI lane
+    runs ``--repeat 3``, so it would have failed deterministically; every local
+    run that missed it used ``--repeat 1``, where the bug cannot appear.
+    """
+    if cache_mode in _SEQUENCE_CACHE_MODES:
+        return index == 0
+    return cache_mode == "cold" and step.scope == "full_cli"
+
+
 def _step_failure(
     step: Step,
     run: CommandRun,
@@ -1097,19 +1133,14 @@ def _run_measured_steps(
     is not the figure the receipt claims.
     """
     for _repetition in range(repeat):
-        for step in measured:
+        for index, step in enumerate(measured):
             if (
                 scenario.cache_mode == "invalidation_control"
                 and step.name == "after_dependency_change"
             ):
                 _mutate_dependency_header(fixture)
-            if scenario.cache_mode == "cold" and step.scope == "full_cli":
-                # Every timed repeat of a cold-cache scenario must really be
-                # cold: without this, repeat 2 would be served by repeat 1's
-                # cache and the median would describe a warm run under a cold
-                # label.
-                shutil.rmtree(cache_root, ignore_errors=True)
-                cache_root.mkdir(parents=True, exist_ok=True)
+            if _needs_cold_cache(scenario.cache_mode, step, index):
+                _reset_cache(cache_root)
             run = execute(step, timed=True)
             runs.setdefault(step.name, []).append(run)
             failure = _step_failure(
@@ -1368,15 +1399,49 @@ def gated_points(scenarios: list[dict[str, Any]]) -> dict[tuple[str, str], float
     """
     out: dict[tuple[str, str], float] = {}
     for scenario in scenarios:
+        # A scenario that did not pass is not a measurement. Its timings exist in
+        # the receipt (the receipt is written before the exit code is decided, on
+        # purpose -- a failed run's numbers are diagnostic), but using them as a
+        # baseline would gate a PR against a base run whose L2 correctness
+        # validation failed: a base that fell back to binary-only evidence is
+        # *faster*, so the head would be measured against a number no correct run
+        # produces. Skipped on both sides for symmetry -- the same filter runs
+        # over this run's own scenarios, so a failed head scenario never
+        # contributes a point either.
+        if scenario.get("status") != "ok":
+            continue
         for step in scenario.get("steps", []):
             if step.get("gated") and is_gateable(step.get("wall_seconds")):
                 out[(scenario["id"], step["name"])] = float(step["wall_seconds"])
     return out
 
 
-def load_baseline(path: Path) -> dict[tuple[str, str], float]:
+def rejected_baseline_scenarios(scenarios: list[dict[str, Any]]) -> list[str]:
+    """Scenario ids a baseline carries but that :func:`gated_points` refuses.
+
+    Reported rather than silently dropped: "the baseline had three scenarios and
+    two are usable" is information a reader needs to judge the gate's coverage,
+    and the whole-run "shares no gated point" failure only fires when *every*
+    one is unusable.
+    """
+    return [
+        str(scenario.get("id"))
+        for scenario in scenarios
+        if scenario.get("status") != "ok"
+    ]
+
+
+def load_baseline(path: Path) -> tuple[dict[tuple[str, str], float], list[str]]:
+    """A baseline report's gated points, plus the scenario ids it refused.
+
+    Returns both halves so the caller can state what it is gating against: a
+    baseline whose scenarios failed validation contributes no points, and saying
+    so is the difference between "nothing to gate" and "gated against a broken
+    base".
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
-    return gated_points(data.get("scenarios", []))
+    scenarios = data.get("scenarios", [])
+    return gated_points(scenarios), rejected_baseline_scenarios(scenarios)
 
 
 def check_regressions(
@@ -1648,10 +1713,18 @@ def main(argv: list[str] | None = None) -> int:
     baseline = None
     if args.baseline is not None:
         try:
-            baseline = load_baseline(args.baseline)
+            baseline, rejected = load_baseline(args.baseline)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(f"\nFAIL: could not read --baseline {args.baseline}: {exc}")
             return 1
+        if rejected:
+            print(
+                f"\nNOTE: {len(rejected)} baseline scenario(s) did not pass their own "
+                "validation and contribute no gated point (a failed base run is not a "
+                "measurement, and is usually *faster* than a correct one):"
+            )
+            for scenario_id in rejected:
+                print(f"  - {scenario_id}")
 
     current = gated_points(results)
     print(f"\nEffective threshold: {threshold.as_dict()}")

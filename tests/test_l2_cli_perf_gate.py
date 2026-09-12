@@ -497,6 +497,144 @@ class TestGating:
         assert "source=explicit" in failures[0]
 
 
+class TestCacheLifecyclePerRepetition:
+    """Each repetition of a cache *sequence* must start cold.
+
+    The defect these pin: the cache was reset only for ``cache_mode == "cold"``,
+    so ``cold_then_warm`` and ``invalidation_control`` never reset at all. At
+    ``--repeat 2`` the second repetition's step *named* ``cold`` was served by the
+    first repetition's cache, observed zero header extractions, and failed its own
+    contract -- deterministically, in the extended CI lane, which runs
+    ``--repeat 3``. Every local run that missed it used ``--repeat 1``, where the
+    bug cannot appear; hence a test over the *index*, which does not need a real
+    run at all.
+    """
+
+    def _step(self, name: str, scope: str = "full_cli") -> object:
+        return harness.Step(name, ["x"], scope=scope)
+
+    def test_a_cold_scenario_resets_before_every_step(self):
+        assert harness._needs_cold_cache("cold", self._step("dump"), 0)
+        assert harness._needs_cold_cache("cold", self._step("dump"), 1)
+        assert harness._needs_cold_cache("cold", self._step("dump"), 5)
+
+    def test_a_cold_scenario_does_not_reset_for_a_nested_window(self):
+        # A startup/resolution probe is not the thing being measured cold, and
+        # resetting before it would throw away the reset the real step needs.
+        assert not harness._needs_cold_cache(
+            "cold", self._step("resolution", scope="startup_and_resolution"), 0
+        )
+
+    @pytest.mark.parametrize("mode", ["cold_then_warm", "invalidation_control"])
+    def test_a_sequence_resets_only_before_its_first_step(self, mode):
+        assert harness._needs_cold_cache(mode, self._step("cold"), 0)
+        # ...and never inside it: the later steps seeing what the first warmed is
+        # the entire point of the sequence.
+        assert not harness._needs_cold_cache(mode, self._step("warm"), 1)
+        assert not harness._needs_cold_cache(
+            mode, self._step("after_dependency_change"), 2
+        )
+
+    @pytest.mark.parametrize("mode", ["cold_then_warm", "invalidation_control"])
+    def test_every_repetition_of_a_sequence_starts_cold(self, mode):
+        # The regression itself, stated as the property that was violated: index 0
+        # comes round again on every repetition, so every repetition resets.
+        resets = [
+            harness._needs_cold_cache(mode, self._step("cold"), 0) for _ in range(3)
+        ]
+        assert resets == [True, True, True]
+
+    def test_an_unknown_cache_mode_never_resets(self):
+        # The default (`cache_mode="cold"` is opt-in per scenario) must not start
+        # silently clearing caches for scenarios that did not ask.
+        assert not harness._needs_cold_cache("warm_only", self._step("x"), 0)
+
+    def test_both_sequence_modes_are_registered(self):
+        # Guards the predicate against a third sequence-shaped mode being added
+        # without being listed, which would reintroduce the bug for it alone.
+        assert harness._SEQUENCE_CACHE_MODES == {
+            "cold_then_warm",
+            "invalidation_control",
+        }
+
+
+class TestAFailedBaselineNeverGates:
+    """A base run that failed validation must contribute no gated point.
+
+    The hazard is specific and asymmetric: the receipt is written *before* the
+    exit code is decided (on purpose -- a failed run's numbers are diagnostic),
+    and a base that fell back to binary-only evidence is *faster* than a correct
+    one. Gating a head against it compares against a number no correct run
+    produces, and the comparison looks perfectly healthy.
+    """
+
+    def _scenario(self, ident: str, status: str, seconds: float) -> dict:
+        return {
+            "id": ident,
+            "status": status,
+            "steps": [
+                {
+                    "name": "compare",
+                    "scope": "full_cli",
+                    "gated": True,
+                    "wall_seconds": seconds,
+                }
+            ],
+        }
+
+    def test_a_passing_scenario_contributes_its_point(self):
+        assert harness.gated_points([self._scenario("s", "ok", 1.0)]) == {
+            ("s", "compare"): 1.0
+        }
+
+    @pytest.mark.parametrize("status", ["failed", "skipped", "", None])
+    def test_a_non_ok_scenario_contributes_nothing(self, status):
+        assert harness.gated_points([self._scenario("s", status, 0.2)]) == {}
+
+    def test_a_scenario_with_no_status_at_all_contributes_nothing(self):
+        # Fail closed on a receipt shape that predates the field, rather than
+        # trusting a timing whose provenance cannot be established.
+        assert harness.gated_points([{"id": "s", "steps": []}]) == {}
+
+    def test_the_refused_scenarios_are_reported_by_id(self):
+        scenarios = [
+            self._scenario("good", "ok", 1.0),
+            self._scenario("bad", "failed", 0.2),
+        ]
+        assert harness.rejected_baseline_scenarios(scenarios) == ["bad"]
+
+    def test_load_baseline_returns_both_halves(self, tmp_path):
+        path = tmp_path / "base.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "scenarios": [
+                        self._scenario("good", "ok", 1.0),
+                        self._scenario("bad", "failed", 0.2),
+                    ]
+                }
+            )
+        )
+        points, rejected = harness.load_baseline(path)
+        assert points == {("good", "compare"): 1.0}
+        assert rejected == ["bad"]
+
+    def test_a_wholly_failed_baseline_cannot_gate_anything(self):
+        # Which then trips main()'s "shares no gated point" failure, rather than
+        # reporting a clean pass against a broken base.
+        points, rejected = (
+            harness.gated_points([self._scenario("s", "failed", 0.2)]),
+            harness.rejected_baseline_scenarios([self._scenario("s", "failed", 0.2)]),
+        )
+        assert points == {}
+        assert rejected == ["s"]
+
+    def test_the_filter_applies_to_this_runs_own_scenarios_too(self):
+        # Symmetry: a failed head scenario must not publish a gated point either,
+        # or a later run could use this receipt as a baseline.
+        assert harness.gated_points([self._scenario("head", "failed", 0.2)]) == {}
+
+
 class TestRequiredCoverage:
     def test_a_full_run_claims_coverage(self):
         measured = [_scenario(f"{shape}[p]") for shape in harness.REQUIRED_PR_SHAPES]

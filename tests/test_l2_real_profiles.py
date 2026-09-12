@@ -30,6 +30,7 @@ worth more guarding than the arithmetic is.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -306,6 +307,178 @@ class TestDigestTree:
         assert profiles.digest_tree(root).startswith("sha256:")
 
 
+class TestRevisionsArePinned:
+    """A placeholder revision is unrunnable, and must not read as valid.
+
+    Rendered into ``git checkout <pinned-base-sha>``, the shell reads ``<`` as
+    input redirection and fails before git runs -- while ``validate_profile()``
+    previously called the profile structurally valid. Both halves are now closed:
+    validation flags it, and the status is BLOCKED naming the real blocker.
+    """
+
+    @pytest.mark.parametrize(
+        "revision",
+        [
+            "<pinned-base-sha>",
+            "<pinned-head-sha>",
+            "pinned-base-sha",
+            "TODO",
+            "FIXME-later",
+            "",
+            "   ",
+        ],
+    )
+    def test_a_placeholder_is_recognised(self, revision):
+        assert profiles.is_placeholder_revision(revision)
+
+    @pytest.mark.parametrize(
+        "revision",
+        [
+            "9371e12391794a66520fc5c4aba87c26a6c6b628",
+            "b8a557d",
+            "a689f87d2f37873078598dfdbf069ee45de2c76e",
+        ],
+    )
+    def test_a_real_revision_is_not_a_placeholder(self, revision):
+        assert not profiles.is_placeholder_revision(revision)
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_shipped_profile_is_pinned_to_real_revisions(self, profile_id):
+        profile = profiles.PROFILES[profile_id]
+        assert not profiles.is_placeholder_revision(profile.old_revision)
+        assert not profiles.is_placeholder_revision(profile.new_revision)
+
+    def test_a_placeholder_profile_fails_validation(self):
+        bad = profiles.RealProfile(
+            id="t",
+            project="p",
+            reference="https://example.invalid/pr/1",
+            repository="https://example.invalid/p.git",
+            old_revision="<pinned-base-sha>",
+            new_revision="bbb",
+            libraries=(profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),),
+            required_tools=("git",),
+        )
+        assert any("placeholder" in p for p in profiles.validate_profile(bad))
+
+    def test_a_placeholder_profile_blocks_naming_the_real_blocker(
+        self, monkeypatch, tmp_path
+    ):
+        # Checked before the tool probe: reporting "missing icpx" for a profile
+        # that has no revisions to build would name the wrong blocker.
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: None)
+        bad = profiles.RealProfile(
+            id="t",
+            project="p",
+            reference="https://example.invalid/pr/1",
+            repository="https://example.invalid/p.git",
+            old_revision="<pinned-base-sha>",
+            new_revision="<pinned-head-sha>",
+            libraries=(profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),),
+            required_tools=("git", "icpx"),
+        )
+        status = profiles.resolve_status(bad, prepared_root=tmp_path, requested=True)
+        assert status.status == "BLOCKED"
+        assert "not pinned" in status.reason
+        assert "icpx" not in status.reason
+
+    def test_rendering_a_placeholder_profile_raises_instead_of_emitting_bad_shell(self):
+        bad = profiles.RealProfile(
+            id="t",
+            project="p",
+            reference="https://example.invalid/pr/1",
+            repository="https://example.invalid/p.git",
+            old_revision="<pinned-base-sha>",
+            new_revision="bbb",
+            libraries=(profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),),
+            required_tools=("git",),
+        )
+        with pytest.raises(ValueError):
+            profiles.prepare_script(bad)
+
+
+class TestPrepareScriptBuildsBothSides:
+    """A temporal profile needs two artifacts, so its script must build two.
+
+    Every profile's preparation previously checked out only ``old_revision`` and
+    nothing referenced ``new_revision`` at all, so no generated script could
+    produce the old-vs-new pair it advertised.
+    """
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_both_revisions_appear_in_the_script(self, profile_id):
+        profile = profiles.PROFILES[profile_id]
+        script = profiles.prepare_script(profile)
+        assert profile.old_revision in script
+        assert profile.new_revision in script
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_each_side_gets_its_own_tree(self, profile_id):
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        assert f"{profile_id}_old" in script
+        assert f"{profile_id}_new" in script
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_profile_declares_per_side_commands(self, profile_id):
+        # A profile with an empty list here can only ever build one side, which is
+        # the defect this guards against reappearing.
+        assert profiles.PROFILES[profile_id].per_side_commands
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_the_build_step_runs_once_per_side(self, profile_id):
+        profile = profiles.PROFILES[profile_id]
+        script = profiles.prepare_script(profile)
+        # The worktree creation is per side by construction, so count it: one per
+        # side and no more.
+        assert script.count("worktree add") == 2
+
+
+class TestPrepareScriptIsolatesEachCommand:
+    """Each command must start from the same root.
+
+    Appending ``cd svs && git checkout`` then ``cd svs && cmake`` into one shell
+    leaves the process inside ``svs``, so the second looks for ``svs/svs``. Every
+    profile used that repeated-``cd`` shape, so no script could complete even its
+    old-side build.
+    """
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_the_script_captures_a_root(self, profile_id):
+        assert 'ROOT="$(pwd)"' in profiles.prepare_script(profiles.PROFILES[profile_id])
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_command_line_is_a_rooted_subshell(self, profile_id):
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        commands = [
+            line
+            for line in script.splitlines()
+            if line and not line.startswith(("#", "set -", "ROOT=", "#!"))
+        ]
+        assert commands, "a profile with no commands would pass this vacuously"
+        for line in commands:
+            assert line.startswith('( cd "$ROOT" && '), line
+            assert line.endswith(" )"), line
+
+    def test_a_cd_inside_one_command_cannot_leak_into_the_next(self):
+        # The property, stated directly: two consecutive `cd X` commands both
+        # resolve X against the root, not against each other.
+        script = profiles.prepare_script(profiles.SVS)
+        cd_lines = [ln for ln in script.splitlines() if "svs_old" in ln]
+        assert len(cd_lines) >= 2
+        for line in cd_lines:
+            assert line.startswith('( cd "$ROOT" && ')
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_the_rendered_script_is_valid_shell(self, profile_id):
+        # Parse-checked rather than eyeballed: a script nobody can run is not
+        # reproduction instructions. `bash -n` needs no network and builds nothing.
+        script = profiles.prepare_script(profiles.PROFILES[profile_id])
+        proc = subprocess.run(
+            ["bash", "-n"], input=script, capture_output=True, text=True, check=False
+        )
+        assert proc.returncode == 0, proc.stderr
+
+
 class TestPrepareScript:
     @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
     def test_it_is_a_runnable_reproducible_script(self, profile_id):
@@ -331,7 +504,11 @@ class TestPrepareScript:
 
     def test_pvxs_preparation_builds_epics_base_first(self):
         script = profiles.prepare_script(profiles.PVXS)
-        assert script.index("epics-base") < script.index("pvxs && make")
+        # EPICS base must be built before either pvxs side, since pvxs's own
+        # makefiles include base's rules. Anchored on the per-side build rather
+        # than a `cd pvxs && make` spelling, which the subshell rewrite changed.
+        assert script.index("epics-base && make") < script.index("make -C pvxs_old")
+        assert script.index("epics-base && make") < script.index("make -C pvxs_new")
 
     def test_no_profile_prepares_with_a_depth_source_run(self):
         # A --depth source run is an L4/L5 measurement; its numbers do not
