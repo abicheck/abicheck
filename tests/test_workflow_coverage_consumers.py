@@ -77,6 +77,8 @@ def _matrix_combinations(job: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _context(combo: dict[str, Any]) -> dict[str, Any]:
+    """The expression context one matrix combination sees, including the
+    `runner.os` GitHub derives from the runner label rather than storing."""
     ctx: dict[str, Any] = {f"matrix.{k}": str(v) for k, v in combo.items()}
     if "os" in combo:
         ctx["runner.os"] = runner_os_for(str(combo["os"]))
@@ -84,10 +86,13 @@ def _context(combo: dict[str, Any]) -> dict[str, Any]:
 
 
 def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """A job's steps, skipping any malformed non-mapping entry."""
     return [s for s in (job.get("steps") or []) if isinstance(s, dict)]
 
 
 def _orphaned_reports() -> list[str]:
+    """Every (workflow, job, matrix combination) that writes a coverage
+    report no step in the same combination reads."""
     findings = []
     for path in workflow_paths():
         doc = yaml.safe_load(read_repo_text(path))
@@ -134,6 +139,7 @@ def _has_consumer(
 
 
 def test_every_written_coverage_report_has_a_consumer() -> None:
+    """The invariant itself: instrumentation must have a reader."""
     orphaned = _orphaned_reports()
     assert not orphaned, (
         "coverage instrumentation costs ~60% wall time on the lane carrying "

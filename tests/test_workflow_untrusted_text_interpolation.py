@@ -86,6 +86,7 @@ HOSTILE_PAYLOADS = (
 
 
 def _steps() -> list[tuple[str, str, int, dict]]:
+    """Every step of every workflow, tagged with where it came from."""
     found = []
     for path in workflow_paths():
         doc = yaml.safe_load(read_repo_text(path))
@@ -185,10 +186,13 @@ def _run_body_step(script: str, payload: str, workdir: Path) -> tuple[str | None
     return written, (workdir / "PWNED").exists()
 
 
-#: The real step, copied from bugfix-test-contract.yml's "Write PR body to
-#: a file". Read from the workflow rather than retyped, so this cannot go
-#: on testing a string the workflow stopped using.
 def _real_pr_body_script() -> str:
+    """The real step body from bugfix-test-contract.yml's "Write PR body to
+    a file".
+
+    Read out of the workflow rather than retyped, so this module cannot go
+    on testing a string the workflow itself stopped using.
+    """
     doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "bugfix-test-contract.yml"))
     for job in doc["jobs"].values():
         for step in job.get("steps") or []:

@@ -53,6 +53,10 @@ def runner_os_for(matrix_os: str) -> str:
 
 
 def _atom(token: str, ctx: dict[str, Any]) -> Any:
+    """Resolve one operand: a quoted literal, a modelled function, a
+    context reference, or -- for anything this evaluator does not model --
+    absence. See this module's docstring for why absence rather than a
+    truthy default is the safe direction here."""
     token = token.strip()
     if token.startswith(("'", '"')):
         return token[1:-1]

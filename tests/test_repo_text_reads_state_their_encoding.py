@@ -73,6 +73,8 @@ def _opens_in_binary_mode(call: ast.Call) -> bool:
 
 
 def _encoding_is_stated(call: ast.Call) -> bool:
+    """Does this read name its encoding -- as a keyword, positionally, or
+    vacuously by reading bytes?"""
     if any(kw.arg == "encoding" for kw in call.keywords):
         return True
     if _opens_in_binary_mode(call):
@@ -82,6 +84,8 @@ def _encoding_is_stated(call: ast.Call) -> bool:
 
 
 def _unencoded_repo_reads(path: Path) -> list[str]:
+    """Every repository-rooted text read in *path* that leaves the encoding
+    to the host's locale, as `file:line: source` strings."""
     tree = ast.parse(path.read_text(encoding=ENCODING))
     findings = []
     for node in ast.walk(tree):
@@ -103,6 +107,7 @@ def _unencoded_repo_reads(path: Path) -> list[str]:
 
 
 def test_no_test_reads_checked_in_text_with_a_platform_dependent_encoding() -> None:
+    """The structural half of the invariant, over the whole suite."""
     findings: list[str] = []
     for module in sorted(TESTS_DIR.rglob("*.py")):
         findings += _unencoded_repo_reads(module)
@@ -153,6 +158,8 @@ def test_workflow_text_is_utf8_that_a_cp1252_host_could_not_have_decoded(
 
 
 def test_some_checked_in_workflow_really_defeats_the_platform_default() -> None:
+    """The non-vacuity half: the rule above must be defending against
+    content that actually exists, not a hypothetical byte."""
     undecodable = []
     for path in workflow_paths():
         try:

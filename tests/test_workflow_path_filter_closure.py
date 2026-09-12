@@ -110,6 +110,9 @@ def _covers(globs: list[str], path: str) -> bool:
 
 
 def _required_paths(text: str) -> set[str]:
+    """Files a workflow's own jobs execute, so its paths filter must name
+    them: scripts it runs, `pyproject.toml` where it installs this
+    package, and the `action.yml` of each local action it uses."""
     required = _executed_files(text)
     if "pip install -e" in text:
         # Every such job installs *this* package; its dependency bounds,
@@ -124,6 +127,8 @@ def _required_paths(text: str) -> set[str]:
 
 
 def _filtered_workflows() -> list[tuple[str, str, list[str], set[str]]]:
+    """One case per (workflow, event) that restricts itself with `paths`,
+    carrying the declared globs and the paths it actually depends on."""
     cases = []
     for path in workflow_paths():
         text = read_repo_text(path)
@@ -157,6 +162,8 @@ def test_the_survey_found_filtered_workflows() -> None:
 def test_path_filter_covers_the_workflow_own_infrastructure(
     name: str, event: str, globs: list[str], required: set[str]
 ) -> None:
+    """A workflow that skips itself when its own machinery changes is a
+    gate that silently stops gating."""
     missing = sorted(p for p in required if not _covers(globs, p))
     assert not missing, (
         f"{name} [{event}]: the jobs depend on these files but the paths "

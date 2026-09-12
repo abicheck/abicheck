@@ -56,6 +56,8 @@ def _context(
     ref: str = "refs/heads/main",
     run_id: str = "1",
 ) -> dict[str, Any]:
+    """A synthesized GitHub context for one run of *event*, so a group
+    expression can be rendered the way the real runner would."""
     return {
         "github.workflow": "W",
         "github.event_name": event,
@@ -82,6 +84,8 @@ def _render(group: str, ctx: dict[str, Any]) -> str:
 
 
 def _cancelling_workflows() -> list[tuple[str, str, list[str]]]:
+    """Every workflow declaring `cancel-in-progress`, with its group
+    expression and the events that can produce a run in that group."""
     found = []
     for path in workflow_paths():
         doc = yaml.safe_load(read_repo_text(path))

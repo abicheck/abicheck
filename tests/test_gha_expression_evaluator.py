@@ -98,6 +98,7 @@ def test_a_real_workflow_condition_shape_still_evaluates() -> None:
     ],
 )
 def test_supported_operators(expr: str, expected: bool) -> None:
+    """The operator subset this evaluator claims to model."""
     assert bool(evaluate(expr, _CTX)) is expected
 
 
@@ -107,6 +108,8 @@ def test_absent_condition_means_the_step_runs() -> None:
 
 
 def test_render_substitutes_and_drops_absent_fields() -> None:
+    """A modelled reference substitutes; an unmodelled one renders empty,
+    matching how GitHub itself interpolates a missing value."""
     assert render("x-${{ github.event_name }}", _CTX) == "x-push"
     assert render("x-${{ steps.nope.outputs.v }}", _CTX) == "x-"
 
@@ -120,6 +123,7 @@ def test_render_substitutes_and_drops_absent_fields() -> None:
     ],
 )
 def test_runner_os_mapping(label: str, expected: str) -> None:
+    """`runner.os` is derived from the runner label, never stored."""
     assert runner_os_for(label) == expected
 
 
