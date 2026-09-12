@@ -52,13 +52,39 @@ Run: ``python scripts/find_duplicate_tests.py``. Exits 0 always; it reports.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import collections
 import json
 import pathlib
+from typing import NamedTuple
+
+#: The two node types a `test_*` definition can be. Annotated precisely
+#: rather than as a bare `ast.AST`, which has none of the `.body`/`.args`/
+#: `.decorator_list`/`.name`/`.lineno` attributes this module reads.
+_TestDef = ast.FunctionDef | ast.AsyncFunctionDef
+#: (enclosing class name or None, test name, line number).
+_Member = tuple[str | None, str, int]
 
 
-def _normalized_body(fn: ast.AST) -> str:
+class _Group(NamedTuple):
+    """One clone group: a file, and the members sharing a body in it."""
+
+    file: str
+    members: list[_Member]
+
+    @property
+    def same_context_different_names(self) -> bool:
+        """True for the category worth reading -- one enclosing scope, more
+        than one name. See this module's docstring for why that split, and
+        not the raw group count, is the signal."""
+        return (
+            len({m[0] for m in self.members}) == 1
+            and len({m[1] for m in self.members}) > 1
+        )
+
+
+def _normalized_body(fn: _TestDef) -> str:
     """The function's body, dumped without line/column attributes.
 
     Attributes off is what makes this a *body* comparison rather than a
@@ -72,7 +98,7 @@ def _normalized_body(fn: ast.AST) -> str:
     )
 
 
-def _signature(fn: ast.AST) -> tuple[str, ...]:
+def _signature(fn: _TestDef) -> tuple[str, ...]:
     """Parameter names, so two tests taking different fixtures never pair."""
     a = fn.args
     parts = [p.arg for p in (a.posonlyargs + a.args + a.kwonlyargs)]
@@ -83,16 +109,16 @@ def _signature(fn: ast.AST) -> tuple[str, ...]:
     return tuple(parts)
 
 
-def _decorators(fn: ast.AST) -> tuple[str, ...]:
+def _decorators(fn: _TestDef) -> tuple[str, ...]:
     """Decorators, so two `@parametrize`d tests with different cases never
     pair -- the audit that motivated this script counted clones "after
     accounting for signatures and decorators" for exactly this reason."""
     return tuple(ast.dump(d, include_attributes=False) for d in fn.decorator_list)
 
 
-def _test_functions(tree: ast.Module) -> list[tuple[str | None, ast.AST]]:
+def _test_functions(tree: ast.Module) -> list[tuple[str | None, _TestDef]]:
     """Every `test_*` function with its enclosing class name (or None)."""
-    found: list[tuple[str | None, ast.AST]] = []
+    found: list[tuple[str | None, _TestDef]] = []
 
     def walk(node: ast.AST, cls: str | None = None) -> None:
         for child in ast.iter_child_nodes(node):
@@ -109,42 +135,61 @@ def _test_functions(tree: ast.Module) -> list[tuple[str | None, ast.AST]]:
     return found
 
 
-def main() -> int:
-    groups = 0
-    excess = 0
-    report = []
-    for path in sorted(pathlib.Path("tests").rglob("test_*.py")):
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--json",
+        type=pathlib.Path,
+        help="Also write the full group listing to this path as JSON.",
+    )
+    parser.add_argument(
+        "--tests-dir",
+        type=pathlib.Path,
+        default=pathlib.Path("tests"),
+        help="Directory to screen (default: tests).",
+    )
+    args = parser.parse_args(argv)
+
+    groups: list[_Group] = []
+    for path in sorted(args.tests_dir.rglob("test_*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             continue
-        buckets: dict[tuple, list] = collections.defaultdict(list)
+        buckets: dict[tuple[str, tuple[str, ...], tuple[str, ...]], list[_Member]] = (
+            collections.defaultdict(list)
+        )
         for cls, fn in _test_functions(tree):
             key = (_normalized_body(fn), _signature(fn), _decorators(fn))
             buckets[key].append((cls, fn.name, fn.lineno))
-        for members in buckets.values():
-            if len(members) > 1:
-                groups += 1
-                excess += len(members) - 1
-                report.append({"file": str(path), "members": members})
+        groups.extend(
+            _Group(str(path), members)
+            for members in buckets.values()
+            if len(members) > 1
+        )
 
-    print(f"clone groups: {groups}   excess definitions: {excess}")
-    same_context = [
-        r
-        for r in report
-        if len({m[0] for m in r["members"]}) == 1
-        and len({m[1] for m in r["members"]}) > 1
-    ]
+    excess = sum(len(g.members) - 1 for g in groups)
+    worth_reading = [g for g in groups if g.same_context_different_names]
+    print(f"clone groups: {len(groups)}   excess definitions: {excess}")
     print(
-        f"of those, same-context with different names "
-        f"(the category worth reading): {len(same_context)}"
+        "of those, same-context with different names "
+        f"(the category worth reading): {len(worth_reading)}"
     )
-    for r in report:
-        marker = " <-- same context, different names" if r in same_context else ""
-        print(f"\n{r['file']}{marker}")
-        for cls, name, lineno in r["members"]:
+    for group in groups:
+        marker = (
+            " <-- same context, different names"
+            if group.same_context_different_names
+            else ""
+        )
+        print(f"\n{group.file}{marker}")
+        for cls, name, lineno in group.members:
             print(f"   L{lineno:5d}  {cls or '-'}::{name}")
-    pathlib.Path("/tmp/clone_report.json").write_text(json.dumps(report, indent=1))
+
+    if args.json:
+        args.json.write_text(
+            json.dumps([g._asdict() for g in groups], indent=1), encoding="utf-8"
+        )
+    # Always 0: this reports for a human to read, it does not gate.
     return 0
 
 
