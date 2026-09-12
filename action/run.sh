@@ -1709,12 +1709,13 @@ PYEOF
   CMD+=(--config "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY")
 }
 
-# A directory, a file whose name matches a recognized package extension, or
-# an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
-# is_package(), including its magic-byte fallback — abicheck/package.py:547-554
-# — since classify_compare_operand() delegates to it regardless of filename;
-# a name-suffix-only check here would misidentify such an operand, Codex
-# review, PR #557). `compare` fans such an operand out through the release
+# A directory, or a package -- answered by the installed abicheck's own
+# `is_package()` where it is importable, and by a suffix/magic table only as
+# the pre-install fallback. That table used to be the whole answer and was
+# documented as "mirrors package.py's is_package()"; plan Phase 7n made the
+# real one content-based, so the mirror broke and the fallback is now
+# explicitly a degraded approximation, not a copy (Codex review, PR #1253;
+# the original name-suffix-only version was Codex review, PR #557). `compare` fans such an operand out through the release
 # engine internally regardless of the Action's MODE. Since CLI cleanup phase
 # two, PR E, the release engine renders every requested export directly
 # (json/markdown/junit) -- this helper is no longer needed to skip the
@@ -1723,6 +1724,37 @@ PYEOF
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
+  # Ask the INSTALLED abicheck first (ADR-070 D3's rule, the same one
+  # `_cli_value_options_init` below follows): `is_package()` became
+  # content-based in plan Phase 7n -- every extractor reads magic bytes and
+  # container members rather than a suffix -- so the table below is no
+  # longer the mirror its own comment claims. A tar/conda/wheel staged
+  # under a nonconventional name is a release operand to `compare` and was
+  # *not* one here, which silently skipped forwarding the package-only
+  # inputs (`devel-pkg1/2`, `debug-info1/2`) into a real release
+  # comparison: a lower-evidence, potentially false-clean result (Codex
+  # review, PR #1253). Deriving also fixes the direction a copy can never
+  # get right -- the answer matches the abicheck version the workflow
+  # installed, not this Action's checkout.
+  #
+  # Exit 0 = package, 3 = definitely not, anything else = the probe itself
+  # failed, which falls through to the table rather than answering. Same
+  # `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other
+  # abicheck-importing call here, for the same sys.path reason.
+  if [[ "${_PY_BIN_HAS_ABICHECK:-false}" == "true" && -n "${_PY_SAFE_DIR:-}" && -n "${_PY_BIN:-}" ]]; then
+    local _probe_rc=0
+    # shellcheck disable=SC2016  # the inline script is deliberately unexpanded.
+    (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+
+from abicheck.package import is_package
+
+raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
+' "$path") || _probe_rc=$?
+    [[ "$_probe_rc" -eq 0 ]] && return 0
+    [[ "$_probe_rc" -eq 3 ]] && return 1
+  fi
   # Portable lowercasing: ${path,,} is bash-4+ only, but this script also
   # supports macOS's stock (GPLv2-frozen) bash 3.2 (see add_flag above).
   local lower
