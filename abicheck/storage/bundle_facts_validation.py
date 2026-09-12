@@ -133,8 +133,14 @@ def check_bundle_facts_json_budget(
     try:
         check_json_container_budget(raw, max_json_object_nodes)
     except JsonContainerBudgetExceeded:
-        # The remedy names the real user-facing config key, not this
-        # function's own parameter name, and says who may raise it. The
+        # Only the *remedy* half of this message changed (ADR-070): it names
+        # the real user-facing config key instead of this function's own
+        # parameter name, and says who may raise it. The "JSON containers"
+        # count phrasing is deliberately left as it was -- the budget does
+        # also count scalar leaves, so "nodes" would be marginally more
+        # precise, but renaming it here alone would desync this message from
+        # `bundle_archive.py`'s sibling manifest-budget refusal (which says
+        # "containers" for the identical check) for no user-visible gain. The
         # previous wording ("pass a larger max_json_object_nodes") named an
         # internal parameter no CLI user can pass, which made a legitimate
         # large-bundle failure read as an unfixable refusal -- the capability
@@ -146,7 +152,7 @@ def check_bundle_facts_json_budget(
         # naming a document they reviewed can.
         raise SnapshotError(
             f"{path}: {description} contains more than "
-            f"{max_json_object_nodes} JSON nodes -- refusing to decode "
+            f"{max_json_object_nodes} JSON containers -- refusing to decode "
             "(possible container-count amplification attack). A real "
             "large-toolkit bundle can legitimately exceed this: raise it with "
             "resource_limits.max_bundle_facts_decode_nodes in a .abicheck.yml "

@@ -47,7 +47,7 @@
 ### Fixed
 
 - **A stored-`BundleFacts` decode that exceeds the container-node budget now
-  says how to raise it.** The refusal named `max_json_object_nodes`, an
+  says how to raise it.** Its remedy named `max_json_object_nodes`, an
   internal parameter no CLI user can pass, which made a legitimate
   large-toolkit bundle read as an unfixable refusal; it now names the real
   `resource_limits.max_bundle_facts_decode_nodes` config key and states that

@@ -11,6 +11,9 @@ depends_on:
   - abicheck/policy/scope_completeness.py
   - abicheck/workflows/release_scope.py
   - abicheck/report/comparison_scope.py
+  - abicheck/policy/release_assurance.py
+  - abicheck/report/release_assurance.py
+  - abicheck/workflows/release_assurance_members.py
   - abicheck/frontends/cli/options/release.py
   - abicheck/bundle.py
   - abicheck/bundle_facts.py
@@ -492,6 +495,8 @@ analysis ran:
   "warnings": [],                         // existing
   "comparison_scope": { ... },            // ADR-065 S2 (schema 2.50): per-member acquisition record,
                                           //   completeness, policy, proven_removed/proven_added
+  "analysis_assurance": { ... },          // ADR-070 (release schema 1.3): the per-member assurance fold --
+                                          //   present only under assurance.require_complete
   "bundle_verdict": "BREAKING",           // new (ADR-023)
   "bundle_findings": [                    // new (ADR-023)
     {
@@ -661,6 +666,40 @@ the inventory that proved it) and `library unmatched (no counterpart on
 NEW): X` are now two different lines rather than one wording for both. See
 the migration notes in
 [Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).
+
+## Analysis assurance across a bundle (ADR-070)
+
+The completeness axis above asks whether every *selected member* was compared
+at all. A second, independent question is whether the comparisons that **did**
+run had complete enough evidence to trust — and a release has one answer per
+compared member, not one for the whole run.
+
+`.abicheck.yml`'s `assurance.require_complete: true` turns that into a gate
+here the same way it already did for a single pair. The release's contribution
+is `max` over every compared member's own: any member whose
+`analysis_assurance.status` is not `complete` floors the release, no matter how
+many fully-analysed siblings it has, and over a **one-member** package the fold
+is the identity — so that package gates and reports exactly as comparing its
+one library on its own would.
+
+Under the setting the JSON report carries the fold as `analysis_assurance`
+(aggregate status, how many members were folded, how many fell short, the
+`0`/`1` exit contribution, and an `incomplete_members` list naming each short
+member **and the notes explaining why**), and each `libraries[]` entry carries
+its own `analysis_assurance_status`. A non-JSON format gets the same facts as a
+one-line stderr notice. `--output-dir`'s `summary.json` carries the block and
+folds the axis into its own `exit` block, so it cannot report a different exit
+code than the run took. A stored `BundleFacts` operand folds identically.
+
+The two axes are orthogonal and either can hold without the other: every
+member compared but one missing its headers is scope `complete` with a
+`partial` analysis; one member never supplied while the rest were fully
+analysed is scope `incomplete` with a complete analysis over what ran. Both
+contribute `0`/`1`, both fold with `max`, and when they tie the `exit` block's
+`reasons` names both. Without `assurance.require_complete` the axis contributes
+`0` and the report carries no `analysis_assurance` key at all, so a run that
+never opted in is unchanged. See
+[Exit codes](../reference/exit-codes.md#analysis-assurance-contribution-p04).
 
 **Support-promise findings (`release.support_promise` in `.abicheck.yml`).**
 A proven inventory change is a change to what the project *promises to

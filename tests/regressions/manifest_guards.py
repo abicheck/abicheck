@@ -116,7 +116,7 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             "strictly additive: a caller that never opts in gets a decision "
             "byte-identical to one passing an explicit 0."
         ),
-        fixed_by=(),
+        fixed_by=(1237,),
         seed_tests=(
             "tests/test_release_assurance_properties.py",
             "tests/test_release_assurance_cli.py",
