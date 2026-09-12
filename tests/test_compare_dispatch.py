@@ -1094,11 +1094,7 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
         write_path = tmp_path / "sec.json"
         code, out, err = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            f"json={write_path}",
+            "compare", str(old_dir), str(new_dir), "-o", f"json={write_path}",
         )
         assert code == 0
         assert write_path.is_file()
@@ -1157,13 +1153,7 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
 
         code, out, err = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--config",
-            str(cfg),
-            "-o",
-            "json=-",
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-",
         )
 
         assert code == 64
@@ -1371,10 +1361,7 @@ class TestCompareDispatch:
         reports = tmp_path / "reports"
         result = CliRunner().invoke(
             main,
-            [
-                "compare", str(old_f), str(new_f),
-                "-o", f"json={reports}/",
-            ],
+            ["compare", str(old_f), str(new_f), "-o", f"json={reports}/"],
         )
         assert result.exit_code == 64, result.output
         assert "per-component export" in result.output
@@ -1415,13 +1402,7 @@ class TestReleaseFanoutParity:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
         code, _, _ = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "-o",
-            f"json={out_dir}/",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "-o", f"json={out_dir}/",
         )
         assert code == 4
         # Per-library reports were written under --output-dir (two-level output).

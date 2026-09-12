@@ -894,13 +894,7 @@ class TestCompareReleaseTarPackages:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_tar),
-            str(new_tar),
-            "-o",
-            "json=-",
-        ])
+        result = runner.invoke(main, ["compare", str(old_tar), str(new_tar), "-o", "json=-"])
         # Should succeed — NO_CHANGE since snapshots are identical
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -924,14 +918,7 @@ class TestCompareReleaseTarPackages:
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(tar),
-            str(tar),
-            "-o",
-            "json=-",
-            "--keep-extracted",
-        ])
+        result = runner.invoke(main, ["compare", str(tar), str(tar), "-o", "json=-", "--keep-extracted"])
         assert result.exit_code == 64, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -959,13 +946,7 @@ class TestCompareReleaseDirectoryPassthrough:
         (new_dir / "libfoo.so.json").write_text(snapshot_to_json(snap))
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-        ])
+        result = runner.invoke(main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -2346,13 +2327,7 @@ class TestCompareReleaseWheelPackages:
         _make_wheel(new_whl, {"libfoo.so.json": snapshot_to_json(snap).encode()})
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_whl),
-            str(new_whl),
-            "-o",
-            "json=-",
-        ])
+        result = runner.invoke(main, ["compare", str(old_whl), str(new_whl), "-o", "json=-"])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -4157,15 +4132,7 @@ class TestCompareReleaseDsoOnly:
         cfg.write_text("release:\n  dso_only: true\n")
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--config",
-            str(cfg),
-        ])
+        result = runner.invoke(main, ["compare", str(old_dir), str(new_dir), "-o", "json=-", "--config", str(cfg)])
         # Flag accepted (no usage error); zero pairs is exit 1 `no_comparison_completed` (ADR-065 D7)
         assert result.exit_code == 1, f"Exit {result.exit_code}: {result.output}"
         assert '"reasons": [\n      "no_comparison_completed"\n    ]' in result.stdout
@@ -4197,13 +4164,7 @@ class TestExtractedTempDirsAlwaysCleanedUp:
             tf.addfile(info, io.BytesIO(data))
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(archive),
-            str(archive),
-            "-o",
-            "json=-",
-        ])
+        result = runner.invoke(main, ["compare", str(archive), str(archive), "-o", "json=-"])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
         assert "Extracted files kept in:" not in result.output
 

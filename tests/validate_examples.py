@@ -348,8 +348,7 @@ def _compile(src: Path, out: Path, *, variant: str = DEFAULT_ARTIFACT_VARIANT) -
                 "-o", str(out), str(src)]
     else:
         opt_flags = ["-O2"] if stock_variant else ["-g", "-Og"]
-        args = [compiler, "-shared", "-fPIC", *opt_flags, "-fvisibility=default",
-                "-o", str(out), str(src)]
+        args = [compiler, "-shared", "-fPIC", *opt_flags, "-fvisibility=default", "-o", str(out), str(src)]
 
     r = subprocess.run(args, capture_output=True, text=True, timeout=30)
     return None if r.returncode == 0 else r.stderr[:600]
@@ -638,16 +637,7 @@ def _build_compare_cmd(
     counterparts when the respective build-source paths are provided, and
     always sets the scoping flag explicitly so verdicts are deterministic.
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "abicheck.cli",
-        "compare",
-        str(snap1),
-        str(snap2),
-        "-o",
-        "json=-",
-    ]
+    cmd = [sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "-o", "json=-"]
     if old_build_source is not None:
         cmd += ["--build-info", "old=" + str(old_build_source), "--sources", "old=" + str(old_build_source)]
     if new_build_source is not None:
@@ -697,16 +687,7 @@ def _build_compare_direct_cmd(
     not the dump/compare work itself, dominates wall time for small examples —
     this removes two of those three process starts per case.
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "abicheck.cli",
-        "compare",
-        str(v1_so),
-        str(v2_so),
-        "-o",
-        "json=-",
-    ]
+    cmd = [sys.executable, "-m", "abicheck.cli", "compare", str(v1_so), str(v2_so), "-o", "json=-"]
     if v1_hdr and v1_hdr.exists():
         cmd += ["-H", "old=" + str(v1_hdr)]
     if v2_hdr and v2_hdr.exists():

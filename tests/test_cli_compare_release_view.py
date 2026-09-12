@@ -240,13 +240,7 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "show=variables",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=variables",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -290,13 +284,7 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "show=variables",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=variables",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -367,24 +355,14 @@ class TestReleaseViewShowOnly:
         """Codex review, fresh evidence, third round ("Count uncapped
         findings in release filter totals"): `release_filtered_summary`'s
         `total` must report the true finding count, not a display-list
-        length.
-
-        Plan slice 7m sharpened the surrounding fact rather than changing
-        this one: a machine export is never truncated at all now (there is
-        no longer any way to ask for it), so this library's own `findings`
-        list carries all 25 too, and `total` agreeing with it is the point
-        -- the old failure mode was `total` reading 10 because it summed a
-        capped list."""
+        length -- the old failure mode was `total` reading 10 because it
+        summed a capped list. Plan slice 7m sharpened the surrounding fact:
+        a machine export is never truncated at all now, so this library's
+        own `findings` carries all 25 and `total` agrees with it."""
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "show=functions",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=functions",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -407,26 +385,14 @@ class TestReleaseViewShowOnly:
         """CodeRabbit review ("Fix the rendered truncation metadata before
         documenting it"): a rendered, `show=functions`-filtered `findings`
         list must never carry a truncation ledger describing a different
-        projection -- the bug counted the one `public_surface_shrank` note
-        the filter had already excluded, and leaked the private
-        `findings_view_truncated_kinds` key into the rendered entry.
-
-        Plan slice 7m removes the *source* of the mismatch for a machine
-        export: it is never truncated, so it claims no truncation and
-        carries no ledger at all. Both private keys must still be stripped,
-        which is the half of this guard that survives -- a leaked
-        `findings_view_*` key would be an internal projection escaping into
-        a published document whatever the cap does."""
+        projection, nor leak the private `findings_view_*` keys. Plan slice
+        7m removes the mismatch's source for a machine export -- never
+        truncated, so no ledger at all -- leaving the key-stripping half,
+        which matters whatever the cap does."""
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "show=functions",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=functions",
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
@@ -567,13 +533,7 @@ class TestReleaseViewDemangle:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "demangle",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "demangle",
         )
         assert result.exit_code == 4, result.output
         assert _MANGLED in result.output
@@ -880,13 +840,7 @@ class TestReleaseViewImpactAggregate:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "impact",
+            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "impact",
         )
         assert result.exit_code == 4, result.output
         data = json.loads(result.output)
@@ -925,12 +879,10 @@ class TestReleaseViewImpactAggregate:
     def test_impact_table_respects_show_only_in_every_export(
         self, tmp_path: Path
     ) -> None:
-        """Combining ``--view impact`` with ``--view show=...`` filters the
-        impact table the same way it filters ``findings`` -- and, since plan
-        slice 7m, in every export rather than only the first, mirroring the
-        findings/findings_view contract exactly (see
-        ``TestReleaseViewShowOnlyAppliesToEveryExport`` for why the old
-        primary-vs-secondary split had no answer under one operand)."""
+        """``--view impact`` plus ``--view show=...`` filters the impact
+        table the way it filters ``findings`` -- and, since plan slice 7m,
+        in every export rather than only the first (see
+        ``TestReleaseViewShowOnlyAppliesToEveryExport``)."""
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
         write_path = tmp_path / "full.json"
 
@@ -987,13 +939,7 @@ class TestReleaseViewImpactJUnitParity:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         with_impact = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "junit=-",
-            "--view",
-            "impact",
+            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "impact",
         )
         without_impact = _invoke(
             "compare", str(old_dir), str(new_dir), "-o", "junit=-",
@@ -1008,13 +954,7 @@ class TestReleaseViewImpactJUnitParity:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "junit=-",
-            "--view",
-            "impact",
+            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "impact",
         )
         assert result.exit_code == 4, result.output
         assert "<?xml" in result.output
@@ -1036,89 +976,11 @@ class TestReleaseViewImpactJUnitParity:
         new_snap_path = new_dir / "libfoo.json"
 
         single_pair = _invoke(
-            "compare",
-            str(old_snap_path),
-            str(new_snap_path),
-            "-o",
-            "junit=-",
-            "--view",
-            "impact",
+            "compare", str(old_snap_path), str(new_snap_path), "-o", "junit=-", "--view", "impact",
         )
         assert single_pair.exit_code == 4, single_pair.output
         assert "<?xml" in single_pair.output
         assert "impact" not in single_pair.output.lower()
-
-
-class TestReleaseViewShowOnlyAppliesToEveryExport:
-    """A display filter means the same thing for every export.
-
-    This class previously pinned the opposite: a secondary ``--write``
-    report was contracted to be full and unfiltered whatever ``--format``
-    was asked for. That asymmetry was answerable only while "primary" and
-    "secondary" were two different flags -- under plan slice 7m's one
-    repeatable ``-o FORMAT=DESTINATION`` there is no principled way to say
-    which of two exports is the unfiltered one, so the filter applies
-    uniformly and the complete accounting stays where it always was: in the
-    machine projection's own disposition/suppression ledger and its
-    `release_filtered_summary`, which reports the true pre-filter totals.
-
-    The underlying regression this class was added for is unchanged and
-    still guarded: the shared ``library_results`` projection must not be
-    filtered *in place* upstream of the renderers, or a filtered view would
-    be all any consumer could ever see.
-    """
-
-    def test_every_export_sees_the_same_filtered_view(self, tmp_path: Path) -> None:
-        old_dir, new_dir = _write_removed_function_pair(tmp_path)
-        first = tmp_path / "one.json"
-        second = tmp_path / "two.json"
-
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "show=variables",
-            "-o",
-            f"json={first}",
-            "-o",
-            f"json={second}",
-        )
-        assert result.exit_code == 4, result.output
-
-        docs = [
-            json.loads(path.read_text(encoding="utf-8")) for path in (first, second)
-        ]
-        assert docs[0] == docs[1]
-        for doc in docs:
-            (entry,) = doc["libraries"]
-            # `show=variables` keeps only variable-element kinds, and this
-            # pair's findings are a function removal plus a surface note.
-            assert [f["kind"] for f in entry.get("findings", [])] == []
-            # Nothing is hidden by narrowing the display: the filter states
-            # what it excluded, over the true uncapped pool.
-            assert doc["release_filtered_summary"]["total"] >= 2
-            assert doc["release_filtered_summary"]["displayed"] == 0
-
-    def test_the_unfiltered_result_is_still_one_invocation_away(
-        self, tmp_path: Path
-    ) -> None:
-        """The capability the old asymmetry existed to provide -- a complete
-        machine artifact -- is not lost, it is just spelled by not asking
-        for a filter. Stated here so "the filter now applies everywhere"
-        cannot quietly become "the complete document is unobtainable"."""
-        old_dir, new_dir = _write_removed_function_pair(tmp_path)
-        full = tmp_path / "full.json"
-
-        result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", f"json={full}"
-        )
-        assert result.exit_code == 4, result.output
-        (entry,) = json.loads(full.read_text(encoding="utf-8"))["libraries"]
-        assert {f["kind"] for f in entry["findings"]} == {
-            "func_removed",
-            "public_surface_shrank",
-        }
 
 
 class TestReleaseViewShowOnlyJUnit:
@@ -1138,13 +1000,7 @@ class TestReleaseViewShowOnlyJUnit:
         assert 'failures="1"' in baseline.output
 
         filtered = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "junit=-",
-            "--view",
-            "show=variables",
+            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "show=variables",
         )
         # show_only is presentation-only -- the exit code (computed from the
         # real, unfiltered DiffResult) is unaffected even though the JUnit
@@ -1159,13 +1015,7 @@ class TestReleaseViewShowOnlyJUnit:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "junit=-",
-            "--view",
-            "show=functions",
+            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "show=functions",
         )
         assert result.exit_code == 4, result.output
         assert 'failures="1"' in result.output
@@ -1280,13 +1130,7 @@ class TestReleaseViewShowOnlyOutputDirStaysFull:
         output_dir = tmp_path / "out"
 
         result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "show=variables",
-            "-o",
-            f"json={output_dir}/",
+            "compare", str(old_dir), str(new_dir), "--view", "show=variables", "-o", f"json={output_dir}/",
         )
         assert result.exit_code == 4, result.output
 
