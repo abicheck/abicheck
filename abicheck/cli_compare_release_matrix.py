@@ -86,6 +86,7 @@ from .frontends.cli.release_variant_operand import (  # noqa: F401
 )
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms
+from .report.release_assurance import ReleaseAssuranceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
 from .workflows.gate import incomplete_scope_diagnostic
 
@@ -232,6 +233,12 @@ def _finalize_release_output(
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    # Both of these come from one origin -- `compare_release_cmd` resolves
+    # `assurance_terms` *from* `require_complete_analysis` over the same
+    # `library_results` -- so they cannot state different settings. The flag
+    # is what the exit resolver and the receipt read; the terms are what the
+    # report section and the stderr notice are rendered from (ADR-071 D5/D6).
+    assurance_terms: ReleaseAssuranceTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
@@ -277,6 +284,7 @@ def _finalize_release_output(
         pack_application=pack_application,
         scope_public_headers=scope_public_headers,
         scope_terms=scope_terms,
+        assurance_terms=assurance_terms,
         demangle=demangle,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
@@ -315,6 +323,7 @@ def _finalize_release_output(
             pack_application=pack_application,
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
+            assurance_terms=assurance_terms,
             write_output=_safe_write_output,
             env_matrix_source_sha256=env_matrix_source_sha256,
             require_complete_analysis=require_complete_analysis,
@@ -419,7 +428,13 @@ def _finalize_release_output(
             if scope_terms
             else 0
         ),
-        require_complete_analysis=require_complete_analysis,
+        # ADR-071: the whole resolved decision, not just its contribution --
+        # `_exit_compare_release` both folds it and formats its notice, and
+        # the notice's wording needs the real compatibility exit, which only
+        # that function's own resolution knows.
+        assurance_decision=(
+            assurance_terms.decision if assurance_terms is not None else None
+        ),
     )
 
 

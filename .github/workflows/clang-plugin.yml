@@ -14,6 +14,18 @@ on:
     paths:
       - "contrib/abicheck-clang-plugin/**"
       - ".github/workflows/clang-plugin.yml"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # so its dependency bounds and extras decide what the
+      # plugin's own Python-side tests run against. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
       - "abicheck/buildsource/source_extractors/clang.py"
       - "abicheck/buildsource/source_extractors/clang_public_roots.py"
       - "abicheck/buildsource/source_extractors/_argv.py"
@@ -25,6 +37,18 @@ on:
     paths:
       - "contrib/abicheck-clang-plugin/**"
       - ".github/workflows/clang-plugin.yml"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # so its dependency bounds and extras decide what the
+      # plugin's own Python-side tests run against. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
       - "abicheck/buildsource/source_extractors/clang.py"
       - "abicheck/buildsource/source_extractors/clang_public_roots.py"
       - "abicheck/buildsource/source_extractors/_argv.py"

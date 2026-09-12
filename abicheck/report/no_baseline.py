@@ -374,16 +374,31 @@ def _candidate_side_scan(block: dict[str, Any] | None) -> dict[str, Any] | None:
     the honest key ``candidate``; the ``*_evolution`` maps are dropped
     entirely rather than emitted all-``persistent`` for the same reason --
     an evolution map states an OLD -> NEW relationship this run has no OLD
-    for. ``None`` in, ``None`` out (the stage did not run).
+    for. ``coverage`` *is* kept, reduced to the candidate the same way: it
+    states how completely this side's own evidence was read, which is a
+    one-sided fact and the one thing a reader needs in order to tell "the
+    candidate has none of these constructs" from "we could not look".
+    ``None`` in, ``None`` out (the stage did not run).
     """
     if block is None:
         return None
     pattern = block.get("pattern") or {}
     preprocessor = block.get("preprocessor") or {}
+    coverage = block.get("coverage") or {}
     return {
         "version": block.get("version"),
         "pattern": {"candidate": pattern.get("new") or {}},
         "preprocessor": {"candidate": preprocessor.get("new") or {}},
+        # Per-check sufficiency is kept, reduced to the candidate the same way
+        # everything else here is. Dropping it would leave an audit unable to
+        # say whether its own facts rest on complete evidence -- and this stage
+        # is exactly where "found nothing" and "could not look" must not read
+        # alike (Codex review, P2). Unlike the evolution maps, this is not an
+        # OLD -> NEW claim, so there is nothing about it an audit cannot state.
+        "coverage": {
+            check: {"candidate": sides.get("new") or {}}
+            for check, sides in coverage.items()
+        },
     }
 
 

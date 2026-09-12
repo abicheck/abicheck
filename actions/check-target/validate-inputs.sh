@@ -166,23 +166,19 @@ if [[ "$KIND" == "bundle" ]]; then
     # baseline-channel: none guard above.
     _fail "allow-new-target: true is not supported when kind is 'bundle' -- a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. Scope the new member individually with a kind: target check instead."
   fi
-  if [[ "$ANALYSIS_ASSURANCE_COMPLETE" == "true" ]]; then
-    # analysis-assurance-complete generates an assurance overlay
-    # (assurance: {require_complete: true}) and routes the internal
-    # analysis step's own `compare` invocation into a directory/package
-    # release fan-out for kind: bundle -- that fan-out has no single
-    # analysis_assurance result to gate on (one contribution per library,
-    # not one for the whole release), and cli_compare_options.py's
-    # _reject_set_input_flags rejects assurance.require_complete: true for
-    # that operand outright. abicheck/buildsource/project_targets.py's
-    # _check_issues already rejects this same combination in the
-    # generated .abicheck.yml/run-plan.json path (analysis.assurance:
-    # complete on a bundle check), but that validation never runs for a
-    # caller invoking check-target directly -- reject it here too, at the
-    # one place every caller actually goes through, before any setup work
-    # (Codex review).
-    _fail "analysis-assurance-complete is not supported for kind: bundle -- a bundle/directory comparison has no single analysis_assurance result to gate on. Scope the assurance check to an individual library-kind target check instead."
-  fi
+  # ADR-071: analysis-assurance-complete IS supported for kind: bundle now.
+  # It generates an assurance overlay (assurance: {require_complete: true})
+  # and routes the internal analysis step's own `compare` invocation into a
+  # directory/package release fan-out; that fan-out used to reject the
+  # setting because it "has no single analysis_assurance result to gate on".
+  # It has one per compared member, and policy/release_assurance.py folds
+  # them with `max` into the same ANALYSIS_ASSURANCE exit axis a scalar
+  # `compare` uses -- so a one-member bundle gates identically to a
+  # library-kind target check, and an N-member one is floored by any member
+  # that fell short. The matching rejection in
+  # abicheck/buildsource/project_targets.py's _check_issues is gone for the
+  # same reason; there is nothing left for this guard to reject. The value
+  # is still validated as a strict 'true'/'false' just below.
 fi
 case "$ALLOW_NEW_TARGET" in
   true | false) ;;

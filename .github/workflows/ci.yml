@@ -8,7 +8,19 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # A PR groups by PR number, so a new push supersedes the stale run for
+  # the same PR. A `push` to `main` must group by *ref*, not `run_id`:
+  # every push run has a distinct `run_id`, so the previous spelling gave
+  # each one its own group and `cancel-in-progress` never cancelled a
+  # superseded main run at all — the newer commit's run simply queued
+  # behind the obsolete one. `schedule`/`workflow_dispatch` deliberately
+  # keep keying off `run_id` (unique per run) so two manual or scheduled
+  # runs stay isolated from each other and from PR runs, matching
+  # `mutation.yml`'s own grouping. This workflow is read-only validation;
+  # do not copy this to a workflow with persistent side effects (release
+  # publication, baseline rotation), where cancelling a superseded run can
+  # leave partial state.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -247,10 +259,25 @@ jobs:
       contents: read
       id-token: write
     env:
-      # Use the sys.monitoring coverage backend (Python 3.12+): far lower
-      # instrumentation overhead than the default C-trace core, with the same
-      # line+branch data. Every matrix Python here is 3.12+, so it's always
-      # available. Harmless on steps that don't collect coverage.
+      # Requests the sys.monitoring coverage backend (far lower
+      # instrumentation overhead than the default C-trace core).
+      #
+      # It is INERT today, and the comment here used to claim otherwise
+      # ("the same line+branch data"): `[tool.coverage.run] branch = true`
+      # in pyproject.toml applies to every lane, and sys.monitoring cannot
+      # measure branches before Python 3.14, so coverage.py warns
+      # ("Can't use core=sysmon: sys.monitoring can't measure branches in
+      # this version, using default core") and falls back to CTracer --
+      # measured on the canonical 3.13 lane's own interpreter, and already
+      # observed by this file's own slow-test carve-out comment below. The
+      # request is left in place rather than deleted because it becomes
+      # live, unchanged, the moment the coverage-collecting lane moves to
+      # 3.14; what was wrong was the claim, not the setting.
+      #
+      # tests/test_coverage_core_effectiveness.py asserts the two stay in
+      # agreement: it probes what coverage.py actually selects and fails if
+      # this is requested under a configuration where it silently falls
+      # back without the repo saying so.
       COVERAGE_CORE: sysmon
     strategy:
       fail-fast: false
@@ -295,10 +322,18 @@ jobs:
         if: runner.os == 'Linux' && matrix.python-version != '3.13'
         run: |
           pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
-      - name: Run tests with coverage (macOS — report only, platform tests skip)
+      - name: Run tests (macOS — no coverage, platform tests skip)
+        # Ran under --cov with an xml report until this change, and nothing
+        # read it: the Codecov upload below is gated to Linux/3.13, no
+        # artifact collected it, and no gate consulted it (macOS skips the
+        # Linux-only ELF/DWARF tests, so its ~93% is structurally below the
+        # floor and deliberately unenforced). That is instrumentation cost
+        # -- coverage adds ~60% wall time, per the canonical lane's own note
+        # above -- bought with no consumer. Every test still runs; only the
+        # measurement nobody read is gone.
         if: runner.os == 'macOS'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --cov=abicheck --cov-report=term-missing --cov-report=xml
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run tests (Windows — parallel, no coverage)
         if: runner.os == 'Windows'
         run: |
@@ -313,9 +348,10 @@ jobs:
         # 90-195s), so running them one at a time was pure wasted wall time
         # on a multi-core runner and a real contributor to this leg
         # repeatedly running past its own timeout-minutes (see that
-        # comment's own incident history above). pytest-cov's xdist
-        # integration combines per-worker coverage automatically, so
-        # --cov-append here still lands in one coverage-slow.xml.
+        # comment's own incident history above). (This step used to collect
+        # coverage into coverage-slow.xml; nothing ever read that file --
+        # not the Codecov upload, not an artifact, not a gate -- so the
+        # instrumentation was dropped and every test kept.)
         #
         # tests/test_performance.py is carved out and run separately,
         # serially, unchanged (Codex review, PR #1036). It measures real
@@ -347,10 +383,9 @@ jobs:
         # CI before this PR existed), not scheduler contention this time.
         # Instrumentation overhead corrupting the very wall-clock
         # measurement a test asserts on is exactly why performance.yml never
-        # instruments this file either; --cov-append here would only add a
-        # few small test files' worth of informational coverage to
-        # coverage-slow.xml, not gate anything (no --cov-fail-under in this
-        # step).
+        # instruments this file either. That carve-out now matches the rest
+        # of this step, which no longer instruments anything at all: the
+        # coverage it collected gated nothing and nobody read it.
         #
         # tests/test_header_scan_deadline_integration.py is carved out the
         # same way, for the same reason (Codex review, PR #1036, a third
@@ -367,7 +402,7 @@ jobs:
         # test) has no effect on them either way.
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+          pytest tests/ -v --tb=short -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal
           pytest tests/test_performance.py tests/test_header_scan_deadline_integration.py -v --tb=short -m "slow"
       - name: Test-time report (slowest tests → run summary)
         # Renders the captured durations into the GitHub run summary. Reporting

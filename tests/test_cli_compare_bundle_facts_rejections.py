@@ -865,9 +865,19 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--used-by" in out
 
-    def test_assurance_require_complete_config_is_rejected(self, tmp_path: Path) -> None:
-        # rulings.py followup: --require-complete-analysis is gone from the
-        # CLI; this driver rejects assurance.require_complete: true instead.
+    def test_assurance_require_complete_config_is_accepted(self, tmp_path: Path) -> None:
+        # ADR-071 D8: this driver used to reject assurance.require_complete:
+        # true (it had no channel for it). It has one now -- it folds every
+        # member's own AnalysisAssurance off result.per_library through the
+        # same resolve_release_assurance_decision the live fan-out uses -- so
+        # the setting must be accepted rather than rejected. Inverted rather
+        # than deleted: a silent regression back to exit 64 for a supported
+        # setting is exactly what this test is still here to catch.
+        #
+        # The stub facts document names no library that exists under the empty
+        # NEW directory, so the run still fails for its own unrelated reason
+        # (no comparable pair); what this asserts is only that the failure is
+        # no longer THIS one.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
@@ -880,8 +890,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "--config", str(cfg_path), "--format", "json",
         )
 
-        assert code == 64
-        assert "assurance.require_complete" in out
+        assert "assurance.require_complete is not supported" not in out
+        assert "no single analysis_assurance" not in out
 
     def test_require_complete_analysis_flag_no_longer_exists(self, tmp_path: Path) -> None:
         # Old CLI spelling gone outright -- no alias, no deprecation window.

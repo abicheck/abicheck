@@ -665,6 +665,83 @@ contracts](concurrency-and-initialization.md) (thread-safety and init order).
 
 ---
 
+## 6. Stored snapshots answer from stored evidence
+
+A snapshot records where each declaration came from — a `source_header` per
+function, type and variable, and (at L3) the source file of each compile unit.
+Those recorded paths are **provenance**, not a licence to re-read the current
+filesystem.
+
+That distinction matters because the usual CI shape is *stored baseline versus
+live build*: the OLD side is a `.json` snapshot published weeks ago, from a
+checkout that no longer exists on the runner. If a source-derived check
+re-opened the paths that snapshot names, it would characterise the historical
+side from whatever happens to sit at the same path today — a different branch,
+an edited header, or an unrelated file. Every answer it produced would be a
+statement about the present dressed as history.
+
+So abicheck reads a side's recorded source paths only when it is entitled to.
+A side can carry two source-evidence sources — its declared headers, and the
+compile units of an embedded L3 build pack — and each is judged on its own
+provenance, because one can be today's and the other historical at the same
+time:
+
+| Evidence source on a side | What happens |
+|---|---|
+| Declared headers, extracted in this run **from headers** (you passed `-H`, so the AST frontend opened those files) | Read normally — those paths are today's paths |
+| Declared headers, extracted in this run from the binary alone (DWARF or the symbol table) | **Not read.** `DW_AT_decl_file` names a path on the *build* machine, which this run never opened |
+| Build pack collected in this run (`--sources`, or a `--build-info` build directory) | Read normally — this run resolved those compile units |
+| Build pack that came off disk (a pre-captured `--build-info` pack, or one embedded in a stored snapshot) | **Not read.** Its recorded compile-unit paths are as historical as a stored snapshot's |
+| Anything loaded from a stored snapshot | **Not read at all.** The check reports that the historical evaluation was not possible |
+| Loaded, with an explicitly supplied and verified source context | Read, on the caller's stated provenance — the caller has asserted the recorded tree *is* the one on disk, which covers both sources |
+
+A side that is licensed for one source and not the other reports what it read
+and still establishes no *absence*: the unlicensed paths stay visible in the
+coverage account as `not_licensed`, so a construct that only the unread half
+could have contained never reads as `introduced`.
+
+The second row is the one that surprises people. A snapshot built from debug
+info records where each declaration was *compiled from*, not a file this run
+has seen — and for a downloaded or previously-built binary that path either
+does not exist locally or belongs to something else entirely. So a headerless
+`compare old.so new.so` reports these advisory facts as not evaluated. Pass the
+headers (`-H`) if you want them.
+
+The consequence you will see in a report: the lexical `pattern` and
+`preprocessor` pre-scan blocks of a stored-versus-stored (or
+stored-versus-live) comparison state their coverage as *not established* for
+the stored side, and every construct they track reads `not_evaluated` rather
+than `introduced` or `resolved`. That is the honest answer. `introduced` is a
+claim that the construct was *absent* before, and an absence claim needs
+evidence about the OLD side — not an inference from a file the runner happens
+to be holding.
+
+Sufficiency is also answered per check rather than per run, because the three
+checks rest on different evidence: the lexical scan on a set of files, macro
+divergence on one `clang -E -dM` probe per compile unit, private-header leaks
+on one `clang -M` probe per public header. A build whose compile units exceeded
+the probe cap has not established the absence of a macro divergence, but its
+public headers may still have been probed completely — so the leak check can be
+established while the macro check is not, and neither answer is allowed to
+stand in for the other.
+
+The same rule governs coverage generally. Sufficiency for an absence claim is
+computed from the set of inputs a check *expected*, with every one of them
+accounted for — scanned, missing, unreadable, unsupported, deliberately
+excluded, or not licensed — and any gap leaves the absence unestablished. A
+declared input that no longer exists is a gap, never silent full coverage; so
+is a directory that could not be read, which is easy to miss because a failed
+directory walk reports nothing at all unless you ask it to.
+Presence is the asymmetric case: a construct the scan actually saw is there,
+whatever else the scan failed to read, so `persistent` survives partial
+coverage where `introduced` and `resolved` do not.
+
+If you need the historical side genuinely re-characterised, re-dump it from a
+checkout of its own commit; comparing two snapshots will not silently do it for
+you.
+
+---
+
 ## Removed scan axes
 
 Earlier releases selected evidence with `--source-method s0…s6`, `--mode`

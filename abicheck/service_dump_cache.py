@@ -29,6 +29,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .buildsource.source_inputs import extraction_read_source_inputs
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -522,6 +524,7 @@ def cached_run_dump(
         include_labels=include_labels,
         dump_manifest=dump_manifest,
     )
+
     def _dump_uncached() -> AbiSnapshot:
         """Run the real dump with this call's arguments, cache aside.
 
@@ -645,6 +648,21 @@ def cached_run_dump(
     )
     cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
+        # A cache hit stands in for the live extraction it replaces, and needs
+        # the source-read licence stamped explicitly: `run_dump` grants it (see
+        # `buildsource.source_inputs.granting_live_source_licence`) but this
+        # path never calls `run_dump`, and the flag is runtime-only so it did
+        # not survive the cache's own serialization round trip. Without this, a warm cache
+        # would answer differently from a cold one. Granting it here is sound
+        # rather than convenient: this function is only reached because the
+        # caller named live inputs in *this* run, and `_cache_key` hashes those
+        # inputs' content, so the hit is itself a provenance check. Loading a
+        # *stored* snapshot never comes through here.
+        # Same predicate the shared dump applies: a cache hit of a headerless
+        # DWARF dump is no more entitled to re-read its DW_AT_decl_file paths
+        # than the uncached dump was (Codex review, P2).
+        if extraction_read_source_inputs(cached):
+            cached.live_source_evidence = True
         return cached
     snap = _dump_uncached()
     final_extra = _build_extra()

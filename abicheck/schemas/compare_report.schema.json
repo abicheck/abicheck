@@ -206,23 +206,65 @@
         "type": "object",
         "additionalProperties": true,
         "properties": {
-          "app": {"type": "string"},
+          "app": {
+            "type": "string"
+          },
           "verdict": {
             "type": "string",
-            "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+            "enum": [
+              "NO_CHANGE",
+              "COMPATIBLE",
+              "COMPATIBLE_WITH_RISK",
+              "API_BREAK",
+              "BREAKING"
+            ]
           },
-          "required_symbol_count": {"type": "integer"},
-          "missing_symbols": {"type": "array", "items": {"type": "string"}},
-          "missing_versions": {"type": "array", "items": {"type": "string"}},
-          "relevant_change_count": {"type": "integer"},
-          "symbol_coverage": {"type": "number"},
-          "platform": {"type": "string"},
-          "profile": {"type": "string"},
-          "provider_baseline": {"type": "string"},
-          "digest": {"type": "string"},
-          "requirement": {"type": "string", "enum": ["required", "advisory"]},
-          "unreadable": {"type": "boolean"},
-          "unreadable_reason": {"type": "string"}
+          "required_symbol_count": {
+            "type": "integer"
+          },
+          "missing_symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missing_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "relevant_change_count": {
+            "type": "integer"
+          },
+          "symbol_coverage": {
+            "type": "number"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "provider_baseline": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string",
+            "enum": [
+              "required",
+              "advisory"
+            ]
+          },
+          "unreadable": {
+            "type": "boolean"
+          },
+          "unreadable_reason": {
+            "type": "string"
+          }
         }
       }
     },
@@ -231,11 +273,24 @@
       "description": "Present only when --used-by/--used-by-manifest was given: \"N of M consumers affected\" statistics across every supplied consumer (Workstream D-S1). Purely informational.",
       "additionalProperties": true,
       "properties": {
-        "total": {"type": "integer"},
-        "evaluated": {"type": "integer"},
-        "affected": {"type": "integer"},
-        "unreadable_advisory": {"type": "integer"},
-        "unreadable_paths": {"type": "array", "items": {"type": "string"}}
+        "total": {
+          "type": "integer"
+        },
+        "evaluated": {
+          "type": "integer"
+        },
+        "affected": {
+          "type": "integer"
+        },
+        "unreadable_advisory": {
+          "type": "integer"
+        },
+        "unreadable_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "required_symbol_contract": {
@@ -245,12 +300,32 @@
       "properties": {
         "verdict": {
           "type": "string",
-          "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+          "enum": [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING"
+          ]
         },
-        "required_entrypoints": {"type": "array", "items": {"type": "string"}},
-        "missing_entrypoints": {"type": "array", "items": {"type": "string"}},
-        "relevant_change_count": {"type": "integer"},
-        "coverage": {"type": "number"}
+        "required_entrypoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing_entrypoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "relevant_change_count": {
+          "type": "integer"
+        },
+        "coverage": {
+          "type": "number"
+        }
       }
     },
     "check_id": {
@@ -611,7 +686,10 @@
           }
         },
         "unacknowledged_additions_review": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "description": "Schema 3.10 (ADR-067 D6): the additions-review gate's own evaluated result (policy allow/warn/block, the unacknowledged public additions found, and the orthogonal 0/1 gate_contribution), or null when this run never supplied an acknowledgment document to evaluate against.",
           "additionalProperties": true
         }
@@ -1105,15 +1183,24 @@
             "description": "P0.2: the subset of requested_roots a query actually resolved to a real build-system target."
           },
           "transitive_targets": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "description": "P0.2: total target count reached transitively from resolved_roots, or null when unknown."
           },
           "compile_units": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "description": "P0.2: compile-unit count for this scoped run (L3_build row only), or null when scoping was not requested."
           },
           "link_units": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "description": "P0.2: link-unit count for this scoped run (L3_build row only), or null when scoping was not requested."
           }
         }
@@ -1247,26 +1334,66 @@
       "description": "Active reclassify: rules from the policy file (report_schema_version 2.30), when any are configured -- the same audit-detail level policy_overrides already gives for kind-global overrides, listing the rule set rather than a per-finding \"which rule fired\" attribution. Selector fields present depend on which selector the rule used (see abicheck/reclassify.py).",
       "items": {
         "type": "object",
-        "required": ["to"],
+        "required": [
+          "to"
+        ],
         "properties": {
           "to": {
             "type": "string",
             "description": "ReclassifyRule.to_report_dict()'s `to` key is `to_verdict.value` (the resolved Verdict, not the raw `break`/`warn`/`risk`/`ignore` YAML spelling) -- one of these four.",
-            "enum": ["BREAKING", "API_BREAK", "COMPATIBLE_WITH_RISK", "COMPATIBLE"]
+            "enum": [
+              "BREAKING",
+              "API_BREAK",
+              "COMPATIBLE_WITH_RISK",
+              "COMPATIBLE"
+            ]
           },
-          "kind": { "type": "string" },
-          "symbol": { "type": "string" },
-          "symbol_pattern": { "type": "string" },
-          "type_pattern": { "type": "string" },
-          "member_name": { "type": "string" },
-          "namespace": { "type": "string" },
-          "entity_namespace": { "type": "string" },
-          "cause_namespace": { "type": "string" },
-          "source_location": { "type": "string" },
-          "binding": { "type": "string", "enum": ["global", "weak", "local", "unique", "other"] },
-          "reason": { "type": "string" },
-          "label": { "type": "string" },
-          "expires": { "type": "string" }
+          "kind": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "symbol_pattern": {
+            "type": "string"
+          },
+          "type_pattern": {
+            "type": "string"
+          },
+          "member_name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "entity_namespace": {
+            "type": "string"
+          },
+          "cause_namespace": {
+            "type": "string"
+          },
+          "source_location": {
+            "type": "string"
+          },
+          "binding": {
+            "type": "string",
+            "enum": [
+              "global",
+              "weak",
+              "local",
+              "unique",
+              "other"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }
@@ -1409,7 +1536,10 @@
             "description": "The subject the sources disagree about \u2014 a symbol name, a library/SONAME, or a version string."
           },
           "side": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "'old'/'new' when the conflict is scoped to one comparison side, else null (e.g. a package-vs-binary check run once per package)."
           },
           "reason_code": {
@@ -1436,7 +1566,10 @@
                   "description": "Structured values (e.g. an observed SONAME) backing `claim`, keyed by name."
                 }
               },
-              "required": ["source_kind", "claim"]
+              "required": [
+                "source_kind",
+                "claim"
+              ]
             }
           },
           "detail": {
@@ -1444,26 +1577,56 @@
             "description": "Structured values about the conflict itself, beyond its per-source detail."
           }
         },
-        "required": ["conflict_kind", "entity", "reason_code", "sources"]
+        "required": [
+          "conflict_kind",
+          "entity",
+          "reason_code",
+          "sources"
+        ]
       }
     },
     "use_case_impact": {
       "type": "object",
       "description": "Schema 2.39. Present only under `compare --use-cases MANIFEST`: the declared use cases, each one's resolved/unresolved entrypoints, and this comparison's findings attributed to the use cases whose entrypoints can be shown to reach them. Read-only evidence -- never an input to a verdict, gate, or exit code; unattributed_changes counts the findings no declared entrypoint could be shown to reach, which is an absence of proof rather than proof they are harmless.",
       "properties": {
-        "manifest": {"type": "string"},
-        "use_case_count": {"type": "integer"},
-        "total_changes": {"type": "integer"},
-        "unattributed_changes": {"type": "integer"},
+        "manifest": {
+          "type": "string"
+        },
+        "use_case_count": {
+          "type": "integer"
+        },
+        "total_changes": {
+          "type": "integer"
+        },
+        "unattributed_changes": {
+          "type": "integer"
+        },
         "use_cases": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "use_case": {"type": "string"},
-              "resolved_entrypoints": {"type": "array", "items": {"type": "string"}},
-              "unresolved_entrypoints": {"type": "array", "items": {"type": "string"}},
-              "tests": {"type": "array", "items": {"type": "string"}}
+              "use_case": {
+                "type": "string"
+              },
+              "resolved_entrypoints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unresolved_entrypoints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tests": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
@@ -1474,9 +1637,16 @@
             "items": {
               "type": "object",
               "properties": {
-                "symbol": {"type": "string"},
-                "kind": {"type": "string"},
-                "finding_id": {"type": "string", "description": "The report's own finding_id for this change, so a row joins back to the findings/changes array \u2014 (symbol, kind) alone does not identify a finding (one symbol can emit the same kind twice)."}
+                "symbol": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "finding_id": {
+                  "type": "string",
+                  "description": "The report's own finding_id for this change, so a row joins back to the findings/changes array \u2014 (symbol, kind) alone does not identify a finding (one symbol can emit the same kind twice)."
+                }
               }
             }
           }
@@ -1526,7 +1696,7 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants — see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) — evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, with `compare --abi3` the first CLI-reachable trigger for evidence_contract_error_contribution (schema 3.8: a candidate that is not a recognisable CPython extension module cannot be audited at all) and no CLI-reachable trigger for budget_overflow_contribution yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports. loadability_contribution (schema 3.11, ADR-068 D6) is a fourth always-0 placeholder here for the identical reason -- it is `deps compare`/`deps tree`'s own axis (stack_checker.exit_decision_for_stack_compare/exit_decision_for_stack_tree), and `deps` does not emit this schema's report shape at all.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison \u2014 code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants \u2014 see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report \u2014 every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) \u2014 evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, with `compare --abi3` the first CLI-reachable trigger for evidence_contract_error_contribution (schema 3.8: a candidate that is not a recognisable CPython extension module cannot be audited at all) and no CLI-reachable trigger for budget_overflow_contribution yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports. loadability_contribution (schema 3.11, ADR-068 D6) is a fourth always-0 placeholder here for the identical reason -- it is `deps compare`/`deps tree`'s own axis (stack_checker.exit_decision_for_stack_compare/exit_decision_for_stack_tree), and `deps` does not emit this schema's report shape at all.",
       "required": [
         "code",
         "reasons",
@@ -1575,12 +1745,18 @@
         },
         "contract_coverage_contribution": {
           "type": "integer",
-          "enum": [0, 1],
+          "enum": [
+            0,
+            1
+          ],
           "description": "Duplicated from the top-level contract_coverage_exit_contribution (present only under --contract) for a single self-contained decision object; 0 when no contract domain was selected."
         },
         "analysis_assurance_contribution": {
           "type": "integer",
-          "enum": [0, 1],
+          "enum": [
+            0,
+            1
+          ],
           "description": "Duplicated from the top-level analysis_assurance_exit_contribution for a single self-contained decision object; 0 when `.abicheck.yml`'s `assurance.require_complete: true` was not set."
         },
         "crosscheck_promotion_contribution": {
@@ -1683,37 +1859,100 @@
       "properties": {
         "_tier": {
           "type": "string",
-          "enum": ["contract", "baseline"]
+          "enum": [
+            "contract",
+            "baseline"
+          ]
         },
-        "policy.base": { "type": "string" },
-        "policy.overrides": { "type": "string" },
-        "policy.reclassify": { "type": "string" },
-        "policy.frozen_namespaces": { "type": "string" },
-        "policy.pattern_verdicts": { "type": "string" },
-        "policy.collapse_versioned_symbols": { "type": "string" },
-        "policy.surface_metrics": { "type": "string" },
-        "policy.env_matrix": { "type": "string" },
-        "policy.reconcile_build_context": { "type": "string" },
-        "surface.internal_namespaces": { "type": "string" },
-        "surface.experimental_namespaces": { "type": "string" },
-        "surface.explicit_scope": { "type": "string" },
-        "surface.scope_to_public_surface": { "type": "string" },
-        "surface.scope_to_public_surface_requested": { "type": "string" },
-        "contract.mode": { "type": "string" },
-        "contract.unresolved": { "type": "string" },
-        "contract.overlays": { "type": "string" },
-        "gate.exit_code_scheme": { "type": "string" },
-        "gate.require_complete_analysis": { "type": "string" },
-        "gate.scope": { "type": "string" },
-        "gate.severity.abi_breaking": { "type": "string" },
-        "gate.severity.potential_breaking": { "type": "string" },
-        "gate.severity.quality_issues": { "type": "string" },
-        "gate.severity.addition": { "type": "string" },
-        "gate.on_incomplete_scope": { "type": "string", "description": "ADR-065 D6 (schema 2.50): the scope.on_incomplete policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart." },
-        "gate.fail_on_removed_library": { "type": "string", "description": "ADR-065 (schema 3.15): the gate.fail_on_removed_library setting a directory/package release resolved ('True'/'False'), empty for a scalar comparison, to which it does not apply. Two otherwise identical releases with a proven removed library exit 0 and 8 under the two values, so the digest tells them apart." },
-        "assurance.require_evidence": { "type": "string" },
-        "suppressions": { "type": "string" },
-        "packs": { "type": "string" }
+        "policy.base": {
+          "type": "string"
+        },
+        "policy.overrides": {
+          "type": "string"
+        },
+        "policy.reclassify": {
+          "type": "string"
+        },
+        "policy.frozen_namespaces": {
+          "type": "string"
+        },
+        "policy.pattern_verdicts": {
+          "type": "string"
+        },
+        "policy.collapse_versioned_symbols": {
+          "type": "string"
+        },
+        "policy.surface_metrics": {
+          "type": "string"
+        },
+        "policy.env_matrix": {
+          "type": "string"
+        },
+        "policy.reconcile_build_context": {
+          "type": "string"
+        },
+        "surface.internal_namespaces": {
+          "type": "string"
+        },
+        "surface.experimental_namespaces": {
+          "type": "string"
+        },
+        "surface.explicit_scope": {
+          "type": "string"
+        },
+        "surface.scope_to_public_surface": {
+          "type": "string"
+        },
+        "surface.scope_to_public_surface_requested": {
+          "type": "string"
+        },
+        "contract.mode": {
+          "type": "string"
+        },
+        "contract.unresolved": {
+          "type": "string"
+        },
+        "contract.overlays": {
+          "type": "string"
+        },
+        "gate.exit_code_scheme": {
+          "type": "string"
+        },
+        "gate.require_complete_analysis": {
+          "type": "string"
+        },
+        "gate.scope": {
+          "type": "string"
+        },
+        "gate.severity.abi_breaking": {
+          "type": "string"
+        },
+        "gate.severity.potential_breaking": {
+          "type": "string"
+        },
+        "gate.severity.quality_issues": {
+          "type": "string"
+        },
+        "gate.severity.addition": {
+          "type": "string"
+        },
+        "gate.on_incomplete_scope": {
+          "type": "string",
+          "description": "ADR-065 D6 (schema 2.50): the scope.on_incomplete policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart."
+        },
+        "gate.fail_on_removed_library": {
+          "type": "string",
+          "description": "ADR-065 (schema 3.15): the gate.fail_on_removed_library setting a directory/package release resolved ('True'/'False'), empty for a scalar comparison, to which it does not apply. Two otherwise identical releases with a proven removed library exit 0 and 8 under the two values, so the digest tells them apart."
+        },
+        "assurance.require_evidence": {
+          "type": "string"
+        },
+        "suppressions": {
+          "type": "string"
+        },
+        "packs": {
+          "type": "string"
+        }
       },
       "additionalProperties": true
     },
@@ -1739,13 +1978,22 @@
           ]
         },
         "requested_depth": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "effective_depth": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "depth_satisfied": {
-          "type": ["boolean", "null"]
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "target_accounting": {
           "type": "object"
@@ -1770,7 +2018,10 @@
         },
         "schema_staleness_status": {
           "type": "string",
-          "enum": ["clean", "degraded"],
+          "enum": [
+            "clean",
+            "degraded"
+          ],
           "description": "Schema 4.1: whether either compared snapshot carries a *_facts_reliable flag stale enough to matter for THIS pair, per policy.analysis_assurance_schema_staleness.schema_staleness_status -- pair-aware: a stale flag whose one real consumer's own gate (header confirmation and/or matching producer on the OTHER side) never actually runs for this pair is excluded rather than reported."
         },
         "fact_set_comparability": {
@@ -1783,6 +2034,72 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "pattern_preprocessor_scan": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The lexical pattern pre-scan and preprocessor pre-scan, folded per side and stated as an evolution per identity (ADR-068 D3/D4/D5). Advisory facts only: never a verdict, severity, or exit-code contributor. Emitted since report_schema_version 3.12; described here as of 4.5, when the block gained its `coverage` object \u2014 the same shape audit_report.schema.json carries under this key, so a consumer of either recognises the other.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "object",
+          "description": "Each side's raw PatternFactsResult.to_dict() -- the same shape `scan`'s own report carries under `pattern_scan`.",
+          "properties": {
+            "old": {
+              "$ref": "#/$defs/patternScanSide"
+            },
+            "new": {
+              "$ref": "#/$defs/patternScanSide"
+            },
+            "escalation_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            }
+          }
+        },
+        "preprocessor": {
+          "type": "object",
+          "properties": {
+            "old": {
+              "$ref": "#/$defs/preprocessorScanSide"
+            },
+            "new": {
+              "$ref": "#/$defs/preprocessorScanSide"
+            },
+            "macro_divergence_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            },
+            "header_leak_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "description": "Added in 1.5. Per-check, per-side sufficiency: whether an *absence* claim is established for that check on that side. Answered per check because the three rest on different evidence -- a set of files, one `clang -E -dM` probe per compile unit, one `clang -M` probe per public header -- so one may be established while another is not. A check whose side is not established never yields `introduced`/`resolved` for any identity; `reason` says why.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "old": {
+                "$ref": "#/$defs/checkSufficiency"
+              },
+              "new": {
+                "$ref": "#/$defs/checkSufficiency"
+              }
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "pattern_escalation",
+              "macro_divergence",
+              "header_leak"
+            ]
           }
         }
       }
@@ -2408,7 +2725,13 @@
         "symbol_binding": {
           "type": "string",
           "description": "The removed symbol's ELF linkage (schema 2.32), present only on func_removed/func_removed_elf_only/var_removed/func_deleted_elf_fallback findings whose binding was captured (non-ELF platforms, older snapshots, and an unmatched .dynsym entry all omit this key). A WEAK/COMDAT symbol usually \u2014 but not always \u2014 means every consumer already carries its own copy (see the binding: suppression selector's documentation for the extern-template counterexample); this is provider-side evidence about the library's own build, not proof a removal is safe.",
-          "enum": ["global", "weak", "local", "unique", "other"]
+          "enum": [
+            "global",
+            "weak",
+            "local",
+            "unique",
+            "other"
+          ]
         },
         "demangled_symbol": {
           "type": "string",
@@ -2437,7 +2760,12 @@
         "cross_source_evolution": {
           "type": "string",
           "description": "Schema 3.7 (ADR-068 D3/D4/D5): present only on a finding produced by compare()'s automatic cross-source stage (no opt-in flag) evaluating a cross-source hygiene check independently on OLD and NEW. 'introduced' \u2014 absent on OLD (OLD evidence sufficient to say so), present on NEW. 'resolved' \u2014 present on OLD, absent on NEW. 'persistent' \u2014 present on both. 'not_evaluated' \u2014 at least one side's evidence could not answer the question, so neither introduced/resolved/persistent can be asserted (mandatory, not a convenience \u2014 never infer 'introduced' from missing baseline evidence). Purely descriptive: never changes this finding's severity/verdict. Not to be confused with the top-level `finding_evolution` object, which tracks a finding's identity across a *chain* of separate compare() calls over time.",
-          "enum": ["introduced", "resolved", "persistent", "not_evaluated"]
+          "enum": [
+            "introduced",
+            "resolved",
+            "persistent",
+            "not_evaluated"
+          ]
         },
         "reviewer_action": {
           "type": "string",
@@ -2738,6 +3066,197 @@
             "type": "string"
           }
         }
+      }
+    },
+    "evolutionMap": {
+      "type": "object",
+      "description": "One evolution value per identity. `not_evaluated` means the question could not be answered from the available evidence -- never a fifth verdict and never a silent omission: an identity either side flagged always appears. `persistent` rests on both sides having *observed* the construct, so it needs no coverage; `introduced` and `resolved` each assert an *absence*, so each requires the relevant side's `coverage` to be established.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "persistent",
+          "introduced",
+          "resolved",
+          "not_evaluated"
+        ]
+      }
+    },
+    "checkSufficiency": {
+      "type": "object",
+      "description": "Added in 1.5.",
+      "required": [
+        "established",
+        "reason"
+      ],
+      "properties": {
+        "established": {
+          "type": "boolean",
+          "description": "True only when an absence claim over this check's inputs on this side is supported by evidence."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why `established` is false -- a missing or unreadable declared input, a failed or truncated probe, or no licence to read a stored snapshot's recorded source paths. Empty when true."
+        }
+      }
+    },
+    "patternScanSide": {
+      "type": "object",
+      "description": "One side's lexical pattern scan.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "files_scanned": {
+          "type": "integer"
+        },
+        "files_skipped": {
+          "type": "integer"
+        },
+        "sufficient": {
+          "type": "boolean",
+          "description": "Added in 1.5. Whether an absence claim over this side's scan is established. Consult this rather than `files_scanned`/`files_skipped`: those count only files the discovery walk found, so a declared root that no longer exists -- or a directory that could not be enumerated -- contributed to neither."
+        },
+        "inputs": {
+          "$ref": "#/$defs/sourceInputAccount"
+        },
+        "facts": {
+          "type": "array"
+        },
+        "escalation_triggers": {
+          "type": "array"
+        },
+        "counts_by_kind": {
+          "type": "object"
+        }
+      }
+    },
+    "sourceInputAccount": {
+      "type": "object",
+      "description": "Added in 1.5. The complete account of this scan's *expected* inputs: every declared root resolves to exactly one disposition, so 'scanned and found nothing' is distinguishable from 'the root is gone'.",
+      "properties": {
+        "licence": {
+          "type": "object",
+          "description": "Whether this side's recorded source paths could be read at all. A path recorded in a snapshot is provenance, not permission to re-read the current filesystem for a historical fact: a side is read only when it was extracted in this run (`live_extraction`) or the caller supplied a verified context (`verified_context`). Otherwise `stored_snapshot`, and nothing was opened or even stat'd.",
+          "properties": {
+            "permitted": {
+              "type": "boolean"
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "live_extraction",
+                "verified_context",
+                "stored_snapshot"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        },
+        "sufficient": {
+          "type": "boolean"
+        },
+        "insufficiency_reason": {
+          "type": "string"
+        },
+        "counts": {
+          "type": "object",
+          "description": "Per-disposition input counts.",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "selected",
+              "scanned",
+              "missing",
+              "unreadable",
+              "unsupported",
+              "excluded",
+              "not_licensed"
+            ]
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "description": "The individual inputs expected to contribute evidence that did not. Non-empty means no absence claim is established here.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "preprocessorScanSide": {
+      "type": "object",
+      "description": "One side's S2 preprocessor scan.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "ran": {
+          "type": "boolean"
+        },
+        "skipped_reason": {
+          "type": "string"
+        },
+        "tus_scanned": {
+          "type": "integer"
+        },
+        "headers_scanned": {
+          "type": "integer"
+        },
+        "attempted": {
+          "type": "integer"
+        },
+        "succeeded": {
+          "type": "integer"
+        },
+        "probes_truncated": {
+          "type": "integer"
+        },
+        "family_attempted": {
+          "$ref": "#/$defs/probeFamilyTally"
+        },
+        "family_succeeded": {
+          "$ref": "#/$defs/probeFamilyTally"
+        },
+        "family_truncated": {
+          "$ref": "#/$defs/probeFamilyTally"
+        },
+        "diagnostics": {
+          "type": "array"
+        },
+        "abi_macros": {
+          "type": "object"
+        },
+        "divergences": {
+          "type": "array"
+        },
+        "leaks": {
+          "type": "array"
+        }
+      }
+    },
+    "probeFamilyTally": {
+      "type": "object",
+      "description": "Added in 1.5. Probe counts keyed by family: `macro` (one `clang -E -dM` per compile unit) and `header` (one `clang -M` per public header). The `attempted`/`succeeded`/`probes_truncated` aggregates beside these mix the two families and so cannot answer either check's coverage on its own -- `coverage` is computed from these. `family_attempted` is also what distinguishes 'probed and found nothing' from 'never probed': a successful macro probe of a unit defining none of the curated ABI macros contributes no entry to `abi_macros`, so `tus_scanned` can be 0 for a fully-covered run.",
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "propertyNames": {
+        "enum": [
+          "macro",
+          "header"
+        ]
       }
     }
   }

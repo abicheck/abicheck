@@ -28,6 +28,7 @@ as invariants over arbitrary input rather than only through the one caller.
 
 from __future__ import annotations
 
+import logging as _logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Generic, TypeVar
@@ -73,3 +74,23 @@ def describe_dropped(dropped: Mapping[K, int]) -> str:
     the duplicate-symbol warning has always used.
     """
     return ", ".join(f"{key} (\u00d7{count + 1})" for key, count in dropped.items())
+
+
+def warn_dropped(
+    logger: _logging.Logger, subject: str, owner: str, dropped: Mapping[K, int]
+) -> None:
+    """Report the declarations a first-wins index had to drop, if any.
+
+    Lifted out of ``AbiSnapshot._warn_dropped``: it is a reporting concern over
+    this module's own :func:`describe_dropped`, not part of the snapshot's
+    shape, and every input it needs (a subject label, an ``owner`` the caller
+    formats, the dropped counts) is already a plain value.
+    """
+    if not dropped:
+        return
+    logger.warning(
+        "Duplicate %s skipped (first-wins) in %s: %s",
+        subject,
+        owner,
+        describe_dropped(dropped),
+    )

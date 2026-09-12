@@ -48,6 +48,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .buildsource.source_inputs import granting_live_source_licence
 from .errors import ValidationError
 from .workflows.artifact import ResolvedArtifactPlan
 from .workflows.artifact.compile_context_gate import side_effective_compile_context
@@ -557,3 +558,17 @@ def execute_dump_request(
         effective_compile_context=resolution.effective_compile_context,
         resolved_execution_context=resolved_execution_context,
     )
+
+
+# The source-read licence, granted at the one function every ``DumpResult`` in
+# this pipeline returns through -- deliberately here rather than at each of the
+# three branches above (ELF/PE/Mach-O, binary-less header-only, binary-less
+# source-only). `service.run_dump` was stamped first, then the ABICC front end,
+# and the typed API's two binary-less dispatches still came back unlicensed:
+# fixing execution branches one at a time is how that keeps happening, so the
+# grant sits at the join instead (Codex review, P2). Conditional and
+# idempotent, so the already-wrapped `run_dump` composing over this changes
+# nothing. See ``buildsource/source_inputs.py`` for the contract.
+execute_dump_request = granting_live_source_licence(
+    execute_dump_request, snapshot_attr="snapshot"
+)

@@ -377,9 +377,16 @@ key today: `require_complete:` (default `false`) — the former `compare
 is not `complete`, independent of the compatibility verdict. Contributes
 exit `1`, folded with `max` the same way `--contract`'s coverage axis is
 (ADR-049 Phase 7): it raises a clean `0` to `1` and never lowers a `2`/`4`.
-Single-pair `compare` only — a directory/package (release) fan-out rejects
-it (the per-library fan-out has no single `analysis_assurance` result to
-gate on). See [Exit codes § Analysis-assurance
+Applies to a single-pair `compare` and to a directory/package (release)
+fan-out alike (ADR-071 — the release operand used to reject it). A release
+has one `analysis_assurance` per compared member, not one for the run, so its
+contribution is `max` over the members': over a one-member package that is
+the identity (it gates exactly as the scalar path does for the same pair),
+and any member whose analysis fell short floors the release no matter how
+many complete siblings it has. The release JSON then carries an
+`analysis_assurance` block naming the short members and why, plus a
+per-`libraries[]` `analysis_assurance_status`; a stored `BundleFacts` operand
+folds identically. See [Exit codes § Analysis-assurance
 contribution](exit-codes.md#analysis-assurance-contribution-p04).
 
 ```yaml
@@ -469,6 +476,17 @@ Deliberately node-based, not a memory size — see
 `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`'s own docstring for the real
 calibration measurement and why a memory-labelled dial would understate
 the actual container-count defense this budget provides.
+
+**Through the composite GitHub Action**, "an explicitly-supplied `--config`"
+means the `build-config` input: a config named there is the operator's own
+reviewed document and its raise is honored, while a config the Action
+*discovered* on its own is folded into a synthesized overlay that caps this
+one key back to the default (with a `::warning::` saying so). So a
+large-toolkit stored-facts comparison in CI needs `build-config` pointing at
+the `.abicheck.yml` carrying the raised value — not `extra-args`, and not a
+bare `.abicheck.yml` left for autodiscovery. The decode failure itself names
+this key and that requirement, so a run that hits the ceiling says how to fix
+it rather than reading as an unfixable refusal.
 
 ---
 
