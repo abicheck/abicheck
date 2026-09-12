@@ -73,6 +73,7 @@ from pathlib import Path
 
 import click
 import pytest
+from _workflow_exec import bash_executable, require_bash
 
 from abicheck.cli import main as abicheck_main
 
@@ -117,6 +118,7 @@ def _run_shell(body: str, *, prelude: str = "") -> str:
     """Source ``run.sh``'s helper region plus *prelude*, run *body*, return
     stdout. *prelude* establishes (or deliberately omits) the interpreter
     variables ``_cli_value_options_init`` reads."""
+    require_bash()
     script = RUN_SH.read_text(encoding="utf-8")
     helpers = script[: script.index(_HELPERS_MARKER)]
     with tempfile.NamedTemporaryFile(
@@ -126,7 +128,7 @@ def _run_shell(body: str, *, prelude: str = "") -> str:
         path = handle.name
     try:
         return subprocess.run(
-            ["bash", path], capture_output=True, text=True, encoding="utf-8"
+            [bash_executable(), path], capture_output=True, text=True, encoding="utf-8"
         ).stdout
     finally:
         os.unlink(path)
@@ -317,6 +319,7 @@ class TestUndeterminedOptionTableFailsClosed:
     )
 
     def _run(self, body: str) -> subprocess.CompletedProcess[str]:
+        require_bash()
         script = RUN_SH.read_text(encoding="utf-8")
         helpers = script[: script.index(_HELPERS_MARKER)]
         with tempfile.NamedTemporaryFile(
@@ -326,7 +329,10 @@ class TestUndeterminedOptionTableFailsClosed:
             path = handle.name
         try:
             return subprocess.run(
-                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
             )
         finally:
             os.unlink(path)
@@ -391,6 +397,120 @@ class TestUndeterminedOptionTableFailsClosed:
 @pytest.mark.skipif(
     not ACTION_YML.is_file(), reason="check-target action.yml not found"
 )
+class TestCheckTargetTableSurvivesItsOwnEncoding:
+    """Bug class ``cli_surface.derived_table_lost_in_its_own_encoding``, on
+    the SECOND copy of the derivation.
+
+    ``TestCheckTargetDerivesTheSameWay`` above splits ``$_ct_cli_value_options``
+    on ``|`` and compares the resulting *set* to Click's, which is blind to
+    both of the defects this class states -- a set built by splitting does not
+    care whether the string it came from was delimited on the right, and it
+    does not care what the shell's own membership test would answer. Both
+    defects were live in ``actions/check-target/action.yml`` while that test
+    passed:
+
+    * the table was framed ``|a|b|c`` while the lookup asks for ``|<opt>|``,
+      so the positionally-last spelling never matched -- on every platform;
+    * on windows-latest ``$PY`` is a native ``python.exe`` whose text-mode
+      stdout writes CRLF, so every entry arrived as ``--config\r`` and nothing
+      matched at all, while ``_ct_cli_value_options_derived`` still read
+      ``true`` so ``_ct_require_cli_value_options_or_fail`` never fired.
+
+    So this asks the real ``_ct_extra_args_is_value_option`` about every
+    option Click declares, under an interpreter whose newline convention
+    differs from the host's -- the same guard
+    ``tests/test_action_run_sh_option_table.py`` applies to ``run.sh``'s copy,
+    which is the point: the two copies drifted once already, and a guard on
+    only one of them is how the second stayed broken.
+    """
+
+    def _recognized(self, py_bin: str, options: list[str]) -> dict[str, bool]:
+        """Ask check-target's own membership test about each of *options*."""
+        require_bash()
+        text = ACTION_YML.read_text(encoding="utf-8")
+        start = text.index('        _ct_cli_value_options=""')
+        end = text.index(
+            "        }\n", text.index("        _ct_extra_args_is_value_option() {")
+        ) + len("        }\n")
+        body = "\n".join(
+            line[8:] if line.startswith("        ") else line
+            for line in text[start:end].splitlines()
+        )
+        checks = "".join(
+            f'if _ct_extra_args_is_value_option {opt!r}; then printf "%s YES\\n" {opt!r};'
+            f' else printf "%s NO\\n" {opt!r}; fi\n'
+            for opt in options
+        )
+        script = (
+            "set -uo pipefail\n"
+            f"PY={shlex.quote(py_bin)}\n"
+            '_py_safe_dir="$(mktemp -d)"\n'
+            "trap 'rm -rf \"$_py_safe_dir\"' EXIT\n" + body + "\n" + checks
+        )
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+        ) as handle:
+            handle.write(script)
+            path = handle.name
+        try:
+            result = subprocess.run(
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+        finally:
+            os.unlink(path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return {
+            line.rsplit(" ", 1)[0]: line.rsplit(" ", 1)[1] == "YES"
+            for line in result.stdout.splitlines()
+            if line
+        }
+
+    @staticmethod
+    def _crlf_interpreter(tmp_path: Path) -> str:
+        """This interpreter, wrapped so its stdout is CRLF.
+
+        Emulates the byte stream ``python.exe`` produces, so the Windows
+        failure reproduces on every platform rather than only where a
+        Windows runner exists.
+        """
+        shim = tmp_path / "crlf_python"
+        shim.write_text(
+            f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@" | sed "s/$/\\r/"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        shim.chmod(0o755)
+        return str(shim)
+
+    def test_every_value_taking_option_is_recognized(self) -> None:
+        """The platform-independent half -- the one the missing trailing
+        delimiter broke, for whichever option ``params`` happens to yield
+        last."""
+        options = sorted(_value_taking_options(("compare",)))
+        assert options, "no value-taking options found via introspection"
+        recognized = self._recognized(sys.executable, options)
+        missed = sorted(opt for opt in options if not recognized.get(opt))
+        assert not missed, (
+            f"check-target's table does not match these options: {missed}"
+        )
+
+    def test_a_crlf_interpreter_changes_nothing(self, tmp_path: Path) -> None:
+        options = sorted(_value_taking_options(("compare",))) + [
+            "--verbose",
+            "--dry-run",
+            "not-an-option",
+        ]
+        lf = self._recognized(sys.executable, options)
+        crlf = self._recognized(self._crlf_interpreter(tmp_path), options)
+        assert crlf == lf
+        # Vacuity guard on the oracle itself: a table answering True (or
+        # False) for everything would otherwise satisfy the equality above.
+        assert any(lf.values()) and not all(lf.values())
+
+
 class TestCheckTargetDerivesTheSameWay:
     """``actions/check-target/action.yml`` carried a byte-identical copy of the
     same list, documented as kept "in sync with run.sh's by hand". Both are now
@@ -398,6 +518,7 @@ class TestCheckTargetDerivesTheSameWay:
     wrong copies can agree -- and did) but "each equals the real CLI"."""
 
     def _derived(self) -> set[str]:
+        require_bash()
         text = ACTION_YML.read_text(encoding="utf-8")
         start = text.index('        _ct_cli_value_options=""')
         end = text.index(
@@ -423,7 +544,10 @@ class TestCheckTargetDerivesTheSameWay:
             path = handle.name
         try:
             out = subprocess.run(
-                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
             ).stdout
         finally:
             os.unlink(path)
@@ -446,6 +570,7 @@ class TestCheckTargetDerivesTheSameWay:
     def _run_guard(self, env_assignments: str) -> subprocess.CompletedProcess[str]:
         """Execute check-target's derivation + guard with *env_assignments*
         prepended, so a test can choose which extra-args variable is set."""
+        require_bash()
         text = ACTION_YML.read_text(encoding="utf-8")
         start = text.index('        _ct_cli_value_options=""')
         end = text.index(
@@ -473,7 +598,10 @@ class TestCheckTargetDerivesTheSameWay:
             path = handle.name
         try:
             return subprocess.run(
-                ["bash", path], capture_output=True, text=True, encoding="utf-8"
+                [bash_executable(), path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
             )
         finally:
             os.unlink(path)
