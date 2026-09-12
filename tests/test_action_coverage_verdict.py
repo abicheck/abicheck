@@ -815,14 +815,34 @@ class TestADemotedBreakStaysVisible:
         assert outputs["_exit"] == 0, outputs["_stdout"]
         assert "Reported, not gated" not in outputs["_summary"], outputs["_summary"]
 
-    def test_an_unreadable_report_falls_back_to_compatible(
+    def test_a_requested_json_report_that_is_unreadable_reports_no_result(
         self, tmp_path: Path
     ) -> None:
-        """No report to read is not evidence of a break. Exit 0 with nothing
-        to contradict it stays COMPATIBLE, as it always has."""
+        """No report to read is not evidence of a break -- and, when the caller
+        asked for that report, not evidence of its absence either.
+
+        This assertion used to read ``verdict == "COMPATIBLE"``, documented as
+        "exit 0 with nothing to contradict it stays COMPATIBLE, as it always
+        has". The first half of that reasoning is sound and unchanged: nothing
+        here fabricates a break, and the assertion below still pins that. The
+        second half turned a `format: json` run whose own `output-file` is
+        unreadable into a *clean compatibility claim*, which AGENTS.md's own
+        product rule forbids -- "missing evidence lowers assurance and is
+        reported; it never fabricates a break and never upgrades to a clean
+        compatibility claim". Now REPORT_UNREADABLE: no break asserted, no pass
+        asserted, and the step fails so the gap is not silently accepted.
+
+        Scoped to a report the caller requested. A non-json-format run whose
+        internal sidecar is missing still publishes COMPATIBLE -- see
+        `action/AGENTS.md`'s "The residual" section for why that needs its own
+        verdict value rather than this one.
+        """
         outputs = self._outputs(tmp_path, "compare", _MALFORMED)  # type: ignore[arg-type]
-        assert outputs["verdict"] == "COMPATIBLE", outputs
-        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
+        # Specifically NOT a fabricated break, which is the half of the
+        # original contract that still holds.
+        assert outputs["verdict"] not in ("BREAKING", "API_BREAK"), outputs
+        assert outputs["_exit"] == 1, outputs["_stdout"]
 
     def test_the_text_report_is_not_read(self, tmp_path: Path) -> None:
         """ADR-063 Track T8: a rendered `format: text` report is no longer

@@ -912,7 +912,32 @@ outputs:
       be rejected outright for that operand, and this output declared itself
       single-pair-only on the strength of that rejection), API_BREAK,
       BREAKING, REMOVED_LIBRARY (directory/package
-      operands with fail-on-removed-library set), or ERROR.
+      operands with fail-on-removed-library set), ERROR, or
+      REPORT_UNREADABLE (abicheck itself exited 0, but the JSON report you
+      requested was absent, truncated, unparseable, not a JSON object, an empty
+      one, or a document that parsed cleanly while carrying no abicheck result
+      at all (no verdict, no run_outcome, no findings) -- so nothing read this
+      run's result. At exit 0 it also covers a report whose analysis_assurance
+      block has no analysis_assurance_exit_contribution beside it on a schema
+      that emits the two together, which makes it internally inconsistent
+      rather than passing. That last case is scoped to exit 0 deliberately: at
+      a nonzero exit the report's own compatibility verdict IS readable, and the
+      two axes are orthogonal, so the real verdict (BREAKING/API_BREAK/...) is
+      published rather than erased -- replacing an established break with "no
+      result" would discard evidence, which is the opposite of this value's
+      purpose. The inconsistency still fails the step unconditionally and still
+      emits its own error annotation on every exit path; only the verdict label
+      differs.
+      Fails the step unconditionally and is never waived by a fail-on-* input:
+      none of those is a statement that an unread result should be reported as a
+      pass. Distinct from ERROR, which is abicheck reporting its own failure
+      through a non-zero exit code; here the tool claimed success and the report
+      backing that claim is missing or unusable. "Requested" means format: json
+      (whether it lands in output-file or on stdout) or your own extra-args
+      --write json=PATH; with a non-json format, the absence of this Action's
+      own internal sidecar still yields COMPATIBLE, since exit 0 does establish
+      that abicheck's gate passed even when the tier cannot be read. Previously
+      every one of these states published COMPATIBLE).
       For compare's audit-only shape (old-library and abi-baseline both
       omitted -- the replacement for a baseline-less mode: scan/audit: true
       request, ADR-068): COVERAGE_INCOMPLETE (with --contract via
@@ -954,9 +979,10 @@ outputs:
       report at all, so there is no candidate-side finding -- or absence
       of one -- to claim either way. Distinct from AUDIT_CLEAN, which
       asserts a real audit ran and found nothing; see the command preview
-      in the job log for what a real run would do. Two-sided dry-run is a
-      separate, pre-existing gap this value does not cover -- only the
-      audit-only shape's dry-run behavior is documented here),
+      in the job log for what a real run would do. A two-sided dry run now
+      publishes this same value, for the same reason: a preview performs no
+      comparison, so it has no compatibility result either. That shape used
+      to publish COMPATIBLE, which claimed a result no analysis produced),
       ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
       `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- the same P0.4
@@ -964,6 +990,13 @@ outputs:
       here since that config key applies to both compare shapes;
       not a two-sided compatibility verdict either, since no baseline was
       compared -- fails the step unconditionally),
+      REPORT_UNREADABLE (reachable on this shape too, for the same reason
+      and with the same meaning as in the two-sided enumeration above: an
+      exit-0 run whose requested JSON report was missing, unusable, or
+      self-contradictory establishes no result, and an audit's AUDIT_CLEAN/
+      AUDIT_RISK are results like any other. Listed here explicitly because
+      the enumerations are read per shape and this value was documented only
+      above, leaving the audit-only contract incomplete),
       NOT_COMPARABLE (two-sided shape only, with the old-library or
       abi-baseline input: when the candidate and baseline were not
       extracted under a comparable profile/scope contract -- ADR-050 D2 --

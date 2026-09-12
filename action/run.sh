@@ -2147,29 +2147,48 @@ _extra_args_has_dry_run_flag() {
 # either rejecting the combination outright or (worse) silently doing
 # nothing.
 #
-# `--write` is a scalar (non-`multiple=True`) Click option: a repeated
-# `--write` resolves to the *last* occurrence, whatever its format, not the
-# first `json=...` one found (Codex review, P2, PR #1071) -- so this keeps
-# scanning the whole `extra-args` list and only remembers the most recent
-# match, clearing it again if a later `--write` isn't `json=...` (matching
-# Click's real resolved value, which could just as well be a non-JSON
-# format last).
-_extra_args_write_json_path() {
-  local _name _value _found=""
+# `--write` is **repeatable**: `compare` declares it with `multiple=True`
+# (`frontends/cli/options/secondary_output.py`'s `deco_multi`, ADR-068 D4's
+# "one analysis, several artifacts"), and its own help text gives
+# `--write json=a.json --write markdown=b.md` as the example. Every named
+# artifact is written, so every `json=` destination among them is a real,
+# caller-requested report.
+#
+# This comment used to say the opposite -- "a scalar (non-`multiple=True`)
+# Click option ... resolves to the *last* occurrence" (Codex review, P2, PR
+# #1071) -- and the function cleared an already-found `json=` path whenever a
+# later `--write` named another format, to match that supposed last-wins
+# resolution. The claim was stale (the singular `deco` shape still exists in
+# that factory, but `compare` does not use it) and the clearing was a real
+# defect: `--write json=a.json --write markdown=b.md` reported *no* requested
+# JSON path at all, so a missing or truncated `a.json` left an exit-0 run
+# publishing a clean verdict (Codex review, P2). Verified against the option
+# declaration rather than either comment, since the two contradicted.
+#
+# `_extra_args_write_json_paths` prints every one, newline-separated, so
+# `_json_report_expected` can require all of them; the singular
+# `_extra_args_write_json_path` keeps its one-value contract for
+# `_json_report_src`, which only needs *a* readable report to read from.
+_extra_args_write_json_paths() {
+  local _name _value _found=1
   while IFS=$'\t' read -r _name _value; do
     if [[ "$_name" == "--write" ]]; then
       case "$_value" in
         json=*)
-          _found="${_value#json=}"
-          ;;
-        *)
-          _found=""
+          printf '%s\n' "${_value#json=}"
+          _found=0
           ;;
       esac
     fi
   done <<<"$(_extra_args_options)"
-  [[ -n "$_found" ]] || return 1
-  printf '%s' "$_found"
+  return $_found
+}
+
+_extra_args_write_json_path() {
+  local _first
+  _first=$(_extra_args_write_json_paths | head -n 1)
+  [[ -n "$_first" ]] || return 1
+  printf '%s' "$_first"
 }
 
 # The real `--format` value `abicheck` runs with, accounting for `extra-args`
@@ -2193,6 +2212,43 @@ _effective_format() {
   local _name _value _found="${FORMAT:-}"
   while IFS=$'\t' read -r _name _value; do
     [[ "$_name" == "--format" ]] && _found="$_value"
+  done <<<"$(_extra_args_options)"
+  printf '%s' "$_found"
+}
+
+# The real `--output` path `abicheck` writes to, accounting for `extra-args`
+# overriding this script's own `-o "$OUTPUT_FILE"` flag -- the exact sibling of
+# `_effective_format` above, and for the same reason: `CMD` carries this
+# script's own flags first and `$INPUT_EXTRA_ARGS` last, and Click keeps the
+# last occurrence of a repeated option.
+#
+# Needed by `_caller_json_destinations`, which asks "where did the caller ask
+# for a report". Keying that on `$OUTPUT_FILE` alone got it wrong in both
+# directions (Codex review, P2, reproduced): `format: json` with
+# `extra-args: --output report.json` and no `output-file` input names no
+# destination at all, so a perfectly valid report was validated as the *stdout*
+# shape -- where the capture is empty, because output went to a file -- and a
+# working run published REPORT_UNREADABLE. And when both are given, the
+# destination inventory validated the superseded path while the real report
+# landed elsewhere.
+#
+# Prints nothing when neither is set: that is genuine stdout mode.
+_effective_output_file() {
+  local _name _value _found="${OUTPUT_FILE:-}"
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      --output | -o) _found="$_value" ;;
+      # Click's *attached* short form, `-oPATH`. `_extra_args_options` leaves it
+      # an opaque bare token on purpose -- that form consumes no following
+      # token, so for every other consumer "unexpanded" is already the right
+      # answer -- but here the attached value IS the answer, and dropping it
+      # sent a file-writing run down the stdout path (Codex review, P2;
+      # confirmed against the installed Click parser, which resolves
+      # `-oreport.json` to `--output`). Matched with a literal `-o` prefix and a
+      # non-empty remainder, so a bare `-o` (whose value is the next token, and
+      # which the case above already handled) cannot fall in here.
+      -o?*) _found="${_name#-o}" ;;
+    esac
   done <<<"$(_extra_args_options)"
   printf '%s' "$_found"
 }
@@ -2226,6 +2282,21 @@ _PY_BIN="$(command -v python3 || command -v python || true)"
 if [[ -n "$_PY_BIN" ]] && ! _is_path_already_qualified "$_PY_BIN"; then
   _PY_BIN="$PWD/$_PY_BIN"
 fi
+
+# The JSON-report reader `_report_query` shells out to. A real file in this
+# Action's own directory rather than a heredoc, so its ~300 lines of report
+# semantics are reachable from pytest/mypy/ruff -- see report_query.py's own
+# module docstring for the full rationale, including why it must version with
+# the Action rather than with the installed `abicheck` package.
+#
+# Resolved from ${BASH_SOURCE[0]} (this script's own path), not from a
+# $GITHUB_ACTION_PATH-style environment variable: an env-supplied path to an
+# executable script is a forgeable channel, the same class this file already
+# rejected twice for the evidence-contract marker (see `_EXIT_EVIDENCE_
+# CONTRACT_ERROR`'s own comment below). Resolved once here, beside $_PY_BIN
+# above, so the tests that extract `_report_query` in isolation can pick this
+# line up the same way they already pick up the $_PY_BIN line.
+_REPORT_QUERY_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/report_query.py"
 
 # ---------------------------------------------------------------------------
 # Security: `python -c`/`python -m` insert this process's current working
@@ -3449,6 +3520,11 @@ fi
 # (dump has no `$FORMAT` at all; deps-tree/deps-compare have one but no
 # sidecar-injection decision that needs it early).
 _EFFECTIVE_FORMAT="$(_effective_format)"
+# The real `-o/--output` destination, same reasoning and same timing as the
+# format above -- see `_effective_output_file`'s own docstring. Assigned here so
+# the pre-run fingerprint bookkeeping and the destination inventory both use the
+# path `abicheck` will actually write, not the superseded input value.
+_EFFECTIVE_OUTPUT_FILE="$(_effective_output_file)"
 
 echo "::group::abicheck $MODE"
 printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
@@ -3526,14 +3602,87 @@ else:
 ' "$_fingerprint_path") 2>/dev/null
 }
 _output_file_pre_fp=""
-if [[ -n "${OUTPUT_FILE:-}" ]]; then
-  _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
+if [[ -n "${_EFFECTIVE_OUTPUT_FILE:-}" ]]; then
+  _output_file_pre_fp="$(_file_fingerprint "$_EFFECTIVE_OUTPUT_FILE")"
 fi
 _extra_write_json_path="$(_extra_args_write_json_path || true)"
 _extra_write_json_pre_fp=""
 if [[ -n "$_extra_write_json_path" ]]; then
   _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
 fi
+
+# Every JSON report destination the *caller* named, one per line, in request
+# order. `_json_report_expected` answers *whether* a JSON report was asked
+# for; this answers *where*, which is the question the validation in
+# `_resolve_clean_exit_verdict` actually needs.
+#
+# The distinction is load-bearing. `_json_report_src` is a *fallback chain*:
+# it returns the first destination that arrived, which is exactly right for
+# "give me a report to read" and exactly wrong for "prove every report the
+# caller asked for arrived". With `format: json` writing `output-file` plus an
+# `extra-args --write json=secondary.json`, a missing or truncated primary
+# fell through to the valid secondary, so the step published a compatibility
+# verdict while the output the caller actually requested never arrived (Codex
+# review, P2, reproduced with an exit-0 stub that wrote only the secondary).
+# `compare --help-all` is explicit that `--write` names a second, independent
+# artifact whose path must differ from `-o`, so one can never stand in for the
+# other.
+#
+# Stdout mode (`format: json` with no `output-file`) names no file at all and
+# so prints nothing here -- its report is only ever readable through
+# `_json_report_src`'s `$_STDOUT_JSON_FILE` branch, and the caller asked for
+# it on stdout, not at a path.
+_caller_json_destinations() {
+  local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" ]]; then
+    printf '%s\n' "$_primary"
+  fi
+  _extra_args_write_json_paths
+}
+
+# (mtime, size) before `${CMD[@]}` ran, for *every* destination above --
+# `<fingerprint>\t<path>` per line, the fingerprint empty when the path did
+# not exist yet.
+#
+# The two scalars above cover only `OUTPUT_FILE` and the *first* `--write
+# json=` destination, because that is all `_json_report_src`'s chain ever
+# reads. Freshness is a property every requested destination needs, not just
+# the ones that can become the verdict source: a second `--write json=b.json`
+# that this run never wrote leaves a stale, possibly PR-committed document in
+# place, and validating it for parseability alone reported it as a report this
+# run had produced (Codex review, P2). Same threat model as the scalars'
+# own docstring above, same non-destructive remedy.
+_json_dest_pre_fps=""
+_json_dest_fps_recorded=""
+while IFS= read -r _json_dest_line; do
+  [[ -n "$_json_dest_line" ]] || continue
+  _json_dest_pre_fps+="$(_file_fingerprint "$_json_dest_line")	$_json_dest_line
+"
+done <<<"$(_caller_json_destinations)"
+_json_dest_fps_recorded=true
+
+# Did THIS invocation write the document now at $1?
+#
+# True when the recorded pre-run fingerprint differs from the current one, or
+# when the path did not exist before the run. Deliberately degrades to true
+# ("make no freshness claim") when the pre-run bookkeeping never ran at all --
+# the isolated snippet-extraction tests that source these helpers without the
+# `${CMD[@]}` section never assign the map, and the same reasoning as
+# `_json_report_src`'s `${_output_file_pre_fp+x}` test applies: the real script
+# always records it first, so production behaviour is unaffected.
+_json_dest_is_fresh() {
+  local _path="$1" _line _pre=""
+  [[ -n "${_json_dest_fps_recorded:-}" ]] || return 0
+  while IFS= read -r _line; do
+    [[ "${_line#*	}" == "$_path" ]] || continue
+    _pre="${_line%%	*}"
+    break
+  done <<<"$_json_dest_pre_fps"
+  # Absent from the map, or absent from disk before the run: nothing stale to
+  # mistake for this run's own output.
+  [[ -n "$_pre" ]] || return 0
+  [[ "$(_file_fingerprint "$_path")" != "$_pre" ]]
+}
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
@@ -3630,10 +3779,11 @@ _json_report_src() {
   # misses an `extra-args --format json` override), while the isolated
   # extraction tests above set only `$FORMAT` and rely on the fallback to
   # keep behaving exactly as before this fix.
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+  local _primary="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_primary" && -s "$_primary" ]] \
      && { [[ -z "${_output_file_pre_fp+x}" ]] \
-          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
-    echo "${OUTPUT_FILE}"
+          || [[ "$(_file_fingerprint "$_primary")" != "$_output_file_pre_fp" ]]; }; then
+    echo "$_primary"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
@@ -3679,9 +3829,24 @@ _json_report_src() {
 # for one question is the shape that drifts. Queries are named rather than
 # passed as expressions, so a caller cannot inject one.
 #
-# The two modes nest the ledger differently and BOTH reach here: `compare`
-# writes it at the top level, while `ScanOutcome.to_dict()` puts the
-# comparison summary under `diff`. Each query below looks in both.
+# The query semantics themselves live in `report_query.py` beside this file,
+# not in a heredoc here -- see that module's docstring for why, and for the
+# exit-code contract (0 answered / 1 cannot tell / 2 unknown query) this
+# function's callers depend on. The move was verified behavior-preserving
+# against the heredoc it replaced over ~247k adversarially-generated
+# (document, query, argument) cases, with exactly two deliberate differences,
+# both pinned by `tests/test_action_report_query.py`: an absent
+# `analysis_assurance_exit_contribution` now answers "cannot tell" instead of
+# a defaulted `0` (`_assurance_gated` tests for an exact "1", which an empty
+# answer fails identically, so the gate is unchanged -- what changes is that
+# "the report did not say" stops being spelled the same way as "the report
+# said no"), and the `assurance_status` query, which no caller asked for, is
+# gone rather than carried over. Everything else answers byte-for-byte what
+# the heredoc answered, malformed documents included.
+#
+# Report shapes nest the ledger differently and BOTH reach here: `compare`
+# writes it at the top level, while an `--against`-style summary sits under
+# `diff`. Every query looks in both.
 #
 # _PY_BIN itself is resolved once, near the top of this script (before
 # MODE's dry-run/back-compat block) -- not here -- so the baseline-set
@@ -3692,12 +3857,17 @@ _report_query() {
   # (only the "annotations" query reads it, as a "1"/"" additions flag).
   # Prints nothing when the report cannot be read or parsed, which every
   # caller treats as "cannot tell" rather than as an answer.
-  [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
+  [[ -n "$_PY_BIN" && -n "${1:-}" && -f "$_REPORT_QUERY_PY" ]] || return 1
   # Isolated the same way as every other Python invocation in this file
   # (Codex review, fresh evidence): the sitecustomize.py auto-import vector
-  # fires during interpreter *startup*, before this heredoc body ever runs
-  # a single line -- it doesn't depend on what the body imports, only on
-  # where the interpreter starts.
+  # fires during interpreter *startup*, before the script body ever runs a
+  # single line -- it doesn't depend on what the body imports, only on where
+  # the interpreter starts. `-I` (isolated mode) is what a script *file*
+  # needs and a `-` stdin script did not: running a file puts the file's own
+  # directory on sys.path[0], where stdin put the CWD, so the `cd
+  # "$_PY_SAFE_DIR"` below no longer covers it on its own. `-I` drops both
+  # that entry and the user site directory; `report_query.py` imports only
+  # `json`/`sys`, so it loses nothing it needs.
   #
   # $1 is NOT reliably absolute -- unlike $_STDOUT_JSON_FILE (mktemp-
   # rooted), $OUTPUT_FILE (this function's other caller shape, via
@@ -3712,309 +3882,7 @@ _report_query() {
   if ! _is_path_already_qualified "$report_path"; then
     report_path="$PWD/$report_path"
   fi
-  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" - "$report_path" "$2" "${3:-}") <<'PYQUERY' 2>/dev/null
-import json
-import sys
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        report = json.load(fh)
-except Exception:
-    raise SystemExit(1)
-if not isinstance(report, dict):
-    raise SystemExit(1)
-nested = report.get("diff")
-nested = nested if isinstance(nested, dict) else {}
-
-
-def _either(key, default):
-    """The value from the compare shape, else the scan shape, else *default*."""
-    value = report.get(key)
-    if value is None:
-        value = nested.get(key, default)
-    return default if value is None else value
-
-
-def _severity():
-    # Compare keeps its gate at the document root; a severity-scheme
-    # `scan --against` nests it under `diff` (scan schema 1.9+), exactly
-    # as it nests the coverage ledger `_either` already reaches for. Root
-    # first so a compare report is unaffected.
-    block = report.get("severity")
-    if not isinstance(block, dict):
-        block = nested.get("severity")
-    return block if isinstance(block, dict) else {}
-
-
-query = sys.argv[2]
-if query == "no_baseline_audit":
-    # `compare --no-baseline`'s own discriminator (Codex review, PR #1210,
-    # round 6): this report's top-level `verdict` is always null (no
-    # comparison ran at all), so _report_compat_verdict's own query prints
-    # nothing for it and the exit-0 dispatch silently defaulted to
-    # VERDICT=COMPATIBLE -- "No binary ABI break detected" for a run that
-    # never compared two builds, and the same flattening for a risk-only
-    # audit that found something but didn't gate on it. Prints "clean" (no
-    # findings), "findings" (candidate-side findings present, none gated --
-    # this branch is only reached for a real exit-0 run), or nothing (not a
-    # no-baseline audit report at all).
-    #
-    # A suppressed finding counts as "findings" too, not "clean" (Codex
-    # review, PR #1210, round 7): `findings` alone omits anything a
-    # `--suppress` rule matched -- those move to `suppressed_findings`,
-    # not away entirely (ADR-067 "record before disposing") -- so a fully
-    # suppressed audit was reporting AUDIT_CLEAN ("no candidate-side
-    # finding was detected") when the run actually recorded one, just
-    # disposed of by policy rather than absent.
-    if report.get("no_baseline") is True:
-        findings = report.get("findings")
-        suppressed = report.get("suppressed_findings")
-        has_findings = (isinstance(findings, list) and findings) or (
-            isinstance(suppressed, list) and suppressed
-        )
-        print("findings" if has_findings else "clean")
-elif query == "coverage_contribution":
-    print(_either("contract_coverage_exit_contribution", 0))
-elif query == "assurance_contribution":
-    # P0.4's own axis, the exact sibling of `coverage_contribution` above:
-    # `analysis_assurance_exit_contribution` is already self-describing --
-    # `checker.compare`/`cli_compare_helpers` compute it as 0 unless the
-    # *resolved* `assurance.require_complete` (CLI flag or config-file value
-    # alike, since the dedicated Action input's retirement) was true AND
-    # the run's own evidence was incomplete -- so no separate "was gating
-    # requested" signal is needed here, unlike the retired
-    # `assurance_status`-only query below.
-    #
-    # `_either` alone only covers the two-sided compare shape (root) and
-    # the `scan --against` shape (nested under `diff`) -- but a `mode: scan`
-    # / `--no-baseline` audit-only report is a THIRD shape
-    # (`report/no_baseline.py:_document_json`) that carries this same
-    # information under `exit_axes.analysis_assurance` instead, since that
-    # document has no `verdict`/gate namespace of its own to hang a
-    # top-level `analysis_assurance_exit_contribution` key from (Codex
-    # review): without this fallback, an audit-only run with
-    # `assurance.require_complete: true` reads a missing key here, silently
-    # answers "not gated", and this Action reports a plain ERROR/nothing
-    # instead of ANALYSIS_INCOMPLETE even though the CLI itself correctly
-    # exited 1. `_either`'s own sentinel-safe None check (not the
-    # zero-collapsing default) is what lets a real `0` from either primary
-    # shape short-circuit before ever consulting `exit_axes`.
-    _value = report.get("analysis_assurance_exit_contribution")
-    if _value is None:
-        _value = nested.get("analysis_assurance_exit_contribution")
-    if _value is None:
-        _exit_axes = report.get("exit_axes")
-        if isinstance(_exit_axes, dict):
-            _value = _exit_axes.get("analysis_assurance")
-    print(_value if _value is not None else 0)
-elif query == "severity_exit":
-    # An absent `severity` block is the legacy scheme, whose exit codes are
-    # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
-    # the compatibility axis contributed 0 by construction. Only an
-    # unreadable report is "cannot tell", and that exits above without
-    # printing.
-    print(_severity().get("exit_code", 0))
-elif query == "compat_verdict":
-    # The *compatibility* axis's own verdict, which a severity scheme never
-    # rewrites -- `compare` reports `result.verdict` unconditionally, and the
-    # gate's own demotion of the exit code never touches that label.
-    # cli-mirror: abicheck/policy/exit_decision.py::ExitDecision
-    # (This used to cite `scan_engine`, deleted with ADR-068's retirement of
-    # `scan`; the rule it described is `compare`'s own.) It is therefore the only signal that
-    # tells a genuinely clean run from a break the user chose not to gate on.
-    #
-    # Read from an abicheck-native JSON report's own `verdict` key alone.
-    # A SARIF `runs[0].properties.abiVerdict` fallback used to live here
-    # too, for the one shape that reaches this query with a SARIF document
-    # (`format: sarif` plus an `extra-args --write <non-json>=...`
-    # suppressing the JSON sidecar); ADR-063 Track T8 retired it with the
-    # rest of the boundary's verdict reconstruction, and `_json_report_src`
-    # -- the only source this function is ever handed -- never yields a
-    # SARIF document in the first place.
-    print(_either("verdict", "") or "")
-elif query == "blocking_categories":
-    print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
-elif query == "coverage_where":
-    print(
-        ", ".join(
-            sorted(
-                {
-                    "{}/{}".format(f.get("side"), f.get("provider"))
-                    for f in (_either("contract_coverage_failures", []) or [])
-                    if isinstance(f, dict)
-                }
-            )
-        )
-    )
-elif query == "scope_contribution":
-    # ADR-065 S2 (D6/D7): the completeness axis's two 0/1 fold participants,
-    # carried on a directory/package release report's root `exit` block (a
-    # scan never sets either). Printed as their max -- the same "did this
-    # axis contribute" answer `coverage_contribution` gives for its own.
-    # A report carrying *neither* key has no scope axis to answer from (an
-    # older abicheck, a scalar report, or the `{}`-shaped placeholder a
-    # PR-comment re-run can leave in PR_JSON when the primary run wrote no
-    # report), so it prints nothing -- "cannot tell" -- and `_scope_gated`
-    # falls back to the CLI's stderr notice rather than reading an absent
-    # axis as "did not fire" (a macOS CI lane caught exactly that: the
-    # final gate consulted a `{}` PR_JSON and dropped the scope error the
-    # dispatch above had already announced).
-    # The stored-baseline dispatch (`compare_bundle_facts.py`) emits no
-    # root `exit` block; its `comparison_scope` section carries the same two
-    # contributions under the `*_exit_contribution` names, so that is the
-    # second source (Codex review) before "cannot tell".
-    ex = _either("exit", {})
-    ex = ex if isinstance(ex, dict) else {}
-    cs = report.get("comparison_scope")
-    cs = cs if isinstance(cs, dict) else {}
-    _root = ("incomplete_scope_contribution", "no_comparison_completed_contribution")
-    _section = (
-        "incomplete_scope_exit_contribution",
-        "no_comparison_completed_exit_contribution",
-    )
-    if any(k in ex for k in _root):
-        src, keys = ex, _root
-    elif any(k in cs for k in _section):
-        src, keys = cs, _section
-    else:
-        raise SystemExit(1)
-
-    def _zero_or_one(value):
-        return 1 if value == 1 else 0
-
-    print(max(_zero_or_one(src.get(k)) for k in keys))
-elif query == "scope_incomplete":
-    # ADR-065 D6, informational (Codex review): whether the report *recorded*
-    # an incomplete scope at all, whatever it contributed -- under the
-    # default --on-incomplete-scope warn both contributions are 0, and the
-    # summary must still name what went unchecked rather than read as a
-    # plain COMPATIBLE. Never a gate: `_scope_gated` alone decides failure.
-    cs = report.get("comparison_scope")
-    cs = cs if isinstance(cs, dict) else {}
-    ro = _either("run_outcome", {})
-    ro = ro if isinstance(ro, dict) else {}
-    if cs.get("completeness") == "incomplete" or ro.get("scope") == "incomplete":
-        print(1)
-    else:
-        raise SystemExit(1)
-elif query == "scope_where":
-    # What went unchecked, from the release report's `comparison_scope`
-    # block -- the actionable half, the same way `coverage_where` names the
-    # provider that fell short. Member names are PR-controlled file names
-    # and every sink interpolates this value inside a Markdown code span on
-    # one summary line, so each is flattened first (Codex review): a line
-    # break, a control character, a backtick, or a table pipe in a file
-    # name must not terminate the span or forge a heading/row/verdict in
-    # $GITHUB_STEP_SUMMARY.
-    def _md_safe(text):
-        out = []
-        for ch in str(text):
-            if ch in "`|":
-                out.append("'" if ch == "`" else "/")
-            elif ch in "\r\n\t\f\v" or ord(ch) < 0x20 or ord(ch) == 0x7F:
-                out.append(" ")
-            else:
-                out.append(ch)
-        return " ".join("".join(out).split()) or "?"
-
-    cs = report.get("comparison_scope")
-    cs = cs if isinstance(cs, dict) else {}
-    parts = ["no comparison completed"] if cs.get("no_comparison_completed") else []
-    parts.extend(_md_safe(n) for n in (cs.get("unchecked") or []) if isinstance(n, str))
-    print(", ".join(parts))
-elif query == "assurance_notes":
-    # `analysis_assurance.notes` — same field name and shape on both compare
-    # (document root) and scan (nested under `diff`), read through the same
-    # `_either` fallback the coverage/severity queries above already use.
-    aa = _either("analysis_assurance", {})
-    notes = aa.get("notes") if isinstance(aa, dict) else None
-    print("; ".join(str(n) for n in (notes or [])))
-elif query == "assurance_status":
-    aa = _either("analysis_assurance", {})
-    print(aa.get("status", "") if isinstance(aa, dict) else "")
-elif query == "run_outcome":
-    # ADR-063 Phase 7 (D6): the report's own `run_outcome` block -- the
-    # canonical, already-folded `compatibility`/`gate`/`operational` axes,
-    # nested the same compare-root-vs-scan-under-`diff` way every other
-    # query here already handles via `_either`. `sys.argv[3]` names which
-    # axis to print; an absent block, an absent axis, or a non-string value
-    # (`compatibility`/`assurance` are `null` on a report that never ran a
-    # real comparison) all print nothing -- the same "cannot tell" contract
-    # every other query in this function follows, so a caller reading this
-    # falls back to its own pre-existing derivation (`compat_verdict`/
-    # `severity_exit`) rather than misreading `null` as a real answer.
-    ro = _either("run_outcome", None)
-    ro = ro if isinstance(ro, dict) else {}
-    value = ro.get(sys.argv[3]) if len(sys.argv) > 3 else None
-    print(value if isinstance(value, str) else "")
-elif query == "annotations":
-    # CLI cleanup phase two, PR E: the Action's own renderer -- reads the
-    # persisted `annotations` array (schema 2.43/2.44) instead of relying
-    # on `compare --annotate`'s own stderr rendering, so this works for
-    # BOTH a single-library compare (top-level `annotations`) and a
-    # directory/package release compare (`libraries[].annotations`,
-    # flattened here across every library) uniformly. `scan --against`
-    # carries no `annotations` field as of this schema version, so this
-    # query prints nothing for a scan report -- not an error, just no
-    # entries to emit yet.
-    additions = len(sys.argv) > 3 and sys.argv[3] == "1"
-    entries = report.get("annotations")
-    if not isinstance(entries, list):
-        entries = []
-        libs = report.get("libraries")
-        if isinstance(libs, list):
-            for lib in libs:
-                if isinstance(lib, dict) and isinstance(
-                    lib.get("annotations"), list
-                ):
-                    entries.extend(lib["annotations"])
-    order = {"error": 0, "warning": 1, "notice": 2}
-    kept = []
-    for e in entries:
-        if not isinstance(e, dict) or not e.get("annotation"):
-            continue
-        level = e.get("level")
-        annotation = e["annotation"]
-        # Codex review, fresh evidence: `_json_report_src` can, in a rare
-        # failure-before-write case, resolve to a JSON file this
-        # invocation never produced (a stale --output-file/--write
-        # destination that already existed in the checked-out tree before
-        # abicheck ran, e.g. one a PR author committed). Printing
-        # `annotation` verbatim in that case would echo an arbitrary,
-        # attacker-controlled workflow command -- including one designed
-        # to smuggle a *different* command past this check via an
-        # embedded newline (GitHub parses every stdout line as a
-        # potential command). Never trust the string as-is: it must be a
-        # single line (no embedded \n/\r), and its own `::LEVEL ` prefix
-        # must agree with the entry's separately-typed `level` field --
-        # exactly the shape `annotations._format_annotation()` always
-        # produces. Anything else is dropped rather than printed.
-        if (
-            not isinstance(annotation, str)
-            or not isinstance(level, str)
-            or "\n" in annotation
-            or "\r" in annotation
-            or not annotation.startswith(f"::{level} ")
-            or level not in order
-        ):
-            continue
-        # `always_visible` is schema 2.44+; a report from an older abicheck
-        # (this Action can be pinned to any released version) may carry
-        # `annotations` without it -- degrade to "visible unless it's a
-        # notice", the same rule `--annotate` (no `--annotate-additions`)
-        # already applied before `always_visible` existed.
-        visible = e.get("always_visible", level != "notice")
-        if additions or visible:
-            kept.append(e)
-    kept.sort(key=lambda e: order.get(e.get("level"), 99))
-    # Matches annotations.py's own _MAX_ANNOTATIONS -- GitHub Actions caps
-    # visible annotations per step at roughly the same figure, and sorting
-    # by severity first means a truncated tail is the least important one.
-    for e in kept[:50]:
-        print(e["annotation"])
-else:
-    raise SystemExit(2)
-PYQUERY
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -I "$_REPORT_QUERY_PY" "$report_path" "$2" "${3:-}") 2>/dev/null
 }
 
 # CLI cleanup phase two, PR E: the Action's own annotation renderer. Reads
@@ -4178,6 +4046,115 @@ _assurance_gated() {
   _src=$(_json_report_src)
   _contribution=$(_report_query "$_src" assurance_contribution)
   [[ -n "$_contribution" && "$_contribution" == "1" ]]
+}
+
+# Why the JSON report this run was supposed to produce could not be read, as
+# one token from `report_query.py`'s own vocabulary: ok / absent / unreadable
+# / unparseable / not_object / empty / no_result. Prints nothing when the source
+# itself could not be located at all (no `$_json_report_src`), which is a
+# *fifth* state -- "nothing to classify" -- and the one the dry-run and
+# no-JSON-output paths legitimately reach.
+#
+# This exists because every axis predicate above deliberately answers "not
+# gated by this axis" for a report it cannot read, and that was the right
+# call: ADR-063 Track T8 retired the alternative (reconstructing an axis from
+# the CLI's own stderr prose) after a PR-controlled build script was shown
+# able to forge those notices. But "I cannot establish that this axis failed"
+# is not "this axis passed", and the exit-0 dispatch was reading it as the
+# latter -- `_resolve_clean_exit_verdict` opened with VERDICT="COMPATIBLE"
+# and only ever *escalated* from a report it could read, so an absent or
+# corrupt report published "No binary ABI break detected" for a run whose
+# result nothing had established. Asking the separate question here, rather
+# than changing what the axis predicates answer, keeps the anti-forgery
+# contract exactly as it was.
+_report_validity() {
+  local _src
+  _src=$(_json_report_src)
+  [[ -n "$_src" ]] || return 0
+  _report_query "$_src" report_validity
+}
+
+# Did the *caller* ask for a JSON report -- and so, is its absence a failure?
+#
+# `_json_report_src` answers "is there a readable one", which conflates two
+# very different situations at exit 0: the run produced no JSON where the user
+# asked for one, versus the run was never asked for JSON at all.
+#
+# Every mode in which the *caller* asked for JSON, and only those:
+#
+#   * `format: json` -- whether it lands in `output-file` or on stdout. Keying
+#     on `$OUTPUT_FILE` as well left the documented stdout mode uncovered, so
+#     an exit-0 run that printed nothing still published COMPATIBLE (Codex
+#     review, P2, reproduced). Requesting json *is* the request; where it lands
+#     is a separate choice.
+#   * `extra-args --write json=PATH` -- a caller-supplied destination, no less
+#     requested for arriving through the passthrough.
+#
+# The one exclusion is the internal `$PR_JSON` sidecar, which this script
+# injects for its own PR-comment and annotation rendering whenever the primary
+# format is not json. That sidecar is an implementation detail of this Action,
+# it already has its own diagnostic when it turns up missing ("no JSON report
+# is available"), and treating its absence as "this run established no result"
+# conflates a convenience artifact with the comparison's outcome.
+#
+# Note this cannot key on `$_STDOUT_JSON_FILE`: that variable is only set when
+# stdout actually *started with* `{`, so it is empty in precisely the failure
+# case this predicate exists to catch.
+#
+# The narrowing matters for a second reason, which is why it is stated here
+# rather than left to the call site: at exit 0 the process exit code is itself
+# evidence, not the absence of it. It is the second of the two sources "How
+# `run.sh` resolves the verdict it publishes" (action/AGENTS.md) deliberately
+# keeps -- the kernel-reported answer to "what did the invocation itself say"
+# -- and `compare` exiting 0 means its own gate did not fire. So an
+# unreadable *sidecar* leaves the tier unknown, which is a real and separate
+# problem (see that section's own note on the residual), but it does not leave
+# the run's acceptance unknown. Only a JSON report the user explicitly
+# requested and did not get is an operational failure of this step.
+_json_report_expected() {
+  [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" ]] \
+    || [[ -n "${_extra_write_json_path:-}" ]]
+}
+
+# The analysis-assurance axis's own four-way answer (see `report_query.py`'s
+# `assurance_axis`): gated / not_gated / absent_legacy_schema /
+# contradictory. `_assurance_gated` above stays the gate -- this is the
+# *provenance* of that answer, which is what distinguishes an older report
+# that predates `analysis_assurance_exit_contribution` (schema 2.40) from a
+# current one that should carry it and does not. Prints nothing when there is
+# no report to ask.
+_assurance_axis() {
+  local _src
+  _src=$(_json_report_src)
+  [[ -n "$_src" ]] || return 0
+  _report_query "$_src" assurance_axis
+}
+
+# A report claiming schema 2.40 or newer while omitting the assurance
+# contribution it is then required to carry. That is an internally
+# inconsistent *result*, not a passing assurance check, so it fails the step
+# on its own -- the one case where an absent field is treated as a failure
+# rather than as "cannot tell", and it is safe to do so precisely because the
+# report's own version claim is what rules out the legacy explanation.
+_assurance_axis_contradictory() {
+  [[ "$(_assurance_axis)" == "contradictory" ]]
+}
+
+# The same question asked of ONE named report rather than of whatever
+# `_json_report_src` settled on.
+#
+# The chain-based form above answers for a single document, which is right at a
+# nonzero exit (there is no destination inventory there) and wrong for the
+# exit-0 validation: with several requested JSON artifacts, a clean primary hid
+# a freshly-written secondary that claimed schema >= 2.40, carried an
+# `analysis_assurance` block and omitted its contribution. Both destinations
+# passed `report_validity`, only the primary was asked this, and the step
+# published COMPATIBLE (Codex review, P2, reproduced). A destination is
+# unusable if it cannot say whether the assurance gate fired, exactly as if it
+# could not be parsed.
+_assurance_axis_contradictory_at() {
+  [[ -n "${1:-}" ]] || return 1
+  [[ "$(_report_query "$1" assurance_axis)" == "contradictory" ]]
 }
 
 # ADR-065 S2's completeness axis (D6 under --on-incomplete-scope block, D7
@@ -4398,8 +4375,71 @@ ADVISORY_BREAK=false
 # The compatibility tier the *gate* follows. Empty means "same as VERDICT" —
 # only an escalation (see `_escalate_verdict_to_report`) makes the two differ.
 GATE_TIER=""
+# One requested JSON destination, one answer: usable (return 0) or not (set
+# VERDICT=REPORT_UNREADABLE, emit the diagnostic, return 1).
+#
+# $1 is a `report_validity` token from `report_query.py`, or the synthetic
+# `stale` for a document that predates this invocation -- the freshness
+# question has no answer inside the document, but its consequence is identical
+# ("no report arrived here"), so one function owns every message rather than
+# leaving a second copy of them beside the freshness check.
+# $2 names the destination for the diagnostic.
+_reject_unusable_report() {
+  local _validity="${1:-}" _where
+  # `$2` is a destination path, and every `--write json=` path comes from
+  # `extra-args` -- PR-controlled per this file's threat model. Interpolating
+  # it raw into a `::error::` workflow command lets `x%0A::add-mask::secret`
+  # reach the runner as a second command, since GitHub percent-decodes
+  # workflow-command data (Codex review, P1). Sanitized here, at the one place
+  # that emits it, rather than at each call site -- and asserted by executing
+  # the attack, not by reading the source, which is exactly the distinction
+  # #705 -> #758 turned on.
+  _where="$(_sanitize_annotation "${2:-}")"
+  case "$_validity" in
+    ok)
+      return 0
+      ;;
+    ""|absent|unreadable)
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is missing or unreadable -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+      ;;
+    stale)
+      # Not a corruption: a readable document that this invocation did not
+      # write. A previous step's leftover, or one a PR author committed into
+      # the checked-out tree -- `extra-args` and its `--write` path are
+      # PR-controlled per this file's threat model -- so reading it as this
+      # run's own result is the forgery the fingerprint bookkeeping exists to
+      # prevent.
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is unchanged since before the run -- so this invocation never wrote it and its contents are some earlier run's, not this one's. This step will not report a result from it."
+      ;;
+    empty)
+      # `{}` is a *known* artifact rather than a corruption -- a PR-comment
+      # re-run can leave one behind when the primary run wrote no report -- so
+      # it gets its own message rather than being lumped in above. It is still
+      # not a result.
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report requested at ${_where} is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
+      ;;
+    no_result)
+      # Parsed, non-empty, and still carries no abicheck result -- a
+      # `{"error": ...}` a wrapper wrote, or a lone `report_schema_version`
+      # from an interrupted write. Its own message because "could not be read"
+      # would misdescribe a document that read perfectly well and simply
+      # answers nothing (Codex review, P2).
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, and the JSON report requested at ${_where} parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
+      ;;
+    *)
+      VERDICT="REPORT_UNREADABLE"
+      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} could not be read (${_validity}) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
+      ;;
+  esac
+  return 1
+}
+
 _resolve_clean_exit_verdict() {
-  local _v _no_baseline_audit
+  local _v _no_baseline_audit _validity _dest _dest_validity _operational
   VERDICT="COMPATIBLE"
   # An audit-only (no-baseline) dry run writes no JSON report at all --
   # `compare --dry-run` performs no analysis and only previews the command
@@ -4409,15 +4449,28 @@ _resolve_clean_exit_verdict() {
   # VERDICT=COMPATIBLE -- "No binary ABI break detected" for a preview that
   # never compared anything, let alone the candidate's own public surface.
   # Checked first and returns early, before the no-baseline-audit report
-  # query (which would find no report to read) and before
-  # `_report_compat_verdict` (same reason). Two-sided dry-run is a
-  # pre-existing, out-of-scope gap this fix does not touch -- see the
-  # verdict output's own description, which documents only the audit-only
-  # shape's dry-run behavior.
-  if [[ "${_NO_BASELINE:-false}" == "true" ]] \
-    && { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; }; then
+  # query (which would find no report to read), before
+  # `_report_compat_verdict` (same reason), and before the requested-report
+  # validation further down.
+  #
+  # **Both compare shapes**, not just the audit-only one. This used to be
+  # gated on `$_NO_BASELINE`, with the two-sided case left as a documented,
+  # pre-existing gap that published COMPATIBLE. The requested-report
+  # validation added in this change turned that gap into an active failure:
+  # `dry-run: true` plus `format: json` writes no report *by design*, so a
+  # perfectly valid two-sided preview was reported as REPORT_UNREADABLE
+  # (Codex review, P2 -- a regression this change introduced, not a
+  # pre-existing one). Widening the early return fixes that and retires the
+  # gap in the truthful direction at the same time: a preview that performed
+  # no analysis has no compatibility result either way, so DRY_RUN is the
+  # honest label for both shapes and COMPATIBLE never was.
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; then
     VERDICT="DRY_RUN"
-    echo "::notice::--dry-run: this is a preview of the command that would run -- no analysis was performed and there is no candidate-side finding to report. Drop --dry-run to run the audit for real."
+    if [[ "${_NO_BASELINE:-false}" == "true" ]]; then
+      echo "::notice::--dry-run: this is a preview of the command that would run -- no analysis was performed and there is no candidate-side finding to report. Drop --dry-run to run the audit for real."
+    else
+      echo "::notice::--dry-run: this is a preview of the command that would run -- no comparison was performed, so there is no compatibility result to report. Drop --dry-run to run the comparison for real."
+    fi
     return
   fi
   # A no-baseline audit's own `verdict` field is always null (no comparison
@@ -4427,6 +4480,142 @@ _resolve_clean_exit_verdict() {
   # (Codex review, PR #1210, round 6). Checked first and returns early:
   # AUDIT_CLEAN (no candidate-side findings) or AUDIT_RISK (findings
   # present, none of them gated -- this function only runs on exit 0).
+  # The report is the only thing that can support a compatibility claim on
+  # this path, so establish that one exists and parses BEFORE any branch
+  # below can default to COMPATIBLE. Every remaining reader here
+  # (`no_baseline_audit`, `_report_compat_verdict`) answers empty for an
+  # unreadable document and falls through to the initial COMPATIBLE above --
+  # which is how an absent, truncated, non-object or `{}` report published
+  # "No binary ABI break detected" for a run that established nothing. A
+  # missing report *source* is not this case (dry-run and the no-JSON-output
+  # shapes reach it legitimately, and `_report_validity` prints nothing for
+  # it); a source that exists and does not parse is.
+  # A JSON report the caller explicitly asked for, that is absent or carries no
+  # result, is an operational failure of this step -- checked before any branch
+  # below can default to COMPATIBLE. Every remaining reader here
+  # (`no_baseline_audit`, `_report_compat_verdict`) answers empty for such a
+  # document and falls through to the initial COMPATIBLE above, which is how a
+  # truncated, non-object or `{}` report.json published "No binary ABI break
+  # detected" for a run whose result nothing had read.
+  if _json_report_expected; then
+    # Every destination the caller named, judged independently, BEFORE any
+    # branch below can default to COMPATIBLE. Two review findings converged on
+    # one root cause here (Codex review, P2, both reproduced): this validation
+    # used to ask "is there a readable report somewhere" -- via
+    # `_report_validity`, which follows `_json_report_src`'s fallback chain --
+    # when the question it owes the caller is "did this invocation produce a
+    # usable report at every destination it was asked for". The chain masked a
+    # missing primary behind a valid `--write` secondary, and the per-`--write`
+    # loop that followed checked parseability without freshness, so a stale
+    # pre-existing document read as one this run had written.
+    #
+    # Both are the same class as the original defect this whole block exists
+    # to close: every remaining reader here (`no_baseline_audit`,
+    # `_report_compat_verdict`) answers empty for a report that never arrived
+    # and falls through to the initial COMPATIBLE above, which is how a
+    # truncated, non-object or `{}` report published "No binary ABI break
+    # detected" for a run whose result nothing had read.
+    while IFS= read -r _dest; do
+      [[ -n "$_dest" ]] || continue
+      if ! _json_dest_is_fresh "$_dest"; then
+        _reject_unusable_report stale "$_dest" || return
+      fi
+      _dest_validity=$(_report_query "$_dest" report_validity)
+      _reject_unusable_report "$_dest_validity" "$_dest" || return
+      if _assurance_axis_contradictory_at "$_dest"; then
+        VERDICT="REPORT_UNREADABLE"
+        echo "::error::abicheck exited 0, but the JSON report requested at $(_sanitize_annotation "$_dest") claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        return
+      fi
+    done <<<"$(_caller_json_destinations)"
+    # Stdout mode names no destination above, so its report is judged here.
+    #
+    # The condition is the *mode* -- json format with no effective output path --
+    # not "the inventory came back empty" (Codex/CodeRabbit review, and my own
+    # bug): `format: json` with no `output-file` plus an `extra-args --write
+    # json=b.json` has a non-empty inventory, so keying on emptiness skipped
+    # stdout validation entirely and let a valid secondary mask an unusable
+    # stdout report. That is the very masking this block was added to close,
+    # reintroduced one branch over.
+    #
+    # And the stdout report is judged by its own captured file rather than
+    # through `_report_validity`, for the same reason: the chain falls through to
+    # a `--write` destination when the capture is absent, which is precisely the
+    # case a missing stdout report presents.
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" \
+          && -z "${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}" ]]; then
+      if [[ -z "${_STDOUT_JSON_FILE:-}" ]]; then
+        # `$_STDOUT_JSON_FILE` is only set when stdout actually started with
+        # `{`, so an empty value here is "the run printed no JSON document at
+        # all" -- the "died between the exit code and the report" shape, which
+        # no valid-JSON fixture can stand in for and the likeliest of these in
+        # practice.
+        VERDICT="REPORT_UNREADABLE"
+        echo "::error::abicheck exited 0, but the JSON report this run requested on stdout is missing or empty -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or output another process consumed."
+        return
+      fi
+      _validity=$(_report_query "$_STDOUT_JSON_FILE" report_validity)
+      _reject_unusable_report "$_validity" "format: json on stdout" || return
+      if _assurance_axis_contradictory_at "$_STDOUT_JSON_FILE"; then
+        VERDICT="REPORT_UNREADABLE"
+        echo "::error::abicheck exited 0, but the JSON report it printed on stdout claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        return
+      fi
+    fi
+  fi
+  # A readable report whose assurance key pair is broken, checked HERE rather
+  # than only at the FINAL_EXIT fold below (Codex review, P2, reproduced):
+  # that fold runs after the verdict output, the job summary and the PR comment
+  # have all been published, so the contradiction failed the step while
+  # publishing `verdict=COMPATIBLE` and "No binary ABI break detected" -- exit 1
+  # beside a false clean result, which a workflow branching on the output (or
+  # using continue-on-error) reads as a pass. The whole point of this axis is
+  # that an unreportable assurance result must not read as a passing one, so it
+  # has to be decided before anything is emitted. The FINAL_EXIT check stays as
+  # the non-exit-0 path's cover; at exit 0 it is now redundant, which is the
+  # correct direction for a gate.
+  if _assurance_axis_contradictory; then
+    VERDICT="REPORT_UNREADABLE"
+    echo "::error::abicheck exited 0, but its JSON report claims a schema version carrying analysis_assurance_exit_contribution and omits it while reporting an analysis_assurance block -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+    return
+  fi
+  # A report that reports an *operational* outcome rather than a compatibility
+  # one. This function acts on the break and risk tiers and otherwise keeps its
+  # initial COMPATIBLE, so a report saying "nothing was compared" published a
+  # clean compatibility claim at exit 0 -- `{"verdict": "ERROR"}` reproduced as
+  # `ERROR COMPATIBLE 0` (Codex review, P2). The engine draws the same line for
+  # the same reason: `_release_completed_compatibility_verdict` excludes exactly
+  # these from `run_outcome.compatibility`, because an operational failure and a
+  # compatibility result are separate axes.
+  #
+  # Two sources, canonical first. `run_outcome.operational` is ADR-063 D6's own
+  # name for this fact and is what the exit-4 arm below already reads via
+  # `_operational_failure_status`; the legacy `verdict` sentinel
+  # (`report_query.py`'s `OPERATIONAL_VERDICTS`) is the fallback for a report
+  # with no `run_outcome` block, which is precisely what `_report_compat_verdict`
+  # already falls through to for a release document.
+  #
+  # The labels reuse existing owners rather than adding a parallel vocabulary:
+  # `not_comparable` is the same fact ADR-050 D2's exit 16 reports, so it gets
+  # the established NOT_COMPARABLE verdict (which already carries its own
+  # summary arm and unconditional step failure), and everything else takes the
+  # same non-waivable ERROR path the exit-4 operational arm takes.
+  _operational=$(_operational_failure_status || true)
+  if [[ -z "$_operational" ]]; then
+    _operational=$(_report_query "$(_json_report_src)" operational_verdict)
+  fi
+  if [[ -n "$_operational" ]]; then
+    case "$_operational" in
+      not_comparable)
+        VERDICT="NOT_COMPARABLE"
+        ;;
+      *)
+        VERDICT="ERROR"
+        echo "::error::abicheck exited 0, but its JSON report reports an operational outcome rather than a compatibility one (${_operational}): a crash, an artifact this build cannot analyze, or a member whose capture failed. No compatibility claim was established for this run, so this step will not report one, and this is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+        ;;
+    esac
+    return
+  fi
   _no_baseline_audit=$(_report_query "$(_json_report_src)" no_baseline_audit)
   if [[ "$_no_baseline_audit" == "clean" ]]; then
     VERDICT="AUDIT_CLEAN"
@@ -4862,10 +5051,30 @@ fi
   # must never reach that step. No other output/behavior changes --
   # `report-path` for any other purpose than gating that one step is
   # unaffected.
+  #
+  # The path is `_EFFECTIVE_OUTPUT_FILE`, not the nominal `$OUTPUT_FILE`: an
+  # `extra-args -o/--output` overrides where the report really lands, and
+  # publishing the input value instead emitted an empty `report-path` (the
+  # superseded path was never written) or, worse, a *stale* pre-existing file at
+  # it -- so the SARIF upload and any consuming workflow skipped the artifact or
+  # took the wrong one (Codex review, P2). The same override is already resolved
+  # for validation and for reading the report; teaching those two and not the
+  # published output was the gap.
+  #
+  # Freshness is required for the same reason it is required of every requested
+  # destination: a file this invocation did not write is some earlier run's, and
+  # handing it to a downstream step is the forgery the pre-run fingerprint
+  # bookkeeping exists to prevent. Compared against `_output_file_pre_fp`, which
+  # is recorded for the effective path under every format, and degrading to
+  # "no freshness claim" when that bookkeeping never ran -- the same rule
+  # `_json_report_src` applies, for the same snippet-extraction tests.
+  _REPORT_PATH_OUT="${_EFFECTIVE_OUTPUT_FILE:-${OUTPUT_FILE:-}}"
   if [[ "$_SARIF_UPLOAD_FORMAT_MISMATCH" == "1" ]]; then
     echo "report-path="
-  elif [[ -n "${OUTPUT_FILE:-}" && -f "${OUTPUT_FILE}" ]]; then
-    echo "report-path=${OUTPUT_FILE}"
+  elif [[ -n "$_REPORT_PATH_OUT" && -f "$_REPORT_PATH_OUT" ]] \
+       && { [[ -z "${_output_file_pre_fp+x}" ]] \
+            || [[ "$(_file_fingerprint "$_REPORT_PATH_OUT")" != "$_output_file_pre_fp" ]]; }; then
+    echo "report-path=$_REPORT_PATH_OUT"
   else
     echo "report-path="
   fi
@@ -5063,6 +5272,14 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       ERROR)
         echo "> **Verdict: ERROR** — abicheck encountered an error (exit code $ABICHECK_EXIT)."
+        ;;
+      REPORT_UNREADABLE)
+        # An explicit arm rather than relying on the `case` falling through:
+        # a bash `case` with no match prints nothing at all, which is exactly
+        # how COMPATIBLE_WITH_RISK came to publish an empty summary (see that
+        # arm's own comment above). A verdict that exists to say "no result
+        # was established" must not be the one that renders as silence.
+        echo "> **Verdict: REPORT_UNREADABLE** — abicheck exited 0, but the JSON report this run asked for was missing or unusable, or contradicted itself, so **no compatibility result was established**. This is not a pass; the error annotation above names which case applied."
         ;;
     esac
 
@@ -5500,7 +5717,15 @@ _maybe_post_pr_comment
 # ---------------------------------------------------------------------------
 FINAL_EXIT=0
 
-if [[ "$VERDICT" == "ERROR" ]]; then
+if [[ "$VERDICT" == "REPORT_UNREADABLE" ]]; then
+  # Checked ahead of every other arm, including ERROR: no fail-on-* input
+  # governs it (none of them is a statement about whether the user wants an
+  # unverifiable result reported as a pass), and there is no compatibility
+  # tier to weigh it against. The ::error:: naming the specific defect was
+  # already emitted where the verdict was set.
+  FINAL_EXIT=1
+
+elif [[ "$VERDICT" == "ERROR" ]]; then
   echo "::error::abicheck failed with exit code $ABICHECK_EXIT"
   FINAL_EXIT=1
 
@@ -5634,6 +5859,18 @@ else
   # contract-coverage check immediately above and for the same reason.
   if _assurance_gated; then
     echo "::error::abicheck's own evidence was not fully complete under assurance.require_complete; see analysis_assurance in the JSON report for what fell short."
+    FINAL_EXIT=1
+  fi
+
+  # A report that claims a schema version whose contract includes the
+  # assurance contribution, and then omits it. Unconditional for the same
+  # reason as the axis check above, but a distinct failure: the axis did not
+  # report a shortfall -- the report failed to report the axis at all, and
+  # `_assurance_gated`'s deliberate "cannot tell means not gated" rule would
+  # otherwise turn that into a silent pass. An older report that genuinely
+  # predates the field answers `absent_legacy_schema` and is untouched here.
+  if _assurance_axis_contradictory; then
+    echo "::error::abicheck's JSON report claims a schema version that carries analysis_assurance_exit_contribution but omits it, so whether the analysis-assurance gate fired cannot be established from it. This is an invalid report, not a passing assurance check -- re-run, and report the inconsistency if it persists."
     FINAL_EXIT=1
   fi
 

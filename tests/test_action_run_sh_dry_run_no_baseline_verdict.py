@@ -154,9 +154,7 @@ class TestNoBaselineDryRunPublishesDryRunVerdict:
         assert outputs["exit-code"] == "0", outputs
         assert outputs["_exit"] == 0, outputs
 
-    def test_job_summary_does_not_claim_no_break_detected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_job_summary_does_not_claim_no_break_detected(self, tmp_path: Path) -> None:
         """The whole point of the fix: a preview that never ran a
         comparison must not read as a clean compatibility result."""
         bindir = _stub_abicheck_dry_run(tmp_path)
@@ -183,8 +181,12 @@ class TestNoBaselineDryRunPublishesDryRunVerdict:
         bindir.mkdir()
         payload = tmp_path / "payload.json"
         payload.write_text(
+            # `suppressed_findings` beside `findings`: the real audit emitter
+            # always writes both, and the reader requires both (an absent
+            # `suppressed_findings` cannot establish that policy suppressed
+            # nothing -- ADR-067).
             '{"report_schema_version": "2.49", "verdict": null, '
-            '"no_baseline": true, "findings": []}',
+            '"no_baseline": true, "findings": [], "suppressed_findings": []}',
             encoding="utf-8",
         )
         stub = bindir / "abicheck"
