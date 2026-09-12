@@ -1471,6 +1471,15 @@ def _format_release_json(
     # which is why it carries its own `schema_version`.
     if a_terms.section is not None:
         summary["analysis_assurance"] = a_terms.section
+        # The canonical top-level key (report schema 2.40) -- sibling of
+        # `contract_coverage_exit_contribution` just below, and what
+        # `aggregate.gate._analysis_assurance_exit` and the Action's deferred
+        # gate read. With the floor only inside `exit`/`analysis_assurance`
+        # both read `0` for a run that really exited `1`, so aggregating a
+        # release report dropped the gate (Codex security review, P1).
+        summary["analysis_assurance_exit_contribution"] = (
+            a_terms.decision.exit_contribution
+        )
     # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
     # release/package parity), max()-aggregated across every library. Only
     # present when at least one library entry carries the per-library key --
@@ -1600,6 +1609,8 @@ def _format_release_json(
         suppress=suppress, pack_application=pack_application,
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
+        # ADR-070: the receipt must name the gate that produced this report.
+        require_complete_analysis=a_terms.require_complete,
         env_matrix_source_sha256=env_matrix_source_sha256,
     )
     summary["effective_config_digest"] = digest

@@ -748,6 +748,7 @@ def _release_summary_effective_config_block(
     scope_public_headers: bool = True,
     on_incomplete_scope: str = "",
     fail_on_removed_library: bool | None = None,
+    require_complete_analysis: bool = False,
     env_matrix_source_sha256: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
@@ -850,6 +851,11 @@ def _release_summary_effective_config_block(
         severity_config,
         on_incomplete_scope=on_incomplete_scope or None,
         fail_on_removed_library=fail_on_removed_library,
+        # ADR-070 (Codex review, P2): without this the receipt said
+        # `gate.require_complete_analysis: "False"` -- and carried a digest
+        # indistinguishable from an ungated run -- for a release this axis
+        # gated. Same reason `on_incomplete_scope` is here.
+        require_complete_analysis=require_complete_analysis,
     )
     ec_fields = effective_config_fields(ec_result, gate=gate)
     return effective_config_digest(ec_fields), ec_fields

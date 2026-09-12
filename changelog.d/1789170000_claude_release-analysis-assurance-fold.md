@@ -25,7 +25,13 @@
   report a different exit code than the process took, and the notice is
   worded from the real resolved code — beside a genuine ABI break it says the
   axis contributes below that exit rather than claiming it floored anything.
-  No new policy
+  **Every document a release run publishes carries the gate**: the canonical
+  top-level `analysis_assurance_exit_contribution` (the key `abicheck
+  aggregate` and the Action's `gate_mode: deferred` path read), each
+  per-library `{library}.json` under `--output-dir`, and the
+  `effective_config_fields`/digest receipt, which names
+  `gate.require_complete_analysis` so a gated run is distinguishable from an
+  ungated one. No new policy
   setting and no new exit number — `assurance.require_complete` defaults
   `false`, so every pre-existing release invocation's exit code, report bytes,
   and stderr are unchanged.

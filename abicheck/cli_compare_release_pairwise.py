@@ -512,7 +512,15 @@ def _compare_one_library(
             # promises the complete list.
             _safe_write_output(
                 lib_report_path,
-                to_json(result, severity_config=severity_config),
+                # ADR-070 (Codex review, P2): without this an incomplete
+                # member's own `{library}.json` said `exit.code: 0` while that
+                # member floored the run to `1` -- a file contradicting the run
+                # that wrote it, read as clean by aggregate/a deferred gate.
+                to_json(
+                    result,
+                    severity_config=severity_config,
+                    require_complete_analysis=require_complete_analysis,
+                ),
             )
         return entry
     except Exception as exc:
@@ -534,6 +542,7 @@ def _suppress_lockstep_soname_findings(
     output_dir: Path | None,
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
+    require_complete_analysis: bool = False,
 ) -> int:
     """Drop ``SONAME_BUMP_UNNECESSARY`` when the release is a coordinated break.
 
@@ -649,7 +658,13 @@ def _suppress_lockstep_soname_findings(
             # contract `_release_md_library_findings` documents).
             _safe_write_output(
                 lib_report_path,
-                to_json(result, severity_config=severity_config),
+                # Same ADR-070 threading as the first write above, same
+                # reason -- see its comment.
+                to_json(
+                    result,
+                    severity_config=severity_config,
+                    require_complete_analysis=require_complete_analysis,
+                ),
             )
     return suppressed
 
@@ -825,6 +840,7 @@ def _compare_release_libraries(
         output_dir,
         severity_config,
         show_only,
+        require_complete_analysis=require_complete_analysis,
     )
     if suppressed_soname:
         click.echo(

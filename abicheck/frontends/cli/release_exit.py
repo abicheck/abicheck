@@ -133,9 +133,16 @@ def _exit_compare_release(
     # known. A caller passing its own guess got this wrong: `compare
     # --bundle-facts` has no severity code to guess from and would have
     # claimed a floor beside a real break.
+    #
+    # And the base is every OTHER axis, not the compatibility one alone
+    # (Codex review, P2): under a dominant `16`/`8`/`7` the compatibility
+    # contribution can be `0` while the real exit was decided by the
+    # not-comparable/removed-library/evidence axis, so basing the wording on it
+    # claimed "Exit code floored to 1" on a run that actually exited 16.
     if assurance_decision is not None:
         assurance_notice = release_assurance_notice(
-            assurance_decision, base_exit=decision.compatibility_contribution
+            assurance_decision,
+            base_exit=decision.exit_without_analysis_assurance(),
         )
         if assurance_notice:
             click.echo(assurance_notice, err=True)

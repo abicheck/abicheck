@@ -136,6 +136,8 @@ def _write_release_summary_file(
         scope_public_headers=scope_public_headers,
         on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
+        # ADR-070: the receipt must name the gate that produced this report.
+        require_complete_analysis=bool(assurance_terms.require_complete) if assurance_terms else False,
         env_matrix_source_sha256=env_matrix_source_sha256,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
@@ -196,6 +198,12 @@ def _write_release_summary_file(
         summary_data["comparison_scope"] = terms.section
     if assurance_terms is not None and assurance_terms.section is not None:
         summary_data["analysis_assurance"] = assurance_terms.section
+        # The canonical top-level key aggregate/the deferred gate read -- see
+        # `cli_compare_release_helpers._format_release_json`'s own comment for
+        # why the floor living only inside `exit` is not enough.
+        summary_data["analysis_assurance_exit_contribution"] = (
+            assurance_terms.decision.exit_contribution
+        )
     # ADR-067 C-S2: the same folded release-level `disposition_audit` the
     # primary report carries (`cli_compare_release_helpers._format_release_
     # json`), via the identical shared helper, so this sidecar cannot drift

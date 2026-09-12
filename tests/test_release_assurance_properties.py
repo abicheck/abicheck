@@ -522,3 +522,73 @@ class TestReleaseExitFoldCarriesTheAxis:
         assert with_axis.code >= without.code
         # And it only ever *adds* the floor, never changes the rest.
         assert with_axis.code == max(without.code, 1)
+
+    @settings(max_examples=400)
+    @given(
+        st.booleans(),
+        st.booleans(),
+        st.integers(0, 4),
+        st.booleans(),
+        st.sampled_from([0, 7]),
+        st.sampled_from([0, 4]),
+    )
+    def test_the_notice_base_is_every_other_axis_not_just_compatibility(
+        self,
+        not_comparable: bool,
+        severity: bool,
+        compat: int,
+        removed: bool,
+        evidence: int,
+        operational: int,
+    ) -> None:
+        """`ExitDecision.exit_without_analysis_assurance()` is the real base.
+
+        The diagnostic's wording turns on "what would this run have exited
+        without this axis", and a single field is not that number: under a
+        dominant `16`/`8`/`7` the compatibility contribution can be `0` while
+        the exit was decided elsewhere. Stated as a property over the whole
+        branch-selecting space rather than the one `not_comparable` example
+        that exposed it, and against an oracle (`max` over the other fields,
+        recomputed here from `dataclasses.fields`) written independently of the
+        method: an axis added to `ExitDecision` without being folded in fails
+        here.
+        """
+        from dataclasses import fields as dc_fields
+
+        from abicheck.policy.exit_decision_precedence import (
+            resolve_release_exit_decision,
+        )
+
+        decision = resolve_release_exit_decision(
+            not_comparable=not_comparable,
+            severity_scheme_active=severity,
+            verdict_or_severity_contribution=compat,
+            removed_required_library=removed,
+            evidence_contract_error_contribution=evidence,
+            operational_error_contribution=operational,
+            analysis_assurance_contribution=1,
+        )
+        oracle = max(
+            (
+                getattr(decision, f.name)
+                for f in dc_fields(decision)
+                if f.name.endswith("_contribution")
+                and f.name != "analysis_assurance_contribution"
+            ),
+            default=0,
+        )
+        base = decision.exit_without_analysis_assurance()
+        assert base == oracle
+        # And the notice never claims a floor it did not impose: whenever some
+        # other axis already reached the decision's own code, the wording must
+        # not say "floored".
+        spoken = release_assurance_diagnostic(
+            resolve_release_assurance_decision(
+                (MemberAssurance("lib.so", "partial", ("no dwarf",)),),
+                require_complete=True,
+            ),
+            base_exit=base,
+        )
+        assert spoken is not None
+        if base >= decision.code:
+            assert "floored to" not in spoken

@@ -371,3 +371,119 @@ class TestReleaseAssuranceThroughTheCli:
         assert "Analysis assurance incomplete" in run.stderr
         assert "floored to" not in run.stderr
         assert "which stands" in run.stderr
+
+    def test_every_report_the_run_writes_agrees_with_the_real_exit(
+        self, bundle: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """The gate must survive every document this run publishes.
+
+        Codex security review (P1) found the floor reaching only `exit.
+        analysis_assurance_contribution` and `analysis_assurance.
+        exit_contribution`, while `workflows.aggregate.gate._analysis_assurance_
+        exit` and the composite Action's `gate_mode: deferred` path read the
+        canonical **top-level** `analysis_assurance_exit_contribution` (report
+        schema 2.40, the exact sibling of the coverage axis's own key) -- so
+        `abicheck compare` exited 1 and aggregating its report exited 0. A
+        sibling P2 found the same loss in each per-library `{library}.json`,
+        which was written without `require_complete_analysis` at all.
+
+        Asserted as one invariant over *every* document rather than per file,
+        and through the reader those consumers actually use rather than a key
+        presence check: a future writer added without the axis fails here.
+        """
+        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+
+        out = tmp_path / "every"
+        run = _compare(
+            str(bundle["v1"]),
+            str(bundle["v1_nodebug"]),
+            "--output-dir",
+            str(out),
+            bundle=bundle,
+        )
+        assert run.returncode == 1, run.stdout + run.stderr
+        documents = {"<stdout>": json.loads(run.stdout)}
+        for path in sorted(out.glob("*.json")):
+            documents[path.name] = json.loads(path.read_text())
+        # The primary report, summary.json, and one file per member.
+        assert len(documents) >= 2 + len(_LIBS)
+        for name, doc in documents.items():
+            assert _analysis_assurance_exit(doc) == 1, (
+                f"{name}: the axis that gated this run reads "
+                f"{_analysis_assurance_exit(doc)} to aggregate/the deferred gate"
+            )
+            assert doc["exit"]["code"] == run.returncode, name
+            assert doc["exit"]["analysis_assurance_contribution"] == 1, name
+
+    def test_a_clean_run_publishes_a_clean_axis_everywhere(
+        self, bundle: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Negative control for the invariant above: with every member's
+        analysis complete, the same reader must see `0` in every document --
+        so the test above is not satisfied by a writer that hard-codes `1`."""
+        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+
+        out = tmp_path / "clean"
+        run = _compare(
+            str(bundle["v1"]),
+            str(bundle["v2"]),
+            "--output-dir",
+            str(out),
+            headers_for=_LIBS,
+            bundle=bundle,
+        )
+        assert run.returncode == 4, run.stdout + run.stderr
+        docs = [json.loads(run.stdout)] + [
+            json.loads(p.read_text()) for p in sorted(out.glob("*.json"))
+        ]
+        for doc in docs:
+            assert _analysis_assurance_exit(doc) == 0
+
+    def test_the_effective_config_receipt_names_the_gate_that_ran(
+        self, bundle: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """The receipt must describe the gate that produced the report.
+
+        Codex review (P2): `_release_summary_effective_config_block` built its
+        `EffectiveGate` without `require_complete_analysis`, so both the primary
+        release JSON and `summary.json` published
+        `effective_config_fields["gate.require_complete_analysis"] == "False"`
+        -- and a digest indistinguishable from an ungated run -- for a run this
+        axis actually gated. Asserted together with the digest *differing*
+        between a gated and an ungated run on the same inputs, since the field
+        alone could be right while the digest still collided.
+        """
+        out = tmp_path / "receipt"
+        gated = _compare(
+            str(bundle["v1"]),
+            str(bundle["v1_nodebug"]),
+            "--output-dir",
+            str(out),
+            bundle=bundle,
+        )
+        assert gated.returncode == 1, gated.stdout + gated.stderr
+        ungated = _compare(
+            str(bundle["v1"]), str(bundle["v1_nodebug"]), bundle=bundle, require=False
+        )
+        assert ungated.returncode == 0, ungated.stdout + ungated.stderr
+
+        gated_docs = [
+            json.loads(gated.stdout),
+            json.loads((out / "summary.json").read_text()),
+        ]
+        for doc in gated_docs:
+            assert (
+                doc["effective_config_fields"]["gate.require_complete_analysis"]
+                == "True"
+            )
+        ungated_doc = json.loads(ungated.stdout)
+        assert (
+            ungated_doc["effective_config_fields"]["gate.require_complete_analysis"]
+            == "False"
+        )
+        # The digest has to move with the setting, or a consumer comparing
+        # receipts cannot tell a gated run from an ungated one.
+        assert (
+            gated_docs[0]["effective_config_digest"]
+            != ungated_doc["effective_config_digest"]
+        )

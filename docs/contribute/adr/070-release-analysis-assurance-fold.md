@@ -164,10 +164,29 @@ finding's compatibility decision or gate contribution. A release
 `BundleDiffResult` whose `per_library` is a list of real `DiffResult`s, each
 carrying its own `AnalysisAssurance` — the same member facts, reached a
 different way. It folds through the identical function, so the two operand
-shapes cannot diverge on what `require_complete` means.
+shapes cannot diverge on what `require_complete` *means*.
 
-**D9 — Every consumer that publishes an exit status folds the axis, and the
-notice is formatted where the real code is known.** Three places build a
+What they can still differ on is the *evidence* each one collects, and this
+axis now makes one such pre-existing difference visible as an exit code. The
+stored-OLD/live-NEW branch does not thread `--depth` into its driver (the
+stored/stored branch does), so `--depth binary` clears NEW's headers while the
+stored OLD snapshot keeps whatever L2/L5 facts its capture recorded. The result
+is an `asymmetric` header/graph context that a live-vs-live comparison at the
+same depth does not have — measured, not inferred: on the same three-library
+fixture, live-vs-live at `--depth binary` reports `partial` only for
+`scope_resolved is False`, while stored-vs-live reports `partial` for
+`header context asymmetric`, `graph completeness unknown` and
+`contract_coverage is 'partial'` as well. That `partial` is a *true* statement
+about that run's evidence — the asymmetry is real — so this axis is not
+manufacturing a finding; it is stricter on the stored path for a reason the
+user did not ask for. Projecting a stored snapshot down to a requested depth is
+its own change to that driver's evidence handling (it would move findings, not
+just assurance), so it is **not** attempted here and is recorded in
+[known-gaps.md](../known-gaps.md) with that reproduction. Read D8 as a claim
+about the fold, not about evidence parity between operand shapes.
+
+**D9 — Every document a run publishes carries the axis, and the notice is
+formatted where the real code is known.** Three places build a
 release `ExitDecision` — the process exit (`release_exit.py`), the primary
 report (`cli_compare_release_helpers._format_release_json`), and the
 `--output-dir` sidecar (`release_summary._write_release_summary_file`) — and
@@ -183,7 +202,33 @@ itself: that wording turns on the compatibility axis's own exit code
 stands"), and the decision it resolves is the only place that number is
 known. A caller passing its own guess gets it wrong — `compare
 --bundle-facts` has no severity code to guess from and would have announced a
-floor beside a real ABI break.
+floor beside a real ABI break — and the base is every *other* axis, not the
+compatibility one alone: under a dominant `16`/`8`/`7` the compatibility
+contribution can be `0` while the exit was decided elsewhere, so
+`ExitDecision.exit_without_analysis_assurance()` owns that number and reads
+every `*_contribution` field off the dataclass, so an axis added later is
+included without a second list to keep in sync.
+
+"Publishes" means every document, not only the exit: the canonical **top-level**
+`analysis_assurance_exit_contribution` (report schema 2.40, the sibling of
+`contract_coverage_exit_contribution`) on the release document and on
+`summary.json`, because that key — not the `exit` block — is what
+`workflows.aggregate.gate._analysis_assurance_exit` and the Action's
+`gate_mode: deferred` path read; each per-library `{library}.json` under
+`--output-dir`, written with the setting threaded through so it cannot report
+`exit.code: 0` for a member that floored the run; and the
+`effective_config_fields`/digest receipt, which must name
+`gate.require_complete_analysis` or a gated run is indistinguishable from an
+ungated one. Each of these was a real loss found in review, and all four share
+one shape — an orthogonal axis reaching some consumers and not others — which
+is why they are stated here as one rule rather than four fixes.
+
+`run_outcome.gate` deliberately stays `none` for a run this axis floors, and
+that is **not** an omission: `gate` is a *compatibility* category
+(`policy_gate_decision_for_exit_code`), an orthogonal floor is by definition not
+one, and a scalar `compare` floored by the same axis reports `gate: none` with
+`compatibility: COMPATIBLE` too. Making the release path differ here would
+break D1's cardinality agreement rather than close a gap.
 
 ## Consequences
 

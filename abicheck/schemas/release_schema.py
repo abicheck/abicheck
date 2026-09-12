@@ -82,7 +82,16 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       the named ``incomplete_members`` rows), plus
 #:       ``analysis_assurance_status``/``analysis_assurance_notes``/
 #:       ``analysis_assurance_exit_contribution`` on each ``libraries[]``
-#:       entry. Unlike 1.1's unconditional field, all of these are present
+#:       entry, and the canonical **top-level**
+#:       ``analysis_assurance_exit_contribution`` (the exact sibling of
+#:       ``contract_coverage_exit_contribution``, and the key report schema
+#:       2.40 defined for this axis) -- emitted on the release document and on
+#:       ``--output-dir``'s ``summary.json`` alike, because that top-level key
+#:       is what ``workflows.aggregate.gate._analysis_assurance_exit`` and the
+#:       composite Action's ``gate_mode: deferred`` path read. Emitting the
+#:       floor only inside ``exit``/``analysis_assurance`` left both reading
+#:       ``0`` for a run whose real exit was ``1`` (Codex security review,
+#:       P1). Unlike 1.1's unconditional field, all of these are present
 #:       ONLY when ``assurance.require_complete`` was in effect -- the same
 #:       "present only when active" convention the ``severity`` and
 #:       ``contract_coverage_*`` blocks already follow, and what keeps every

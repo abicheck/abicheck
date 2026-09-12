@@ -8497,6 +8497,39 @@ left out, each for a stated reason rather than for effort:
    and the right one — it would close this and several adjacent asymmetries at
    once, rather than bolting one block onto a document with no exit contract.
 
+5. **`--depth binary` is not projected onto a stored-`BundleFacts` OLD side,
+   so that operand is stricter than a live one.** `compare_bundle_facts.
+   dispatch` threads `depth=` into the **stored/stored** driver
+   (`workflows.bundle_stored_pair_compare.compare_stored_bundle_facts_pair`)
+   but not into the **stored/live** one
+   (`bundle_side_input.compare_release_against_bundle_facts`, which has no
+   depth parameter at all). At `--depth binary` it clears NEW's headers while
+   the stored OLD snapshot keeps whatever L2/L5 facts its capture recorded, so
+   the comparison is asymmetric in a way live-vs-live at the same depth is not.
+
+   Measured on a three-library fixture, same pair both ways: live-vs-live at
+   `--depth binary` reports `analysis_assurance: partial` with one note
+   (`scope_resolved is False`), while stored-vs-live reports `partial` with
+   three (`header context asymmetric: the new side carries no header/API-level
+   evidence`, `graph completeness unknown`, `contract_coverage is 'partial'`).
+
+   ADR-070 did not cause the asymmetry — it pre-dates this axis and affects
+   *findings* too, not only assurance — but it is what makes the asymmetry
+   gate, so the divergence is worth stating plainly: under
+   `assurance.require_complete` a stored-OLD release at `--depth binary` can be
+   floored where the live equivalent is not. The `partial` is **not** a false
+   finding: the evidence really was asymmetric, and `AGENTS.md`'s "weaker
+   evidence narrows conclusions" says to report that rather than hide it. What
+   is wrong is only that the user asked for binary depth and the stored side
+   did not honour it.
+
+   The fix is to give that driver a real `depth` and project both sides to it
+   before comparing — which moves findings, not just assurance, and so belongs
+   with the stored/live driver's own evidence handling rather than bolted onto
+   this axis. Until then, compare a stored OLD side at its captured depth (omit
+   `--depth`), or use a live OLD tree when you need `--depth binary` to be
+   symmetric. Found by Codex review on PR #1237.
+
 The companion test gap is recorded in `tests/regressions/manifest.py` under
 bug class `gate.per_member_axis_fold`: the order-independence and monotonicity
 properties are stated and generated for the assurance axis only. The coverage
