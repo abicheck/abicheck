@@ -1621,9 +1621,17 @@ _is_release_style_operand() {
 # spellings, is listed; anything not listed here is treated as a flag/
 # unknown token.
 #
-# This is a hand-maintained snapshot, not derived at run time (the Action
-# has no live `abicheck --help-all` to introspect before it even knows
-# which dependency-source install produced a `python`/`abicheck` on PATH).
+# This is a hand-maintained snapshot. It is NOT, as this comment long
+# claimed, impossible to derive at run time: `action.yml` installs abicheck
+# (step 3) before invoking this script (step 4), and `_PY_BIN` below already
+# verifies that `abicheck` imports -- so a live introspection call is
+# available here and would be version-correct for whatever abicheck the
+# workflow actually installed, which no snapshot can be. That false
+# justification is tracked as a finding in
+# `docs/contribute/plans/action-cli-surface-drift.md` (Phase 3a replaces this
+# list with the live query); it survives for now only because nothing has
+# made the switch yet. `action/validate-inputs.sh` is the one shell here that
+# genuinely runs pre-install.
 # It is the UNION over every command this Action's mode dispatch can invoke
 # (`compare`/`dump`/`deps tree`/`deps compare`), not `compare` alone --
 # `_effective_format` is evaluated after the mode dispatch, so the tokenizer

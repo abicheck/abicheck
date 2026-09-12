@@ -13,12 +13,27 @@ itself (`_extra_args_is_value_option`, `action/run.sh:1626-1634`: "a
 hand-maintained snapshot, not derived at run time ... it can go stale") and
 the audit below confirms the prediction came true in three independent places.
 
-The Action cannot introspect the CLI at run time: `run.sh` assembles its
-command before it knows which `dependency-source` install produced a
-`python`/`abicheck` on `PATH`, and `validate-inputs.sh` deliberately runs
-*before* Python setup so an unsupported combination fails in seconds rather
-than after a multi-minute toolchain install. Anything derived must therefore
-be derived at authoring/CI time.
+**Where derivation is actually possible — corrected.** An earlier revision of
+this plan asserted, on the strength of `_extra_args_is_value_option`'s own
+comment, that "the Action cannot introspect the CLI at run time" and that
+anything derived must therefore be derived at authoring/CI time. **That is
+false for the tokenizers, and the comment asserting it is itself a stale
+justification** (Codex review on PR #1234, verified against `action.yml`):
+
+| Shell | Runs | Live `abicheck`? |
+|---|---|---|
+| `action/validate-inputs.sh` | before Python setup, by design ("fail fast") | **No** |
+| `action/run.sh` | `action.yml`'s step 4, after step 3's `pip install` (`action.yml:1240-1246`) | **Yes** |
+| `actions/check-target/action.yml`'s assurance-overlay step | line ~666, after the `pip install` at `:507-509` | **Yes** |
+
+`run.sh` already resolves an interpreter and checks `abicheck` importability
+(`action/run.sh:2095`), so it not only *could* introspect — it already proves
+the import works. Only `validate-inputs.sh` is genuinely pre-install, and the
+CLI facts it needs are the format choice sets, not the option tables.
+
+This correction materially narrows B1/Phase 3 below: the option tables do not
+need a generated artifact at all, because the surface that uses them can ask
+the installed CLI directly.
 
 ---
 
@@ -78,27 +93,43 @@ dispatch — so the tokenizer runs for **every** mode, not just `compare`:
 check-target twin) claims `-j` is one of "four value-taking" short options on
 `compare`. `compare` has no `-j` at all (`jobs` was retired, ADR-068 D5).
 
-**The surplus entries were live, not cosmetic.** Sourcing the tokenizer out
-of `action/run.sh` at the pre-fix commit and at the corrected one, and asking
-whether a real `--config` occurrence is seen:
+**What the surplus entries actually cost — corrected.** An earlier revision
+of this section claimed `--lang --config x.yml` let a real conflicting
+`--config` "through unnoticed". Codex (PR #1234, P2) correctly pushed back:
+all twelve surplus names are retired on every command the Action invokes, so
+Click rejects the invocation with a usage error regardless of how the shell
+tokenized it. The token misclassification is real and demonstrable —
 
 ```
-                                       pre-fix                        --config seen?
---lang --config x.yml        --lang=`--config x.yml`                  NO
---pdb-path --config x.yml    --pdb-path=`--config x.yml`              NO
-                                       corrected
---lang --config x.yml        --lang=(empty), --config=x.yml           YES
---pdb-path --config x.yml    --pdb-path=(empty), --config=x.yml       YES
+                             pre-fix tokens                    --config seen?
+--lang --config x.yml        --lang=`--config x.yml`            NO
+--pdb-path --config x.yml    --pdb-path=`--config x.yml`        NO
+                             corrected
+--lang --config x.yml        --lang=(empty), --config=x.yml     YES
 ```
 
-A retired option name still reserved in the table swallowed the following
-real flag as its own value, so `_extra_args_has_config_flag` answered `NO`
-and `run.sh:3175`'s own synthesized-`--config`-vs-`extra-args-`--config``
-conflict guard was silently skipped — precisely the "never a false negative
-that lets a real conflicting combination through unnoticed" outcome the
-function's own docstring promised could not happen. The same mechanism
-suppresses `_extra_args_has_write_flag`, which gates the internal JSON
-sidecar injection that ADR-049's unconditional coverage/assurance floors read.
+— and `run.sh:3175`'s synthesized-config conflict guard really is skipped in
+the pre-fix column. But the run then dies on the unknown option anyway, so
+the cost is a **degraded diagnostic** (a raw Click usage error instead of the
+Action's own specific guidance about which `--config` won), not a false-
+negative gate. No surplus entry yields a live false-negative path, because
+none of them is accepted by any command the Action invokes.
+
+**The missing entries are the direction with real, shipped harm**, and it is
+a *false rejection* rather than a false pass. That is the documented #1222
+repro (`tests/test_reusable_workflows_assurance_overlay_extra_args_config.py`'s
+`TestAssuranceOverlayRecognizesUsedByManifestAsValueOption`): `extra-args:
+'--used-by-manifest --config'` with a consumer manifest literally named
+`--config` is argv the real CLI accepts, but the tokenizer read it as a bare
+trailing valueless `--config` and the overlay step's guard rejected it
+outright — `analysis-assurance-complete: true` broke a check that would
+otherwise have succeeded. The four options missing here
+(`--compression`, `--provenance`, `--old-root`, `--new-root`) are the same
+shape on `dump`/`deps compare`, reachable whenever such an option's own value
+resembles a flag the scanners read.
+
+So the two directions are not symmetric, and neither is "safe": a surplus
+entry degrades an error message, a missing entry can fail a valid check.
 
 **Why the existing guard missed all of this.**
 `tests/test_extra_args_is_value_option_completeness.py` asserts only
@@ -178,6 +209,18 @@ is now an engine-level constant in `policy/`. **STALE-COMMENT ×4.** A reader
 checking one of these against its cited source finds nothing and cannot tell
 whether the code or the comment is wrong.
 
+**A sixth stale justification, and the one that misled this plan's own first
+revision:** `_extra_args_is_value_option`'s comment
+(`action/run.sh:1626-1634`) explains that the list is not derived at run time
+because "the Action has no live `abicheck --help-all` to introspect before it
+even knows which dependency-source install produced a `python`/`abicheck` on
+PATH". `action.yml` installs abicheck at step 3 and runs `run.sh` at step 4,
+and `run.sh:2095` already verifies the import — so the comment's stated reason
+for the whole hand-maintained-snapshot design does not hold. A false
+justification is worse than a missing one: it was load-bearing enough that
+this plan's first revision adopted it without checking and designed a
+generated artifact around it. **STALE-COMMENT (×6 total.)**
+
 Separately, `docs/reference/exit-codes.md:547` still documents exit `6` =
 `NOT_COMPARABLE` for `scan --against`, a command ADR-068 retired. Docs
 drift, not Action drift, but it is the reference the Action's own dispatch
@@ -206,7 +249,7 @@ hand-maintained table must classify. ADR-049's contract-coverage axis, which
 | Verdict | Count |
 |---|---|
 | DRIFTED | 3 guards (two known, one new) + both option tables + one short-cluster comment |
-| STALE-COMMENT | 5 (4 exit-code, 1 check-target) |
+| STALE-COMMENT | 6 (4 exit-code, 1 check-target, 1 the tokenizer's own no-live-CLI premise) |
 | UNGUARDED (latent) | 1 (no-baseline guard list vs. 27-entry CLI table) |
 | AGREES | 7 release/format guards, 10 input mappings, all 7 exit codes |
 
@@ -218,26 +261,39 @@ and nothing re-derives it.** Every STALE-COMMENT item shares a second:
 
 ## Part B — Prevention mechanisms, assessed
 
-### B1. Derived option tables, checked by a `--check` generator
+### B1. Derive the tables from the installed CLI (not from a snapshot)
 
-A `scripts/gen_action_cli_surface.py` introspecting
-`abicheck.cli.main.commands[...]` and emitting a committed, versioned
-artifact (`action/cli-surface.json`) that both shells read; `--check` fails
-CI on drift. Same pattern as `scripts/gen_changekind_stub.py` and
-`scripts/gen_agent_skills.py`.
+**Revised after the premise correction above.** Because `run.sh` and
+check-target's overlay step both run *after* `pip install`, the right answer
+for the option tables is not a committed artifact at all — it is to ask the
+installed CLI. One `python -c` introspection call emitting the value-taking
+option set for the command about to be invoked, consumed by the existing
+tokenizer, replaces both hand-maintained `case` lists with a derivation that
+is correct by construction for *whatever abicheck version the workflow
+actually installed* — including a version newer or older than the Action's
+own checkout, which no committed snapshot can ever be right about.
 
-- **Catches:** all of A2 — the 12 stale extras, the `--sysroot` misscope, the
-  4 missing non-`compare` options, the `-j` claim. Removes the duplication
-  between the two lists outright (one artifact, two readers).
-- **Misses:** A1 and A4 entirely. A guard's *reasoning* is not an option
-  table; no generator output would have contradicted "the fan-out never
-  threads the compile context".
-- **Cost:** low-moderate. One script, one committed JSON, shell-side JSON
-  reading (needs care: `validate-inputs.sh` runs pre-install and must not
-  need Python — a flat newline-delimited text artifact is cheaper than JSON
-  here and `grep -qxF` reads it in any shell).
-- **Home:** `scripts/verify.py` step catalog (a `--check` step, like the
-  existing generator checks) + the `ai-readiness` job.
+- **Catches:** all of A2, permanently, and strictly better than a snapshot:
+  it cannot drift, and it is version-correct rather than merely
+  repo-correct. Removes the duplication between the two lists outright.
+- **Misses:** A1 and A4 entirely — a guard's *reasoning* is not an option
+  table. Also misses `validate-inputs.sh`'s format choice sets, which are
+  genuinely pre-install; those are the only remaining case for a generated
+  artifact, and they are a three-line `click.Choice` set, not a table.
+- **Cost:** low. `run.sh` already resolves `_PY_BIN` and already verifies
+  `abicheck` imports (`action/run.sh:2095`), so the machinery exists. Needs a
+  fallback for the documented case where the interpreter cannot import
+  abicheck — and the honest fallback is the one `run.sh` already uses there:
+  fail loudly rather than guess, or degrade to "treat every unknown token as
+  opaque", which is the safe direction for the *missing*-entry failure mode.
+- **Home:** `action/run.sh` + `actions/check-target/action.yml`; a unit test
+  asserting the derived set equals live introspection. No new gate, no
+  generator, no committed artifact.
+
+A committed `--check` generator (the `scripts/gen_changekind_stub.py` pattern)
+remains the right shape *only* for `validate-inputs.sh`'s pre-install needs.
+Using it for the tokenizers would institutionalize a snapshot where a live
+query is available — which is how this class of drift started.
 
 ### B2. Cross-surface equivalence check
 
@@ -309,10 +365,12 @@ surface a CLI refusal well (`_is_cli_error()`, the exit-64 arm).
 - **Catches:** A1, A3 and A4 by **removal** — a guard that does not exist
   cannot drift. This is the only candidate that shrinks the surface instead
   of instrumenting it.
-- **Misses:** A2. The `extra-args` tokenizer is irreducibly pre-install: it
-  must classify tokens to decide what `run.sh` itself may inject
-  (`--write json=`, `-o`), before any CLI exists to ask. B1 is its
-  complement, not its competitor.
+- **Misses:** A2. The `extra-args` tokenizer survives any amount of guard
+  deletion: it must classify tokens to decide what `run.sh` itself may inject
+  (`--write json=`, `-o`), which is the Action's own concern, not the CLI's.
+  B1 is its complement, not its competitor. (It is *not*, as an earlier
+  revision claimed, "irreducibly pre-install" — it runs post-install and can
+  ask the CLI; see the premise correction at the top.)
 - **Cost:** moderate, and mostly *behavioural* rather than mechanical — it
   trades a fast, specific, pre-install Action error for a slower, more
   generic CLI error after install. That is a real regression for the cases
@@ -330,7 +388,7 @@ and want different answers:
 
 | Class | Answer |
 |---|---|
-| A CLI *fact* copied into shell and needed pre-install (A2) | **B1** — derive it |
+| A CLI *fact* copied into shell (A2) | **B1** — derive it from the installed CLI |
 | A CLI *restriction* re-implemented in shell (A1, A3, A4) | **B5** — delete it |
 | A CLI *symbol* cited in a comment (A5) | **B4** — pin it |
 
@@ -345,9 +403,11 @@ not as the primary mechanism.
 
 **B5 + B1, in that order of importance, with B4 as a cheap third.**
 
-The ordering matters: doing B1 first would generate a beautifully derived
-table for guards that should not exist. Delete the mirrored semantics, then
-derive what genuinely survives pre-install.
+The ordering matters: B5 shrinks the surface, and only then is it clear how
+little is left to derive. Delete the mirrored semantics, then derive the
+tokenizer tables from the installed CLI (3a) and generate only the handful of
+facts that are genuinely needed before install (3b) — if those earn a
+generator at all.
 
 ### Does this need an ADR?
 
@@ -422,21 +482,32 @@ efforts do not edit the same guards.
   `_UNSUPPORTED_OPTIONS` error is the answer, and it cannot go stale.
 - Write the ADR alongside.
 
-### Phase 3 — Generated pre-install CLI surface artifact (B1)
+### Phase 3 — Derive the tokenizer tables; generate only what is pre-install
 
-For what genuinely survives Phase 2: the `extra-args` tokenizer's option
-table, and `validate-inputs.sh`'s format choice sets.
+Split in two, per the corrected premise:
 
-- `scripts/gen_action_cli_surface.py` → `action/cli-surface.txt`, a flat
-  newline-delimited artifact (`VALUE_OPTION --foo`, `FORMAT compare json`),
-  readable pre-install with `grep -qxF` and no Python.
-- `--check` mode wired as a `Step` in `scripts/verify.py`'s catalog
-  (`pr` profile) and therefore into the `ai-readiness` job, per
-  `.github/AGENTS.md`'s "don't add a new required check without adding the
-  matching `Step`".
-- Both shells read the artifact; both `case` lists deleted. Phase 1's test
-  then guards the *generator*, not two hand-copies.
-- `scripts/CLAUDE.md` inventory row (the `script-inventory` check).
+**3a — tokenizers (no artifact).** Replace both `case` lists with one
+introspection call against the *installed* abicheck, made once per run and
+cached in a variable. Both call sites already run post-install. Delete the
+lists. Phase 1's bidirectional test then becomes a test of the derivation,
+and the version-skew case it cannot currently express (a workflow installing
+a different abicheck than this checkout) becomes correct for free.
+
+- Fallback when `_PY_BIN` cannot import abicheck: `run.sh:2095` already warns
+  for exactly this case. Treat every token as opaque there — the
+  missing-entry direction, whose worst case is a false rejection the existing
+  guard messages already explain — and say so, rather than falling back to a
+  stale baked list.
+
+**3b — `validate-inputs.sh` (artifact, if anything).** Its format choice sets
+(`compare`'s seven, `deps`' three, `--compression`'s four) are the only CLI
+facts needed before install. They are small and they already AGREE (A3), so
+this is drift *prevention*, not a fix. A `scripts/gen_action_cli_surface.py
+--check` emitting a flat `action/cli-surface.txt`, wired as a `Step` in
+`scripts/verify.py`'s catalog (and therefore the `ai-readiness` job, per
+`.github/AGENTS.md`), plus a `scripts/CLAUDE.md` inventory row. Defensible to
+defer: three `click.Choice` sets that have never drifted may not earn a
+generator and a gate.
 
 ### Phase 4 — Pin guard justifications to CLI symbols (B4)
 

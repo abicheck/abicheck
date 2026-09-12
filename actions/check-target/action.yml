@@ -893,7 +893,10 @@ runs:
         # where `--config` is `--policy`'s value, not a flag) -- deliberately
         # duplicated rather than sourced, the same "this step doesn't source
         # run.sh" convention `_is_path_already_qualified` above already
-        # documents. Keeps this list in sync with run.sh's by hand.
+        # documents. Keeps this list in sync with run.sh's by hand. (This
+        # step runs after the `pip install` above, so a live introspection
+        # call is available here too -- see run.sh's own corrected note and
+        # `docs/contribute/plans/action-cli-surface-drift.md` Phase 3a.)
         #
         # A *missing* entry is the safe direction (an unlisted value-taking
         # option is misread as a bare flag, which can only under-recognize a
