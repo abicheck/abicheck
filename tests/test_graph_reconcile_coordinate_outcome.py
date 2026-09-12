@@ -434,14 +434,55 @@ class TestMarkerCarriedLocationEvidence:
 
     def test_one_sided_file_evidence_falls_back_to_the_marker(self) -> None:
         """The fallback boundary: one recorded declaring file is not a
-        two-sided comparison, so the marker still speaks."""
+        two-sided comparison, so the marker still speaks — provided that
+        file does not contradict its own side's marker (the case below)."""
         old_qn, new_qn = _MARKER_MOVE_CASES["paren_at_spelling"]
-        for old_file, new_file in (("wrapper.h", ""), ("", "wrapper.h")):
+        for old_file, new_file in (("old.h", ""), ("", "new.h")):
             outcome = _classify_outcome(
                 _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
                 _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
             )
             assert outcome == OUTCOME_MOVED, (old_file, new_file, outcome)
+
+    def test_a_lone_declaring_file_can_disprove_the_marker(self) -> None:
+        """Codex review (PR #1229): a recorded declaring file naming NONE
+        of its side's markers disproves that those markers describe the
+        declaration. `Wrapper<(lambda at nested_old.h:1:2)>` declared in
+        `include/wrapper.h` carries a marker for a nested template
+        argument, so a differing marker on the other side cannot establish
+        that the WRAPPER moved.
+
+        The same rule the two-sided case already applies, extended to the
+        one recorded file: it is still enough to disprove the fallback,
+        since it is the only known declaration location. The pair keeps
+        the evidence-conflict outcome rather than dropping into
+        coordinate-only — the nested argument's own file really did
+        change — and it holds whichever side recorded the file."""
+        old_qn = "Wrapper<(lambda at nested_old.h:1:2)>"
+        new_qn = "Wrapper<(lambda at nested_new.h:1:2)>"
+        for old_file, new_file in (
+            ("include/wrapper.h", ""),
+            ("", "include/wrapper.h"),
+        ):
+            outcome = _classify_outcome(
+                _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
+                _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
+            )
+            assert outcome == OUTCOME_RECONCILED, (old_file, new_file, outcome)
+
+    def test_a_lone_agreeing_declaring_file_still_lets_the_marker_speak(self) -> None:
+        """The must-stay-distinct half, so the rule cannot degrade into
+        "any recorded file silences the markers": when the recorded file IS
+        one of its side's markers, the marker describes the declaration and
+        a differing marker on the other side is still a move. Over every
+        marker spelling, and both orientations."""
+        for label, (old_qn, new_qn) in _MARKER_MOVE_CASES.items():
+            for old_file, new_file in (("old.h", ""), ("", "new.h")):
+                outcome = _classify_outcome(
+                    _identity(old_qn, old_file, f"sig:{old_qn}\x1fs"),
+                    _identity(new_qn, new_file, f"sig:{new_qn}\x1fs"),
+                )
+                assert outcome == OUTCOME_MOVED, (label, old_file, new_file, outcome)
 
     def test_a_marker_move_never_reports_coordinate_evidence(self) -> None:
         """`coordinate_evidence` answers None for anything that is not a

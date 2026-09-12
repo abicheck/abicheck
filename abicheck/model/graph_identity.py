@@ -498,5 +498,17 @@ def closure_marker_locations(
     )
 
 
-def _basename(path: str) -> str:
+def path_basename(path: str) -> str:
+    """The final segment of *path*, tolerating either separator.
+
+    Public because a consumer comparing a recorded declaring file against
+    a marker's own basename must use the IDENTICAL rule this module used
+    to extract that basename -- two spellings of "last segment" that
+    disagree on a trailing slash or a backslash would make the comparison
+    answer differently from the extraction (Codex review, PR #1229).
+    """
     return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].strip()
+
+
+#: Internal spelling kept for this module's own call sites.
+_basename = path_basename

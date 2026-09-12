@@ -32,6 +32,7 @@ from __future__ import annotations
 from ..model.graph_identity import (
     closure_location_free_identity,
     closure_marker_locations,
+    path_basename,
 )
 from .entity_identity import CanonicalIdentity
 
@@ -140,6 +141,23 @@ def _signature_tail(identity: CanonicalIdentity) -> str:
     return identity.normalized_signature.split("\x1f", 1)[-1]
 
 
+def _markers_describe_declaration(
+    declaring_file: str, markers: list[tuple[str, str]]
+) -> bool:
+    """Whether *markers* can be read as evidence about where a declaration
+    carrying *declaring_file* lives.
+
+    Vacuously true when either is absent -- no file recorded means nothing
+    contradicts the markers, and no marker means there is nothing to read.
+    Otherwise the recorded file must be among the marker basenames: a
+    marker naming some other header describes a nested template argument's
+    location, not the declaration's own.
+    """
+    if not declaring_file or not markers:
+        return True
+    return path_basename(declaring_file) in {base for _kind, base in markers}
+
+
 def _classify_outcome(
     old_identity: CanonicalIdentity,
     new_identity: CanonicalIdentity,
@@ -243,7 +261,26 @@ def _classify_outcome(
         and sorted(old_markers) == sorted(new_markers)
     )
     has_two_sided_files = bool(old_file) and bool(new_file)
-    moved = (old_file != new_file) if has_two_sided_files else markers_differ
+    # A recorded declaring file that names NONE of its side's markers
+    # disproves that those markers describe the declaration (Codex review,
+    # PR #1229) -- `Wrapper<(lambda at nested_old.h:1:2)>` declared in
+    # `include/wrapper.h` carries a marker for a nested template argument,
+    # not for the wrapper. The two-sided case already defers to the files;
+    # this is the same rule where only ONE side recorded a file, which is
+    # still enough to disprove the fallback: the only known declaration
+    # location is unrelated to the marker, so the marker cannot establish
+    # that the declaration moved. `markers_differ` stays true, so the pair
+    # keeps the evidence-conflict outcome rather than dropping into
+    # coordinate-only's "no material identity change" -- the nested
+    # argument's own file really did change.
+    marker_fallback_usable = _markers_describe_declaration(
+        old_file, old_files
+    ) and _markers_describe_declaration(new_file, new_files)
+    moved = (
+        (old_file != new_file)
+        if has_two_sided_files
+        else (markers_differ and marker_fallback_usable)
+    )
     if renamed and not moved:
         return OUTCOME_RENAMED
     if moved and not renamed:
