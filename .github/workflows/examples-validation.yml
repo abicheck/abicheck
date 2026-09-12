@@ -19,6 +19,23 @@ on:
       # path this replaced named only one of the three, so a change to the
       # CastXML pin could merge without scheduling the jobs that depend on it.
       - ".github/actions/**"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # and sets up CastXML through a composite action that shells out to
+      # `action/install-castxml.sh`, restores mtimes through
+      # `scripts/restore_git_mtimes.py`, and drives the build-source proof
+      # through `scripts/verify.py`. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
+      - "action/**"
+      - "scripts/restore_git_mtimes.py"
+      - "scripts/verify.py"
   pull_request:
     branches: [main]
     paths:
@@ -37,6 +54,23 @@ on:
       # path this replaced named only one of the three, so a change to the
       # CastXML pin could merge without scheduling the jobs that depend on it.
       - ".github/actions/**"
+      # This workflow's own build infrastructure, not just the inputs it
+      # validates: every job here `pip install -e ".[dev]"`s this package,
+      # and sets up CastXML through a composite action that shells out to
+      # `action/install-castxml.sh`, restores mtimes through
+      # `scripts/restore_git_mtimes.py`, and drives the build-source proof
+      # through `scripts/verify.py`. A change to one of those
+      # decides how this workflow runs, so omitting it let such a change
+      # merge without a single job that depends on it having run --
+      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # same reason ("re-pinning CastXML in action/install-castxml.sh ...
+      # would otherwise land without a single job that uses CastXML having
+      # run"). Enforced by tests/test_workflow_path_filter_closure.py,
+      # which derives the set from what this workflow actually executes.
+      - "pyproject.toml"
+      - "action/**"
+      - "scripts/restore_git_mtimes.py"
+      - "scripts/verify.py"
   workflow_dispatch:
 
 concurrency:

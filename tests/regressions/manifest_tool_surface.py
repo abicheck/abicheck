@@ -93,6 +93,91 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="ci.path_filter_omits_own_build_infrastructure",
+        invariant=(
+            "A workflow's `paths:` filter must cover the files that decide "
+            "*how* it runs, not only the inputs it validates: the package "
+            "metadata its jobs pip-install from, the composite actions it "
+            "calls, and the scripts those actions execute in turn. "
+            "Otherwise a change to one of them merges without a single job "
+            "that depends on it having run, and nothing fails -- the "
+            "filter looks careful and is silently incomplete. `ci.yml`'s "
+            "`heavy-parity-gate` already named `pyproject.toml`, "
+            "`action/**`, `.github/actions/**` and `scripts/verify.py` for "
+            "this reason, citing the sharpest case (re-pinning CastXML in "
+            "`action/install-castxml.sh` landing with no CastXML job run); "
+            "three other path-filtered workflows had the identical "
+            "dependency and none of the entries. The dependency set is "
+            "derived from each workflow rather than listed, so a workflow "
+            "that starts using a new script is covered when it does."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_workflow_path_filter_closure.py",),
+        public_surfaces=("ci-workflow",),
+        axes={
+            "dependency": ("package-metadata", "composite-action", "action-script"),
+            "event": ("push", "pull_request"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Dependencies are derived from `run:` text by regex -- "
+                    "an interpreter invocation naming an existing repo "
+                    "file. A script reached indirectly (a Makefile target, "
+                    "a script that execs a sibling, a tool resolved from "
+                    "PATH after `pip install`) is not seen, and neither is "
+                    "a data file a job merely reads. `pixi.lock` is a "
+                    "concrete instance: a pixi-driven job's real dependency "
+                    "set is not derived at all. The `**` glob is also "
+                    "matched permissively on purpose, so an over-broad "
+                    "filter entry is never reported."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
+        id="ci.instrumentation_without_a_consumer",
+        invariant=(
+            "Measurement a CI lane collects must have a reader: an upload, "
+            "an artifact, or a gate. Coverage instrumentation costs ~60% "
+            "wall time on every lane that carries it, so a report nobody "
+            "reads is pure loss -- and it reads as diligence, which is why "
+            "it survives review. The macOS unit lane wrote a "
+            "`coverage.xml` the Codecov step (gated to Linux/3.13) never "
+            "took, and the `slow` lane wrote a `coverage-slow.xml` that "
+            "nothing in the repository referenced at all. The sibling half "
+            "of the same class is configuration that cannot take effect: "
+            "`COVERAGE_CORE=sysmon` requested under `branch = true` below "
+            "Python 3.14, where coverage.py warns and silently falls back "
+            "to CTracer -- so what is requested and what runs must either "
+            "agree or the disagreement must be stated where the setting "
+            "is."
+        ),
+        fixed_by=(1240,),
+        seed_tests=("tests/test_coverage_core_effectiveness.py",),
+        public_surfaces=("ci-workflow",),
+        axes={
+            "half": ("requested-vs-selected-core", "documented-fallback"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the coverage-core half is executable. Nothing "
+                    "asserts the consumer half -- that every `--cov-report` "
+                    "a workflow writes is uploaded, archived or gated -- so "
+                    "a future lane can reintroduce an unread report and "
+                    "only a human reading the diff would notice. The "
+                    "core-effectiveness test also probes the interpreter "
+                    "running the suite, not the pinned Python of each CI "
+                    "lane, so a lane on a different version is checked only "
+                    "through the stated caveat, not by measurement."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="ci.inert_concurrency_group_key",
         invariant=(
             "A concurrency group keyed off a value that is unique per run "
