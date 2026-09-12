@@ -393,16 +393,21 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "SHARED_OPTION_DEFAULTS is hand-maintained and currently "
-                    "names one option (include_dependencies). The parity "
-                    "assertion itself is general -- it reads the Click "
-                    "parameter's own default off the real command and "
-                    "compares it against each typed surface -- but nothing "
-                    "enumerates *which* options are reachable from more than "
-                    "one front end, so a newly shared option is covered only "
-                    "once added to that tuple. Deriving the list (every Click "
-                    "dest that also names an InputSpec field or a "
-                    "run_dump/DumpRequest keyword) would close it."
+                    "The *typed surfaces* are now derived, not listed: the "
+                    "sweep walks abicheck.service.__all__ plus the InputSpec "
+                    "field/of and run_dump's synthetic signature, so a new or "
+                    "renamed public entry point carrying the option is covered "
+                    "the moment it exists. That half was a real gap and it bit "
+                    "immediately -- the first revision listed three surfaces "
+                    "and review found resolve_input and run_compare still "
+                    "defaulting the other way, run_compare writing its value "
+                    "into both InputSpecs and so overriding the field default "
+                    "the test did check. What remains hand-maintained is "
+                    "SHARED_OPTIONS, the list of *options* reachable from more "
+                    "than one front end (one entry today). Deriving that too "
+                    "means matching Click dests against typed parameter names "
+                    "across every command, which would also sweep in "
+                    "coincidental name collisions; left listed deliberately."
                 ),
                 reference="PR #1258",
             ),

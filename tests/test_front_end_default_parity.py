@@ -47,17 +47,21 @@ import inspect
 
 import pytest
 
+from abicheck import service
 from abicheck.cli import main
 from abicheck.dumper_scoping import wrap_run_dump_with_dependency_scope
 from abicheck.workflows.request_inputs import InputSpec
 
-#: ``(click_dest, cli_command, typed_surfaces)`` for every option a caller can
-#: reach from more than one front end. ``typed_surfaces`` names where the same
-#: concept is spelled on the typed API; each is resolved dynamically below so a
-#: rename fails loudly rather than silently skipping.
-SHARED_OPTION_DEFAULTS = (
-    ("include_dependencies", "dump", ("InputSpec.field", "InputSpec.of", "run_dump")),
-)
+#: Options a caller can reach from more than one front end, as
+#: ``(click_dest, cli_command)``. The *typed* surfaces are not listed: they are
+#: **derived** below from ``abicheck.service.__all__``, because a hand-written
+#: list is exactly what let two of them be missed. The first revision of this
+#: file named three surfaces (``InputSpec``, ``InputSpec.of``, ``run_dump``)
+#: and recorded the enumeration gap as a ``KnownGap``; review then found
+#: ``resolve_input`` and ``run_compare`` still defaulting the other way, with
+#: ``run_compare`` writing its value into *both* ``InputSpec``s and so
+#: overriding the field default this test did check. Deriving closes that.
+SHARED_OPTIONS = (("include_dependencies", "dump"),)
 
 
 def _click_default(command: str, dest: str) -> object:
@@ -68,58 +72,90 @@ def _click_default(command: str, dest: str) -> object:
     raise AssertionError(f"{command} has no parameter {dest!r}")
 
 
-def _typed_default(surface: str, dest: str) -> object:
-    if surface == "InputSpec.field":
-        # Read the declared default off the dataclass field: `InputSpec()`
-        # cannot be constructed without `path`, and a fabricated path would
-        # make this read depend on the fixture rather than the declaration.
-        for field in dataclasses.fields(InputSpec):
-            if field.name == dest:
-                return field.default
-        raise AssertionError(f"InputSpec has no field {dest!r}")
-    if surface == "InputSpec.of":
-        return inspect.signature(InputSpec.of).parameters[dest].default
-    if surface == "run_dump":
-        wrapped = wrap_run_dump_with_dependency_scope(lambda *a, **k: None)
-        return inspect.signature(wrapped).parameters[dest].default
-    raise AssertionError(f"unknown typed surface {surface!r}")
+def _declared_defaults(dest: str) -> dict[str, object]:
+    """Every public typed surface that accepts *dest*, mapped to its default.
+
+    Derived, not listed: the dataclass field, ``InputSpec.of``, and every
+    callable in ``abicheck.service.__all__`` whose signature accepts *dest* --
+    so a new or renamed public entry point carrying the option is covered the
+    moment it exists.
+    """
+    found: dict[str, object] = {}
+
+    for field in dataclasses.fields(InputSpec):
+        if field.name == dest:
+            # `InputSpec()` needs `path`, and a fabricated one would make this
+            # read depend on the fixture rather than the declaration.
+            found["InputSpec.field"] = field.default
+
+    for name in service.__all__:
+        obj = getattr(service, name, None)
+        if not callable(obj):
+            continue
+        try:
+            sig = inspect.signature(obj)
+        except (TypeError, ValueError):  # pragma: no cover - builtins
+            continue
+        param = sig.parameters.get(dest)
+        if param is not None and param.default is not inspect.Parameter.empty:
+            found[f"service.{name}"] = param.default
+
+    of_param = inspect.signature(InputSpec.of).parameters.get(dest)
+    if of_param is not None and of_param.default is not inspect.Parameter.empty:
+        found["InputSpec.of"] = of_param.default
+
+    wrapped = wrap_run_dump_with_dependency_scope(lambda *a, **k: None)
+    sig_param = inspect.signature(wrapped).parameters.get(dest)
+    if sig_param is not None and sig_param.default is not inspect.Parameter.empty:
+        found["run_dump.__signature__"] = sig_param.default
+
+    return found
 
 
 @pytest.mark.parametrize(
-    ("dest", "command", "surfaces"),
-    SHARED_OPTION_DEFAULTS,
-    ids=[d for d, _, _ in SHARED_OPTION_DEFAULTS],
+    ("dest", "command"), SHARED_OPTIONS, ids=[d for d, _ in SHARED_OPTIONS]
 )
-def test_every_front_end_agrees_on_the_default(
-    dest: str, command: str, surfaces: tuple[str, ...]
-) -> None:
-    """Every surface offering the option defaults to the same value.
+def test_every_typed_surface_agrees_with_the_cli(dest: str, command: str) -> None:
+    """Every public typed surface accepting the option defaults as the CLI does.
 
     Batched so a failure names every disagreeing surface at once rather than
-    stopping at the first."""
+    stopping at the first -- the two surfaces review found were both invisible
+    to a check that stopped at the dataclass field."""
     cli_default = _click_default(command, dest)
-    disagree = {
-        surface: got
-        for surface in surfaces
-        if (got := _typed_default(surface, dest)) != cli_default
-    }
+    declared = _declared_defaults(dest)
+    disagree = {k: v for k, v in declared.items() if v != cli_default}
     assert not disagree, (
         f"{dest!r} defaults to {cli_default!r} on `{command}` but "
         f"{disagree} on the typed API — omitting the option would mean "
-        "different things depending on which front end the caller used"
+        "different things depending on which entry point the caller used"
+    )
+
+
+@pytest.mark.parametrize(
+    ("dest", "command"), SHARED_OPTIONS, ids=[d for d, _ in SHARED_OPTIONS]
+)
+def test_the_derivation_finds_the_surfaces_it_should(dest: str, command: str) -> None:
+    """Guard the guard: a derivation that found *nothing* would make the parity
+    test above pass vacuously, which is the original failure in a new place.
+
+    Pin that the sweep reaches the dataclass field, both the request-building
+    and the execution entry points, and the synthetic signature -- the four
+    kinds of surface this option is spelled on."""
+    declared = _declared_defaults(dest)
+    assert "InputSpec.field" in declared
+    assert "InputSpec.of" in declared
+    assert "run_dump.__signature__" in declared
+    service_surfaces = {k for k in declared if k.startswith("service.")}
+    assert len(service_surfaces) >= 3, (
+        f"derivation found only {service_surfaces} on `abicheck.service` — "
+        "expected at least run_dump, resolve_input and run_compare"
     )
 
 
 def test_the_oracle_is_not_vacuous() -> None:
-    """Guard the guard: the comparison above must be able to fail.
-
-    A resolver that silently returned the CLI default for every typed surface
-    would make the parity test pass no matter what the typed API does. Assert
-    the two sides are read through genuinely different mechanisms by feeding
-    the typed resolver a value the CLI cannot produce."""
-    assert _typed_default("InputSpec.field", "include_dependencies") is False
-    with pytest.raises(AssertionError):
-        _typed_default("no_such_surface", "include_dependencies")
+    """The two sides must be read through genuinely different mechanisms."""
+    assert _declared_defaults("include_dependencies")["InputSpec.field"] is False
+    assert _declared_defaults("no_such_option_anywhere") == {}
     with pytest.raises(AssertionError):
         _click_default("dump", "no_such_dest")
 
@@ -132,4 +168,4 @@ def test_include_dependencies_default_is_the_filtered_surface() -> None:
     different regression. ``False`` is the documented product default
     (``dumper_scoping.py``: dependency exclusion is on by default)."""
     assert _click_default("dump", "include_dependencies") is False
-    assert _typed_default("InputSpec.field", "include_dependencies") is False
+    assert _declared_defaults("include_dependencies")["InputSpec.field"] is False
