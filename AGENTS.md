@@ -1011,6 +1011,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `fact-field-readers` | ERROR | ADR-063 Phase 0 (`docs/contribute/plans/one-semantic-pipeline.md`): no function outside `EXEMPT_FUNCTIONS` reads a `Fact[T]`-bridged legacy field (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`) directly — via a plain attribute access, a `getattr(obj, "name", ...)` call (including a resolved `getattr`/`builtins` alias, excluding one locally shadowed by a parameter), an `operator.attrgetter(...)` call or a bound/unbound `__getattribute__` call (each through a resolved alias too), an `ast.AugAssign` target (`rec.bases += x`, an implicit read before the write), or a `case RecordType(bases=[]):` structural-pattern match (keyword or positional) — without first consulting its `Fact[...]` sibling's `.status`, which would collapse "confirmed empty/false" and "no evidence" onto the same value. Real, repo-wide AST scan, not a `diff_*.py` glob. `KNOWN_UNMIGRATED_READERS` records every currently-known reader site the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does, keyed by enclosing function, attribute, the read's own outermost containing expression, its own exact source text, and a per-site occurrence rank — a new, unlisted site fails outright |
 | `import-cycle-growth` | ERROR | No *unapproved* strongly-connected-component growth within `abicheck/` — not literally "no import cycles": a large, deliberately-baselined CLI-registration SCC already exists and is allowed (`IMPORT_CYCLE_ALLOWLIST`). The invariant is that no *new* module joins it and no *new* separate SCC forms; extending the allowlist to unblock a fresh cycle needs an ADR or explicit architectural sign-off, not a routine edit (CLAUDE.md "M1-3") |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
+| `mypy-override-targets` | ERROR | Every first-party (`abicheck.*`) `[[tool.mypy.overrides]]` target still resolves — an exact target naming neither a module nor a package, or a wildcard matching nothing, fails. mypy silently ignores an override whose target does not exist, so a deleted module otherwise leaves its override *and the comment explaining it* behind with no signal anywhere (eleven such entries had accumulated when this gate was added). Module resolution and wildcard matching follow mypy's own rules — stub-only (`.pyi`) modules count, a PEP 420 namespace directory containing a module is a module, and a `*` component matches *zero* or more components (ported from `mypy.options.Options.compile_glob`, not approximated with `fnmatch`). Third-party targets are out of scope: whether `yaml` or `click` resolves depends on the environment mypy runs in, not the tree. Lives in `scripts/mypy_override_targets.py`, a sibling leaf module, since `check_ai_readiness.py` is already past the 2000-line hard cap |
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
 | `examples-readme-sync` | ERROR | `examples/README.md` headline count, verdict distribution, and case-index rows match `ground_truth.json` (catches missing/stale catalog rows) |
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
@@ -1339,8 +1340,10 @@ split-out module over growing the parent toward the cap.
 ### Adding a new top-level command
 
 **First, ask whether it should be a *root* command at all (ADR-043/ADR-054).**
-The public root surface is exactly `dump`, `compare`, `scan`, `deps`, `compat`,
-`aggregate`, `project` — and `tests/test_cli_root_surface.py` pins that set as
+The public root surface is exactly `dump`, `compare`, `deps`, `compat`,
+`aggregate`, `project` — `scan` was retired by ADR-068 Phase 6, which deleted
+the command and its scan-only modules — and `tests/test_cli_root_surface.py`
+pins that set as
 an executable contract, so a new root registration fails CI until the test is
 updated too. Before adding one, a new root command must clear **every** one of
 these (ADR-054's admission bar — the same review that consolidated four

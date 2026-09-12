@@ -30,3 +30,15 @@
   passing it is a usage error (exit 64). `AGENTS.md`'s module map described
   `abicheck/cli.py` as a large file "at the 2000-line hard cap" long after
   ADR-061 Phase 4 reduced it to a ~140-line registration root.
+- **Stopped documenting the retired `scan` command as live surface** —
+  ADR-068 Phase 6 deleted `scan`, but `AGENTS.md` still declared it part of
+  "the public root surface" (a contract statement, and flatly wrong against
+  `tests/test_cli_root_surface.py`'s own pinned set), and `README.md` still
+  offered `scan --ast-frontend clang` and listed `scan` among the commands
+  adding per-command exit codes. Corrected in all three places. Wider `scan`
+  drift remains in `docs/` — see the PR discussion.
+- **Re-verified ADR-049's Status and advanced its `**Verified:**` receipt** —
+  the receipt named a commit unreachable from `main`, so `adr-status-sync`
+  errored on `main` itself. Re-read claim by claim against the code rather
+  than having its sha bumped; one drift corrected (it named
+  `--surface-metrics`/`--pattern-verdicts`, removed by ADR-068 D4/Phase 5).
