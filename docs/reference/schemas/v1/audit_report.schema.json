@@ -19,58 +19,336 @@
     "finding": {
       "type": "object",
       "description": "One candidate-side finding: a hygiene or cross-source observation about this build alone. Never an addition, removal or modification -- those require two sides.",
-      "required": ["kind", "verdict", "category"],
+      "required": [
+        "kind",
+        "verdict",
+        "category"
+      ],
       "additionalProperties": true,
       "properties": {
-        "kind": {"type": "string", "description": "The ChangeKind slug."},
-        "symbol": {"type": ["string", "null"]},
-        "description": {"type": ["string", "null"]},
-        "verdict": {"type": "string", "description": "The finding kind's own classification, NOT a verdict for the run -- an audit has none."},
-        "category": {"type": "string"},
-        "evolution": {
-          "type": ["string", "null"],
-          "description": "ADR-068 D3's evolution state. With OLD declared absent only these two are reachable: a finding is present in this build, or its evidence could not be evaluated. `introduced`/`resolved` state an OLD -> NEW relationship this run has no OLD for.",
-          "enum": ["persistent", "not_evaluated", null]
+        "kind": {
+          "type": "string",
+          "description": "The ChangeKind slug."
         },
-        "candidate_side_enrichment": {"type": "boolean"},
-        "observed_value": {"type": ["string", "null"]},
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": {
+          "type": "string",
+          "description": "The finding kind's own classification, NOT a verdict for the run -- an audit has none."
+        },
+        "category": {
+          "type": "string"
+        },
+        "evolution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ADR-068 D3's evolution state. With OLD declared absent only these two are reachable: a finding is present in this build, or its evidence could not be evaluated. `introduced`/`resolved` state an OLD -> NEW relationship this run has no OLD for.",
+          "enum": [
+            "persistent",
+            "not_evaluated",
+            null
+          ]
+        },
+        "candidate_side_enrichment": {
+          "type": "boolean"
+        },
+        "observed_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "suppression_rule": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The rule's short display label (its `label`, else its `reason`). See `suppression_provenance` for the full record."
         },
         "suppression_provenance": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "description": "ADR-067 D3's full provenance of the rule that hid this finding: rule id, source file, reason, label, expiry. Distinct from `suppression_rule`, which is only the short display label and so cannot carry both a label and a reason. `null` when the run recorded no ledger entry for this finding.",
           "additionalProperties": true,
           "properties": {
-            "rule_id": {"type": ["string", "null"], "description": "The rule's canonical selector-and-gate identity, so two rules sharing a label stay distinguishable."},
-            "source_file": {"type": ["string", "null"], "description": "The --suppress document the rule was loaded from."},
-            "reason": {"type": ["string", "null"]},
-            "label": {"type": ["string", "null"]},
-            "expires": {"type": ["string", "null"], "description": "ISO-8601 date, or null for a rule that never lapses."},
-            "intent": {"type": ["string", "null"]},
-            "allow_public_break": {"type": "boolean"}
+            "rule_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The rule's canonical selector-and-gate identity, so two rules sharing a label stay distinguishable."
+            },
+            "source_file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The --suppress document the rule was loaded from."
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "expires": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "ISO-8601 date, or null for a rule that never lapses."
+            },
+            "intent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "allow_public_break": {
+              "type": "boolean"
+            }
           }
         }
+      }
+    },
+    "evolutionMap": {
+      "type": "object",
+      "description": "One evolution value per identity. `not_evaluated` means the question could not be answered from the available evidence -- never a fifth verdict and never a silent omission: an identity either side flagged always appears. `persistent` rests on both sides having *observed* the construct, so it needs no coverage; `introduced` and `resolved` each assert an *absence*, so each requires the relevant side's `coverage` to be established.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "persistent",
+          "introduced",
+          "resolved",
+          "not_evaluated"
+        ]
+      }
+    },
+    "checkSufficiency": {
+      "type": "object",
+      "description": "Added in 1.5.",
+      "required": [
+        "established",
+        "reason"
+      ],
+      "properties": {
+        "established": {
+          "type": "boolean",
+          "description": "True only when an absence claim over this check's inputs on this side is supported by evidence."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why `established` is false -- a missing or unreadable declared input, a failed or truncated probe, or no licence to read a stored snapshot's recorded source paths. Empty when true."
+        }
+      }
+    },
+    "patternScanSide": {
+      "type": "object",
+      "description": "One side's lexical pattern scan.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "files_scanned": {
+          "type": "integer"
+        },
+        "files_skipped": {
+          "type": "integer"
+        },
+        "sufficient": {
+          "type": "boolean",
+          "description": "Added in 1.5. Whether an absence claim over this side's scan is established. Consult this rather than `files_scanned`/`files_skipped`: those count only files the discovery walk found, so a declared root that no longer exists -- or a directory that could not be enumerated -- contributed to neither."
+        },
+        "inputs": {
+          "$ref": "#/$defs/sourceInputAccount"
+        },
+        "facts": {
+          "type": "array"
+        },
+        "escalation_triggers": {
+          "type": "array"
+        },
+        "counts_by_kind": {
+          "type": "object"
+        }
+      }
+    },
+    "sourceInputAccount": {
+      "type": "object",
+      "description": "Added in 1.5. The complete account of this scan's *expected* inputs: every declared root resolves to exactly one disposition, so 'scanned and found nothing' is distinguishable from 'the root is gone'.",
+      "properties": {
+        "licence": {
+          "type": "object",
+          "description": "Whether this side's recorded source paths could be read at all. A path recorded in a snapshot is provenance, not permission to re-read the current filesystem for a historical fact: a side is read only when it was extracted in this run (`live_extraction`) or the caller supplied a verified context (`verified_context`). Otherwise `stored_snapshot`, and nothing was opened or even stat'd.",
+          "properties": {
+            "permitted": {
+              "type": "boolean"
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "live_extraction",
+                "verified_context",
+                "stored_snapshot"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        },
+        "sufficient": {
+          "type": "boolean"
+        },
+        "insufficiency_reason": {
+          "type": "string"
+        },
+        "counts": {
+          "type": "object",
+          "description": "Per-disposition input counts.",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "selected",
+              "scanned",
+              "missing",
+              "unreadable",
+              "unsupported",
+              "excluded",
+              "not_licensed"
+            ]
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "description": "The individual inputs expected to contribute evidence that did not. Non-empty means no absence claim is established here.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "preprocessorScanSide": {
+      "type": "object",
+      "description": "One side's S2 preprocessor scan.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "ran": {
+          "type": "boolean"
+        },
+        "skipped_reason": {
+          "type": "string"
+        },
+        "tus_scanned": {
+          "type": "integer"
+        },
+        "headers_scanned": {
+          "type": "integer"
+        },
+        "attempted": {
+          "type": "integer"
+        },
+        "succeeded": {
+          "type": "integer"
+        },
+        "probes_truncated": {
+          "type": "integer"
+        },
+        "family_attempted": {
+          "$ref": "#/$defs/probeFamilyTally"
+        },
+        "family_succeeded": {
+          "$ref": "#/$defs/probeFamilyTally"
+        },
+        "family_truncated": {
+          "$ref": "#/$defs/probeFamilyTally"
+        },
+        "diagnostics": {
+          "type": "array"
+        },
+        "abi_macros": {
+          "type": "object"
+        },
+        "divergences": {
+          "type": "array"
+        },
+        "leaks": {
+          "type": "array"
+        }
+      }
+    },
+    "probeFamilyTally": {
+      "type": "object",
+      "description": "Added in 1.5. Probe counts keyed by family: `macro` (one `clang -E -dM` per compile unit) and `header` (one `clang -M` per public header). The `attempted`/`succeeded`/`probes_truncated` aggregates beside these mix the two families and so cannot answer either check's coverage on its own -- `coverage` is computed from these. `family_attempted` is also what distinguishes 'probed and found nothing' from 'never probed': a successful macro probe of a unit defining none of the curated ABI macros contributes no entry to `abi_macros`, so `tus_scanned` can be 0 for a fully-covered run.",
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "propertyNames": {
+        "enum": [
+          "macro",
+          "header"
+        ]
       }
     }
   },
   "properties": {
     "audit_report_schema_version": {
       "type": "string",
-      "description": "SemVer-style version of THIS schema (currently \"1.4\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
+      "description": "SemVer-style version of THIS schema (currently \"1.5\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "no_baseline": {
       "const": true,
       "description": "Always true. The discriminator a consumer can branch on before reading anything else."
     },
-    "library": {"type": "string"},
-    "new_version": {"type": ["string", "null"], "description": "The candidate build's version label."},
+    "library": {
+      "type": "string"
+    },
+    "new_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The candidate build's version label."
+    },
     "old_acquisition_state": {
       "type": "string",
       "description": "ADR-065's acquisition state for the absent OLD side; `declared_absent` today.",
-      "enum": ["declared_absent"]
+      "enum": [
+        "declared_absent"
+      ]
     },
     "verdict": {
       "type": "null",
@@ -81,34 +359,135 @@
       "maxItems": 0,
       "description": "Always empty, never omitted. Present so a consumer that reads `changes` off any abicheck report finds it, and finds it honestly empty: a one-sided run produces no comparison findings. The audit's content is `findings` below."
     },
-    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
     "suppressed_findings": {
       "type": "array",
-      "items": {"$ref": "#/$defs/finding"},
+      "items": {
+        "$ref": "#/$defs/finding"
+      },
       "description": "Findings a --suppress rule matched. Listed rather than dropped: a suppressed finding is a disposition, not an absence (vision.md, \"record before disposing\"). Each carries the rule that hid it."
     },
-    "suppressed_count": {"type": "integer", "minimum": 0},
+    "suppressed_count": {
+      "type": "integer",
+      "minimum": 0
+    },
     "cross_source_evolution": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Counts per ADR-068 D3 evolution state across the findings above.",
       "additionalProperties": true
     },
-    "pattern_preprocessor_scan": {"type": ["object", "null"]},
-    "evidence_tiers": {"type": "array", "items": {"type": "string"}},
-    "run_outcome": {"type": "object", "additionalProperties": true},
-    "comparison_scope": {"type": "object", "additionalProperties": true},
+    "pattern_preprocessor_scan": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The lexical pattern pre-scan and preprocessor pre-scan for this audit's candidate side (ADR-068 D3/D4/D5), or null when the stage did not run. Advisory facts only: never a verdict, severity, or exit-code contributor. Described explicitly as of 1.5, when the block gained its `coverage` object; previously declared as an opaque object.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "object",
+          "description": "Each side's raw PatternFactsResult.to_dict() -- the same shape `scan`'s own report carries under `pattern_scan`.",
+          "properties": {
+            "old": {
+              "$ref": "#/$defs/patternScanSide"
+            },
+            "new": {
+              "$ref": "#/$defs/patternScanSide"
+            },
+            "escalation_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            }
+          }
+        },
+        "preprocessor": {
+          "type": "object",
+          "properties": {
+            "old": {
+              "$ref": "#/$defs/preprocessorScanSide"
+            },
+            "new": {
+              "$ref": "#/$defs/preprocessorScanSide"
+            },
+            "macro_divergence_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            },
+            "header_leak_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "description": "Added in 1.5. Per-check, per-side sufficiency: whether an *absence* claim is established for that check on that side. Answered per check because the three rest on different evidence -- a set of files, one `clang -E -dM` probe per compile unit, one `clang -M` probe per public header -- so one may be established while another is not. A check whose side is not established never yields `introduced`/`resolved` for any identity; `reason` says why.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "old": {
+                "$ref": "#/$defs/checkSufficiency"
+              },
+              "new": {
+                "$ref": "#/$defs/checkSufficiency"
+              }
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "pattern_escalation",
+              "macro_divergence",
+              "header_leak"
+            ]
+          }
+        }
+      }
+    },
+    "evidence_tiers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "run_outcome": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "comparison_scope": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "contract_coverage_failures": {
       "type": "array",
       "description": "ADR-049 Phase 5's unsuppressible coverage ledger. Emitted whenever a --contract domain was selected, `[]` when that domain closed cleanly; absent entirely when no domain was selected, which is a different thing.",
-      "items": {"type": "object", "additionalProperties": true}
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
     },
-    "contract_coverage_exit_contribution": {"type": "integer", "minimum": 0},
+    "contract_coverage_exit_contribution": {
+      "type": "integer",
+      "minimum": 0
+    },
     "exit_axes": {
       "type": "object",
       "description": "Each orthogonal axis's own exit contribution. `exit_code` below is the max over these, so a consumer can tell which axis gated a run.",
-      "additionalProperties": {"type": "integer", "minimum": 0}
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
     },
-    "exit_code": {"type": "integer", "minimum": 0},
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
     "policy": {
       "type": "string",
       "description": "The resolved policy name (--policy's own value, or the \"strict_abi\" default) that classified every finding above. Added in 1.2."

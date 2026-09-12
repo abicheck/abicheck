@@ -61,3 +61,15 @@
   in a document, which is the invariant rather than an omission — persisting the
   source-read licence would let a stored snapshot grant itself permission to
   re-read today's filesystem.
+
+- **The published JSON schemas describe the block, not just permit it.** Both
+  copies of `audit_report.schema.json` (packaged and mirrored under
+  `docs/reference/schemas/v1/`) now advertise `1.5` and describe
+  `pattern_preprocessor_scan` — its `coverage` object, each pattern side's
+  `sufficient`/`inputs` account, and the per-family probe tallies — instead of
+  declaring it an opaque object. `compare_report.schema.json` gains the same
+  described block, sharing one set of `$defs`, so a consumer of either report
+  recognises the other. An opaque declaration validates every document, which
+  is why a schema-shape test now pins the described keys rather than relying on
+  positive validation alone.
+
