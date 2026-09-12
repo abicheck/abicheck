@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -44,12 +45,27 @@ from abicheck.policy.analysis_assurance_schema_staleness import (
     schema_staleness_status,
 )
 from abicheck.serialization import snapshot_from_dict
+from abicheck.storage.snapshot_encode import same_persisted_content
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "schema"
 
 #: Schema vintages spanning both sides of the invariant: current-ish (no
 #: degraded fact at all) through several genuinely stale ones.
 _VINTAGES = (45, 38, 25, 18, 9, 4)
+
+
+def _status(a: Any, b: Any) -> tuple[str, list[str]]:
+    """`schema_staleness_status` as production calls it.
+
+    The content-identity answer is supplied by the caller — `policy` may
+    not import `storage` — so a test that omitted it would exercise the
+    narrower object-identity path and prove nothing about the real one.
+    `test_every_compute_call_site_passes_the_storage_projection` is what
+    holds production to the same wiring.
+    """
+    return schema_staleness_status(
+        a, b, same_content=partial(same_persisted_content, a, b)
+    )
 
 
 def _load(fixture: str, **overrides: Any):
@@ -74,8 +90,8 @@ def test_content_identical_reload_matches_self_pairing(
     b = _load(fixture, schema_version=vintage, from_headers=True, ast_producer="clang")
     assert a is not b
     assert a == b
-    assert schema_staleness_status(a, b) == schema_staleness_status(a, a)
-    assert schema_staleness_status(a, b)[0] == "clean"
+    assert _status(a, b) == _status(a, a)
+    assert _status(a, b)[0] == "clean"
 
 
 @pytest.mark.parametrize("vintage", _VINTAGES)
@@ -110,10 +126,10 @@ def test_differing_vintages_still_report_degraded(stale_vintage: int) -> None:
     )
     assert stale != current
     assert degraded_reliability_facts(stale)
-    status, notes = schema_staleness_status(stale, current)
+    status, notes = _status(stale, current)
     assert status == "degraded", notes
     # ... and symmetrically, with the stale side as NEW.
-    assert schema_staleness_status(current, stale)[0] == "degraded"
+    assert _status(current, stale)[0] == "degraded"
 
 
 def test_self_compare_of_stored_stale_snapshot_is_complete_end_to_end(
@@ -203,3 +219,123 @@ def test_content_identical_compare_still_warns_it_can_detect_nothing(
     warnings_out = payload.get("coverage_warnings", [])
     assert any("byte-identical" in w for w in warnings_out), warnings_out
     assert any("cannot detect a change" in w for w in warnings_out), warnings_out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param("entity_id", id="compare_false_field"),
+        pytest.param("library", id="ordinary_field"),
+        pytest.param("nested_return_type", id="nested_declaration_field"),
+    ],
+)
+def test_any_persisted_difference_defeats_content_identity(mutate: str) -> None:
+    """Generalizes past the one reported field: a difference in an
+    ordinary field, in a `compare=False` field, or nested inside a
+    declaration must each defeat content identity. `entity_id` is the
+    reported case (it is `field(compare=False)`, so plain `==` misses it,
+    yet it IS persisted); the other two are independently-chosen siblings,
+    so the answer cannot be a special-case for one field name."""
+    from abicheck.model.identity import EntityId, EntityKind
+    from abicheck.storage.snapshot_encode import same_persisted_content
+
+    a = _load("v4.json", schema_version=25, from_headers=True)
+    b = _load("v4.json", schema_version=25, from_headers=True)
+    assert same_persisted_content(a, b), "fixture must start out identical"
+
+    if mutate == "entity_id":
+        assert b.functions, "fixture must carry a function to perturb"
+        b.functions[0].entity_id = EntityId(
+            scope=(), kind=EntityKind.FUNCTION, leaf_name="perturbed"
+        )
+    elif mutate == "library":
+        b.library = f"{b.library}-other"
+    else:
+        assert b.functions, "fixture must carry a function to perturb"
+        b.functions[0].return_type = f"{b.functions[0].return_type} const"
+
+    assert not same_persisted_content(a, b)
+    assert _status(a, b)[0] == "degraded"
+
+
+def test_content_identity_fails_closed_on_an_unencodable_snapshot() -> None:
+    """ "Not provably the same content" rather than an exception: the one
+    consumer is a status field on an already-degraded path, so an encoder
+    failure must cost an over-cautious `degraded`, never a comparison that
+    used to complete."""
+    from abicheck.storage.snapshot_encode import snapshot_content_digest
+
+    class _Unencodable:
+        def __repr__(self) -> str:  # pragma: no cover - only for failure output
+            return "<unencodable>"
+
+    a = _load("v4.json", schema_version=25, from_headers=True)
+    b = _load("v4.json", schema_version=25, from_headers=True)
+    assert same_persisted_content(a, b)
+    assert b.functions, "fixture must carry a function to perturb"
+    b.functions[0].return_type = _Unencodable()  # type: ignore[assignment]
+    with pytest.raises(TypeError):
+        snapshot_content_digest(b)
+    assert same_persisted_content(a, b) is False
+    assert _status(a, b)[0] == "degraded"
+
+
+def test_every_compute_call_site_passes_the_storage_projection() -> None:
+    """The exhaustiveness half, and the reason this question is answered in
+    `storage` at all (Codex review, PR #1229 -- the P1, plus the four P2s
+    that followed it, each a nested projection a `model`-side
+    reimplementation got wrong).
+
+    `schema_staleness_status` cannot compute content identity itself:
+    `policy` may not import `storage`. So it takes the answer as a
+    callable, which means an un-threaded call site would silently fall back
+    to the narrower object-identity test -- reintroducing the original
+    defect on that path, with nothing failing anywhere. This AST-scans
+    every `compute_analysis_assurance(...)` call under `abicheck/` and
+    requires `same_content=`."""
+    import ast
+
+    root = Path(__file__).resolve().parent.parent / "abicheck"
+    sites: list[tuple[str, int, bool]] = []
+    for path in root.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", "")
+            )
+            if name != "compute_analysis_assurance":
+                continue
+            sites.append(
+                (
+                    str(path.relative_to(root)),
+                    node.lineno,
+                    any(kw.arg == "same_content" for kw in node.keywords),
+                )
+            )
+
+    assert sites, "the scan found no call site at all -- it is vacuous"
+    missing = [(f, ln) for f, ln, ok in sites if not ok]
+    assert not missing, (
+        "compute_analysis_assurance() called without same_content= at "
+        f"{missing}; pass storage.snapshot_encode.same_persisted_content, or "
+        "that path falls back to object identity and a content-identical "
+        "reload reports degraded again"
+    )
+
+
+def test_the_persisted_projection_is_not_reimplemented_outside_storage() -> None:
+    """The companion to the call-site guard: the reason the class closed is
+    that nothing outside `storage` describes what the codec persists any
+    more. A new copy of that knowledge is how the four P2s happened."""
+    root = Path(__file__).resolve().parent.parent / "abicheck"
+    offenders = [
+        str(p.relative_to(root))
+        for p in root.rglob("*.py")
+        if p.parts[-2] != "storage"
+        and "RUNTIME_ONLY_FIELDS" in p.read_text(encoding="utf-8")
+    ]
+    assert not offenders, offenders

@@ -881,13 +881,20 @@ def _report_compare_result(
     # straight off old/new here (not re-resolving the raw paths, which would
     # reload the uncapped pack and defeat the ceiling here) is correct at
     # any --depth (Codex review, PR #1020, second round).
+    from functools import partial
+
     from .cli_dump_helpers import evidence_depth_label
-    from .workflows.gate import compute_analysis_assurance
+    from .workflows.gate import compute_analysis_assurance, same_persisted_content
 
     old_pack = old.build_source
     new_pack = new.build_source
     result.analysis_assurance = compute_analysis_assurance(
-        result, old, new, old_pack=old_pack, new_pack=new_pack,
+        result,
+        old,
+        new,
+        old_pack=old_pack,
+        new_pack=new_pack,
+        same_content=partial(same_persisted_content, old, new),
     )
     # ADR-061 Phase 2 item 5 (post-render mutation): resolved here, before
     # any report is rendered, and attached directly onto `result` -- mirrors

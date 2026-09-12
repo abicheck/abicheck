@@ -1470,13 +1470,7 @@ def compare(
     # the real pack passed explicitly (P1 review; see
     # `compute_analysis_assurance`'s own docstring and
     # `cli_compare_helpers._report_compare_result`'s recomputation).
-    from .analysis_assurance import compute_analysis_assurance
+    from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
-    result.analysis_assurance = compute_analysis_assurance(
-        result,
-        old,
-        new,
-        old_pack=getattr(old, "build_source", None),
-        new_pack=getattr(new, "build_source", None),
-    )
+    attach_analysis_assurance(result, old, new)
     return result

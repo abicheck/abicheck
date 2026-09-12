@@ -96,6 +96,7 @@ projection is the safe direction, never a fabricated ``"complete"``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .analysis_assurance_degraded_facts import degraded_reliability_facts
@@ -446,47 +447,11 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
     return kept
 
 
-def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
-    """Whether *old* and *new* are provably the same content.
-
-    Plain ``AbiSnapshot`` dataclass equality (structural, every field).
-    Chosen over a serialized digest (``storage.snapshot_encode.
-    snapshot_content_digest``, this repo's existing content fingerprint)
-    because ``policy`` may not import ``storage`` (``architecture/
-    modules.yaml``: ``policy -> model, compare``), and because equality is
-    the stronger test of the two -- a digest can only ever agree with it,
-    after paying a full re-serialization. Soundness is what matters here,
-    and field-wise equality has it in the direction actually used: equal
-    ==> every input a pairwise detector reads agrees on both sides ==> no
-    pairwise finding is possible. The converse is neither claimed nor
-    needed: any inequality falls through to the ordinary degraded report,
-    which is the safe direction.
-
-    **The one residual, and where it is reported instead** (Codex review,
-    PR #1228): an ``AbiSnapshot`` is a lossy capture, so equal content
-    proves the two sides' *recorded evidence* is equal, not that the two
-    underlying artifacts are. Two genuinely different binaries whose stale
-    snapshots decode equal (the stale schema failed to record the one field
-    that differs) therefore read ``"clean"`` here. That case is not
-    silent, and deliberately is not this field's job: it is exactly the
-    population ``confidence.note_if_same_binary_compared`` already fires
-    on, from the identical signal (equal canonical serialization), with the
-    stronger claim -- "this comparison cannot detect a change even if one
-    was intended -- verify the correct snapshot files were provided" -- on
-    ``DiffResult.coverage_warnings``, which no suppression rule can remove.
-    Reporting the same residual a second time as schema staleness would
-    label it as a *vintage* problem, which it is not: the comparison is
-    equally blind at any vintage once both sides decode to the same
-    evidence. ``tests/test_analysis_assurance_content_identity.py``'s
-    ``test_content_identical_compare_still_warns_it_can_detect_nothing``
-    pins the pairing, so the disclosure cannot quietly disappear and leave
-    this return claiming completeness alone.
-    """
-    return old == new
-
-
 def schema_staleness_status(
-    old: AbiSnapshot, new: AbiSnapshot
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    same_content: Callable[[], bool] | None = None,
 ) -> tuple[str, list[str]]:
     """``"clean"``/``"degraded"`` plus human-readable notes -- the
     ``analysis_assurance.AnalysisAssurance.schema_staleness_status`` value
@@ -534,16 +499,36 @@ def schema_staleness_status(
     rejects.
 
     So the early return is widened from object identity to *provable
-    content identity* (:func:`_same_content`). That test is SOUND, not
-    heuristic: equal content means every input the pairwise detectors read
-    is equal on both sides, so no pairwise finding is possible, reliable
-    facts or not. It is deliberately NOT widened to "same input path" or
-    "same binary": two independent extractions of one binary can
+    content identity*, which *same_content* answers. That test is SOUND,
+    not heuristic: equal content means every input the pairwise detectors
+    read is equal on both sides, so no pairwise finding is possible,
+    reliable facts or not. It is deliberately NOT widened to "same input
+    path" or "same binary": two independent extractions of one binary can
     legitimately differ in schema vintage, which is precisely the case this
-    field exists to report. It is also evaluated only AFTER
-    :func:`_pair_aware_degraded_facts` has returned something for at least
-    one side, so an ordinary clean comparison never pays for it; that path
-    is rare by construction.
+    field exists to report.
+
+    *same_content* is a CALLABLE supplied by the caller, not a rule this
+    module implements, and that is the whole point (Codex review, PR #1229,
+    one P1 and four P2s): "the same persisted content" is the storage
+    codec's question, and this module may not import ``storage``
+    (``architecture/modules.yaml``: ``policy -> model, compare``). A
+    field-by-field reimplementation lived in ``model`` for exactly as long
+    as it took review to find four separate nested projections it got wrong
+    -- a rounded float, a derived id, a codec reprojecting a mapping
+    through fixed keys, an aliased graph the codec writes once. Every
+    caller of this function sits in a layer that MAY import ``storage``, so
+    each passes ``storage.snapshot_encode.same_persisted_content``, and the
+    projection is executed rather than reproduced.
+    ``tests/test_analysis_assurance_content_identity.py`` fails on any
+    ``compute_analysis_assurance`` call site under ``abicheck/`` that omits
+    it, so an un-threaded path cannot silently fall back to the narrower
+    object-identity answer.
+
+    Passing it is what costs anything, so it is a callable rather than a
+    ``bool``: it is invoked only AFTER :func:`_pair_aware_degraded_facts`
+    has returned something for at least one side, so an ordinary clean
+    comparison never serializes a snapshot to answer a question it does not
+    ask; that path is rare by construction.
     """
     if old is new:
         return "clean", []
@@ -551,7 +536,7 @@ def schema_staleness_status(
     new_degraded = _pair_aware_degraded_facts(new, old)
     if not old_degraded and not new_degraded:
         return "clean", []
-    if _same_content(old, new):
+    if same_content is not None and same_content():
         return "clean", []
     notes: list[str] = []
     if old_degraded:

@@ -1,0 +1,60 @@
+### Fixed
+
+- **A cross-file move carried only in a closure marker's own filename is no
+  longer reported as a compatible coordinate-only shift.**
+  `closure_location_free_identity` drops each marker's basename along with
+  its `:line:col`, and justified that by saying a genuine cross-file move is
+  caught separately by the declaring-file check — which holds only where
+  such evidence exists. With none recorded, `(lambda at old.h:1:2)` →
+  `(lambda at new.h:9:9)` collapsed to nothing. `_classify_outcome` now
+  reads the marker basenames as location evidence (via the new
+  `model.graph_identity.closure_marker_files`) and reports
+  `declaration_moved`.
+- **A coordinate-only finding no longer claims "no declaring file was
+  recorded on either side" when exactly one side recorded one.** The new
+  `partial_declaring_file` evidence value distinguishes a one-sided
+  extraction gap from a fully absent one, and the finding's text states
+  which it is.
+- **`schema_staleness_status`'s content-identity shortcut now compares every
+  persisted field.** `entity_id` is `field(compare=False)` yet is persisted
+  and part of the canonical content digest, so plain dataclass equality
+  called two snapshots one capture while their serializations differed —
+  and the digest-driven byte-identical coverage warning, the channel that
+  residual is disclosed through, stayed silent.
+- **Marker extraction is order-correct across mixed spellings.**
+  `closure_marker_files` normalizes once and scans the single normalized
+  form, so an identity mixing the raw `lambda at path:line:col` and
+  normalized `lambda:basename:line:col` spellings yields its declaring
+  basenames in source order — two independent scans returned them grouped
+  by which regex matched, and the raw form's path group could run greedily
+  through a following normalized marker.
+- **A declaration that was renamed *and* moved reports the combined
+  outcome again.** The marker-carried move evidence is no longer disabled
+  during a rename, so the pair reports `declaration_identity_reconciled`
+  rather than a bare `declaration_renamed`.
+- **Snapshot content identity ignores runtime-only fields.** Calling
+  `AbiSnapshot.index()` on one side no longer makes two content-identical
+  snapshots report degraded assurance; `from_headers`' conditional
+  persistence is modelled explicitly.
+- **Recorded declaring files outrank the marker fallback.** When both sides
+  record a declaring file, that two-sided evidence decides whether the
+  declaration moved; a marker inside the name may describe a nested
+  template argument's location rather than the declaration's own. Markers
+  disagreeing with it is an evidence conflict, not a coordinate-only shift.
+- **A build-source pack's load directory is not persisted content.**
+  `BuildSourcePack.root` is omitted by `to_embedded_dict`, so two snapshots
+  whose packs were loaded from different directories no longer report
+  degraded assurance.
+- **Reordered markers are no longer a move.** Several same-kind markers
+  swapping positions leaves every one naming the file it already named, so
+  the comparison is now over the multiset; the reordering is still a real
+  difference, so it is not reported as a coordinate-only shift either.
+- **A derived `SourceGraphSummary.graph_id` is compared as persisted.**
+  `to_dict` serializes `graph_id or compute_graph_id()`, so an unset id and
+  the computed one are the same content — while a stale stored id is
+  genuinely different, which is why it is normalized rather than excluded.
+- **Graph aliasing is compared as persisted content.** When a snapshot's
+  `surface_graph` and its pack's `source_graph` are one shared object the
+  codec writes the graph once and drops the nested copy, so an aliased
+  snapshot and a structurally-equal unaliased one are different persisted
+  content — the one case where content identity was claiming too much.
