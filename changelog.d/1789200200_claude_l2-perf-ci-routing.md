@@ -24,3 +24,12 @@
   orchestration or storage-codec path — a change to any of them could not
   trigger a performance run. Added per verified dependency rather than by
   directory name.
+
+### Fixed
+
+- **`check_l2_cli_perf.py --no-spy` crashed instead of running.** The scenario
+  runner reset the invocation spy's log unconditionally, while `--no-spy` never
+  created the shim directory, so the flag raised `FileNotFoundError`
+  immediately. Found by the one measurement the flag exists to enable — the
+  harness's own instrumentation overhead — which could therefore not be taken at
+  all.

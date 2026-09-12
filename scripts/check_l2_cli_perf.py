@@ -1017,7 +1017,13 @@ def run_scenario(
         env = spy.env(base_env) if keep_spy else base_env
 
         def execute(step: Step, *, timed: bool) -> CommandRun:
-            spy.reset()
+            # Guarded: with --no-spy the shim directory was never created, so
+            # resetting its log raises FileNotFoundError. Found by the
+            # overhead measurement this flag exists to enable -- the flag's
+            # whole purpose is to run the lane without the spy, and it could
+            # not.
+            if keep_spy:
+                spy.reset()
             run = run_measured(
                 step.argv,
                 env=env,

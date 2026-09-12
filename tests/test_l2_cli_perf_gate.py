@@ -608,6 +608,38 @@ class TestRealL2Execution:
                     assert step["additive"] is False
 
     @requires_toolchain
+    def test_the_no_spy_lane_runs_and_claims_no_invocation_coverage(self, capsys):
+        # Regression: --no-spy crashed with FileNotFoundError, because the
+        # scenario runner reset the spy's log unconditionally while --no-spy had
+        # never created the shim directory. Found by the very measurement the
+        # flag exists to enable (this harness's own instrumentation overhead),
+        # which could not be taken at all.
+        #
+        # Two claims, because the flag has two obligations: the lane must run,
+        # and it must NOT let a run with no observation read as having verified
+        # a compiler-free path.
+        rc = harness.main(["--repeat", "1", "--no-spy"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "COVERAGE NOT CLAIMED (native invocations)" in out
+
+    @requires_toolchain
+    def test_no_spy_records_no_invocation_counts_at_all(self):
+        result = harness.run_scenario(
+            harness.scenario_compare_stored_stored(fixtures.FixtureSpec()),
+            repeat=1,
+            timeout=900,
+            rss_interval=0.05,
+            keep_spy=False,
+        )
+        assert result["status"] == "ok", result["validation_problems"]
+        compare = next(s for s in result["steps"] if s["name"] == "compare")
+        # Empty, not a zero-filled mapping: "we did not look" must be
+        # distinguishable from "we looked and saw none", which is the whole
+        # basis of the compiler-free claim.
+        assert compare["native_invocations"] == {}
+
+    @requires_toolchain
     def test_a_doctored_faster_baseline_makes_the_gate_fail(self, tmp_path):
         # Proof the gate is wired, not merely present: measure, halve the
         # baseline, and require a failure.

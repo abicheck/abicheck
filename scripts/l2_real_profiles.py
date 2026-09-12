@@ -117,6 +117,9 @@ class RealProfile:
     approx_build_minutes: int = 0
     approx_disk_gb: int = 0
     notes: tuple[str, ...] = ()
+    #: Distribution packages needed beyond ``required_tools`` -- a header-only
+    #: dependency has no binary on PATH, so tool presence cannot detect it.
+    system_packages: tuple[str, ...] = ()
     #: Scenario shapes this profile is meant to exercise.
     scenarios: tuple[str, ...] = ("temporal",)
 
@@ -256,8 +259,12 @@ PVXS = RealProfile(
     project="epics-base/pvxs",
     reference="https://github.com/epics-base/pvxs/pull/216",
     repository="https://github.com/epics-base/pvxs.git",
-    old_revision="<pinned-base-sha>",
-    new_revision="<pinned-head-sha>",
+    # Real, verified revisions: PR #216's head and its merge base with master.
+    # This is the one profile of the three that has actually been prepared and
+    # measured end to end (see the notes below for the numbers and the one
+    # caveat they carry), so its revisions are concrete rather than placeholder.
+    old_revision="9371e12391794a66520fc5c4aba87c26a6c6b628",
+    new_revision="b8a557d",
     libraries=(
         LibraryTarget(
             "pvxs",
@@ -289,6 +296,10 @@ PVXS = RealProfile(
         "printf 'EPICS_BASE=%s/epics-base\\n' \"$PWD\" > pvxs/configure/RELEASE.local",
         "cd pvxs && make -j$(nproc)",
     ),
+    # libevent's development headers are a real prerequisite, not an optional
+    # extra: EPICS base builds fine without them and pvxs then fails partway
+    # through its own build on a missing event2/event.h.
+    system_packages=("libevent-dev",),
     required_tools=("git", "make", "g++", "perl"),
     approx_build_minutes=30,
     approx_disk_gb=4,
@@ -300,6 +311,27 @@ PVXS = RealProfile(
         "Must NOT be measured by running the project's own script with --depth "
         "source: that is an L4/L5 measurement and does not belong in an L2 "
         "profile's numbers.",
+        "MEASURED once locally (2026-09-12, gcc 13.3.0 / castxml 0.7.0 / "
+        "clang 18.1.3, 4 CPUs): libpvxs 166.5s wall / 160.1s user CPU / "
+        "1949MB sampled peak concurrent process-tree RSS (4 concurrent "
+        "processes) / 4 header extractions + 6 include passes; libpvxsIoc "
+        "16.3s / 15.6s / 438MB / 4 extractions + 2 include passes. Both sides "
+        "resolved to depth=headers with assurance complete and public scoping "
+        "applied. The ~10x spread between the two libraries is the size of "
+        "their public header surfaces (client.h+data.h+server.h vs. one "
+        "iochooks.h), not a defect.",
+        "CAVEAT on that measurement, and the reason it is not a temporal "
+        "result: the two revisions' public header trees digest IDENTICALLY, "
+        "because PR #216 is a CI-only change. So the run is in practice an "
+        "equivalence comparison (same headers, two builds), not a "
+        "header-changing temporal one -- which is exactly why "
+        "validate_side_headers exists and why a digest is recorded. A temporal "
+        "PVXS measurement needs a revision pair that actually changes a public "
+        "header.",
+        "Preparation needs libevent development headers (event2/event.h) in "
+        "addition to the tools listed -- a missing system dependency, found the "
+        "hard way: the first build failed on it after EPICS base had already "
+        "built successfully.",
     ),
 )
 
