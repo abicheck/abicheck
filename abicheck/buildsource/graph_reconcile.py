@@ -120,6 +120,7 @@ from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabu
     _classify_outcome,
     _project_relative_path,
     coordinate_evidence,
+    move_evidence_established,
 )
 
 if TYPE_CHECKING:
@@ -756,6 +757,24 @@ def diff_graph_reconciliation_findings(
         old_label = pair.old_node.label or pair.old_node.id
         new_label = pair.new_node.label or pair.new_node.id
         prose = _OUTCOME_PROSE.get(pair.outcome, "identity-reconciled")
+        # OUTCOME_RECONCILED's prose asserts that location evidence
+        # CHANGED, which is false for a pair that reached it because the
+        # location could not be determined at all -- an ambiguous marker
+        # basename, a kind mismatch, a permutation, a declaring file
+        # contradicting its own markers (Codex review, PR #1232). Those
+        # are exactly the cases where the move claim was withheld for
+        # being unsupported, so rendering it back in the description
+        # re-made the claim the classifier had just declined. Same
+        # outcome, same ChangeKind, same severity -- only the sentence
+        # stops over-claiming, and says which dimension is unresolved.
+        if pair.outcome == OUTCOME_RECONCILED and not move_evidence_established(
+            pair.old_identity, pair.new_identity
+        ):
+            prose = (
+                "identity-reconciled (no clean split: the available "
+                "evidence does not establish whether the declaring "
+                "location changed)"
+            )
         # State the weaker evidence rather than hiding it (Codex review, PR
         # #1228): a coordinate-only pair with no declaring-file evidence on
         # either side read its coordinate shift out of the qualified name,

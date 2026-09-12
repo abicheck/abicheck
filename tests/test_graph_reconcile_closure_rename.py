@@ -634,6 +634,104 @@ class TestCoordinateEvidenceIsStated:
         assert "on either side" not in text, text
         assert "on one side but not the other" in text, text
 
+    def test_reconciled_text_does_not_claim_a_location_it_could_not_read(
+        self,
+    ) -> None:
+        """Codex review (PR #1232): withholding an unsupported move but
+        then rendering `OUTCOME_RECONCILED`'s "both name and location
+        evidence changed" re-makes, in the user-facing sentence, exactly
+        the claim the classifier just declined.
+
+        Over every shape that reaches the outcome with the location
+        dimension unresolved -- an ambiguous marker basename, a marker
+        permutation, and a declaring file contradicting its own marker --
+        the description must not assert a changed location, and must say
+        the dimension is unresolved. (A kind mismatch lands on
+        `OUTCOME_RENAMED`, whose prose claims nothing about location, so
+        it needs no wording of its own.)"""
+        from abicheck.buildsource.graph_reconcile import (
+            GraphReconciliation,
+            diff_graph_reconciliation_findings,
+        )
+
+        unresolved = {
+            "ambiguous_basename": (
+                "W<(lambda at wrapper.h:1:2),(lambda at wrapper.h:3:4)>",
+                "include/wrapper.h",
+                "W<(lambda at wrapper.h:1:2),(lambda at nested_new.h:3:4)>",
+                "",
+            ),
+            "marker_permutation": (
+                "P<(lambda at a.h:1:2),(lambda at b.h:3:4)>",
+                "",
+                "P<(lambda at b.h:7:8),(lambda at a.h:9:10)>",
+                "",
+            ),
+            "file_contradicts_its_marker": (
+                "W<(lambda at nested_old.h:1:2)>",
+                "include/wrapper.h",
+                "W<(lambda at nested_new.h:1:2)>",
+                "",
+            ),
+        }
+        for label, (old_qn, old_file, new_qn, new_file) in unresolved.items():
+            old_attrs = {"qualified_name": old_qn}
+            if old_file:
+                old_attrs["def_file"] = old_file
+            new_attrs = {"qualified_name": new_qn}
+            if new_file:
+                new_attrs["def_file"] = new_file
+            pair = _reconcile_one_pair(
+                GraphNode(
+                    id="type://old", kind="record_type", label=old_qn, attrs=old_attrs
+                ),
+                GraphNode(
+                    id="type://new", kind="record_type", label=new_qn, attrs=new_attrs
+                ),
+            )
+            findings = diff_graph_reconciliation_findings(
+                GraphReconciliation(reconciled=[pair])
+            )
+            assert len(findings) == 1, (label, findings)
+            text = findings[0].description
+            assert "both name and location evidence changed" not in text, (label, text)
+            assert (
+                "does not establish whether the declaring location changed" in text
+            ), (
+                label,
+                text,
+            )
+
+    def test_a_real_rename_and_move_still_says_both_changed(self) -> None:
+        """The must-stay-distinct half: when two-sided declaring files DO
+        establish the move, the combined claim is true and must still be
+        made, so the softened wording cannot spread to every reconciled
+        pair."""
+        from abicheck.buildsource.graph_reconcile import (
+            GraphReconciliation,
+            diff_graph_reconciliation_findings,
+        )
+
+        pair = _reconcile_one_pair(
+            GraphNode(
+                id="type://old",
+                kind="record_type",
+                label="Old",
+                attrs={"qualified_name": "Old", "def_file": "a.h"},
+            ),
+            GraphNode(
+                id="type://new",
+                kind="record_type",
+                label="New",
+                attrs={"qualified_name": "New", "def_file": "b.h"},
+            ),
+        )
+        findings = diff_graph_reconciliation_findings(
+            GraphReconciliation(reconciled=[pair])
+        )
+        assert len(findings) == 1, findings
+        assert "both name and location evidence changed" in findings[0].description
+
     def test_finding_description_discloses_the_weaker_evidence(self) -> None:
         """The field has a real consumer: the emitted finding's own text.
         A `qualified_name`-evidence pair must say a same-basename move

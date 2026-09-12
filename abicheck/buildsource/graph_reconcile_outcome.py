@@ -30,6 +30,7 @@ A leaf: nothing here reaches back into the matching module.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 
 from ..model.graph_identity import (
     closure_location_free_identity,
@@ -190,6 +191,53 @@ def _classify_outcome(
     old_declaring_file: str = "",
     new_declaring_file: str = "",
 ) -> str:
+    """The reconciliation outcome for this pair. See :func:`_classify`."""
+    return _classify(
+        old_identity,
+        new_identity,
+        old_declaring_file=old_declaring_file,
+        new_declaring_file=new_declaring_file,
+    ).outcome
+
+
+def move_evidence_established(
+    old_identity: CanonicalIdentity,
+    new_identity: CanonicalIdentity,
+    *,
+    old_declaring_file: str = "",
+    new_declaring_file: str = "",
+) -> bool:
+    """Whether this pair's evidence actually established a declaring-file
+    MOVE, as opposed to reaching its outcome some other way.
+
+    ``OUTCOME_RECONCILED`` is the case that matters: it is produced both
+    by a genuine rename-and-move and by a pair whose move claim was
+    withheld as unsupported, and its prose asserts the former. Shares
+    :func:`_classify`'s computation rather than re-deriving it, so the
+    prose a finding renders cannot drift from the outcome it renders
+    (Codex review, PR #1232).
+    """
+    return _classify(
+        old_identity,
+        new_identity,
+        old_declaring_file=old_declaring_file,
+        new_declaring_file=new_declaring_file,
+    ).move_established
+
+
+@dataclass(frozen=True)
+class _Classification:
+    outcome: str
+    move_established: bool
+
+
+def _classify(
+    old_identity: CanonicalIdentity,
+    new_identity: CanonicalIdentity,
+    *,
+    old_declaring_file: str = "",
+    new_declaring_file: str = "",
+) -> _Classification:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
     # source_relative is file#scope#name; the file prefix says "did the
@@ -315,12 +363,20 @@ def _classify_outcome(
         if has_two_sided_files
         else (markers_differ and marker_fallback_usable)
     )
+    # `moved` is also what the PROSE may claim (Codex review, PR #1232).
+    # A pair reaches OUTCOME_RECONCILED two ways: because both dimensions
+    # genuinely changed, or because coordinate-only was disqualified while
+    # the move claim was withheld -- an ambiguous marker basename, a
+    # permutation, a declaring file contradicting its own markers. The
+    # outcome cannot tell them apart, and its prose asserts the first, so
+    # rendering it for the second re-makes in the user-facing sentence
+    # exactly the claim this function just declined to make.
     if renamed and not moved:
-        return OUTCOME_RENAMED
+        return _Classification(OUTCOME_RENAMED, moved)
     if moved and not renamed:
-        return OUTCOME_MOVED
+        return _Classification(OUTCOME_MOVED, moved)
     if renamed and moved:
-        return OUTCOME_RECONCILED
+        return _Classification(OUTCOME_RECONCILED, moved)
     # Neither fired: coordinate-only needs the raw name differed (normalized
     # equal), an agreeing signature tail, AND a type-shaped kind -- a real
     # source_decl producer tracks no param_types/mangled_name (Codex
@@ -363,7 +419,10 @@ def _classify_outcome(
         and not markers_reordered
         and old_identity.kind in _COORDINATE_ONLY_KINDS
     )
-    return OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED
+    return _Classification(
+        OUTCOME_COORDINATES_ONLY if coordinate_only else OUTCOME_RECONCILED,
+        moved,
+    )
 
 
 def coordinate_evidence(
