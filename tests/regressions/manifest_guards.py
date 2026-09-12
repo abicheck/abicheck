@@ -99,4 +99,68 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="guard.differential_test_shares_state_with_itself",
+        invariant=(
+            "A test whose claim is that two configurations AGREE must "
+            "establish, within that same comparison, that each "
+            "configuration actually executed. Otherwise a shared cache, "
+            "memo or fixture lets the second run be served the first's "
+            "result, the test compares one configuration with itself, and "
+            "it passes identically whether the second code path is "
+            "correct, broken, or never entered at all. A sibling test "
+            "proving the mechanism CAN engage on the same input does not "
+            "discharge this: it says nothing about whether this "
+            "comparison engaged it. The executable form of the invariant "
+            "is to observe the mechanism (a spy on the real entry point, "
+            "asserting it ran and what it reported) rather than to infer "
+            "it from the outputs being compared -- outputs are exactly "
+            "what a stale cache makes indistinguishable. The same "
+            "reasoning bounds fixture sharing: sharing immutable INPUTS "
+            "between two configurations is sound, sharing the OUTPUT "
+            "whose equivalence is the claim is this bug."
+        ),
+        # PR #1243: both streaming-pruner tests in
+        # tests/test_clang_header_backend_integration.py derived their
+        # "fresh" AST-cache root from the same `tmp_path`, so the
+        # pruning-on run hit the pruning-off run's on-disk cache. The
+        # pruner never parsed anything (proven by reintroducing the shared
+        # root: the loader's call count is 0), so the public-model
+        # equivalence assertion and the method-shaped-node count equality
+        # were both vacuously true. The comment on the second call
+        # asserted "a *different*, still-fresh cache dir"; it never was.
+        fixed_by=(1243,),
+        seed_tests=(
+            "tests/test_clang_header_backend_integration.py",
+            "tests/test_conftest_cache_isolation.py",
+        ),
+        # Neither seed test reaches a documented public entry point: the
+        # pruner tests call `dump()`/`_clang_header_dump` directly and the
+        # isolation tests inspect a pytest fixture's own allocation, so
+        # per this field's rule this stays empty rather than claiming
+        # "cli"/"python-api".
+        public_surfaces=(),
+        axes={
+            "shared_state": ("on_disk_cache", "in_process_memo"),
+            "configuration_pair": ("pruning_off_vs_on", "allocator_old_vs_new"),
+            "observation": ("outputs_only", "mechanism_spy"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the two known instances are repaired and pinned; "
+                    "nothing sweeps the suite for other differential tests "
+                    "that share a cache, memo, fixture or temp root "
+                    "between the two configurations they compare. The "
+                    "shape is not mechanically detectable from a test's "
+                    "text -- a second call to one isolation helper is not "
+                    "by itself a defect -- so a sibling instance elsewhere "
+                    "would still be found by hand, the same residual the "
+                    "`guard.proxy_predicate_overshoots_justification` "
+                    "entry above records for reachability."
+                ),
+                reference="PR #1243",
+            ),
+        ),
+    ),
 )

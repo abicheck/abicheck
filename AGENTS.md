@@ -1186,6 +1186,45 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   the *real* `main()` over a small instrumented registry, and each check's
   own live-tree test stays in `tests/test_ai_readiness.py`, where it belongs.
 
+  Two sibling live-tree assertions were examined and deliberately **kept**
+  in the unit lane: `test_fact_detector_misuse.py`'s
+  `test_no_violation_in_real_repo` and `test_fact_field_readers.py`'s
+  `test_no_unlisted_violation_in_real_repo`. Unlike the `main()` case they
+  assert something substantive (the tree is clean; the baseline holds no
+  stale entry), so relocating them would stop a contributor learning
+  locally that they introduced a violation. Their cost was attacked at its
+  cause instead — see the next bullet. Note also what measurement ruled
+  out: sharing one parsed-AST inventory across the eleven test modules that
+  each walk `abicheck/**/*.py` sounds like the win and is not. Reading and
+  parsing all 787 files costs ~1.1s in total against ~43s for those two
+  tests — the scan logic dominates by roughly 40x, so a shared parse would
+  have bought ~2s of 43s.
+- **When a live-tree gate is slow, profile it before relocating the test
+  that runs it.** `fact-detector-misuse`'s scan took 25.5s over 787 files,
+  and profiling said why: `fact_equality_misuse_sites` computes
+  `_def_containing_qualnames`, `_locally_bound_constructor_shadow_names`
+  and `_lexical_function_parents`, then calls `_fact_aliases`, which
+  computes all three again — four, two and two full `ast.walk`s per file,
+  and the bulk of the scan's 13.7M `walk` calls. `_memoize_per_tree` in
+  `scripts/fact_detector_misuse_scope.py` caches each on the tree node's
+  own `__dict__` (not a module-level `id(tree)` dict, which would leak for
+  the life of the process and could serve a stale entry once an address is
+  reused), taking the scan to 19.0s with **byte-identical** output across
+  all 787 files. Prefer that to moving or deleting the test: the unit lane
+  and the `ai-readiness` job both get faster, no coverage moves, and no
+  lane-policy decision is needed. Two conditions make such a cache safe and
+  both were checked rather than assumed — every decorated helper is pure,
+  and no caller mutates a returned mapping. One caution, recorded because
+  it caught a real gap in the first version of the accompanying test:
+  `tests/test_fact_detector_misuse_memoization.py` initially had 77 tests
+  that a `key = ()` mutation — dropping the second argument from the cache
+  key — passed in full, because every real caller happens to pass the one
+  memoized spans object per tree. An untested key is not an unnecessary
+  key: `test_cache_key_includes_the_second_argument` now calls the helper
+  twice on one tree with two genuinely different span arguments, and a
+  cache-that-caches-nothing mutation is caught separately, since output
+  equivalence alone cannot distinguish a correct cache from an absent one.
+
 ## Line-coverage floor
 
 The `pr` profile's `unit-pr` step (`scripts/verify.py`) enforces a **95%**
