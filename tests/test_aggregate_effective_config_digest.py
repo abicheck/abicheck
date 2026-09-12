@@ -49,6 +49,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
+from tests.schema_validation import validate_instance
+
 LINUX = "linux-x86_64"
 
 #: A well-formed digest -- the exact ``"sha256:<64 lowercase hex chars>"``
@@ -198,5 +200,5 @@ def test_digest_bearing_report_validates_against_the_schema(tmp_path: Path) -> N
         effective_config_digest=_VALID_DIGEST,
     )
     d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).to_dict()
-    jsonschema.validate(d, load_aggregate_report_schema())
+    validate_instance(d, load_aggregate_report_schema())
     assert d["targets"][0]["effective_config_digest"] == _VALID_DIGEST

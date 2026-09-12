@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+from tests.schema_validation import validate_instance
 
 LINUX = "linux-x86_64"
 
@@ -223,7 +224,6 @@ class TestScopeCompletenessAxis:
         reason="jsonschema not installed",
     )
     def test_the_output_validates_against_the_schema(self, tmp_path: Path) -> None:
-        import jsonschema
 
         from abicheck.schemas import load_aggregate_report_schema
 
@@ -231,7 +231,7 @@ class TestScopeCompletenessAxis:
             tmp_path, LINUX, "NO_CHANGE", **_exit(incomplete_scope_contribution=1)
         )
         payload = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).to_dict()
-        jsonschema.validate(payload, load_aggregate_report_schema())
+        validate_instance(payload, load_aggregate_report_schema())
 
 
 class TestScopeCompletenessFromARealRelease:
