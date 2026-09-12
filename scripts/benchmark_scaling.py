@@ -140,7 +140,9 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from perf_baseline import (  # noqa: E402
-    check_regressions,
+    DEFAULT_REGRESS_TOLERANCE,
+    apply_regression_gate,
+    check_regressions as check_regressions,
     load_baseline as _load_baseline,
     matched_baseline_points,
 )
@@ -1316,14 +1318,16 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "suppression_audit": Scenario(_build_suppression_audit, run=_run_suppression_audit),
     "severity": Scenario(_build_severity, run=_run_severity),
-    # ADR-063 Phase 5's growing `Fact[T]` sibling surface (~27 fields as of
-    # PR #982) raised this scenario's real cost ~2x: every sibling is walked
-    # by `dataclasses.asdict()` (encode) and by the closure-identity string
-    # walk in `qualified_name_segments_walk._collect_strings` (decode), even
-    # with no markers present -- that walk now skips a `Fact`'s own `status`
-    # (never a string, PR #982), but most of the rest is genuinely new data.
-    # Scenario-scoped, not a blanket raise -- a new regression still fails.
-    "serialize": Scenario(_build_serialize, run=_run_serialize, regress_tolerance=1.3),
+    # ADR-063 Phase 5's growing `Fact[T]` sibling surface raised this
+    # scenario's real cost ~2x when it landed (every sibling is walked by
+    # `dataclasses.asdict()` on encode and by the closure-identity string walk
+    # on decode). That was a ONE-TIME data-model cost, and it was carried here
+    # as an indefinite `regress_tolerance=1.3` -- a permanent licence for any
+    # future serialize change to get 130% slower, for a reason that had already
+    # finished happening. Removed: the regression lane measures base and head on
+    # the same runner with the same fixture, so a cost present on both sides
+    # needs no tolerance; what it needed was a refreshed baseline, a one-off.
+    "serialize": Scenario(_build_serialize, run=_run_serialize),
     "report_html": Scenario(_build_report, run=_run_report_html),
     "report_sarif": Scenario(_build_report, run=_run_report_sarif),
     "report_junit": Scenario(_build_report, run=_run_report_junit),
@@ -1692,16 +1696,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--regress-tolerance",
         type=finite_nonnegative_float_arg,
-        default=0.5,
+        default=None,
         help="GATE (with --baseline): fail if a scenario is slower than its "
-        "baseline by more than this fraction (default 0.5 = 50%%). The actual "
+        "baseline by more than this fraction (default 0.5 = 50%%). An explicitly "
+        "given value always wins over any built-in per-scenario default. The actual "
         "allowed delta is max(this fraction x baseline, --regress-min-delta-seconds) "
         "— see that flag to also set an absolute floor.",
     )
     p.add_argument(
         "--regress-min-delta-seconds",
         type=finite_nonnegative_float_arg,
-        default=0.0,
+        default=None,
         help="GATE (with --baseline): absolute-seconds floor combined with "
         "--regress-tolerance via max() — protects a small baseline (a few ms) "
         "from flagging on run-to-run noise alone (default 0.0 = pure "
@@ -1874,23 +1879,16 @@ def _run_scenario(
     if baseline_points:
         matched = matched_baseline_points(points, scenario, baseline_points)
         overlap = len(matched)
-        tolerance = (
-            spec.regress_tolerance
-            if spec.regress_tolerance is not None
-            else args.regress_tolerance
-        )
-        min_delta_seconds = (
-            spec.regress_min_delta_seconds
-            if spec.regress_min_delta_seconds is not None
-            else args.regress_min_delta_seconds
-        )
         failures.extend(
-            check_regressions(
+            apply_regression_gate(
                 points,
                 scenario,
                 baseline_points,
-                tolerance,
-                min_delta_seconds=min_delta_seconds,
+                cli_tolerance=args.regress_tolerance,
+                cli_min_delta=args.regress_min_delta_seconds,
+                spec_tolerance=spec.regress_tolerance,
+                spec_min_delta=spec.regress_min_delta_seconds,
+                record_into=report["scenarios"][scenario],  # type: ignore[index,arg-type]
             )
         )
     return failures, overlap
@@ -1948,7 +1946,9 @@ def main(argv: list[str] | None = None) -> int:
     baseline_points: dict[tuple[str, int], float] = {}
     baseline_required = args.baseline is not None
     if baseline_required:
-        baseline_points = _load_baseline(args.baseline, args.regress_tolerance)
+        baseline_points = _load_baseline(
+            args.baseline, args.regress_tolerance or DEFAULT_REGRESS_TOLERANCE
+        )
         if not baseline_points:
             # Fail closed rather than silently degrading to a report-only run:
             # an explicitly-requested --baseline that loaded to zero points

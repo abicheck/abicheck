@@ -441,7 +441,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Header-graph attach-cost (trend)"
+            echo "## Header-graph L2 dump+attach cost (trend)"
             echo ""
             cat reports/perf/header_graph.txt 2>/dev/null || echo "(no output captured)"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -571,7 +571,23 @@ jobs:
               --sizes 25 100 400 --repeat 5 --require-castxml \
               --baseline base_header_graph.json \
               --regress-tolerance 0.3 --regress-min-delta-ms 10 \
+              --regress-min-delta-ms-dump 30 \
+              --regress-min-delta-ms-total 40 \
               | tee header_graph_regression.txt
+            # All three metrics (dump_ms/attach_ms/total_ms) are gated
+            # independently. The absolute floors differ per metric because the
+            # metrics differ by roughly an order of magnitude in size: a shared
+            # 10ms floor is right for attach_ms but is well inside runner noise
+            # for the ~100ms+ dump and total windows, where it would reduce the
+            # gate to the relative tolerance alone.
+            #
+            # --require-all-metrics is deliberately NOT passed here: the base
+            # branch is measured with the BASE branch's own copy of this script,
+            # so across the commit that introduced total_ms the base report
+            # legitimately carries no such field. That point is reported as
+            # ungated (and dump_ms still gates via its baseline_ms alias) rather
+            # than hard-failing a PR for a baseline it could not have written.
+            # Once total_ms is on main, every base report carries it.
           else
             echo "No base measurement available (base predates this gate's feature, or a cross-checkout castxml-policy mismatch) -- report-only." \
               | tee header_graph_regression.txt
@@ -584,7 +600,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Header-graph attach-cost regression (PR vs base)"
+            echo "## Header-graph L2 dump+attach regression (PR vs base)"
             echo ""
             echo '```'
             cat header_graph_regression.txt 2>/dev/null || echo "(no output captured)"

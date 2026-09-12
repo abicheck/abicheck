@@ -41,7 +41,7 @@ a shared fixture would let a later measurement silently hit a disk-cache
 entry an earlier one already wrote for the identical path, understating the
 genuine cold-invocation cost this gate exists to catch. Then time:
 
-* ``baseline_ms`` — ``dumper.dump(so, [header], header_backend=...)``, which
+* ``dump_ms`` — ``dumper.dump(so, [header], header_backend=...)``, which
   does **not** itself attach the header graph (see
   ``abicheck/buildsource/CLAUDE.md``'s ``header_graph.py`` row: the attach
   step lives in ``service.py``, not ``dumper.py``), run inside
@@ -53,7 +53,7 @@ genuine cold-invocation cost this gate exists to catch. Then time:
   ``_ast_memoize_scope`` docstring).
 * ``attach_ms`` — ``service._attach_header_graph(snap, header_graph=True,
   header_graph_includes=True, ...)``
-  applied to the snapshot ``baseline_ms`` already produced, *outside* that
+  applied to the snapshot ``dump_ms`` already produced, *outside* that
   scope (again matching ``_run_dump_uncached``'s own call ordering), in
   isolation. Both flags are ``True``, matching production's
   ``_HEADER_GRAPH_ENABLED``/``_HEADER_GRAPH_INCLUDES_ENABLED`` (both
@@ -61,6 +61,34 @@ genuine cold-invocation cost this gate exists to catch. Then time:
   ``ClangHeaderIncludeExtractor``'s own extra ``clang -M`` subprocess per
   top-level header, a real, always-on part of the attach cost this gate
   would otherwise silently exclude.
+
+* ``total_ms`` — the **same sample's** whole ``dump`` + ``attach`` window,
+  read off one ``perf_counter`` span (the ``t0``/``t3`` pair bracketing both
+  phases), not reconstructed afterwards. It is deliberately *not*
+  ``median(dump_ms) + median(attach_ms)``: two independent medians are two
+  different samples' values, so their sum names a run that never happened and
+  systematically understates the spread a reader would use to judge noise.
+  Nothing extra is executed to obtain it — it reuses the timestamps the two
+  phase measurements already take, so adding this metric cost zero additional
+  ``dump`` calls.
+
+  **Scope boundary, stated because the name invites over-reading:**
+  ``total_ms`` is the total of *these two in-process phases only*. It excludes
+  Python interpreter startup, CLI argument/config resolution, input
+  resolution, snapshot serialization, comparison, and report rendering — i.e.
+  it is not a full ``abicheck`` CLI wall time and must never be quoted as
+  one. The full-CLI L2 figure has its own harness
+  (``scripts/check_l2_cli_perf.py``); see ``docs/contribute/performance.md``
+  for the three distinct measurement levels and which number belongs to
+  which.
+
+All three metrics are gated **separately** against the baseline. Gating only
+``attach_ms`` (this script's original behaviour) measured the main dump on
+every single sample and then threw the number away at gate time: a 2x
+regression in the primary header-AST extraction path — by far the larger of
+the two costs, and the one most product changes actually touch — printed a
+larger ``dump_ms`` in the table and still exited ``0``. Separate gates also
+distinguish *which* phase moved, which a single combined number cannot.
 
 For the ``clang`` backend this measures the real Phase C in-process memo
 handoff (should be cheap: a dict lookup + graph construction, no second
@@ -150,9 +178,11 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from perf_measurement import (  # noqa: E402
-    combined_regression_threshold,
+    GateThreshold,
     finite_nonnegative_float_arg,
+    is_gateable,
     positive_int_arg,
+    resolve_threshold,
     summarize_samples,
 )
 
@@ -164,11 +194,37 @@ from perf_measurement import (  # noqa: E402
 # docstring's Usage section for how to establish and then gate against one.
 DEFAULT_SIZES: tuple[int, ...] = (25, 100, 400)
 DEFAULT_REPEAT = 3
-DEFAULT_REGRESS_TOLERANCE = 0.5  # attach_ms may grow at most 50% vs. baseline
+DEFAULT_REGRESS_TOLERANCE = 0.5  # a gated metric may grow at most 50% vs. baseline
 #: Absolute-ms floor combined with DEFAULT_REGRESS_TOLERANCE via max() — see
 #: perf_measurement.combined_regression_threshold. 0.0 preserves the
 #: historical pure-percentage-tolerance behaviour by default.
 DEFAULT_REGRESS_MIN_DELTA_MS = 0.0
+
+#: The three independently-gated metrics, in report order. ``dump_ms`` is the
+#: primary header-AST extraction pass, ``attach_ms`` the always-on header-graph
+#: attach layered on top of it, and ``total_ms`` the one ``perf_counter`` span
+#: covering both (see the module docstring for why it is measured rather than
+#: summed from the two medians, and for the scope it does *not* cover).
+#:
+#: Order matters only for presentation. Every one of them is gated: this tuple
+#: replaced a hard-coded single ``"attach_ms"`` gate, and a metric being
+#: *measured but ungated* is the specific defect that replacement fixes, so a
+#: metric added here without a gate would reintroduce it.
+METRICS: tuple[str, ...] = ("dump_ms", "attach_ms", "total_ms")
+
+#: Legacy key a pre-schema-2 report used for what is now ``dump_ms``. Read as
+#: an alias so the PR-vs-base CI job (which measures the *base* branch with the
+#: base branch's own copy of this script) keeps gating the dump phase across
+#: the one commit that renames it, instead of hard-failing on a baseline it
+#: cannot be expected to have written in the new shape. ``total_ms`` has no
+#: such alias -- a pre-schema-2 report genuinely never measured it, so it is
+#: reported as ungated rather than reconstructed by summing, which is exactly
+#: the bad arithmetic ``total_ms`` exists to avoid.
+LEGACY_METRIC_ALIASES: dict[str, str] = {"dump_ms": "baseline_ms"}
+
+#: Report schema. ``2`` is the three-metric shape; ``1`` (implicit, unstamped)
+#: was ``baseline_ms``/``attach_ms`` with only the latter gated.
+REPORT_SCHEMA = "abicheck-header-graph-perf/2"
 
 
 def _have(tool: str) -> bool:
@@ -407,27 +463,45 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                 public_header_dirs=None,
             )
             t3 = time.perf_counter()
+            # total_ms is (t3 - t0): ONE span over this very sample's dump and
+            # attach, taken from timestamps the two phase measurements already
+            # produced. No third call, no extra dump -- adding the metric cost
+            # nothing to execute. It is deliberately not computed later as
+            # median(dump) + median(attach): those two medians generally come
+            # from different samples, so their sum describes a run that never
+            # occurred (and, being a sum of two robust centres, understates the
+            # real joint spread a reader judges noise by).
+            #
+            # It also intentionally includes the small inter-phase gap (the
+            # t1..t2 window) rather than excluding it: the gap is real wall time
+            # a production dump also pays, and dropping it would make total_ms
+            # an exact sum of the two phases, i.e. carry no information the two
+            # already carry.
+            #
+            # _require_real_ast_attach runs *after* t3 -- correctness validation
+            # is this harness's own work, not the user-facing path, so it must
+            # never land inside a timed window.
             _require_real_ast_attach(attached, n, backend)
-            return (t1 - t0) * 1000.0, (t3 - t2) * 1000.0
+            return {
+                "dump_ms": (t1 - t0) * 1000.0,
+                "attach_ms": (t3 - t2) * 1000.0,
+                "total_ms": (t3 - t0) * 1000.0,
+            }
 
     _one_pair()  # untimed warmup — discarded
-    baseline_samples: list[float] = []
-    attach_samples: list[float] = []
+    samples: dict[str, list[float]] = {m: [] for m in METRICS}
     for _ in range(repeat):
-        baseline_ms, attach_ms = _one_pair()
-        baseline_samples.append(baseline_ms)
-        attach_samples.append(attach_ms)
+        one = _one_pair()
+        for metric in METRICS:
+            samples[metric].append(one[metric])
 
-    baseline_stats = summarize_samples(baseline_samples)
-    attach_stats = summarize_samples(attach_samples)
-    return {
-        "baseline_ms": baseline_stats.median,
-        "attach_ms": attach_stats.median,
-        "baseline_ms_samples": baseline_samples,
-        "attach_ms_samples": attach_samples,
-        "baseline_ms_cv": baseline_stats.cv,
-        "attach_ms_cv": attach_stats.cv,
-    }
+    result: dict[str, Any] = {}
+    for metric in METRICS:
+        stats = summarize_samples(samples[metric])
+        result[metric] = stats.median
+        result[f"{metric}_samples"] = samples[metric]
+        result[f"{metric}_cv"] = stats.cv
+    return result
 
 
 def _measure_size(
@@ -508,16 +582,69 @@ def _point_key(p: dict[str, Any]) -> tuple[int, str]:
     return int(p["size"]), str(p.get("backend", "clang"))
 
 
-def _load_baseline(path: Path) -> dict[tuple[int, str], float]:
+def _load_baseline(path: Path) -> dict[tuple[int, str], dict[str, float]]:
+    """Read a report into ``(size, backend) -> {metric: baseline_ms}``.
+
+    Per-metric, not a single scalar: the gate now checks three independent
+    metrics, and folding them into one number at load time is what made the
+    original single-``attach_ms`` gate impossible to extend without silently
+    dropping the other two.
+
+    Only :func:`is_gateable` values are retained. A ``NaN``/``Infinity``
+    baseline (both of which ``json.load`` accepts and happily round-trips) is
+    dropped rather than kept, because ``current > base + allowed`` is ``False``
+    for either -- a single poisoned number would otherwise turn this gate into
+    an unconditional pass that still prints ``OK``. Dropping it makes the point
+    read as *ungated*, which :func:`main` then surfaces (and, when nothing at
+    all survives, fails on) instead.
+
+    ``baseline_ms`` is accepted as an alias for ``dump_ms`` -- see
+    :data:`LEGACY_METRIC_ALIASES`.
+    """
     data = json.loads(path.read_text())
     points = data if isinstance(data, list) else data.get("points", [])
-    return {_point_key(p): float(p["attach_ms"]) for p in points}
+    out: dict[tuple[int, str], dict[str, float]] = {}
+    for p in points:
+        metrics: dict[str, float] = {}
+        for metric in METRICS:
+            value = p.get(metric)
+            if value is None:
+                alias = LEGACY_METRIC_ALIASES.get(metric)
+                if alias is not None:
+                    value = p.get(alias)
+            if is_gateable(value):
+                metrics[metric] = float(value)
+        out[_point_key(p)] = metrics
+    return out
+
+
+def gateable_metrics(
+    point: dict[str, Any],
+    baseline: dict[tuple[int, str], dict[str, float]],
+    metrics: tuple[str, ...] = METRICS,
+) -> list[str]:
+    """Which of *metrics* can actually be gated for *point*.
+
+    A metric is gateable only when **both** sides are real, finite, positive
+    numbers. Requiring it of the *measured* side too is not redundant defensive
+    coding: a point carrying ``attach_ms = nan`` (a malformed hand-edited
+    report, a point assembled by a caller that mis-keyed a field) compares
+    ``False`` against any threshold, so it would pass the gate while having
+    measured nothing -- the same silent-pass shape a ``nan`` baseline causes,
+    from the other direction.
+    """
+    base = baseline.get(_point_key(point), {})
+    return [
+        m for m in metrics if is_gateable(base.get(m)) and is_gateable(point.get(m))
+    ]
 
 
 def matched_points(
-    points: list[dict[str, Any]], baseline: dict[tuple[int, str], float]
+    points: list[dict[str, Any]],
+    baseline: dict[tuple[int, str], dict[str, float]],
+    metrics: tuple[str, ...] = METRICS,
 ) -> list[dict[str, Any]]:
-    """The subset of *points* that have a corresponding *baseline* entry.
+    """The subset of *points* with at least one gateable metric.
 
     Used to distinguish "every point checked out fine" from "the baseline
     covered nothing this run measured" — a size/backend axis change (or a
@@ -527,79 +654,118 @@ def matched_points(
     baseline containing only size 999 would let a completely unchecked
     default 25/100/400 run report success.
 
-    Excludes an entry whose baseline value is non-positive, matching
-    ``check_regressions``'s own ``base is None or base <= 0`` skip
-    condition (CodeRabbit review) -- otherwise the final "N checked" count
-    in ``main()`` would include a point ``check_regressions`` never
-    actually gated.
+    "At least one gateable metric" (rather than "key present in the
+    baseline") is what keeps this aligned with what
+    :func:`check_regressions` really gates, now that a point can be present
+    yet carry no usable number for any metric -- a non-positive, absent or
+    non-finite value on either side.
     """
-    return [p for p in points if baseline.get(_point_key(p), 0.0) > 0]
+    return [p for p in points if gateable_metrics(p, baseline, metrics)]
+
+
+def ungated_metrics(
+    points: list[dict[str, Any]],
+    baseline: dict[tuple[int, str], dict[str, float]],
+    metrics: tuple[str, ...] = METRICS,
+) -> list[str]:
+    """One message per (point, metric) pair that could *not* be gated.
+
+    The counterpart of :func:`check_regressions`: a gate that reports only its
+    failures cannot distinguish "three metrics, all fine" from "one metric
+    fine, two silently unmeasurable". :func:`main` prints these, and
+    ``--require-all-metrics`` promotes them to failures for a caller that
+    knows the baseline should be complete.
+    """
+    out: list[str] = []
+    for p in points:
+        base = baseline.get(_point_key(p), {})
+        size, backend = _point_key(p)
+        for metric in metrics:
+            if is_gateable(base.get(metric)) and is_gateable(p.get(metric)):
+                continue
+            if _point_key(p) not in baseline:
+                reason = "no baseline entry for this (size, backend)"
+            elif not is_gateable(base.get(metric)):
+                reason = (
+                    f"baseline {metric}={base.get(metric)!r} is not a gateable value"
+                )
+            else:
+                reason = f"measured {metric}={p.get(metric)!r} is not a gateable value"
+            out.append(f"size={size} backend={backend} metric={metric}: {reason}")
+    return out
 
 
 def check_regressions(
     points: list[dict[str, Any]],
-    baseline: dict[tuple[int, str], float],
-    tolerance: float,
-    *,
-    min_delta_ms: float = DEFAULT_REGRESS_MIN_DELTA_MS,
+    baseline: dict[tuple[int, str], dict[str, float]],
+    thresholds: dict[str, GateThreshold],
 ) -> list[str]:
-    """Return one message per (size, backend) that regressed beyond *tolerance*.
+    """Return one message per (size, backend, metric) that regressed.
 
-    A point regresses once ``attach_ms`` exceeds the baseline by more than
-    ``max(tolerance * baseline, min_delta_ms)`` — see
-    ``perf_measurement.combined_regression_threshold``. ``min_delta_ms=0``
-    (the default) reduces to the historical pure-percentage-tolerance rule.
+    A metric regresses once its measured median exceeds its own baseline by
+    more than that metric's ``GateThreshold.allowed_delta`` — see
+    ``perf_measurement.combined_regression_threshold``.
+
+    Each metric in *thresholds* is checked independently, which is the whole
+    point: a dump-only, an attach-only and a total-only slowdown each fail on
+    their own metric and name it, instead of one combined number that a
+    reader then has to guess the cause of. A metric absent from *thresholds*
+    is not gated at all, so the caller's ``--metrics`` selection is honored
+    here rather than re-derived.
     """
     failures = []
     for p in points:
-        base = baseline.get(_point_key(p))
-        if base is None or base <= 0:
-            continue
-        current = float(p["attach_ms"])
-        allowed_delta = combined_regression_threshold(base, tolerance, min_delta_ms)
-        allowed = base + allowed_delta
-        if current > allowed:
-            pct = (current / base - 1.0) * 100.0
-            size, backend = _point_key(p)
-            failures.append(
-                f"size={size} backend={backend}: attach_ms {current:.1f} > "
-                f"baseline {base:.1f} + {allowed_delta:.1f} allowed ({pct:+.0f}%)"
-            )
+        base_metrics = baseline.get(_point_key(p), {})
+        size, backend = _point_key(p)
+        for metric, threshold in thresholds.items():
+            base = base_metrics.get(metric)
+            current = p.get(metric)
+            if not (is_gateable(base) and is_gateable(current)):
+                # Reported by ungated_metrics() instead -- skipping silently
+                # here would be the original silent-pass bug in miniature.
+                continue
+            base = float(base)
+            current = float(current)
+            allowed_delta = threshold.allowed_delta(base)
+            if current > base + allowed_delta:
+                pct = (current / base - 1.0) * 100.0
+                failures.append(
+                    f"size={size} backend={backend}: {metric} {current:.1f} > "
+                    f"baseline {base:.1f} + {allowed_delta:.1f} allowed ({pct:+.0f}%) "
+                    f"[tolerance={threshold.tolerance} min_delta_ms={threshold.min_delta} "
+                    f"source={threshold.source}]"
+                )
     return failures
 
 
-def _attach_cv_pct(p: dict[str, Any]) -> float:
-    """``attach_ms``'s coefficient of variation as a percentage, or NaN if unset."""
-    cv = p.get("attach_ms_cv")
+def _cv_pct(p: dict[str, Any], metric: str) -> float:
+    """*metric*'s coefficient of variation as a percentage, or NaN if unset."""
+    cv = p.get(f"{metric}_cv")
     return cv * 100.0 if cv is not None else float("nan")
 
 
+_TABLE_COLUMNS = ("size", "backend", *METRICS, *(f"{m}_cv%" for m in METRICS))
+
+
+def _row_cells(p: dict[str, Any]) -> list[str]:
+    cells = [str(p["size"]), str(p.get("backend", "clang"))]
+    cells += [f"{float(p[m]):.1f}" if is_gateable(p.get(m)) else "n/a" for m in METRICS]
+    cells += [f"{_cv_pct(p, m):.1f}" for m in METRICS]
+    return cells
+
+
 def _print_table(points: list[dict[str, Any]]) -> None:
-    print(
-        f"{'size':>8} {'backend':>9} {'baseline_ms':>12} {'attach_ms':>12} "
-        f"{'attach_%':>10} {'attach_cv%':>11}"
-    )
+    widths = [max(len(c), 11) for c in _TABLE_COLUMNS]
+    print(" ".join(c.rjust(w) for c, w in zip(_TABLE_COLUMNS, widths)))
     for p in points:
-        baseline_ms = p["baseline_ms"]
-        attach_ms = p["attach_ms"]
-        pct = (attach_ms / baseline_ms * 100.0) if baseline_ms else float("nan")
-        print(
-            f"{p['size']:>8} {p.get('backend', 'clang'):>9} {baseline_ms:>12.1f} "
-            f"{attach_ms:>12.1f} {pct:>9.1f}% {_attach_cv_pct(p):>10.1f}%"
-        )
+        print(" ".join(c.rjust(w) for c, w in zip(_row_cells(p), widths)))
 
 
 def _print_markdown(points: list[dict[str, Any]]) -> None:
-    print("| size | backend | baseline_ms | attach_ms | attach_% | attach_cv% |")
-    print("|---:|---|---:|---:|---:|---:|")
+    print("| " + " | ".join(_TABLE_COLUMNS) + " |")
+    print("|" + "|".join(["---:"] * len(_TABLE_COLUMNS)) + "|")
     for p in points:
-        baseline_ms = p["baseline_ms"]
-        attach_ms = p["attach_ms"]
-        pct = (attach_ms / baseline_ms * 100.0) if baseline_ms else float("nan")
-        print(
-            f"| {p['size']} | {p.get('backend', 'clang')} | {baseline_ms:.1f} | "
-            f"{attach_ms:.1f} | {pct:.1f}% | {_attach_cv_pct(p):.1f}% |"
-        )
+        print("| " + " | ".join(_row_cells(p)) + " |")
 
 
 #: ``argparse`` ``type=`` for ``--sizes``/``--repeat``: reject <= 0. Now
@@ -617,6 +783,40 @@ _positive_int = positive_int_arg
 #: module's own historical name since tests/test_header_graph_perf_gate.py
 #: references it directly.
 _finite_nonnegative_float = finite_nonnegative_float_arg
+
+
+def resolve_thresholds(args: argparse.Namespace) -> dict[str, GateThreshold]:
+    """The effective :class:`GateThreshold` per selected metric.
+
+    Exists as its own function, returning a value the report then records,
+    because a threshold that is only ever computed inline at comparison time
+    cannot be audited from the run's own output. That is not a hypothetical:
+    ``benchmark_scaling.py`` carried a built-in per-scenario
+    ``regress_tolerance=1.3`` that silently outranked an explicitly-passed
+    stricter ``--regress-tolerance``, and no reader of its JSON report could
+    see that the number they asked for was not the number that gated them.
+
+    The precedence here admits no such case: the CLI-wide value is the
+    default, a caller-stated per-metric value overrides it, and nothing else
+    participates. A future built-in exception would have to arrive as a
+    ``GateThreshold`` with its own ``source`` label and would therefore appear
+    in the receipt.
+    """
+    base = GateThreshold(
+        tolerance=args.regress_tolerance,
+        min_delta=args.regress_min_delta_ms,
+        source="explicit"
+        if args.regress_tolerance != DEFAULT_REGRESS_TOLERANCE
+        else "default",
+    )
+    return {
+        metric: resolve_threshold(
+            default=base,
+            explicit_tolerance=getattr(args, f"tolerance_{metric}"),
+            explicit_min_delta=getattr(args, f"min_delta_{metric}"),
+        )
+        for metric in args.metrics
+    }
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -647,18 +847,56 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--regress-tolerance",
         type=_finite_nonnegative_float,
         default=DEFAULT_REGRESS_TOLERANCE,
-        help="Fractional attach_ms growth allowed vs. baseline before failing "
-        "(default: %(default)s = 50%%). The actual allowed delta is "
-        "max(this fraction x baseline, --regress-min-delta-ms).",
+        help="Fractional growth allowed vs. baseline, for EVERY gated metric, "
+        "before failing (default: %(default)s = 50%%). The actual allowed delta "
+        "is max(this fraction x baseline, --regress-min-delta-ms).",
     )
     p.add_argument(
         "--regress-min-delta-ms",
         type=_finite_nonnegative_float,
         default=DEFAULT_REGRESS_MIN_DELTA_MS,
-        help="Absolute-ms floor combined with --regress-tolerance via max() -- "
-        "protects a small attach_ms baseline from flagging on run-to-run "
-        "noise alone (default: %(default)s = pure percentage tolerance, the "
-        "historical behaviour).",
+        help="Absolute-ms floor combined with --regress-tolerance via max(), for "
+        "every gated metric -- protects a small baseline from flagging on "
+        "run-to-run noise alone (default: %(default)s = pure percentage "
+        "tolerance, the historical behaviour).",
+    )
+    p.add_argument(
+        "--metrics",
+        nargs="+",
+        choices=list(METRICS),
+        default=list(METRICS),
+        help="Which metrics to gate (default: all three, gated independently). "
+        "Narrowing this is a deliberate, visible choice recorded in the JSON "
+        "report's effective_thresholds block -- it is not how a metric should "
+        "ever come to be measured-but-ungated by accident.",
+    )
+    for metric in METRICS:
+        p.add_argument(
+            f"--regress-tolerance-{metric.removesuffix('_ms')}",
+            type=_finite_nonnegative_float,
+            default=None,
+            dest=f"tolerance_{metric}",
+            help=f"Per-metric override of --regress-tolerance for {metric}.",
+        )
+        p.add_argument(
+            f"--regress-min-delta-ms-{metric.removesuffix('_ms')}",
+            type=_finite_nonnegative_float,
+            default=None,
+            dest=f"min_delta_{metric}",
+            help=f"Per-metric override of --regress-min-delta-ms for {metric}. "
+            f"Useful because the three metrics differ by an order of magnitude "
+            f"in absolute size, so one shared absolute floor is either useless "
+            f"for the large one or noise-prone for the small one.",
+        )
+    p.add_argument(
+        "--require-all-metrics",
+        action="store_true",
+        help="Fail when any selected metric could not be gated for any measured "
+        "point (a missing baseline entry, or a non-finite/non-positive value "
+        "on either side) instead of only reporting it. For a caller whose "
+        "baseline was written by this same script version, an ungateable "
+        "metric means something is wrong, not that coverage is legitimately "
+        "partial.",
     )
     p.add_argument("--json-out", type=Path, default=None, help="Write a JSON report")
     p.add_argument(
@@ -680,6 +918,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Resolved up front so the --json-out report records them even on a
+    # report-only (no --baseline) run.
+    thresholds = resolve_thresholds(args)
+    metrics = tuple(args.metrics)
 
     if not (_have("clang") and _have("clang++") and _have("g++")):
         print(
@@ -788,7 +1030,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.json_out is not None and not same_path:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(json.dumps({"points": points}, indent=2) + "\n")
+        args.json_out.write_text(
+            json.dumps(
+                {
+                    "schema": REPORT_SCHEMA,
+                    "metrics": list(METRICS),
+                    # The thresholds that ACTUALLY gated this run, per metric,
+                    # each with the provenance of its two numbers. Recorded
+                    # unconditionally -- including on a report-only run, where
+                    # they document what a later --baseline run would apply --
+                    # so "the strict threshold I passed was honored" is a fact a
+                    # reader can check rather than has to trust.
+                    "effective_thresholds": {
+                        m: t.as_dict() for m, t in thresholds.items()
+                    },
+                    "points": points,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
         print(f"\nWrote {args.json_out}")
     elif same_path:
         print(
@@ -805,34 +1066,46 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    matched = matched_points(points, baseline)
+    print("\nEffective thresholds (the numbers that gated this run):")
+    for metric, threshold in thresholds.items():
+        print(
+            f"  {metric}: tolerance={threshold.tolerance} "
+            f"min_delta_ms={threshold.min_delta} source={threshold.source}"
+        )
+
+    matched = matched_points(points, baseline, metrics)
     if not matched:
         print(
-            f"\nFAIL: --baseline {args.baseline} has no entry matching any of this "
-            f"run's {len(points)} (size, backend) point(s) — nothing was actually "
-            "gated. Check that --sizes/the backends measured match what the "
-            "baseline was generated with, or regenerate it via --json-out."
+            f"\nFAIL: --baseline {args.baseline} has no gateable entry for any of "
+            f"this run's {len(points)} (size, backend) point(s) and selected "
+            f"metric(s) {list(metrics)} — nothing was actually gated. Check that "
+            "--sizes/--metrics/the backends measured match what the baseline was "
+            "generated with, or regenerate it via --json-out."
         )
         return 1
-    failures = check_regressions(
-        points,
-        baseline,
-        args.regress_tolerance,
-        min_delta_ms=args.regress_min_delta_ms,
-    )
+
+    failures = check_regressions(points, baseline, thresholds)
+    ungated = ungated_metrics(points, baseline, metrics)
+    if args.require_all_metrics and ungated:
+        failures.extend(f"--require-all-metrics: {u}" for u in ungated)
     if failures:
-        print("\nFAIL: header-graph attach-cost regression:")
+        print("\nFAIL: header-graph L2 perf regression:")
         for f in failures:
             print(f"  - {f}")
         return 1
-    unmatched = len(points) - len(matched)
-    if unmatched:
+    if ungated:
         print(
-            f"\nNOTE: {unmatched} point(s) had no matching baseline entry and were "
-            "not gated (new size/backend not yet in the baseline)."
+            f"\nNOTE: {len(ungated)} (point, metric) pair(s) were NOT gated "
+            "(no baseline entry, or a non-gateable value on one side). Pass "
+            "--require-all-metrics to turn this into a failure:"
         )
+        for u in ungated:
+            print(f"  - {u}")
+    gated_pairs = sum(len(gateable_metrics(p, baseline, metrics)) for p in points)
     print(
-        f"\nOK: no header-graph attach-cost regression vs. baseline ({len(matched)} checked)."
+        f"\nOK: no header-graph L2 perf regression vs. baseline "
+        f"({gated_pairs} (point, metric) pair(s) checked across "
+        f"{len(matched)} point(s), metrics={list(metrics)})."
     )
     return 0
 
