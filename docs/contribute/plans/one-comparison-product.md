@@ -1810,6 +1810,85 @@ simplification, and does not satisfy 7m–7r.
 already gone with `scan` and §4.5's ≤16 target reachable only through one
 further ruling, not through this audit.
 
+**The whole-surface count, verified and re-derived.** 7i/7k only ever
+counted `compare` and `dump`; the audit counts every command, and every one
+of its twelve numbers reproduces exactly by Click introspection on this
+branch (one logical option once, short aliases and `--no-` spellings
+collapsed, `--help`/`--help-all` excluded). The "adopted" column is what
+7m–7r above actually deliver — not the audit's own end state, which is
+listed beside it so the gap is legible rather than averaged away:
+
+| Command | Today | After 7m–7r | Audit's end state | The gap, named |
+|---|---|---|---|---|
+| `compare` | 47 | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
+| `dump` | 18 | **17** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
+| `aggregate` | 6 | **4** | 4 | — (7q + 7m's shared export) |
+| `deps tree` | 7 | **6** | 6 | — (7m) |
+| `deps compare` | 8 | **7** | 7 | — (7m) |
+| `project history` | 5 | **4** | 4 | — (7m) |
+| `project plan` | 8 | **6** | 6 | — (7r + 7m) |
+| `project validate` | 4 | **3** | 3 | — (7m) |
+| `project validate-build` | 3 | **0** | folded | 7p |
+| `project validate-use-cases` | 3 | **0** | folded | 7p |
+| **Native total** | **109** | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** |
+| `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
+
+Read the last column as this phase's actual position: **on six of the ten
+native commands the audit's end state and ours are identical**, and the
+entire 87-vs-68 difference is the contract/capture-config question this
+plan has already gated (Phase 9, G42, P5) or ruled against with a
+measurement. There is no third, unexamined bucket. `--format`/`-o`
+converging on one export request is what moves every command except
+`compare`/`dump`, which is why 7m is sequenced first: it is one mechanism
+that closes eight rows.
+
+**Six smaller audit items, ruled here rather than left unrecorded** —
+these were in the audit and absent from the first pass of this section:
+
+- **`--abi3` → declared floor activates the check.** Adopted *in part*: an
+  `.abicheck.yml`-declared `abi3` floor should arm the applicable check
+  without a second enable flag. The flag itself stays until that key
+  exists, and the audit's own guard is adopted with it — **an arbitrary
+  CPython extension must never be assumed to promise `abi3`**, so the
+  check arms from a declaration, never from sniffing the binary. Owner:
+  G26 (`--abi3`'s own workstream), not this phase.
+- **`--dump-manifest`, `--include-system-declarations` → capture
+  contract.** The audit argues both are properties of *how this project
+  captures evidence*, against our `per_run_operand` rulings. Recorded as a
+  live disagreement rather than settled: it is the same question 7p/7n
+  cannot answer alone, and it needs the capture-specification work
+  (below) to have a home at all. Neither ruling changes until then, and
+  the plan states why on each: a multi-TU recipe and a dependency-surface
+  selector both vary per invocation today because no capture spec exists
+  to carry them.
+- **`--bundle-facts-out`: the blocker is a task, not a property.** 7d
+  ruled it a keep because "`dump` has no directory/package fan-out to hold
+  this". The audit is right that this is a *missing implementation*, not a
+  reason the flag belongs on `compare` forever. Re-recorded as a keep
+  **with a named owner** — bundle capture in `dump` — so it reads as
+  deferred-by-absence rather than settled. `rulings.py` keeps
+  `per_run_operand` until that capture exists (a `deferred` ruling needs a
+  blocker that is actually being built).
+- **`deps`: the default `/` root must be visible in the resolved plan.**
+  Adopted, and it is a correctness point rather than a CLI one: an
+  unspecified `--sysroot`/`--old-root`/`--new-root` currently reads in the
+  output like a deliberately chosen deployment environment. No flag
+  changes; the resolved plan and report state that the root was defaulted.
+  Owner: Phase 8's `ReportDocument` projection, which already renders the
+  stack report.
+- **`ABICHECK_CC_DISABLE` treats `"0"` as disable.** A real defect
+  (any non-empty value disables capture), not a CLI-surface item. Fix
+  separately with a regression test over the *class* — truthy/falsey
+  string parsing across every `ABICHECK_*` boolean, not just this one
+  variable — per AGENTS.md's bug-class rule.
+- **One capture specification for `dump`, `abicheck-cc` and the Clang
+  plugin.** The audit's strongest structural point outside `compare`:
+  public roots, library identity and version are configured three times in
+  three vocabularies (`-H`/`ABICHECK_CC_HEADERS`/`public-roots=`). Not
+  this plan's to own — recorded as G34's, and as the prerequisite that
+  makes the two `per_run_operand` rulings above answerable.
+
+
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
 
 `StackVerdict` → `ExitDecision`: `stack_checker.exit_decision_for_stack_compare`/
