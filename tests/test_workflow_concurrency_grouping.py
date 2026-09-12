@@ -36,14 +36,12 @@ here rather than at the next congested merge queue.
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-
-WORKFLOW_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+from _gha_expressions import render
+from _workflow_files import read_repo_text, workflow_paths
 
 # Events whose runs can legitimately supersede one another. A schedule or a
 # workflow_dispatch run is deliberately allowed (and expected) to key off
@@ -51,8 +49,15 @@ WORKFLOW_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 _SUPERSEDABLE = ("pull_request", "push")
 
 
-def _context(event: str, *, pr: int | None = None, ref: str = "refs/heads/main",
-             run_id: str = "1") -> dict[str, Any]:
+def _context(
+    event: str,
+    *,
+    pr: int | None = None,
+    ref: str = "refs/heads/main",
+    run_id: str = "1",
+) -> dict[str, Any]:
+    """A synthesized GitHub context for one run of *event*, so a group
+    expression can be rendered the way the real runner would."""
     return {
         "github.workflow": "W",
         "github.event_name": event,
@@ -66,63 +71,24 @@ def _context(event: str, *, pr: int | None = None, ref: str = "refs/heads/main",
     }
 
 
-def _atom(token: str, ctx: dict[str, Any]) -> Any:
-    token = token.strip()
-    if token.startswith(("'", '"')):
-        return token[1:-1]
-    if token in ctx:
-        value = ctx[token]
-        return value if value != "" else False
-    if token.startswith("github."):
-        # An unmodelled context field: treat as absent rather than guessing.
-        return False
-    return token
-
-
-def _evaluate(expr: str, ctx: dict[str, Any]) -> Any:
-    """Evaluate the small GitHub-expression subset these groups use:
-    parenthesised sub-expressions, `||`, `&&`, and `==` against a literal.
-    Falsy follows GitHub: an empty string is falsy, so `a || b` yields b."""
-    expr = expr.strip()
-    while expr.startswith("(") and expr.endswith(")"):
-        depth = 0
-        for i, ch in enumerate(expr):
-            depth += (ch == "(") - (ch == ")")
-            if depth == 0 and i < len(expr) - 1:
-                break
-        else:
-            expr = expr[1:-1].strip()
-            continue
-        break
-
-    for op in ("||", "&&"):
-        depth = 0
-        for i in range(len(expr) - 1):
-            depth += (expr[i] == "(") - (expr[i] == ")")
-            if depth == 0 and expr[i : i + 2] == op:
-                left = _evaluate(expr[:i], ctx)
-                right = _evaluate(expr[i + 2 :], ctx)
-                if op == "||":
-                    return left if left else right
-                return right if left else left
-    if "==" in expr:
-        lhs, rhs = expr.split("==", 1)
-        return _atom(lhs, ctx) == _atom(rhs, ctx)
-    return _atom(expr, ctx)
-
-
 def _render(group: str, ctx: dict[str, Any]) -> str:
-    def sub(match: re.Match[str]) -> str:
-        value = _evaluate(match.group(1), ctx)
-        return "" if value is False else str(value)
+    """Render a concurrency-group expression.
 
-    return re.sub(r"\$\{\{(.+?)\}\}", sub, group)
+    A thin alias for the shared renderer: the expression semantics live in
+    `_gha_expressions` so this module and
+    `test_workflow_coverage_consumers.py` cannot drift apart on what `||`,
+    `&&` or an unmodelled context field mean. They were a private copy here
+    until the second guard needed them.
+    """
+    return render(group, ctx)
 
 
 def _cancelling_workflows() -> list[tuple[str, str, list[str]]]:
+    """Every workflow declaring `cancel-in-progress`, with its group
+    expression and the events that can produce a run in that group."""
     found = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        doc = yaml.safe_load(path.read_text())
+    for path in workflow_paths():
+        doc = yaml.safe_load(read_repo_text(path))
         concurrency = (doc or {}).get("concurrency")
         if not isinstance(concurrency, dict):
             continue
