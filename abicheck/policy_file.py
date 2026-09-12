@@ -613,15 +613,15 @@ class PolicyFile:
     # False, so nothing that builds one in code starts claiming a statement it
     # never made.
     internal_namespaces_stated: bool = False
-    # The `experimental::` graduation convention (DEFAULT_EXPERIMENTAL_NAMESPACES),
-    # threaded into DetectNamespacePatterns via PipelineContext.
-    # experimental_namespaces. Distinct from `internal_namespaces` above: that
-    # one marks implementation detail, this one marks "declared, but not yet
-    # promised stable". Empty list = use DEFAULT_EXPERIMENTAL_NAMESPACES. Exists
-    # because a *version* segment is not a stability promise -- see
-    # diff_namespaces.DEFAULT_EXPERIMENTAL_NAMESPACES and docs/use/policies.md.
-    experimental_namespaces: list[str] = field(default_factory=list)
-    experimental_namespaces_stated: bool = False  # mirrors internal_namespaces_stated
+    # The `experimental::` graduation convention, threaded into
+    # DetectNamespacePatterns via PipelineContext.experimental_namespaces.
+    # Distinct from `internal_namespaces` above: that marks implementation
+    # detail, this marks "declared, but not yet promised stable". Empty list =
+    # use DEFAULT_EXPERIMENTAL_NAMESPACES. See ADR-069, docs/use/policies.md.
+    # kw_only like `reclassify`/`versioning`: a positional field here would
+    # rebind every later positional argument (Codex, PR #1231).
+    experimental_namespaces: list[str] = field(default_factory=list, kw_only=True)
+    experimental_namespaces_stated: bool = field(default=False, kw_only=True)
     # ADR-066 D4/S2 -- versioning policy; `versioning_stated` mirrors `internal_namespaces_stated`.
     # `kw_only=True` for the same reason `reclassify` above is (CodeRabbit review; see its comment).
     versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)

@@ -222,3 +222,58 @@ class TestEffectiveConfigDigest:
             None, result=_Result(), policy_file=pf, gate=gate
         )
         assert "v0" in rich["surface.experimental_namespaces"]
+
+
+class TestPositionalConstructionIsPreserved:
+    """A new ``PolicyFile`` field must not silently rebind positional args.
+
+    The two fields this change adds sit *before* the evidence-policy slots, so
+    as ordinary dataclass fields they shifted every later positional parameter
+    -- an existing 8th positional argument meant for ``source_only_findings``
+    would have bound to ``experimental_namespaces`` instead, quietly changing
+    both the namespace findings and the evidence policy (Codex review, P1).
+    ``kw_only=True`` is the fix, matching ``reclassify``/``versioning``.
+
+    Stated as the whole positional signature rather than one field's index, so
+    this fails for *any* future field inserted mid-class, not only for the two
+    added here.
+    """
+
+    #: The positional parameter order of ``PolicyFile.__init__``. Appending is
+    #: fine; inserting is not -- a new field belongs at the end or, better,
+    #: ``kw_only=True``.
+    EXPECTED_POSITIONAL_ORDER = (
+        "base_policy",
+        "overrides",
+        "source_path",
+        "source_sha256",
+        "frozen_namespaces",
+        "internal_namespaces",
+        "internal_namespaces_stated",
+        "source_only_findings",
+        "build_context_drift",
+        "graph_risk_findings",
+        "require_evidence",
+    )
+
+    def _positional_fields(self) -> tuple[str, ...]:
+        import dataclasses
+
+        return tuple(f.name for f in dataclasses.fields(PolicyFile) if not f.kw_only)
+
+    def test_positional_order_is_unchanged(self) -> None:
+        assert self._positional_fields() == self.EXPECTED_POSITIONAL_ORDER
+
+    def test_new_namespace_fields_are_keyword_only(self) -> None:
+        positional = self._positional_fields()
+        assert "experimental_namespaces" not in positional
+        assert "experimental_namespaces_stated" not in positional
+
+    def test_positional_construction_still_binds_evidence_policy(self) -> None:
+        """The concrete break: the 8th positional argument must still be
+        ``source_only_findings``, not the newly-inserted field."""
+        pf = PolicyFile(
+            "strict_abi", {}, None, "", [], ["detail"], True, "error"
+        )
+        assert pf.source_only_findings == "error"
+        assert pf.experimental_namespaces == []
