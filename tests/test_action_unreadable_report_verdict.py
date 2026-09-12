@@ -959,3 +959,155 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
         outputs = _run_action(tmp_path, self._env(tmp_path, primary, secondary), bindir)
         assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
         assert outputs["_exit"] == 1, outputs
+
+
+#: Workflow-command payloads, embedded in a *destination path* rather than in
+#: report content. `extra-args` is PR-controlled per `action/AGENTS.md`'s threat
+#: model, so `--write json=<payload>` is a caller-supplied string that reaches a
+#: `::error::` annotation whenever that destination fails to arrive.
+#:
+#: `%0A` is the one that matters and the one that was missed: GitHub
+#: percent-decodes workflow-command *data*, so a raw `%0A` in the emitted line
+#: becomes a newline on the runner and everything after it is parsed as a
+#: second command. A literal newline cannot survive a shell path here; a
+#: percent-encoded one can.
+DESTINATION_INJECTION_PAYLOADS = (
+    "x%0A::add-mask::secret",
+    "x%0A::set-output name=verdict::COMPATIBLE",
+    "x%0A::error::forged",
+    "x%0A::stop-commands::token",
+    "x%0D::notice::forged",
+    "x%25%30A::error::double-encoded",
+)
+
+
+class TestADestinationPathCannotForgeAWorkflowCommand:
+    """The path in the diagnostic is attacker-controlled, so attack it.
+
+    Written as an executed attack rather than an assertion over `run.sh`'s
+    text, for the reason this repository already paid for once (#705 -> #758):
+    a defense asserted by reading the defending file passed while the next
+    payload went straight through it.
+
+    The invariant: for any caller-supplied destination path, no line this step
+    emits may contain a decodable workflow-command separator that the path put
+    there. `_sanitize_annotation` escapes `%` first and then flattens CR/LF, so
+    a `%0A` in the input reaches the log as the literal text `%250A` --
+    displayed, never decoded.
+    """
+
+    @pytest.mark.parametrize("payload", DESTINATION_INJECTION_PAYLOADS)
+    def test_no_raw_percent_escape_from_the_path_reaches_the_log(
+        self, tmp_path: Path, payload: str
+    ) -> None:
+        dest = tmp_path / payload
+        bindir = self._stub_that_writes_nothing(tmp_path)
+        outputs = _run_action(tmp_path, self._env(tmp_path, dest), bindir)
+        # The step must still fail -- the attack must not be prevented by the
+        # destination quietly being treated as satisfied.
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
+        errors = [
+            line
+            for line in outputs["_stdout"].splitlines()
+            if line.startswith("::error::")
+        ]
+        assert errors, outputs["_stdout"]
+        for line in errors:
+            assert "%0A" not in line.upper().replace("%0D", "%0A") or "%25" in line, (
+                payload,
+                line,
+            )
+            # The decisive check: the payload's own escape must appear escaped.
+            assert payload not in line, (payload, line)
+            assert "%250A" in line or "%250D" in line or "%25" in line, (payload, line)
+
+    @pytest.mark.parametrize("payload", DESTINATION_INJECTION_PAYLOADS)
+    def test_the_forged_command_never_becomes_its_own_line(
+        self, tmp_path: Path, payload: str
+    ) -> None:
+        # Even if a future change decoded before emitting, the smuggled command
+        # must not end up as a line of its own that a runner would execute.
+        dest = tmp_path / payload
+        bindir = self._stub_that_writes_nothing(tmp_path)
+        outputs = _run_action(tmp_path, self._env(tmp_path, dest), bindir)
+        smuggled = payload.split("%0A")[-1].split("%0D")[-1]
+        for line in outputs["_stdout"].splitlines():
+            assert line.strip() != smuggled.strip(), (payload, line)
+
+    def test_an_ordinary_path_is_still_named_in_full(self, tmp_path: Path) -> None:
+        # Narrowness control: sanitizing must not mangle the common case, or
+        # the diagnostic stops telling the user which artifact went missing.
+        dest = tmp_path / "reports" / "abi.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        bindir = self._stub_that_writes_nothing(tmp_path)
+        outputs = _run_action(tmp_path, self._env(tmp_path, dest), bindir)
+        errors = [
+            line
+            for line in outputs["_stdout"].splitlines()
+            if line.startswith("::error::")
+        ]
+        assert any(str(dest) in line for line in errors), errors
+
+    def _stub_that_writes_nothing(self, tmp_path: Path) -> Path:
+        bindir = tmp_path / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "abicheck"
+        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return bindir
+
+    def _env(self, tmp_path: Path, dest: Path) -> dict[str, str]:
+        return {
+            "INPUT_MODE": "compare",
+            "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+            "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+            "INPUT_FORMAT": "markdown",
+            "INPUT_EXTRA_ARGS": f"--write json={dest}",
+        }
+
+
+#: Strings that parse, are non-empty, and are not verdicts any consumer can act
+#: on. The reported instance was `"write interrupted"`; the class is "anything
+#: outside the emitters' own vocabulary".
+UNKNOWN_VERDICT_STRINGS = (
+    "write interrupted",
+    "compatible",
+    "OK",
+    "PASS",
+    "BREAKING_CHANGE",
+    "COMPATIBLE ",
+    "null",
+    "0",
+)
+
+
+class TestAnUnknownVerdictStringIsNotAResult:
+    """`{"verdict": "<anything>"}` must not license the COMPATIBLE fallthrough.
+
+    `_carries_a_result` accepted any non-empty verdict string, so a document
+    like `{"verdict": "write interrupted"}` read as `ok`; `compat_verdict` then
+    returned that unknown value, and `_resolve_clean_exit_verdict` -- which
+    recognizes only the break and risk tiers -- kept its initial COMPATIBLE
+    (Codex review, P2). Membership in the emitters' own vocabulary is what the
+    reader now requires.
+    """
+
+    @pytest.mark.parametrize("verdict", UNKNOWN_VERDICT_STRINGS)
+    def test_it_never_publishes_compatible(self, tmp_path: Path, verdict: str) -> None:
+        payload = json.dumps({"report_schema_version": "4.4", "verdict": verdict})
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", (verdict, outputs)
+        assert outputs["_exit"] == 1, (verdict, outputs)
+
+    @pytest.mark.parametrize(
+        "verdict",
+        ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"),
+    )
+    def test_every_real_verdict_still_reads(self, tmp_path: Path, verdict: str) -> None:
+        # The control that keeps the vocabulary from being satisfiable by
+        # rejecting everything: each tier the CLI actually emits must pass.
+        payload = json.dumps({"report_schema_version": "4.4", "verdict": verdict})
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
+        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
+        assert outputs.get("verdict") != "REPORT_UNREADABLE", (verdict, outputs)

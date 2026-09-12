@@ -4324,7 +4324,16 @@ GATE_TIER=""
 # leaving a second copy of them beside the freshness check.
 # $2 names the destination for the diagnostic.
 _reject_unusable_report() {
-  local _validity="${1:-}" _where="${2:-}"
+  local _validity="${1:-}" _where
+  # `$2` is a destination path, and every `--write json=` path comes from
+  # `extra-args` -- PR-controlled per this file's threat model. Interpolating
+  # it raw into a `::error::` workflow command lets `x%0A::add-mask::secret`
+  # reach the runner as a second command, since GitHub percent-decodes
+  # workflow-command data (Codex review, P1). Sanitized here, at the one place
+  # that emits it, rather than at each call site -- and asserted by executing
+  # the attack, not by reading the source, which is exactly the distinction
+  # #705 -> #758 turned on.
+  _where="$(_sanitize_annotation "${2:-}")"
   case "$_validity" in
     ok)
       return 0

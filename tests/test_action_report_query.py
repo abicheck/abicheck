@@ -1027,3 +1027,45 @@ class TestTheReleaseSchemaSequence:
             "audit_report_schema_version",
             "release_schema_version",
         }
+
+
+class TestTheVerdictVocabularyTracksTheRealEmitters:
+    """`KNOWN_VERDICTS` must stay a superset of what abicheck actually emits.
+
+    Validating against a vocabulary replaces "any non-empty string" and closes
+    the `{"verdict": "write interrupted"}` case, but it introduces the opposite
+    failure mode: a verdict value added to the CLI and not added here would
+    make a *working* report read as unusable and fail real runs. That is the
+    same shape as the audit/release schema-threshold misses earlier in this PR
+    -- a table that must track code, pinned by a test rather than by a comment
+    asking the next author to remember.
+
+    Derived from the producing code on both sides, so the check cannot be
+    satisfied by copying a literal into two places.
+    """
+
+    def test_every_compatibility_tier_is_known(self) -> None:
+        from abicheck.checker import Verdict
+
+        missing = {v.value for v in Verdict} - rq.KNOWN_VERDICTS
+        assert not missing, (
+            f"emitted by Verdict but unreadable to the Action: {missing}"
+        )
+
+    def test_every_release_rollup_verdict_is_known(self) -> None:
+        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+
+        missing = set(_RELEASE_VERDICT_ORDER) - rq.KNOWN_VERDICTS
+        assert not missing, f"emitted by the release fan-out but unreadable: {missing}"
+
+    def test_the_release_scope_states_are_known(self) -> None:
+        # `workflows/release_scope.py` writes these per-library sentinels
+        # directly rather than through the order table above.
+        for sentinel in ("ERROR", "not_comparable", "unsupported", "failed"):
+            assert sentinel in rq.KNOWN_VERDICTS, sentinel
+
+    def test_the_vocabulary_is_not_merely_everything(self) -> None:
+        # Without this the two assertions above are satisfiable by accepting
+        # any string, which is the defect the vocabulary replaced.
+        for outsider in ("write interrupted", "compatible", "OK", ""):
+            assert outsider not in rq.KNOWN_VERDICTS, outsider

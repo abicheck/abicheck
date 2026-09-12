@@ -30,6 +30,18 @@
   committed into the checked-out tree, is rejected rather than read as the
   run's own result. The pre-run (mtime, size) bookkeeping that already guarded
   the verdict *source* now covers every requested destination.
+- **An unrecognized `verdict` string is no longer read as a result.** The
+  reader accepted any non-empty verdict, so `{"verdict": "write interrupted"}`
+  parsed as a readable result and then matched none of the tiers the Action
+  acts on, leaving the COMPATIBLE fallthrough in place. Verdicts are now
+  checked against the vocabulary the emitters actually produce, pinned against
+  `checker.Verdict` and the release fan-out's own rollup values so the table
+  cannot drift out of step with either.
+- **A report destination named in `extra-args` can no longer forge a workflow
+  command.** The diagnostics naming a missing `--write json=` destination
+  interpolated that PR-controlled path into a `::error::` line without
+  escaping, so `--write json=x%0A::add-mask::secret` reached the runner as a
+  second command once GitHub decoded it. Sanitized at the point of emission.
 - **A self-contradictory report no longer reads as a passing assurance check.**
   A report claiming schema 2.40 or newer that carries an `analysis_assurance`
   block while omitting the `analysis_assurance_exit_contribution` emitted

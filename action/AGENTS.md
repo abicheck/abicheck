@@ -184,6 +184,27 @@ Two predicates close that without weakening anything above:
   the option declaration in `frontends/cli/options/secondary_output.py`, not
   against either comment.
 
+  **A verdict must be one the emitters actually produce.** `KNOWN_VERDICTS`
+  in `report_query.py` is checked by membership, not non-emptiness: an
+  arbitrary string (`{"verdict": "write interrupted"}`) parses, reads as a
+  result, and then matches none of the tiers `_resolve_clean_exit_verdict`
+  acts on, so it kept the COMPATIBLE fallthrough. The table must track the
+  producing code in *both* directions — a value the CLI adds and this set
+  lacks would fail working runs — so
+  `TestTheVerdictVocabularyTracksTheRealEmitters` derives it from
+  `checker.Verdict` and `_RELEASE_VERDICT_ORDER` rather than restating
+  literals.
+
+  **Any caller-supplied string reaching an annotation goes through
+  `_sanitize_annotation` first.** That includes *paths*, not just report text:
+  every `--write json=` destination comes from `extra-args`, so a diagnostic
+  naming one interpolates PR-controlled input into a `::error::` workflow
+  command, and GitHub percent-decodes workflow-command data — `x%0A::add-mask::secret`
+  becomes a second command. `_reject_unusable_report` sanitizes at the one
+  place that emits, and the guard is asserted by *executing* the attack
+  (`TestADestinationPathCannotForgeAWorkflowCommand`), never by asserting the
+  text of the defending file — the exact mistake #705 → #758 shipped.
+
   **Validate destinations, never the fallback chain.** `_json_report_src` is a
   *fallback chain* — it answers "give me a report to read" by returning the
   first destination that arrived. `_caller_json_destinations` answers the

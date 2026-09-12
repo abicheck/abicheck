@@ -122,8 +122,10 @@ VALIDITY_NO_RESULT = "no_result"
 #: covered, and three of them legitimately carry ``verdict: null`` -- which is
 #: why "non-empty string verdict" alone would fail working runs:
 #:
-#: * a two-sided ``compare`` report: ``verdict`` is a non-empty string
-#:   (``reporter.py``), as is a release envelope's own sentinel;
+#: * a two-sided ``compare`` report: ``verdict`` is a string from
+#:   ``KNOWN_VERDICTS`` below (``reporter.py``), as is a release envelope's
+#:   own sentinel. Membership, not non-emptiness: an arbitrary string is a
+#:   document that parsed and still says nothing any caller can act on;
 #: * a not-comparable report: ``verdict`` is ``null`` beside a ``reason``
 #:   object (``report/not_comparable.py``);
 #: * an audit-only report: ``verdict`` is ``null``, and the audit's own result
@@ -142,8 +144,47 @@ VALIDITY_NO_RESULT = "no_result"
 #: reads.
 
 
-def _is_nonempty_str(value: object) -> bool:
-    return isinstance(value, str) and bool(value)
+#: Every string a real emitter puts in a ``verdict`` slot, or in
+#: ``run_outcome.compatibility``. Derived from the producing code, not invented
+#: here:
+#:
+#: * ``abicheck.checker.Verdict`` -- the five compatibility tiers, used for
+#:   both keys (ADR-063 D6 makes ``run_outcome.compatibility`` the canonical
+#:   one, and it carries the same enum);
+#: * ``cli_compare_release_helpers._RELEASE_VERDICT_ORDER`` plus
+#:   ``workflows/release_scope.py`` -- a release envelope's per-library rollup
+#:   adds ``ERROR``, ``not_comparable``, ``unsupported`` and ``failed``;
+#: * ``reporter.py``'s appcompat document -- ``UNKNOWN`` when no verdict was
+#:   computed.
+#:
+#: Checked rather than "any non-empty string", because the latter admitted
+#: ``{"verdict": "write interrupted"}``: `_carries_a_result` called it a
+#: readable result, `compat_verdict` returned the unknown value, and
+#: `_resolve_clean_exit_verdict` -- which recognizes only the break and risk
+#: tiers -- kept its initial COMPATIBLE (Codex review, P2). An unrecognized
+#: verdict is exactly the "parsed cleanly, says nothing this can act on" case
+#: ``no_result`` exists for.
+#:
+#: A *new* enum member must land here, not silently read as unusable, so
+#: `tests/test_action_report_query.py` pins this set against the real enums.
+KNOWN_VERDICTS = frozenset(
+    {
+        "NO_CHANGE",
+        "COMPATIBLE",
+        "COMPATIBLE_WITH_RISK",
+        "API_BREAK",
+        "BREAKING",
+        "ERROR",
+        "UNKNOWN",
+        "not_comparable",
+        "unsupported",
+        "failed",
+    }
+)
+
+
+def _is_known_verdict(value: object) -> bool:
+    return isinstance(value, str) and value in KNOWN_VERDICTS
 
 
 def _carries_a_result(document: dict[str, Any]) -> bool:
@@ -153,10 +194,12 @@ def _carries_a_result(document: dict[str, Any]) -> bool:
     alone is not enough.
     """
     for source in (document, _nested(document)):
-        if _is_nonempty_str(source.get("verdict")):
+        if _is_known_verdict(source.get("verdict")):
             return True
         outcome = source.get("run_outcome")
-        if isinstance(outcome, dict) and _is_nonempty_str(outcome.get("compatibility")):
+        if isinstance(outcome, dict) and _is_known_verdict(
+            outcome.get("compatibility")
+        ):
             return True
     # The three shapes whose `verdict` is null by design. Checked at the root
     # only: each is a whole-document shape, not something nested under `diff`.
