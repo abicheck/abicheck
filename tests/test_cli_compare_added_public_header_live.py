@@ -51,8 +51,14 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from abicheck.cli import main
 from abicheck.header_utils import iter_directory_headers
+
+#: Every kind the engine itself classifies as an ABI or API break -- read off
+#: `checker_policy`'s own partitions, never restated here, so this test cannot
+#: drift from the taxonomy it is asserting against.
+_NON_COMPATIBLE_KIND_VALUES = {k.value for k in (*BREAKING_KINDS, *API_BREAK_KINDS)}
 
 # The reported inventory. `json.h` sorts between `data.h` and `log.h`, so a
 # sorted directory expansion places it INTERIOR -- the shape a trailing-only
@@ -159,7 +165,24 @@ def test_reported_invocation_reports_the_added_api(tmp_path: Path) -> None:
     assert "header_sequence" not in result.output
 
     report = json.loads(out.read_text(encoding="utf-8"))
-    assert report["verdict"] == "COMPATIBLE", report["verdict"]
+    # Not `== "COMPATIBLE"`. That spelling asserted the absence of every RISK
+    # finding, which is a claim about the whole fixture rather than about the
+    # header addition, and it is false on a non-ELF host: `g++ -shared` there
+    # produces a Mach-O whose own platform facts raise the verdict to
+    # COMPATIBLE_WITH_RISK, so this test failed on the macOS integration lane
+    # from the day it landed (it fails identically on `main`). The claim that
+    # belongs here is that nothing BREAKING or API-breaking was reported --
+    # derived from the engine's own partitions rather than from a hand-listed
+    # verdict string, so a new breaking kind is covered the day it is added.
+    breaking = [
+        c
+        for c in report.get("changes", [])
+        if c.get("kind") in _NON_COMPATIBLE_KIND_VALUES
+    ]
+    assert not breaking, breaking
+    assert report["verdict"] in {"COMPATIBLE", "COMPATIBLE_WITH_RISK"}, report[
+        "verdict"
+    ]
     # The rendered report, not just the exit code: the added API is REPORTED.
     added = [c for c in report.get("changes", []) if c.get("kind") == "func_added"]
     assert any("pvxs_json" in str(c.get("symbol", "")) for c in added), report.get(
