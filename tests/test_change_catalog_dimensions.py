@@ -439,50 +439,66 @@ class TestADeclaredEntityAgreesWithItsOwnRegistration:
             assert len(reason) > 40, kind
 
 
-class TestSiblingEntriesSharingATemplateAgree:
-    """Two kinds whose `description_template` is character-identical describe
-    the same shape of change, so they may not disagree on a dimension.
+class TestWhyTheSharedTemplateOracleWasWithdrawn:
+    """A shared `description_template` does **not** imply a shared dimension,
+    and this class exists so that idea is not proposed a third time.
 
-    A third oracle alongside the two above, and the one that found
-    `type_field_added` declared `MODIFIED` while `type_field_added_compatible`,
-    `union_field_added` and `type_field_removed` -- same template shape --
-    were all `ADDED`/`REMOVED`. Measured before being adopted: the catalog
-    has 7 shared-template groups and exactly one disagreed, so this is a
-    low-noise rule rather than a heuristic that needs an allowlist.
+    Round 4 added a gate asserting that kinds whose `description_template`
+    is character-identical must agree on `operation`/`entity`, measured
+    first: 7 shared-template groups, exactly 1 disagreement. That one
+    disagreement was `type_field_added` (MODIFIED) against
+    `type_field_added_compatible` (ADDED), and the gate's "fix" flipped the
+    former to ADDED.
 
-    A *verb*-based oracle over the template ("... removed" implies REMOVED)
-    was measured and rejected in the same pass: it flagged 29 kinds, of
-    which 27 were correct as declared, because "gained `final`", "no longer
-    trivially copyable" and every `[[deprecated]]` sibling legitimately read
-    as an addition or removal in a sentence while being a trait change of a
-    persisting entity. A gate with a 93% false-positive rate is not a gate.
+    That was a regression, caught in round 5 review. The two kinds are
+    semantically different despite identical wording: `type_field_added` is
+    a field *inserted* into an existing type — "New field shifts subsequent
+    fields; old code reads wrong offsets" — so the persisting type is
+    modified, while `type_field_added_compatible` is an append that changes
+    no existing offset. The published report schema's own `operation`
+    description names `type_field_added` as an example of a kind reporting
+    `modified`, so the gate also contradicted this PR's own documented
+    contract.
+
+    The template text is a *sentence for a human*, not a statement about the
+    dimension — which is the same lesson the name-parsing table taught, one
+    level along. The gate's only finding in the whole catalog was a false
+    positive, so it is withdrawn rather than allowlisted: a check whose
+    entire observed yield is one wrong answer is not a check.
     """
 
-    def _groups(self):
-        from collections import defaultdict
+    def test_two_kinds_may_share_a_template_and_differ(self):
+        """The counterexample itself, pinned so the rule stays withdrawn."""
+        added = REGISTRY.description_template_for("type_field_added")
+        appended = REGISTRY.description_template_for("type_field_added_compatible")
+        assert added == appended, "the counterexample needs identical templates"
+        assert REGISTRY.operation_for("type_field_added") is ChangeOperation.MODIFIED
+        assert (
+            REGISTRY.operation_for("type_field_added_compatible")
+            is ChangeOperation.ADDED
+        )
 
-        groups = defaultdict(list)
-        for kind in ChangeKind:
-            template = REGISTRY.description_template_for(kind.value)
-            if template:
-                groups[template].append(kind.value)
-        return {t: ks for t, ks in groups.items() if len(ks) > 1}
+    def test_an_insertion_into_a_persisting_type_is_a_modification(self):
+        """The rule that actually governs, stated over the family the
+        schema names rather than over template text."""
+        for kind in ("type_field_added", "virtual_method_added", "func_noexcept_added"):
+            assert REGISTRY.operation_for(kind) is ChangeOperation.MODIFIED, kind
 
-    def test_there_are_shared_template_groups_to_check(self):
-        """Vacuity guard."""
-        assert len(self._groups()) >= 5
+    def test_the_schema_still_says_so(self):
+        """The contract this PR publishes names these kinds explicitly, so a
+        future flip would contradict the schema and not just this test."""
+        import json
+        import pathlib as _pathlib
 
-    def test_they_agree_on_operation_and_entity(self):
-        disagreeing = {
-            template: [
-                (k, REGISTRY.operation_for(k).value, REGISTRY.entity_for(k).value)
-                for k in kinds
-            ]
-            for template, kinds in self._groups().items()
-            if len({REGISTRY.operation_for(k) for k in kinds}) > 1
-            or len({REGISTRY.entity_for(k) for k in kinds}) > 1
-        }
-        assert not disagreeing, disagreeing
+        schema = json.loads(
+            (
+                _pathlib.Path(__file__).resolve().parents[1]
+                / "abicheck/schemas/compare_report.schema.json"
+            ).read_text()
+        )
+        text = json.dumps(schema)
+        assert "type_field_added" in text
+        assert "trait *gained by a persisting entity*" in text
 
 
 class TestDeepCopyPreservesEveryDeclaredField:

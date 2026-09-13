@@ -727,6 +727,16 @@ def _finalize_compare_result(
     # a disposition is part of the result, not a display preference. Each
     # still renders nothing at all when its own collection is empty, so a
     # run with no scoping and no reconciliation is unchanged.
+    #
+    # Both ledgers demangle per row, and this runs *before*
+    # `_render_compare_report` reaches `build_report_document`'s own batch,
+    # so that later cache fill is too late to help here: without this one
+    # batched call a host with no in-process `cxxfilt` forks a `c++filt`
+    # per distinct symbol in the loops below (Codex review, PR #1284).
+    if result.out_of_surface_changes or result.reconciled_changes:
+        from ...reporter import prewarm_change_demangling
+
+        prewarm_change_demangling(result)
     if result.out_of_surface_changes:
         echo_filtered_surface(result, contract_evaluation=contract_evaluation)
     if result.reconciled_changes:

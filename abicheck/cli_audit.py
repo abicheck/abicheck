@@ -23,6 +23,7 @@ module under the AI-readiness file-size cap.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import click
@@ -67,6 +68,19 @@ def _ledger_line(c: Change, contract_evaluation: bool) -> str:
     return f"  - {c.kind.value}: {demangle_text(c.symbol)}{loc}{reason}{tag}"
 
 
+def ledger_lines_for(
+    changes: Sequence[Change], *, contract_evaluation: bool = False
+) -> list[str]:
+    """The ledger rows for *changes*, without printing them.
+
+    The release fan-out needs the same rows this module echoes for a single
+    comparison, but captured in a worker and printed later in library order
+    (see `cli_compare_release_pairwise`), so the two cannot render the
+    disposition differently.
+    """
+    return [_ledger_line(c, contract_evaluation) for c in changes]
+
+
 def echo_filtered_surface(
     result: DiffResult, *, contract_evaluation: bool = False
 ) -> None:
@@ -77,8 +91,10 @@ def echo_filtered_surface(
         f"{'finding' if n == 1 else 'findings'}, --scope-public-headers):",
         err=True,
     )
-    for c in result.out_of_surface_changes:
-        click.echo(_ledger_line(c, contract_evaluation), err=True)
+    for line in ledger_lines_for(
+        result.out_of_surface_changes, contract_evaluation=contract_evaluation
+    ):
+        click.echo(line, err=True)
 
 
 def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) -> None:

@@ -512,6 +512,26 @@ def _compare_one_library(
             # aggregated into the release-level scope block by the formatter.
             entry["scope_resolved"] = result.scope_resolved
             entry["filtered_internal_count"] = result.out_of_surface_count
+            # A count alone does not say *what* was excluded or why, so a
+            # release whose entire breaking set was scoped out could pass
+            # while explaining nothing -- ADR-067 again, the same gap the
+            # suppression audit had (Codex review, PR #1284). Captured as
+            # text and echoed in order by the caller, like the audit and
+            # the pattern ledger, so parallel libraries cannot interleave.
+            if result.out_of_surface_changes:
+                from .cli_audit import ledger_lines_for
+
+                entry["_scope_ledger_text"] = "\n".join(
+                    [
+                        f"\nFiltered as non-public ABI surface in "
+                        f"{old_path.name} ({result.out_of_surface_count} "
+                        f"{'finding' if result.out_of_surface_count == 1 else 'findings'}):",
+                        *ledger_lines_for(
+                            result.out_of_surface_changes,
+                            contract_evaluation=contract_evaluation,
+                        ),
+                    ]
+                )
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
             # Codex review, fresh evidence ("Keep per-library output-dir
@@ -831,6 +851,9 @@ def _compare_release_libraries(
         suppression_audit_text = entry.pop("_suppression_audit_text", None)
         if suppression_audit_text is not None:
             click.echo(suppression_audit_text, err=True)
+        scope_ledger_text = entry.pop("_scope_ledger_text", None)
+        if scope_ledger_text is not None:
+            click.echo(scope_ledger_text, err=True)
         v = str(entry["verdict"])
         if v == "ERROR":
             if "error" in entry:

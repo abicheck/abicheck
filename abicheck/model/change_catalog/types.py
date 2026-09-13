@@ -959,7 +959,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="New field shifts subsequent fields; old code reads wrong offsets for all fields after insertion point.",
         description_template="Field added: {name}::{detail}",
         entity=_ENT.TYPE,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_field_added_compatible",

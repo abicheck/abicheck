@@ -214,16 +214,22 @@ class TestTheHumanLedgersDemangleToo:
         assert "lib::gone(int)" in line
         assert symbol in line
 
-    def test_both_ledgers_share_one_builder(self):
+    def test_every_ledger_renders_through_one_builder(self):
         """They had the same body twice, which is why both were missed.
         Asserted structurally so a future edit to one cannot silently
-        diverge from the other."""
+        diverge — and the release fan-out's own per-library scope ledger
+        goes through the same rows, so a release cannot render a
+        disposition differently from a single comparison."""
         import inspect
 
-        from abicheck import cli_audit
+        from abicheck import cli_audit, cli_compare_release_pairwise
 
         for fn in (cli_audit.echo_filtered_surface, cli_audit.echo_reconciled):
-            assert "_ledger_line(" in inspect.getsource(fn), fn.__name__
+            src = inspect.getsource(fn)
+            assert "_ledger_line(" in src or "ledger_lines_for(" in src, fn.__name__
+        assert "ledger_lines_for(" in inspect.getsource(cli_compare_release_pairwise), (
+            "the release fan-out must reuse the same rows"
+        )
 
     def test_an_unmangled_symbol_is_untouched(self):
         assert "plain_c_function" in self._line("plain_c_function")

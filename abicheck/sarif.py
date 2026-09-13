@@ -767,6 +767,16 @@ def to_sarif(
 
     reject_unsupported_report_mode(report_mode)
 
+    # One batched demangle before the per-finding loops below. This entry
+    # point never reaches `build_report_document`, so the shared prewarm
+    # there does not cover a direct `to_sarif()` caller -- without this, a
+    # host with no in-process `cxxfilt` forks one `c++filt` per distinct
+    # symbol while building `demangledSymbol` properties (Codex review, PR
+    # #1284).
+    from .reporter import prewarm_change_demangling
+
+    prewarm_change_demangling(result)
+
     tool_version = _tool_version()
     gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
     disposition_audit_dict = disposition_audit_dict_reusing_document(

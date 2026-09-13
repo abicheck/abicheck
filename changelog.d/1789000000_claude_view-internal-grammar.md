@@ -37,6 +37,11 @@
   Markdown output still rendering raw mangled names, which the retired
   `--view demangle` token left with no override.
 
+- **A directory/package comparison discloses its scope exclusions too.** It
+  reported only a *count* of findings scoped out of the public surface, so a
+  release whose whole breaking set was excluded could pass while explaining
+  nothing. The rows come from the same builder a single comparison uses.
+
 - **A directory/package comparison discloses its suppression audit.** The
   release fan-out rendered no audit section at all, so a passing release
   report could hide which breaking findings a rule disposed of — ADR-067
