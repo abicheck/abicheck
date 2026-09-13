@@ -26,6 +26,7 @@ of in a detector module already at its debt baseline.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -43,8 +44,11 @@ from .surface_reconcile import reconcile_declaration_lists
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Variable
 
+_ABI_TAG_RE = re.compile(r"\[abi:[^\]]*\]")
+
 __all__ = [
     "abi_visible_functions",
+    "alias_identity",
     "public_functions",
     "reconciled_abi_visible_functions",
     "public_variables",
@@ -90,7 +94,7 @@ def reconciled_public_functions(
         # gain or loss *is* a mangling change, `_Z3fooB3barv` ->
         # `_Z3foov`), leaving the exact-key lookup with no peer to admit
         # (Codex review, P2).
-        alias_key=lambda f: f.name,
+        alias_key=alias_identity,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
@@ -132,7 +136,7 @@ def reconciled_public_function_maps(
         # the declared name is the second tier -- the same "single peer or
         # nothing" rule the detectors' own demangled-name fallback applies to
         # their leftovers.
-        alias_key=lambda f: f.name,
+        alias_key=alias_identity,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
@@ -312,7 +316,7 @@ def reconciled_abi_visible_functions(
         old_all=old.functions,
         new_all=new.functions,
         key=lambda f: f.mangled or f.name,
-        alias_key=lambda f: f.name,
+        alias_key=alias_identity,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
@@ -320,3 +324,42 @@ def reconciled_abi_visible_functions(
             getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
     )
+
+
+def alias_identity(decl: Function | Variable) -> str:
+    """The ambiguity-safe second tier's identity: a declaration's
+    *namespace-qualified* stem.
+
+    The bare declared name is not an identity. Header-AST backends commonly
+    store only the leaf, so `A::foo` and `B::foo` are one key -- and since
+    each is unique under it, the tier's "single peer or nothing" rule pairs
+    two unrelated declarations rather than declining. Measured: an
+    evidence-poor `A::foo(char *)` beside an evidence-backed
+    `B::foo(char8_t *)` reconciled as one declaration and reported a false
+    `CHAR8T_MIGRATION` with a `BREAKING` verdict, where the honest answer is
+    a removal and an addition (Codex review, P1).
+
+    The signature is dropped but the namespace kept, because those are the
+    two things this tier needs at once: it exists to pair a declaration
+    whose *mangling* changed (`A::foo(char *)` -> `A::foo(char8_t *)`, one
+    entity), and it must not pair declarations that differ by more than
+    that.
+
+    Itanium ABI tags are stripped for the same reason the signature is:
+    they live in the *mangling* (`_Z3fooB3barv` demangles to
+    `foo[abi:bar]()`), so keeping them would make a tag gain or loss look
+    like a different entity -- and pairing exactly that pair is what lets
+    the ABI-tag detector see a tag change at all rather than a removal plus
+    an addition.
+
+    The truncation is deliberately cruder than the display stems
+    `diff_templates` computes: it cuts at the first parenthesis, so
+    `A::operator()` and `A::operator()(int)` share an identity. That is
+    correct for this purpose -- they are the same entity name in the same
+    namespace -- and it keeps the rule a leaf that needs no part of the
+    template machinery.
+    """
+    qualified = qualified_declaration_name(decl.name, decl.mangled) or decl.name
+    head, sep, _ = qualified.partition("(")
+    stem = head.rstrip() if sep else qualified
+    return _ABI_TAG_RE.sub("", stem)
