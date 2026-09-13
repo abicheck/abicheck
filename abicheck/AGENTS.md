@@ -48,8 +48,11 @@ Do not react to a full file by moving arbitrary functions to a new
 1. names a responsibility and its destination package;
 2. moves the authoritative implementation and its tests together;
 3. changes callers to import the new owner directly;
-4. preserves only documented public imports through a thin explicit façade
-   (`architecture/modules.yaml`'s `limits.facade` ceiling: 150 lines);
+4. retires the old import path outright, naming the new owner in a
+   changelog fragment -- a delegation-only façade preserving a historical
+   path is not a durable outcome pre-1.0 (ADR-061's 2026-09-13 amendment);
+   keep one only for a real dependency-direction constraint, within
+   `architecture/modules.yaml`'s `limits.facade` ceiling (150 lines);
 5. reduces dependency direction or responsibility count;
 6. adds no import-cycle or boundary allowlist entry, and no new
    `architecture/debt.yaml` entry for the new file.

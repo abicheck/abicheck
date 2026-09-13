@@ -61,8 +61,8 @@ else:
   than not recording it.
 
 **One planner, two request shapes.** :func:`AnalysisPlanner.resolve` accepts
-either a :class:`~abicheck.api_types.CompareRequest` (two sides) or a
-:class:`~abicheck.api_types.DumpRequest` (one side) and normalizes both into
+either a :class:`~abicheck.workflows.contracts.CompareRequest` (two sides) or a
+:class:`~abicheck.workflows.contracts.DumpRequest` (one side) and normalizes both into
 the same per-side :class:`SidePlan` shape before running every registered
 check — so a check that only cares about one side's own requested inputs
 (every check today is exactly this shape) never needs to know which request
@@ -236,7 +236,7 @@ def _discovered_config_build_targets(
     ``dump``/``compare``'s ``--config``) wins outright; otherwise falls back
     to auto-discovering one at *sources*. CLI cleanup phase two, Block 7 (PR
     C's tail): ``dump``/``compare`` now have this request-level seam too --
-    :class:`~abicheck.api_types.InputSpec.build_config`, threaded from
+    :class:`~abicheck.workflows.contracts.InputSpec.build_config`, threaded from
     ``cli_dump_request.build_dump_request`` and from ``compare``'s inline
     ``--old/new-sources`` embed path's nested ``dump_cmd`` invocation, into
     :attr:`SidePlan.build_config` -- so a call site that resolves its
@@ -341,8 +341,8 @@ def bazel_target_scoping_failure(
     A free function, not a method on :class:`SidePlan`/:class:`AnalysisPlan`
     — the known-gap entry names this same silent no-op on ``scan --against``
     too, and ``scan_engine.py``'s own candidate resolution (``_build_new_snapshot``)
-    builds a raw ``InputSpec`` directly rather than a :class:`~abicheck.api_types.CompareRequest`/
-    :class:`~abicheck.api_types.DumpRequest`, so it has no :class:`AnalysisPlan`
+    builds a raw ``InputSpec`` directly rather than a :class:`~abicheck.workflows.contracts.CompareRequest`/
+    :class:`~abicheck.workflows.contracts.DumpRequest`, so it has no :class:`AnalysisPlan`
     of its own to resolve through. Exposing the check itself, over plain
     ``(build_info, build_targets)`` values, lets that call site reuse the
     identical logic instead of a second, independently-maintained copy.

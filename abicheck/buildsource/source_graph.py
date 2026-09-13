@@ -42,6 +42,20 @@ from __future__ import annotations
 
 from typing import Any
 
+# Shared node/edge-classification predicates neither half owns exclusively.
+from abicheck.model.source_graph_query import (
+    DECL_NODE_KINDS as DECL_NODE_KINDS,
+    INTERNAL_VISIBILITIES as INTERNAL_VISIBILITIES,
+    PUBLIC_VISIBILITIES as PUBLIC_VISIBILITIES,
+    UNANNOTATED_VISIBILITIES as UNANNOTATED_VISIBILITIES,
+    decl_declaring_files as decl_declaring_files,
+    is_consumer_compiled_node as is_consumer_compiled_node,
+    is_consumer_compiled_public_entry as is_consumer_compiled_public_entry,
+    is_internal_dependency_node as is_internal_dependency_node,
+    is_public_dependency_node as is_public_dependency_node,
+    looks_like_system_name as looks_like_system_name,
+)
+
 # GraphNode/GraphEdge live in graph_facts.py now (ADR-046 D1/D2/D3 schema
 # additions pushed this module to its AI-readiness line-count cap) and are
 # re-exported for backward compatibility (many modules do ``from
@@ -104,20 +118,6 @@ from .source_graph_build_source_abi import (
 from .source_graph_compare import (
     diff_source_graph as diff_source_graph,
     localize_symbol as localize_symbol,
-)
-
-# Shared node/edge-classification predicates neither half owns exclusively.
-from .source_graph_query import (
-    DECL_NODE_KINDS as DECL_NODE_KINDS,
-    INTERNAL_VISIBILITIES as INTERNAL_VISIBILITIES,
-    PUBLIC_VISIBILITIES as PUBLIC_VISIBILITIES,
-    UNANNOTATED_VISIBILITIES as UNANNOTATED_VISIBILITIES,
-    decl_declaring_files as decl_declaring_files,
-    is_consumer_compiled_node as is_consumer_compiled_node,
-    is_consumer_compiled_public_entry as is_consumer_compiled_public_entry,
-    is_internal_dependency_node as is_internal_dependency_node,
-    is_public_dependency_node as is_public_dependency_node,
-    looks_like_system_name as looks_like_system_name,
 )
 
 

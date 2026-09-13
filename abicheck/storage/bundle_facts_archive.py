@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 from ..model import AbiSnapshot
 from ..model.bundle_facts import (
     BUNDLE_FACTS_SCHEMA_VERSION,
+    DEFAULT_MAX_JSON_OBJECT_NODES,
     DEFAULT_VARIANT_FINGERPRINT,
     BundleFacts,
     document_schema_version,
@@ -80,18 +81,6 @@ DEFAULT_MAX_BUNDLE_DECODED_BYTES = 1024 * 1024 * 1024
 #: bytes are charged once, but each name sharing it still materializes its
 #: own AbiSnapshot object graph). No real bundle approaches this.
 DEFAULT_MAX_LIBRARY_COUNT = 20_000
-
-#: Default container-node budget for one blob's JSON decode -- json.loads()
-#: has no cap on *node count*; many small containers under an ignored key
-#: inflate real memory regardless of container shape (~150MB RSS from a 6MB
-#: payload of ~2M empty objects; an array-only payload bypassed an
-#: earlier, object-only cap identically -- both confirmed empirically).
-#: See `storage.json_budget` for the shared object+array pre-scan (Codex).
-#: Kept conservative (Codex review, PR #1174): a real oneDAL-scale blob
-#: can need ~5.8-17M nodes (one-comparison-product.md §4.1/§3 #21), but
-#: raising the *default* would widen every untrusted run's decode-bomb
-#: ceiling. Set `resource_limits.max_bundle_facts_decode_nodes` instead.
-DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
 
 
 def maybe_write_bundle_facts_archive(

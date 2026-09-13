@@ -11,12 +11,9 @@
       "path": "abicheck/model",
       "may_import": [],
       "legacy_paths": [
-        "abicheck/buildsource/entity_identity.py",
-        "abicheck/buildsource/entity_resolver.py",
         "abicheck/buildsource/model.py",
         "abicheck/buildsource/pack.py",
         "abicheck/buildsource/source_abi.py",
-        "abicheck/buildsource/source_graph_query.py",
         "abicheck/model/evidence_depth_levels.py",
         "abicheck/bundle_manifest.py",
         "abicheck/change_registry.py",
@@ -321,7 +318,6 @@
         "abicheck/bundle_analysis.py",
         "abicheck/bundle_detector_heuristics.py",
         "abicheck/bundle_detectors.py",
-        "abicheck/bundle_facts.py",
         "abicheck/bundle_facts_serialization.py",
         "abicheck/bundle_facts_store.py",
         "abicheck/bundle_models.py",
@@ -362,7 +358,6 @@
         "abicheck/dry_run_estimate.py",
         "abicheck/stack_checker.py",
         "abicheck/product_baseline.py",
-        "abicheck/aggregate.py",
         "abicheck/aggregate_findings.py",
         "abicheck/aggregate_manifest.py"
       ]
@@ -460,21 +455,9 @@
     "abicheck.serialization"
   ],
   "facades": [
-    "abicheck.aggregate",
-    "abicheck.aggregate_findings",
-    "abicheck.aggregate_manifest",
-    "abicheck.api_types",
-    "abicheck.bundle_facts",
-    "abicheck.bundle_facts_serialization",
-    "abicheck.bundle_facts_store",
     "abicheck.checker_policy",
-    "abicheck.contract_coverage_ledger",
     "abicheck.contract_gating",
-    "abicheck.qualified_name_segments",
-    "abicheck.reclassify",
-    "abicheck.buildsource.entity_identity",
-    "abicheck.buildsource.entity_resolver",
-    "abicheck.buildsource.source_graph_query"
+    "abicheck.reclassify"
   ],
   "frozen_root_families": {
     "cli_": [
@@ -576,9 +559,6 @@
       "bundle_analysis.py",
       "bundle_detector_heuristics.py",
       "bundle_detectors.py",
-      "bundle_facts.py",
-      "bundle_facts_serialization.py",
-      "bundle_facts_store.py",
       "bundle_manifest.py",
       "bundle_models.py",
       "bundle_multibuild.py",
@@ -589,8 +569,6 @@
       "bundle_soname.py"
     ],
     "aggregate_": [
-      "aggregate_findings.py",
-      "aggregate_manifest.py"
     ],
     "dumper_": [
       "dumper_ast_config.py",
@@ -669,8 +647,6 @@
     "bundle_analysis.py",
     "bundle_detector_heuristics.py",
     "bundle_detectors.py",
-    "bundle_facts.py",
-    "bundle_facts_serialization.py",
     "bundle_manifest.py",
     "bundle_models.py",
     "bundle_multibuild.py",
@@ -730,7 +706,6 @@
     "contract_context.py",
     "contract_context_io.py",
     "contract_coverage_exit.py",
-    "contract_coverage_ledger.py",
     "contract_evaluation.py",
     "contract_evidence.py",
     "contract_evidence_collect.py",
@@ -873,7 +848,6 @@
     "provenance.py",
     "python_api.py",
     "python_ext.py",
-    "qualified_name_segments.py",
     "qualified_name_segments_walk.py",
     "reclassify.py",
     "report_classifications.py",

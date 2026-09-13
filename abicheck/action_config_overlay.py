@@ -184,9 +184,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from abicheck.model.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
+
 from .action_config_overlay_compile import merge_compile_block
 from .buildsource.build_config import BuildConfig
-from .bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
 from .config_paths import project_root_for_config
 from .frontends.cli.commands.compare_bundle_facts_rejections import (
     resolve_max_json_object_nodes_cfg,

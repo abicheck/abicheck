@@ -24,7 +24,7 @@ new cost model -- and adds only the compare-specific glue: resolving
 compare's own ``--depth``/``.abicheck.yml`` ``source.method``/
 ``--sources``/``--build-info`` precedence into the
 ``(SourceMethod, EvidenceDepth)`` pair ``estimate_scan``'s ``resolved_level``
-takes, building one :class:`~abicheck.api_types.InputSpec` per side, and
+takes, building one :class:`~abicheck.workflows.contracts.InputSpec` per side, and
 summing both sides' rows layer-by-layer (:func:`_merge_layer_estimates`) --
 a real ``compare`` run with live source/build evidence extracts *both*
 operands, so the preview sums each side's own projection.

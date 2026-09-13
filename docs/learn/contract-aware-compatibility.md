@@ -11,7 +11,7 @@ depends_on:
   - abicheck/contract_evaluation.py
   - abicheck/export_surface.py
   - abicheck/contract_pipeline.py
-  - abicheck/contract_coverage_ledger.py
+  - abicheck/policy/coverage_ledger.py
   - abicheck/policy/coverage_ledger.py
   - abicheck/contract_coverage_exit.py
 lifecycle: active

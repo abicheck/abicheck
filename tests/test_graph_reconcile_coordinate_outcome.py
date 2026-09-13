@@ -34,10 +34,6 @@ ADR-048's 2026-09 amendment for the full account.
 
 from __future__ import annotations
 
-from abicheck.buildsource.entity_identity import (
-    IDENTITY_TIER_CANONICAL,
-    CanonicalIdentity,
-)
 from abicheck.buildsource.graph_reconcile import (
     _OUTCOME_PROSE,
     OUTCOME_COORDINATES_ONLY,
@@ -48,6 +44,7 @@ from abicheck.buildsource.graph_reconcile import (
     OUTCOME_RENAMED,
     _classify_outcome,
 )
+from abicheck.model.entity_identity import IDENTITY_TIER_CANONICAL, CanonicalIdentity
 
 
 def _identity(

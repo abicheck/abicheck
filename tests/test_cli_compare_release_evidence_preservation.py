@@ -536,7 +536,7 @@ class TestAliasNodeBudgetAggregation:
         # combined (> 20).
         aliases_a = tuple(f"liba-alias-{i}.so" for i in range(15))
         aliases_b = tuple(f"libb-alias-{i}.so" for i in range(15))
-        from abicheck.bundle_facts import BundleFacts
+        from abicheck.model.bundle_facts import BundleFacts
 
         facts = BundleFacts(
             variant_fingerprint=facts.variant_fingerprint,
@@ -670,8 +670,8 @@ class TestEmbeddedManifestForEmptyVariant:
     def test_empty_variant_manifest_still_gates_the_new_side(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts import BundleFacts
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.model.bundle_facts import BundleFacts
 
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
         facts = BundleFacts(
@@ -769,8 +769,8 @@ class TestMalformedEmbeddedManifestRaises:
     def test_corrupted_project_level_manifest_raises_not_none(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts import BundleFacts
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.model.bundle_facts import BundleFacts
         from abicheck.workflows.release_package import read_embedded_manifest
 
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
@@ -810,8 +810,8 @@ class TestBothSidesEmptyVariantsStillEnforceManifests:
     def test_manifest_drift_is_reported_even_when_both_sides_are_empty(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts import BundleFacts
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.model.bundle_facts import BundleFacts
 
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))
         facts = BundleFacts(
@@ -865,8 +865,8 @@ class TestMismatchedManifestRefKindRaises:
     check instead of surfacing as a usage error."""
 
     def test_mismatched_kind_raises_not_none(self, tmp_path: Path) -> None:
-        from abicheck.bundle_facts import BundleFacts
         from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+        from abicheck.model.bundle_facts import BundleFacts
         from abicheck.workflows.release_package import read_embedded_manifest
 
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="core_mul"),))

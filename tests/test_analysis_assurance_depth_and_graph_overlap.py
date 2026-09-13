@@ -242,8 +242,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         request IS satisfied) -- before this fix, the returned result still
         silently read ``requested_depth=None``/``depth_satisfied=None``
         despite the caller's explicit, successfully-reached request."""
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old_p, new_p = self._snapshot_files(tmp_path)
         request = CompareRequest(
@@ -270,10 +269,9 @@ class TestRequestedDepthPropagationSharedPipeline:
         ``EVIDENCE_DEPTH_VALUES`` spelling -- most visibly,
         ``validate_evidence_depth()`` (every JSON reporter) raised
         ``ValueError`` outright. This must fail against the pre-fix code."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.checker_types import validate_evidence_depth
         from abicheck.reporter import to_json
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old_p, new_p = self._snapshot_files(tmp_path)
         request = CompareRequest(
@@ -299,8 +297,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         """Companion negative case: a caller that never sets
         ``CompareRequest.depth`` must see the identical, unaffected
         ``requested_depth=None`` behavior as before this fix."""
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old_p, new_p = self._snapshot_files(tmp_path)
         request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
@@ -326,7 +323,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         ``test_unit_level_unsatisfied_requested_depth_is_failed`` above
         exercises it -- by constructing an already-resolved pair directly
         rather than going through the full resolve step."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_evidence import SideEvidence
         from abicheck.service_compare_pipeline import (
             ResolvedComparePair,
@@ -369,7 +366,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         *and* a request with no ``depth`` at all, so neither the
         context-agrees branch nor the ``request.depth``-fallback branch
         fires and ``requested_depth`` stays at its default ``None``."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_evidence import SideEvidence
         from abicheck.service_compare_pipeline import (
             ResolvedComparePair,
@@ -425,7 +422,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         requested_depth`` when one is attached and agrees with
         ``request.depth`` -- the ordinary case, since both are seeded from
         the same request in every real invocation."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import classify_compare_pair
         from abicheck.workflows.resolved_execution_context import (
             EvidenceView,
@@ -456,7 +453,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         depth`` disagrees must not win -- reporting it would claim a depth
         this classification never actually saw. Must defer to
         ``request.depth`` instead."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import classify_compare_pair
         from abicheck.workflows.resolved_execution_context import (
             EvidenceView,

@@ -27,7 +27,7 @@ independent code paths that never shared a resolution step:
   leaves on each library's release-report entry (G38 Phase 9).
 - **Stored**: ``bundle_facts.compare_bundle_from_facts()`` reconstructs a
   live-equivalent ``BundleSnapshot`` from a persisted
-  :class:`~abicheck.bundle_facts.BundleFacts` document via
+  :class:`~abicheck.model.bundle_facts.BundleFacts` document via
   ``bundle_facts.bundle_snapshot_from_facts()``, and its own mandatory
   ``per_library_snapshots`` field *is* the OLD-side signature-evidence map.
 
@@ -131,7 +131,7 @@ class LiveBundleInput:
 @dataclass(frozen=True)
 class StoredBundleFactsInput:
     """One bundle side resolved from a persisted
-    :class:`~abicheck.bundle_facts.BundleFacts` file (G38 Phase 2/13).
+    :class:`~abicheck.model.bundle_facts.BundleFacts` file (G38 Phase 2/13).
 
     No binaries are read -- see ``bundle_facts.bundle_snapshot_from_facts``.
 
@@ -278,7 +278,7 @@ def compare_release_against_bundle_facts(
     """End-to-end driver: a stored OLD-side ``BundleFacts`` file compared
     against a live NEW-side directory/package extraction root (G38 Phase 13).
 
-    The concrete Python-API path ``abicheck.bundle_facts.
+    The concrete Python-API path ``abicheck.model.bundle_facts.
     compare_bundle_from_facts()`` was fully implemented and parity-tested
     (G38 Phase 2/12) for, but had no real driver exercising end to end: this
     function discovers every ``.so`` under *new_dir*, matches it by canonical

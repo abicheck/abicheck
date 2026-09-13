@@ -377,7 +377,7 @@ def test_binary_depth_does_not_run_the_header_frontend(tmp_path: Path) -> None:
     so it needs no toolchain: the rule under test is which evidence the
     resolver is handed, not what an extractor then finds.
     """
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import resolve_side_evidence
 
     side = InputSpec.of(tmp_path / "libfoo.so", headers=[tmp_path / "inc"])

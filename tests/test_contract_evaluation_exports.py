@@ -783,7 +783,7 @@ class TestCompareRequestContractModeValidation:
 
     @staticmethod
     def _request(**kw):
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
 
         return CompareRequest(
             old=InputSpec(path="old.so"), new=InputSpec(path="new.so"), **kw

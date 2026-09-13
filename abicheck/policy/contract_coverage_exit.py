@@ -15,7 +15,7 @@
 
 """ADR-049 Phase 7: the contract-coverage exit, finally applied.
 
-``contract_coverage_ledger`` has computed a ``0``/``1`` contribution since
+``policy.coverage_ledger`` has computed a ``0``/``1`` contribution since
 Phase 5 and every consumer *reported* it -- deliberately, so a user could
 see what the flip would do before it did it. Nothing turned it into a real
 exit code. This module is that step, and only that step: it reads the

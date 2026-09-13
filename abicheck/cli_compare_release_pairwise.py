@@ -479,8 +479,7 @@ def _compare_one_library(
             # aggregated with max() into the release-level exit code in
             # _exit_compare_release, the same "raises a clean 0 to 1, never
             # lowers a real 2/4" rule a single-pair `compare` applies.
-            from .contract_coverage_ledger import coverage_failures_for_context
-            from .workflows.gate import coverage_exit_floor
+            from .workflows.gate import coverage_exit_floor, coverage_failure_count
 
             entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
             # The *count* of failures is independent of the exit floor above
@@ -493,9 +492,7 @@ def _compare_one_library(
             # this schema has no per-library `contract_coverage_failures`
             # array the way a single-pair `compare` report does (Codex
             # review, CLI-audit P2 follow-up).
-            entry["contract_coverage_failure_count"] = len(
-                coverage_failures_for_context(result.contract_context)
-            )
+            entry["contract_coverage_failure_count"] = coverage_failure_count(result)
         if scope_to_public_surface:
             # Per-library public-surface scoping outcome (ADR-024, issue #235),
             # aggregated into the release-level scope block by the formatter.

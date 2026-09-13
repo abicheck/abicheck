@@ -504,7 +504,7 @@ def legacy_section_from_dto(dto: SectionDTO) -> dict[str, Any]:
 
 def bundle_composition_to_dto(payload: Mapping[str, Any]) -> SectionDTO:
     """The small set of bundle-composition facts a persisted `BundleFacts`
-    document (`abicheck.bundle_facts_serialization.bundle_facts_to_dict()`)
+    document (`abicheck.storage.bundle_facts_codec.bundle_facts_to_dict()`)
     carries beyond its `per_library_snapshots` -- `variant_fingerprint`,
     `manifest`, `filesystem_aliases`, `library_filenames` -- as a
     `SectionDTO` (ADR-063 Track C 8B).

@@ -155,8 +155,8 @@ def resolve_side_snapshot(
 
     ``lang_explicit`` (G31 Phase C follow-up): whether *lang* reflects a
     genuinely explicit request rather than a request-level default — see
-    :attr:`abicheck.api_types.CompareRequest.lang_explicit` /
-    :attr:`abicheck.api_types.DumpRequest.lang_explicit`. Forwarded to
+    :attr:`abicheck.workflows.contracts.CompareRequest.lang_explicit` /
+    :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`. Forwarded to
     :func:`abicheck.service.resolve_input` unchanged.
 
     ``symbols_only``/``debug_presence_only`` (PR 3A, dump/scan resolver

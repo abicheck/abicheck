@@ -402,7 +402,7 @@ class TestSetOnlyFlagWarnings:
 
 class TestTypedRequestParity:
     def test_a_seeded_request_narrows_both_sides_collect_mode(self) -> None:
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_evidence import resolve_compare_request_evidence
 
         def _modes(changed: tuple[str, ...]) -> set[str]:

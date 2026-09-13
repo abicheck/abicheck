@@ -43,12 +43,13 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from abicheck.model.entity_identity import candidate_lookup_keys
+
 from .buildsource.call_graph import (
     CALL_KIND_FUNCTION_POINTER,
     CALL_KIND_VIRTUAL,
     RESOLUTION_OVERAPPROX,
 )
-from .buildsource.entity_identity import candidate_lookup_keys
 from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .checker_types import Change
 from .impact.engine import assess_change
@@ -725,7 +726,7 @@ def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -
     """Whether *node_id*'s own body is compiled into consumer code.
 
     Thin re-export of
-    :func:`~abicheck.buildsource.source_graph_query.is_consumer_compiled_node` (the
+    :func:`~abicheck.model.source_graph_query.is_consumer_compiled_node` (the
     shared predicate both the entry check and this walk's own
     expand-past-this-node check use) so the rest of this module keeps its
     existing call shape. See that function's docstring for the exact
@@ -733,7 +734,7 @@ def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -
     conservative for everything else attr-less (notably a build-integrated
     ``call_graph.py`` fallback node, Codex review, fresh evidence).
     """
-    from .buildsource.source_graph_query import is_consumer_compiled_node
+    from abicheck.model.source_graph_query import is_consumer_compiled_node
 
     return is_consumer_compiled_node(node_id, node_by_id)
 
@@ -933,7 +934,7 @@ def compute_call_graph_leak_paths(
     actually compiled into consumer code (exported-symbol decl or
     public-header-visible decl/type, restricted to an inline/template
     rendition where the graph can tell the difference — Codex review; see
-    :func:`~abicheck.buildsource.source_graph_query.is_consumer_compiled_public_entry`
+    :func:`~abicheck.model.source_graph_query.is_consumer_compiled_public_entry`
     for why an ordinary out-of-line exported function does not qualify),
     returning a mapping ``lookup_key -> list of formatted proof-path
     strings`` (one per public entry that reaches it, edge-kind-annotated via
@@ -984,8 +985,9 @@ def compute_call_graph_leak_paths(
     if graph is None or not graph.nodes:
         return {}
 
+    from abicheck.model.source_graph_query import is_consumer_compiled_public_entry
+
     from .buildsource.source_graph_findings import _format_dependency_path
-    from .buildsource.source_graph_query import is_consumer_compiled_public_entry
 
     if not any(
         e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges

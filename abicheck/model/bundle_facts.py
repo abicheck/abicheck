@@ -26,7 +26,7 @@ version it declares, and that ``degraded_members`` never names a library
 (``storage.bundle_facts_codec``/``storage.bundle_facts_archive``/
 ``storage.bundle_facts_package``), reconstruct a live comparable snapshot,
 or run a comparison (``workflows.bundle_facts_capture``/
-``workflows.bundle_facts_compare``) — see ``abicheck/bundle_facts.py`` for
+``workflows.bundle_facts_compare``) — see this package's own siblings for
 the compatibility facade unifying all of these under their historical
 import path.
 """
@@ -141,3 +141,16 @@ class BundleFacts:
     #: the whole release; ``False`` (every pre-field document) proves nothing.
     inventory_complete: bool = False
     artifact_type: str = field(default=BUNDLE_FACTS_ARTIFACT_TYPE, init=False)
+
+
+#: Default container-node budget for one blob's JSON decode -- json.loads()
+#: has no cap on *node count*; many small containers under an ignored key
+#: inflate real memory regardless of container shape (~150MB RSS from a 6MB
+#: payload of ~2M empty objects; an array-only payload bypassed an
+#: earlier, object-only cap identically -- both confirmed empirically).
+#: See `storage.json_budget` for the shared object+array pre-scan (Codex).
+#: Kept conservative (Codex review, PR #1174): a real oneDAL-scale blob
+#: can need ~5.8-17M nodes (one-comparison-product.md §4.1/§3 #21), but
+#: raising the *default* would widen every untrusted run's decode-bomb
+#: ceiling. Set `resource_limits.max_bundle_facts_decode_nodes` instead.
+DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000

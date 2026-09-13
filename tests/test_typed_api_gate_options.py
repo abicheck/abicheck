@@ -112,8 +112,7 @@ class TestCompareRequestGateOptions:
     classify_compare_pair`)."""
 
     def _run(self, old: Path, new: Path, **kwargs):
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         return run_compare_request(
             CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new), **kwargs)
@@ -215,8 +214,7 @@ class TestCompareRequestContractContextGateReceipt:
     was already covered by `TestCompareRequestGateOptions` above)."""
 
     def _run(self, old: Path, new: Path, **kwargs):
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         return run_compare_request(
             CompareRequest(
@@ -657,8 +655,7 @@ class TestCompareResultSeverityConfigRenderingParity:
     omitting it would still hit."""
 
     def _run(self, old: Path, new: Path, **kwargs):
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         return run_compare_request(
             CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new), **kwargs)
@@ -750,8 +747,12 @@ class TestRunCompareForwardsGateOptions:
     def test_agrees_with_run_compare_request_for_equivalent_input(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare, run_compare_request
+        from abicheck.service import (
+            CompareRequest,
+            InputSpec,
+            run_compare,
+            run_compare_request,
+        )
 
         old, new = _write(tmp_path, *_breaking_pair())
         shim_result = run_compare(old, new, severity_preset="info-only")
@@ -813,7 +814,7 @@ class TestInvalidExitCodeScheme:
     def test_compare_request_no_longer_has_an_exit_code_scheme_field(self) -> None:
         """Same proof, one layer up: a typed `CompareRequest` cannot even be
         constructed with the deleted field any more."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
 
         with pytest.raises(TypeError, match="exit_code_scheme"):
             CompareRequest(  # type: ignore[call-arg]
@@ -832,9 +833,8 @@ class TestInvalidExitCodeScheme:
         (raised from `CompareRequest.validate()`, the first line of
         `resolve_compare_request`) instead of a filesystem error is direct
         evidence the check now runs before it."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.errors import ValidationError
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         missing_old = Path("/nonexistent/old.abi.json")
         missing_new = Path("/nonexistent/new.abi.json")
@@ -862,9 +862,8 @@ class TestInvalidExitCodeScheme:
         tests above: a nonexistent path would raise a filesystem error if
         extraction ran first, so seeing `ValidationError` instead is direct
         evidence the check now runs before it."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.errors import ValidationError
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         missing_old = Path("/nonexistent/old.abi.json")
         missing_new = Path("/nonexistent/new.abi.json")
@@ -896,11 +895,10 @@ class TestInvalidExitCodeScheme:
         nonexistent path would raise a filesystem error if extraction ran
         first, so seeing `ValidationError` instead is direct evidence the
         check now runs before it, for a live (not stored-snapshot) operand."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
         from abicheck.errors import ValidationError
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         missing_old = Path("/nonexistent/old.so")
         missing_new = Path("/nonexistent/new.so")
@@ -922,11 +920,10 @@ class TestInvalidExitCodeScheme:
         self,
     ) -> None:
         """The identical proof for the sibling `pack_policy_overrides` field."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
         from abicheck.errors import ValidationError
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         missing_old = Path("/nonexistent/old.so")
         missing_new = Path("/nonexistent/new.so")
@@ -954,10 +951,10 @@ class TestInvalidExitCodeScheme:
         so this proves the rejection is available with zero resolution
         work attempted, not merely "before the extraction step happens to
         run"."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
         from abicheck.errors import ValidationError
+        from abicheck.service import CompareRequest, InputSpec
 
         request = CompareRequest(
             old=InputSpec(path=Path("/nonexistent/old.so")),
@@ -991,8 +988,7 @@ class TestPatternVerdictsStaysOptInAtTier2:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.workflows.compare_policy as compare_policy_mod
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old, new = _write(tmp_path, *_breaking_pair())
 
@@ -1020,8 +1016,7 @@ class TestPatternVerdictsStaysOptInAtTier2:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.workflows.compare_policy as compare_policy_mod
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old, new = _write(tmp_path, *_breaking_pair())
 

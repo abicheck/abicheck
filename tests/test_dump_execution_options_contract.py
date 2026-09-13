@@ -38,7 +38,7 @@ import pytest
 
 
 def _minimal_resolved(tmp_path: Path):
-    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service import DumpRequest, InputSpec
     from abicheck.service_dump_pipeline import resolve_dump_request
 
     so_path = tmp_path / "lib.so"

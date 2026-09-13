@@ -29,16 +29,16 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.bundle_facts import (
+from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.model import AbiSnapshot
+from abicheck.model.bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
     BUNDLE_FACTS_BASE_SCHEMA_VERSION,
     BundleFacts,
-    capture_bundle_facts,
 )
-from abicheck.bundle_facts_serialization import looks_like_bundle_facts_document
-from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
-from abicheck.model import AbiSnapshot
 from abicheck.serialization import bundle_facts_from_dict, bundle_facts_to_dict
+from abicheck.storage.bundle_facts_codec import looks_like_bundle_facts_document
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 def _meta(

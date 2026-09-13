@@ -289,9 +289,9 @@ def _bundle_facts_serialization() -> Any:
 
 
 def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
-    """Serialize a :class:`~abicheck.bundle_facts.BundleFacts` to a
+    """Serialize a :class:`~abicheck.model.bundle_facts.BundleFacts` to a
     JSON-able dict (G38 Phase 2). See
-    :func:`abicheck.bundle_facts_serialization.bundle_facts_to_dict`."""
+    :func:`abicheck.storage.bundle_facts_codec.bundle_facts_to_dict`."""
     return cast(
         "dict[str, Any]", _bundle_facts_serialization().bundle_facts_to_dict(facts)
     )
@@ -299,7 +299,7 @@ def bundle_facts_to_dict(facts: BundleFacts) -> dict[str, Any]:
 
 def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     """Inverse of :func:`bundle_facts_to_dict`. See
-    :func:`abicheck.bundle_facts_serialization.bundle_facts_from_dict`."""
+    :func:`abicheck.storage.bundle_facts_codec.bundle_facts_from_dict`."""
     return cast("BundleFacts", _bundle_facts_serialization().bundle_facts_from_dict(d))
 
 
@@ -307,7 +307,7 @@ def load_bundle_facts(
     path: str | Path, *, format: str = "auto", max_json_object_nodes: int | None = None
 ) -> BundleFacts:
     """Load a BundleFacts. See
-    :func:`abicheck.bundle_facts_serialization.load_bundle_facts`."""
+    :func:`abicheck.storage.bundle_facts_codec.load_bundle_facts`."""
     return cast(
         "BundleFacts",
         _bundle_facts_serialization().load_bundle_facts(
@@ -324,7 +324,7 @@ def save_bundle_facts(
     compression: str = "auto",
 ) -> SnapshotWriteResult:
     """Save *facts*. See
-    :func:`abicheck.bundle_facts_serialization.save_bundle_facts`."""
+    :func:`abicheck.storage.bundle_facts_codec.save_bundle_facts`."""
     return cast(
         "SnapshotWriteResult",
         _bundle_facts_serialization().save_bundle_facts(

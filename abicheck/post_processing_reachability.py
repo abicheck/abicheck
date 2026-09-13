@@ -359,7 +359,7 @@ class MarkReachability:
             # private-header decl would still count there) -- require the
             # walk's own actual seed predicate to find a match (Codex
             # review, two passes).
-            from .buildsource.source_graph_query import (
+            from abicheck.model.source_graph_query import (
                 is_consumer_compiled_public_entry,
             )
 

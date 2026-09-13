@@ -1423,7 +1423,7 @@ def test_derive_l2_compile_context_corrupt_build_info_pack_degrades_to_empty(
 
 
 def test_seeded_compile_context_noop_without_sources(tmp_path: Path) -> None:
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_input_resolution import _seeded_includes_and_compile_context
 
@@ -1451,8 +1451,8 @@ def test_seeded_includes_and_compile_context_preserves_none_on_no_op_fold(
     silently disable caching for an otherwise-cacheable typed dump/compare
     operand whenever unrelated build evidence was supplied and matched
     nothing."""
-    from abicheck.api_types import InputSpec
     from abicheck.compile_context import CompileContext
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_input_resolution import _seeded_includes_and_compile_context
 
@@ -1485,8 +1485,8 @@ def test_resolve_side_snapshot_stamps_parsed_with_build_context(
     """Wiring test: derived L3 context reaches ``service.resolve_input`` and
     ``AbiSnapshot.parsed_with_build_context`` is stamped when it does."""
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     header = tmp_path / "widget.h"
@@ -1541,8 +1541,8 @@ def test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only(
     forwarding ``False``/``False`` regardless of what the caller passed.
     """
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     so = tmp_path / "lib.so"
@@ -1604,8 +1604,8 @@ def test_resolve_side_snapshot_forwards_only_explicit_includes_as_public_include
     `DumpRequest`/`run_dump_request` API, so the gap reached both.
     """
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     so = tmp_path / "lib.so"
@@ -1653,8 +1653,8 @@ def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
     ``header_compile_context._context_flags`` for the confirmed repro).
     """
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     header = tmp_path / "widget.h"
@@ -1702,8 +1702,8 @@ def test_resolve_side_snapshot_does_not_stamp_when_unmatched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     header = tmp_path / "widget.h"
@@ -1742,8 +1742,8 @@ def test_resolve_side_snapshot_propagates_ambiguous_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     header = tmp_path / "widget.h"
@@ -1833,7 +1833,7 @@ def test_e2e_without_context_regresses_to_pre_p03_behavior(
     header parsed with no build context silently drops the build-only field,
     diverging from the library's real (compiled-in) ABI."""
     from abicheck import service
-    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service import DumpRequest, InputSpec
 
     so, header, _src_dir = widget_lib
     req = DumpRequest(
@@ -1856,7 +1856,7 @@ def test_e2e_with_l3_evidence_context_is_genuinely_applied(
     """The real fix: with L3 evidence available, the field the build actually
     compiles in is now present, and parsed_with_build_context is stamped."""
     from abicheck import service
-    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service import DumpRequest, InputSpec
 
     so, header, src_dir = widget_lib
     req = DumpRequest(
@@ -1889,7 +1889,7 @@ def test_e2e_forced_cxx_dump_succeeds_against_c_compile_unit_std(
     triple/defines/etc.) still genuinely applied.
     """
     from abicheck import service
-    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service import DumpRequest, InputSpec
 
     so, header, src_dir = c_widget_lib
     req = DumpRequest(
@@ -1909,8 +1909,8 @@ def test_e2e_header_parse_context_drift_stops_firing_once_applied(
     widget_lib: tuple[Path, Path, Path],
 ) -> None:
     from abicheck import service
-    from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource.build_diff import check_header_parse_drift
+    from abicheck.service import DumpRequest, InputSpec
 
     so, header, src_dir = widget_lib
 
@@ -1968,9 +1968,9 @@ def test_e2e_crosscheck_header_build_context_mismatch_stops_firing(
     import copy
 
     from abicheck import service
-    from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource.cross_source_checks import run_crosschecks
     from abicheck.checker_policy import ChangeKind
+    from abicheck.service import DumpRequest, InputSpec
 
     so, header, src_dir = widget_lib
 

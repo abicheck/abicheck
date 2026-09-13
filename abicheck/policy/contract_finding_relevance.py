@@ -33,7 +33,7 @@ are *not evaluated* by compatibility policy and contribute ``0`` to the
 change gate. They are never deleted, never re-kinded, and stay fully visible
 in the report -- an excluded finding is an audited one, not a hidden one, and
 the orthogonal contract-coverage ledger
-(:mod:`abicheck.policy.contract_coverage_ledger`) independently contributes
+(:mod:`abicheck.policy.coverage_ledger`) independently contributes
 its own exit ``1`` for the unresolved case.
 
 **An unstamped finding is evaluated.** ``contract_relevance is None`` means

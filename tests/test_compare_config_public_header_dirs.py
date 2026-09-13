@@ -43,9 +43,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from abicheck.api_types import CompareRequest
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot
+from abicheck.service import CompareRequest
 from abicheck.workflows.public_header_boundary import (
     project_config_public_header_dirs,
 )

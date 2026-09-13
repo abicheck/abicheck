@@ -115,7 +115,7 @@ def build_dump_request(
 
     *so_path* may be ``None``: that is the source-only shape
     (``dump --sources ./tree`` with no ``SO_PATH``), which
-    :attr:`~abicheck.api_types.InputSpec.path` can express since PR 3A
+    :attr:`~abicheck.workflows.contracts.InputSpec.path` can express since PR 3A
     blocker 5 widened it to ``Path | None``. ``DumpRequest.validate()``
     accepts it only alongside real ``sources``/``build_info``, matching
     ``cli_buildsource.dump_source_only``'s own "a bare dump errors clearly
@@ -143,7 +143,7 @@ def build_dump_request(
     ``resolve_dump_request()`` derive it from *depth* as usual.
 
     *compile_db_filter* is ``dump``'s own ``--compile-db-filter`` value,
-    forwarded onto :attr:`~abicheck.api_types.InputSpec.compile_db_filter`
+    forwarded onto :attr:`~abicheck.workflows.contracts.InputSpec.compile_db_filter`
     verbatim (PR 3A investigation, 2026-08-21) so a ``--dry-run`` resolved
     from this request reports the same
     ``compile_db_filter_scope_error`` refusal ``dump_cmd`` already raises
@@ -151,7 +151,7 @@ def build_dump_request(
     narrow the header parse were the real run migrated onto it.
 
     *build_config* is ``dump``'s own ``--config`` value, forwarded onto
-    :attr:`~abicheck.api_types.InputSpec.build_config` verbatim (CLI cleanup
+    :attr:`~abicheck.workflows.contracts.InputSpec.build_config` verbatim (CLI cleanup
     phase two, Block 7 -- PR C's tail) so the resolved request's own
     ``workflows.plan.AnalysisPlanner.resolve`` pre-flight check sees the
     same explicit config ``embed_build_source`` already honors at

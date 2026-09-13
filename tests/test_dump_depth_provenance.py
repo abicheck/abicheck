@@ -869,12 +869,12 @@ def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth
     it didn't preserve the lower-tier evidence a completed
     ``_gated_source_label`` call would have found). This pack carries real
     L3 ``compile_units`` evidence, so the correct label is "build"."""
-    from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
     from abicheck.model import Function
     from abicheck.serialization import snapshot_to_json
+    from abicheck.service import DumpRequest, InputSpec
     from abicheck.service_dump_pipeline import (
         execute_dump_request,
         resolve_dump_request,

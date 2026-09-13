@@ -29,7 +29,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.aggregate import (
+from abicheck.change_registry_types import Verdict
+from abicheck.workflows.aggregate import (
     AGGREGATE_SCHEMA_VERSION,
     AggregateError,
     CoverageStatus,
@@ -41,7 +42,6 @@ from abicheck.aggregate import (
     parse_report_verdict,
     target_id_from_path,
 )
-from abicheck.change_registry_types import Verdict
 from tests.schema_validation import requires_jsonschema, validate_instance
 
 LINUX = "linux-x86_64"

@@ -30,12 +30,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from abicheck.bundle import _compute_resolution_graph
-from abicheck.bundle_facts import capture_bundle_facts, compare_bundle_from_facts
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
+from abicheck.workflows.bundle_facts_compare import compare_bundle_from_facts
 
 
 def _meta(

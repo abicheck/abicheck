@@ -33,14 +33,6 @@ from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker import compare
 from abicheck.cli import main
-from abicheck.contract_coverage_ledger import (
-    REQUIRED_PROVIDERS,
-    CoverageFailure,
-    coverage_exit_contribution,
-    coverage_failures,
-    coverage_failures_for_context,
-    suppression_reaches_coverage_failures,
-)
 from abicheck.contract_evidence import (
     ContractEvidenceBlock,
     EvidenceCompleteness,
@@ -55,6 +47,14 @@ from abicheck.model import (
     Function,
     ScopeOrigin,
     Visibility,
+)
+from abicheck.policy.coverage_ledger import (
+    REQUIRED_PROVIDERS,
+    CoverageFailure,
+    coverage_exit_contribution,
+    coverage_failures,
+    coverage_failures_for_context,
+    suppression_reaches_coverage_failures,
 )
 from abicheck.serialization import snapshot_to_json
 from tests.schema_validation import validate_instance

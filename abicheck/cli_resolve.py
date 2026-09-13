@@ -550,7 +550,7 @@ def _resolve_compare_snapshots(
     genuinely explicit ``--lang`` on the command line rather than Click's
     own default (which is the identical, indistinguishable string) — see
     ``cli.compare_cmd``'s own detection and
-    :attr:`abicheck.api_types.CompareRequest.lang_explicit`. ``False`` (the
+    :attr:`abicheck.workflows.contracts.CompareRequest.lang_explicit`. ``False`` (the
     default) preserves this function's pre-existing behavior for both sides.
 
     ``header_backend`` is the both-sides default; ``old_header_backend`` /
@@ -585,7 +585,7 @@ def _resolve_compare_snapshots(
     reachable from plain ``compare``.
 
     **ADR-055 D1: this no longer resolves anything itself.** It assembles a
-    :class:`~abicheck.api_types.CompareRequest` from ``compare``'s loose
+    :class:`~abicheck.workflows.contracts.CompareRequest` from ``compare``'s loose
     arguments and hands it to the shared
     :func:`abicheck.service.resolve_compare_request`, which is the same
     resolution the typed Python API and the MCP ``abi_compare`` tool run. It

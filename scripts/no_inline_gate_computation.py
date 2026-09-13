@@ -59,7 +59,7 @@ class Findings(Protocol):
         ...
 
 
-#: The four boundary encoders ADR-063 D6 names, relative to `abicheck/` --
+#: The boundary encoders ADR-063 D6 names, relative to `abicheck/` --
 #: the only modules allowed to compare/fold a `.gate`/`.operational` value
 #: against a raw integer literal.
 ALLOWED_RELATIVE_PATHS = frozenset(
@@ -68,7 +68,6 @@ ALLOWED_RELATIVE_PATHS = frozenset(
         "workflows/aggregate/gate.py",
         "service.py",
         "cli.py",
-        "aggregate.py",
     }
 )
 

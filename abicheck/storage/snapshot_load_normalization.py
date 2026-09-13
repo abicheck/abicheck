@@ -76,7 +76,7 @@ def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnap
     identities`` (Codex review; see ``docs/contribute/known-gaps.md``'s "The
     L5 source graph's own node identities are never renumbered..." entry,
     Codex review on PR #868): this only rewrites
-    :data:`~abicheck.qualified_name_segments._LAMBDA_IDENTITY_FIELDS` on the
+    :data:`~abicheck.compare.qualified_name_normalization._LAMBDA_IDENTITY_FIELDS` on the
     flat snapshot. A schema-v29+ document's ``AbiSnapshot.surface_graph`` is
     decoded earlier in ``snapshot_from_dict`` (``decode_surface_graph``) and
     is not touched here, so a loaded raw-marker baseline's attached graph

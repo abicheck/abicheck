@@ -29,17 +29,14 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts import (
-    BUNDLE_ARCHIVE_ARTIFACT_TYPE,
-    BUNDLE_FACTS_BASE_SCHEMA_VERSION,
-    BundleFacts,
-    capture_bundle_facts,
-)
 from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot
+from abicheck.model.bundle_facts import BUNDLE_FACTS_BASE_SCHEMA_VERSION, BundleFacts
 from abicheck.serialization import load_bundle_facts, save_bundle_facts
+from abicheck.storage.bundle_facts_validation import BUNDLE_ARCHIVE_ARTIFACT_TYPE
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 def _meta(
@@ -874,7 +871,7 @@ class TestBundleFactsArchiveArtifactTypeDiscriminator:
         string ``"1"`` (Codex review, PR #1060, round 10). The check now
         delegates to ``storage.guards.identity_text()`` (round 11), which
         raises ``TypeError`` rather than a bare ``ValueError``."""
-        from abicheck.bundle_facts import BUNDLE_FACTS_SCHEMA_VERSION
+        from abicheck.model.bundle_facts import BUNDLE_FACTS_SCHEMA_VERSION
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         out = tmp_path / "bad-fingerprint.bundlefacts.archive.zip"
