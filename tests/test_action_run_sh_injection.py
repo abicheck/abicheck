@@ -126,6 +126,16 @@ _SITES = {
     # `::add-mask::` line of its own.
     "INPUT_MODE": {"INPUT_NEW_LIBRARY": "libfoo.so"},
     "INPUT_FORMAT": {"INPUT_MODE": "deps-tree", "INPUT_NEW_LIBRARY": "libfoo.so"},
+    # A `::group::` title is a workflow command too, and this one is built
+    # from the baseline asset name -- i.e. from `baseline-profile` (Codex
+    # review). Reaching it needs a real `abi-baseline` to resolve against.
+    "INPUT_BASELINE_PROFILE_GROUP_TITLE": {
+        "INPUT_MODE": "compare",
+        "INPUT_NEW_LIBRARY": "libfoo.so",
+        "INPUT_OLD_LIBRARY": "libold.so",
+        "INPUT_ABI_BASELINE": "latest-release",
+        "INPUT_BASELINE_TARGET": "t",
+    },
     "INPUT_BASELINE_GENERATION": {
         "INPUT_MODE": "compare",
         "INPUT_NEW_LIBRARY": "libfoo.so",
@@ -139,6 +149,18 @@ _SITES = {
         "INPUT_BASELINE_TARGET": "t",
     },
 }
+
+#: Site keys that are not themselves the attacked variable. A key can be
+#: descriptive when one input is probed twice against two different
+#: emitters -- `baseline-profile` reaches both an `::error::` and a
+#: `::group::` title, and they are separate sites even though the variable
+#: is the same.
+_SITE_KEY_ALIASES = {"INPUT_BASELINE_PROFILE_GROUP_TITLE": "INPUT_BASELINE_PROFILE"}
+
+
+def _attacked_var(site_key: str) -> str:
+    """The env var a site actually sets."""
+    return _SITE_KEY_ALIASES.get(site_key, site_key)
 
 
 def _run(env_extra: dict[str, str], bash_options: list[str] | None = None):
@@ -205,7 +227,7 @@ def test_no_input_value_can_forge_a_workflow_command(var: str, payload: str) -> 
     a defense that held only at the reported site would be the narrow patch
     this repository's own guidance rejects.
     """
-    attack = _run({**_SITES[var], var: payload})
+    attack = _run({**_SITES[var], _attacked_var(var): payload})
     combined = attack.stdout + attack.stderr
     forged = _forged_lines(combined)
     assert not forged, (
@@ -218,7 +240,7 @@ def test_no_input_value_can_forge_a_workflow_command(var: str, payload: str) -> 
     # benign value, so annotations the script legitimately owns in this
     # environment (a `::warning::` about the resolved interpreter, say) are
     # counted on both sides and cancel out.
-    benign = _run({**_SITES[var], var: "benign-value"})
+    benign = _run({**_SITES[var], _attacked_var(var): "benign-value"})
     attack_lines = _annotation_lines(combined)
     benign_lines = _annotation_lines(benign.stdout + benign.stderr)
     assert len(attack_lines) <= len(benign_lines), (
@@ -233,17 +255,24 @@ def test_the_attack_reaches_the_guard_it_targets(var: str) -> None:
     """Vacuity guard, and the one this module would be worthless without.
 
     Every assertion above is an *absence*, so an invocation that never
-    reached its guard -- a typo in the surrounding inputs, a mode that
+    reached its emitter -- a typo in the surrounding inputs, a mode that
     bails earlier -- would pass while testing nothing. This asserts the
-    positive: with a benign value, the run really does emit that site's own
-    error naming the input.
+    positive.
+
+    The oracle is the benign *value* reaching the output, not the input's
+    flag name: an emitter may quote the value without naming the input it
+    came from (a `::group::` title built from an asset name is exactly
+    that), and requiring the name would fail on a site that is in fact
+    reached. The value appearing proves this input's data reached an
+    emitter, which is precisely what the injection sweep needs to be true.
     """
-    flag = var.removeprefix("INPUT_").lower().replace("_", "-")
-    result = _run({**_SITES[var], var: "benign-value"})
+    sentinel = "benign-value"
+    result = _run({**_SITES[var], _attacked_var(var): sentinel})
     combined = result.stdout + result.stderr
-    assert flag in combined, (
-        f"the invocation for {var} never reached its own guard, so the "
-        f"injection sweep above proves nothing for it:\n{combined}"
+    assert sentinel in combined, (
+        f"the invocation for {var} never got its value into any emitted "
+        f"line, so the injection sweep above proves nothing for it:\n"
+        f"{combined}"
     )
 
 
@@ -272,14 +301,19 @@ def test_no_run_sh_annotation_interpolates_anything_unsanitized() -> None:
     """The exhaustiveness half: no annotation may interpolate *any* value
     without routing through a sanitizing helper.
 
-    Deliberately name-independent. The first version of this scan matched
-    `${INPUT_...}` specifically, which missed the aliases `run.sh` copies
-    those inputs into -- `MODE`, `FORMAT` -- and three annotations
-    interpolating them stayed vulnerable while the suite was green (Codex
-    review). Enumerating which variables are "caller-controlled" is the
-    mistake: an alias, a derived path, a value read from a report are all
-    reachable by some input, so the invariant is simply that an annotation
-    carrying data goes through the helper.
+    Deliberately name-independent in *both* axes, each learned from a
+    reviewer finding the axis the previous version had fixed in the other
+    (Codex, twice). It first matched `${INPUT_...}`, missing the aliases
+    `run.sh` copies inputs into (`MODE`, `FORMAT`). It then matched only
+    `error|warning|notice`, missing `::group::` -- whose titles are built
+    from asset names and modes, and whose newline forged a standalone
+    `::add-mask::` command while the sanitized error beside it looked fine.
+
+    Both were the same mistake: enumerating a subset (which *variables* are
+    caller-controlled, which *command kinds* count) instead of stating the
+    invariant. The invariant is that any workflow command carrying data goes
+    through a sanitizing helper -- so the pattern matches any `::name::`
+    command with an interpolation in it, whatever the name.
 
     Static, and deliberately paired with the executing sweeps above rather
     than replacing them -- text alone is what #705 asserted and #758 had to
@@ -291,14 +325,14 @@ def test_no_run_sh_annotation_interpolates_anything_unsanitized() -> None:
         for number, line in enumerate(
             RUN_SH.read_text(encoding="utf-8").splitlines(), start=1
         )
-        if re.search(r'echo\s+"::(error|warning|notice)::[^"]*\$', line)
+        if re.search(r'echo\s+"::[a-z-]+::[^"]*\$', line)
     ]
     assert not offenders, (
-        "these action/run.sh annotations interpolate a value with a bare "
-        "`echo`, so a value carrying a newline forges a workflow command "
-        "and a literal `\\n` does the same under `xpg_echo` -- emit them "
-        "with `_error_annotation`/`_warning_annotation`/`_notice_annotation` "
-        "instead:\n" + "\n".join(offenders)
+        "these action/run.sh workflow commands interpolate a value with a "
+        "bare `echo`, so a value carrying a newline forges a command of its "
+        "own and a literal `\\n` does the same under `xpg_echo` -- emit "
+        "them with `_error_annotation`/`_warning_annotation`/"
+        "`_notice_annotation`/`_group_start` instead:\n" + "\n".join(offenders)
     )
 
 
@@ -309,7 +343,12 @@ def test_the_annotation_helpers_are_the_only_emitters_left() -> None:
     sanitizing at all.
     """
     text = RUN_SH.read_text(encoding="utf-8")
-    for helper in ("_error_annotation", "_warning_annotation", "_notice_annotation"):
+    for helper in (
+        "_error_annotation",
+        "_warning_annotation",
+        "_notice_annotation",
+        "_group_start",
+    ):
         assert f"{helper}() {{" in text, f"{helper} is gone from run.sh"
     assert text.count("_error_annotation ") >= 20, (
         "far fewer _error_annotation call sites than expected -- if the "

@@ -129,6 +129,18 @@ _notice_annotation() {
   printf '%s\n' "::notice::$(_sanitize_annotation "$1")"
 }
 
+# `::group::` is a workflow command like any other, and its title is just as
+# frequently caller-controlled -- a baseline asset name built from
+# `baseline-profile`, the resolved `$MODE`, an `abi-baseline` tag. A newline
+# in one ends the group command and the runner parses the next line as a
+# command of its own: `baseline-profile: $'p\n::add-mask::SECRET'` really did
+# emit a standalone `::add-mask::` line while the error annotation beside it
+# was correctly sanitized (Codex review). The class is "workflow command
+# carrying data", not "error, warning or notice".
+_group_start() {
+  printf '%s\n' "::group::$(_sanitize_annotation "$1")"
+}
+
 _mktemp_canonical() {
   if ! _is_path_already_qualified "$1"; then
     printf '%s\n' "$PWD/$1"
@@ -2801,7 +2813,7 @@ _try_baseline_set_fallback() {
   # this composite Action installs no jq (self-hosted runners need not
   # have it either; see $_PY_BIN's own "Python, not jq" precedent further
   # down this file).
-  echo "::group::Fetch release-contract baseline-set '$asset_name'"
+  _group_start "Fetch release-contract baseline-set '$asset_name'"
   local set_download_dir="$BASELINE_DIR/baseline-set-download"
   mkdir -p "$set_download_dir"
   local assets_json=""
@@ -3081,7 +3093,7 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
       echo "::endgroup::"
     else
       # Treat as a tag name
-      echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
+      _group_start "Fetch ABI baseline from release $ABI_BASELINE"
       if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
         # See the latest-release branch's identical comment above.
         if [[ -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
@@ -3731,7 +3743,7 @@ _EFFECTIVE_FORMAT="$(_effective_format)"
 # path `abicheck` will actually write, not the superseded input value.
 _EFFECTIVE_OUTPUT_FILE="$(_effective_output_file)"
 
-echo "::group::abicheck $MODE"
+_group_start "abicheck $MODE"
 printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
 echo ""
 
