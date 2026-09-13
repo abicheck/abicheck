@@ -408,11 +408,21 @@ numbers are in the receipt.
 |---|---:|---:|---|---:|
 | `--suite pr` | 44–48 s | 40–43 s | 28 header extractions, 14 include passes, 100 probes | ~0.9 s |
 | `--suite extended` (`--repeat 1`) | ~65 s | — | — | ~4.7 s |
+| `--suite extended` (`--repeat 3`) | ~180 s | — | — | ~5.1 s |
 
 The PR lane's cost is dominated by interpreter startup, not by analysis: the
 lane makes roughly 30 CLI invocations (8 gated steps plus setup and resolution
 steps, times 3 repeats) at ~0.6 s of startup each, so well over a third of the
 lane is spent before any evidence work happens.
+
+Per-repetition validation (each repetition's own outputs checked, rather than
+only the final report) triples the validation work, all of it outside every timed
+window. It does not materially change the lane: re-measured at **43 s** wall,
+inside the range above. That measurement was taken while the extended suite ran
+concurrently on the same 4-CPU host, so read it as an upper bound — which is what
+makes it usable here, since an upper bound inside the existing range is enough to
+say the range still holds. The range is deliberately left as it was rather than
+narrowed to a contended number.
 
 Per-scenario gated `full_cli` medians on that fixture, with the coefficient of
 variation that sets the gate's noise floor (`--repeat 3`, except the two-format
