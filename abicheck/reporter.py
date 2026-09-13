@@ -885,6 +885,14 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     suppressed. A library with neither adds no keys, which is what keeps
     every release document produced without those settings unchanged.
     """
+    # Warm the shared demangle cache once, here rather than at each caller:
+    # every suppressed row resolves a demangled symbol and the scope ledger
+    # demangles per row, so an unwarmed cache forks a `c++filt` per distinct
+    # symbol. The release fan-out reaches this before any `to_json`, whose
+    # own prewarm is therefore too late to help it (CodeRabbit review, PR
+    # #1284). Batched and process-wide, so it also serves the scope ledger
+    # the caller renders next.
+    prewarm_change_demangling(result)
     blocks: dict[str, object] = {}
     _add_suppression(blocks, result)
     suppression = cast("dict[str, object]", blocks["suppression"])

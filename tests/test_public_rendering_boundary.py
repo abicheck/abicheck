@@ -513,3 +513,43 @@ class TestASymbolIsNeverCorruptedByDemangling:
                     word.strip(".,") in out.replace("(", " ").replace(")", " ")
                     or word in out
                 ), (text, word, out)
+
+
+class TestTheDispositionLedgersWarmTheirOwnDemangleCache:
+    """Every row of both ledgers resolves a demangled symbol, so an unwarmed
+    cache forks one `c++filt` per distinct C++ symbol on a host without the
+    in-process `cxxfilt` package. The release fan-out reaches these ledgers
+    *before* any `to_json`, whose own prewarm is therefore too late to help
+    it (CodeRabbit review, PR #1284).
+
+    Asserted by observing the mechanism rather than the output: a caller that
+    quietly stopped warming would produce byte-identical reports.
+    """
+
+    def test_building_the_blocks_prewarms_once(self, monkeypatch):
+        from abicheck import reporter
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import Change, DiffResult
+
+        calls = []
+        monkeypatch.setattr(
+            reporter, "prewarm_change_demangling", lambda r: calls.append(r)
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[
+                Change(
+                    kind=__import__(
+                        "abicheck.checker_policy", fromlist=["ChangeKind"]
+                    ).ChangeKind.FUNC_REMOVED,
+                    symbol="_ZN3lib4goneEi",
+                    description="removed",
+                )
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        reporter.disposition_ledger_blocks(result)
+        assert len(calls) == 1, "the ledger builder must warm the cache exactly once"
+        assert calls[0] is result

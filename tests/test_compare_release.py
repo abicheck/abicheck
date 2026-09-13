@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -124,6 +125,22 @@ def _api_break_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _runner() -> CliRunner:
+    """A runner whose stdout is *only* stdout, on every supported Click.
+
+    `pyproject.toml` declares `click>=8.0`, and 8.0/8.1's `CliRunner` defaults
+    to `mix_stderr=True`, so `result.stdout` there carries stderr too and the
+    unconditional ledgers would land inside a `-o json=-` document again --
+    the same failure this file's `_invoke` was fixed for, just on a different
+    Click (CodeRabbit review, PR #1284). 8.2 removed the parameter and always
+    separates, so it is passed only where it exists, detected from the
+    signature rather than by parsing a version string.
+    """
+    if "mix_stderr" in inspect.signature(CliRunner.__init__).parameters:
+        return CliRunner(mix_stderr=False)  # type: ignore[call-arg]
+    return CliRunner()
+
+
 def _invoke(*args: str) -> tuple[int, str]:
     """Run the CLI and return ``(exit_code, stdout)``.
 
@@ -137,7 +154,7 @@ def _invoke(*args: str) -> tuple[int, str]:
     stream is both the fix and the more faithful harness: it is what a
     consumer redirecting the CLI's stdout actually receives.
     """
-    result = CliRunner().invoke(main, list(args))
+    result = _runner().invoke(main, list(args))
     return result.exit_code, result.stdout
 
 
@@ -149,8 +166,8 @@ def _invoke_combined(*args: str) -> tuple[int, str]:
     a rendered document. Those live on stderr, which is exactly why
     :func:`_invoke` does not return them.
     """
-    result = CliRunner().invoke(main, list(args))
-    return result.exit_code, result.output
+    result = _runner().invoke(main, list(args))
+    return result.exit_code, result.stdout + result.stderr
 
 
 # ── canonical key helpers ─────────────────────────────────────────────────────
