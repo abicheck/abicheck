@@ -92,7 +92,7 @@ def _lost(env_files: Sequence[Path], missing: Path) -> AssertionError:
 
 
 def run_writing_env_files(
-    env_files: Sequence[Path], run: Callable[[], T]
+    env_files: Sequence[Path], run: Callable[[], T], *, retry: bool = False
 ) -> tuple[T, list[bytes]]:
     """Run *run* with every path in *env_files* freshly created; return their bytes.
 
@@ -103,12 +103,22 @@ def run_writing_env_files(
     bug, moved one file to the right. Whatever removed one of these removed the
     others beside it, so they are recovered together or not at all.
 
-    *run* must be re-runnable: it is called again, against recreated files, if
-    any file it was pointed at did not survive the call **and** the directories
-    holding the caller's fixtures did.
+    ``retry`` is the caller's assertion that running *run* twice is
+    indistinguishable from running it once -- that every sink the step writes
+    is one of *env_files* (reset here between attempts) or is rewritten rather
+    than appended to. It defaults to ``False`` because that is *not* generally
+    true and the helper cannot check it: `run_step`'s callers may pass their
+    own `$GITHUB_STEP_SUMMARY` through the step's env and read it back
+    themselves, and the workflow steps append to it -- so a recovered
+    `$GITHUB_OUTPUT` loss would hand that caller a summary containing its entry
+    twice, an effect no single run of the step produces (Codex review,
+    PR #1292, against `tests/test_mutation_workflow_execution.py`). Without
+    ``retry`` the loss is still detected and attributed; it is simply reported
+    rather than papered over with a second run whose result would be a
+    fabrication.
     """
     losses: list[str] = []
-    for _ in range(ATTEMPTS):
+    for _ in range(ATTEMPTS if retry else 1):
         if not _fixtures_intact(env_files):
             raise _lost(env_files, next(f for f in env_files if not f.parent.is_dir()))
         for env_file in env_files:
@@ -124,15 +134,22 @@ def run_writing_env_files(
             if not missing.parent.is_dir():
                 raise _lost(env_files, missing) from exc
             losses.append(describe_tree(missing))
+    attempts = (
+        f"any of {ATTEMPTS} attempts at running the step that writes them"
+        if retry
+        else "running the step that writes them (not retried: this caller has "
+        "not declared the step idempotent)"
+    )
     raise AssertionError(
-        f"{', '.join(str(f) for f in env_files)} did not all survive any of "
-        f"{ATTEMPTS} attempts at running the step that writes them, so the "
-        "step's own output was never observable. Tree state after each "
-        "attempt, outermost path first:\n  " + "\n  ".join(losses)
+        f"{', '.join(str(f) for f in env_files)} did not all survive "
+        f"{attempts}, so the step's own output was never observable. Tree "
+        "state after each attempt, outermost path first:\n  " + "\n  ".join(losses)
     )
 
 
-def run_writing_env_file(env_file: Path, run: Callable[[], T]) -> tuple[T, bytes]:
+def run_writing_env_file(
+    env_file: Path, run: Callable[[], T], *, retry: bool = False
+) -> tuple[T, bytes]:
     """The single-file case of `run_writing_env_files`."""
-    result, payloads = run_writing_env_files([env_file], run)
+    result, payloads = run_writing_env_files([env_file], run, retry=retry)
     return result, payloads[0]

@@ -160,7 +160,11 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
     # instead of retried. BOTH files are named, because both are read back
     # below: guarding only `$GITHUB_OUTPUT` left `$GITHUB_STEP_SUMMARY`'s own
     # read outside the retry boundary, which is the same bug one file to the
-    # right (CodeRabbit, PR #1292).
+    # right (CodeRabbit, PR #1292). `retry=True` is safe *here* specifically:
+    # this harness owns both sinks and resets them between attempts, and no
+    # caller passes a `$GITHUB_OUTPUT`/`$GITHUB_STEP_SUMMARY` of its own
+    # through `env_extra` -- which is exactly the precondition `run_step`
+    # cannot make, so it does not opt in.
     def _run() -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [bash_executable(), str(RUN_SH)],
@@ -171,7 +175,9 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             check=False,
         )
 
-    proc, (out_bytes, summary_bytes) = run_writing_env_files([out, summary], _run)
+    proc, (out_bytes, summary_bytes) = run_writing_env_files(
+        [out, summary], _run, retry=True
+    )
     outputs: dict = {}
     for line in out_bytes.decode("utf-8", errors="replace").splitlines():
         if "=" in line:

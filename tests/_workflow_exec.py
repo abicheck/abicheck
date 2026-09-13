@@ -467,6 +467,14 @@ def run_step(
     # does not weaken any assertion: an undecodable byte becomes U+FFFD, which
     # is not alphanumeric, so a byte that survived sanitization still fails
     # the checks that matter.
+    # No `retry=True`: a caller may pass its own `$GITHUB_STEP_SUMMARY` (or any
+    # other sink) through `env` and read it back itself, and workflow steps
+    # *append* to it -- so re-running the body after a recovered
+    # `$GITHUB_OUTPUT` loss would hand that caller a summary holding its entry
+    # twice, an effect no single run of the step produces (Codex review,
+    # PR #1292, against tests/test_mutation_workflow_execution.py). `run_step`
+    # cannot reset a sink it was never told about, so the loss is attributed
+    # and reported here rather than papered over with a fabricated second run.
     proc, output_bytes = run_writing_env_file(github_output, _run)
     decoded = output_bytes.decode("utf-8", errors="replace")
     lines = [line for line in decoded.splitlines() if line != ""]

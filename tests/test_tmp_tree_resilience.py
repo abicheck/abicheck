@@ -68,7 +68,7 @@ class TestAStepWhoseOutputVanishedIsRunAgain:
             env_file.write_bytes(b"answer=second\n")
             return "kept"
 
-        result, payload = run_writing_env_file(env_file, run)
+        result, payload = run_writing_env_file(env_file, run, retry=True)
 
         assert result == "kept", (
             "the surviving attempt's own result is the one returned"
@@ -89,7 +89,7 @@ class TestAStepWhoseOutputVanishedIsRunAgain:
             return "lost"
 
         with pytest.raises(AssertionError) as excinfo:
-            run_writing_env_file(env_file, run)
+            run_writing_env_file(env_file, run, retry=True)
 
         assert len(calls) == ATTEMPTS, "the budget is spent, and only once"
         message = str(excinfo.value)
@@ -126,7 +126,7 @@ class TestAStepWhoseOutputVanishedIsRunAgain:
                 env_file.unlink()
             return "done"
 
-        _, payload = run_writing_env_file(env_file, run)
+        _, payload = run_writing_env_file(env_file, run, retry=True)
         assert seen == [b"", b""], "the step is always handed a fresh, empty file"
         assert payload == b"answer=2\n"
 
@@ -192,7 +192,7 @@ class TestEveryRequiredFileIsGuarded:
                 _remove(files[victim], how)
             return "kept"
 
-        result, payloads = run_writing_env_files(files, run)
+        result, payloads = run_writing_env_files(files, run, retry=True)
 
         assert len(calls) == 2, f"losing file{victim} must re-run the step"
         assert result == "kept"
@@ -213,7 +213,7 @@ class TestEveryRequiredFileIsGuarded:
             return "lost"
 
         with pytest.raises(AssertionError) as excinfo:
-            run_writing_env_files(files, run)
+            run_writing_env_files(files, run, retry=True)
 
         message = str(excinfo.value)
         assert f"{files[victim]}: MISSING" in message, message
@@ -229,7 +229,10 @@ class TestEveryRequiredFileIsGuarded:
             env_file.write_bytes(b"answer=only\n")
             return "kept"
 
-        assert run_writing_env_file(env_file, run) == ("kept", b"answer=only\n")
+        assert run_writing_env_file(env_file, run, retry=True) == (
+            "kept",
+            b"answer=only\n",
+        )
 
 
 class TestARetryThatCouldNotBeFaithfulIsRefused:
@@ -264,7 +267,7 @@ class TestARetryThatCouldNotBeFaithfulIsRefused:
         fixture.write_bytes(b"#!/bin/sh\n")
 
         with pytest.raises(AssertionError) as excinfo:
-            run_writing_env_file(env_file, run)
+            run_writing_env_file(env_file, run, retry=True)
 
         assert calls == [True], (
             "the step ran once, with its fixtures; it must not be run a second "
@@ -290,6 +293,60 @@ class TestARetryThatCouldNotBeFaithfulIsRefused:
         calls: list[int] = []
 
         with pytest.raises(AssertionError, match="not retried"):
-            run_writing_env_file(env_file, lambda: calls.append(1))
+            run_writing_env_file(env_file, lambda: calls.append(1), retry=True)
 
         assert calls == [], "the step must never run without its fixtures"
+
+
+class TestRetryingIsOptedIntoPerCaller:
+    """Re-running a step is a claim about the step, so the caller must make it.
+
+    `run_step` cannot: a caller may hand the workflow body its own
+    `$GITHUB_STEP_SUMMARY` through `env` and read it back itself, and the body
+    *appends* to it -- so a recovered `$GITHUB_OUTPUT` loss would return a
+    summary holding that entry twice, an effect no single run produces (Codex
+    review, PR #1292). The default is therefore "detect and report", never
+    "run it again and hope the sinks did not notice".
+    """
+
+    def test_the_default_reports_the_loss_instead_of_re_running(
+        self, tmp_path: Path
+    ) -> None:
+        env_file = _workspace(tmp_path) / "env_file"
+        appended = _workspace(tmp_path) / "caller_owned_sink"
+        appended.write_bytes(b"")
+        calls: list[int] = []
+
+        def run() -> str:
+            calls.append(1)
+            with appended.open("ab") as handle:  # the step appends, as they do
+                handle.write(b"entry\n")
+            env_file.unlink()
+            return "lost"
+
+        with pytest.raises(AssertionError) as excinfo:
+            run_writing_env_file(env_file, run)
+
+        assert calls == [1], "the step must run exactly once without an opt-in"
+        assert appended.read_bytes() == b"entry\n", (
+            "a second run would have doubled the caller's own sink, which is "
+            "the fabricated result this default exists to refuse"
+        )
+        assert "not retried" in str(excinfo.value), excinfo.value
+
+    def test_opting_in_is_what_enables_the_second_attempt(self, tmp_path: Path) -> None:
+        """Vacuity guard: the flag must be the thing that changes the behaviour."""
+
+        env_file = _workspace(tmp_path) / "env_file"
+        calls: list[int] = []
+
+        def run() -> str:
+            calls.append(1)
+            if len(calls) == 1:
+                env_file.unlink()
+            else:
+                env_file.write_bytes(b"ok\n")
+            return "kept"
+
+        assert run_writing_env_file(env_file, run, retry=True) == ("kept", b"ok\n")
+        assert calls == [1, 1]
