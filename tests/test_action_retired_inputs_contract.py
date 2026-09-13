@@ -154,15 +154,38 @@ def test_the_frozen_tombstone_list_has_not_gone_stale() -> None:
     )
 
 
-def _meaningful_value(spec: dict) -> str:
-    """A value that actually *sets* this input.
+#: Spellings a workflow can plausibly give a boolean-shaped input. Composite
+#: inputs are untyped strings, so `audit: yes` and `estimate: 1` are as much
+#: an explicit request for the retired behaviour as `true` is -- and guards
+#: matching only the literal "true" let every other spelling through into a
+#: silently narrower run, which this suite missed by defining the one
+#: meaningful probe as "true" (Codex review).
+_BOOLEAN_TRUTHY_SPELLINGS = ("true", "yes", "1", "TRUE", "on")
 
-    A boolean-shaped input (``default: "false"``) is only "set" at ``true``:
-    its rejection is written as ``!= false`` / ``== true``, so probing it
-    with an arbitrary string would test a different branch than a real
-    workflow hits. Everything else takes a plain non-empty string.
+
+def _is_boolean_shaped(spec: dict) -> bool:
+    """A `default: "false"` input is boolean-shaped: it is "set" at any
+    value other than that default, not only at `true`."""
+    return str(spec.get("default", "")).lower() == "false"
+
+
+def _meaningful_values(spec: dict) -> tuple[str, ...]:
+    """Every value that counts as *setting* this input.
+
+    A boolean-shaped input is probed with several independently chosen
+    truthy spellings rather than one, so a guard that happens to match the
+    first cannot stand in for the contract. Everything else takes a plain
+    non-empty string.
     """
-    return "true" if str(spec.get("default", "")).lower() == "false" else "probe-value"
+    if _is_boolean_shaped(spec):
+        return _BOOLEAN_TRUTHY_SPELLINGS
+    return ("probe-value",)
+
+
+def _meaningful_value(spec: dict) -> str:
+    """One representative value, for the checks that need only a single
+    invocation (`run.sh`'s own copy of each guard)."""
+    return _meaningful_values(spec)[0]
 
 
 def _run_script(script: Path, env_extra: dict[str, str]) -> subprocess.CompletedProcess:
@@ -204,28 +227,32 @@ def test_setting_a_retired_input_fails_preflight_validation(name: str) -> None:
     Python setup and the toolchain install -- so this is where a retired
     input must be refused. Executed, not text-matched.
     """
-    result = _run_script(
-        VALIDATE_SH,
-        {
-            "INPUT_MODE": "compare",
-            "INPUT_NEW_LIBRARY": "libfoo.so",
-            _input_env_var(name): _meaningful_value(RETIRED_INPUTS[name]),
-        },
-    )
-    combined = result.stdout + result.stderr
-    assert result.returncode != 0, (
-        f"action.yml declares {name!r} RETIRED, but setting it passes "
-        f"validate-inputs.sh -- a workflow that still sets it would run a "
-        f"narrower analysis than it asked for, with no signal.\n{combined}"
-    )
-    assert "::error::" in combined, (
-        f"{name} fails the run but emits no ::error:: annotation, so the "
-        f"reason is invisible in the GitHub Actions UI.\n{combined}"
-    )
-    assert name in combined, (
-        f"{name}'s rejection message never names the input, so a workflow "
-        f"author cannot tell which of their inputs to remove.\n{combined}"
-    )
+    for value in _meaningful_values(RETIRED_INPUTS[name]):
+        result = _run_script(
+            VALIDATE_SH,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": "libfoo.so",
+                _input_env_var(name): value,
+            },
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"action.yml declares {name!r} RETIRED, but setting it to "
+            f"{value!r} passes validate-inputs.sh -- a workflow that still "
+            f"sets it would run a narrower analysis than it asked for, with "
+            f"no signal.\n{combined}"
+        )
+        assert "::error::" in combined, (
+            f"{name}={value!r} fails the run but emits no ::error:: "
+            f"annotation, so the reason is invisible in the GitHub Actions "
+            f"UI.\n{combined}"
+        )
+        assert name in combined, (
+            f"{name}={value!r}'s rejection message never names the input, so "
+            f"a workflow author cannot tell which input to remove.\n"
+            f"{combined}"
+        )
 
 
 @pytest.mark.parametrize("name", sorted(RETIRED_INPUTS))
@@ -322,6 +349,31 @@ def test_run_sh_refuses_the_same_input_independently(name: str) -> None:
             f"names it -- that is some other error, not this input's "
             f"rejection.\n{combined}"
         )
+
+
+@pytest.mark.parametrize(
+    "name", sorted(n for n, spec in RETIRED_INPUTS.items() if _is_boolean_shaped(spec))
+)
+def test_a_boolean_tombstone_at_its_documented_default_is_inert(name: str) -> None:
+    """The other side of the truthy sweep: `audit: false` is not a request
+    for the retired behaviour, it is the documented default written out, and
+    a workflow that spells it must keep working. Without this, a guard
+    rejecting the input unconditionally would satisfy every assertion above.
+    """
+    result = _run_script(
+        VALIDATE_SH,
+        {
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": "libfoo.so",
+            _input_env_var(name): "false",
+        },
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"{name}=false is the input's own documented default, but the run "
+        f"failed -- an existing workflow that writes the default explicitly "
+        f"now breaks.\n{combined}"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(RETIRED_INPUTS))

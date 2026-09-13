@@ -2613,11 +2613,18 @@ if [[ -n "${INPUT_AGAINST:-}" ]]; then
   echo "::error::against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
   exit 1
 fi
-if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+# A retired boolean-shaped input is refused for *any* value other than its
+# `false` default. Composite-action inputs are untyped strings, so
+# `audit: yes`, `estimate: 1` or `audit: TRUE` are all a workflow explicitly
+# asking for the retired behaviour -- and a guard matching only the exact
+# string "true" let every other spelling through preflight and into a
+# silently narrower run (Codex review). `require-complete-analysis` below
+# already had this shape; these two did not.
+if [[ -n "${INPUT_ESTIMATE:-}" && "${INPUT_ESTIMATE}" != "false" ]]; then
   echo "::error::estimate is no longer supported (it applied only to the now-removed mode: scan, as a dry-run alias). Set dry-run: 'true' instead, which applies to every mode."
   exit 1
 fi
-if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
+if [[ -n "${INPUT_AUDIT:-}" && "${INPUT_AUDIT}" != "false" ]]; then
   echo "::error::audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
   exit 1
 fi
