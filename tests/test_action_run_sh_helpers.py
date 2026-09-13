@@ -55,6 +55,14 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _package_fixtures import (
+    _make_conda_v2,
+    _make_deb,
+    _make_rpm,
+    _make_tar_mode,
+    _make_wheel,
+    _write_zstd_tar,
+)
 from _workflow_exec import HOSTILE_SCALAR_CORPUS, bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -421,30 +429,58 @@ class TestIsReleaseStyleOperand:
         f.write_text("{}", encoding="utf-8")
         assert not _run_predicate(f'_is_release_style_operand "{f}"')
 
+    # Each supported container, built as content its own extractor really
+    # recognises. These cases wrote a ZERO-BYTE file and asserted the suffix
+    # alone made it release-style, which stopped being true when plan Phase
+    # 7n made every `abicheck.package` extractor route on content: an empty
+    # `libfoo.rpm` is now definitively *not* a package, so `is_package()`
+    # answers False, the probe exits 3 ("definitely not"), and the suffix
+    # table below is never consulted. `tests/_package_fixtures.py` is the
+    # shared owner of these builders and its own docstring names this exact
+    # trap; `test_package.py` and `test_evidence_transport_roles.py` were
+    # migrated onto it when 7n landed and this module was missed.
     @pytest.mark.parametrize(
-        "suffix",
+        ("suffix", "build"),
         [
-            ".rpm",
-            ".deb",
-            ".tar",
-            ".tar.gz",
-            ".tar.xz",
-            ".tar.bz2",
-            ".tar.zst",
-            ".tgz",
-            ".conda",
-            ".whl",
+            (".rpm", _make_rpm),
+            (".deb", _make_deb),
+            (".tar", lambda p: _make_tar_mode(p, "w")),
+            (".tar.gz", lambda p: _make_tar_mode(p, "w:gz")),
+            (".tar.xz", lambda p: _make_tar_mode(p, "w:xz")),
+            (".tar.bz2", lambda p: _make_tar_mode(p, "w:bz2")),
+            (".tar.zst", _write_zstd_tar),
+            (".tgz", lambda p: _make_tar_mode(p, "w:gz")),
+            (".conda", lambda p: _make_conda_v2(p, {})),
+            (".whl", lambda p: _make_wheel(p, {})),
         ],
     )
-    def test_package_extensions_are_release_style(self, tmp_path, suffix) -> None:
+    def test_package_formats_are_release_style(self, tmp_path, suffix, build) -> None:
         f = tmp_path / f"libfoo{suffix}"
-        f.write_text("", encoding="utf-8")
+        build(f)
         assert _run_predicate(f'_is_release_style_operand "{f}"')
 
-    def test_package_extension_matched_case_insensitively(self, tmp_path) -> None:
-        f = tmp_path / "libfoo.RPM"
-        f.write_text("", encoding="utf-8")
+    def test_real_package_is_detected_whatever_its_extension_case(
+        self, tmp_path
+    ) -> None:
+        # Originally "extension matched case-insensitively", asserting an
+        # empty `libfoo.RPM`. Under content routing the *name* carries no
+        # weight at all, so the case-folding of the suffix is no longer the
+        # property under test -- name-independence is, and an uppercase
+        # extension is one instance of it (the two sibling
+        # `*_detected_by_magic_bytes` tests cover the extensionless case).
+        f = _make_rpm(tmp_path / "libfoo.RPM")
         assert _run_predicate(f'_is_release_style_operand "{f}"')
+
+    def test_package_suffix_alone_is_not_release_style(self, tmp_path) -> None:
+        # The converse, and the reason the cases above had to change: a
+        # zero-byte file wearing a package suffix must NOT read as a package,
+        # or `run.sh` would forward the package-only inputs for an operand
+        # `compare` then refuses. Pins the 7n contract from the other side so
+        # a regression to name-based detection fails here rather than
+        # silently making the tests above pass for the wrong reason.
+        f = tmp_path / "libfoo.rpm"
+        f.write_text("", encoding="utf-8")
+        assert not _run_predicate(f'_is_release_style_operand "{f}"')
 
     def test_missing_path_is_not_release_style(self) -> None:
         # A nonexistent path isn't a directory and doesn't match a package

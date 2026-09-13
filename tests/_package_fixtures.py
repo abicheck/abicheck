@@ -75,3 +75,20 @@ def _make_conda_v2(archive_path: Path, files: dict[str, bytes]) -> Path:
         for name, content in files.items():
             zf.writestr(name, content)
     return archive_path
+
+
+def _make_rpm(archive_path: Path) -> Path:
+    """A file carrying RPM's lead magic (0xedabeedb).
+
+    `RpmExtractor.detect` reads the lead, so this is the smallest content
+    that is genuinely an RPM as far as the detector is concerned -- and,
+    unlike a suffix, it stays true whatever the caller names the file.
+    """
+    archive_path.write_bytes(b"\xed\xab\xee\xdb\x00\x00\x03\x00" + b"\x00" * 90)
+    return archive_path
+
+
+def _make_deb(archive_path: Path) -> Path:
+    """A file carrying the `ar` archive magic a .deb is wrapped in."""
+    archive_path.write_bytes(b"!<arch>\n" + b"\x00" * 90)
+    return archive_path
