@@ -128,66 +128,16 @@ DEFAULT_REGRESS_TOLERANCE = 0.3
 DEFAULT_REGRESS_MIN_DELTA_SECONDS = 0.5
 DEFAULT_TIMEOUT_SECONDS = 900.0
 
-#: How many header extractions a correct run of each extraction shape performs,
-#: expressed as a predicate over the observed count rather than an exact number:
-#: the count scales with header and library count, and pinning it would make
-#: this a test of the fixture's size.
-EXTRACTION_EXPECTATIONS = {
-    "forbidden": "zero header extractions (a stored-operand path)",
-    "one_side": "extractions for exactly one operand (the live side only)",
-    "both_sides": "extractions for both operands",
-    "any": "not asserted",
-}
-
-
-@dataclass
-class Step:
-    """One measured CLI invocation inside a scenario."""
-
-    name: str
-    argv: list[str]
-    #: Phase scope this step's wall time describes. ``"full_cli"`` is the real
-    #: user-facing run; the others are nested inclusive windows measured for
-    #: diagnosis and explicitly NOT additive with it.
-    scope: str = "full_cli"
-    extraction: str = "any"
-    #: Exit codes that mean the run did its job. A compare finding a real break
-    #: exits 4; treating that as a failure would make the break scenario
-    #: unmeasurable.
-    ok_exit_codes: tuple[int, ...] = (0,)
-    output: Path | None = None
-    #: Further files this one invocation is required to write. `output` alone was
-    #: not enough for the two-formats scenario, whose single `compare` writes both
-    #: a JSON and a Markdown export: only the JSON was cleared and required, so a
-    #: repetition that wrote fresh JSON and silently omitted Markdown left the
-    #: previous repetition's Markdown in place for the validator to accept, and an
-    #: incomplete render's (faster) timing stayed in the median (Codex review).
-    extra_outputs: tuple[Path, ...] = ()
-    sample_rss: bool = False
-
-    @property
-    def declared_outputs(self) -> tuple[Path, ...]:
-        """Every file this invocation must produce -- the one list to iterate.
-
-        Exists so a caller cannot handle `output` and forget `extra_outputs`,
-        which is the exact shape of the defect that introduced the second field.
-        """
-        return ((self.output,) if self.output is not None else ()) + self.extra_outputs
-
-
-@dataclass
-class Scenario:
-    id: str
-    description: str
-    spec: fixtures.FixtureSpec
-    #: Untimed setup run once per scenario (e.g. pre-dumping a stored operand).
-    prepare: Callable[[fixtures.BuiltFixture, Path], list[Step]] | None
-    steps: Callable[[fixtures.BuiltFixture, Path], list[Step]]
-    validate: Callable[[Path, dict[str, list[CommandRun]]], list[str]]
-    cache_mode: str = "cold"
-    suites: tuple[str, ...] = ("pr", "extended")
-
-
+# ── shared types ───────────────────────────────────────────────────────────────
+# `Step`, `Scenario` and the extraction vocabulary live in `l2_cli_model.py`, the
+# innermost module of this harness: everything else (argv construction,
+# validation, gating, the runner) depends on them and they depend on nothing but
+# the fixture shape. Extracted on the FOURTH time this file crossed the
+# AI-readiness 2000-line hard cap -- the three previous splits each shaved a
+# layer off the outside while the scenario definitions, which are the bulk, had
+# to stay put because they construct these two types. Giving the types their own
+# home is what makes that last split possible, so the next check added here does
+# not push the file over again.
 # ── CLI invocation builders ────────────────────────────────────────────────────
 # Split into `l2_cli_argv.py` once this file crossed the AI-readiness `file-size`
 # gate's 2000-line hard cap a third time -- a mechanical extraction, unchanged
@@ -201,6 +151,11 @@ from l2_cli_argv import (  # noqa: E402
     _dry_run_argv as _dry_run_argv,
     _dump_argv as _dump_argv,
     _header_args as _header_args,
+)
+from l2_cli_model import (  # noqa: E402
+    EXTRACTION_EXPECTATIONS as EXTRACTION_EXPECTATIONS,
+    Scenario as Scenario,
+    Step as Step,
 )
 
 # ── validation (always outside the timed window) ───────────────────────────────
@@ -360,8 +315,18 @@ def uncalibrated_contracts(steps: list[Step], one_side: int | None) -> list[str]
     ]
 
 
-def _extraction_counts(batch: list[CommandRun]) -> list[int]:
-    return [(run.native_invocations or {}).get("header_extraction", 0) for run in batch]
+def _extraction_counts(batch: list[CommandRun]) -> list[int | None]:
+    """Observed header-extraction count per run, or ``None`` where unobserved.
+
+    ``None``, never ``0``, when the spy is off: under ``--no-spy`` every
+    ``native_invocations`` is empty, and reading the absent key as zero made the
+    cache validators conclude "the cold run extracted nothing" and "the cache
+    served stale evidence" -- so the supported instrumentation-overhead
+    configuration failed deterministically rather than measuring anything (Codex
+    review). Absent is not zero; it is unknown, which is the same rule
+    `_check_extraction` and `_include_pass_problems` already follow.
+    """
+    return [(run.native_invocations or {}).get("header_extraction") for run in batch]
 
 
 def _warm_cache_problems(runs: dict[str, list[CommandRun]]) -> list[str]:
@@ -388,10 +353,15 @@ def _warm_cache_problems(runs: dict[str, list[CommandRun]]) -> list[str]:
             f"{len(cold)} cold vs {len(warm)} warm repetition(s) -- cannot pair "
             "them, so no repetition's cache state is established"
         ]
+    cold_counts = _extraction_counts(cold)
+    warm_counts = _extraction_counts(warm)
+    if any(n is None for n in (*cold_counts, *warm_counts)):
+        # Unobserved, not zero. With the spy off this claim cannot be checked at
+        # all, so it is left unchecked and reported as such by the caller rather
+        # than failed -- `cache_claim_unverified` exists for exactly this.
+        return []
     problems: list[str] = []
-    for index, (cold_n, warm_n) in enumerate(
-        zip(_extraction_counts(cold), _extraction_counts(warm))
-    ):
+    for index, (cold_n, warm_n) in enumerate(zip(cold_counts, warm_counts)):
         if cold_n == 0:
             problems.append(
                 f"repetition {index}: the cold run performed no header extraction "
@@ -810,12 +780,24 @@ def scenario_cache_invalidation(
     def steps(fixture: fixtures.BuiltFixture, work: Path) -> list[Step]:
         lib = fixture.new[0]
         return [
+            # Both of these declare their output too. They are cache *setup*
+            # measurements, but they are measured (their timings are gated), so a
+            # run that exited 0 after skipping report serialization would have had
+            # its faster timing gated while validation looked only at
+            # `inv_after.abi.json` (Codex review). Declaring the path is what makes
+            # `_StepExecutor` clear it and `_step_failure` require it.
             Step(
                 "cold",
                 _dump_argv(lib, work / "inv_cold.abi.json"),
                 extraction="one_side",
+                output=work / "inv_cold.abi.json",
             ),
-            Step("warm", _dump_argv(lib, work / "inv_warm.abi.json"), extraction="any"),
+            Step(
+                "warm",
+                _dump_argv(lib, work / "inv_warm.abi.json"),
+                extraction="any",
+                output=work / "inv_warm.abi.json",
+            ),
             Step(
                 "after_dependency_change",
                 _dump_argv(lib, work / "inv_after.abi.json"),
@@ -825,7 +807,11 @@ def scenario_cache_invalidation(
         ]
 
     def validate(work: Path, runs: dict[str, list[CommandRun]]) -> list[str]:
-        problems = _validate_snapshot(work / "inv_after.abi.json")
+        # All three snapshots, not only the post-change one: each is produced by a
+        # measured step whose timing is gated, so each has to be real L2 content.
+        problems = _validate_snapshot(work / "inv_cold.abi.json")
+        problems += _validate_snapshot(work / "inv_warm.abi.json")
+        problems += _validate_snapshot(work / "inv_after.abi.json")
         after = runs.get("after_dependency_change") or []
         if not after:
             return problems + ["no post-change run recorded"]
@@ -834,11 +820,13 @@ def scenario_cache_invalidation(
         # that did re-extract was enough to certify a batch in which the others
         # had served the pre-change snapshot (Codex review -- the mirror image of
         # the warm-cache `min()` defect above).
-        stale = [
-            index
-            for index, run in enumerate(after)
-            if (run.native_invocations or {}).get("header_extraction", 0) == 0
-        ]
+        counts = _extraction_counts(after)
+        if any(n is None for n in counts):
+            # See `_extraction_counts`: with the spy off there is nothing to read,
+            # and reading absent as zero reported every repetition as having
+            # served stale evidence.
+            return problems
+        stale = [index for index, n in enumerate(counts) if n == 0]
         if stale:
             problems.append(
                 f"repetition(s) {stale} performed no header extraction after a "
@@ -1215,7 +1203,15 @@ def _run_measured_steps(
         if validate_repetition is not None:
             problems = validate_repetition(repetition)
             if problems:
-                return [f"repetition {repetition}: {p}" for p in problems]
+                # Only prefix a message that does not already name a repetition:
+                # the cache validators number their own pairs, and the first
+                # version produced "repetition 0: repetition 0: ...".
+                return [
+                    p
+                    if p.startswith("repetition ")
+                    else f"repetition {repetition}: {p}"
+                    for p in problems
+                ]
     return None
 
 
@@ -1526,8 +1522,24 @@ def _validate_and_record(
     if problems:
         result["status"] = "failed"
     result["steps"].extend(_step_receipt(step, runs[step.name]) for step in measured)
-    if scenario.cache_mode == "cold_then_warm":
-        result["observed_cache_service"] = _classify_cache_service(runs)
+    if scenario.cache_mode in _SEQUENCE_CACHE_MODES:
+        service = (
+            _classify_cache_service(runs)
+            if scenario.cache_mode == "cold_then_warm"
+            else None
+        )
+        if service is not None:
+            result["observed_cache_service"] = service
+        # A scenario whose whole claim rests on counters must say so when there
+        # were none, rather than leaving a reader to infer it from an absent
+        # field: with --no-spy the cache validators cannot run, so the scenario
+        # passes having checked its snapshots but NOT its cache state.
+        if not keep_spy:
+            result["cache_claim_unverified"] = (
+                "--no-spy: no native-invocation counters, so this scenario's cache "
+                "state (cold vs warm, or invalidated) was not checked -- only its "
+                "output correctness was"
+            )
 
 
 def _classify_cache_service(runs: dict[str, list[CommandRun]]) -> str:
@@ -1538,6 +1550,12 @@ def _classify_cache_service(runs: dict[str, list[CommandRun]]) -> str:
         return "unknown"
 
     if len(cold) != len(warm):
+        return "unknown"
+    cold_counts = _extraction_counts(cold)
+    warm_counts = _extraction_counts(warm)
+    if any(n is None for n in (*cold_counts, *warm_counts)):
+        # "unknown", not "none": with the spy off nothing was observed, and
+        # reporting "no cache served" would be a measurement the run never made.
         return "unknown"
 
     def one(cold_n: int, warm_n: int) -> str:
@@ -1550,10 +1568,7 @@ def _classify_cache_service(runs: dict[str, list[CommandRun]]) -> str:
     # it as one is the mislabelling half of the same defect `_warm_cache_problems`
     # rejects (the old code reduced both batches with `min()`, which reports the
     # most favourable repetition).
-    observed = {
-        one(cold_n, warm_n)
-        for cold_n, warm_n in zip(_extraction_counts(cold), _extraction_counts(warm))
-    }
+    observed = {one(c, w) for c, w in zip(cold_counts, warm_counts)}
     for label in ("none", "partial", "full"):
         if label in observed:
             return label

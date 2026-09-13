@@ -964,3 +964,148 @@ class TestEveryRepetitionIsValidated:
             )
             is None
         )
+
+
+class TestAbsentCountersAreNotZero:
+    """`--no-spy` is a supported mode, and strict counter checks broke it.
+
+    With the spy off every `native_invocations` is empty. Reading the absent key
+    as zero made the cache validators conclude "the cold run extracted nothing"
+    and "the cache served stale evidence", so the one configuration that exists to
+    measure instrumentation overhead failed deterministically — reproduced with a
+    real `--no-spy --scenario cache` run before the fix. Absent is unknown, which
+    is the rule `_check_extraction` and `_include_pass_problems` already follow.
+    """
+
+    @staticmethod
+    def _unobserved(count: int) -> list[object]:
+        return [_run({}) for _ in range(count)]
+
+    def test_extraction_counts_reports_none_for_an_unobserved_run(self):
+        assert harness._extraction_counts(self._unobserved(2)) == [None, None]
+
+    def test_extraction_counts_still_reports_real_zeros(self):
+        # The distinction that makes this fix non-trivial: an observed zero must
+        # stay a zero, because that is what a `forbidden` contract rests on.
+        assert harness._extraction_counts([_run({"header_extraction": 0})]) == [0]
+
+    def test_the_warm_cache_check_is_skipped_rather_than_failed(self):
+        runs = {"cold": self._unobserved(3), "warm": self._unobserved(3)}
+        assert harness._warm_cache_problems(runs) == []
+
+    def test_a_partially_unobserved_batch_is_also_skipped(self):
+        # Mixed is not a licence to check the observed half: the pairing is what
+        # the claim rests on, and half a pairing establishes nothing.
+        runs = {
+            "cold": [_run({"header_extraction": 2}), _run({})],
+            "warm": [_run({"header_extraction": 0}), _run({})],
+        }
+        assert harness._warm_cache_problems(runs) == []
+
+    def test_the_cache_service_reads_unknown_not_none(self):
+        # "none" would assert that no cache served, which is a measurement the
+        # run never made.
+        runs = {"cold": self._unobserved(2), "warm": self._unobserved(2)}
+        assert harness._classify_cache_service(runs) == "unknown"
+
+    def test_an_observed_batch_still_classifies(self):
+        runs = {
+            "cold": [_run({"header_extraction": 2})],
+            "warm": [_run({"header_extraction": 0})],
+        }
+        assert harness._classify_cache_service(runs) == "full"
+
+    def test_the_invalidation_check_is_skipped_rather_than_failed(self):
+        scenario = harness.scenario_cache_invalidation(
+            fixtures.FixtureSpec(
+                shape="simple",
+                headers=1,
+                libraries=1,
+                change="break",
+                distinct_contexts=False,
+            )
+        )
+        problems = scenario.validate(
+            Path("/nonexistent"), {"after_dependency_change": self._unobserved(3)}
+        )
+        assert not [p for p in problems if "stale" in p], problems
+
+    def test_a_repetition_message_is_not_prefixed_twice(self):
+        # The cache validators number their own pairs, so the per-repetition
+        # wrapper must not prefix them again; the first version printed
+        # "repetition 0: repetition 0: ...".
+        spec = fixtures.FixtureSpec(
+            shape="simple",
+            headers=1,
+            libraries=1,
+            change="break",
+            distinct_contexts=False,
+        )
+        scenario = harness.Scenario(
+            id="x",
+            description="",
+            spec=spec,
+            prepare=None,
+            steps=lambda f, w: [harness.Step("s", [sys.executable, "-c", ""])],
+            validate=lambda w, r: [],
+        )
+
+        def execute(step, *, timed: bool):
+            run = _run({"header_extraction": 0})
+            run.exit_code = 0
+            return run
+
+        abort = harness._run_measured_steps(
+            [harness.Step("s", [sys.executable, "-c", ""])],
+            execute=execute,
+            repeat=1,
+            runs={},
+            scenario=scenario,
+            fixture=None,
+            cache_root=Path("/tmp"),
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+            validate_repetition=lambda _i: ["repetition 0: the cold run ..."],
+        )
+        assert abort == ["repetition 0: the cold run ..."], abort
+
+
+class TestTheInvalidationSetupStepsDeclareTheirOutputs:
+    """Its `cold` and `warm` dumps are measured steps, so they are gated.
+
+    They declared no output, so a run that exited 0 after skipping report
+    serialization had its faster timing gated while validation looked only at the
+    post-change snapshot.
+    """
+
+    def _steps(self) -> list[object]:
+        spec = fixtures.FixtureSpec(
+            shape="simple",
+            headers=1,
+            libraries=1,
+            change="break",
+            distinct_contexts=False,
+        )
+        return harness.scenario_cache_invalidation(spec).steps(
+            fixtures.BuiltFixture(
+                spec=spec, old=[_stub_library()], new=[_stub_library()]
+            ),
+            Path("/tmp/l2-inv-decl"),
+        )
+
+    def test_every_measured_step_declares_an_output(self):
+        steps = self._steps()
+        assert len(steps) == 3, [s.name for s in steps]
+        for step in steps:
+            assert step.declared_outputs, step.name
+
+    def test_each_step_declares_its_own_distinct_snapshot(self):
+        # Sharing one path between the three would reintroduce the stale-output
+        # problem inside a single repetition.
+        names = [p.name for step in self._steps() for p in step.declared_outputs]
+        assert sorted(names) == [
+            "inv_after.abi.json",
+            "inv_cold.abi.json",
+            "inv_warm.abi.json",
+        ], names

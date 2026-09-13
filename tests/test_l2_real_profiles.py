@@ -32,6 +32,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -712,3 +713,82 @@ class TestPartialCoverageSurvivesAMissingContextTool:
         profile = profiles.PROFILES[profile_id]
         contexts = {lib.context for lib in profile.l2_libraries}
         assert set(profile.context_tools) <= contexts, profile.context_tools
+
+
+class TestTheStatusVocabularyCoversWhatResolveStatusReturns:
+    """`PARTIAL` was missing from `STATUSES` while `resolve_status` returned it.
+
+    A caller validating or enumerating results through the declared constant
+    would have rejected or dropped a valid partial result. The pre-existing
+    vocabulary test missed it because its all-tools-missing setup reaches
+    `BLOCKED` before the per-context branch runs at all — so the test below
+    drives the `PARTIAL` branch specifically, and the one after it derives the
+    expectation from the code rather than restating a list.
+    """
+
+    def test_partial_is_declared(self):
+        assert "PARTIAL" in profiles.STATUSES
+
+    def test_the_partial_branch_really_produces_a_declared_status(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            profiles.shutil,
+            "which",
+            lambda tool: None if tool == "icpx" else "/usr/bin",
+        )
+        status = profiles.resolve_status(
+            profiles.ONEDAL, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "PARTIAL"
+        assert status.status in profiles.STATUSES
+
+    def test_every_status_resolve_status_can_return_is_declared(self):
+        # Derived from the source rather than hand-listed: a fifth status added
+        # without extending the vocabulary is the defect this class exists for,
+        # and a hand-listed expectation would not notice it.
+        source = (_SCRIPTS / "l2_real_profiles.py").read_text(encoding="utf-8")
+        returned = set(re.findall(r'ProfileStatus\(\s*[^,]+,\s*"([A-Z_]+)"', source))
+        returned |= set(re.findall(r'"(MEASURED|PARTIAL|BLOCKED|NOT_RUN)"', source))
+        undeclared = sorted(returned - set(profiles.STATUSES))
+        assert undeclared == [], undeclared
+
+
+class TestContextToolsAreInTheMeasurementIdentity:
+    """A context-specific compiler is as identity-bearing as a profile-wide one.
+
+    Recording only `required_tools` omitted `icpx`, the compiler oneDAL's DPC++
+    libraries are built with, so two measurements taken with different DPC++
+    compilers recorded identical toolchains — defeating the one thing the field
+    exists for.
+    """
+
+    def test_icpx_is_in_onedals_identity_tools(self):
+        assert "icpx" in profiles.identity_tools(profiles.ONEDAL)
+
+    def test_identity_tools_is_the_union_of_both_sources(self):
+        for profile in profiles.PROFILES.values():
+            tools = set(profiles.identity_tools(profile))
+            assert set(profile.required_tools) <= tools, profile.id
+            for context_tools in profile.context_tools.values():
+                assert set(context_tools) <= tools, profile.id
+
+    def test_identity_tools_deduplicates_and_keeps_order(self):
+        variant = dataclasses.replace(
+            profiles.SVS, context_tools={"runtime": ("g++", "ninja")}
+        )
+        tools = profiles.identity_tools(variant)
+        assert tools.count("g++") == 1, tools
+        assert tools[: len(variant.required_tools)] == variant.required_tools
+        assert "ninja" in tools
+
+    def test_the_recorded_toolchain_covers_every_identity_tool(self, monkeypatch):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: None)
+        recorded = profiles.toolchain_identity(profiles.ONEDAL)
+        assert set(recorded) == set(profiles.identity_tools(profiles.ONEDAL))
+        # Absent tools are recorded as None rather than omitted, so a reader can
+        # tell "not installed" from "not part of this profile's identity".
+        assert all(value is None for value in recorded.values())
+
+    def test_a_profile_with_no_context_tools_is_unchanged(self):
+        assert profiles.identity_tools(profiles.PVXS) == profiles.PVXS.required_tools

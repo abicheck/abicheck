@@ -70,7 +70,14 @@ from pathlib import Path
 #: preconditions", ``NOT_RUN`` is "the preconditions hold but the caller did not
 #: ask for it". Collapsing them would let a lane that skipped a profile for
 #: convenience look like one that could not run it.
-STATUSES = ("MEASURED", "BLOCKED", "NOT_RUN")
+#: ``PARTIAL`` is in this vocabulary because `resolve_status` returns it: a host
+#: that can build some of a profile's header/compile contexts and not others is a
+#: fourth outcome, not a variety of one of the other three. It was omitted when
+#: `PARTIAL` was introduced, so a caller validating or enumerating results through
+#: this constant would have rejected or dropped a valid partial result -- and the
+#: vocabulary test did not catch it, because its all-tools-missing setup reaches
+#: ``BLOCKED`` before the per-context branch runs at all (Codex review).
+STATUSES = ("MEASURED", "PARTIAL", "BLOCKED", "NOT_RUN")
 
 
 @dataclass(frozen=True)
@@ -525,15 +532,33 @@ def measurable_libraries(profile: RealProfile) -> tuple[LibraryTarget, ...]:
     return tuple(lib for lib in profile.l2_libraries if lib.context not in unavailable)
 
 
+def identity_tools(profile: RealProfile) -> tuple[str, ...]:
+    """Every tool whose version is part of this profile's measurement identity.
+
+    The union of profile-wide `required_tools` and every `context_tools` entry.
+    Recording only the profile-wide set omitted `icpx` -- the compiler oneDAL's
+    DPC++ libraries are built with -- so two measurements taken with different
+    DPC++ compilers recorded identical toolchains, which defeats the one thing
+    the field is for (Codex review). Order is stable and deduplicated so a
+    receipt diff is readable.
+    """
+    seen: list[str] = list(profile.required_tools)
+    for tools in profile.context_tools.values():
+        seen.extend(tool for tool in tools if tool not in seen)
+    return tuple(seen)
+
+
 def toolchain_identity(profile: RealProfile) -> dict[str, str | None]:
-    """Resolved version of every required tool, for the receipt.
+    """Resolved version of every tool in this profile's measurement identity.
 
     Two measurements taken with different compilers are not comparable, and a
     profile that records only "g++" cannot tell a reader which. Captured outside
-    every timed window.
+    every timed window. Covers `identity_tools`, not just `required_tools`: a
+    context-specific compiler is exactly as identity-bearing as a profile-wide
+    one.
     """
     identity: dict[str, str | None] = {}
-    for tool in profile.required_tools:
+    for tool in identity_tools(profile):
         path = shutil.which(tool)
         if path is None:
             identity[tool] = None
