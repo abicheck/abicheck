@@ -2121,7 +2121,23 @@ vacuity guards on both the oracle and the function under test), plus the
 extracted primitive's own contract (reflexivity, transitivity, reversal
 rejection). The eleventh pass's two `..._false_for_insertion_*` unit tests
 are flipped back to `..._true_for_insertion_*` with the reasoning above.
-All seven behavioral tests proven to fail against the pre-fix code.
+
+`tests/test_cli_compare_added_public_header.py` adds the public-workflow
+layer that gate-level coverage cannot reach (AGENTS.md, "Validate the
+user-facing result"; Codex review P1): the reported failure was a *CLI*
+failure, and the mechanism behind it — `iter_directory_headers` returning a
+**sorted** expansion — lives in directory-expansion wiring a hand-built
+`declared_headers` list bypasses entirely. It drives the real Click command
+both ways: a stored-snapshot pair with genuine contracts (no toolchain, so
+it runs in the default fast lane) and, under `integration`, the reported
+invocation verbatim — two compiled `.so` files with `--header old=<dir>
+--header new=<dir>` directory operands and live L2 extraction — each
+asserting the rendered JSON report, not only the exit code. Both were
+confirmed against the pre-fix predicate to reproduce the reported message
+(`profile_fingerprint mismatch; differing fields: header_sequence`, exit
+16); the reorder negative control passes either way, proving the carve-out
+did not widen into a blanket waiver. Nine behavioral tests in total, all
+proven to fail against the pre-fix code.
 
 **A twelfth review pass** (Codex, one P1) found a second gap left as a
 **documented limitation, not fixed** — the same category as the

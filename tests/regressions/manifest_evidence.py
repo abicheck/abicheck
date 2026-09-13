@@ -507,10 +507,17 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(641,),
         seed_tests=(
             "tests/test_comparability_header_inventory_growth.py",
+            "tests/test_cli_compare_added_public_header.py",
             "tests/test_comparability_gate.py",
         ),
+        public_surfaces=("cli",),
         axes={
-            "header_surface": ("declared_headers", "public_header_dirs"),
+            "header_surface": (
+                "declared_headers",
+                "public_header_dirs",
+                "cli_header_directory_operand",
+            ),
+            "operand_kind": ("stored_snapshot", "live_binary"),
             "insertion_position": ("leading", "interior", "trailing"),
             "drift_field": (
                 "compiler_family",
