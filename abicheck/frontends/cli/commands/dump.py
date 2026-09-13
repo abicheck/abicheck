@@ -54,6 +54,7 @@ from ....cli_options import (
     LANG_DEFAULT,
     apply_compile_config_env_toggles,
     build_source_dump_options,
+    exclude_header_option,
     include_dependencies_option,
     snapshot_compression_option,
     verbose_option,
@@ -160,6 +161,7 @@ def _resolve_and_check_dump_debug_format(
     type=click.Path(exists=True, path_type=Path),
     help="Public header file or directory (repeat for multiple).",
 )
+@exclude_header_option
 @click.option(
     "-I",
     "--include",
@@ -263,6 +265,7 @@ def _resolve_and_check_dump_debug_format(
 def dump_cmd(
     so_path: Path | None,
     headers: tuple[Path, ...],
+    exclude_headers: tuple[str, ...],
     includes: tuple[Path, ...],
     include_dependencies: bool,
     version: str,
@@ -610,6 +613,7 @@ def dump_cmd(
     _dump_request = build_dump_request(
         so_path=so_path,
         headers=headers,
+        exclude_headers=tuple(exclude_headers),
         includes=includes,
         version=version,
         lang=lang,

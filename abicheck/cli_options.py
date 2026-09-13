@@ -332,7 +332,33 @@ def two_sided_input_options(func: F) -> F:
         "best-effort and falls back to the export table when castxml is unavailable or names don't match "
         "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
     )(func)
+    func = exclude_header_option(func)
     return func
+
+
+def exclude_header_option(func: F) -> F:
+    """``--exclude-header PATTERN`` -- drop matching headers from the parse.
+
+    A separate decorator so ``dump`` and ``compare`` share one spelling and
+    one help text (``tests/test_cli_contract.py`` enforces that a shared
+    concept has one canonical primary spelling).
+    """
+    return click.option(
+        "--exclude-header",
+        "exclude_headers",
+        multiple=True,
+        metavar="PATTERN",
+        help="Exclude headers matching PATTERN (fnmatch-style) from the "
+        "parsed surface. Matched against the header's bare name "
+        "(--exclude-header fftw3.h), its full path, or a glob "
+        "(--exclude-header '**/detail/*'). Repeatable; applies to both "
+        "sides. Use it when a header *directory* contains headers that "
+        "cannot be parsed together -- two vendored copies of a third-party "
+        "API declaring conflicting typedefs, for example -- which otherwise "
+        "makes the whole directory unusable as a -H operand. Anything only "
+        "an excluded header declared is simply not observed, and is "
+        "reported as reduced evidence rather than as a removal.",
+    )(func)
 
 
 def release_input_options(func: F) -> F:

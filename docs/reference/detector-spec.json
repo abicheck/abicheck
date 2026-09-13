@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 407,
+  "count": 408,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -991,6 +991,15 @@
       "min_evidence": "L0",
       "doc_slug": "func_added",
       "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case185_inherited_override_reuses_slot,case200_new_entry_point_instead_of_parameter_added,case204_class_gained_non_virtual_method,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+    },
+    {
+      "kind": "func_added_elf_only",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "func_added_elf_only",
+      "examples": ""
     },
     {
       "kind": "func_became_inline",

@@ -54,12 +54,17 @@ from typing import TYPE_CHECKING, Any
 from ..checker_types import LibraryMetadata
 from ..compile_context import CompileContext
 from ..errors import AbicheckError, SnapshotError, ValidationError
+from ..extract.header_exclusions import (
+    apply_header_exclusions_to_inputs,
+    record_header_exclusions,
+    reject_exclusions_against_a_manifest,
+)
 from ..model import AbiSnapshot, Function
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from ..dump_manifest import DumpManifest
@@ -421,7 +426,47 @@ def resolve_input(
     includes: list[Path] | None = None,
     version: str = "",
     lang: str = "c++",
+    **kwargs: Any,
+) -> AbiSnapshot:
+    """Auto-detect input type and return an ABI snapshot.
+
+    The public entry point: *path* may be a binary, a stored snapshot, a
+    ``ProjectSnapshot`` package directory, a symvers file, or a dump
+    manifest, and the right reader is chosen from the content rather than
+    the name. :func:`_resolve_input_impl` does that work.
+
+    What this wrapper adds is one line: the snapshot records the
+    ``--exclude-header`` patterns it was built under
+    (:func:`~abicheck.extract.header_exclusions.record_header_exclusions`).
+    That stamp is deliberately here rather than at each of the resolution
+    body's eight exits -- a snapshot that reached one of them unstamped
+    would claim a complete surface it does not have, and "the branch nobody
+    updated" is exactly how that happens, so there is one exit to forget.
+    It is idempotent, which matters because the body re-enters this wrapper
+    for a symlink/alias target.
+    """
+    exclude_headers = tuple(kwargs.get("exclude_headers") or ())
+    reject_exclusions_against_a_manifest(exclude_headers, kwargs.get("dump_manifest"))
+    snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
+    return record_header_exclusions(
+        snapshot, exclude_headers, extracted_now=not is_stored_snapshot_operand(path)
+    )
+
+
+def _resolve_input_impl(
+    path: Path,
+    headers: list[Path] | None = None,
+    includes: list[Path] | None = None,
+    version: str = "",
+    lang: str = "c++",
     *,
+    # Keyword-only, and *appended* rather than inserted next to `headers`
+    # where it reads best: this signature has positional callers, and a
+    # mid-signature insertion silently rebinds every one of them a slot to
+    # the left without raising or failing to type-check (the
+    # `api.positional_slot_rebinding` bug class in
+    # `tests/regressions/manifest.py`).
+    exclude_headers: Sequence[str] = (),
     lang_explicit: bool = False,
     is_elf: bool | None = None,
     pdb_path: Path | None = None,
@@ -504,7 +549,7 @@ def resolve_input(
         SnapshotError: If the snapshot cannot be loaded from the input.
         ValidationError: If the input format cannot be detected.
     """
-    _headers = headers or []
+    _headers = apply_header_exclusions_to_inputs(headers or [], exclude_headers)
     _includes = includes or []
 
     # ADR-062/ADR-063 storage-v2: a directory input is only ever a

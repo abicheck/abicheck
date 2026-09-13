@@ -6730,6 +6730,33 @@ looked like the obvious fix and wasn't.
   L4/L5 coverage rows to `NOT_COLLECTED` in the same place the payload
   fields themselves are cleared.
 
+### `--exclude-header` cannot narrow a `--dump-manifest` dump
+
+`dump`/`compare --exclude-header PATTERN` filters the resolved `-H` header
+list. A manifest dump does not use that list: it parses the
+`translation_units[]` and `public_header_paths` the manifest document itself
+declares (ADR-050 D3). So the two together matched nothing, changed nothing,
+and were still recorded on the snapshot as `excluded_header_patterns` and
+reported as headers omitted -- a request recorded as achieved when it was
+not, which is the failure `--exclude-header` was added to stop, reappearing
+one layer down (Codex review on PR #1283).
+
+The combination is now **rejected** (`workflows.input_resolution.
+reject_exclusions_against_a_manifest`, a `ValidationError`) rather than
+applied, and that is the part that is a gap rather than a fix. Excluding a
+header from a manifest-driven dump is a real thing a user may want; what is
+wrong is doing it from the command line. A manifest is an exact,
+self-describing extraction contract, its roots are matched exactly by
+`dumper_scoping.dump_manifest_header_roots`, and narrowing it from outside
+would contradict the document the run was told to honour -- while dropping a
+translation unit could change what compiles at all.
+
+The right home for the capability is the manifest: an exclusion expressed in
+the document, so the contract stays self-describing and the snapshot's
+recorded patterns keep meaning "what this extraction actually did". Not
+attempted here, since it is a manifest-schema change with its own migration
+rather than a review-round fix.
+
 ### The composite Action's single `--write` slot can leave its unconditional coverage/assurance/severity floors without a structured report
 
 **Superseded** (ADR-063 Phase 6, Track T8): the SARIF-fallback/HTML-gap

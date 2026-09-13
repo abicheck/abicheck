@@ -138,6 +138,7 @@ from .policy.disposition_ledger import (
     record_suppressed_change,
 )
 from .policy.evidence_status import EvidenceTier, is_cross_source_resolved
+from .policy.persistent_hygiene import drop_persistent_hygiene
 from .policy.policy_file_namespaces import (
     experimental_namespaces as _experimental_namespaces,
     internal_namespaces as _internal_namespaces,
@@ -205,6 +206,7 @@ def _compute_verdict_for(
     if stage is not None:
         stage.classify(all_unsuppressed)
         all_unsuppressed = evaluated_for_policy(all_unsuppressed)
+    all_unsuppressed = drop_persistent_hygiene(all_unsuppressed, policy, policy_file)
     if policy_file is not None:
         return policy_file.compute_verdict(all_unsuppressed)
     return compute_verdict(all_unsuppressed, policy=policy)

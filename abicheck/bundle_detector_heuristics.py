@@ -48,7 +48,12 @@ from .bundle_manifest import (
     ManifestEntry,
     _expand_instantiations,
 )
-from .bundle_models import BundleFinding, BundleSnapshot, ConsumerEntry, ProviderEntry
+from .bundle_models import (
+    BundleFinding,
+    BundleSnapshot,
+    ConsumerEntry,
+    ProviderEntry,
+)
 from .elf_metadata import ElfMetadata
 from .model.change_catalog.kinds import ChangeKind
 

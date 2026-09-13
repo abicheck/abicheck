@@ -216,9 +216,17 @@ _BINARY_ONLY_KINDS: frozenset[ChangeKind] = frozenset(
 )
 
 # ChangeKinds that represent new symbols being added (for -warn-newsym)
+#: What ``-warn-newsym`` counts as a new symbol.
+#:
+#: ``FUNC_ADDED_ELF_ONLY`` belongs here for the same reason ``FUNC_ADDED``
+#: does -- it *is* a newly exported symbol; the only difference is that the
+#: headers never declared it, which is a statement about the evidence and not
+#: about what happened. Leaving it out made ``-warn-newsym`` silently ignore
+#: exactly the additions only the export table can see (Codex review).
 _NEW_SYMBOL_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_ADDED,
+        ChangeKind.FUNC_ADDED_ELF_ONLY,
         ChangeKind.VAR_ADDED,
     }
 )
@@ -269,6 +277,7 @@ def _apply_strict(result: DiffResult, *, mode: str = "full") -> DiffResult:
     _ADDITION_ONLY_KINDS: frozenset[ChangeKind] = frozenset(
         {
             ChangeKind.FUNC_ADDED,
+            ChangeKind.FUNC_ADDED_ELF_ONLY,
             ChangeKind.VAR_ADDED,
             ChangeKind.TYPE_ADDED,
             ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
@@ -607,6 +616,12 @@ def _resolve_headers_from_list(
         p = Path(single_header)
         if p.exists():
             result.append(p)
+
+    # Expand directory operands before filtering: a skip rule naming a header
+    # file can only match once the directory holding it has been walked.
+    from .descriptor_expansion import expand_descriptor_headers
+
+    result = expand_descriptor_headers(result)
 
     # Apply -skip-headers filtering: exclude headers whose name or path matches
     if skip_headers:

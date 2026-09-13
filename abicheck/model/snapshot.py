@@ -230,6 +230,19 @@ class AbiSnapshot:
         default_factory=tuple, kw_only=True
     )
 
+    # Schema v47 -- the `--exclude-header PATTERN` values this snapshot was
+    # dumped under, empty when none were given. The same shape as
+    # `scope_fallback`: a machine-readable record that the parsed surface is
+    # narrower than the operand names. Unlike `scope_fallback` it is not a
+    # failure -- the narrowing was requested -- so it warns rather than
+    # erroring. Persisted because nothing else records it, and a stored
+    # baseline that forgot its own exclusions claims a complete surface. Why
+    # it exists and what reads it: `confidence.header_exclusion_warnings`
+    # and `extract/header_exclusions.py`.
+    excluded_header_patterns: tuple[str, ...] = field(
+        default_factory=tuple, kw_only=True
+    )
+
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone
     # already answers the question there). Keyed by the stable strings built by

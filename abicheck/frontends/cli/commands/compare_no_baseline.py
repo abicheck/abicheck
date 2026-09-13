@@ -99,6 +99,13 @@ class _HeaderInputs:
     """The candidate's header surface, split for provenance tagging."""
 
     headers: list[Path]
+    #: ``--exclude-header`` patterns, applied to *this* run's own resolved
+    #: header list. Carried here rather than dropped: an option that reaches
+    #: ``--no-baseline`` unaccounted for is silently ignored, so a user who
+    #: excluded an unparseable header would get the parse failure back with
+    #: no indication their flag did nothing (``test_compare_no_baseline_
+    #: options.py`` exists to catch exactly that).
+    exclude_headers: tuple[str, ...]
     includes: list[Path]
     public_headers: list[Path]
     public_header_dirs: list[Path]
@@ -306,6 +313,7 @@ def _resolve_no_baseline_invocation(
     includes = list(kwargs.get("includes") or ()) + list(
         kwargs.get("new_includes_only") or ()
     )
+    exclude_headers = tuple(kwargs.get("exclude_headers") or ())
     public_headers, public_header_dirs = public_header_sets_for_candidate(
         headers,
         list(kwargs.get("public_headers") or ()),
@@ -370,6 +378,7 @@ def _resolve_no_baseline_invocation(
         ),
         headers=_HeaderInputs(
             headers=headers,
+            exclude_headers=exclude_headers,
             includes=includes,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
@@ -459,6 +468,7 @@ def _resolve_candidate_or_fail(candidate: Path, inv: _ResolvedInvocation) -> Any
         return resolve_no_baseline_candidate(
             candidate,
             headers=inv.headers.headers,
+            exclude_headers=inv.headers.exclude_headers,
             includes=inv.headers.includes,
             lang=inv.compile.lang,
             lang_explicit=inv.compile.lang_explicit,

@@ -208,6 +208,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "float_abi_changed",
         "frame_register_changed",
         "func_added",
+        "func_added_elf_only",
         "func_became_inline",
         "func_contract_attribute_added",
         "func_contract_attribute_removed",

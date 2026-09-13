@@ -807,7 +807,7 @@ class TestCompatClassifiedErrorPaths:
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 
@@ -838,7 +838,7 @@ class TestCompatClassifiedErrorPaths:
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 
@@ -871,7 +871,7 @@ class TestCompatClassifiedErrorPaths:
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 
@@ -901,7 +901,7 @@ class TestCompatClassifiedErrorPaths:
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 
@@ -933,7 +933,7 @@ class TestCompatClassifiedErrorPaths:
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 
@@ -965,7 +965,7 @@ class TestCompatClassifiedErrorPaths:
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 

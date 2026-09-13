@@ -113,6 +113,23 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "(the former --devel-pkg), which is the same per-run evidence under "
         "a different wrapper, not a second decision."
     ),
+    "--exclude-header": _keep(
+        "Which headers this run's -H operand must NOT parse. A per-run "
+        "operand for the same reason --header is, and inseparable from it: "
+        "it names paths *within* the header set this invocation supplied, "
+        "so it cannot be a stable project property -- the same library's "
+        "exclusions differ between a release tree, a devel package and a "
+        "source checkout, and a side-scoped -H can make them differ between "
+        "the two sides of one comparison. Not a second spelling of "
+        "anything: no other option can remove a header from a directory "
+        "operand, which is what makes a -H <dir> all-or-nothing without it "
+        "(two vendored copies of a third-party API that cannot be parsed in "
+        "one translation unit make the whole directory unusable). And not "
+        "an analysis-disabling hatch: it narrows what is *parsed*, not what "
+        "is *reported* -- anything only an excluded header declared is "
+        "simply not observed, and the evidence layers report that as "
+        "reduced assurance rather than as a clean result."
+    ),
     "--include": _keep(
         "The include search path the -H headers parse under. Travels with "
         "--header (a checkout's include dirs move with its headers), so it "
@@ -457,6 +474,11 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
     # ── Shared with compare, ruled identically (ADR-037 D8.1) ────────────
     "--header": _keep(
         "Same ruling as `compare --header`: the canonical L2 evidence input."
+    ),
+    "--exclude-header": _keep(
+        "Same ruling as `compare --exclude-header`: names paths within this "
+        "run's own -H operand, so it is per-run for exactly the reason -H "
+        "is. Shared family, ruled identically (ADR-037 D8.1)."
     ),
     "--include": _keep("Same ruling as `compare --include`: travels with -H, per-run."),
     "--sources": _keep(

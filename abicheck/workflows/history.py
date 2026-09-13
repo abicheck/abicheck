@@ -118,6 +118,10 @@ ENTITY_KIND_TYPE = "type"
 #: so both fold onto ``ENTITY_KIND_TYPE``.
 _ADDED_KINDS: dict[ChangeKind, str] = {
     ChangeKind.FUNC_ADDED: ENTITY_KIND_FUNCTION,
+    # The mirror of `_REMOVED_KINDS`' own FUNC_REMOVED_ELF_ONLY entry below:
+    # an entity's lifecycle event does not depend on which evidence tier saw
+    # it appear or disappear.
+    ChangeKind.FUNC_ADDED_ELF_ONLY: ENTITY_KIND_FUNCTION,
     ChangeKind.VAR_ADDED: ENTITY_KIND_VARIABLE,
     ChangeKind.TYPE_ADDED: ENTITY_KIND_TYPE,
 }

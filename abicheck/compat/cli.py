@@ -27,20 +27,17 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import click
 
 from ..checker import compare
 from ..dumper import dump
-from ..errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+from ..errors import ProfileMismatchError, ScopeMismatchError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
-from ..serialization import load_snapshot, save_snapshot
+from ..serialization import save_snapshot
 from ..workflows.extraction import (
-    import_abicc_perl_dump,
-    is_abicc_perl_dump_file,
-    looks_like_perl_dump,
     suppress_streaming_prune,
 )
 from ..workflows.pattern_preprocessor_scan import grant_live_source_licence
@@ -78,7 +75,23 @@ from ._helpers import (  # noqa: F401
     _warn_stub_flags as _warn_stub_flags,
     _write_affected_list as _write_affected_list,
 )
-from .descriptor import parse_descriptor
+from .descriptor import CompatDescriptor, parse_descriptor
+from .descriptor_expansion import (  # noqa: F401
+    build_descriptor_suppression as build_descriptor_suppression,
+    expand_descriptor_headers as expand_descriptor_headers,
+    expand_descriptor_libs as expand_descriptor_libs,
+)
+from .multi_library import merge_results
+from .multi_library_run import (
+    _descriptor_compile_options,
+    _no_library_pair_error,
+    _plan_library_pairs,
+    _record_unpaired_libraries,
+)
+from .run_inputs import (
+    _emit_compat_info_notes,
+    _load_compat_inputs,
+)
 from .xml_report import write_xml_report
 
 # Re-exports for backwards compatibility (these used to be defined inline).
@@ -95,7 +108,6 @@ __all__ = [
 if TYPE_CHECKING:
     from ..checker import DiffResult
     from ..model import AbiSnapshot
-    from .descriptor import CompatDescriptor
 
 
 # ── compat group ──────────────────────────────────────────────────────────────
@@ -936,26 +948,28 @@ def compat_check_cmd(  # noqa: PLR0913
         quiet,
     )
 
-    old_snap, old_version, new_snap, new_version = _take_snapshots_with_logging(
-        old_d,
-        new_d,
-        old_desc,
-        new_desc,
-        vnum1,
-        vnum2,
-        _log1_handler,
-        _log2_handler,
-        headers_list_path=headers_list_path,
-        single_header=single_header,
-        skip_headers_set=_skip_headers_set,
-        quiet=quiet,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-    )
+    _snapshot_kwargs: _SnapshotOptions = {
+        "headers_list_path": headers_list_path,
+        "single_header": single_header,
+        "skip_headers_set": _skip_headers_set,
+        "quiet": quiet,
+        "gcc_path": gcc_path,
+        "gcc_prefix": gcc_prefix,
+        "gcc_options": gcc_options,
+        "sysroot": sysroot,
+        "nostdinc": nostdinc,
+        "lang": lang,
+    }
+    _plan = _plan_library_pairs(old_d, new_d)
+    _library_pairs, _unpaired_old, _unpaired_new = _plan or ([], [], [])
+    if _plan is not None and not _library_pairs:
+        # A multi-library plan that paired nothing: no comparison is
+        # possible, and falling through would compare two unrelated
+        # libraries (see `_no_library_pair_error`).
+        _compat_fail(
+            "comparing snapshots",
+            _no_library_pair_error(_unpaired_old, _unpaired_new),
+        )
 
     if headers_only:
         _do_echo("Note: -headers-only is accepted — ELF/DWARF checks still run.", quiet)
@@ -969,11 +983,66 @@ def compat_check_cmd(  # noqa: PLR0913
         skip_internal_types,
         suppress,
     )
+    # The descriptors' own <skip_namespaces>/<skip_symbols>/<skip_types>/
+    # <skip_constants> rules, merged in alongside the CLI's. Parsed by
+    # nothing before, so a descriptor could declare 16 exclusions, have none
+    # applied, and still report a confident verdict over the unnarrowed
+    # surface. Built before the snapshots (it depends only on the parsed
+    # descriptors and the CLI flags) so the comparison loop below can be one
+    # loop over every library pair rather than one call plus a fan-out
+    # helper -- which keeps this command's single Tier-1 `checker.compare`
+    # call site single (`CLI_CONTRACT_ALLOWLIST` pins it; a second one would
+    # be a new direct bypass, not another instance of the allowlisted one).
+    _descriptor_suppression = build_descriptor_suppression([old_d, new_d])
+    if _descriptor_suppression is not None:
+        suppression = _merge_suppression(suppression, _descriptor_suppression)
 
+    # One iteration for an ordinary single-library descriptor (the `[(None,
+    # None)]` sentinel means "no library selection"); one per paired library
+    # otherwise. The first iteration keeps the per-phase log handlers, which
+    # are a property of the *run* rather than of each library.
+    _pairs: list[tuple[Path | None, Path | None]] = list(_library_pairs) or [
+        (None, None)
+    ]
+    _results: list[DiffResult] = []
     try:
-        result = compare(
-            old_snap, new_snap, suppression=suppression, policy="strict_abi"
-        )
+        for _index, (_old_lib, _new_lib) in enumerate(_pairs):
+            if _index == 0:
+                old_snap, old_version, new_snap, new_version = (
+                    _take_snapshots_with_logging(
+                        old_d,
+                        new_d,
+                        old_desc,
+                        new_desc,
+                        vnum1,
+                        vnum2,
+                        _log1_handler,
+                        _log2_handler,
+                        old_lib=_old_lib,
+                        new_lib=_new_lib,
+                        **_snapshot_kwargs,
+                    )
+                )
+            else:
+                old_snap, _ = _snapshot_from_compat_input(
+                    old_d, vnum1, old_desc, lib_override=_old_lib, **_snapshot_kwargs
+                )
+                new_snap, _ = _snapshot_from_compat_input(
+                    new_d, vnum2, new_desc, lib_override=_new_lib, **_snapshot_kwargs
+                )
+            _results.append(
+                compare(
+                    old_snap, new_snap, suppression=suppression, policy="strict_abi"
+                )
+            )
+        if len(_results) > 1:
+            _do_echo(
+                f"Compared {len(_results)} libraries from the descriptor pair.", quiet
+            )
+            result = merge_results(_results, label=f"{len(_results)} libraries")
+        else:
+            result = _results[0]
+        result = _record_unpaired_libraries(result, _unpaired_old, _unpaired_new, quiet)
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _compat_fail("comparing snapshots", exc)
 
@@ -1034,82 +1103,6 @@ def compat_check_cmd(  # noqa: PLR0913
 #    abicheck.compat.cli.dump / parse_descriptor / compare resolve correctly) ──
 
 
-def _emit_compat_info_notes(
-    *,
-    quiet: bool,
-    compat_html: bool,
-    use_dumps: bool,
-    filter_path: Path | None,
-    params_path: Path | None,
-    app_path: Path | None,
-    arch: str | None,
-    keep_cxx: bool,
-    keep_reserved: bool,
-    count_symbols: str | None,
-    count_all_symbols: str | None,
-) -> None:
-    """Emit informational notes for ABICC-compat flags with limited effect."""
-    notes: list[str] = []
-    if compat_html:
-        notes.append(
-            "Note: -compat-html / -old-style enabled: HTML will match ABICC element IDs."
-        )
-    if use_dumps:
-        notes.append(
-            "Note: -use-dumps is accepted; abicheck auto-detects JSON dumps by extension."
-        )
-    if filter_path:
-        notes.append(
-            f"Note: -filter {filter_path} is accepted for compatibility (not yet applied)."
-        )
-    if params_path:
-        notes.append(
-            f"Note: -params {params_path} is accepted for compatibility (not yet applied)."
-        )
-    if app_path:
-        notes.append(
-            f"Note: -app {app_path} is accepted for compatibility (not yet applied)."
-        )
-    if arch:
-        notes.append(f"Note: -arch {arch} is recorded for informational purposes.")
-    if keep_cxx:
-        notes.append(
-            "Note: -keep-cxx is accepted; abicheck includes all exported symbols by default."
-        )
-    if keep_reserved:
-        notes.append(
-            "Note: -keep-reserved is accepted; abicheck reports all field changes by default."
-        )
-    if count_symbols:
-        notes.append(
-            f"Note: -count-symbols {count_symbols} is accepted for compatibility (not yet applied)."
-        )
-    if count_all_symbols:
-        notes.append(
-            f"Note: -count-all-symbols {count_all_symbols} is accepted for compatibility (not yet applied)."
-        )
-    for note in notes:
-        _do_echo(note, quiet)
-
-
-def _parse_compat_descriptors(
-    old_desc: Path,
-    new_desc: Path,
-    old_relpath: str | None,
-    new_relpath: str | None,
-) -> tuple[CompatDescriptor | AbiSnapshot, CompatDescriptor | AbiSnapshot]:
-    """Parse old/new descriptors or dumps with compat-mode error mapping."""
-    try:
-        return (
-            _load_descriptor_or_dump(old_desc, relpath=old_relpath),
-            _load_descriptor_or_dump(new_desc, relpath=new_relpath),
-        )
-    # TypeError: a malformed nested contract field rejected at the storage
-    # boundary (storage AGENTS.md invariant 6), caught like a bad descriptor.
-    except (TypeError, ValueError, FileNotFoundError, OSError) as exc:
-        _compat_fail("parsing descriptor", exc)
-
-
 def _snapshot_from_compat_input(
     data: CompatDescriptor | AbiSnapshot,
     vnum_override: str | None,
@@ -1125,8 +1118,18 @@ def _snapshot_from_compat_input(
     sysroot: Path | None,
     nostdinc: bool,
     lang: str | None,
+    lib_override: Path | None = None,
 ) -> tuple[AbiSnapshot, str]:
-    """Convert compat input (descriptor or dump) into a concrete snapshot."""
+    """Convert compat input (descriptor or dump) into a concrete snapshot.
+
+    *lib_override* selects which of the descriptor's ``<libs>`` entries to
+    snapshot. It exists because a descriptor may name many libraries and
+    this function produces exactly one snapshot: the caller
+    (``compat.multi_library``) pairs the two sides' libraries and drives this
+    once per pair. Before that fan-out existed, this function took
+    ``libs[0]`` and printed a warning naming the rest -- answering a
+    28-library release by comparing one library.
+    """
     from ..model import AbiSnapshot as _AbiSnapshot
 
     if isinstance(data, _AbiSnapshot):
@@ -1140,18 +1143,31 @@ def _snapshot_from_compat_input(
         from dataclasses import replace as _replace
 
         desc = _replace(desc, version=vnum_override)
-    so = desc.libs[0]
-    if len(desc.libs) > 1:
-        _do_echo(
-            f"Warning: descriptor {desc_path.name} has {len(desc.libs)} <libs> entries; "
-            f"using only the first: {so}",
-            quiet,
-        )
+    # `lib_override` is how the multi-library fan-out asks for one specific
+    # member (see `compat.multi_library`). Without it this is a single-library
+    # descriptor and `libs[0]` is the only entry.
+    so = lib_override if lib_override is not None else desc.libs[0]
+    # The descriptor's own <skip_headers>/<skip_including> rules union with
+    # the CLI's -skip-headers FILE rather than replacing it: both are
+    # exclusions, and ABICC applies both. The descriptor's are per-side by
+    # construction (each side names its own), which is why they are merged
+    # here rather than once in `_load_compat_inputs`.
+    effective_skip = set(skip_headers_set) | set(desc.skip_headers)
     hdrs = _resolve_headers_from_list(
         headers_list_path,
         single_header,
         desc.headers,
-        skip_headers=skip_headers_set or None,
+        skip_headers=effective_skip or None,
+    )
+    descriptor_options = _descriptor_compile_options(desc)
+    # Descriptor flags FIRST, the command line's own `-gcc-options` last.
+    # GCC is last-wins for a repeated order-sensitive flag (`-DNAME=...`,
+    # `-std=...`, `--sysroot`; verified with duplicate `-D`), so appending
+    # the descriptor last let it override the value the user explicitly
+    # asked for -- the opposite of what a descriptor is, which is the
+    # project's recorded default (Codex review).
+    combined_gcc_options = " ".join(
+        opt for opt in (descriptor_options, gcc_options) if opt
     )
     if not so.exists():
         _compat_fail(
@@ -1172,7 +1188,7 @@ def _snapshot_from_compat_input(
             version=desc.version,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
+            gcc_options=combined_gcc_options or None,
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang,
@@ -1180,106 +1196,26 @@ def _snapshot_from_compat_input(
     return grant_live_source_licence(snap), desc.version
 
 
-def _load_descriptor_or_dump(
-    path: Path, *, relpath: str | None = None
-) -> CompatDescriptor | AbiSnapshot:
-    """Load either an ABICC XML descriptor or a JSON ABI dump.
+class _SnapshotOptions(TypedDict):
+    """The dump options every library in one ``compat check`` run shares.
 
-    Returns:
-        CompatDescriptor for XML descriptor files, AbiSnapshot for JSON dumps.
-
-    Raises:
-        ValueError: If the file is an ABICC Perl dump (unsupported format).
+    A ``TypedDict`` rather than a ``dict[str, object]`` bag: these are
+    forwarded straight into ``_snapshot_from_compat_input``'s keyword
+    parameters, and an untyped bag turns every one of those parameters into
+    ``object`` at the call site -- mypy then cannot tell a misspelled key or
+    a swapped ``sysroot``/``gcc_path`` from a correct call.
     """
-    # ABICC Perl dump support (minimal migration-focused importer)
-    if path.suffix == ".dump":
-        return import_abicc_perl_dump(path)
 
-    # Heuristic: if the file is JSON, load as a dump
-    if path.suffix == ".json":
-        return load_snapshot(path)
-
-    # ADR-059 (Codex review): `compat dump -dump-path v1.json.gz`/`.json.zst`
-    # writes a valid compressed snapshot (its documented companion command,
-    # AGENTS.md), but Path.suffix only sees the *last* component ("gz"/
-    # "zst"), so those fell through to the XML-descriptor heuristic below
-    # and failed before ever reaching load_snapshot(). Recognize the
-    # canonical compressed suffixes directly, and fall back to magic-byte
-    # detection (never trusts the filename either way) so a compressed
-    # snapshot written under a neutral name is still dispatched correctly.
-    name = path.name.lower()
-    if name.endswith((".json.gz", ".json.zst")):
-        return load_snapshot(path)
-    from ..workflows.storage import SnapshotCompression, detect_snapshot_compression
-
-    try:
-        compression_hint = detect_snapshot_compression(path)
-    except SnapshotError:
-        compression_hint = SnapshotCompression.NONE
-    if compression_hint is not SnapshotCompression.NONE:
-        return load_snapshot(path)
-
-    # For XML files, peek at content to detect ABICC Perl dump disguised as .xml
-    # (ABICC -dump-format xml produces a different XML schema than descriptors)
-    try:
-        head = path.read_text(encoding="utf-8", errors="replace")[:512]
-    except OSError:
-        head = ""
-
-    # Detect ABICC Perl Data::Dumper format (starts with $VAR1 = { or similar)
-    if looks_like_perl_dump(head):
-        return import_abicc_perl_dump(path)
-
-    # Detect ABICC XML dump format (contains <ABI_dump_* or <abi_dump tags)
-    if "<ABI_dump" in head or "<abi_dump" in head or "ABI_COMPLIANCE_CHECKER" in head:
-        raise ValueError(
-            f"ABICC XML dump format detected: {path}\n"
-            "  abicheck currently supports ABICC Perl Data::Dumper dumps, not ABICC XML dumps.\n"
-            "  If possible, generate the default ABI.dump (Perl) format with abi-dumper,\n"
-            "  or convert via descriptor using 'abicheck compat dump' to abicheck JSON."
-        )
-
-    # Otherwise parse as XML descriptor
-    return parse_descriptor(path, relpath=relpath)
-
-
-def _load_compat_inputs(
-    old_desc: Path,
-    new_desc: Path,
-    relpath: str | None,
-    relpath1: str | None,
-    relpath2: str | None,
-    skip_headers: Path | None,
-    quiet: bool,
-) -> tuple[CompatDescriptor | AbiSnapshot, CompatDescriptor | AbiSnapshot, set[str]]:
-    """Resolve relpath overrides, notify about Perl dumps, parse descriptors, load skip-headers set.
-
-    Returns (old_d, new_d, skip_headers_set).
-    """
-    old_relpath = relpath1 or relpath
-    new_relpath = relpath2 or relpath
-
-    old_is_abicc_perl = is_abicc_perl_dump_file(old_desc)
-    new_is_abicc_perl = is_abicc_perl_dump_file(new_desc)
-    if old_is_abicc_perl or new_is_abicc_perl:
-        _do_echo(
-            "Info: ABICC Perl ABI.dump input detected. "
-            "Using migration-focused importer (full ABICC dump parity is not guaranteed). "
-            "Prefer abicheck JSON dumps for best fidelity.",
-            quiet,
-        )
-
-    old_d, new_d = _parse_compat_descriptors(
-        old_desc, new_desc, old_relpath, new_relpath
-    )
-    skip_headers_set = _load_skip_headers(skip_headers)
-    if skip_headers_set:
-        _do_echo(
-            f"Applying -skip-headers: excluding {len(skip_headers_set)} header(s).",
-            quiet,
-        )
-
-    return old_d, new_d, skip_headers_set
+    headers_list_path: Path | None
+    single_header: str | None
+    skip_headers_set: set[str]
+    quiet: bool
+    gcc_path: str | None
+    gcc_prefix: str | None
+    gcc_options: str | None
+    sysroot: Path | None
+    nostdinc: bool
+    lang: str | None
 
 
 def _take_snapshots_with_logging(
@@ -1292,6 +1228,8 @@ def _take_snapshots_with_logging(
     log1_handler: logging.Handler | None,
     log2_handler: logging.Handler | None,
     *,
+    old_lib: Path | None = None,
+    new_lib: Path | None = None,
     headers_list_path: Path | None,
     single_header: str | None,
     skip_headers_set: set[str],
@@ -1316,6 +1254,7 @@ def _take_snapshots_with_logging(
             old_d,
             vnum1,
             old_desc,
+            lib_override=old_lib,
             headers_list_path=headers_list_path,
             single_header=single_header,
             skip_headers_set=skip_headers_set,
@@ -1337,6 +1276,7 @@ def _take_snapshots_with_logging(
             new_d,
             vnum2,
             new_desc,
+            lib_override=new_lib,
             headers_list_path=headers_list_path,
             single_header=single_header,
             skip_headers_set=skip_headers_set,

@@ -267,6 +267,8 @@ def compute_confidence(
         if not dr.enabled and dr.coverage_gap:
             warnings.append(f"Detector '{dr.name}' disabled: {dr.coverage_gap}")
 
+    warnings.extend(header_exclusion_warnings(old, new))
+
     confidence = _determine_confidence_level(
         has_elf,
         has_dwarf,
@@ -278,6 +280,58 @@ def compute_confidence(
     )
 
     return tiers, confidence, warnings, evidence_tier
+
+
+#: Substring every header-exclusion warning shares, so a consumer can filter
+#: `coverage_warnings` for this one the way `SAME_BINARY_WARNING_MARKER`
+#: exists for its own.
+HEADER_EXCLUSION_WARNING_MARKER = "--exclude-header"
+
+
+def header_exclusion_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:
+    """What each side's ``--exclude-header`` patterns cost this comparison.
+
+    ``--exclude-header``'s own help promises the omission is "reported as
+    reduced evidence rather than as a removal". The second half held by
+    construction -- one invocation applies the patterns to both sides, so a
+    symmetrically excluded declaration is absent from both and no removal is
+    manufactured. The first half was promised and never implemented: the
+    patterns were applied before extraction and assurance saw the input, so a
+    clean parse of what remained reported full header-aware assurance and a
+    clean verdict over a surface nobody had looked at (Codex review).
+
+    Two distinct warnings, because the asymmetric case is the dangerous one:
+
+    * **Both sides, same patterns.** The ordinary use. The surface is
+      narrower than the operand names and the verdict covers only what was
+      parsed -- reduced evidence, no more.
+    * **One side only, or differing patterns.** Reachable whenever a *stored*
+      baseline was dumped under one set and the candidate under another,
+      which no single invocation can prevent. Here the asymmetry itself can
+      manufacture findings: a declaration excluded from OLD alone reads as
+      newly added. Named explicitly so the reader can tell that apart from a
+      real change.
+    """
+    old_patterns = tuple(getattr(old, "excluded_header_patterns", ()) or ())
+    new_patterns = tuple(getattr(new, "excluded_header_patterns", ()) or ())
+    if not old_patterns and not new_patterns:
+        return []
+    if old is not None and old_patterns != new_patterns:
+        return [
+            f"Header exclusions differ between the two sides "
+            f"({HEADER_EXCLUSION_WARNING_MARKER}): old "
+            + (", ".join(old_patterns) or "(none)")
+            + "; new "
+            + (", ".join(new_patterns) or "(none)")
+            + ". Anything only an excluded header declared was not observed "
+            "on that side, so a difference reported here may be the "
+            "asymmetry rather than a change."
+        ]
+    return [
+        f"Headers matching {', '.join(new_patterns)} were excluded from the "
+        f"parsed surface ({HEADER_EXCLUSION_WARNING_MARKER}); anything only "
+        f"they declared was not observed, on either side."
+    ]
 
 
 # Back-compat alias: the function was historically named ``_compute_confidence``

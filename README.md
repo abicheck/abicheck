@@ -39,7 +39,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Five layers of evidence, not one.** Binary, debug info, headers, build flags, sources. Each layer finds breaks the others miss and removes false positives the weaker ones raise.
 - **It says what it could not check.** Missing evidence is reported, never silently passed.
 - **Additions count.** A compatible release still lists every new function, variable, and enumerator, with a version-bump recommendation, so surface growth is reviewed rather than assumed.
-- **407 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
+- **408 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
 - **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
 - **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), a typed [Python API](#python-api), and a drop-in `compat` mode for `abi-compliance-checker`. Pure Python, Linux/Windows/macOS.
 
@@ -181,7 +181,7 @@ This is a discoverability floor, not an accuracy score; the [tool comparison pag
 
 ## How it compares to other tools
 
-`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **407 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
+`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **408 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
 
 | | abicheck | libabigail `abidiff` | ABICC |
 |---|:---:|:---:|:---:|

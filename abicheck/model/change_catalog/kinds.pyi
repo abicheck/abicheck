@@ -29,6 +29,7 @@ class ChangeKind(str, Enum):
     FUNC_REMOVED = 'func_removed'
     FUNC_REMOVED_ELF_ONLY = 'func_removed_elf_only'
     FUNC_ADDED = 'func_added'
+    FUNC_ADDED_ELF_ONLY = 'func_added_elf_only'
     FUNC_RETURN_CHANGED = 'func_return_changed'
     FUNC_PARAMS_CHANGED = 'func_params_changed'
     FUNC_NOEXCEPT_ADDED = 'func_noexcept_added'

@@ -30,6 +30,12 @@ from .checker import _BREAKING_KINDS as _CHECKER_BREAKING_KINDS_ENUM
 REMOVED_KINDS: frozenset[str] = frozenset(
     {
         "func_removed",
+        # Pre-existing omission, found by `test_evidence_tier_registry_
+        # parity.py` while registering this kind's *addition* counterpart: an
+        # export that disappeared is a removal whether the headers declared
+        # it or not, so HTML and the compat XML were rendering it as a
+        # "changed" symbol and counting zero removals for it.
+        "func_removed_elf_only",
         "var_removed",
         "type_removed",
         "typedef_removed",
@@ -42,6 +48,7 @@ REMOVED_KINDS: frozenset[str] = frozenset(
 ADDED_KINDS: frozenset[str] = frozenset(
     {
         "func_added",
+        "func_added_elf_only",
         "var_added",
         "type_added",
         "func_virtual_added",
@@ -204,6 +211,12 @@ CHANGED_BREAKING_KINDS: frozenset[str] = frozenset(
 HIGH_SEVERITY_KINDS: frozenset[str] = frozenset(
     {
         "func_removed",
+        # Pre-existing omission, found by `test_evidence_tier_registry_
+        # parity.py` while registering this kind's *addition* counterpart: an
+        # export that disappeared is a removal whether the headers declared
+        # it or not, so HTML and the compat XML were rendering it as a
+        # "changed" symbol and counting zero removals for it.
+        "func_removed_elf_only",
         "var_removed",
         "type_removed",
         "typedef_removed",

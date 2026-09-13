@@ -1125,6 +1125,7 @@ def _report_compare_result(
 def run_compare(
     ctx: click.Context,
     *,
+    exclude_headers: tuple[str, ...] = (),
     old_input: Path,
     new_input: Path,
     output_dir: Path | None,
@@ -1915,6 +1916,7 @@ def run_compare(
             lang_explicit=lang_explicit,
             changed_paths=_enrich.changed_paths,
             config_public_header_dirs=project_config_public_header_dirs(project_cfg),
+            exclude_headers=tuple(exclude_headers or ()),
         )
     except deadline.DeadlineExceeded as exc:
         _exit_on_budget_overflow(

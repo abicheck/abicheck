@@ -84,6 +84,7 @@ def build_dump_request(
     *,
     so_path: Path | None,
     headers: tuple[Path, ...],
+    exclude_headers: tuple[str, ...] = (),
     includes: tuple[Path, ...],
     version: str,
     lang: str,
@@ -169,6 +170,7 @@ def build_dump_request(
         input=InputSpec(
             path=so_path,
             headers=tuple(headers),
+            exclude_headers=tuple(exclude_headers),
             includes=tuple(includes),
             version=version,
             pdb=pdb_path,

@@ -403,6 +403,7 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | Kind | Description |
 |------|-------------|
 | `func_added` | A new public function was exported. Existing binaries are unaffected; new callers can use it. |
+| `func_added_elf_only` | A new exported function symbol appeared that no public header declares on either side. The compatible-addition counterpart of `func_removed_elf_only`: existing consumers are unaffected and the release needs a MINOR bump like any other addition, but the evidence is the export table alone, so nothing is known about its signature. Without it, a header-aware comparison could not see such a symbol appear at all — the function map is built from the header AST, so an undeclared export never entered it, and the same release reported one addition at `--depth binary` and none with `-H`. Orthogonal to `exported_not_public`, which asks whether the export *should* be undeclared; this one only reports that the export set grew. |
 | `var_added` | A new public global variable was exported. Existing binaries are unaffected. |
 | `type_added` | A new type was added to the public API. Additive — existing consumers are unchanged. |
 | `type_field_added_compatible` | A field was appended to a standard-layout, non-polymorphic struct. Size increases but no existing field offsets shift. Compatible only for types meeting the standard-layout criteria. |

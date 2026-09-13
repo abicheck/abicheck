@@ -46,6 +46,7 @@ from typing import Any
 
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
+from .kind_rollup import KindRollup, render_kind_rollups
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
@@ -117,6 +118,16 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
     elif new_val is not None:
         old_new = f" (`{new_val}`)"
     line = f"- **{kind_val}**: {desc}{old_new}"
+
+    # Which library, when the run compared more than one. Absent for every
+    # single-library comparison, where the report's own header already says
+    # it -- so those reports render exactly as before. Without it a
+    # multi-library `compat check` report cannot say which DSO a removal came
+    # from, and the same symbol removed from two of them renders as two
+    # identical lines (Codex review).
+    finding_library = getattr(c, "library", None)
+    if finding_library:
+        line += f" — in `{finding_library}`"
 
     # Source location
     if loc:
@@ -490,6 +501,9 @@ class ChangeGroup:
     changes: tuple[Change, ...]
     oneline: bool
     note_lines: tuple[str, ...] = ()
+    #: Per-kind summaries rendered *instead of* the individual findings of
+    #: those kinds. A kind appearing here is not in ``changes``.
+    rollups: tuple[KindRollup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,6 +521,7 @@ def render_severity_sections(data: SeveritySectionsData) -> list[str]:
         fmt = _format_change_md_oneline if group.oneline else _format_change_md
         for c in group.changes:
             lines.append(fmt(c))
+        lines += render_kind_rollups(group.rollups)
         lines.append("")
     return lines
 

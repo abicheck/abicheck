@@ -90,7 +90,6 @@ from .bundle_detectors import (
     _detect_library_structural_changes,
     _detect_manifest_ownership,
     _detect_provider_changed,
-    _detect_unresolved_intra_dependency,
     _detect_version_drift,
 )
 from .bundle_manifest import (  # noqa: F401  (re-exported for back-compat)
@@ -113,6 +112,9 @@ from .bundle_soname import hard_link_alias_basenames
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
 from .policy.classification import Verdict, compute_verdict
+from .workflows.bundle_unresolved_audit import (  # noqa: F401
+    _detect_unresolved_intra_dependency as _detect_unresolved_intra_dependency,
+)
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile

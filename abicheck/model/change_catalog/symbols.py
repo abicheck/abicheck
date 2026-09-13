@@ -416,6 +416,24 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.",
     ),
     _E(
+        "func_added_elf_only",
+        _C,
+        is_addition=True,
+        impact="An exported function symbol appeared in the new binary that no "
+        "public header declares on either side. Existing consumers are "
+        "unaffected -- it is an addition, and the release needs a MINOR bump "
+        "like any other -- but the evidence for it is the export table alone, "
+        "so nothing is known about its signature. The weaker-evidence "
+        "counterpart of func_removed_elf_only, and the reason it exists: a "
+        "header-aware comparison builds its function map from the header AST, "
+        "so an export with no declaration never entered that map and its "
+        "addition was invisible. The same release reported Additions (1) at "
+        "--depth binary and Additions (0) with -H. Orthogonal to "
+        "exported_not_public, which asks whether the export *should* be "
+        "undeclared; this one only reports that the export set grew.",
+        description_template="New exported symbol not declared in any public header: {name}",
+    ),
+    _E(
         "func_removed_elf_only",
         _B,
         impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",

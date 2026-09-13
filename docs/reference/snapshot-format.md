@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`46`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`47`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 46,
+  "schema_version": 47,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -202,7 +202,15 @@ the promised public contract; a binary symbol is exported). They are absent
 on a pre-v46 snapshot, where `abicheck/model/surface_facts.py` derives all
 three from the stored `visibility` value as a `PARTIAL`, diagnostic-stamped
 reading -- never as a confirmed negative, so a headerless snapshot still
-reads "declaration not established" rather than "no declaration". Before
+reads "declaration not established" rather than "no declaration". Then
+(v47) `AbiSnapshot.excluded_header_patterns` persisted — the
+`--exclude-header PATTERN` values a snapshot was dumped under. The parsed
+surface is narrower than the operand names and nothing else recorded that,
+so a stored baseline dumped with an exclusion, compared later against a full
+dump of the same library, reported every declaration the excluded header
+carried as appearing out of nowhere. Absent on a pre-v47 snapshot, which
+loads as the empty tuple — correct for every such snapshot, since the flag
+did not exist. Before
 that (v45)
 `Param.kind_fact` persisted — closes the last case-(a) field ADR-063 Phase
 5's "field-by-field conversion complete" note missed: neither header-AST
@@ -220,7 +228,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 46`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 47`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -299,7 +307,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `46`). |
+| `schema_version` | int | Snapshot format version (currently `47`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -434,7 +442,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `46`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `47`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no
