@@ -84,6 +84,28 @@ looked like the obvious fix and wasn't.
   memory by running fewer members at once* -- which costs wall-clock on a
   job that is already over its timeout. Routing a bundle check at header
   depth needs a runner/timeout decision, not another budget constant.
+
+  One further hole in the same budget, found in review and **deliberately
+  left open**: the depth a worker reaches is inferred from `--depth` and
+  from whether header roots were supplied, and a release whose members are
+  *already-serialized snapshots* answers neither -- such a run types no
+  depth and supplies no roots, so it is budgeted as binary depth while each
+  worker holds two possibly deep-evidence snapshots resident. The obvious
+  fix -- size a stored-member release at the table's largest rung, since the
+  captured depth is not cheaply legible (reading it means decoding the very
+  snapshots whose size is the problem, once per member, before the fan-out
+  that would have loaded them lazily) -- was implemented and reverted: it is
+  correct in direction and far too blunt in degree. It quarters the worker
+  count of *every* stored-baseline run, which is the most common workflow
+  this tool has and is usually a set of small snapshots, and it moved 75
+  tests from passing to failing on the clamp notice alone. The accurate
+  signal is a member's resident cost, for which its on-disk size is the
+  cheap proxy -- but the budget model is depth-keyed, and expressing size in
+  it means inventing an encoded-to-resident expansion factor with no
+  measurement behind it, which is the same "a number calibrated on one
+  shape" mistake this whole entry records. So: a stored-member release is
+  still sized as binary depth, and closing it properly means measuring that
+  factor first, not picking one.
   (d) **No first-party Action emits a bundle-facts document.** The
   producer itself exists and is reachable -- `compare`'s release fan-out
   takes `--bundle-facts-out`, forwardable today through the root Action's

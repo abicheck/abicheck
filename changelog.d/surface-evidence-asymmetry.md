@@ -31,6 +31,20 @@
   and a new side whose producer *observed* the declaration out of the public
   contract all still report exactly as before.
 
+- **The release fan-out's per-worker memory budget follows the evidence depth
+  the run actually reaches.** It was a single 1.0 GiB constant sized for
+  binary-depth workers, so a directory/package `compare` at header depth
+  started four to six times as many workers as fit — an OOM-killed job rather
+  than a wrong answer, measured at ~20.4 GiB peak RSS on a six-member bundle.
+  The budget is now per-rung (4.0 GiB at `headers`, 6.0 at `build`/`source`),
+  and the depth it is sized from is the one a worker *reaches*, not the raw
+  `--depth`: that flag is a floor and is `None` for an ordinary
+  `compare OLD_DIR NEW_DIR --header ...`, so header roots on either side imply
+  header depth on their own. `ABICHECK_RELEASE_JOB_MEM_GIB` still overrides
+  the default at every depth. A release whose members are *stored* snapshots
+  is still sized as binary depth — see `docs/contribute/known-gaps.md` for
+  why the conservative fix for that was tried and reverted.
+
 ### Added
 
 - **`ABICHECK_SNAPSHOT_MAX_DECODED_BYTES` and
