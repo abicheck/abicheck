@@ -32,20 +32,28 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from abicheck.buildsource.baseline_set import (
     ResolveOutcome,
     ResolveResult,
+    load_baseline_manifest,
     resolve_bundle,
     resolve_target,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from abicheck.buildsource.bundle_member_snapshots import StagedBundleBaseline
+
 
 #: Usage error, matching the repo-wide convention documented in AGENTS.md
 #: ("64 = usage error (bad flags/inputs)").
 _EXIT_USAGE_ERROR = 64
 
 
-def _print_outputs(result: ResolveResult) -> int:
+def _print_outputs(
+    result: ResolveResult, staged: StagedBundleBaseline | None = None
+) -> int:
     """Print ``key=value`` lines ``run.sh`` forwards to ``GITHUB_OUTPUT``.
 
     Returns ``0`` normally, or :data:`_EXIT_USAGE_ERROR` if any value
@@ -60,6 +68,14 @@ def _print_outputs(result: ResolveResult) -> int:
     checking every field uniformly here is simpler and more robust than
     trusting each value's construction to stay newline-free forever
     (CodeRabbit review).
+
+    ``member-snapshots-dir``/``member-header-evidence`` are always printed,
+    empty/``none`` when no per-member baseline header staging ran (every
+    ``kind: target`` resolution, and any bundle resolution the caller did
+    not pass ``--stage-member-snapshots`` for) -- a composite Action output
+    that exists only on some paths reads as the empty string on the others
+    anyway, and emitting it unconditionally keeps one key set for every
+    branch, the same way ``binaries-dir`` is printed for a target.
     """
     fields = {
         "outcome": result.outcome,
@@ -68,6 +84,8 @@ def _print_outputs(result: ResolveResult) -> int:
         "snapshot-path": result.snapshot_path or "",
         "binaries-dir": result.binaries_dir or "",
         "binary-paths": json.dumps(result.binary_paths),
+        "member-snapshots-dir": str(staged.snapshots_dir) if staged else "",
+        "member-header-evidence": (staged.header_evidence_state if staged else "none"),
         "message": result.message,
     }
     for key, value in fields.items():
@@ -127,6 +145,18 @@ def main(argv: list[str] | None = None) -> int:
         "release) instead of ambiguous. 'false' (default) -- unchanged "
         "behavior. Ignored for --kind bundle, which never supports "
         "new_target (see resolve_target()'s own docstring).",
+    )
+    parser.add_argument(
+        "--stage-member-snapshots",
+        default="",
+        help="(kind: bundle only) Stage each resolved member's *baseline* "
+        "snapshot -- the historical, per-member header evidence "
+        "actions/baseline already dumped at baseline time -- into "
+        "<DIR>/member-snapshots/, a clean directory usable as a "
+        "directory-compare old-side operand, and report whether every "
+        "member's snapshot genuinely carries header evidence via the "
+        "member-header-evidence output. Empty (default) skips staging "
+        "entirely; ignored for --kind target.",
     )
     args = parser.parse_args(argv)
 
@@ -209,7 +239,66 @@ def main(argv: list[str] | None = None) -> int:
             expected_baseline_generation=expected_baseline_generation,
         )
 
-    output_status = _print_outputs(result)
+    # Per-bundle-member baseline header staging (only for a genuinely
+    # resolved bundle: there is nothing historical to stage for a not_found/
+    # ambiguous resolution, and staging from a partially-resolved manifest
+    # would publish an old-side operand missing a member -- which a
+    # directory compare reads as a *removed library*, not as missing
+    # evidence).
+    staged: StagedBundleBaseline | None = None
+    if (
+        args.kind == "bundle"
+        and args.stage_member_snapshots
+        and result.outcome == ResolveOutcome.RESOLVED
+    ):
+        manifest = load_baseline_manifest(args.baseline_dir)
+        if manifest is None:
+            # Unreachable for a resolved bundle (resolution already read the
+            # manifest); a defensive branch rather than an AttributeError.
+            print(
+                "::error::--stage-member-snapshots: the resolved baseline-set "
+                "has no readable manifest.json.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
+        # Imported here, not at module scope: the staging module is only
+        # needed on this one opt-in path, and every other resolution (every
+        # kind: target run, every bundle run without
+        # --stage-member-snapshots) must keep working against an abicheck
+        # install that predates it.
+        from abicheck.buildsource.bundle_member_snapshots import (
+            MemberStagingError,
+            stage_bundle_baseline_headers,
+        )
+
+        try:
+            staged = stage_bundle_baseline_headers(
+                args.baseline_dir,
+                manifest,
+                [str(m) for m in json.loads(args.members)],
+                Path(args.stage_member_snapshots),
+            )
+        except (MemberStagingError, OSError) as exc:
+            print(
+                f"::error::--stage-member-snapshots failed: {exc}",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
+        if not staged.header_evidence_complete:
+            # A warning, never a failure: binary-depth bundle checks (the
+            # only depth a bundle check supports today) do not need header
+            # evidence at all, so an ELF-only baseline must stay usable.
+            print(
+                "::warning::per-member baseline header evidence is "
+                f"{staged.header_evidence_state!r} -- members without it: "
+                f"{list(staged.members_without_header_evidence)}, unresolved: "
+                f"{sorted(staged.problems)}. A header-depth bundle comparison "
+                "against this baseline would parse at least one member's old "
+                "side from the current checkout's headers.",
+                file=sys.stderr,
+            )
+
+    output_status = _print_outputs(result, staged)
     if output_status != 0:
         return output_status
 

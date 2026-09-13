@@ -127,6 +127,25 @@ inputs:
       resolve_bundle's own docstring).
     required: false
     default: 'false'
+  stage-member-snapshots:
+    description: >
+      'false' (default) -- unchanged behavior. 'true' (kind: bundle only,
+      ignored for kind: target) -- additionally stage each resolved
+      member's *baseline* snapshot into a clean member-snapshots/
+      directory and report it as the member-snapshots-dir output, with
+      member-header-evidence saying whether every member's snapshot
+      genuinely carries header-derived evidence. That snapshot is the
+      historical, per-member header evidence `abicheck baseline` already
+      dumped at baseline time from the baseline checkout's own headers, so
+      an old-side operand built from it is genuinely distinct from the
+      current checkout -- unlike binaries-dir, which carries no header
+      evidence at all. Staging it does not by itself make a
+      headers-depth bundle check safe (the candidate side still has no
+      per-member header selection, and the cross-library bundle graph
+      still needs binaries-dir's real ELF binaries) -- see
+      docs/contribute/known-gaps.md.
+    required: false
+    default: 'false'
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -154,6 +173,12 @@ outputs:
   binary-paths:
     description: '(kind: bundle only) JSON object mapping each member target id to its staged binary path.'
     value: ${{ steps.resolve.outputs.binary-paths }}
+  member-snapshots-dir:
+    description: '(kind: bundle with stage-member-snapshots: true only) Path to the staged, one-snapshot-per-member directory holding each member''s historical baseline snapshot -- usable as a directory-compare old-side operand. Empty otherwise.'
+    value: ${{ steps.resolve.outputs.member-snapshots-dir }}
+  member-header-evidence:
+    description: '''complete'' when every staged member''s baseline snapshot carries header-derived evidence, ''partial'' when only some do, ''none'' when none do or no staging ran. Only ''complete'' means an old side genuinely distinct from the current checkout for every member.'
+    value: ${{ steps.resolve.outputs.member-header-evidence }}
   message:
     description: 'Human-readable explanation of the outcome.'
     value: ${{ steps.resolve.outputs.message }}
@@ -186,5 +211,6 @@ runs:
         INPUT_EXPECTED_PROJECT_REF: ${{ inputs.expected-project-ref }}
         INPUT_EXPECTED_BASELINE_GENERATION: ${{ inputs.expected-baseline-generation }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
+        INPUT_STAGE_MEMBER_SNAPSHOTS: ${{ inputs.stage-member-snapshots }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

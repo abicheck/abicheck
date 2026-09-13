@@ -146,8 +146,8 @@ CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
 #: project-wide ``header:`` input) -- a header-only change between baseline
 #: and candidate (e.g. an inline function or template removed) would be
 #: silently invisible, since only one version of the headers is ever parsed
-#: (Codex review). Until per-bundle-member baseline header staging exists,
-#: only binary-level (L0/L1) evidence is safe for a bundle check.
+#: (Codex review). The baseline half now exists (``bundle_member_snapshots``
+#: stages it); the candidate half does not -- see that module's docstring.
 BUNDLE_CHECK_DEPTHS = frozenset({EvidenceDepth.BINARY.value})
 
 #: Sentinel ``channel`` value for a ``baseline: none`` check (ADR-047 §6 S5

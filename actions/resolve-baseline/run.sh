@@ -30,6 +30,8 @@ _fail_ambiguous() {
     echo "snapshot-path="
     echo "binaries-dir="
     echo "binary-paths={}"
+    echo "member-snapshots-dir="
+    echo "member-header-evidence=none"
     echo "message=$message"
     echo "channel=$CHANNEL"
   } >> "${GITHUB_OUTPUT:-/dev/null}"
@@ -48,6 +50,7 @@ CANDIDATE_BUILD_OUTPUT="${INPUT_CANDIDATE_BUILD_OUTPUT:-}"
 EXPECTED_PROJECT_REF="${INPUT_EXPECTED_PROJECT_REF:-}"
 EXPECTED_BASELINE_GENERATION="${INPUT_EXPECTED_BASELINE_GENERATION:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
+STAGE_MEMBER_SNAPSHOTS="${INPUT_STAGE_MEMBER_SNAPSHOTS:-false}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # A newline in channel (or baseline-path, which _fail_ambiguous may embed
@@ -72,6 +75,10 @@ esac
 case "$ALLOW_NEW_TARGET" in
   true | false) ;;
   *) _fail "allow-new-target '$ALLOW_NEW_TARGET' is not recognized. Use 'true' or 'false'." ;;
+esac
+case "$STAGE_MEMBER_SNAPSHOTS" in
+  true | false) ;;
+  *) _fail "stage-member-snapshots '$STAGE_MEMBER_SNAPSHOTS' is not recognized. Use 'true' or 'false'." ;;
 esac
 if [[ "$KIND" == "target" && -z "$TARGET" ]]; then
   _fail "target input is required when kind is 'target'."
@@ -281,6 +288,17 @@ if [[ -n "$EXPECTED_BASELINE_GENERATION" ]]; then
 fi
 if [[ "$KIND" == "target" ]]; then
   RESOLVE_ARGS+=(--allow-new-target "$ALLOW_NEW_TARGET")
+fi
+# Per-bundle-member baseline header staging. Staged under a directory of
+# this run's own making, never inside $BASELINE_DIR: a baseline-set
+# directory a caller restored from a cache/archive may be re-uploaded or
+# re-packaged verbatim by a later step, and adding a member-snapshots/ tree
+# to it would make that published baseline-set carry a second copy of every
+# member's snapshot, invisible to its own manifest.json/content-digest.
+MEMBER_STAGING_DIR=""
+if [[ "$KIND" == "bundle" && "$STAGE_MEMBER_SNAPSHOTS" == "true" ]]; then
+  MEMBER_STAGING_DIR=$(mktemp -d)
+  RESOLVE_ARGS+=(--stage-member-snapshots "$MEMBER_STAGING_DIR")
 fi
 
 echo "::group::Resolve baseline ($CHANNEL / $KIND / $PROFILE)"
