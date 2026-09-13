@@ -36,6 +36,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
@@ -59,13 +61,40 @@ _WORKFLOW = (
 )
 
 
-def _workflow_l2_body() -> str:
-    """The `l2-cli-perf` job's own RAW text, so a match cannot come from another job.
+def _strip_comments(text: str) -> str:
+    """*text* with YAML/shell comments removed, line by line.
 
-    Raw, not a yaml round-trip: `safe_dump` re-quotes shell text, so a literal
-    assertion about a `${var}` expansion fails against its own source.
+    Load-bearing, and the repo says why (`AGENTS.md`: "when asserting against
+    workflow *text*, strip comments first"). Without it, commenting OUT the real
+    `--count-gateable-points` invocation or the positive-point conditional leaves
+    the asserted substring present as a comment, so the wiring assertions below
+    pass while the workflow no longer gates -- the same false positive an earlier
+    `performance.yml` assertion already hit, which is why
+    `test_classify_perf_paths.py` grew the identical helper. Same rule as that
+    one (cut at the first `#`, drop blank remainders) rather than a second,
+    subtly-different stripper.
     """
-    text = _WORKFLOW.read_text()
+    out = []
+    for raw in text.splitlines():
+        body = raw.split("#", 1)[0]
+        if body.strip():
+            out.append(body)
+    return "\n".join(out)
+
+
+def _workflow_l2_body(text: str | None = None) -> str:
+    """The `l2-cli-perf` job's own text, comments stripped.
+
+    Raw slicing rather than a yaml round-trip: `safe_dump` re-quotes shell text,
+    so a literal assertion about a `${var}` expansion fails against its own
+    source. Sliced to this one job so a match cannot be satisfied by another
+    job's body, and comment-stripped per `_strip_comments`.
+
+    *text* exists so a test can run a deliberately-broken variant of the workflow
+    through the real reader, which is the only way to show the stripping is doing
+    anything.
+    """
+    text = _WORKFLOW.read_text() if text is None else text
     start = text.index("\n  l2-cli-perf:")
     rest = text[start + 1 :]
     out = [rest.split("\n")[0]]
@@ -73,7 +102,7 @@ def _workflow_l2_body() -> str:
         if line and not line.startswith("   ") and not line.lstrip().startswith("#"):
             break
         out.append(line)
-    return "\n".join(out)
+    return _strip_comments("\n".join(out))
 
 
 class TestWhetherToGateIsAskedOfTheGatesOwnRule:
@@ -190,3 +219,54 @@ class TestTheWorkflowAsksTheHarnessWhetherToGate:
         assert "l2-cli-perf:" in body
         assert "l2-cli-extended:" not in body
         assert len(body) < len(_WORKFLOW.read_text())
+
+
+class TestTheWorkflowReaderIgnoresComments:
+    """A commented-out gate must fail the wiring assertions, not satisfy them.
+
+    The invariant, executable rather than asserted in prose: take the REAL
+    workflow, comment out the line each assertion depends on, push it through
+    the real reader, and require the assertion to fail. Without comment
+    stripping both mutations pass, which is exactly the false-positive mode
+    `AGENTS.md` records from an earlier `performance.yml` assertion.
+    """
+
+    @staticmethod
+    def _commented_out(fragment: str) -> str:
+        """The real workflow with the line holding *fragment* commented out."""
+        text = _WORKFLOW.read_text()
+        lines = text.split("\n")
+        hits = [i for i, line in enumerate(lines) if fragment in line]
+        assert hits, f"{fragment!r} is not in the workflow at all"
+        for index in hits:
+            stripped = lines[index].lstrip()
+            indent = lines[index][: len(lines[index]) - len(stripped)]
+            lines[index] = f"{indent}# {stripped}"
+        return "\n".join(lines)
+
+    @pytest.mark.parametrize(
+        "fragment",
+        ["--count-gateable-points", 'if [ "${base_points:-0}" -gt 0 ]'],
+    )
+    def test_commenting_the_line_out_is_detected(self, fragment: str) -> None:
+        body = _workflow_l2_body(self._commented_out(fragment))
+        assert fragment not in body
+
+    @pytest.mark.parametrize(
+        "fragment",
+        ["--count-gateable-points", 'if [ "${base_points:-0}" -gt 0 ]'],
+    )
+    def test_the_mutation_would_pass_without_stripping(self, fragment: str) -> None:
+        """Vacuity guard on the test above: the mutation must really be invisible.
+
+        If this ever fails, the test above proves nothing -- it would be passing
+        because the mutation removed the text rather than because stripping
+        caught it.
+        """
+        assert fragment in self._commented_out(fragment)
+
+    def test_the_real_workflow_still_satisfies_the_assertions(self) -> None:
+        """And stripping must not be so aggressive that the real wiring vanishes."""
+        body = _workflow_l2_body()
+        assert "--count-gateable-points" in body
+        assert 'if [ "${base_points:-0}" -gt 0 ]' in body
