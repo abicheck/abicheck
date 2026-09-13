@@ -96,6 +96,24 @@ _sanitize_annotation() {
   printf '%s' "${1//%/%25}" | tr '\r\n' '  '
 }
 
+# Emit one `::error::` annotation whose message may contain workflow-
+# controlled input, the way `validate-inputs.sh`'s own `_fail` does.
+#
+# Two things matter and both are load-bearing (bug class
+# `trust_boundary.shell_workflow_injection`, the one
+# `tests/test_action_validate_inputs_injection.py` already covers for the
+# validator). A GitHub annotation is line-delimited, so a value carrying a
+# newline ends the annotation and everything after it is parsed as a *new*
+# workflow command -- `_sanitize_annotation` collapses CR/LF and escapes
+# `%` so a percent-encoded break cannot be decoded back into one. And the
+# emit itself is `printf '%s\n'`, never `echo`: a value spelling a literal
+# `\n` is inert under a plain `echo` but becomes a real line under one with
+# `xpg_echo` enabled, which is a build-time default on some bash builds and
+# reachable through `BASHOPTS`/`BASH_ENV`.
+_error_annotation() {
+  printf '%s\n' "::error::$(_sanitize_annotation "$1")"
+}
+
 _mktemp_canonical() {
   if ! _is_path_already_qualified "$1"; then
     printf '%s\n' "$PWD/$1"
@@ -2649,7 +2667,7 @@ fi
 # comment above claims was true only for `mode: compare` -- a direct
 # `mode: dump` run with the input set proceeded to analyse (Codex review).
 if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-  echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+  _error_annotation "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
   exit 1
 fi
 
@@ -2943,11 +2961,11 @@ print("snapshot_path=" + snapshot_path)
 # in its place (Codex review).
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
 if [[ -n "${INPUT_BASELINE_PROFILE:-}" && -z "${INPUT_BASELINE_TARGET:-}" ]]; then
-  echo "::error::baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  _error_annotation "baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
   exit 1
 fi
 if [[ -n "${INPUT_BASELINE_TARGET:-}" && -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
-  echo "::error::baseline-target is set ('${INPUT_BASELINE_TARGET}') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  _error_annotation "baseline-target is set ('${INPUT_BASELINE_TARGET}') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
   exit 1
 fi
 if [[ ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) && -z "$ABI_BASELINE" ]]; then
@@ -2965,7 +2983,7 @@ fi
 case "${INPUT_BASELINE_GENERATION:-}" in
   '') ;;
   *[!0-9]*)
-    echo "::error::baseline-generation '${INPUT_BASELINE_GENERATION}' is not a non-negative integer."
+    _error_annotation "baseline-generation '${INPUT_BASELINE_GENERATION}' is not a non-negative integer."
     exit 1
     ;;
   [0-9]*) ;;
@@ -3103,7 +3121,7 @@ if [[ "$MODE" == "dump" ]]; then
     # dependency install; re-checked here for anyone invoking run.sh
     # directly (e.g. tests) without that step.
     if _is_release_style_operand "${INPUT_NEW_LIBRARY}"; then
-      echo "::error::mode: dump does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY}') — dump snapshots exactly one library. Dump each library individually, or use mode: compare with a directory/package operand instead."
+      _error_annotation "mode: dump does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY}') — dump snapshots exactly one library. Dump each library individually, or use mode: compare with a directory/package operand instead."
       exit 1
     fi
     CMD+=("${INPUT_NEW_LIBRARY}")
@@ -3227,7 +3245,7 @@ elif [[ "$MODE" == "compare" ]]; then
   CMD+=(compare)
   if [[ "$_NO_BASELINE" == "true" ]]; then
     if _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-      echo "::error::mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY:-}') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
+      _error_annotation "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY:-}') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
       exit 1
     fi
     CMD+=(--no-baseline "${INPUT_NEW_LIBRARY:?new-library is required for an audit-only compare (old-library/abi-baseline both omitted)}")
