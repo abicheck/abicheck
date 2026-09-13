@@ -31,15 +31,21 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+from ..elf_symbol_filter import (
+    FUNCTION_SYMBOL_TYPES,
+    VARIABLE_SYMBOL_TYPES,
+    exported_symbol_names,
+)
 from ..model.surface_facts import in_public_surface
 from .surface_reconcile import reconcile_declaration_lists
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot, Function
+    from ..model import AbiSnapshot, Function, Variable
 
 __all__ = [
     "public_functions",
+    "public_variables",
+    "reconciled_public_variables",
     "reconciled_public_function_maps",
     "reconciled_public_functions",
 ]
@@ -127,4 +133,38 @@ def reconciled_public_function_maps(
     return (
         {key(f): f for f in reconciled_old},
         {key(f): f for f in reconciled_new},
+    )
+
+
+def public_variables(snap: AbiSnapshot) -> list[Variable]:
+    """Return the subset of public variables in *snap*."""
+    return [v for v in snap.variables if in_public_surface(v)]
+
+
+def reconciled_public_variables(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[list[Variable], list[Variable]]:
+    """:func:`reconciled_public_functions` for data symbols.
+
+    The CPO detector compares a function population against a *variable*
+    one, so reconciling only the functions would leave the same asymmetry
+    reachable through the other half of its own comparison.
+
+    No alias tier: two differing mangled names are two different exports,
+    and a display-name join would pair declarations that are not the same
+    entity -- the same reasoning ``SymbolIdentityIndex`` records for
+    declining a variable alias tier.
+    """
+    return reconcile_declaration_lists(
+        public_variables(old),
+        public_variables(new),
+        old_all=old.variables,
+        new_all=new.variables,
+        key=lambda v: v.mangled or v.name,
+        old_exported=exported_symbol_names(
+            getattr(old, "elf", None), VARIABLE_SYMBOL_TYPES
+        ),
+        new_exported=exported_symbol_names(
+            getattr(new, "elf", None), VARIABLE_SYMBOL_TYPES
+        ),
     )

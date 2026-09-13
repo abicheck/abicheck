@@ -51,12 +51,13 @@ from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .compare.template_surface import (
     reconciled_public_functions,
+    reconciled_public_variables,
 )
 from .diff_helpers import make_change
-from .model.surface_facts import in_public_surface, is_public_export
+from .model.surface_facts import is_public_export
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot, Function
+    from .model import AbiSnapshot, Function, Variable
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -745,11 +746,9 @@ def detect_cpo_kind_changed(
     only in variables (new), or vice versa, triggers the finding.
     """
 
-    def _func_names(snap: AbiSnapshot) -> set[str]:
+    def _func_names(funcs: list[Function]) -> set[str]:
         out: set[str] = set()
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
                 stem = _strip_param_signature(_strip_template_args(qname))
@@ -767,11 +766,9 @@ def detect_cpo_kind_changed(
                 out.add(stem)
         return out
 
-    def _var_names(snap: AbiSnapshot) -> set[str]:
+    def _var_names(variables: list[Variable]) -> set[str]:
         out: set[str] = set()
-        for v in snap.variables:
-            if not in_public_surface(v):
-                continue
+        for v in variables:
             # castxml never namespace-qualifies Variable.name itself, but a
             # real external-linkage variable's mangled name demangles to the
             # full qualified path (_qualified_function_name works for a
@@ -782,10 +779,15 @@ def detect_cpo_kind_changed(
                 out.add(qname)
         return out
 
-    old_funcs = _func_names(old)
-    old_vars = _var_names(old)
-    new_funcs = _func_names(new)
-    new_vars = _var_names(new)
+    # Reconciled populations on both halves of this comparison -- see
+    # compare/template_surface.py. Functions *and* variables: this detector
+    # compares one against the other, so an asymmetry in either is enough.
+    reconciled_old_funcs, reconciled_new_funcs = reconciled_public_functions(old, new)
+    reconciled_old_vars, reconciled_new_vars = reconciled_public_variables(old, new)
+    old_funcs = _func_names(reconciled_old_funcs)
+    old_vars = _var_names(reconciled_old_vars)
+    new_funcs = _func_names(reconciled_new_funcs)
+    new_vars = _var_names(reconciled_new_vars)
 
     changes: list[Change] = []
 
@@ -851,11 +853,9 @@ def detect_overload_set_rerouted(
     overload (silent re-routing).
     """
 
-    def _by_stem(snap: AbiSnapshot) -> dict[str, list[Function]]:
+    def _by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
         out: dict[str, list[Function]] = defaultdict(list)
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             stem = _strip_template_args(qname)
             out[stem].append(f)
@@ -885,8 +885,9 @@ def detect_overload_set_rerouted(
             sig += f" {ref_qual}"
         return sig
 
-    old_by_stem = _by_stem(old)
-    new_by_stem = _by_stem(new)
+    old_by_stem, new_by_stem = (
+        _by_stem(funcs) for funcs in reconciled_public_functions(old, new)
+    )
 
     changes: list[Change] = []
     for stem in sorted(set(old_by_stem) & set(new_by_stem)):
@@ -982,7 +983,9 @@ def detect_mandatory_template_param_added(
     """
     from .model import ScopeOrigin
 
-    def _arities(snap: AbiSnapshot) -> tuple[dict[str, set[int]], dict[str, bool]]:
+    def _arities(
+        snap: AbiSnapshot, funcs: list[Function]
+    ) -> tuple[dict[str, set[int]], dict[str, bool]]:
         out: dict[str, set[int]] = defaultdict(set)
         # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
         # observation is reliably public — a Visibility.PUBLIC function, or a
@@ -992,9 +995,7 @@ def detect_mandatory_template_param_added(
         # this degrades to "public only if a public function contributed"
         # automatically for the common case.
         is_public: dict[str, bool] = defaultdict(bool)
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             if "<" not in qname:
                 continue
@@ -1015,8 +1016,9 @@ def detect_mandatory_template_param_added(
                     is_public[stem] = True
         return out, is_public
 
-    old_ar, old_public = _arities(old)
-    new_ar, new_public = _arities(new)
+    reconciled_old, reconciled_new = reconciled_public_functions(old, new)
+    old_ar, old_public = _arities(old, reconciled_old)
+    new_ar, new_public = _arities(new, reconciled_new)
 
     changes: list[Change] = []
     for stem in sorted(set(old_ar) & set(new_ar)):
@@ -1093,18 +1095,17 @@ def detect_unspecified_return_now_named(
     they gained or lost a deduced return.
     """
 
-    def _index(snap: AbiSnapshot) -> dict[tuple[str, tuple[str, ...]], str]:
+    def _index(funcs: list[Function]) -> dict[tuple[str, tuple[str, ...]], str]:
         out: dict[tuple[str, tuple[str, ...]], str] = {}
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             key = (qname, tuple(p.type for p in f.params))
             out[key] = f.return_type
         return out
 
-    old_idx = _index(old)
-    new_idx = _index(new)
+    old_idx, new_idx = (
+        _index(funcs) for funcs in reconciled_public_functions(old, new)
+    )
 
     changes: list[Change] = []
     for key in sorted(set(old_idx) & set(new_idx)):

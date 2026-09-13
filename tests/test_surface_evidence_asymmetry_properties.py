@@ -670,6 +670,76 @@ class TestTypeSpellingAndIntegerModelDetectors:
         assert ChangeKind.INTEGER_MODEL_CHANGED in kinds, sorted(k.value for k in kinds)
 
 
+class TestEveryTemplatePatternDetector:
+    """`detect_template_patterns` runs five detectors; all five see the
+    reconciled populations.
+
+    Routing only the first left the rest on raw surfaces, and the pass emits
+    them from one entry point -- so a hidden `Foo<int>` alongside a stable
+    public `Foo<int, int>` read as a minimum-arity rise from 1 to 2 and
+    produced a false breaking `MANDATORY_TEMPLATE_PARAM_ADDED` (Codex review,
+    P1).
+    """
+
+    @staticmethod
+    def _snapshot(*, evidence: bool, arities: tuple[int, ...] = (1, 2)) -> AbiSnapshot:
+        spellings = {
+            1: ("Foo<int>", "_Z3FooIiEvv"),
+            2: ("Foo<int, int>", "_Z3FooIiiEvv"),
+            3: ("Foo<int, int, int>", "_Z3FooIiiiEvv"),
+        }
+        functions = []
+        for i, arity in enumerate(arities):
+            name, mangled = spellings[arity]
+            # The smallest arity is the promised-but-unexported one whose
+            # contract evidence varies; the rest are stably public, so any
+            # finding must come from the varied one alone.
+            hidden = i == 0
+            functions.append(
+                Function(
+                    name=name,
+                    mangled=mangled,
+                    return_type="void",
+                    visibility=Visibility.HIDDEN if hidden else Visibility.PUBLIC,
+                    in_public_contract_fact=(
+                        _contract(evidence) if hidden else Fact.present(True)
+                    ),
+                )
+            )
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            functions=functions,
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z3FooIiiEvv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @given(evidence_on_old=st.booleans())
+    @settings(deadline=None, max_examples=10)
+    def test_no_template_pattern_finding_is_manufactured_by_an_evidence_gap(
+        self, evidence_on_old: bool
+    ) -> None:
+        from abicheck.diff_templates import detect_template_patterns
+
+        old = self._snapshot(evidence=evidence_on_old)
+        new = self._snapshot(evidence=not evidence_on_old)
+        assert detect_template_patterns(old, new) == []
+
+    def test_a_real_minimum_arity_rise_still_reports(self) -> None:
+        """The complement: the detector is routed, not disabled. Both sides
+        carry evidence and the smallest instantiation genuinely goes away."""
+        from abicheck.diff_templates import detect_template_patterns
+
+        old = self._snapshot(evidence=True, arities=(1, 2))
+        new = self._snapshot(evidence=True, arities=(2, 3))
+        assert ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED in {
+            c.kind for c in detect_template_patterns(old, new)
+        }
+
+
 class TestReconciliationIsScopedToOneComparison:
     """The per-pair memo may not outlive the comparison that built it.
 
