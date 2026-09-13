@@ -34,11 +34,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
-from _workflow_exec import bash_executable, require_bash
+from _action_run_sh_harness import _run_action
 
 ACTION_DIR = Path(__file__).resolve().parent.parent / "action"
 RUN_SH = ACTION_DIR / "run.sh"
@@ -101,49 +100,6 @@ def _stub_abicheck(
     )
     stub.chmod(0o755)
     return bindir
-
-
-def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
-    """Run ``action/run.sh`` and return its ``GITHUB_OUTPUT`` key/value pairs."""
-    require_bash()
-    out = tmp_path / "github_output"
-    out.write_text("", encoding="utf-8")
-    summary = tmp_path / "step_summary"
-    summary.write_text("", encoding="utf-8")
-    # Its own directory so a test can assert the run left no scratch files
-    # behind, without seeing another test's (or the system's) temp files.
-    runner_temp = tmp_path / "runner_temp"
-    runner_temp.mkdir(exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
-    env.update(
-        {
-            "PATH": f"{bindir}{os.pathsep}{env.get('PATH', '')}",
-            "ACTION_PATH": str(ACTION_DIR),
-            "GITHUB_OUTPUT": str(out),
-            "GITHUB_STEP_SUMMARY": str(summary),
-            "RUNNER_TEMP": str(runner_temp),
-            "INPUT_ADD_JOB_SUMMARY": "true",
-            **env_extra,
-        }
-    )
-    proc = subprocess.run(
-        [bash_executable(), str(RUN_SH)],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=tmp_path,
-        check=False,
-    )
-    outputs = {}
-    for line in out.read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            outputs[key] = value
-    outputs["_stdout"] = proc.stdout
-    outputs["_exit"] = proc.returncode
-    outputs["_summary"] = summary.read_text(encoding="utf-8")
-    outputs["_runner_temp"] = str(runner_temp)
-    return outputs
 
 
 def _shadow_path_without(tmp_path: Path, missing: str) -> Path:

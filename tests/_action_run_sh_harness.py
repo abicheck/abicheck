@@ -35,6 +35,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _tmp_tree_resilience import run_writing_env_files
 from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
@@ -134,11 +135,8 @@ def _lib(tmp_path: Path, name: str) -> str:
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
     require_bash()
     out = tmp_path / "github_output"
-    out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"
-    summary.write_text("", encoding="utf-8")
     runner_temp = tmp_path / "runner_temp"
-    runner_temp.mkdir(exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env.update(
         {
@@ -151,22 +149,48 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             **env_extra,
         }
     )
-    proc = subprocess.run(
-        [bash_executable(), str(RUN_SH)],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=tmp_path,
-        check=False,
+
+    runner_temp.mkdir(exist_ok=True)
+
+    # Through `run_writing_env_files`, not a bare `subprocess.run`: the step is
+    # re-run against recreated files if either file it writes did not survive
+    # the call -- see tests/_tmp_tree_resilience.py for why that is recovery
+    # rather than tolerance, and why a deletion that reaches this `tmp_path`
+    # (taking `bindir`'s stub and the input libraries with it) is refused
+    # instead of retried. BOTH files are named, because both are read back
+    # below: guarding only `$GITHUB_OUTPUT` left `$GITHUB_STEP_SUMMARY`'s own
+    # read outside the retry boundary, which is the same bug one file to the
+    # right (CodeRabbit, PR #1292). `retry=True` is safe *here* specifically:
+    # this harness owns both sinks and resets them between attempts, and no
+    # caller passes a `$GITHUB_OUTPUT`/`$GITHUB_STEP_SUMMARY` of its own
+    # through `env_extra` -- which is exactly the precondition `run_step`
+    # cannot make, so it does not opt in.
+    def _run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
+        )
+
+    proc, (out_bytes, summary_bytes) = run_writing_env_files(
+        [out, summary], _run, retry=True
     )
     outputs: dict = {}
-    for line in out.read_text(encoding="utf-8").splitlines():
+    for line in out_bytes.decode("utf-8", errors="replace").splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
             outputs[key] = value
     outputs["_stdout"] = proc.stdout
     outputs["_exit"] = proc.returncode
-    outputs["_summary"] = summary.read_text(encoding="utf-8")
+    outputs["_summary"] = summary_bytes.decode("utf-8", errors="replace")
+    # Published so a test can assert the run left no scratch file behind in its
+    # own private `$RUNNER_TEMP`, without seeing another test's (or the
+    # system's) temp files. Carried over from the duplicate `_run_action` in
+    # `test_action_coverage_verdict.py`, which this now replaces.
+    outputs["_runner_temp"] = str(runner_temp)
     return outputs
 
 

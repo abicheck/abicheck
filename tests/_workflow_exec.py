@@ -45,6 +45,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _tmp_tree_resilience import run_writing_env_file
 
 #: Distinguishes the per-invocation step-body script files `run_step` writes,
 #: so two calls sharing one tmp_path never race on the same name.
@@ -380,7 +381,6 @@ def run_step(
     export something the workflow relies on.
     """
     github_output = workspace / "_github_output"
-    github_output.write_text("", encoding="utf-8")
 
     step_env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -389,7 +389,6 @@ def run_step(
         "GITHUB_WORKSPACE": str(workspace),
         "RUNNER_TEMP": str(workspace / "_runner_temp"),
     }
-    (workspace / "_runner_temp").mkdir(exist_ok=True)
     # The step's own declared env, with unresolved ${{ }} expressions left to
     # the caller to substitute — a test that forgets is passing a literal
     # expression, which is visible rather than silently empty.
@@ -420,35 +419,46 @@ def run_step(
     # launcher on a stub-only runner, which is what `_assurance_overlay_exec`
     # was doing (Codex review, PR #1255).
     require_bash()
-    body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
-    body.write_bytes(step["run"].encode("utf-8"))
-    # Git Bash wants forward slashes, but a backslash is a legal *filename*
-    # character on POSIX, so rewriting one unconditionally would corrupt a real
-    # path (a workspace under `with\backslash/` would be run from
-    # `with/backslash/`, i.e. "No such file or directory" -- Codex review,
-    # PR #1230). Convert only where the separator actually differs.
-    script_arg = body.as_posix() if os.name == "nt" else str(body)
-    try:
-        proc = subprocess.run(
-            # `-e` as well as pipefail: the runner invokes a `run:` body as
-            # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without
-            # it a command failing mid-body left returncode 0 here while the
-            # real step failed — every `assert result.returncode == 0` in the
-            # workflow tests was weaker than the thing it models (CodeRabbit
-            # review).
-            [bash_executable(), "-eo", "pipefail", script_arg],
-            cwd=workspace,
-            env=step_env,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    finally:
-        # Unconditional, so a timeout or a spawn failure does not leave the
-        # script behind either: a caller passing a workspace whose parent is
-        # not itself a pytest-managed temporary directory would otherwise
-        # accumulate one file per step (CodeRabbit review, PR #1230).
-        body.unlink(missing_ok=True)
+
+    def _run() -> subprocess.CompletedProcess[str]:
+        # Inside the retry, not before it: `run_writing_env_file` rebuilds the
+        # tree under `$GITHUB_OUTPUT` before each attempt, and the step body,
+        # the workspace it runs in and `$RUNNER_TEMP` all live in that same
+        # tree -- whatever removed one removed them beside it.
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "_runner_temp").mkdir(parents=True, exist_ok=True)
+        body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
+        body.parent.mkdir(parents=True, exist_ok=True)
+        body.write_bytes(step["run"].encode("utf-8"))
+        # Git Bash wants forward slashes, but a backslash is a legal *filename*
+        # character on POSIX, so rewriting one unconditionally would corrupt a real
+        # path (a workspace under `with\backslash/` would be run from
+        # `with/backslash/`, i.e. "No such file or directory" -- Codex review,
+        # PR #1230). Convert only where the separator actually differs.
+        script_arg = body.as_posix() if os.name == "nt" else str(body)
+        try:
+            proc = subprocess.run(
+                # `-e` as well as pipefail: the runner invokes a `run:` body as
+                # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without
+                # it a command failing mid-body left returncode 0 here while the
+                # real step failed — every `assert result.returncode == 0` in the
+                # workflow tests was weaker than the thing it models (CodeRabbit
+                # review).
+                [bash_executable(), "-eo", "pipefail", script_arg],
+                cwd=workspace,
+                env=step_env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        finally:
+            # Unconditional, so a timeout or a spawn failure does not leave the
+            # script behind either: a caller passing a workspace whose parent is
+            # not itself a pytest-managed temporary directory would otherwise
+            # accumulate one file per step (CodeRabbit review, PR #1230).
+            body.unlink(missing_ok=True)
+        return proc
+
     # `$GITHUB_OUTPUT` is written by the step, not by us, so its bytes are
     # whatever the runner's shell produced. On Windows a non-ASCII input
     # reaches Git Bash through the ANSI code page and comes back as cp1252,
@@ -457,7 +467,16 @@ def run_step(
     # does not weaken any assertion: an undecodable byte becomes U+FFFD, which
     # is not alphanumeric, so a byte that survived sanitization still fails
     # the checks that matter.
-    decoded = github_output.read_bytes().decode("utf-8", errors="replace")
+    # No `retry=True`: a caller may pass its own `$GITHUB_STEP_SUMMARY` (or any
+    # other sink) through `env` and read it back itself, and workflow steps
+    # *append* to it -- so re-running the body after a recovered
+    # `$GITHUB_OUTPUT` loss would hand that caller a summary holding its entry
+    # twice, an effect no single run of the step produces (Codex review,
+    # PR #1292, against tests/test_mutation_workflow_execution.py). `run_step`
+    # cannot reset a sink it was never told about, so the loss is attributed
+    # and reported here rather than papered over with a fabricated second run.
+    proc, output_bytes = run_writing_env_file(github_output, _run)
+    decoded = output_bytes.decode("utf-8", errors="replace")
     lines = [line for line in decoded.splitlines() if line != ""]
     return StepResult(
         returncode=proc.returncode,
