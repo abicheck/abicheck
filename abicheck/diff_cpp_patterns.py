@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING
 from .checker_types import Change
 from .compare.template_surface import (
     qualified_declaration_name as _qualified_function_name,
+    reconciled_abi_visible_functions,
 )
 from .diff_helpers import make_change
 
@@ -221,8 +222,7 @@ def detect_sycl_overload_set_removal(
     # included for consistency with the sibling ISA-dropped detector, though
     # a param-type check can't fire in symbols-only mode anyway (no header
     # info means Function.params is always empty there).
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
     new_mangled = {f.mangled for f in new_funcs}
     # Bare-name -> {distinct qualified_names}, merged from both sides, so a
     # bare param spelling (``queue&``) can be resolved to its real namespace
@@ -513,8 +513,7 @@ def detect_cpu_dispatch_isa_dropped(
     # this detector is calibrated as an L0 (symbols-only) signal, where every
     # real exported function is ELF_ONLY, never PUBLIC; excluding it would
     # empty out old_funcs/new_funcs and silently disable case83 in that mode.
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
     new_mangled = {f.mangled for f in new_funcs}
     removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
     all_surviving_stems = _build_all_surviving_stems(new_funcs)
@@ -821,8 +820,7 @@ def detect_default_template_arg_changed(
 
     old.index()
     new.index()
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
     new_mangled = {f.mangled for f in new_funcs}
     removed = [f for f in old_funcs if f.mangled not in new_mangled]
     # Key by *qualified* callable stem (full namespace path with all

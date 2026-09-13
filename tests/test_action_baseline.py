@@ -38,7 +38,8 @@ from pathlib import Path
 import pytest
 from _workflow_exec import bash_executable, require_bash
 
-ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "baseline"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ACTION_DIR = REPO_ROOT / "actions" / "baseline"
 RUN_SH = ACTION_DIR / "run.sh"
 
 _GCC = shutil.which("gcc")
@@ -160,6 +161,52 @@ class TestBuildConfigInput:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
+class TestBuildConfigReachesTheDocumentedPublishers:
+    """The two workflows users actually call must expose and forward it.
+
+    `actions/baseline` taking the input is not enough on its own: every
+    documented path to a published baseline goes through
+    `publish-baseline.yml` or `update-main-baseline.yml`, and neither
+    declared `build-config` nor passed it down -- so the extraction mismatch
+    the input exists to close was still reachable through the supported
+    workflow (Codex review). Asserting the *wiring*, not the presence of a
+    string: a declared-but-unforwarded input reads exactly like a fixed one.
+    """
+
+    WORKFLOWS = (
+        ".github/workflows/publish-baseline.yml",
+        ".github/workflows/update-main-baseline.yml",
+    )
+
+    @pytest.mark.parametrize("workflow", WORKFLOWS)
+    def test_the_input_is_declared_and_forwarded(self, workflow: str) -> None:
+        import yaml
+
+        document = yaml.safe_load((REPO_ROOT / workflow).read_text())
+        # PyYAML parses the bare `on:` key as the boolean True.
+        triggers = document.get("on", document.get(True, {}))
+        declared = triggers["workflow_call"]["inputs"]
+        assert "build-config" in declared, (
+            f"{workflow} does not expose build-config, so a caller cannot supply one"
+        )
+
+        forwarded = [
+            step
+            for job in document["jobs"].values()
+            for step in job.get("steps", [])
+            if isinstance(step.get("uses"), str)
+            and step["uses"].endswith("actions/baseline")
+        ]
+        assert forwarded, f"{workflow} no longer invokes actions/baseline"
+        for step in forwarded:
+            assert step.get("with", {}).get("build-config") == (
+                "${{ inputs.build-config }}"
+            ), (
+                f"{workflow} declares build-config but does not pass it to "
+                "actions/baseline"
+            )
+
+
 class TestValidationInputRejected:
     def test_unknown_validation_value_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action(

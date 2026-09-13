@@ -37,14 +37,16 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
 )
 from ..model import Function
-from ..model.surface_facts import in_public_surface
+from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import reconcile_declaration_lists
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Variable
 
 __all__ = [
+    "abi_visible_functions",
     "public_functions",
+    "reconciled_abi_visible_functions",
     "public_variables",
     "reconciled_cpo_surfaces",
     "reconciled_public_variables",
@@ -283,3 +285,38 @@ def cpo_identity(
     """
     qname = qualified_declaration_name(decl.name, decl.mangled) or decl.name
     return function_stem(qname) if isinstance(decl, Function) else qname
+
+
+def abi_visible_functions(snap: AbiSnapshot) -> list[Function]:
+    """The functions in *snap* that participate in the binary contract."""
+    return [f for f in snap.functions if is_abi_visible(f)]
+
+
+def reconciled_abi_visible_functions(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[list[Function], list[Function]]:
+    """:func:`reconciled_public_functions` for the detectors that select on
+    :func:`~abicheck.model.surface_facts.is_abi_visible`.
+
+    That predicate is the union "exported *or* promised", so it inherits the
+    same gap: a promised-but-unexported declaration is ABI-visible only on
+    the side whose run established the promise. The const-overload and SYCL
+    overload-set detectors compare *sets* of such declarations, so the
+    asymmetry read as a removed overload -- a false `REMOVED_CONST_OVERLOAD`
+    and a false `SYCL_OVERLOAD_SET_REMOVED` on identical declarations (Codex
+    review, P1).
+    """
+    return reconcile_declaration_lists(
+        abi_visible_functions(old),
+        abi_visible_functions(new),
+        old_all=old.functions,
+        new_all=new.functions,
+        key=lambda f: f.mangled or f.name,
+        alias_key=lambda f: f.name,
+        old_exported=exported_symbol_names(
+            getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
+        ),
+        new_exported=exported_symbol_names(
+            getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
+        ),
+    )

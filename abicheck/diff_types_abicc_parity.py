@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .checker_types import Change
+from .compare.template_surface import reconciled_abi_visible_functions
 from .detector_registry import registry
 from .diff_helpers import (
     build_type_map as _build_type_map,
@@ -49,7 +50,6 @@ from .diff_types_surface import (
 )
 from .model import AbiSnapshot, Function, TypeField, stdlib_namespaces_excluded
 from .model.change_catalog.kinds import ChangeKind
-from .model.surface_facts import is_abi_visible
 
 
 @registry.detector("var_values")
@@ -229,8 +229,8 @@ def _diff_const_overloads(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     existed in old, but only the non-const version remains in new.
     """
     changes: list[Change] = []
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    # Reconciled, not raw -- see compare/template_surface.py.
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
 
     # Group by (name, param_signature) to find const/non-const pairs
     _ParamSig = tuple[str, int, str]  # (type, pointer_depth, kind)
