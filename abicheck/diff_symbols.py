@@ -90,13 +90,12 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _scalar_repr as _scalar_repr,
 )
 from .diff_symbols_variables import (
-    _check_variable_alignment,
+    _check_variable,
     _is_access_narrowing,
     _observed_exports,
     _public_variables,
     _var_added,
     _var_removed,
-    _without_top_level_const,
     var_access_changes,
 )
 from .elf_symbol_filter import (
@@ -125,7 +124,6 @@ from .model import (
     Param,
     ParamKind,
     RecordType,
-    Variable,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
@@ -976,6 +974,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # cross-checks each candidate against the OLD artifact's own export
     # table (see `_match_old_function`'s `old_exported_symbols`).
     _old_exported_functions = _observed_exports(old, FUNCTION_SYMBOL_TYPES)
+    _new_exported_functions = _observed_exports(new, FUNCTION_SYMBOL_TYPES)
     old_map = _public_functions(old)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``_public_functions`` returns -- so every loop below is
@@ -1041,6 +1040,31 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if mangled in ctor_dtor_consumed_new:
             continue
         if mangled not in old_map and f_new.name not in matched_by_name:
+            # The mirror of the removal-side guard above, and not optional
+            # symmetry (Codex review, P2): when it is the OLD side that
+            # lacks contract evidence, the same unchanged declaration
+            # *enters* the compared surface and reads as an addition. Same
+            # predicate, sides swapped, same outcome -- compare the pair.
+            f_old_all = old.function_map.get(mangled)
+            if (
+                f_old_all is not None
+                and _export_transition.surface_exit_is_evidence_gap(
+                    f_new,
+                    f_old_all,
+                    old_exported_symbols=_new_exported_functions,
+                    key=mangled,
+                )
+            ):
+                changes.extend(
+                    _check_function_signature(
+                        mangled,
+                        f_old_all,
+                        f_new,
+                        params_unconfirmed=params_unconfirmed,
+                        is_llp64=is_llp64,
+                    )
+                )
+                continue
             virtual_break = virtual_method_addition(
                 f_new,
                 old_owner_classes,
@@ -1198,82 +1222,6 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     return changes
 
 
-def _check_variable(
-    mangled: str, v_old: Variable, v_new: Variable, *, cv_facts_reliable: bool = True
-) -> list[Change]:
-    """Compare a matched pair of public variables.
-
-    *cv_facts_reliable* mirrors ``diff_types._field_type_genuinely_changed``:
-    a pre-v9 CastXML snapshot silently dropped ``volatile`` from a variable's
-    type spelling (no dedicated ``is_volatile`` fact to fall back on, unlike
-    ``TypeField``), so an unchanged legacy-vs-fresh pair would otherwise
-    misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
-    """
-    changes = _check_variable_alignment(mangled, v_old, v_new)
-    # The export axis is independent of every type/qualifier comparison below
-    # and must survive their early returns -- an unknown "?" type on a
-    # stripped side says nothing about whether the symbol is still exported --
-    # so it is folded in first (compare/export_transition.py).
-    changes += _export_transition.check_variable(mangled, v_old, v_new)
-    # RD2-5: a stripped side reports type "?"; unknown is not a type change.
-    if _type_unknown(v_old.type) or _type_unknown(v_new.type):
-        return changes
-    canon_old = canonicalize_type_name(v_old.type)
-    canon_new = canonicalize_type_name(v_new.type)
-    if canon_old != canon_new:
-        # A pure TOP-LEVEL const-qualifier flip is a real, common case where
-        # the type strings differ (the dumper bakes "const" into the type
-        # text) but the base type is otherwise identical — that's a const
-        # transition (below), not a base-type change. Only the trailing
-        # (top-level) const is stripped for this comparison — a pointee-level
-        # const (e.g. `int *` -> `const int *`) must still fall through to
-        # VAR_TYPE_CHANGED, since the pointer itself didn't become const.
-        is_pure_const_flip = (
-            v_old.is_const != v_new.is_const
-            and _without_top_level_const(canon_old)
-            == _without_top_level_const(canon_new)
-        )
-        if not is_pure_const_flip:
-            if not cv_facts_reliable and func_signature_cv_only_differ(
-                canon_old, canon_new
-            ):
-                # Legacy-snapshot cv noise: the type-string difference itself
-                # is untrustworthy (see this function's docstring), so don't
-                # fall through to the const-transition check below either —
-                # is_const may be equally unreliable for the same reason,
-                # and falling through would just resurface the same false
-                # positive as VAR_BECAME_CONST/VAR_LOST_CONST instead of
-                # VAR_TYPE_CHANGED (Codex review, PR #589).
-                return changes
-            return changes + [
-                make_change(
-                    ChangeKind.VAR_TYPE_CHANGED,
-                    symbol=mangled,
-                    name=v_old.name,
-                    old=v_old.type,
-                    new=v_new.type,
-                    entity_id=v_old.entity_id or v_new.entity_id,
-                )
-            ]
-    # const-qualification transitions only matter when the type is unchanged.
-    return changes + bool_transition(
-        v_old.is_const,
-        v_new.is_const,
-        mangled,
-        added=(
-            ChangeKind.VAR_BECAME_CONST,
-            f"Variable became const-qualified: {v_old.name} (writes now → SIGSEGV)",
-        ),
-        added_values=("non-const", "const"),
-        removed=(
-            ChangeKind.VAR_LOST_CONST,
-            f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
-        ),
-        removed_values=("const", "non-const"),
-        entity_id=v_old.entity_id or v_new.entity_id,
-    )
-
-
 @registry.detector("variables")
 def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Diff public variables, joined through the shared identity index.
@@ -1291,6 +1239,7 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
     _old_exported_variables = _observed_exports(old, VARIABLE_SYMBOL_TYPES)
+    _new_exported_variables = _observed_exports(new, VARIABLE_SYMBOL_TYPES)
     old_vars = _public_variables(old)
     new_vars_index = SymbolIdentityIndex.for_variables(_public_variables(new))
     _prewarm_elf_only_demangling(old_vars, new_vars_index)
@@ -1298,15 +1247,11 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
         on_removed=lambda m, v: _var_removed(
-            m,
-            v,
-            new.variable_map,
-            _old_exported_variables,
-            compare_surviving=lambda k, o, n: _check_variable(
-                k, o, n, cv_facts_reliable=cv_facts_reliable
-            ),
+            m, v, new.variable_map, _old_exported_variables, cv_facts_reliable
         ),
-        on_added=_var_added,
+        on_added=lambda m, v: _var_added(
+            m, v, old.variable_map, _new_exported_variables, cv_facts_reliable
+        ),
         on_common=lambda m, o, n: _check_variable(
             m, o, n, cv_facts_reliable=cv_facts_reliable
         ),

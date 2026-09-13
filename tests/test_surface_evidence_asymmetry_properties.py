@@ -45,8 +45,13 @@ from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.fact import Fact
 from abicheck.model.snapshot import AbiSnapshot
 
-#: The kinds this class manufactures. A finding of any other kind is not
-#: what these tests are about and is left to the rest of the suite.
+#: The kinds this class manufactures. Both directions, deliberately: the
+#: asymmetry is symmetric, so a declaration can be pushed *out* of the
+#: compared surface (a removal/visibility finding) or pulled *into* it (an
+#: addition), depending on which side happens to hold the contract
+#: evidence. An earlier revision of this set listed only the exit kinds,
+#: which left the entry half of the same defect passing (Codex review, P2)
+#: -- the fix and the invariant must cover both or the claim overstates.
 _SURFACE_EXIT_KINDS = frozenset(
     {
         ChangeKind.FUNC_VISIBILITY_CHANGED,
@@ -54,6 +59,8 @@ _SURFACE_EXIT_KINDS = frozenset(
         ChangeKind.FUNC_REMOVED_ELF_ONLY,
         ChangeKind.INLINE_FUNCTION_REMOVED,
         ChangeKind.VAR_REMOVED,
+        ChangeKind.FUNC_ADDED,
+        ChangeKind.VAR_ADDED,
     }
 )
 
@@ -266,6 +273,31 @@ class TestReleaseJobMemoryBudgetIsDepthAware:
 
         for depth in (None, "", "not-a-rung"):
             assert release_job_mem_budget_gib(depth) == _RELEASE_JOB_MEM_BUDGET_GIB
+
+    def test_header_roots_alone_size_the_worker_as_header_depth(self) -> None:
+        """`--depth` is a floor, not a description of the run.
+
+        It is `None` for an ordinary `compare OLD_DIR NEW_DIR --header ...`,
+        and the pipeline then infers header evidence from the roots. Sizing
+        off the raw option budgets such a worker as binary depth -- four to
+        six times too many workers, the overcommit the table exists to
+        prevent (Codex review, P1).
+        """
+        from abicheck.workflows.release_jobs import (
+            release_job_mem_budget_gib,
+            sizing_depth,
+        )
+
+        assert sizing_depth(None, header_roots=True) == "headers"
+        assert sizing_depth(None, header_roots=False) is None
+        # An explicit rung always wins, in both directions: a run pinned to
+        # binary depth is not re-sized upward merely for carrying roots, and
+        # a deeper pin is never narrowed to "headers".
+        assert sizing_depth("binary", header_roots=True) == "binary"
+        assert sizing_depth("source", header_roots=False) == "source"
+        assert release_job_mem_budget_gib(
+            sizing_depth(None, header_roots=True)
+        ) > release_job_mem_budget_gib(sizing_depth(None, header_roots=False))
 
     def test_an_explicit_override_wins_at_every_depth(
         self, monkeypatch: object

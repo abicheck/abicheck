@@ -17,10 +17,14 @@
 
   Such a disagreement is now read as the evidence gap it is -- the same rule
   the matched-pair export path already applied ("exported before, unknown
-  now" is a gap, not a transition). The fix narrows conclusions only: a
-  declaration genuinely gone from the new side, an export the old artifact's
-  own table confirms it had, and a new side whose producer *observed* the
-  declaration out of the public contract all still report exactly as before.
+  now" is a gap, not a transition) -- in both directions, since the same
+  unchanged declaration reads as an *addition* when it is the old side that
+  lacks the evidence. The surviving declaration is then compared rather than
+  dropped, so a real return-type or variable-type change on it is still
+  reported. The fix narrows conclusions only: a declaration genuinely gone
+  from the new side, an export the old artifact's own table confirms it had,
+  and a new side whose producer *observed* the declaration out of the public
+  contract all still report exactly as before.
 
 ### Added
 

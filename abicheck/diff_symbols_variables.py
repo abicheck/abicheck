@@ -23,7 +23,6 @@ cycle). ``diff_symbols._check_variable`` is the sole caller.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
 from typing import Any
 
 from .checker_types import Change
@@ -32,7 +31,7 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
 from .compare.fact_comparison import compare_facts
-from .diff_helpers import make_change
+from .diff_helpers import bool_transition, make_change
 from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import (
     exported_symbol_names,
@@ -45,7 +44,12 @@ from .model.surface_facts import (
     is_export_table_only_record,
     surface_fact_summary,
 )
-from .name_classification import _find_matching_close, is_local_rtti_symbol
+from .name_classification import (
+    _find_matching_close,
+    canonicalize_type_name,
+    func_signature_cv_only_differ,
+    is_local_rtti_symbol,
+)
 
 
 def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
@@ -331,13 +335,23 @@ def _without_top_level_const(canonical_type: str) -> str:
     return _TRAILING_CONST_RE.sub("", stripped)
 
 
+_UNKNOWN_TYPE = "?"
+
+
+def _type_unknown(type_name: str | None) -> bool:
+    """An unresolved type spelling -- a stripped side's placeholder, not a
+    real type. Mirrors ``diff_symbols``' own predicate of the same name; the
+    two are independent one-liners over the same sentinel rather than a
+    cross-module import between two modules that already import one way."""
+    return type_name is None or type_name.strip() == _UNKNOWN_TYPE
+
+
 def _var_removed(
     mangled: str,
     v_old: Variable,
     new_all: dict[str, Variable] | None = None,
     old_exported_symbols: frozenset[str] = frozenset(),
-    compare_surviving: Callable[[str, Variable, Variable], Iterable[Change]]
-    | None = None,
+    cv_facts_reliable: bool = True,
 ) -> list[Change]:
     """A public variable with no peer in the NEW side's public surface.
 
@@ -348,12 +362,9 @@ def _var_removed(
     ``export_transition.surface_exit_is_evidence_gap``. Defaulted so a
     caller with no full map behaves exactly as before.
 
-    *compare_surviving* is the matched-pair comparison to run on such a
-    surviving declaration instead (``diff_symbols._check_variable``, passed
-    in because that function lives in the module which imports *this* one).
-    Omitted, the pair is simply not reported -- but every production caller
-    passes it, since a real type change on a surviving declaration must
-    still be reported (Codex review, P1).
+    Such a surviving declaration is then *compared* (:func:`_check_variable`)
+    rather than reported as removed: a real type change on it must still be
+    reported (Codex review, P1).
     """
     v_new = None if new_all is None else new_all.get(mangled)
     if v_new is not None and _export_transition.surface_exit_is_evidence_gap(
@@ -366,10 +377,8 @@ def _var_removed(
         # reasoning at `diff_symbols._match_old_function`'s own call: the
         # declaration is on both sides, so a real type or const-qualification
         # change on it is still comparable and must still be reported.
-        return (
-            []
-            if compare_surviving is None
-            else list(compare_surviving(mangled, v_old, v_new))
+        return _check_variable(
+            mangled, v_old, v_new, cv_facts_reliable=cv_facts_reliable
         )
     return [
         make_change(
@@ -386,7 +395,31 @@ def _var_removed(
     ]
 
 
-def _var_added(mangled: str, v_new: Variable) -> list[Change]:
+def _var_added(
+    mangled: str,
+    v_new: Variable,
+    old_all: dict[str, Variable] | None = None,
+    new_exported_symbols: frozenset[str] = frozenset(),
+    cv_facts_reliable: bool = True,
+) -> list[Change]:
+    """A public variable with no peer in the OLD side's public surface.
+
+    The mirror of :func:`_var_removed`'s own guard (Codex review, P2): when
+    it is the OLD side that lacks contract evidence, the same unchanged
+    declaration *enters* the compared surface and reads as an addition. Same
+    predicate with the sides swapped, same outcome -- the surviving pair is
+    compared, not reported as new.
+    """
+    v_old = None if old_all is None else old_all.get(mangled)
+    if v_old is not None and _export_transition.surface_exit_is_evidence_gap(
+        v_new,
+        v_old,
+        old_exported_symbols=new_exported_symbols,
+        key=mangled,
+    ):
+        return _check_variable(
+            mangled, v_old, v_new, cv_facts_reliable=cv_facts_reliable
+        )
     return [
         make_change(
             ChangeKind.VAR_ADDED,
@@ -439,3 +472,79 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
             and not is_local_rtti_symbol(k)
         )
     }
+
+
+def _check_variable(
+    mangled: str, v_old: Variable, v_new: Variable, *, cv_facts_reliable: bool = True
+) -> list[Change]:
+    """Compare a matched pair of public variables.
+
+    *cv_facts_reliable* mirrors ``diff_types._field_type_genuinely_changed``:
+    a pre-v9 CastXML snapshot silently dropped ``volatile`` from a variable's
+    type spelling (no dedicated ``is_volatile`` fact to fall back on, unlike
+    ``TypeField``), so an unchanged legacy-vs-fresh pair would otherwise
+    misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
+    """
+    changes = _check_variable_alignment(mangled, v_old, v_new)
+    # The export axis is independent of every type/qualifier comparison below
+    # and must survive their early returns -- an unknown "?" type on a
+    # stripped side says nothing about whether the symbol is still exported --
+    # so it is folded in first (compare/export_transition.py).
+    changes += _export_transition.check_variable(mangled, v_old, v_new)
+    # RD2-5: a stripped side reports type "?"; unknown is not a type change.
+    if _type_unknown(v_old.type) or _type_unknown(v_new.type):
+        return changes
+    canon_old = canonicalize_type_name(v_old.type)
+    canon_new = canonicalize_type_name(v_new.type)
+    if canon_old != canon_new:
+        # A pure TOP-LEVEL const-qualifier flip is a real, common case where
+        # the type strings differ (the dumper bakes "const" into the type
+        # text) but the base type is otherwise identical — that's a const
+        # transition (below), not a base-type change. Only the trailing
+        # (top-level) const is stripped for this comparison — a pointee-level
+        # const (e.g. `int *` -> `const int *`) must still fall through to
+        # VAR_TYPE_CHANGED, since the pointer itself didn't become const.
+        is_pure_const_flip = (
+            v_old.is_const != v_new.is_const
+            and _without_top_level_const(canon_old)
+            == _without_top_level_const(canon_new)
+        )
+        if not is_pure_const_flip:
+            if not cv_facts_reliable and func_signature_cv_only_differ(
+                canon_old, canon_new
+            ):
+                # Legacy-snapshot cv noise: the type-string difference itself
+                # is untrustworthy (see this function's docstring), so don't
+                # fall through to the const-transition check below either —
+                # is_const may be equally unreliable for the same reason,
+                # and falling through would just resurface the same false
+                # positive as VAR_BECAME_CONST/VAR_LOST_CONST instead of
+                # VAR_TYPE_CHANGED (Codex review, PR #589).
+                return changes
+            return changes + [
+                make_change(
+                    ChangeKind.VAR_TYPE_CHANGED,
+                    symbol=mangled,
+                    name=v_old.name,
+                    old=v_old.type,
+                    new=v_new.type,
+                    entity_id=v_old.entity_id or v_new.entity_id,
+                )
+            ]
+    # const-qualification transitions only matter when the type is unchanged.
+    return changes + bool_transition(
+        v_old.is_const,
+        v_new.is_const,
+        mangled,
+        added=(
+            ChangeKind.VAR_BECAME_CONST,
+            f"Variable became const-qualified: {v_old.name} (writes now → SIGSEGV)",
+        ),
+        added_values=("non-const", "const"),
+        removed=(
+            ChangeKind.VAR_LOST_CONST,
+            f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
+        ),
+        removed_values=("const", "non-const"),
+        entity_id=v_old.entity_id or v_new.entity_id,
+    )
