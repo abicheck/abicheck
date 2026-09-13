@@ -36,7 +36,6 @@ from ..checker import compare
 from ..dumper import dump
 from ..errors import ProfileMismatchError, ScopeMismatchError
 from ..html_report import write_html_report
-from ..model.header_exclusion_record import record_header_exclusions
 from ..reporter import to_json, to_markdown
 from ..serialization import save_snapshot
 from ..workflows.extraction import (
@@ -93,6 +92,7 @@ from .multi_library_run import (
 from .run_inputs import (
     _emit_compat_info_notes,
     _load_compat_inputs,
+    record_descriptor_skips,
 )
 from .xml_report import write_xml_report
 
@@ -384,7 +384,7 @@ def compat_dump_cmd(
     # call: a snapshot that forgot the patterns it was narrowed under claims
     # a complete surface, and is then compared against a full dump as though
     # the missing declarations had been removed.
-    snap = record_header_exclusions(snap, sorted(skip_for_dump))
+    snap = record_descriptor_skips(snap, sorted(skip_for_dump), quiet)
 
     # Override library name to match -lib flag
     from dataclasses import replace as _replace  # noqa: PLC0415
@@ -1248,7 +1248,7 @@ def _snapshot_from_compat_input(
     # either -- declarations omitted from NEW came back as removals and a
     # breaking verdict (Codex review). Sorted so the record does not depend
     # on set iteration order.
-    snap = record_header_exclusions(snap, sorted(effective_skip))
+    snap = record_descriptor_skips(snap, sorted(effective_skip), quiet)
     return grant_live_source_licence(snap), desc.version
 
 

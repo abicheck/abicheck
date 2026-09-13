@@ -258,3 +258,14 @@
   disagreed with `join_gcc_options`, the emitter the same values pass
   through: parser and emitter had two grammars for one string, and now share
   `split_gcc_options` on POSIX and Windows alike.
+- **A descriptor skip and a native exclusion are no longer conflated.** The
+  two are matched by different rules -- a descriptor's
+  `<skip_headers>`/`<skip_including>` by exact basename or path, native
+  `--exclude-header` by `fnmatch` -- so the same text names two different
+  scopes: `*.h` excludes every header natively and nothing at all through a
+  descriptor. Both wrote the raw text into `excluded_header_patterns`, so the
+  comparability gate read two entirely different achieved surfaces as equal
+  and could report fabricated additions or removals. Only what the matching
+  rule could achieve is recorded now, and a wildcard in a descriptor skip is
+  reported as ineffective rather than silently doing nothing. Whether real
+  ABICC globs there is an open parity question (`docs/contribute/known-gaps.md`).

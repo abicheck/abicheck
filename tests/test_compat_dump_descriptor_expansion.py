@@ -323,3 +323,94 @@ class TestDescriptorSkipsAreRecordedOnTheSnapshot:
         stored = AbiSnapshot(library="libfoo.so", version="0.9")
         with pytest.raises(ScopeMismatchError):
             check_contracts_comparable(stored, narrowed)
+
+
+class TestOnlyTheAchievedNarrowingIsRecorded:
+    """A descriptor skip and a native `--exclude-header` are matched by
+    different rules, so the same text is not the same scope.
+
+    `_resolve_headers_from_list` matches a descriptor skip as an exact
+    basename or path; `extract.header_exclusions` matches
+    `--exclude-header` with `fnmatch`. So `*.h` excludes *nothing* through a
+    descriptor and *every header* natively. Recording the raw text for both
+    made the comparability gate treat those two snapshots as covering the
+    same declared surface, and it could then report fabricated additions or
+    removals (Codex review).
+
+    Bug class: one field recording two producers' values under two different
+    meanings -- the "request recorded as achieved" failure this field exists
+    to prevent, arriving from the other side.
+    """
+
+    def _dump(self, tree: Path, skip: str):
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import load_snapshot
+
+        desc = tree / "d.xml"
+        desc.write_text(
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            f"<libs>\n  libs\n</libs>\n<skip_headers>\n  {skip}\n</skip_headers>\n"
+        )
+        out = tree / "out.json"
+        with mock.patch(
+            "abicheck.compat.cli.dump",
+            side_effect=lambda path, **kw: AbiSnapshot(
+                library="libfoo.so", version="1.0"
+            ),
+        ):
+            result = CliRunner().invoke(
+                compat_group,
+                ["dump", "-lib", "foo", "-dump", str(desc), "-dump-path", str(out)],
+            )
+        assert result.exit_code == 0, result.output
+        return load_snapshot(out), result.output
+
+    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
+    def test_a_glob_skip_records_nothing(self, skip, tree):
+        """It excluded nothing under exact matching, so it narrowed nothing
+        and is not part of the achieved scope."""
+        snap, _ = self._dump(tree, skip)
+        assert snap.excluded_header_patterns == ()
+
+    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
+    def test_a_glob_skip_is_reported_rather_than_silently_ignored(self, skip, tree):
+        """Doing nothing with a rule the user wrote is its own failure, and
+        is what made this look like working configuration."""
+        _, output = self._dump(tree, skip)
+        assert "wildcard" in output
+        assert skip in output
+
+    def test_a_plain_skip_is_still_recorded(self, tree):
+        """The negative control: dropping every pattern would satisfy the
+        claims above completely, and would undo the recording this PR's
+        predecessor added."""
+        snap, output = self._dump(tree, "b.h")
+        assert snap.excluded_header_patterns == ("b.h",)
+        assert "wildcard" not in output
+
+    def test_a_plain_skip_still_compares_equal_to_the_native_spelling(self, tree):
+        """The rule must not over-refuse: a pattern with no metacharacter
+        means the same thing under both matching rules, so a descriptor and a
+        native run naming `b.h` are genuinely comparable."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.model import AbiSnapshot
+
+        snap, _ = self._dump(tree, "b.h")
+        native = AbiSnapshot(
+            library="libfoo.so", version="0.9", excluded_header_patterns=("b.h",)
+        )
+        assert check_contracts_comparable(native, snap) is None
+
+    def test_a_glob_no_longer_compares_equal_to_the_native_spelling(self, tree):
+        """The conflation itself, stated end to end through the real gate:
+        native `*.h` excluded every header, the descriptor's excluded none."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.model import AbiSnapshot
+
+        snap, _ = self._dump(tree, "*.h")
+        native = AbiSnapshot(
+            library="libfoo.so", version="0.9", excluded_header_patterns=("*.h",)
+        )
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(native, snap)

@@ -64,3 +64,41 @@ def record_header_exclusions(
         return snapshot
     snapshot.excluded_header_patterns = tuple(exclude_headers)
     return snapshot
+
+
+#: The characters that make an ``--exclude-header`` pattern a *glob*.
+#: ``fnmatch``'s own metacharacter set, which is what the native path matches
+#: with (``extract.header_exclusions``).
+_GLOB_METACHARACTERS = frozenset("*?[")
+
+
+def exact_match_patterns_only(patterns: Sequence[str]) -> tuple[str, ...]:
+    """*patterns* minus any that only mean something under glob matching.
+
+    The two producers of this field do **not** share a matching rule. The
+    native ``--exclude-header`` path is ``fnmatch``; a descriptor's
+    ``<skip_headers>``/``<skip_including>`` is exact basename-or-path
+    membership (``compat/_helpers._resolve_headers_from_list``). So the same
+    text can name two different achieved scopes: ``*.h`` excludes *every*
+    header natively and *nothing* through a descriptor.
+
+    Recording the raw text for both made those two look identical, so the
+    comparability gate accepted a descriptor-narrowed snapshot against a
+    natively-narrowed one and could report fabricated additions or removals
+    (Codex review) -- the same "a request recorded as achieved" failure this
+    field exists to prevent, arriving from the other side.
+
+    A pattern with no metacharacter behaves identically under both rules, so
+    it is recorded unchanged and a descriptor/native pair naming plain header
+    names still compares equal. One *with* a metacharacter narrowed nothing
+    under exact matching, so it is not part of the achieved scope and is not
+    recorded. The caller is expected to say so out loud rather than drop it
+    silently -- see ``compat/cli.py``'s use.
+
+    Deliberately not the other candidate fix, "make descriptor skips use
+    fnmatch too": that changes ABICC drop-in behaviour on a guess about what
+    real ABICC does with a glob in ``<skip_headers>``, which is a parity
+    question with its own evidence requirement, not a comparability fix.
+    Recorded in ``docs/contribute/known-gaps.md`` instead.
+    """
+    return tuple(p for p in patterns if not (_GLOB_METACHARACTERS & set(p)))

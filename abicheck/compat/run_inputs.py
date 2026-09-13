@@ -45,6 +45,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..errors import SnapshotError
+from ..model.header_exclusion_record import (
+    exact_match_patterns_only,
+    record_header_exclusions,
+)
 from ..serialization import load_snapshot
 from ._errors import _compat_fail
 from ._helpers import _do_echo, _load_skip_headers
@@ -246,3 +250,45 @@ def _parse_compat_descriptors(
     # boundary (storage AGENTS.md invariant 6), caught like a bad descriptor.
     except (TypeError, ValueError, FileNotFoundError, OSError) as exc:
         _compat_fail("parsing descriptor", exc)
+
+
+def warn_glob_skips_do_nothing(skips: list[str], quiet: bool) -> None:
+    """Say so when a descriptor skip could only have matched as a glob.
+
+    `<skip_headers>`/`<skip_including>` are matched as exact basenames or
+    paths (`_resolve_headers_from_list`), so `*.h` excludes nothing at all.
+    It is also not recorded as an achieved exclusion, since it achieved none
+    -- but silently doing nothing with a rule the user wrote is its own
+    failure, and it is what made this look like working configuration.
+
+    Whether real ABICC globs here is a parity question with its own evidence
+    requirement, recorded in `docs/contribute/known-gaps.md`; this only
+    reports what *this* implementation did.
+    """
+    ignored = [s for s in skips if s not in exact_match_patterns_only(skips)]
+    if not ignored:
+        return
+    _do_echo(
+        "Warning: descriptor skip rule(s) "
+        + ", ".join(repr(s) for s in ignored)
+        + " contain a wildcard, but <skip_headers>/<skip_including> are "
+        "matched as exact header names or paths -- they excluded nothing. "
+        "Name the headers explicitly.",
+        quiet,
+    )
+
+
+def record_descriptor_skips(
+    snapshot: AbiSnapshot, skips: list[str], quiet: bool
+) -> AbiSnapshot:
+    """Record a descriptor's achieved header narrowing, and report what it
+    could not achieve.
+
+    One function because the two steps always belong together: what gets
+    *recorded* is the exact-matchable subset, and what is left over is
+    precisely what has to be *reported*. Splitting them is how a third caller
+    ends up doing one and not the other -- the bug shape this whole area
+    keeps producing.
+    """
+    warn_glob_skips_do_nothing(skips, quiet)
+    return record_header_exclusions(snapshot, exact_match_patterns_only(skips))
