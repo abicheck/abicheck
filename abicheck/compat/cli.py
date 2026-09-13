@@ -24,6 +24,7 @@ Commands:
 
 from __future__ import annotations
 
+import dataclasses as _dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -303,7 +304,21 @@ def compat_dump_cmd(
         _do_echo(f"Note: -arch {arch} is recorded for informational purposes.", quiet)
 
     try:
+        # Expanded at the boundary, exactly as `compat check`'s own loading
+        # path does (`run_inputs._load_descriptor_or_dump`). Calling
+        # `parse_descriptor` alone here left `compat dump` unable to read the
+        # ordinary ABICC descriptor form this branch documents: a `<libs>`
+        # directory reached the binary parser as "Unrecognised binary format"
+        # and a `<headers>` directory reached the header parser as
+        # `#include "<dir>"` (Codex review). One descriptor capability, both
+        # public consumers -- a descriptor `compat check` accepts and
+        # `compat dump` rejects is not a supported format, it is two.
         desc = parse_descriptor(desc_path, relpath=relpath)
+        desc = _dataclasses.replace(
+            desc,
+            headers=expand_descriptor_headers(desc.headers),
+            libs=expand_descriptor_libs(desc.libs),
+        )
     except (ValueError, FileNotFoundError, OSError) as exc:
         _compat_fail("parsing descriptor", exc)
 

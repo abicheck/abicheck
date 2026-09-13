@@ -309,26 +309,42 @@ class TestAnExclusionIsRecordedAsReducedEvidence:
             w for w in result.coverage_warnings if HEADER_EXCLUSION_WARNING_MARKER in w
         ]
 
-    def test_differing_exclusions_are_named_as_an_asymmetry(self) -> None:
-        """Reachable only with a *stored* baseline, since one invocation
-        applies one set of patterns to both sides. There the asymmetry itself
-        can manufacture a finding -- a declaration excluded from OLD alone
-        reads as newly added -- so the warning has to say which side.
-
-        ADR-050 comparability independently refuses such a pair on
-        ``scope_fingerprint`` (the resolved header lists differ), which is the
-        stronger guarantee; this states what a caller that reaches the diff
-        anyway is told.
+    def test_an_asymmetric_pair_is_refused_before_any_diff_runs(self) -> None:
+        """An earlier revision of this test asserted the *warning* on such a
+        pair, and was wrong to settle for it: the diff still ran and still
+        emitted `func_removed` for anything the excluded header declared
+        (Codex review, reproduced end to end). The ordinary path now refuses
+        the pair outright -- see `TestAsymmetricExclusionsAreNotComparable`.
         """
+        from abicheck.checker import compare
+        from abicheck.errors import ScopeMismatchError
+
+        with pytest.raises(ScopeMismatchError):
+            compare(self._snap(), self._snap(("fftw3.h",)))
+
+    def test_the_warning_still_names_the_side_under_diagnostic_comparison(
+        self,
+    ) -> None:
+        """The escape hatch is where the disclosure now matters: a caller who
+        forces the diff through is told which side lost which header, since
+        the asymmetry itself can manufacture a finding."""
         from abicheck.checker import compare
         from abicheck.confidence import HEADER_EXCLUSION_WARNING_MARKER
 
-        result = compare(self._snap(), self._snap(("fftw3.h",)))
+        result = compare(
+            self._snap(),
+            self._snap(("fftw3.h",)),
+            diagnostic_comparison=True,
+        )
         disclosed = [
             w for w in result.coverage_warnings if HEADER_EXCLUSION_WARNING_MARKER in w
         ]
-        assert len(disclosed) == 1
-        assert "differ between the two sides" in disclosed[0]
+        # Two now, and both earn their place: the confidence layer's own
+        # disclosure, plus the waived comparability reason explaining what
+        # `--diagnostic-comparison` forced through.
+        assert [w for w in disclosed if "differ between the two sides" in w]
+        assert [w for w in disclosed if "not cover the same declared surface" in w]
+        assert all("fftw3.h" in w for w in disclosed)
 
     def test_the_patterns_survive_a_snapshot_round_trip(self) -> None:
         """Persistence is the half that matters for a *stored* baseline: a
@@ -453,3 +469,121 @@ class TestExclusionsAreRefusedAgainstAManifest:
         )
 
         reject_exclusions_against_a_manifest(patterns, manifest)
+
+
+class TestAsymmetricExclusionsAreNotComparable:
+    """An exclusion on one side only must never become a finding.
+
+    `scope_fingerprint` already refuses most of this shape, because the
+    exclusion narrows the `-H` list before the contract is computed. It
+    cannot refuse a baseline carrying **no** contract at all -- a
+    pre-ADR-050 snapshot, or one whose contract was stripped -- and that
+    case reported every declaration the excluded header carried as
+    `func_removed`, verdict BREAKING, exit 4 (Codex review; reproduced
+    end-to-end before the fix).
+
+    Bug class: a run's own narrowing presented as a change in the library.
+    """
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ((), ()),
+            (("b.h",), ("b.h",)),
+            # Order and duplication are not scope: the patterns are a filter.
+            (("a.h", "b.h"), ("b.h", "a.h")),
+            (("a.h", "a.h"), ("a.h",)),
+        ],
+    )
+    def test_equal_pattern_sets_are_comparable(self, old, new):
+        from abicheck.extract.header_exclusions import exclusion_asymmetry_reason
+
+        assert exclusion_asymmetry_reason(old, new) is None
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ((), ("b.h",)),
+            (("b.h",), ()),
+            (("a.h",), ("b.h",)),
+            (("a.h",), ("a.h", "b.h")),
+        ],
+    )
+    def test_differing_pattern_sets_are_refused(self, old, new):
+        from abicheck.extract.header_exclusions import exclusion_asymmetry_reason
+
+        reason = exclusion_asymmetry_reason(old, new)
+        assert reason is not None
+        # The reason must name what actually differed, in both directions --
+        # a generic "scope differs" leaves a user with nothing to act on.
+        for pattern in set(old) ^ set(new):
+            assert pattern in reason
+
+    def test_the_set_rule_holds_for_every_pair_over_a_small_domain(self):
+        """Exhaustive over a small domain, against an independent oracle.
+
+        The oracle is set equality, derived here rather than by calling the
+        implementation's own comparison -- a fixed pair of examples would
+        foreclose only the two spellings it names.
+        """
+        from itertools import chain, combinations
+
+        from abicheck.extract.header_exclusions import exclusion_asymmetry_reason
+
+        domain = ("a.h", "b.h", "c.h")
+        subsets = list(
+            chain.from_iterable(combinations(domain, n) for n in range(len(domain) + 1))
+        )
+        disagreeing = [
+            (old, new)
+            for old in subsets
+            for new in subsets
+            if (exclusion_asymmetry_reason(old, new) is None)
+            != (frozenset(old) == frozenset(new))
+        ]
+        assert not disagreeing
+        # Vacuity guard: the sweep must contain both outcomes.
+        assert any(
+            frozenset(o) == frozenset(n)
+            for o, n in ((a, b) for a in subsets for b in subsets)
+        )
+        assert any(
+            frozenset(o) != frozenset(n)
+            for o, n in ((a, b) for a in subsets for b in subsets)
+        )
+
+    def test_a_contract_less_baseline_is_refused_through_the_real_gate(self):
+        """The reproduced case, through `check_contracts_comparable` itself."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.model import AbiSnapshot
+
+        old = AbiSnapshot(library="libfoo.so", version="1")
+        new = AbiSnapshot(
+            library="libfoo.so", version="2", excluded_header_patterns=("b.h",)
+        )
+        assert getattr(old.contract, "scope_fingerprint", None) is None
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(old, new)
+
+    def test_the_same_exclusion_on_both_sides_still_compares(self):
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.model import AbiSnapshot
+
+        kw = {"excluded_header_patterns": ("b.h",)}
+        old = AbiSnapshot(library="libfoo.so", version="1", **kw)
+        new = AbiSnapshot(library="libfoo.so", version="2", **kw)
+        assert check_contracts_comparable(old, new) is None
+
+    def test_diagnostic_mode_downgrades_rather_than_raising(self):
+        """`--diagnostic-comparison` stays the one sanctioned escape hatch."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.model import AbiSnapshot
+
+        old = AbiSnapshot(library="libfoo.so", version="1")
+        new = AbiSnapshot(
+            library="libfoo.so", version="2", excluded_header_patterns=("b.h",)
+        )
+        mismatch = check_contracts_comparable(old, new, diagnostic=True)
+        assert mismatch is not None
+        assert mismatch.kind == "scope"

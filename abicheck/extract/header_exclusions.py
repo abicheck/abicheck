@@ -189,3 +189,51 @@ def reject_exclusions_against_a_manifest(
         "the pattern would match nothing while still being recorded as an "
         "omission. Remove the header from the manifest instead."
     )
+
+
+def exclusion_asymmetry_reason(
+    old_patterns: Sequence[str], new_patterns: Sequence[str]
+) -> str | None:
+    """Why this pair is not comparable, or ``None`` when the two agree.
+
+    ADR-050 D2's scope axis, answered from the field rather than from a
+    fingerprint. `scope_fingerprint` already refuses most of this shape --
+    the exclusion narrows the `-H` list before the contract is computed, so
+    `scope_fields["headers"]` differs and the pair is refused with exit 16
+    (verified against a real pair). It cannot refuse the one shape that
+    matters most, though: a baseline that carries **no** contract at all --
+    a pre-ADR-050 snapshot, or one whose contract was stripped -- has no
+    fingerprint to differ, so a run excluding a header from the candidate
+    alone reported every declaration that header carried as `func_removed`
+    and exited `4` (reproduced; Codex review). A finding manufactured by
+    the run's own narrowing is exactly what `vision.md` forbids.
+
+    So this asks the field directly, which is sound with no ambiguity
+    carve-out of the sort `_check_dependency_scope_comparable` needs for
+    `dependency_scope`: `--exclude-header` and the field arrived together
+    in schema v47, so a pre-v47 snapshot's `()` is not an unknown, it is a
+    certainty -- no snapshot predating the field could have been dumped
+    under an exclusion, because no flag existed to request one.
+
+    Comparing the *sets* rather than the sequences: the patterns are a
+    filter, and stating one twice, or in the other order, narrows the
+    surface identically. Only a genuine difference in what was excluded is
+    a difference in what was compared.
+    """
+    old_set = frozenset(old_patterns)
+    new_set = frozenset(new_patterns)
+    if old_set == new_set:
+        return None
+
+    def _render(patterns: frozenset[str]) -> str:
+        return ", ".join(sorted(patterns)) if patterns else "none"
+
+    return (
+        "old and new snapshots do not cover the same declared surface: the "
+        "--exclude-header patterns differ (old: "
+        f"{_render(old_set)}; new: {_render(new_set)}). Anything only an "
+        "excluded header declared was never parsed on that side, so a "
+        "difference between the two would be this run's own narrowing rather "
+        "than a change in the library. Exclude the same headers on both "
+        "sides, or re-dump the baseline under the same exclusions."
+    )

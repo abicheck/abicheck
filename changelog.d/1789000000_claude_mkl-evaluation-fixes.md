@@ -158,3 +158,22 @@
   `"not_evaluated"` the same accidental way. Every member's own notes are
   still unioned into the merged block, so the specific detected defect is
   reported even when the one-word label defers to the least-claiming member.
+- **An asymmetric `--exclude-header` is refused, not merely warned about.**
+  Excluding a header from one side only never becomes a finding. ADR-050's
+  `scope_fingerprint` already refused most of this shape -- the exclusion
+  narrows the `-H` list before the contract is computed -- but it cannot
+  refuse a baseline carrying no contract at all, and that case reported every
+  declaration the excluded header carried as `func_removed`, verdict
+  `BREAKING`, exit `4`. The patterns are now compared directly
+  (`extract.header_exclusions.exclusion_asymmetry_reason`, a fourth
+  comparability check beside the `dependency_scope` one), as sets, with no
+  pre-v47 ambiguity carve-out needed: the flag and the field arrived
+  together, so an older snapshot's empty value is a certainty rather than an
+  unknown. `--diagnostic-comparison` remains the one way through.
+- **`compat dump` reads the same descriptors `compat check` does.** A
+  `<headers>`/`<libs>` *directory* operand -- ABICC's ordinary usage -- was
+  expanded only on the `compat check` loading path, so the identical
+  descriptor failed under `compat dump`: the library directory reached the
+  binary parser as "Unrecognised binary format", the header directory
+  reached the header parser as `#include "<dir>"`. Both consumers now expand
+  at the same boundary.

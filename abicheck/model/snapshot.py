@@ -23,7 +23,6 @@ belongs to ``extract``, persisting one to ``storage``.
 
 from __future__ import annotations
 
-import logging as _logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -31,8 +30,8 @@ from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
 from .fact import Fact, bridge_legacy_and_fact
-from .first_wins_index import build_first_wins_index, warn_dropped
 from .graph_facts import SurfaceGraphLike
+from .snapshot_index import build_snapshot_indexes
 
 if TYPE_CHECKING:
     from ..buildsource.model import BuildSourceRef
@@ -51,8 +50,6 @@ if TYPE_CHECKING:
     )
     from .semantic_ir import SemanticIR
     from .sycl_facts import SyclMetadata
-
-_model_log = _logging.getLogger(__name__)
 
 
 @dataclass
@@ -231,14 +228,8 @@ class AbiSnapshot:
     )
 
     # Schema v47 -- the `--exclude-header PATTERN` values this snapshot was
-    # dumped under, empty when none were given. The same shape as
-    # `scope_fallback`: a machine-readable record that the parsed surface is
-    # narrower than the operand names. Unlike `scope_fallback` it is not a
-    # failure -- the narrowing was requested -- so it warns rather than
-    # erroring. Persisted because nothing else records it, and a stored
-    # baseline that forgot its own exclusions claims a complete surface. Why
-    # it exists and what reads it: `confidence.header_exclusion_warnings`
-    # and `extract/header_exclusions.py`.
+    # dumped under, empty when none were given. Rules, rationale and readers:
+    # `extract/header_exclusions.py`, `confidence.header_exclusion_warnings`.
     excluded_header_patterns: tuple[str, ...] = field(
         default_factory=tuple, kw_only=True
     )
@@ -772,18 +763,10 @@ class AbiSnapshot:
         """
         if self._type_by_name is not None:
             return
-        owner = f"{self.library}@{self.version}"
-        functions = build_first_wins_index(self.functions, lambda f: f.mangled)
-        warn_dropped(_model_log, "mangled symbols", owner, functions.dropped)
-        self._func_by_mangled = functions.mapping
-
-        variables = build_first_wins_index(self.variables, lambda v: v.mangled)
-        warn_dropped(_model_log, "mangled variables", owner, variables.dropped)
-        self._var_by_mangled = variables.mapping
-
-        types = build_first_wins_index(self.types, lambda t: t.name)
-        warn_dropped(_model_log, "type names", owner, types.dropped)
-        self._type_by_name = types.mapping
+        maps = build_snapshot_indexes(
+            self.functions, self.variables, self.types, f"{self.library}@{self.version}"
+        )
+        self._func_by_mangled, self._var_by_mangled, self._type_by_name = maps
 
     @property
     def function_map(self) -> dict[str, Function]:
