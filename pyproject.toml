@@ -366,6 +366,17 @@ source_paths = ["abicheck"]
 also_copy = [
     ".github",
     ".pre-commit-config.yaml",
+    # ruff's own config, and the reason the lane aborted at *stats collection*
+    # (before a single mutant was measured): `ruff.toml` carries
+    # `[format] exclude = ["abicheck/model/change_catalog/kinds.pyi"]`, since
+    # that stub's formatting authority is `gen_changekind_stub.py`, not the
+    # formatter. Without the file, the `mutants/` copy loses the exclusion,
+    # `ruff format --check abicheck/` reformats `kinds.pyi` and reports
+    # "1 file would be reformatted", and the test asserting a formatted tree
+    # fails inside the copy while the real tree is clean. Reproduced directly:
+    # the same command over a directory holding only `kinds.pyi` exits 1
+    # without this file beside it and 0 with it.
+    "ruff.toml",
     "AGENTS.md",
     "CHANGELOG.md",
     "CLAUDE.md",
