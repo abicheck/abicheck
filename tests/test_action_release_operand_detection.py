@@ -59,11 +59,36 @@ def _named_function_source(name: str) -> str:
     return text[start:end]
 
 
+def _os_detection_source() -> str:
+    """`run.sh`'s own `$OSTYPE` -> `_RUNNING_ON_WINDOWS` block, not restated."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index('case "$OSTYPE" in')
+    end = text.index("esac", start) + len("esac")
+    return text[start:end]
+
+
 def _function_source() -> str:
-    """The real `_is_release_style_operand`, plus the helpers it calls."""
+    """The real `_is_release_style_operand`, plus the helpers it calls.
+
+    The host-detection block is run.sh's own, not a hardcoded `false`. That
+    default was wrong on exactly one platform and silently so: with
+    `_RUNNING_ON_WINDOWS=false` on a Windows runner,
+    `_is_path_already_qualified` does not recognise a drive-absolute
+    `C:\\...` operand, so `_is_release_style_operand` anchors it a second
+    time as `$PWD/C:\\...`, stats a path that cannot exist, and answers "not
+    a package" for every absolutely-spelled operand. The relative-operand
+    cases pass either way, which is why only the absolute ones failed and
+    the cause read as "the probe is broken on Windows" rather than "the
+    harness told it the wrong platform".
+
+    Still `:-`-guarded so the parametrised callers that set the flag
+    themselves (`_predicate`, the recorder) keep choosing their own value.
+    """
     return "\n".join(
         (
-            '_RUNNING_ON_WINDOWS="${_RUNNING_ON_WINDOWS:-false}"',
+            'if [[ -z "${_RUNNING_ON_WINDOWS:-}" ]]; then',
+            _os_detection_source(),
+            "fi",
             _named_function_source("_is_path_already_qualified"),
             _named_function_source("_is_release_style_operand"),
         )
@@ -91,20 +116,6 @@ def _sh(value: Path | str) -> str:
     return shlex.quote(
         value.as_posix() if isinstance(value, Path) and os.name == "nt" else str(value)
     )
-
-
-# The probe branch shells a *Windows* `sys.executable` into an msys/git-bash
-# script, and the interpreter path and argv do not survive that boundary, so
-# `_PY_BIN` never runs and the probe answers "not a package" for everything.
-# That makes a probe-positive assertion fail outright and a probe-negative one
-# pass for the wrong reason -- so both are skipped rather than only the noisy
-# half. The composite Action itself runs on Linux runners; the fallback table,
-# which is what actually executes before abicheck is installed, stays covered
-# on every platform by the tests that pass `abicheck_available=False`.
-_probe_needs_a_posix_shell = pytest.mark.skipif(
-    os.name == "nt",
-    reason="the abicheck probe's interpreter path does not cross the msys bash boundary",
-)
 
 
 def _ask(
@@ -159,7 +170,6 @@ def _shapes(tmp_path: Path) -> dict[str, Path]:
 class TestAgreementWithTheRealPredicate:
     """The whole point: one answer, from one place."""
 
-    @_probe_needs_a_posix_shell
     def test_every_package_shape_agrees_under_a_nonconventional_name(
         self, tmp_path: Path
     ) -> None:
@@ -172,7 +182,6 @@ class TestAgreementWithTheRealPredicate:
         # agreement above is not two predicates both answering False.
         assert all(cli for cli, _sh in disagreements.values()), disagreements
 
-    @_probe_needs_a_posix_shell
     def test_a_non_package_agrees_too(self, tmp_path: Path) -> None:
         """The negative control: agreement is not "say yes to everything"."""
         plain = tmp_path / "libfoo.so"
@@ -436,7 +445,6 @@ class TestThePreInstallFallback:
             path.write_bytes(b"\x00" * 32)
             assert _ask(path, abicheck_available=False, cwd=tmp_path), name
 
-    @_probe_needs_a_posix_shell
     def test_the_fallback_is_what_the_probe_improves_on(self, tmp_path: Path) -> None:
         """States the gap rather than hiding it: the table cannot see a
         content-routed package, which is exactly why the probe exists. If

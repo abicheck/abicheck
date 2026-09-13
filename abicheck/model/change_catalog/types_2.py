@@ -14,24 +14,22 @@
 # limitations under the License.
 
 
-"""ADR-061 D9 taxonomy: type/layout-level ChangeKind entries.
+"""Ordinal part 2 of ``types.py``'s entry list -- not a separate owner.
 
-Struct/class/union/enum/typedef declarations and everything about their
-shape: fields, bases, vtables, layout (size/alignment/offset), kind
-(struct vs. class vs. union), template parameters, and C++-specific
-member-function qualifiers that are properties of the type's own
-declaration (``const``/``ref``-qualified, ``static``, pure-virtual) rather
-than of a free function's own linkage.
+``types.py`` remains the taxonomy and the single public name
+(``TYPES_ENTRIES``); see its docstring for this taxonomy's scope, its
+boundary against the other four, and the methodology the entries were
+categorized by. This file holds a contiguous slice of that one list and
+claims no responsibility of its own, so nothing should import it directly.
 
-Categorized by which detector module actually produces each kind (verified
-against the real ``ChangeKind.X`` construction sites in ``diff_types.py``
-and its siblings -- ``diff_types_abicc_parity.py``,
-``diff_types_field_facts.py``, ``diff_layout.py``, ``diff_elf_layout.py``,
-``diff_vtable_layout.py``, ``diff_namespaces.py``, ``diff_stdlib_impl.py``,
-``diff_cpp_patterns.py``, ``diff_templates.py``,
-``diff_platform_templates.py`` -- not by which flat
-``change_registry_*.py`` sibling an entry happened to live in for pure
-line-count reasons before this migration.
+The split is by declaration-order line position, not by concern, purely so
+each file stays under ADR-061's 800-line ceiling -- the same reason and the
+same shape as ``kind_names_{1,2,3}.py``, whose own docstring records that an
+ordinal split is the right tool when the content is a data table rather than
+behavior. Partitioning *this* list by a named sub-concern would be a
+different change: it would move the D9 ownership boundary that
+``symbols``/``types``/``platform``/``build``/``source`` already draws, and
+the "Adding a new ChangeKind" procedure names those five modules by name.
 """
 
 from __future__ import annotations

@@ -14,25 +14,22 @@
 # limitations under the License.
 
 
-"""ADR-061 D9 taxonomy: symbol-level ChangeKind entries.
+"""Ordinal part 1 of ``symbols.py``'s entry list -- not a separate owner.
 
-Function, variable, parameter, constant, and Python-API declaration facts --
-the entities a linker/dynamic loader resolves by name, plus the C/C++ and
-Python signature-level facts attached to them (linkage, inline-ness,
-default arguments, access level, calling-convention-neutral qualifiers).
-Distinguished from ``types.py`` (the type/layout side of the same
-declarations) and from ``platform.py`` (the binary symbol-table
-*representation* of the same names -- ELF/PE symbol binding, visibility,
-and versioning, which are a platform-format concern rather than a
-language-level one).
+``symbols.py`` remains the taxonomy and the single public name
+(``SYMBOLS_ENTRIES``); see its docstring for this taxonomy's scope, its
+boundary against the other four, and the methodology the entries were
+categorized by. This file holds a contiguous slice of that one list and
+claims no responsibility of its own, so nothing should import it directly.
 
-Categorized by which detector module actually produces each kind (verified
-against the real ``ChangeKind.X`` construction sites in ``diff_symbols.py``
-and its siblings -- ``diff_symbols_variables.py``, ``diff_symbols_renames.py``,
-``diff_param_qualifiers.py``, ``diff_hidden_friends.py``,
-``diff_python_api.py``, ``diff_python.py`` -- not by which flat
-``change_registry_*.py`` sibling an entry happened to live in for pure
-line-count reasons before this migration.
+The split is by declaration-order line position, not by concern, purely so
+each file stays under ADR-061's 800-line ceiling -- the same reason and the
+same shape as ``kind_names_{1,2,3}.py``, whose own docstring records that an
+ordinal split is the right tool when the content is a data table rather than
+behavior. Partitioning *this* list by a named sub-concern would be a
+different change: it would move the D9 ownership boundary that
+``symbols``/``types``/``platform``/``build``/``source`` already draws, and
+the "Adding a new ChangeKind" procedure names those five modules by name.
 """
 
 from __future__ import annotations
