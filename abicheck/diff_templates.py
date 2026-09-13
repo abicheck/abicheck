@@ -810,6 +810,9 @@ def detect_cpo_kind_changed(
                 old="function",
                 new="variable (function-object / CPO)",
                 new_value="variable",
+                # Polymorphic: the *new* side is stated, since the finding's
+                # point is what a call site must bind against now.
+                entity_discriminator="variable",
                 public_reachable=True,
                 reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 reachability_kind="direct_public_symbol",
@@ -826,6 +829,7 @@ def detect_cpo_kind_changed(
                 old="variable (function-object / CPO)",
                 new="function",
                 old_value="variable",
+                entity_discriminator="function",
                 public_reachable=True,
                 reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 reachability_kind="direct_public_symbol",
@@ -985,8 +989,16 @@ def detect_mandatory_template_param_added(
     """
     from .model import ScopeOrigin
 
-    def _arities(snap: AbiSnapshot) -> tuple[dict[str, set[int]], dict[str, bool]]:
+    def _arities(
+        snap: AbiSnapshot,
+    ) -> tuple[dict[str, set[int]], dict[str, bool], dict[str, set[str]]]:
         out: dict[str, set[int]] = defaultdict(set)
+        # Which kind of declaration contributed each stem's observations.
+        # This detector deliberately pools function templates and class
+        # templates under one stem, so the kind is a property of the
+        # *finding*, not of the ChangeKind -- see the entity resolution
+        # below (Codex review, PR #1284).
+        sources: dict[str, set[str]] = defaultdict(set)
         # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
         # observation is reliably public — a Visibility.PUBLIC function, or a
         # type explicitly scoped to the public-header set (ADR-024's opt-in
@@ -1006,6 +1018,7 @@ def detect_mandatory_template_param_added(
             if arity is not None:
                 out[stem].add(arity)
                 is_public[stem] = True
+                sources[stem].add("function")
         # Types are also indexed.
         for t in snap.types:
             if "<" not in t.name:
@@ -1014,12 +1027,13 @@ def detect_mandatory_template_param_added(
             arity = _count_top_level_template_args(t.name)
             if arity is not None:
                 out[stem].add(arity)
+                sources[stem].add("type")
                 if t.origin == ScopeOrigin.PUBLIC_HEADER:
                     is_public[stem] = True
-        return out, is_public
+        return out, is_public, sources
 
-    old_ar, old_public = _arities(old)
-    new_ar, new_public = _arities(new)
+    old_ar, old_public, old_sources = _arities(old)
+    new_ar, new_public, new_sources = _arities(new)
 
     changes: list[Change] = []
     for stem in sorted(set(old_ar) & set(new_ar)):
@@ -1034,11 +1048,22 @@ def detect_mandatory_template_param_added(
         # no-reliable-signal reasoning as before, now narrowed to exactly
         # the cases that do have one.
         subject_is_public = old_public.get(stem, False) or new_public.get(stem, False)
+        # The entity this finding is about, when the evidence says so
+        # unambiguously. A stem observed only as a class template is a type
+        # finding and belongs under `--view show=types`; one observed only
+        # through function templates is a function finding. A stem both
+        # contributed to is genuinely both, so it states nothing and falls
+        # back to the kind's declared entity rather than guessing.
+        contributing = old_sources.get(stem, set()) | new_sources.get(stem, set())
+        entity_discriminator = (
+            next(iter(contributing)) if len(contributing) == 1 else None
+        )
         changes.append(
             make_change(
                 ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
                 symbol=stem,
                 name=stem,
+                entity_discriminator=entity_discriminator,
                 old=str(old_min),
                 public_reachable=subject_is_public,
                 reachability_state=(

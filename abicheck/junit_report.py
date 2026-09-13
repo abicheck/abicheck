@@ -43,11 +43,10 @@ from __future__ import annotations
 import hashlib
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from .checker_types import Change, DiffResult
 from .junit_coverage_warnings import append_coverage_warnings_suite
-from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import Verdict
 from .policy.contract_finding_relevance import is_evaluated
 from .report.envelope import resolved_document as _resolved_document
@@ -55,6 +54,12 @@ from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
     # so every existing caller and test resolves unchanged).
     add_disposition_audit_properties as _add_disposition_audit_properties,
+)
+from .report.junit_properties import (
+    add_contract_properties,
+    add_demangled_symbol_property,
+    add_scoped_properties,
+    testcase_properties,
 )
 from .report.junit_scope import append_env_matrix_suite, append_scope_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
@@ -75,25 +80,40 @@ if TYPE_CHECKING:
 # Classname mapping — groups symbols/types by element kind
 # ---------------------------------------------------------------------------
 
-_FUNC_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("func_"))
-_VAR_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("var_"))
-_TYPE_KINDS = frozenset(
-    k for k in ChangeKind if k.value.startswith("type_") or k.value.startswith("union_")
-)
-_ENUM_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("enum_"))
+#: JUnit's classname groups, keyed by the catalog's own entity dimension.
+#: Only the four element entities have a group; every other entity
+#: (``binary``/``build``/``source``/``analysis``) keeps the historical
+#: ``metadata`` bucket, so an existing consumer's grouping is unchanged for
+#: every kind that was already classified correctly.
+_ENTITY_TO_CLASSNAME: dict[str, str] = {
+    "function": "functions",
+    "variable": "variables",
+    "type": "types",
+    "enum": "enums",
+}
 
 
 def _classname_for(change: Change) -> str:
-    """Determine the JUnit classname group for a change."""
-    if change.kind in _FUNC_KINDS:
-        return "functions"
-    if change.kind in _VAR_KINDS:
-        return "variables"
-    if change.kind in _TYPE_KINDS:
-        return "types"
-    if change.kind in _ENUM_KINDS:
-        return "enums"
-    return "metadata"
+    """The JUnit classname group for a change, read off the change catalog.
+
+    Was a fourth name-prefix taxonomy (``func_``/``var_``/``type_``/
+    ``union_``/``enum_`` string prefixes over every ``ChangeKind``), which is
+    the exact derivation plan slice 7o deleted everywhere else: it answered
+    ``metadata`` for kinds the catalog declares as real elements
+    (``constant_added`` is a variable, ``calling_convention_changed`` a
+    function), and it cannot classify a *polymorphic* kind at all, since the
+    entity is a property of the finding rather than of its name. JUnit
+    therefore disagreed with JSON and with ``--view show=`` about the same
+    finding (Codex review, PR #1284).
+
+    Resolved through :func:`~abicheck.reporter_markdown.entity_for_change`,
+    the one resolver every other projection uses, so a kind added tomorrow
+    lands in the right group from its single catalog registration.
+    """
+    from .reporter_markdown import entity_for_change
+
+    entity = entity_for_change(change, change.kind.value)
+    return _ENTITY_TO_CLASSNAME.get(entity or "", "metadata")
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +449,7 @@ def _emit_testcases(
             tc.set("name", sym)
             tc.set("classname", classname)
             if sym in change_by_symbol:
+                add_demangled_symbol_property(tc, change_by_symbol[sym])
                 _maybe_add_failure(
                     tc,
                     change_by_symbol[sym],
@@ -446,6 +467,7 @@ def _emit_testcases(
             tc = ET.SubElement(ts, "testcase")
             tc.set("name", sym)
             tc.set("classname", _classname_for(c))
+            add_demangled_symbol_property(tc, c)
             _maybe_add_failure(
                 tc,
                 c,
@@ -668,7 +690,7 @@ def _build_testsuite(
         severity_config,
         report_document=_resolved_document(envelope, report_document),
     )
-    _add_scoped_properties(props, result)
+    add_scoped_properties(props, result)
     _add_env_matrix_property(
         props, result, report_document=_resolved_document(envelope, report_document)
     )
@@ -776,72 +798,6 @@ def _add_env_matrix_property(
     p.set("value", digest)
 
 
-def _add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
-    """Append the ``--used-by``/``--required-symbol(s)`` scoping properties
-    into the testsuite's ``<properties>`` element (ADR-043 + CLI-audit P1).
-
-    *props* is created by the caller and shared with the ADR-067 disposition
-    audit above; this function adds nothing at all when no scoping was
-    requested, which is the pre-existing behaviour of its own rows.
-
-    **Purely informational (workstream D-S1).** ``failures``/pass-fail
-    status always follow ``result.verdict``, reported here unswapped as
-    ``abicheck.full_library_verdict`` -- never this block's own
-    ``abicheck.gate_verdict``/``abicheck.gate_exit_code``, a supplied
-    consumer's own impact, reported *beside* the full-library result.
-    """
-    scoped_verdict = getattr(result, "scoped_verdict", None)
-    if scoped_verdict is None:
-        return
-
-    def _prop(name: str, value: str) -> None:
-        p = ET.SubElement(props, "property")
-        p.set("name", name)
-        p.set("value", value)
-
-    gate_scope = getattr(result, "gate_scope", None)
-    if gate_scope is not None:
-        _prop("abicheck.gate_scope", gate_scope)
-    _prop("abicheck.gate_verdict", scoped_verdict.value)
-    _prop("abicheck.full_library_verdict", result.verdict.value)
-    # Back-compat alias for the property's original name.
-    _prop("abicheck.scoped_verdict", scoped_verdict.value)
-    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_in_changes = sum(
-        1 for c in result.changes if _finding_id(c) in relevant_ids
-    )
-    # Scoped-only changes and missing-contract members are relevant by
-    # construction and never in result.changes, so they count toward
-    # relevant_finding_count but not unrelated_finding_count, which only
-    # counts irrelevant entries *within* result.changes (CodeRabbit review,
-    # mirrors sarif._scoped_gate_properties).
-    scoped_only_count = len(getattr(result, "scoped_only_changes", ()) or ())
-    missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
-    relevant_count = relevant_in_changes + scoped_only_count + missing_count
-    _prop("abicheck.relevant_finding_count", str(relevant_count))
-    _prop(
-        "abicheck.unrelated_finding_count",
-        str(len(result.changes) - relevant_in_changes),
-    )
-    scoped_exit_code = getattr(result, "scoped_exit_code", None)
-    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    if scoped_exit_code is not None:
-        _prop("abicheck.gate_exit_code", str(scoped_exit_code))
-        _prop("abicheck.gate_exit_code_scheme", str(scoped_exit_code_scheme))
-        # Back-compat aliases.
-        _prop("abicheck.scoped_exit_code", str(scoped_exit_code))
-        _prop("abicheck.scoped_exit_code_scheme", str(scoped_exit_code_scheme))
-    used_by = getattr(result, "used_by", None)
-    if used_by is not None:
-        _prop("abicheck.used_by_app_count", str(len(used_by)))
-    required_symbols = getattr(result, "required_symbols", None)
-    if required_symbols is not None:
-        _prop(
-            "abicheck.required_symbol_contract_verdict",
-            str(required_symbols.get("verdict", "")),
-        )
-
-
 def _maybe_add_failure(
     tc: ET.Element,
     change: Change,
@@ -859,7 +815,7 @@ def _maybe_add_failure(
     (CLI-audit P1) and any cross-detector correlation, regardless of
     pass/fail.
     """
-    _add_contract_properties(tc, change, result, severity_config, today=today)
+    add_contract_properties(tc, change, result, severity_config, today=today)
     _add_correlation_property(tc, change)
     if _is_failure(
         change,
@@ -877,72 +833,6 @@ def _maybe_add_failure(
             severity_config,
             root_cause_lookup=root_cause_lookup,
             findings_by_id=findings_by_id,
-        )
-
-
-def _add_contract_properties(
-    tc: ET.Element,
-    change: Change,
-    result: DiffResult,
-    severity_config: SeverityConfig | None,
-    *,
-    today: date | None = None,
-) -> None:
-    """Append a ``<properties>`` block to testcase *tc* with the same
-    canonical per-finding contract shape reporter.py's JSON output and
-    sarif.py's ``properties`` already carry (contract_relevance/
-    contract_reason_code/contract_assurance/compatibility_evaluation_status/
-    compatibility_decision/gate_contribution/contract_evidence_refs).
-
-    A finding whose ``contract_relevance`` was never stamped (every run
-    without ``--contract``, the default) gets nothing appended --
-    this keeps every pre-existing JUnit report byte-for-byte unchanged.
-    """
-    from .contract_relevance_types import CompatibilityEvaluationStatus
-    from .policy.contract_finding_relevance import (
-        contract_relevance_of,
-        evaluation_status_of,
-    )
-    from .severity import gate_contribution_for_change
-
-    relevance = contract_relevance_of(change)
-    if relevance is None:
-        return
-    props = ET.SubElement(tc, "properties")
-
-    def _prop(name: str, value: str) -> None:
-        p = ET.SubElement(props, "property")
-        p.set("name", name)
-        p.set("value", value)
-
-    _prop("abicheck.contract_relevance", relevance.value)
-    if change.contract_reason_code:
-        _prop("abicheck.contract_reason_code", change.contract_reason_code)
-    if change.contract_assurance is not None:
-        _prop("abicheck.contract_assurance", change.contract_assurance.value)
-    # evaluation_status_of always resolves to a real status once `relevance`
-    # is known non-None (it falls back to deriving one from the relevance
-    # itself -- see its own docstring), so there is no reachable `None`
-    # branch to guard here -- `cast` tells mypy that without adding one.
-    status = cast(CompatibilityEvaluationStatus, evaluation_status_of(change))
-    _prop("abicheck.compatibility_evaluation_status", status.value)
-    decision = getattr(change, "compatibility_decision", None)
-    _prop("abicheck.compatibility_decision", getattr(decision, "value", "") or "")
-    _prop(
-        "abicheck.gate_contribution",
-        str(
-            gate_contribution_for_change(
-                change,
-                severity_config,
-                policy=result.policy,
-                policy_file=result.policy_file,
-                today=today,
-            )
-        ),
-    )
-    if change.contract_evidence_refs is not None:
-        _prop(
-            "abicheck.contract_evidence_refs", ",".join(change.contract_evidence_refs)
         )
 
 
@@ -986,14 +876,7 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     # sibling element -- JUnit consumers, including this repo's own tests,
     # look up a testcase's properties via `tc.find("properties")`, which
     # only ever sees the first such element (Codex review).
-    props = tc.find("properties")
-    if props is None:
-        # tc.insert(0, ...), not ET.SubElement (which would append after any
-        # <failure> a primary change already added) -- see this function's
-        # own docstring for why ordering matters here.
-        props = ET.Element("properties")
-        tc.insert(0, props)
-    p = ET.SubElement(props, "property")
+    p = ET.SubElement(testcase_properties(tc), "property")
     p.set("name", "abicheck.correlated_change_kind")
     p.set("value", change.correlated_change_kind)
 
@@ -1097,9 +980,10 @@ def to_junit_xml(
         attributes to each ``<failure>`` element (see
         :func:`_root_cause_lookup`); it does not restructure the
         per-symbol ``<testcase>`` tree the way JSON/markdown/SARIF's
-        root-cause mode regroups findings. Any other value (e.g.
-        ``"leaf"``/``"impact"``) renders identically to ``"full"``, same as
-        before this parameter existed.
+        root-cause mode regroups findings. Any other *supported* value
+        (``"impact"``) renders identically to ``"full"``, same as before
+        this parameter existed; a retired mode (``"leaf"``) or an unknown
+        one raises ``ValidationError``.
     report_document:
         ADR-061 gap C shared build; forwarded to :func:`_build_testsuite`.
     envelope:
@@ -1112,6 +996,15 @@ def to_junit_xml(
     str
         JUnit XML document as a string.
     """
+    # The one shared check every public rendering entry point applies.
+    from .report.report_modes import reject_unsupported_report_mode
+
+    reject_unsupported_report_mode(report_mode)
+
+    from .reporter import prewarm_change_demangling  # see to_junit_xml_multi
+
+    prewarm_change_demangling(result)
+
     root = ET.Element("testsuites")
     root.set("name", "abicheck")
 
@@ -1206,6 +1099,19 @@ def to_junit_xml_multi(
 
     *report_mode*: see :func:`to_junit_xml`. *comparison_scope*: ADR-065's section (``report.junit_scope``). *env_matrix_source_sha256*: the release-wide deployment-floor digest -- see :func:`abicheck.report.junit_scope.append_env_matrix_suite`.
     """
+    # A public entry point reaching ``_build_testsuite`` directly, so it
+    # validates and prewarms for itself rather than inheriting either from
+    # its single-result sibling (Codex review, PR #1284): delegating the mode
+    # contract in the docstring left a retired mode rendering a full
+    # document, and an unwarmed demangle cache forks one ``c++filt`` per
+    # distinct symbol on a host without in-process ``cxxfilt``.
+    from .report.report_modes import reject_unsupported_report_mode
+    from .reporter import prewarm_change_demangling
+
+    reject_unsupported_report_mode(report_mode)
+    for _result, _old_snap in results:
+        prewarm_change_demangling(_result)
+
     root = ET.Element("testsuites")
     root.set("name", "abicheck")
 

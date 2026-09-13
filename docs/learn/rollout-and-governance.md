@@ -129,13 +129,14 @@ suppressions:
 Two `.abicheck.yml` keys hold the team to that shape:
 `suppression.require_justification: true` refuses a rule with no `reason`,
 and `suppression.strict: true` turns an expired rule into a failed run
-instead of a silently re-appearing finding. The audit flag lists what each
-rule is actually doing — matched nothing (stale), matched a breaking change
-(worth a second look), expired, or about to:
+instead of a silently re-appearing finding. The suppression audit — which
+runs automatically whenever `--suppress` is given, with no token to type —
+lists what each rule is actually doing: matched nothing (stale), matched a
+breaking change (worth a second look), expired, or about to:
 
 ```bash
 abicheck compare old.json new.so -H include/ \
-  --suppress suppressions.yaml --view suppressions
+  --suppress suppressions.yaml
 ```
 
 The rule above with the broad `namespace` selector has one more property:

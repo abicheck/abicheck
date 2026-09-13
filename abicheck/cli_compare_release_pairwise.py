@@ -53,7 +53,7 @@ from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
-from .reporter import to_json
+from .reporter import disposition_ledger_blocks, to_json
 from .workflows.contracts import CompareResult
 
 if TYPE_CHECKING:
@@ -114,7 +114,6 @@ _CompareReleaseCommonArgs = tuple[
     "CompileContext | None",
     "str | None",
     "str | None",
-    bool,
     "list[Path] | None",
     bool,
     "dict[Any, Any] | None",
@@ -295,7 +294,6 @@ def _compare_one_library(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     show_only: str | None = None,
-    explain_patterns: bool = False,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
@@ -324,8 +322,8 @@ def _compare_one_library(
     ``findings``/``findings_view`` split lives one level up, in
     :func:`~abicheck.cli_compare_release_matrix._strip_diff_results_and_adjust_verdict`,
     which has the real live ``DiffResult`` to filter from.
-    *explain_patterns* renders this library's pattern-verdict modulation
-    ledger (``cli_audit.render_pattern_modulations``, same content a
+    This library's pattern-verdict modulation ledger is always rendered
+    (plan slice 7o: disclosure is unconditional, ADR-067) (``cli_audit.render_pattern_modulations``, same content a
     single-pair `compare --view patterns` echoes) and stashes it under
     ``"_pattern_modulations_text"`` rather than echoing it directly --
     this function runs inside a `ThreadPoolExecutor` worker when the
@@ -371,10 +369,14 @@ def _compare_one_library(
             env_matrix=env_matrix,
         )
         result = compare_result.diff
-        pattern_modulations_text: str | None = None
-        if explain_patterns:
-            from .cli_audit import render_pattern_modulations
+        # Plan slice 7o: unconditional, like every other disposition ledger
+        # (ADR-067). Captured as text rather than echoed here because a
+        # per-library worker thread's echo could interleave with a sibling's
+        # -- see `render_pattern_modulations`'s own docstring.
+        from .cli_audit import render_pattern_modulations
 
+        pattern_modulations_text: str | None = None
+        if result.pattern_modulations:
             pattern_modulations_text = (
                 f"\n== {old_path.name} ==\n{render_pattern_modulations(result)}"
             )
@@ -424,8 +426,20 @@ def _compare_one_library(
                 else {}
             ),
         }
+        # ADR-067's structured half; see `reporter.disposition_ledger_blocks`.
+        entry.update(disposition_ledger_blocks(result))
         if pattern_modulations_text is not None:
             entry["_pattern_modulations_text"] = pattern_modulations_text
+        # ADR-067: a passing release report may not hide which breaking
+        # findings a rule disposed of. Echoed by the caller, in order.
+        if result.suppression_audit is not None:
+            from .cli_compare_fold import _fold_suppression_audit_into_text
+
+            section = _fold_suppression_audit_into_text(
+                "", "markdown", result.suppression_audit, demangle=True
+            )
+            if section.strip():
+                entry["_suppression_audit_text"] = f"\n### {old_path.name}{section}"
         if collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
             # full- vs. compact-evidence split, G38 Phase 9).
@@ -498,6 +512,23 @@ def _compare_one_library(
             # aggregated into the release-level scope block by the formatter.
             entry["scope_resolved"] = result.scope_resolved
             entry["filtered_internal_count"] = result.out_of_surface_count
+            # ADR-067: a count alone does not say *what* was excluded or
+            # why. Echoed in order by the caller so libraries cannot
+            # interleave under the parallel fan-out.
+            if result.out_of_surface_changes:
+                from .cli_audit import ledger_lines_for
+
+                entry["_scope_ledger_text"] = "\n".join(
+                    [
+                        f"\nFiltered as non-public ABI surface in "
+                        f"{old_path.name} ({result.out_of_surface_count} "
+                        f"{'finding' if result.out_of_surface_count == 1 else 'findings'}):",
+                        *ledger_lines_for(
+                            result.out_of_surface_changes,
+                            contract_evaluation=contract_evaluation,
+                        ),
+                    ]
+                )
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
             # Codex review, fresh evidence ("Keep per-library output-dir
@@ -646,6 +677,9 @@ def _suppress_lockstep_soname_findings(
         entry["disposition_audit"] = compute_disposition_audit(
             result, severity_config
         ).to_dict()
+        # ...and the ledger blocks, snapshotted before this pass ran and so
+        # naming neither this rule nor what it hid (Codex review, PR #1284).
+        entry.update(disposition_ledger_blocks(result))
         # Recompute the cached per-library counts via `build_summary`,
         # same as above (Codex review, findings-fixes round 10/11).
         from .report_summary import build_summary
@@ -707,7 +741,6 @@ def _compare_release_libraries(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     show_only: str | None = None,
-    explain_patterns: bool = False,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
@@ -786,7 +819,6 @@ def _compare_release_libraries(
         compile_context,
         depth,
         show_only,
-        explain_patterns,
         public_header_dirs,
         collapse_versioned_symbols,
         project_policy_overrides,
@@ -816,6 +848,12 @@ def _compare_release_libraries(
         pattern_modulations_text = entry.pop("_pattern_modulations_text", None)
         if pattern_modulations_text is not None:
             click.echo(pattern_modulations_text, err=True)
+        suppression_audit_text = entry.pop("_suppression_audit_text", None)
+        if suppression_audit_text is not None:
+            click.echo(suppression_audit_text, err=True)
+        scope_ledger_text = entry.pop("_scope_ledger_text", None)
+        if scope_ledger_text is not None:
+            click.echo(scope_ledger_text, err=True)
         v = str(entry["verdict"])
         if v == "ERROR":
             if "error" in entry:

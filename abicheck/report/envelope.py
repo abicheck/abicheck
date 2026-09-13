@@ -103,7 +103,16 @@ class RenderOptions:
     show_only: str | None = None
     report_mode: str = "full"
     show_impact: bool = False
-    demangle: bool = False
+    #: Tri-state, and the default is deliberately ``None``: demangling is a
+    #: property of the *format* a projection targets (human formats
+    #: demangle, machine formats carry both names in their own field), and
+    #: one envelope is projected into several formats. ``None`` means
+    #: "resolve it per projection"; an explicit ``True``/``False`` is a
+    #: caller overriding that for every format it renders. Storing a
+    #: resolved bool here instead is what made ``render_output`` and
+    #: ``render_envelope`` disagree byte-for-byte on the same evaluation
+    #: (plan slice 7o, caught by `TestRendererOrderIndependence`).
+    demangle: bool | None = None
     follow_deps: bool = False
     show_recommendation: bool = True
     require_complete_analysis: bool = False

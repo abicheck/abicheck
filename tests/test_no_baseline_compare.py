@@ -461,20 +461,12 @@ class TestNoBaselineRejectsViewTokens:
 
     @pytest.mark.parametrize(
         "view_token",
-        [
-            "leaf",
-            "root-cause",
-            "impact",
-            "show=breaking",
-            "demangle",
-            "patterns",
-            # Codex review, PR #1180, fresh evidence: these two were added
-            # to --view in the same PR and missed this rejection entirely --
-            # a no-baseline audit has no scope/disposition ledger and no
-            # suppression audit either.
-            "filtered",
-            "suppressions",
-        ],
+        # Plan slice 7o retired every other token: demangling, the pattern
+        # ledger, the scope ledger and the suppression audit are
+        # unconditional now, and `leaf` retired against `root-cause`. What
+        # is left of the vocabulary is what a no-baseline audit still has
+        # to refuse.
+        ["root-cause", "impact", "show=breaking"],
     )
     def test_any_view_token_is_rejected(self, tmp_path: Path, view_token: str) -> None:
         from click.testing import CliRunner
@@ -488,6 +480,27 @@ class TestNoBaselineRejectsViewTokens:
         )
         assert result.exit_code == 64, result.output
         assert "--view is not available together with --no-baseline" in (result.output)
+
+    @pytest.mark.parametrize(
+        "retired_token",
+        ["leaf", "demangle", "no-demangle", "patterns", "filtered", "suppressions"],
+    )
+    def test_a_retired_token_is_still_a_usage_error_here(
+        self, tmp_path: Path, retired_token: str
+    ) -> None:
+        """A token retired in plan slice 7o fails at parse time, before the
+        no-baseline rejection -- exit 64 either way, with no hidden alias."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        path = self._snapshot_path(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", "--no-baseline", str(path), "--view", retired_token],
+        )
+        assert result.exit_code == 64, result.output
+        assert "retired" in result.output
 
     def test_no_view_flag_still_succeeds(self, tmp_path: Path) -> None:
         from click.testing import CliRunner

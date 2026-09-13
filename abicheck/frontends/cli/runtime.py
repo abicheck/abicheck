@@ -654,7 +654,6 @@ def _finalize_compare_result(
     metadata_new_input: Path,
     *,
     show_redundant: bool,
-    show_filtered: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
     old_snapshot: AbiSnapshot | None = None,
@@ -722,9 +721,25 @@ def _finalize_compare_result(
 
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
-    if show_filtered and result.out_of_surface_changes:
+    # Plan slice 7o: both ledgers are unconditional. They used to be gated
+    # on `--view filtered`, which made an exclusion invisible unless a token
+    # was typed -- ADR-067's record-before-disposing accounting rule is that
+    # a disposition is part of the result, not a display preference. Each
+    # still renders nothing at all when its own collection is empty, so a
+    # run with no scoping and no reconciliation is unchanged.
+    #
+    # Both ledgers demangle per row, and this runs *before*
+    # `_render_compare_report` reaches `build_report_document`'s own batch,
+    # so that later cache fill is too late to help here: without this one
+    # batched call a host with no in-process `cxxfilt` forks a `c++filt`
+    # per distinct symbol in the loops below (Codex review, PR #1284).
+    if result.out_of_surface_changes or result.reconciled_changes:
+        from ...reporter import prewarm_change_demangling
+
+        prewarm_change_demangling(result)
+    if result.out_of_surface_changes:
         echo_filtered_surface(result, contract_evaluation=contract_evaluation)
-    if show_filtered and result.reconciled_changes:
+    if result.reconciled_changes:
         echo_reconciled(result, contract_evaluation=contract_evaluation)
 
     # The scoping fallback warning goes to stderr so it never corrupts the

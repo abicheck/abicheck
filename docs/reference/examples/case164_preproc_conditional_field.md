@@ -67,7 +67,7 @@ With build context available (reconciliation is automatic):
 Verdict: NO_CHANGE (exit 0)
 
 _No ABI changes detected._
-(--view filtered discloses: "Reconciled as context-free header-parse
+(the reconciliation ledger is always disclosed: "Reconciled as context-free header-parse
 artifacts (1 finding): type_field_removed: Config [config.h:10]")
 ```
 
@@ -90,7 +90,7 @@ each struct's guarded members: since `CONFIG_KEEP_LEGACY` is in
 `build_context_defines` on both sides, the guarded field is proven
 present in both real builds and the phantom removal is reclassified as a
 context-free parsing artifact rather than a genuine break (ADR-028 D3: a
-reconciled finding is disclosed under `--view filtered`, never silently
+reconciled finding is always disclosed, never silently
 dropped, and an *unconditional* removal — or one guarded on an undefined
 macro — is never reconciled away).
 

@@ -38,7 +38,7 @@ from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
-from test_compare_release import _invoke, _snap, _write_snap
+from test_compare_release import _invoke, _invoke_combined, _snap, _write_snap
 
 from abicheck import service
 from abicheck.cli import main
@@ -237,7 +237,12 @@ class TestTheApiRaisesTypedErrorsAndTheCliTranslatesThem:
                 service.resolve_release_compare(
                     service.ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)
                 )
-            code, out = _invoke("compare", str(old_dir), str(new_dir))
+            # `_invoke_combined`, not `_invoke`: a usage error's message goes
+            # to stderr, and `_invoke` deliberately returns stdout alone so the
+            # unconditional ledgers cannot land inside a `-o json=-` document
+            # (see its own docstring). The sibling below already made this
+            # distinction with a hand-rolled runner.
+            code, out = _invoke_combined("compare", str(old_dir), str(new_dir))
         assert code == 64, out
         assert message in out
 

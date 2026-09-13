@@ -1759,21 +1759,244 @@ mechanism* first and an option count second:
      the binary happens to carry), with build-id validation that refuses
      a contradicting sidecar and accepts one that carries no build-id —
      absent evidence never manufactures a mismatch.
-- **7o — `--view`'s internal grammar.** 7i/7k ruled `--view` a keep and
-  never looked inside it. It now carries report mode, a
-  severity/entity/action display filter with its own AND/OR rules across
-  repeated groups, demangle toggles, pattern explanation, filtered-finding
-  display and suppression audit — the four flags Phase 5 merged, still
-  four decisions. Target: `patterns`, `filtered` and `suppressions` become
-  unconditional disclosure (compact counts always, detail in the canonical
-  result — which is ADR-067's accounting rule, not a display preference);
-  `demangle`/`no-demangle` become automatic once human output carries a
-  copyable exact symbol and machine output carries both names; the display
-  dimensions derive from the canonical finding model rather than a second
-  `ChangeKind`-name interpretation. `leaf` is re-examined against
-  `root-cause` **with a measurement**, not declared redundant. Net option
-  count: **0** — which is the point: this slice reduces decisions, not
-  strings beginning with `--`.
+- **7o — `--view`'s internal grammar. Done.** 7i/7k ruled `--view` a keep
+  and never looked inside it. Inside, it carried six independent decisions:
+  report mode, a severity/entity/action display filter, demangle toggles,
+  pattern explanation, filtered-finding display and suppression audit. Four
+  are gone; the net option count is **0**, which is the point — this slice
+  reduces what a user must decide, not what they must type.
+
+  1. **`patterns`, `filtered` and `suppressions` are unconditional
+     disclosure.** All three gated *rendering* of a ledger the run had
+     already computed, which ADR-067's record-before-disposing rule says is
+     part of the result rather than a display preference. Verified against
+     the real machine projections rather than by reading the renderers:
+     nothing was reachable only through a token. The scope/reconciliation
+     ledgers and the `--suppress` audit were already in every JSON/SARIF/
+     JUnit/HTML projection unconditionally, and the disposition audit
+     (ADR-067 D3, `report/disposition_audit.py`) already carried the
+     detected/effective totals into every view including the compact ones.
+     What the tokens gated was the human-side echo, which now happens
+     whenever there is something to disclose. **One deliberate exception,
+     recorded because it looks like an inconsistency:** the pattern ledger
+     is echoed only when at least one finding was actually modulated. An
+     unconditional "No pattern-aware modulations applied." on every run is
+     a banner, not accounting, and it would make every quiet run differ
+     from before for no reader's benefit.
+  2. **`demangle`/`no-demangle` are automatic.** The decision existed only
+     because demangling *replaced* the mangled name, leaving nothing to
+     paste into `nm`, a suppression selector or a bug report.
+     `demangle_text` now renders `lib::gone(int) [_ZN3lib4goneEi]`, human
+     formats (markdown/review/html/text/oneline) always demangle, machine
+     formats never do — and `reporter.resolve_demangled_symbol` resolves
+     `demangled_symbol` for *every* Itanium-mangled finding rather than
+     only an `ELF_ONLY`-visibility one, so a JSON/SARIF consumer carries
+     both names. Confirmed on real compiled libraries, not fixtures with
+     hand-written names: a g++-built ELF pair and a
+     `clang++ -target x86_64-apple-macos11 -fuse-ld=lld`-built Mach-O pair
+     both produce a real `func_removed` whose machine projection carries
+     `symbol=_ZN3lib4goneEi` + `demangled_symbol=lib::gone(int)` and whose
+     markdown carries both spellings. **PE is the documented exception and
+     is unchanged by this slice**: a real `clang++ -target
+     x86_64-pc-windows-msvc` DLL pair produces `?gone@lib@@YAXH@Z` in both
+     projections with no `demangled_symbol` at all, because nothing in this
+     codebase demangles MSVC decoration (`demangle.py`'s own module
+     docstring explains why, and adding a demangler is a dependency
+     decision, not a display one). The exact symbol is copyable there too,
+     which is the property this deliverable actually promises.
+  3. **The display dimensions come from the canonical finding model.**
+     `ChangeKindMeta` gains a mandatory `entity` (`ChangeEntity`) and
+     `operation` (`ChangeOperation`), declared on the same single
+     registration that declares a kind's verdict and impact, and
+     `_validate_entry` refuses an entry without them — so a kind added
+     tomorrow lands in the right dimension with no second registration.
+     The superseded path is deleted, not left beside the catalog:
+     `reporter_markdown`'s `_ELEMENT_PREFIXES`/`_ELEMENT_EXACT` name-prefix
+     tables, its `_ADDED_SUFFIXES`/`_REMOVED_SUFFIXES` suffix rule, and the
+     30-entry `_OPERATION_OVERRIDES` table that corrected the suffix rule
+     for every kind whose name ends in `_added` while naming a trait
+     *gained by a persisting entity*. **That override table was itself the
+     evidence that a name is not the fact.** The measurement that motivates
+     this is worth not rediscovering: the prefix table matched **no element
+     at all for 238 of the 407 kinds**, so `--view
+     show=functions,variables,types,enums,elf` — every token the vocabulary
+     had — hid 58% of the catalog, silently. The element vocabulary
+     therefore also gains `build`, `source` and `analysis`, the three
+     dimensions the prefix table could not express; the five existing
+     tokens keep their exact spellings (`elf` stays the alias for
+     `ChangeEntity.BINARY`) so the old invocation is unchanged.
+     Two consequences of *declaring* the dimensions surfaced only in review
+     and are the reason this is worth stating as a rule rather than a
+     seeding pass. **An attribute transition is a modification.**
+     `ChangeOperation`'s docstring already said a trait gained by a
+     persisting entity is not an addition (`func_noexcept_added`), but the
+     seeding applied that inconsistently: every `[[deprecated]]` kind, the
+     `override`-specifier pair and `field_default_initializer_removed` each
+     named a declaration present on *both* sides while claiming `added`/
+     `removed`, so `--view show=added` listed functions that were merely
+     annotated. All thirteen are now `modified`. The boundary is the
+     interesting half, and is asserted so a later sweep cannot widen the
+     rule: `func_export_added`/`var_export_added` stay `added`, because a
+     symbol genuinely appears in the export table — a new thing becomes
+     bindable, rather than an existing one being annotated. **And a kind
+     can be polymorphic.** `diff_namespaces` emits both
+     `experimental_graduated` and
+     `experimental_removed_without_replacement` for functions *and* types,
+     so no single declared `entity` is right for every finding — declaring
+     them `TYPE` excluded a graduated function from `--view
+     show=functions`. The fix keeps the one-registration property rather
+     than reintroducing a reporter-side table: `ChangeKindMeta.
+     entity_from_field` names the *finding's own* attribute that states the
+     concrete entity (`Change.entity_discriminator`), with the declared
+     `entity` as the fallback when a finding states none — an unresolvable
+     dimension would drop the finding from every element filter, which is
+     worse than a coarse one. Splitting the two kinds into function/type
+     variants was the alternative and costs two `ChangeKind` values, two
+     catalog entries and a detector branch to express what one declarative
+ field does.
+
+     **Two rounds of this went wrong in ways worth recording.** The
+     mechanism first pointed at `make_change`'s `detail` *argument* — the
+     same word the description template interpolates — which `Change` does
+     not store, so it resolved to nothing on every production finding while
+     a synthetic test object carrying a `detail` attribute made it look
+     correct: the "test written to confirm the fix" failure AGENTS.md names,
+     committed in the same slice that quotes it. Rewritten against the real
+     detector, the test then caught the second error immediately: the
+     detector's own label for a function is `"declaration"`, not
+     `"function"`, so even a persisted field carrying it would have resolved
+     to nothing. The rule that survives: **a per-finding dimension is only
+     tested by a finding the detector actually produced.**
+
+     The same three rounds kept finding *seeding* errors by eye —
+     `anon_field_changed` and the three `base_class_*` kinds, then
+     `source_level_kind_changed` and `used_reserved_field`. 407 entries were
+     classified by hand and a wrong one fails nothing anywhere, which is
+     exactly the escape class the bug-class plan names. So the
+     contradiction is now mechanical:
+     `tests/test_change_catalog_dimensions.py`'s
+     `TestADeclaredEntityAgreesWithItsOwnRegistration` checks each declared
+     entity against two oracles derived from the entry's *own*
+     `description_template` — its leading noun, and the `{name}::{...}`
+     member shape — neither of which restates the field under test. It
+     immediately found a third error no reviewer had flagged
+     (`ctor_overload_ambiguity_risk`, whose template names a class). The
+     judgement stays manual; only the contradiction is automated.
+
+     Per-finding `operation` values may move in JSON for a kind the suffix
+     rule classified wrongly, and each finding now carries `entity` beside
+     it — report schema **5.0**, a MAJOR bump because the `leaf` removal
+     takes two keys with it (Codex review, PR #1284: a consumer told to
+     accept any 4.x report would otherwise get a document that no longer
+     satisfies the contract it implemented).
+  4. **`leaf` re-examined against `root-cause` with a measurement, per the
+     7g/7k precedent — and retired.** 129 real library pairs were built
+     from the catalog corpus (`catalog/cases/*/v1.{c,cpp}` + `v2`, compiled
+     to shared objects with debug info) and compared through the typed API,
+     then rendered under both modes and under `full`:
+
+     | Measured over the 129 pairs | Result |
+     |---|---|
+     | pairs compared without error | 129 |
+     | pairs with at least one finding | 93 |
+     | pairs where `leaf` and `root-cause` exposed the **same finding set** | **93 of 93** |
+     | pairs where either mode exposed a finding the other did not | **0** |
+     | pairs with findings where `leaf_changes` was **empty** while `root_causes` grouped everything | **40** |
+     | keys `leaf` had and `root-cause` did not | `leaf_changes`, `non_type_changes` |
+     | keys `root-cause` had and `leaf` did not | `root_causes`, `root_cause_count`, `detectors`, `suppression`, `old_file`, `new_file` |
+
+     The measurement decides it: `leaf` never showed evidence `root-cause`
+     lacked, and in 43% of the cases that had findings its own headline
+     section was empty because it groups *only* root-type changes. So
+     `--view leaf` exits 64 naming `root-cause`, `_to_json_leaf`/
+     `_to_markdown_leaf`/`build_leaf_document` and the leaf row/section
+     renderers are deleted, and the `leaf_changes`/`non_type_changes` JSON
+     keys go with them (what makes that bump MAJOR). The acceptance bar is
+     met by asserting what the retired mode's *own* tests asserted — the
+     root type grouped with its affected-interface list, and the non-type
+     findings alongside it — against `root-cause`, rather than by asserting
+     that the removed token now errors.
+
+  **Front-end parity and the merge criteria**, in this PR: every retired
+  spelling exits `64` with no hidden alias and is registered in
+  `scripts/retired_surfaces.py`; `action/run.sh`'s two hand-maintained
+  `--view` token scanners needed no behavioural change (both are
+  token-generic and special-case only `show=`) and their comments are
+  corrected; the typed API never carried any of these values (`--view` is a
+  front-end spelling resolved into `report_mode`/`show_only` before
+  `run_compare` is reached), and the `demangle`/`explain_patterns`/
+  `show_filtered`/`audit_suppressions` parameters are removed from the CLI
+  layer rather than left as dead internal knobs — `demangle` survives only
+  as a *resolved per-format* value
+  (`service_render.resolve_demangle_for_format(fmt)`, a one-argument
+  function over `HUMAN_FORMATS`). That resolution is owned engine-side, not
+  by the CLI, which is what makes the typed API's `render_output` demangle
+  automatically too — and `HUMAN_FORMATS` must list every *alias* of a human
+  projector, not just its primary spelling: `md` was omitted at first, so
+  the identical Markdown projection demangled under one of its two
+  documented names and not the other (Codex review, PR #1284; the test
+  derives the alias groups from the projector table itself rather than
+  restating them). Verdict, gate, exit code,
+  coverage contribution and assurance are asserted separately from the
+  display change.
+
+  **Three consequences worth not rediscovering**:
+
+  1. **Two release-path rejections disappeared without their gaps
+     closing.** `--view filtered` was rejected outright on a directory/
+     package operand because the release engine never threaded the ledger
+     into its per-library renderer, and `--view suppressions` with a real
+     `--suppress` was rejected because the fan-out has no single audit
+     result to attach. Both rejections are gone because the requests are
+     gone — but the release renderer still shows no per-library scope
+     ledger and no per-library suppression audit. That is now a missing
+     feature rather than a usage error, and it is the one place where a
+     release comparison discloses less in human output than a single-pair
+     one. The machine projections are unaffected.
+  2. **A stored-bundle-facts comparison lost two rejections**
+     (`compare_bundle_facts_rejections.py`), and the two outcomes are not
+     the same — the first revision of this note said they were, which was
+     wrong in both directions (CodeRabbit review, PR #1284). *Demangling*
+     was a real gap and is closed: `_render_markdown` now runs the same
+     `demangle_text` pass every other human renderer does, because a
+     format-driven contract that one Markdown path ignores is not a
+     contract. The *pattern ledger* is absent for a different reason
+     entirely — it is never computed on this path (`compare_snapshots`
+     defaults `pattern_verdicts=False`; `bundle_side_input.py` deliberately
+     does not pass True, ADR-027 defers that flip), so it is **not** in that
+     comparison's JSON either and the retired token could only ever have
+     echoed an empty one. Nothing was lost; disclosure there becomes real
+     work only if the ADR-027 decision changes.
+  3. **The F-19 rendering-invariance space shrank from 6048 points to
+     189**, because four of its axes stopped existing. The invariant is
+     unchanged; there is simply less rendering space left for it to hold
+     over, which is what this slice is for. `tests/
+     test_presentation_analysis_separation.py`'s own vacuity guard on the
+     space size is what keeps that shrink honest rather than silent.
+
+  **Verification.** `scripts/verify.py --profile pr` passes all 21 non-unit
+  steps, and the `unit-pr` lane reports **47,447 passed** with the 95%
+  line+branch floor held at **96.25%**. Its 45 remaining failures are all
+  pre-existing in this environment, not this slice's: 43 of them reproduce
+  name-for-name on the parent commit (the git/workflow-harness families --
+  `test_protect_committed_baseline_workflow`, `test_changelog_fragment_gate`,
+  `test_bugfix_test_contract`, `test_agent_evals`,
+  `test_backend_capability_matrix`, `test_classify_perf_paths`,
+  `test_subprocess_bash_is_resolved`, `test_model_package_surface`,
+  `test_l2_real_profiles`, `test_real_world_false_positives`), and the
+  remaining two pass when run individually -- `-n auto` cross-test
+  interference in two files whose siblings are in that same pre-existing set.
+
+  The surviving parsing primitive gets the treatment AGENTS.md requires:
+  `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
+  states `parse_view_tokens`'s contract as invariants — last mode wins under
+  any interleaving, `show=` groups keep their order and are never merged,
+  the two dimensions are independent, a group is never joined with a comma
+  (which would AND two groups instead of ORing them), every retired token is
+  a usage error naming its replacement — exhaustively over every token
+  sequence up to length three, against an independently-stated oracle plus a
+  vacuity guard on the oracle itself.
+
 - **7p — `project validate` consolidation. Done.** `project validate`,
   `validate-build` and `validate-use-cases` were one question over three
   input schemas. Now `abicheck project validate INPUT`, dispatching on a

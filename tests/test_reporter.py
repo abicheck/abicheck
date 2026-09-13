@@ -8,6 +8,17 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.reporter import to_json, to_markdown, to_review_digest, to_stat_json
 
 
+def _first_finding(doc: dict) -> dict:
+    """The first finding a ``--view root-cause`` document exposes.
+
+    The `leaf` mode these assertions were written against retired in plan
+    slice 7o (measured identical to `root-cause` over 129 real library
+    pairs); the claims transfer unchanged, only the document differs."""
+    findings = [f for g in doc.get("root_causes", []) for f in g["findings"]]
+    assert findings, doc
+    return findings[0]
+
+
 class TestReviewDigest:
     def test_breaking_digest_has_verdict_and_recommendation(self):
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
@@ -184,7 +195,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
         r = _result(Verdict.BREAKING, changes=[c])
         r.analysis_assurance = AnalysisAssurance(status="partial")
-        for mode in ("leaf", "root-cause"):
+        for mode in ("full", "root-cause"):
             d = json.loads(to_json(r, report_mode=mode, require_complete_analysis=True))
             assert d["analysis_assurance_exit_contribution"] == 1, mode
 
@@ -261,7 +272,7 @@ class TestAnnotationsPersistence:
     def test_present_across_leaf_and_root_cause_modes(self):
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         r = _result(Verdict.BREAKING, changes=[c])
-        for mode in ("leaf", "root-cause"):
+        for mode in ("full", "root-cause"):
             d = json.loads(to_json(r, report_mode=mode))
             assert len(d["annotations"]) == 1
             assert d["annotations"][0]["level"] == "error"
@@ -550,19 +561,19 @@ class TestEvidenceStatusInJson:
         # `changes[]` by --show-only — only the gate summary must see it.
         assert len(d["changes"]) == 1
 
-    def test_leaf_mode_root_type_change_carries_evidence_status(self):
+    def test_root_cause_mode_root_type_change_carries_evidence_status(self):
         # Regression (Codex review): --report-mode leaf serializes root type
         # changes via a separate _leaf_entry() path, not _change_to_dict() —
         # evidence_status must be populated there too.
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
         r = _result(Verdict.BREAKING, changes=[c])
-        d = json.loads(to_json(r, report_mode="leaf"))
-        assert d["leaf_changes"][0]["evidence_status"] == "artifact_proven"
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert _first_finding(d)["evidence_status"] == "artifact_proven"
         # And the top-level `changes` union (leaf_changes + non_type_changes,
         # kept for backward-compat consumers) carries it too.
         assert d["changes"][0]["evidence_status"] == "artifact_proven"
 
-    def test_leaf_mode_root_type_change_carries_schema_2_3_fields(self):
+    def test_root_cause_mode_root_type_change_carries_schema_2_3_fields(self):
         """Codex review on #557: _leaf_entry() builds its own dict rather
         than routing through _change_to_dict(), so root type changes in
         leaf_changes[]/changes[] were missing the schema 2.3 `operation`/
@@ -570,37 +581,36 @@ class TestEvidenceStatusInJson:
         entries — breaking finding_id correlation for leaf-mode reports."""
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
         r = _result(Verdict.BREAKING, changes=[c])
-        d = json.loads(to_json(r, report_mode="leaf"))
-        assert d["leaf_changes"][0]["operation"] == "modified"
-        assert isinstance(d["leaf_changes"][0]["finding_id"], str)
-        assert len(d["leaf_changes"][0]["finding_id"]) == 16
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert _first_finding(d)["operation"] == "modified"
+        assert isinstance(_first_finding(d)["finding_id"], str)
+        assert len(_first_finding(d)["finding_id"]) == 16
         assert d["changes"][0]["operation"] == "modified"
-        assert d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+        assert d["changes"][0]["finding_id"] == _first_finding(d)["finding_id"]
 
         # Same finding_id as full (non-leaf) mode for the identical change —
         # the fingerprint must not depend on which report mode built it.
         full_d = json.loads(to_json(_result(Verdict.BREAKING, changes=[c])))
-        assert full_d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+        assert full_d["changes"][0]["finding_id"] == _first_finding(d)["finding_id"]
 
-    def test_leaf_mode_root_type_change_carries_recommended_action(self):
+    def test_root_cause_mode_root_type_change_carries_recommended_action(self):
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
         r = _result(Verdict.BREAKING, changes=[c])
-        d = json.loads(to_json(r, report_mode="leaf"))
+        d = json.loads(to_json(r, report_mode="root-cause"))
         assert (
-            d["leaf_changes"][0]["recommended_action"]
-            == "recompile_and_relink_required"
+            _first_finding(d)["recommended_action"] == "recompile_and_relink_required"
         )
         assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
 
-    def test_leaf_mode_root_type_change_carries_reviewer_action(self):
+    def test_root_cause_mode_root_type_change_carries_reviewer_action(self):
         # enum_member_added is both a root-type-change kind (routed through _leaf_entry, which builds its own dict rather than reusing _change_to_dict) and an addition -- must carry reviewer_action in both leaf_changes[] and changes[], matching full-mode entries.
         c = Change(ChangeKind.ENUM_MEMBER_ADDED, "E::X", "added")
         r = _result(Verdict.COMPATIBLE, changes=[c])
-        d = json.loads(to_json(r, report_mode="leaf"))
-        assert d["leaf_changes"][0]["reviewer_action"] == "review_exhaustive_switches"
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert _first_finding(d)["reviewer_action"] == "review_exhaustive_switches"
         assert d["changes"][0]["reviewer_action"] == "review_exhaustive_switches"
 
-    def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
+    def test_root_cause_mode_root_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a root
         type kind (type_size_changed) to COMPATIBLE must not silently drop a
         frozen_namespace_violation-tagged finding below its raw severity in
@@ -619,11 +629,13 @@ class TestEvidenceStatusInJson:
         pf = PolicyFile(overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.COMPATIBLE})
         r = _result(Verdict.BREAKING, changes=[c])
         r.policy_file = pf
-        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
-        assert d["leaf_changes"][0]["severity"] == "breaking"
+        d = json.loads(
+            to_json(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        )
+        assert _first_finding(d)["severity"] == "breaking"
         assert d["severity"]["exit_code"] == 4
 
-    def test_leaf_mode_non_type_change_honours_frozen_namespace_floor(self):
+    def test_root_cause_mode_non_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549 (follow-on to the root-type leaf-entry fix):
         the adjacent non_type_changes path in the same leaf-mode function
         called _change_to_dict without policy_file, so a non-root-type kind
@@ -643,26 +655,30 @@ class TestEvidenceStatusInJson:
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
         r = _result(Verdict.BREAKING, changes=[c])
         r.policy_file = pf
-        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
-        assert d["non_type_changes"][0]["severity"] == "breaking"
+        d = json.loads(
+            to_json(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        )
+        assert _first_finding(d)["severity"] == "breaking"
         assert d["changes"][0]["severity"] == "breaking"
         assert d["severity"]["exit_code"] == 4
 
-    def test_leaf_mode_carries_severity_block(self):
-        """report_mode="leaf" returned before the severity block was ever
+    def test_root_cause_mode_carries_severity_block(self):
+        """report_mode="root-cause" returned before the severity block was ever
         built, so a caller passing severity_config silently got no severity
         information at all — unlike full-mode JSON."""
         from abicheck.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         r = _result(Verdict.COMPATIBLE, changes=[c])
-        d = json.loads(to_json(r, report_mode="leaf", severity_config=PRESET_DEFAULT))
+        d = json.loads(
+            to_json(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        )
         assert "severity" in d
         assert d["severity"]["categories"]["addition"]["count"] == 1
 
-    def test_leaf_mode_without_severity_config_has_no_severity_block(self):
+    def test_root_cause_mode_without_severity_config_has_no_severity_block(self):
         r = _result(Verdict.COMPATIBLE)
-        d = json.loads(to_json(r, report_mode="leaf"))
+        d = json.loads(to_json(r, report_mode="root-cause"))
         assert "severity" not in d
 
 
@@ -901,7 +917,7 @@ class TestImpactAssessmentRootCause:
             "ns::internal::helper"
         )
 
-    def test_leaf_mode_also_correlates_via_scoped_only_changes(self):
+    def test_root_cause_mode_also_correlates_via_scoped_only_changes(self):
         root = Change(
             ChangeKind.FUNC_REMOVED,
             "ns::internal::helper",
@@ -915,7 +931,7 @@ class TestImpactAssessmentRootCause:
         )
         r = _result(Verdict.BREAKING, changes=[root])
         r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
-        d = json.loads(to_json(r, report_mode="leaf"))
+        d = json.loads(to_json(r, report_mode="root-cause"))
         assert d["changes"][0]["impact_assessment"]["root_cause_display"] == (
             "ns::internal::helper"
         )
@@ -945,7 +961,7 @@ class TestImpactAssessmentRootCause:
         assert evidence["strongest_evidence_level"] == "consumer_proven"
         assert evidence["evidence_levels"] == ["artifact_proven", "consumer_proven"]
 
-    def test_leaf_mode_also_correlates_evidence_via_scoped_only_sibling(self):
+    def test_root_cause_mode_also_correlates_evidence_via_scoped_only_sibling(self):
         root = Change(
             ChangeKind.FUNC_REMOVED,
             "ns::internal::helper",
@@ -959,7 +975,7 @@ class TestImpactAssessmentRootCause:
         )
         r = _result(Verdict.BREAKING, changes=[root])
         r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
-        d = json.loads(to_json(r, report_mode="leaf"))
+        d = json.loads(to_json(r, report_mode="root-cause"))
         evidence = d["changes"][0]["impact_assessment"]["root_cause_evidence"]
         assert evidence["strongest_evidence_level"] == "consumer_proven"
 
@@ -1120,11 +1136,12 @@ class TestRootCauseMarkdown:
         assert "No ABI changes detected" in md
         assert "Root Causes" not in md
 
-    @pytest.mark.parametrize("mode", ["leaf", "root-cause"])
+    @pytest.mark.parametrize("mode", ["root-cause"])
     def test_coverage_warning_surfaced_in_alternate_modes(self, mode):
         # Codex review: _append_confidence_section (the coverage-warning
-        # banner's other home) only runs in full mode -- leaf/root-cause
+        # banner's other home) only runs in full mode -- the alternate views
         # share _view_preamble instead, which must carry the same banner.
+        # ``leaf`` left this parametrization with plan slice 7o.
         r = _result(Verdict.COMPATIBLE)
         r.coverage_warnings = ["old and new binaries are byte-identical"]
         assert "byte-identical" in to_markdown(r, report_mode=mode)
@@ -1199,11 +1216,16 @@ class TestMarkdownReporter:
         )
         result = _result(Verdict.BREAKING, [c])
         md_on = to_markdown(result, demangle=True)
-        assert "foo()" in md_on
-        assert "_Z3foov" not in md_on
-        # Default leaves mangled names untouched (machine-stable).
+        # Plan slice 7o: the demangled name *and* the exact mangled one, so
+        # human output stays copyable -- which is what let the demangle
+        # toggle retire.
+        assert "foo() [_Z3foov]" in md_on
+        # Off leaves mangled names untouched (machine-stable). The CLI no
+        # longer exposes this choice; the parameter survives as the
+        # per-format resolution `_resolve_demangle(fmt)` makes.
         md_off = to_markdown(result, demangle=False)
         assert "_Z3foov" in md_off
+        assert "foo()" not in md_off
 
     def test_service_review_format_honors_demangle(self, monkeypatch):
         import abicheck.demangle as dm
@@ -1219,7 +1241,7 @@ class TestMarkdownReporter:
         )
         old = AbiSnapshot(library="libtest.so.1", version="1.0")
         out_on = render_output("review", result, old, demangle=True)
-        assert "foo()" in out_on and "_Z3foov" not in out_on
+        assert "foo() [_Z3foov]" in out_on
         out_off = render_output("review", result, old, demangle=False)
         assert "_Z3foov" in out_off
 

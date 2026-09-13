@@ -69,10 +69,13 @@ class TestScopedCompatFoldDemangle:
             "compare", str(old_p), str(new_p), "--required-symbol", _MANGLED
         )
         assert "## Scoped to --required-symbol(s) contract" in result.output
-        assert f"missing entrypoint: `{_DEMANGLED}`" in result.output
-        assert f"missing entrypoint: `{_MANGLED}`" not in result.output
+        # Plan slice 7o: demangled *and* carrying the exact symbol, which
+        # is what makes the missing entrypoint greppable in the binary.
+        assert f"missing entrypoint: `{_DEMANGLED} [{_MANGLED}]`" in result.output
 
-    def test_missing_entrypoint_stays_mangled_with_no_demangle(self, tmp_path) -> None:
+    def test_no_demangle_is_retired_because_nothing_is_lost(self, tmp_path) -> None:
+        """Plan slice 7o: the token existed to recover the exact symbol,
+        which the demangled render now carries anyway."""
         old_p, new_p = _write_pair(tmp_path)
         result = _invoke(
             "compare",
@@ -83,8 +86,8 @@ class TestScopedCompatFoldDemangle:
             "--view",
             "no-demangle",
         )
-        assert f"missing entrypoint: `{_MANGLED}`" in result.output
-        assert f"missing entrypoint: `{_DEMANGLED}`" not in result.output
+        assert result.exit_code == 64, result.output
+        assert "retired" in result.output
 
     def test_json_output_never_demangles(self, tmp_path) -> None:
         old_p, new_p = _write_pair(tmp_path)
@@ -125,20 +128,21 @@ class TestSuppressionAuditFoldDemangle:
             str(new_p),
             "--suppress",
             str(suppress),
-            "--view",
-            "suppressions",
         )
         assert "## Suppression Audit" in result.output
         # The label's own selector echo is never demangled.
         assert f"`intentional removal (symbol={_MANGLED})`" in result.output
         assert f"(symbol={_DEMANGLED})" not in result.output
-        # The trailing free-text symbol mention is demangled by default.
-        assert f"suppressed func_removed: {_DEMANGLED}" in result.output
-        assert f"suppressed func_removed: {_MANGLED}" not in result.output
+        # The trailing free-text symbol mention is demangled, and keeps the
+        # exact spelling beside it (plan slice 7o).
+        assert f"suppressed func_removed: {_DEMANGLED} [{_MANGLED}]" in result.output
 
-    def test_high_risk_match_tail_stays_mangled_with_no_demangle(
+    def test_the_exact_symbol_survives_without_a_no_demangle_token(
         self, tmp_path
     ) -> None:
+        """What ``--view no-demangle`` used to buy here -- a mangled name
+        to paste into ``nm``/a suppression selector -- is present in the
+        demangled render itself, which is why the token could retire."""
         old_p, new_p = _write_pair(tmp_path)
         suppress = tmp_path / "suppress.yml"
         suppress.write_text(
@@ -152,13 +156,8 @@ class TestSuppressionAuditFoldDemangle:
             str(new_p),
             "--suppress",
             str(suppress),
-            "--view",
-            "suppressions",
-            "--view",
-            "no-demangle",
         )
-        assert f"suppressed func_removed: {_MANGLED}" in result.output
-        assert f"suppressed func_removed: {_DEMANGLED}" not in result.output
+        assert f"suppressed func_removed: {_DEMANGLED} [{_MANGLED}]" in result.output
 
     def test_colliding_demangled_names_stay_distinguishable(self, tmp_path) -> None:
         """Two suppression rules on distinct symbols that demangle to the
@@ -196,8 +195,6 @@ class TestSuppressionAuditFoldDemangle:
             str(new_p),
             "--suppress",
             str(suppress),
-            "--view",
-            "suppressions",
         )
         assert f"`intentional removal (symbol={ctor1})`" in result.output
         assert f"`intentional removal (symbol={ctor2})`" in result.output

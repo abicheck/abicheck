@@ -983,8 +983,6 @@ class TestScopeCli:
                 str(op),
                 str(np_),
                 "--scope-public-headers",
-                "--view",
-                "filtered",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1064,7 +1062,7 @@ class TestSurfaceLedgerOutput:
 
         from abicheck.reporter import to_json
 
-        d = json.loads(to_json(self._scoped_result(), report_mode="leaf"))
+        d = json.loads(to_json(self._scoped_result(), report_mode="root-cause"))
         assert "surface_scope" in d
         symbols = {c["symbol"] for c in d["surface_scope"]["out_of_surface_changes"]}
         assert any("InternalCache" in s for s in symbols)

@@ -120,14 +120,16 @@ def test_mixed_hygiene_and_deployment_risk_findings_split_into_two_sections():
     )
 
 
-def test_report_mode_leaf_and_root_cause_are_unaffected_by_the_kind_split():
+def test_report_mode_root_cause_is_unaffected_by_the_kind_split():
     """ADR-068 D4: presentation never changes analysis. The split only
     changes *which section* a RISK_KINDS finding's oneline rendering lands
-    in for the default full-mode view; it must not change report_mode="leaf"
-    or "root-cause", which don't go through compute_severity_sections at
-    all, and it must not change the verdict or change count."""
+    in for the default full-mode view; it must not change
+    report_mode="root-cause", which doesn't go through
+    compute_severity_sections at all, and it must not change the verdict or
+    change count. (``leaf`` was the other mode here until plan slice 7o
+    retired it.)"""
     result = _result([_evolved_change(CrossSourceEvolution.PERSISTENT, "a")])
-    for mode in ("leaf", "root-cause"):
+    for mode in ("root-cause",):
         # Must not raise, and must not silently drop the finding.
         md = to_markdown(result, report_mode=mode)
         assert isinstance(md, str)

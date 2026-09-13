@@ -49,15 +49,6 @@ if TYPE_CHECKING:
 _VIEW_DEFAULTS: dict[str, object] = {
     "report_mode": "full",
     "show_only": None,
-    "demangle": None,
-    "explain_patterns": False,
-    # Phase 5 additions (Codex review, PR #1180, fresh evidence): a
-    # no-baseline audit has no scope/disposition ledger and no suppression
-    # audit either -- it reports one hand-built, un-suppressed, always-
-    # in-scope empty change set by construction -- so these two are exactly
-    # as unsupported as the four above, not a silent no-op.
-    "show_filtered": False,
-    "audit_suppressions": False,
 }
 
 
@@ -69,9 +60,12 @@ def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
     (an empty change set, by construction -- see `report/no_baseline.py`'s
     own module docstring) -- it has no root-cause graph for `leaf`/
     `root-cause` to restructure, no per-library `DiffResult` for `impact`
-    to summarize, no findings list for `show=...` to filter, no symbol
-    table for `demangle` to affect, and no pattern-modulation ledger for
-    `patterns` to echo. Silently accepting any of them (`parse_view_tokens`
+    to summarize and no findings list for `show=...` to filter. (Plan slice
+    7o retired the other four tokens outright -- demangling, the pattern
+    ledger, the scope ledger and the suppression audit are unconditional
+    now, and each is self-evidently empty for an audit with no findings, so
+    there is nothing left to reject for them.) Silently accepting one of
+    the two that remain (`parse_view_tokens`
     resolved them, but this dispatch never reads the result) reads as "your
     selector was honored" when nothing changed at all -- the same class of
     gap `_dispatch_release_compare` already guards against for its own

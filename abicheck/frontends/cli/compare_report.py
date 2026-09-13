@@ -132,7 +132,6 @@ def _render_compare_report(
     demangle: bool,
     contract_evaluation: bool,
     require_complete_analysis: bool = False,
-    audit_suppressions: bool = False,
 ) -> str:
     """Render one compare report and fold every post-render section into it.
 
@@ -177,14 +176,17 @@ def _render_compare_report(
         contract_evaluation=contract_evaluation,
         demangle=demangle,
     )
-    # ADR-068 D4/Phase 5: result.suppression_audit is now always attached
-    # when suppression was given; --audit-suppressions only gates whether
-    # this markdown/text/review fold renders it (pass None when not given).
-    # JSON/SARIF/JUnit/HTML read the field off `result` unconditionally.
+    # Plan slice 7o: unconditional. `result.suppression_audit` is attached
+    # whenever suppression was given, and every machine format has always
+    # emitted it; `--view suppressions` gated only whether the markdown/
+    # text/review render echoed it. ADR-067's record-before-disposing rule
+    # says a suppressed finding may not be invisible because a token was
+    # not typed, so the fold now runs on the field itself -- a no-op, as
+    # before, on a run with no `--suppress`.
     text = _fold_suppression_audit_into_text(
         text,
         fmt,
-        result.suppression_audit if audit_suppressions else None,
+        result.suppression_audit,
         demangle=demangle,
     )
     return _fold_use_case_impact_into_text(
@@ -195,8 +197,8 @@ def _render_compare_report(
 def _attach_suppression_audit(result: Any, suppression: Any) -> None:
     """Attach the ``--audit-suppressions`` audit trail to *result*.
 
-    Guarded above: audit_suppressions=True implies suppression is not
-    None. Audited against the full pre-suppression change set (kept +
+    Called whenever suppression is not None (plan slice 7o: the audit is
+    unconditional, so there is no separate request to guard on). Audited against the full pre-suppression change set (kept +
     suppressed) plus any --used-by/--required-symbol scoped_only_changes
     (Codex review, fresh evidence: run *after* scoping, not before, so a
     rule matching only a scoping-synthesized finding like
@@ -236,7 +238,6 @@ def _reject_flags_unsupported_for_set_inputs(
     used_by_apps: tuple[ConsumerAppInput, ...],
     required_symbols: tuple[str, ...],
     diagnostic_comparison: bool,
-    audit_suppressions: bool,
     include_labels: dict[Path, str] | None,
     use_cases_manifest: Path | None = None,
     suppress: Path | None = None,
@@ -267,7 +268,6 @@ def _reject_flags_unsupported_for_set_inputs(
         required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
-        audit_suppressions=audit_suppressions,
         suppress=suppress,
         include_labels=include_labels,
         budget=budget,

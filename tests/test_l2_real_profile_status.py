@@ -37,6 +37,7 @@ from _l2_real_profiles_support import (
     measurement_output,
     profiles,
 )
+from _workflow_exec import bash_executable, require_bash
 
 
 class TestReadinessIsNotAMeasurement:
@@ -288,6 +289,7 @@ class TestSideAcquisitionIsDeclared:
         string a text assertion would look for while passing for an empty
         directory.
         """
+        require_bash()
         script = profiles.prepare_script(profiles.SVS)
         guard = [
             line
@@ -296,7 +298,7 @@ class TestSideAcquisitionIsDeclared:
         ]
         assert guard, "no guard was generated for the supplied side"
         return subprocess.run(
-            ["bash", "-c", "set -u\n" + "\n".join(guard)],
+            [bash_executable(), "-c", "set -u\n" + "\n".join(guard)],
             cwd=tmp_path,
             capture_output=True,
             text=True,
@@ -1014,6 +1016,7 @@ class TestASuppliedDistributionMustProveItsIdentity:
         guard line failed to parse, and a text assertion would have reported the
         expected strings present throughout. Only running it caught that.
         """
+        require_bash()
         script = profiles.prepare_script(profiles.SVS)
         guard = "\n".join(
             line
@@ -1030,7 +1033,7 @@ class TestASuppliedDistributionMustProveItsIdentity:
                 f'#define SVS_RUNTIME_VERSION_STRING "{version}"\n'
             )
         result = subprocess.run(
-            ["bash", "-c", "set -u\n" + guard],
+            [bash_executable(), "-c", "set -u\n" + guard],
             cwd=tmp_path,
             capture_output=True,
             text=True,

@@ -62,7 +62,6 @@ def _reject_set_input_flags(
     required_symbols: tuple[str, ...] = (),
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
-    audit_suppressions: bool = False,
     suppress: Path | None = None,
     include_labels: dict[Path, str] | None = None,
     budget: str | None = None,
@@ -174,26 +173,16 @@ def _reject_set_input_flags(
     # gate` pack (gate.exit_code_scheme/gate.severity.*) is still rejected,
     # by that resolution itself, since the release fan-out has no resolved
     # gate-options wiring to apply one to yet.
-    # ADR-068 D4/Phase 5, CodeRabbit/Codex review on PR #1154: the scalar
-    # `compare` path's own preflight (``_preflight_manifests_and_audit``)
-    # made ``--audit-suppressions`` with no ``--suppress`` a no-op rather
-    # than a hard rejection -- there is genuinely nothing to audit without a
-    # suppression file, so the release fan-out must not reject that same
-    # harmless combination just because the operand is a directory/package.
-    # A real conflict remains: ``--suppress`` *with* the audit *rendering*
-    # request asks for a genuine per-finding audit section, and the
-    # per-library fan-out still has no single audit result to attach across
-    # N libraries -- that combination is still rejected. The flag itself is
-    # gone (Phase 5); ``--view suppressions`` is its only spelling now, so
-    # the message names that instead, the same way
-    # ``reject_release_incompatible_view_mode`` already names ``--view``.
-    if audit_suppressions and suppress is not None:
-        raise click.UsageError(
-            "--view suppressions is not supported together with --suppress "
-            "for directory/package (release) comparisons yet: the "
-            "per-library fan-out has no single suppression-audit result to "
-            "attach. Compare the specific library individually to use it."
-        )
+    # Plan slice 7o retired `--view suppressions`: the suppression audit is
+    # unconditional now, so there is no per-run *request* for it left to
+    # reject here. `--suppress` itself stays supported on a release
+    # comparison exactly as it was without the token -- and the per-library
+    # fan-out now *does* disclose an audit section per library
+    # (`cli_compare_release_pairwise`), which it did not when this rejection
+    # was first removed. Dropping the rejection without that would have let
+    # a passing release report hide which breaking findings a rule disposed
+    # of, which ADR-067 makes part of the result rather than a display
+    # preference (Codex review, PR #1284).
     if include_labels:
         raise click.UsageError(
             "A labeled --include (old:LABEL=PATH/new:LABEL=PATH/"
@@ -357,27 +346,6 @@ class _NormalizedCompareOptions(NamedTuple):
     demangle: bool
     report_mode: str
     show_impact: bool
-
-
-def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
-    """Resolve the tri-state ``--demangle`` flag against a specific format.
-
-    Default ON for the human-facing formats (markdown/review/html), OFF for
-    machine formats (json/sarif/junit) whose consumers match on the raw
-    mangled symbol. HTML demangles safely because ``report.render_html.
-    abbr_symbol_text``/``render_changes_table`` always run ``demangle_text``
-    BEFORE ``html.escape`` — never the reverse — so a demangled signature's
-    own ``<``/``>``/``&`` are escaped like any other text, not injected raw
-    (this was previously assumed unsafe and HTML defaulted OFF; abicheck
-    code-review report item 8). An explicit flag always wins over the
-    per-format default.
-
-    Shared by the primary render (:func:`_normalize_compare_options`) and
-    the ``-o`` render in :func:`run_compare`, each resolved
-    against its own format — a machine primary format paired with a text
-    secondary format (or vice versa) must not inherit the other's default.
-    """
-    return fmt in {"markdown", "review", "html"} if demangle is None else demangle
 
 
 def _reject_debug_format_for_non_elf(

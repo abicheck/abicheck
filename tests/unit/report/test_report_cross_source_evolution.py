@@ -85,7 +85,8 @@ def test_cross_source_evolution_stable_across_report_modes():
         library="libfoo.so",
         changes=[_evolved_change(CrossSourceEvolution.PERSISTENT, "_Z6leakyv")],
     )
-    for mode in ("full", "leaf", "root-cause"):
+    # ``leaf`` was retired by plan slice 7o against ``root-cause``.
+    for mode in ("full", "root-cause"):
         doc = json.loads(to_json(result, report_mode=mode))
         assert doc["cross_source_evolution"] == {
             "introduced": 0,

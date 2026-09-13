@@ -56,6 +56,7 @@ from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_bundle_findings as _release_md_bundle_findings,
     _release_md_changed_libraries as _release_md_changed_libraries,
     _release_md_coverage_warnings as _release_md_coverage_warnings,
+    _release_md_disposed_findings as _release_md_disposed_findings,
     _release_md_evidence_contract as _release_md_evidence_contract,
     _release_md_libraries_table as _release_md_libraries_table,
     _release_md_matrix_findings as _release_md_matrix_findings,
@@ -1772,6 +1773,7 @@ def _format_release_markdown(
         lines += render_comparison_scope_markdown(scope_section)
     lines += _release_md_libraries_table(display_library_results, _VERDICT_EMOJI)
     lines += _release_md_coverage_warnings(library_results)
+    lines += _release_md_disposed_findings(library_results)
     lines += _release_md_evidence_contract(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     # The human summary stays bounded even though the shared projection is

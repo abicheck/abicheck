@@ -55,7 +55,9 @@ def test_document_rejects_non_json_values() -> None:
         ReportDocument.from_mapping({"bad": object()})
 
 
-@pytest.mark.parametrize("report_mode", ["full", "leaf", "root-cause"])
+# ``leaf`` left this set with plan slice 7o, which retired it against
+# ``root-cause`` on a 129-pair measurement.
+@pytest.mark.parametrize("report_mode", ["full", "root-cause"])
 def test_every_native_json_mode_crosses_document_boundary(
     monkeypatch: pytest.MonkeyPatch, report_mode: str
 ) -> None:
@@ -90,7 +92,9 @@ def test_stat_json_crosses_document_boundary(monkeypatch: pytest.MonkeyPatch) ->
     assert calls == 1
 
 
-@pytest.mark.parametrize("report_mode", ["full", "leaf", "root-cause"])
+# ``leaf`` left this set with plan slice 7o, which retired it against
+# ``root-cause`` on a 129-pair measurement.
+@pytest.mark.parametrize("report_mode", ["full", "root-cause"])
 def test_sarif_crosses_document_boundary(
     monkeypatch: pytest.MonkeyPatch, report_mode: str
 ) -> None:

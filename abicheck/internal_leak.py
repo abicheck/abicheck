@@ -51,6 +51,7 @@ from .buildsource.call_graph import (
     RESOLUTION_OVERAPPROX,
 )
 from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
+from .change_registry import unanimous_entity_for
 from .checker_types import Change
 from .impact.engine import assess_change
 from .model.change_catalog.kinds import ChangeKind
@@ -1498,6 +1499,7 @@ def _build_call_graph_leak_change(
     change = Change(
         kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
         symbol=dname,
+        entity_discriminator=unanimous_entity_for(kinds_seen),
         description=(
             f"Internal symbol '{dname}' changed ({', '.join(kinds_seen)}) and "
             "is called/referenced from the public ABI surface — an "

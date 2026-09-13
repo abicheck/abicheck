@@ -130,6 +130,7 @@ def build_report_document(
         _displayed_with_scoped_only,
         _suppress_dangling_correlation_notes,
         apply_show_only,
+        prewarm_change_demangling,
     )
     from ..reporter_contract_blocks import (
         add_contract_context as _add_contract_context,
@@ -178,6 +179,12 @@ def build_report_document(
             today=today,
         )
 
+    # Plan slice 7o (Codex review, PR #1284): one batched demangle before the
+    # per-finding dicts are built -- `_add_changes_block` resolves a
+    # `demangled_symbol` per finding, and this builder is the chokepoint every
+    # projection reaches, so prewarming anywhere else leaves a path forking a
+    # `c++filt` per distinct symbol.
+    prewarm_change_demangling(result)
     _add_changes_block(
         d,
         result,

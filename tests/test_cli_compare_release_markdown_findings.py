@@ -83,13 +83,15 @@ class TestReleaseMarkdownCarriesSymbolNames:
         # (previously always raw/mangled, regardless of format) -- markdown
         # defaults to demangled, matching a single-pair `compare`'s own
         # default (`_Z3foov` -> `foo()`, confirmed against real `c++filt`).
-        assert "foo()" in out
-        assert "_Z3foov" not in out
+        # Plan slice 7o: the demangled name *and* the exact mangled one.
+        assert "foo() [_Z3foov]" in out
         assert "func_removed" in out
 
-    def test_broken_symbol_name_stays_mangled_with_no_demangle(
+    def test_the_exact_symbol_is_present_without_a_no_demangle_token(
         self, tmp_path: Path
     ) -> None:
+        """Plan slice 7o: `--view no-demangle` is retired because the
+        demangled release markdown carries the mangled spelling anyway."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -98,16 +100,9 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
 
-        code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "no-demangle",
-        )
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4, out
         assert "_Z3foov" in out
-        assert "foo()" not in out
 
     def test_no_findings_section_when_nothing_gates(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

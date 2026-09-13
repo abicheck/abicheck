@@ -23,6 +23,7 @@ module under the AI-readiness file-size cap.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import click
@@ -48,6 +49,38 @@ def _contract_tag(c: Change, contract_evaluation: bool) -> str:
     return tag + "]"
 
 
+def _ledger_line(c: Change, contract_evaluation: bool) -> str:
+    """One ledger row: the finding, with its symbol demangled.
+
+    Shared by both ledgers below because they had the same body twice and
+    both were missed when demangling became a property of the output format
+    rather than a token a user types -- the main report showed
+    ``Readable [mangled]`` while these human-facing ledgers stayed raw
+    (Codex review, PR #1284). ``demangle_text`` keeps the exact mangled
+    spelling beside the readable name, so nothing a user might paste into
+    ``nm`` or a suppression selector is lost.
+    """
+    from .demangle import demangle_text
+
+    loc = f" [{c.source_location}]" if c.source_location else ""
+    reason = f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
+    tag = _contract_tag(c, contract_evaluation)
+    return f"  - {c.kind.value}: {demangle_text(c.symbol)}{loc}{reason}{tag}"
+
+
+def ledger_lines_for(
+    changes: Sequence[Change], *, contract_evaluation: bool = False
+) -> list[str]:
+    """The ledger rows for *changes*, without printing them.
+
+    The release fan-out needs the same rows this module echoes for a single
+    comparison, but captured in a worker and printed later in library order
+    (see `cli_compare_release_pairwise`), so the two cannot render the
+    disposition differently.
+    """
+    return [_ledger_line(c, contract_evaluation) for c in changes]
+
+
 def echo_filtered_surface(
     result: DiffResult, *, contract_evaluation: bool = False
 ) -> None:
@@ -58,13 +91,10 @@ def echo_filtered_surface(
         f"{'finding' if n == 1 else 'findings'}, --scope-public-headers):",
         err=True,
     )
-    for c in result.out_of_surface_changes:
-        loc = f" [{c.source_location}]" if c.source_location else ""
-        reason = (
-            f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
-        )
-        tag = _contract_tag(c, contract_evaluation)
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
+    for line in ledger_lines_for(
+        result.out_of_surface_changes, contract_evaluation=contract_evaluation
+    ):
+        click.echo(line, err=True)
 
 
 def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) -> None:
@@ -80,12 +110,7 @@ def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) ->
         err=True,
     )
     for c in result.reconciled_changes:
-        loc = f" [{c.source_location}]" if c.source_location else ""
-        reason = (
-            f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
-        )
-        tag = _contract_tag(c, contract_evaluation)
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
+        click.echo(_ledger_line(c, contract_evaluation), err=True)
 
 
 def render_pattern_modulations(result: DiffResult) -> str:
@@ -104,7 +129,7 @@ def render_pattern_modulations(result: DiffResult) -> str:
     mods = result.pattern_modulations
     if not mods:
         return "\nNo pattern-aware modulations applied."
-    lines = [f"\nPattern-aware modulations ({len(mods)}, --view patterns):"]
+    lines = [f"\nPattern-aware modulations ({len(mods)}):"]
     for m in mods:
         sym = m.get("symbol", "?")
         rule = m.get("rule_id", "?")

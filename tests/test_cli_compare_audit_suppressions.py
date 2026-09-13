@@ -99,8 +99,6 @@ class TestNoOpWithoutSuppress:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -119,22 +117,25 @@ class TestNoOpWithoutSuppress:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--view",
-                "suppressions",
                 "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
 
 
-class TestRejectedOnSetInputs:
-    def test_rejected_on_directory_inputs_with_a_real_suppress_file(self, tmp_path):
-        """CodeRabbit/Codex review, PR #1154: this combination -- a real
-        ``--suppress`` file *and* the audit render request -- is still
-        rejected on a directory/package operand: it asks for a genuine
-        per-finding audit result the per-library fan-out has no single
-        place to attach. See the no-op test right below for the
-        combination this same review fixed (no ``--suppress`` at all)."""
+class TestNotRejectedOnSetInputs:
+    def test_a_real_suppress_file_is_accepted_on_directory_inputs(self, tmp_path):
+        """Plan slice 7o: the rejection this class used to assert is gone
+        with the token that caused it.
+
+        ``--suppress`` on a directory/package operand used to be rejected
+        *when combined with the audit render request*, because the
+        per-library fan-out has no single audit result to attach. The
+        request no longer exists (the audit is unconditional), so the
+        combination is simply accepted and the fan-out renders no
+        per-library audit section -- a missing feature of the release
+        renderer, recorded in the plan's 7o section, rather than a usage
+        error for a spelling that no longer exists."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -152,14 +153,9 @@ class TestRejectedOnSetInputs:
                 str(new_dir),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
             ],
         )
-        assert result.exit_code != 0
-        assert "not supported" in result.output
-        assert "directory/package" in result.output
-        assert "--view suppressions" in result.output
+        assert "not supported" not in result.output
 
     def test_accepted_as_a_no_op_on_directory_inputs_without_suppress(
         self, tmp_path
@@ -184,8 +180,6 @@ class TestRejectedOnSetInputs:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -212,8 +206,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -249,8 +241,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -288,8 +278,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -327,8 +315,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -369,8 +355,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -410,8 +394,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -451,8 +433,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -499,8 +479,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -532,8 +510,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],
@@ -575,8 +551,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "--policy",
                 str(policy),
                 "-o",
@@ -620,7 +594,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         assert "suppression_audit" in payload
 
-    @pytest.mark.parametrize("report_mode", ["leaf", "root-cause"])
+    @pytest.mark.parametrize("report_mode", ["root-cause"])
     def test_present_under_every_report_mode(self, tmp_path, report_mode):
         # ADR-061 Phase 2 item 5: the removed post-render fold applied
         # unconditionally whenever fmt == "json", regardless of
@@ -642,8 +616,6 @@ class TestJsonReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
                 "--view",
@@ -675,8 +647,6 @@ class TestMarkdownReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -709,8 +679,6 @@ class TestMarkdownReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -737,8 +705,6 @@ class TestMarkdownReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -756,7 +722,10 @@ class TestMarkdownReport:
         assert "`intentional removal (symbol=_Z5api_bv)` suppressed" in result.output
         assert "suppressed func_removed: api_b()" in result.output
 
-    def test_omitted_by_default(self, tmp_path):
+    def test_rendered_without_being_asked_for(self, tmp_path):
+        """Plan slice 7o: the markdown audit section used to require
+        ``--view suppressions``; ADR-067 makes it unconditional whenever a
+        suppression file was given."""
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(
             tmp_path,
@@ -770,7 +739,7 @@ class TestMarkdownReport:
             ["compare", str(old_p), str(new_p), "--suppress", str(suppress)],
         )
         assert result.exit_code == 4, result.output
-        assert "## Suppression Audit" not in result.output
+        assert "## Suppression Audit" in result.output
 
     def test_expired_rule_labeled_not_just_counted(self, tmp_path):
         # Regression (Codex review, fresh evidence): audit.summary() only
@@ -796,8 +765,6 @@ class TestMarkdownReport:
                 str(new_p),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -877,8 +844,6 @@ class TestUsedByScopedOnlyChange:
                 str(app),
                 "--suppress",
                 str(suppress),
-                "--view",
-                "suppressions",
                 "-o",
                 "json=-",
             ],

@@ -1,0 +1,1142 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The change catalog's declared display dimensions are *correct*.
+
+Sibling of `test_view_internal_grammar.py`, which owns the `--view` grammar
+itself (what tokens exist, what they parse to, what is retired). This file
+owns the other half plan slice 7o created: 407 hand-seeded `entity`/
+`operation` declarations, and whether each one says what its own entry
+means.
+
+They are separated because the failure modes are different. A grammar bug
+is a wrong token; a dimension bug is a *silently* wrong classification that
+fails nothing anywhere -- three consecutive review rounds each found more of
+them by reading entries, which is why
+`TestADeclaredEntityAgreesWithItsOwnRegistration` makes the contradiction
+mechanical instead.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from abicheck.change_registry import REGISTRY
+from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.model.change_catalog.registry import ChangeEntity, ChangeOperation
+from abicheck.reporter_markdown import (
+    ShowOnlyFilter,
+    entity_for_change,
+    entity_for_kind,
+)
+
+
+class TestBaseClassLayoutFindingsAreTypeEntities:
+    """A base subobject moving within a record is a *type* layout break.
+
+    `surface.py` already routes this family through type-level
+    reachability because the symbol is the owning type; classifying it as
+    a function meant `--view show=types` hid it and `show=functions`
+    wrongly included it.
+    """
+
+    KINDS = (
+        "base_class_offset_changed",
+        "base_class_position_changed",
+        "base_class_virtual_changed",
+    )
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_declared_as_a_type_entity(self, kind):
+        assert entity_for_kind(kind) == ChangeEntity.TYPE.value
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_shown_by_the_types_token_and_not_the_functions_token(self, kind):
+        types_filter = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        functions_filter = ShowOnlyFilter(
+            frozenset(), frozenset({"functions"}), frozenset()
+        )
+        assert types_filter._check_element(None, kind)
+        assert not functions_filter._check_element(None, kind)
+
+    def test_it_agrees_with_the_type_level_surface_routing(self):
+        """The independent oracle: `surface.py`'s own type-level family."""
+        from abicheck.surface import _TYPE_LEVEL_KIND_NAMES
+
+        for kind in _TYPE_LEVEL_KIND_NAMES:
+            if entity_for_kind(kind) is None:
+                continue
+            assert entity_for_kind(kind) in {
+                ChangeEntity.TYPE.value,
+                ChangeEntity.ENUM.value,
+                ChangeEntity.ANALYSIS.value,
+            }, kind
+
+
+class TestAnonymousFieldChangesAreTypeFindings:
+    """`anon_field_changed` compares anonymous members of a matched record
+    and carries the containing record's identity, so `--view show=types`
+    must show it and `show=functions` must not."""
+
+    def test_declared_as_a_type_entity(self):
+        assert entity_for_kind("anon_field_changed") == ChangeEntity.TYPE.value
+
+    def test_shown_by_the_types_token_and_not_the_functions_token(self):
+        types_filter = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        functions_filter = ShowOnlyFilter(
+            frozenset(), frozenset({"functions"}), frozenset()
+        )
+        assert types_filter._check_element(None, "anon_field_changed")
+        assert not functions_filter._check_element(None, "anon_field_changed")
+
+
+class TestAnAttributeTransitionIsAModification:
+    """A kind reporting that a *persisting* declaration gained or lost an
+    attribute is a modification of that declaration, not an addition or a
+    removal of it.
+
+    The class, not the one reported kind: Codex flagged
+    `func_deprecated_added`, and the same mistake was in every
+    `[[deprecated]]` sibling, the `override`-specifier pair and the field
+    default-initializer kind -- each one naming a declaration present on
+    both sides. `ChangeOperation`'s own docstring already stated the rule
+    (`func_noexcept_added` is a "trait gained by a persisting entity"); the
+    seeding pass did not apply it consistently.
+
+    Deliberately *not* included, and the boundary is the point:
+    `func_export_added`/`var_export_added` stay `ADDED` because a symbol
+    genuinely appears in the binary's export table -- a new thing becomes
+    bindable, rather than an existing one being annotated.
+    """
+
+    #: Every kind whose name says an attribute of a persisting declaration
+    #: moved. Derived from the catalog by shape, then asserted -- so a kind
+    #: added tomorrow in this shape is caught rather than assumed.
+    ATTRIBUTE_MARKERS = (
+        "_deprecated_",
+        "_override_specifier_",
+        "_default_initializer_",
+    )
+
+    def _attribute_transition_kinds(self):
+        return sorted(
+            k.value
+            for k in ChangeKind
+            if any(m in k.value for m in self.ATTRIBUTE_MARKERS)
+            and REGISTRY.operation_for(k.value) is not None
+        )
+
+    def test_the_corpus_is_not_empty(self):
+        """Vacuity guard: an empty derivation would pass every assertion."""
+        assert len(self._attribute_transition_kinds()) >= 10
+
+    def test_none_of_them_is_an_addition_or_a_removal(self):
+        wrong = {
+            k: REGISTRY.operation_for(k).value
+            for k in self._attribute_transition_kinds()
+            if REGISTRY.operation_for(k) is not ChangeOperation.MODIFIED
+        }
+        assert not wrong, wrong
+
+    def test_they_are_shown_by_changed_and_hidden_by_added_and_removed(self):
+        changed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"changed"}))
+        added = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"added"}))
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        for kind in self._attribute_transition_kinds():
+            assert changed._check_action(kind, changed.actions), kind
+            assert not added._check_action(kind, added.actions), kind
+            assert not removed._check_action(kind, removed.actions), kind
+
+    def test_a_genuinely_new_export_is_still_an_addition(self):
+        """The boundary, asserted so a later sweep cannot widen the rule
+        into every kind whose subject persists."""
+        assert REGISTRY.operation_for("func_export_added") is ChangeOperation.ADDED
+        assert REGISTRY.operation_for("var_export_added") is ChangeOperation.ADDED
+
+
+class TestAPolymorphicKindTakesItsEntityFromTheFinding:
+    """A kind a detector emits for more than one entity type resolves its
+    entity per *finding*, not per kind.
+
+    `diff_namespaces` emits both experimental-namespace kinds for functions
+    and for types; declaring either statically excluded a graduated
+    *function* from `--view show=functions` and serialized a wrong `entity`
+    (Codex review, PR #1284). The polymorphism is declared on the kind's own
+    single catalog registration (`ChangeKindMeta.entity_from_field`), so
+    this is not a second table the reporter maintains.
+
+    **Every case below runs the real detector.** The first version of this
+    class built a synthetic object carrying a `detail` attribute and passed
+    in full, while the production path resolved nothing at all: the
+    mechanism pointed at `make_change`'s `detail` *argument*, which `Change`
+    does not store, so every real finding fell back to the declared entity
+    (Codex review round 4 — the exact "test written to confirm the fix"
+    failure AGENTS.md names). A synthetic finding cannot state this claim.
+    """
+
+    #: Every kind declared polymorphic. Derived from the catalog rather
+    #: than restated, so a kind made polymorphic later is covered here or
+    #: fails the monomorphic assertion below -- never silently neither.
+    #: The subset this class drives through a real detector. The catalog's
+    #: *full* polymorphic set is pinned by
+    #: `TestPolymorphicKindsRealDetectorCoverage` below; the others have
+    #: their own classes in this file.
+    POLYMORPHIC = (
+        "experimental_graduated",
+        "experimental_removed_without_replacement",
+    )
+
+    @staticmethod
+    def _real_findings():
+        """One real finding per (kind, entity) the detector can produce."""
+        from abicheck.diff_namespaces import detect_experimental_namespace_changes
+        from tests.test_diff_namespaces import _fn, _rec, _snap
+
+        graduated_fn = detect_experimental_namespace_changes(
+            _snap(funcs=[_fn("ns::experimental::sort")]),
+            _snap(funcs=[_fn("ns::experimental::sort"), _fn("ns::sort")]),
+        )
+        graduated_type = detect_experimental_namespace_changes(
+            _snap(types=[_rec("ns::experimental::queue")]),
+            _snap(types=[_rec("ns::experimental::queue"), _rec("ns::queue")]),
+        )
+        removed_fn = detect_experimental_namespace_changes(
+            _snap(funcs=[_fn("ns::experimental::sort")]), _snap(funcs=[])
+        )
+        removed_type = detect_experimental_namespace_changes(
+            _snap(types=[_rec("ns::experimental::queue")]), _snap(types=[])
+        )
+        return {
+            ("experimental_graduated", "function"): graduated_fn,
+            ("experimental_graduated", "type"): graduated_type,
+            ("experimental_removed_without_replacement", "function"): removed_fn,
+            ("experimental_removed_without_replacement", "type"): removed_type,
+        }
+
+    def test_each_polymorphic_kind_declares_where_its_entity_comes_from(self):
+        for kind in self.POLYMORPHIC:
+            assert REGISTRY.entity_from_field_for(kind) == "entity_discriminator", kind
+
+    def test_the_named_field_is_one_a_real_change_actually_carries(self):
+        """The bug that made the first version of this vacuous: a field name
+        no `Change` has resolves to `None` on every production finding."""
+        import dataclasses
+
+        from abicheck.checker_types import Change
+
+        fields = {f.name for f in dataclasses.fields(Change)}
+        for kind in self.POLYMORPHIC:
+            assert REGISTRY.entity_from_field_for(kind) in fields, kind
+
+    def test_the_detector_states_the_entity_on_every_real_finding(self):
+        produced = self._real_findings()
+        # Vacuity guard: all four shapes must actually produce a finding, or
+        # the assertions below check nothing.
+        for key, changes in produced.items():
+            assert changes, key
+        for (kind, expected), changes in produced.items():
+            for change in changes:
+                if change.kind.value != kind:
+                    continue
+                assert change.entity_discriminator == expected, (kind, expected)
+                assert entity_for_change(change, change.kind.value) == expected
+
+    def test_a_graduated_function_reaches_the_functions_token(self):
+        functions = ShowOnlyFilter(frozenset(), frozenset({"functions"}), frozenset())
+        types = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        produced = self._real_findings()
+        for (kind, expected), changes in produced.items():
+            for change in changes:
+                if change.kind.value != kind:
+                    continue
+                wanted = functions if expected == "function" else types
+                other = types if expected == "function" else functions
+                assert wanted._check_element(change, change.kind.value), (
+                    kind,
+                    expected,
+                )
+                assert not other._check_element(change, change.kind.value), (
+                    kind,
+                    expected,
+                )
+
+    def test_the_json_projection_carries_the_concrete_entity(self):
+        """Through the real serializer, not the resolver alone."""
+        import json
+
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.reporter import to_json
+
+        for (kind, expected), changes in self._real_findings().items():
+            relevant = [c for c in changes if c.kind.value == kind]
+            if not relevant:
+                continue
+            payload = json.loads(
+                to_json(
+                    DiffResult(
+                        old_version="1.0",
+                        new_version="2.0",
+                        library="libfoo.so",
+                        changes=relevant,
+                        verdict=Verdict.COMPATIBLE,
+                    )
+                )
+            )
+            entities = {c["entity"] for c in payload["changes"] if c["kind"] == kind}
+            assert entities == {expected}, (kind, expected, entities)
+
+    def test_an_unstated_discriminator_falls_back_rather_than_vanishing(self):
+        """A hand-built `Change` states none; an unresolvable dimension would
+        drop it from every element filter, which is worse than a coarse
+        one."""
+        from abicheck.checker_types import Change
+        from abicheck.model.change_catalog.kinds import ChangeKind as CK
+
+        for kind in self.POLYMORPHIC:
+            change = Change(
+                kind=CK(kind), symbol="ns::experimental::x", description="d"
+            )
+            assert change.entity_discriminator is None
+            assert entity_for_change(change, kind) == entity_for_kind(kind)
+
+    def test_the_escape_hatch_stays_opt_in(self):
+        """Only a handful of kinds are polymorphic; the rest declare none."""
+        polymorphic = [
+            k.value
+            for k in ChangeKind
+            if REGISTRY.entity_from_field_for(k.value) is not None
+        ]
+        monomorphic = [
+            k.value
+            for k in ChangeKind
+            if REGISTRY.entity_for(k.value) and k.value not in polymorphic
+        ]
+        assert len(monomorphic) > 100, "vacuity guard"
+        assert len(polymorphic) < 20, polymorphic
+
+
+class TestADeclaredEntityAgreesWithItsOwnRegistration:
+    """A kind's declared `entity` may not contradict the evidence in its own
+    catalog entry.
+
+    This class exists because three separate review rounds each found entity
+    misclassifications by *reading* entries — `anon_field_changed` and the
+    three `base_class_*` kinds (round 2), then `source_level_kind_changed`
+    and `used_reserved_field` (round 3) — which is exactly the failure mode
+    AGENTS.md names: 407 entries were seeded by hand, and a wrong one failed
+    nothing anywhere, so a 47k-test suite passed against every one of them.
+    The judgement stays manual; only the *contradiction* is now mechanical,
+    and it immediately found a third round-3 error no reviewer had flagged
+    (`ctor_overload_ambiguity_risk`, whose template names a class).
+
+    Two oracles, both derived from `description_template` — the entry's own
+    human-facing sentence, written independently of the `entity` field this
+    slice added, so neither restates what it checks.
+    """
+
+    #: Leading noun of a `description_template` -> the entity it names.
+    #: Deliberately partial: a noun that does not settle the question
+    #: ("Symbol", "Member") is absent rather than guessed at.
+    LEADING_NOUN_ENTITIES = {
+        "function": ChangeEntity.FUNCTION,
+        "method": ChangeEntity.FUNCTION,
+        "constructor": ChangeEntity.FUNCTION,
+        "destructor": ChangeEntity.FUNCTION,
+        "operator": ChangeEntity.FUNCTION,
+        "overload": ChangeEntity.FUNCTION,
+        "variable": ChangeEntity.VARIABLE,
+        "struct": ChangeEntity.TYPE,
+        "class": ChangeEntity.TYPE,
+        "union": ChangeEntity.TYPE,
+        "type": ChangeEntity.TYPE,
+        "typedef": ChangeEntity.TYPE,
+        "field": ChangeEntity.TYPE,
+        "aggregate": ChangeEntity.TYPE,
+        "base": ChangeEntity.TYPE,
+        "vtable": ChangeEntity.TYPE,
+        "enum": ChangeEntity.ENUM,
+    }
+
+    #: A kind whose declared entity legitimately disagrees with an oracle
+    #: below. Empty, and that is the point: an entry here is a reviewed
+    #: decision with a reason, never a way to silence the check.
+    ACCEPTED_DISAGREEMENTS: dict[str, str] = {}
+
+    def _templated_kinds(self):
+        return [
+            (k.value, REGISTRY.description_template_for(k.value))
+            for k in ChangeKind
+            if REGISTRY.description_template_for(k.value)
+        ]
+
+    def test_the_oracles_have_something_to_check(self):
+        """Vacuity guard: both oracles must match a substantial share of the
+        catalog, or every assertion below is trivially true."""
+        import re
+
+        leading = [
+            k
+            for k, t in self._templated_kinds()
+            if re.split(r"[^A-Za-z]+", t.strip())[0].lower()
+            in self.LEADING_NOUN_ENTITIES
+        ]
+        member = [k for k, t in self._templated_kinds() if "{name}::" in t]
+        assert len(leading) > 50, len(leading)
+        assert len(member) > 20, len(member)
+
+    def test_the_leading_noun_of_a_template_agrees_with_the_declared_entity(self):
+        """ "Function ..." is a function finding, "Class ..." a type one."""
+        import re
+
+        disagreeing = {}
+        for kind, template in self._templated_kinds():
+            if kind in self.ACCEPTED_DISAGREEMENTS:
+                continue
+            noun = re.split(r"[^A-Za-z]+", template.strip())[0].lower()
+            expected = self.LEADING_NOUN_ENTITIES.get(noun)
+            if expected is None:
+                continue
+            declared = REGISTRY.entity_for(kind)
+            if declared is not expected:
+                disagreeing[kind] = (
+                    template,
+                    declared.value if declared else None,
+                    expected.value,
+                )
+        assert not disagreeing, disagreeing
+
+    def test_a_member_shaped_template_is_never_a_function_or_variable(self):
+        """`{name}::{...}` names a member of an aggregate, so the finding is
+        about the aggregate (TYPE) or the enumeration (ENUM) -- never about a
+        function or a variable. `used_reserved_field` was the lone
+        `FUNCTION` outlier among 30 kinds sharing this exact shape."""
+        wrong = {
+            kind: REGISTRY.entity_for(kind).value
+            for kind, template in self._templated_kinds()
+            if "{name}::" in template
+            and kind not in self.ACCEPTED_DISAGREEMENTS
+            and REGISTRY.entity_for(kind) not in (ChangeEntity.TYPE, ChangeEntity.ENUM)
+        }
+        assert not wrong, wrong
+
+    def test_every_accepted_disagreement_states_a_reason(self):
+        """The allowlist cannot become a silent one."""
+        for kind, reason in self.ACCEPTED_DISAGREEMENTS.items():
+            assert REGISTRY.entity_for(kind) is not None, kind
+            assert len(reason) > 40, kind
+
+
+class TestWhyTheSharedTemplateOracleWasWithdrawn:
+    """A shared `description_template` does **not** imply a shared dimension,
+    and this class exists so that idea is not proposed a third time.
+
+    Round 4 added a gate asserting that kinds whose `description_template`
+    is character-identical must agree on `operation`/`entity`, measured
+    first: 7 shared-template groups, exactly 1 disagreement. That one
+    disagreement was `type_field_added` (MODIFIED) against
+    `type_field_added_compatible` (ADDED), and the gate's "fix" flipped the
+    former to ADDED.
+
+    That was a regression, caught in round 5 review. The two kinds are
+    semantically different despite identical wording: `type_field_added` is
+    a field *inserted* into an existing type — "New field shifts subsequent
+    fields; old code reads wrong offsets" — so the persisting type is
+    modified, while `type_field_added_compatible` is an append that changes
+    no existing offset. The published report schema's own `operation`
+    description names `type_field_added` as an example of a kind reporting
+    `modified`, so the gate also contradicted this PR's own documented
+    contract.
+
+    The template text is a *sentence for a human*, not a statement about the
+    dimension — which is the same lesson the name-parsing table taught, one
+    level along. The gate's only finding in the whole catalog was a false
+    positive, so it is withdrawn rather than allowlisted: a check whose
+    entire observed yield is one wrong answer is not a check.
+    """
+
+    def test_two_kinds_may_share_a_template_and_differ(self):
+        """The counterexample itself, pinned so the rule stays withdrawn."""
+        added = REGISTRY.description_template_for("type_field_added")
+        appended = REGISTRY.description_template_for("type_field_added_compatible")
+        assert added == appended, "the counterexample needs identical templates"
+        assert REGISTRY.operation_for("type_field_added") is ChangeOperation.MODIFIED
+        assert (
+            REGISTRY.operation_for("type_field_added_compatible")
+            is ChangeOperation.ADDED
+        )
+
+    def test_an_insertion_into_a_persisting_type_is_a_modification(self):
+        """The rule that actually governs, stated over the family the
+        schema names rather than over template text."""
+        for kind in ("type_field_added", "virtual_method_added", "func_noexcept_added"):
+            assert REGISTRY.operation_for(kind) is ChangeOperation.MODIFIED, kind
+
+    def test_the_schema_still_says_so(self):
+        """The contract this PR publishes names these kinds explicitly, so a
+        future flip would contradict the schema and not just this test."""
+        import json
+        import pathlib as _pathlib
+
+        schema = json.loads(
+            (
+                _pathlib.Path(__file__).resolve().parents[1]
+                / "abicheck/schemas/compare_report.schema.json"
+            ).read_text()
+        )
+        text = json.dumps(schema)
+        assert "type_field_added" in text
+        assert "trait *gained by a persisting entity*" in text
+
+
+class TestDeepCopyPreservesEveryDeclaredField:
+    """`ChangeKindMeta.__deepcopy__` must not silently drop a field.
+
+    It reconstructed the entry from a hand-written keyword list, so it lost
+    `entity_from_field` the moment that field was added -- turning a
+    polymorphic entry back into a statically-classified one on any deep copy
+    (Codex review, PR #1284). The fix is structural (`fields(self)`), and
+    this states the invariant over *every* field so the next added one
+    cannot repeat it.
+    """
+
+    def test_every_field_survives(self):
+        import copy
+        import dataclasses
+
+        for kind in ("experimental_graduated", "func_removed", "type_size_changed"):
+            entry = REGISTRY._entries[kind]
+            clone = copy.deepcopy(entry)
+            mismatched = [
+                f.name
+                for f in dataclasses.fields(entry)
+                if getattr(clone, f.name) != getattr(entry, f.name)
+            ]
+            assert not mismatched, (kind, mismatched)
+
+    def test_the_polymorphic_field_specifically_survives(self):
+        import copy
+
+        entry = REGISTRY._entries["experimental_graduated"]
+        assert entry.entity_from_field is not None
+        assert copy.deepcopy(entry).entity_from_field == entry.entity_from_field
+
+    def test_unpickling_fills_every_field_in_both_state_shapes(self):
+        """`__setstate__`'s trailing-default fill has to cover the legacy
+        *dict* state too, not only the positional tuple.
+
+        It was nested inside the tuple branch, so a pre-slots pickle's own
+        ``__dict__`` left every field added since it was written simply
+        *unset* — and `entity_for`/`operation_for`/`entity_from_field_for`
+        then raised `AttributeError` on the restored entry instead of
+        reading a default (CodeRabbit review, PR #1284). Same shape as the
+        `__deepcopy__` bug above, and stated the same way: over every
+        field, so the next added one cannot repeat it.
+        """
+        import dataclasses
+
+        from abicheck.change_registry_types import Verdict
+        from abicheck.model.change_catalog.registry import ChangeKindMeta
+
+        minimal_dict = {
+            "kind": "x",
+            "default_verdict": Verdict.BREAKING,
+            "impact": "i",
+        }
+        minimal_tuple = ["x", Verdict.BREAKING, "i"]
+        for state in (minimal_dict, minimal_tuple):
+            entry = ChangeKindMeta.__new__(ChangeKindMeta)
+            entry.__setstate__(state)
+            unset = [
+                f.name for f in dataclasses.fields(entry) if not hasattr(entry, f.name)
+            ]
+            assert not unset, (type(state).__name__, unset)
+
+    def test_a_legacy_entry_answers_the_accessors_rather_than_raising(self):
+        """The consequence the fill exists for, asserted through the public
+        accessors rather than through `hasattr`."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.model.change_catalog.registry import (
+            ChangeKindMeta,
+            ChangeKindRegistry,
+        )
+
+        entry = ChangeKindMeta.__new__(ChangeKindMeta)
+        entry.__setstate__({"kind": "x", "default_verdict": Verdict.BREAKING})
+        registry = ChangeKindRegistry.__new__(ChangeKindRegistry)
+        object.__setattr__(registry, "_entries", {"x": entry})
+        assert registry.entity_for("x") is None
+        assert registry.operation_for("x") is None
+        assert registry.entity_from_field_for("x") is None
+
+    def test_the_immutability_guarantee_still_holds(self):
+        """The reason `__deepcopy__` exists at all (PR #882) is unchanged by
+        rebuilding it from `fields()`."""
+        import copy
+
+        from abicheck.model.change_catalog._immutable_mapping import _ImmutableDict
+
+        entry = REGISTRY._entries["func_removed"]
+        assert isinstance(copy.deepcopy(entry).policy_overrides, _ImmutableDict)
+
+
+class TestARemovedTypedefIsARemoval:
+    """`typedef_version_sentinel` fires when a version-stamped typedef
+    *disappears* -- its own description says so -- so `--view show=removed`
+    must list it. Its compatible verdict is an orthogonal axis and does not
+    make the removal a modification (Codex review, PR #1284)."""
+
+    def test_declared_as_a_removal(self):
+        assert (
+            REGISTRY.operation_for("typedef_version_sentinel")
+            is ChangeOperation.REMOVED
+        )
+
+    def test_shown_by_removed_and_not_by_changed(self):
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        changed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"changed"}))
+        assert removed._check_action("typedef_version_sentinel", removed.actions)
+        assert not changed._check_action("typedef_version_sentinel", changed.actions)
+
+
+class TestAClassTemplateFindingIsATypeFinding:
+    """`mandatory_template_param_added` pools function templates and class
+    templates under one stem, so the entity is a property of the finding.
+
+    Run through the real detector, not a synthetic object -- the lesson from
+    the namespace kinds' own first attempt.
+    """
+
+    @staticmethod
+    def _changes(*, funcs=(), types=()):
+        from abicheck.diff_templates import detect_mandatory_template_param_added
+        from tests.test_diff_namespaces import _fn, _rec, _snap
+
+        old = _snap(
+            funcs=[_fn(n) for n in funcs[:1]], types=[_rec(n) for n in types[:1]]
+        )
+        new = _snap(
+            funcs=[_fn(n) for n in funcs[1:]], types=[_rec(n) for n in types[1:]]
+        )
+        return detect_mandatory_template_param_added(old, new)
+
+    def test_a_class_template_only_stem_is_a_type_finding(self):
+        changes = self._changes(types=("ns::vec<int>", "ns::vec<int, A>"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert c.entity_discriminator == "type"
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.TYPE.value
+
+    def test_a_function_template_only_stem_is_a_function_finding(self):
+        changes = self._changes(funcs=("ns::sort<int>", "ns::sort<int, A>"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert c.entity_discriminator == "function"
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.FUNCTION.value
+
+    def test_the_view_filter_follows(self):
+        types_only = self._changes(types=("ns::vec<int>", "ns::vec<int, A>"))
+        functions = ShowOnlyFilter(frozenset(), frozenset({"functions"}), frozenset())
+        types = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        for c in types_only:
+            assert types._check_element(c, c.kind.value)
+            assert not functions._check_element(c, c.kind.value)
+
+
+class TestABinaryEntityIsNotADeclarationFinding:
+    """A kind declared `BINARY` whose own text names a function, variable or
+    type is a review queue, not an error — but it must be a *reviewed* one.
+
+    This is the fourth oracle, and it exists because this exact
+    misclassification has now been found four separate times by reading
+    entries: `anon_field_changed`, `base_class_*`, `source_level_kind_changed`,
+    then `calling_convention_changed` (carries a function's mangled symbol
+    and `entity_id`) and `tls_var_size_changed` (carries the TLS variable's
+    own symbol) — the last of which no reviewer flagged; this audit did.
+
+    Unlike the other three oracles it is deliberately allowlist-shaped
+    rather than absolute: measured over the catalog it names 12 legitimate
+    binary-level kinds whose impact text simply *mentions* a declaration
+    ("struct/enum layout comparison is degraded"), so an unconditional rule
+    would be 86% noise. Listing each one with a reason makes the next
+    addition a decision someone made rather than a silence.
+    """
+
+    #: Binary-level kind -> why its text names a declaration anyway.
+    REVIEWED_BINARY_KINDS = {
+        "dwarf_info_missing": "an evidence fact about the binary; names struct/enum only to say what can no longer be compared",
+        "vector_abi_changed": "a toolchain-wide ABI trait of the binary, not of one declaration",
+        "sycl_pi_entrypoint_removed": "a plugin-interface fact keyed by plugin, not a C++ declaration",
+        "integer_model_changed": "a whole-binary data-model trait (LP64/LLP64)",
+        "char8t_migration": "a whole-binary dialect/ABI trait; names the declaration it was observed on",
+        "bit_int_width_changed": "a target ABI trait for _BitInt widths",
+        "threadsafe_statics_mode_changed": "a compiler-mode trait of the binary",
+        "elf_class_changed": "an ELF container fact: the whole file changed word size",
+        "long_double_abi_changed": "a target floating-point ABI trait",
+        "pe_ordinal_retargeted": "a PE export-table fact keyed by ordinal",
+        "pe_import_load_mode_changed": "a PE import-table fact about how the module is bound at load time",
+        "wchar_model_changed": "a whole-binary character-model trait",
+    }
+
+    def _suspects(self):
+        import re
+
+        impacts = REGISTRY.impact_text()
+        out = []
+        for kind in ChangeKind:
+            if REGISTRY.entity_for(kind.value) is not ChangeEntity.BINARY:
+                continue
+            text = (REGISTRY.description_template_for(kind.value) or "") + " "
+            text += impacts.get(kind.value, "")[:160]
+            if re.search(
+                r"\b(function|method|variable|struct|class|typedef|field|enum)\b",
+                text,
+                re.I,
+            ):
+                out.append(kind.value)
+        return out
+
+    def test_the_oracle_still_matches_something(self):
+        """Vacuity guard."""
+        assert len(self._suspects()) >= 5
+
+    def test_every_suspect_is_reviewed(self):
+        unreviewed = [
+            k for k in self._suspects() if k not in self.REVIEWED_BINARY_KINDS
+        ]
+        assert not unreviewed, (
+            "These kinds are declared BINARY but their own text names a "
+            "declaration-level subject. Check what the detector actually "
+            "attaches the finding to; if BINARY is right, add a reason to "
+            f"REVIEWED_BINARY_KINDS: {unreviewed}"
+        )
+
+    def test_the_allowlist_does_not_go_stale(self):
+        """An entry for a kind that is no longer BINARY, or no longer
+        matches, is a leftover that would hide the next real one."""
+        stale = [k for k in self.REVIEWED_BINARY_KINDS if k not in self._suspects()]
+        assert not stale, stale
+
+    def test_every_reason_says_something(self):
+        for kind, reason in self.REVIEWED_BINARY_KINDS.items():
+            assert len(reason) > 25, kind
+
+
+class TestPolymorphicKindsRealDetectorCoverage:
+    """Every kind declared polymorphic must be *reachable* with each entity it
+    claims — a declaration nothing can produce is worse than a static one.
+
+    Rounds 3 through 6 of review each found another kind a detector emits for
+    more than one entity type. What makes that recurrence stop is not another
+    entry in a list: it is that the catalog's polymorphic set and the
+    detectors' behaviour are checked against each other, and that every one
+    of them is exercised through a finding the detector actually produced.
+    """
+
+    def test_the_catalog_and_this_file_agree(self):
+        declared = {
+            k.value
+            for k in ChangeKind
+            if REGISTRY.entity_from_field_for(k.value) is not None
+        }
+        # Kept as an explicit list so adding a polymorphic kind is a visible
+        # decision; the assertion is that neither side drifts.
+        assert declared == {
+            "experimental_graduated",
+            "experimental_removed_without_replacement",
+            "mandatory_template_param_added",
+            "cpo_kind_changed",
+            "inline_namespace_version_bumped",
+            "template_body_changed",
+            "uninstantiated_template_removed",
+            # Round 9: `detect_call_graph_leaks` triggers on any
+            # BREAKING_KINDS change whose subject is the internal decl, and
+            # `var_removed` is one -- so this overlay is emitted for
+            # variables as well as functions.
+            "internal_symbol_required_by_public_api",
+        }
+
+    def test_every_polymorphic_kind_names_a_real_change_field(self):
+        import dataclasses
+
+        from abicheck.checker_types import Change
+
+        fields = {f.name for f in dataclasses.fields(Change)}
+        for kind in ChangeKind:
+            field = REGISTRY.entity_from_field_for(kind.value)
+            if field is not None:
+                assert field in fields, kind.value
+
+    def test_every_polymorphic_kind_falls_back_rather_than_vanishing(self):
+        """A finding that states nothing keeps the declared entity, so it is
+        never dropped from every element filter."""
+        from abicheck.checker_types import Change
+
+        for kind in ChangeKind:
+            if REGISTRY.entity_from_field_for(kind.value) is None:
+                continue
+            change = Change(kind=kind, symbol="x", description="d")
+            assert entity_for_change(change, kind.value) == entity_for_kind(kind.value)
+
+
+class TestInlineNamespaceVersionBumpTakesItsEntityFromTheFinding:
+    """`_collect_versioned_entries` pools functions and record types, so a
+    versioned inline namespace containing a function was reported as a type
+    (Codex review, PR #1284). Driven by the real detector."""
+
+    @staticmethod
+    def _changes(*, funcs=(), types=()):
+        """Through the real pipeline stage, the way the existing
+        `inline_namespace_version_bumped` tests reach this detector."""
+        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from tests.test_diff_namespaces import _fn, _rec, _snap
+
+        old = _snap(
+            funcs=[_fn(n) for n in funcs[:1]], types=[_rec(n) for n in types[:1]]
+        )
+        new = _snap(
+            funcs=[_fn(n) for n in funcs[1:]], types=[_rec(n) for n in types[1:]]
+        )
+        out = DetectNamespacePatterns().run([], PipelineContext(old=old, new=new))
+        return [c for c in out if c.kind.value == "inline_namespace_version_bumped"]
+
+    def test_a_function_only_bump_is_a_function_finding(self):
+        changes = self._changes(funcs=("ns::v1::sort", "ns::v2::sort"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.FUNCTION.value
+
+    def test_a_type_only_bump_is_a_type_finding(self):
+        changes = self._changes(types=("ns::v1::queue", "ns::v2::queue"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.TYPE.value
+
+
+class TestSourceTemplateFindingsKeepTheirDeclarationKind:
+    """The L4 extractor routes `FunctionTemplateDecl` and `ClassTemplateDecl`
+    into one bucket under `kind="template"`, but it already records which in
+    `relations["template_kind"]` — the diff simply never read it (Codex
+    review, PR #1284)."""
+
+    def _entity(self, template_kind):
+        from abicheck.buildsource.source_diff import _template_entity
+
+        return _template_entity(
+            type("_E", (), {"relations": {"template_kind": template_kind}})()
+        )
+
+    def test_a_class_template_is_a_type(self):
+        assert self._entity("ClassTemplateDecl") == ChangeEntity.TYPE.value
+
+    def test_a_function_template_is_a_function(self):
+        assert self._entity("FunctionTemplateDecl") == ChangeEntity.FUNCTION.value
+
+    def test_an_unrecorded_kind_falls_back(self):
+        """A producer that records no template_kind leaves the declared
+        entity, rather than guessing one."""
+        assert self._entity("") is None
+        assert self._entity("SomethingElse") is None
+
+    def test_the_extractor_really_records_it(self):
+        """The claim this rests on: the mapping's keys are the spellings the
+        extractor actually writes, not ones invented here."""
+        from abicheck.buildsource.source_diff import _ENTITY_FOR_TEMPLATE_KIND
+        from abicheck.buildsource.source_extractors.clang import _TEMPLATE_NODE_KINDS
+
+        assert set(_ENTITY_FOR_TEMPLATE_KIND) == set(_TEMPLATE_NODE_KINDS)
+
+
+class TestASymbolTableFactIsNotClaimedAsAFunction:
+    """`consumer_required_symbol_removed` rests on a consumer binary's
+    dynamic-symbol table, and that evidence carries no function/variable
+    discriminator: `AppRequirements.undefined_symbols` is a bare `set[str]`,
+    and the PE/Mach-O collectors retain no symbol type either. Declaring
+    FUNCTION therefore hid a required *data* symbol from
+    `--view show=variables` and serialized an entity the evidence cannot
+    support (Codex review, PR #1284).
+
+    Stated as a rule over the evidence rather than as one kind's expected
+    value: any finding whose only operand is an undiscriminated symbol name
+    belongs to the BINARY dimension, which is what its exact structural
+    sibling `imported_symbol_removed` already declares.
+    """
+
+    def _entity(self, kind_name):
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import ChangeKind
+
+        return REGISTRY.entity_for(ChangeKind(kind_name))
+
+    def test_consumer_required_symbol_removed_is_a_binary_finding(self):
+        from abicheck.model.change_catalog.dimensions import ChangeEntity
+
+        assert self._entity("consumer_required_symbol_removed") is ChangeEntity.BINARY
+
+    def test_it_agrees_with_its_structural_sibling(self):
+        assert self._entity("consumer_required_symbol_removed") == self._entity(
+            "imported_symbol_removed"
+        )
+
+    def test_the_evidence_really_discards_the_symbol_type(self):
+        """The premise, asserted rather than assumed -- if `undefined_symbols`
+        ever grows a type, BINARY stops being the honest answer and this test
+        is where that should be noticed."""
+        from dataclasses import fields
+
+        from abicheck.appcompat import AppRequirements
+
+        undefined = {f.name: f for f in fields(AppRequirements)}["undefined_symbols"]
+        assert "set[str]" in str(undefined.type).replace(" ", "")
+
+
+class TestAPersistingCallableWithAChangedSignatureIsModified:
+    """A parameter is not an entity in this vocabulary, so a parameter-level
+    change is a *modification of the function that persists*, whatever the
+    kind's name ends in. `python_api_parameter_removed` was the one
+    parameter-level kind declared REMOVED, which put it in
+    `--view show=removed` and hid it from `show=changed` (Codex review,
+    PR #1284).
+
+    Stated over the whole parameter-level family, so the next one added
+    cannot drift the same way -- and this is exactly the case the retired
+    name-suffix derivation got wrong by construction.
+    """
+
+    def _operation(self, kind_name):
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import ChangeKind
+
+        return REGISTRY.operation_for(ChangeKind(kind_name))
+
+    def test_every_parameter_level_kind_is_a_modification(self):
+        from abicheck.model.change_catalog.dimensions import ChangeOperation
+
+        family = [
+            "python_api_parameter_added",
+            "python_api_parameter_removed",
+            "python_api_parameter_renamed",
+            "python_api_parameter_kind_changed",
+            "python_api_parameter_type_changed",
+            "param_default_value_removed",
+        ]
+        disagreeing = {
+            k: self._operation(k)
+            for k in family
+            if self._operation(k) is not ChangeOperation.MODIFIED
+        }
+        assert not disagreeing, disagreeing
+
+    def test_the_family_is_not_empty(self):
+        """Vacuity guard: an oracle that silently selects nothing passes the
+        sweep above while asserting nothing."""
+        from abicheck.checker_policy import ChangeKind
+
+        assert ChangeKind("python_api_parameter_removed")
+
+    def test_the_view_filter_follows(self):
+        """The consequence a user actually sees, not just the declared
+        value: `show=changed` lists it and `show=removed` does not."""
+        changed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"changed"}))
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        assert changed._check_action("python_api_parameter_removed", changed.actions)
+        assert not removed._check_action(
+            "python_api_parameter_removed", removed.actions
+        )
+
+
+class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
+    """`internal_symbol_required_by_public_api` is emitted for whatever the
+    triggering breaking change was about — `func_removed` on an internal
+    function, but equally `var_removed` on an internal global that a public
+    inline function references. A fixed FUNCTION entity hid the latter from
+    `--view show=variables` and serialized it as a function (Codex review,
+    PR #1284).
+
+    The rule is unanimous-or-fall-back, not first-wins: a decl that changed
+    several ways at once has no single honest entity, and the declared
+    fallback is a coarse answer rather than a wrong one.
+    """
+
+    def _entity(self, kinds):
+        from abicheck.change_registry import unanimous_entity_for
+
+        return unanimous_entity_for(kinds)
+
+    def test_a_variable_trigger_yields_a_variable_finding(self):
+        assert self._entity(["var_removed"]) == "variable"
+
+    def test_a_function_trigger_yields_a_function_finding(self):
+        assert self._entity(["func_removed"]) == "function"
+
+    def test_a_mixed_trigger_falls_back_rather_than_guessing(self):
+        assert self._entity(["func_removed", "var_removed"]) is None
+        assert self._entity([]) is None
+
+    def test_it_agrees_with_the_registry_for_every_breaking_kind(self):
+        """The oracle is the catalog itself, swept over every kind that can
+        actually trigger this detector -- so the helper cannot drift from
+        what the registry says about those same kinds."""
+        from abicheck.change_registry import REGISTRY
+        from abicheck.policy.classification import BREAKING_KINDS
+
+        disagreeing = {}
+        for kind in BREAKING_KINDS:
+            declared = REGISTRY.entity_for(kind.value)
+            expected = None if declared is None else declared.value
+            got = self._entity([kind.value])
+            if got != expected:
+                disagreeing[kind.value] = (got, expected)
+        assert not disagreeing, disagreeing
+
+    def test_the_sweep_is_not_vacuous(self):
+        from abicheck.policy.classification import BREAKING_KINDS
+
+        assert len(BREAKING_KINDS) > 50
+
+    def test_the_catalog_declares_the_kind_polymorphic(self):
+        """Without this the discriminator the detector sets is ignored."""
+        from abicheck.change_registry import REGISTRY
+
+        assert (
+            REGISTRY.entity_from_field_for("internal_symbol_required_by_public_api")
+            == "entity_discriminator"
+        )
+
+
+class TestJUnitClassnamesComeFromTheCatalog:
+    """JUnit kept a fourth name-prefix taxonomy (`func_`/`var_`/`type_`/
+    `union_`/`enum_`) after every other projection moved to the catalog, so
+    it answered `metadata` for kinds the catalog declares as real elements
+    and could not classify a polymorphic kind at all — JUnit disagreed with
+    JSON and `--view show=` about the same finding (Codex review, PR #1284).
+    """
+
+    def _classname(self, kind_value, **kw):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.junit_report import _classname_for
+
+        return _classname_for(
+            Change(kind=ChangeKind(kind_value), symbol="s", description="d", **kw)
+        )
+
+    def test_kinds_the_prefix_table_called_metadata_are_classified_now(self):
+        assert self._classname("constant_added") == "variables"
+        assert self._classname("calling_convention_changed") == "functions"
+
+    def test_the_obvious_cases_are_unchanged(self):
+        assert self._classname("func_removed") == "functions"
+        assert self._classname("var_removed") == "variables"
+        assert self._classname("type_size_changed") == "types"
+
+    def test_a_non_element_entity_keeps_the_metadata_bucket(self):
+        """Existing consumers' grouping is unchanged for everything the old
+        table already got right."""
+        assert self._classname("soname_changed") == "metadata"
+
+    def test_junit_agrees_with_the_view_filter_for_every_kind(self):
+        """The claim worth pinning: one taxonomy, not two that happen to
+        agree today. Swept over the whole catalog against the same resolver
+        `--view show=` uses."""
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import ChangeKind
+
+        mapping = {
+            "function": "functions",
+            "variable": "variables",
+            "type": "types",
+            "enum": "enums",
+        }
+        disagreeing = {}
+        for kind in ChangeKind:
+            entity = REGISTRY.entity_for(kind.value)
+            expected = mapping.get(getattr(entity, "value", ""), "metadata")
+            got = self._classname(kind.value)
+            if got != expected:
+                disagreeing[kind.value] = (got, expected)
+        assert not disagreeing, disagreeing
+
+    def test_that_sweep_reaches_every_bucket(self):
+        """Vacuity guard: a mapping reduced to a constant would satisfy the
+        sweep above while asserting nothing."""
+        from abicheck.checker_policy import ChangeKind
+
+        seen = {self._classname(k.value) for k in ChangeKind}
+        assert seen == {"functions", "variables", "types", "enums", "metadata"}
+
+
+class TestADataOnlyProducerYieldsAVariableFinding:
+    """Five kinds were declared `BINARY` whose producers emit them *only* for
+    data symbols or *only* per function, so `--view show=variables` /
+    `show=functions` omitted them and the JSON `entity` was wrong (Codex
+    review, PR #1284).
+
+    The oracle here is the producer's own gate, not a name: each of these is
+    guarded on `SymbolType.OBJECT/COMMON/TLS` (or, for the return-convention
+    kind, emitted once per public function name). `struct_return_convention_
+    changed` additionally had a *reviewed* allowlist entry asserting it was
+    "a target calling-convention trait, not one function's attribute" -- true
+    about its cause, but the finding is keyed to the function whose callers
+    break, which is what the display dimension answers.
+    """
+
+    DATA_ONLY = (
+        "symbol_size_changed",
+        "symbol_size_changed_const_object",
+        "symbol_size_changed_internal",
+        "exported_object_alignment_reduced",
+        "protected_visibility_changed",
+    )
+
+    def test_every_data_only_kind_is_a_variable(self):
+        from abicheck.model.change_catalog.dimensions import ChangeEntity
+
+        wrong = {
+            k: REGISTRY.entity_for(k)
+            for k in self.DATA_ONLY
+            if REGISTRY.entity_for(k) is not ChangeEntity.VARIABLE
+        }
+        assert not wrong, wrong
+
+    def test_they_are_shown_by_the_variables_filter(self):
+        f = ShowOnlyFilter(frozenset(), frozenset({"variables"}), frozenset())
+        for kind in self.DATA_ONLY:
+            assert f._check_element(None, kind), (
+                f"{kind} is hidden from --view show=variables"
+            )
+
+    def test_a_per_function_finding_is_a_function(self):
+        from abicheck.model.change_catalog.dimensions import ChangeEntity
+
+        assert (
+            REGISTRY.entity_for("struct_return_convention_changed")
+            is ChangeEntity.FUNCTION
+        )
+
+    def test_a_disappeared_instantiation_is_a_removal(self):
+        """`instantiation_missing_from_binary` fires when an old exported
+        instantiation is absent from the new export set while its siblings
+        survive -- a disappearance, so `show=removed` must list it."""
+        from abicheck.model.change_catalog.dimensions import ChangeOperation
+
+        assert (
+            REGISTRY.operation_for("instantiation_missing_from_binary")
+            is ChangeOperation.REMOVED
+        )
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        assert removed._check_action(
+            "instantiation_missing_from_binary", removed.actions
+        )

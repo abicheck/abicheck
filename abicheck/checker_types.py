@@ -457,6 +457,14 @@ class Change:
     # never an omitted key); ``None`` when no single declaration is behind
     # the finding. Appended last, keyword-only, like `demangled_symbol`.
     surface_facts: dict[str, str] | None = field(default=None, kw_only=True)
+    #: The concrete ``ChangeEntity`` *value* for a finding whose kind is
+    #: polymorphic -- one a detector emits for more than one entity type.
+    #: ``None`` for every monomorphic kind. Set by the detector that knows,
+    #: read via ``ChangeKindMeta.entity_from_field``, which is where the
+    #: full account lives. It must be a real, persisted field: pointing that
+    #: mechanism at ``make_change``'s ``detail`` *argument* (not stored)
+    #: made it a no-op on every production finding.
+    entity_discriminator: str | None = field(default=None, kw_only=True)
 
 
 @dataclass

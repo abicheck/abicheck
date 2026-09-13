@@ -22,12 +22,16 @@ AI-readiness size cap. This is a leaf module: it does not import
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .errors import ValidationError
 from .model import AbiSnapshot
 from .report.build import build_report_envelope
 from .report.envelope import RenderOptions, ReportEnvelope
+from .report.report_modes import (
+    reject_unsupported_report_mode as _reject_unsupported_report_mode,
+)
 from .reporter import (
     to_json,
     to_markdown,
@@ -73,7 +77,7 @@ def render_output(
     report_mode: str = "full",
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
-    demangle: bool = False,
+    demangle: bool | None = None,
     contract_evaluation: bool = False,
     show_recommendation: bool = True,
     require_complete_analysis: bool = False,
@@ -84,12 +88,15 @@ def render_output(
     ``'junit'``, ``'review'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
     a public ``--format`` choice on ``compare``.
 
-    ``demangle`` only affects human-facing formats (markdown, review, html);
-    machine formats (json/sarif/junit) always keep raw mangled symbols so
-    downstream tooling can match on them. This function's own default
-    (``False``) is for a direct Tier-2 caller with no CLI in front of it;
-    the CLI itself resolves the per-format default via
-    ``cli_compare_options._resolve_demangle`` before calling here.
+    ``demangle`` only affects human-facing formats (markdown, review, html,
+    text, oneline); machine formats (json/sarif/junit) always keep raw
+    mangled symbols so downstream tooling can match on them, and carry the
+    readable name in their own ``demangled_symbol`` field. Omitting it
+    (``None``, the default) means "resolve it from *fmt*" -- the same answer
+    the CLI gets, so a direct Tier-2 caller is not the one path left with
+    raw output. The resolution itself happens once, in
+    :func:`render_envelope`, because demangling is a property of the format
+    a projection targets rather than of the evaluation being projected.
 
     The release recommendation is included in every human-facing format
     (markdown/review) and in JSON's own ``summary`` block. ``show_recommendation``
@@ -131,10 +138,22 @@ def render_output(
     Raises:
         ValidationError: For unrecognised output format.
     """
+    # Before the ``oneline`` early return, not after it: that return used to
+    # sit in front of the check, so a retired or unknown mode reached
+    # ``--stat``'s summary and got a report rather than a ValidationError
+    # (CodeRabbit review, PR #1284).
+    _reject_unsupported_report_mode(report_mode)
     if fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
     _reject_unsupported_format(fmt)
+    # Plan slice 7o (Codex review, PR #1284): `None` -- the default -- means
+    # "resolve it from the format", which is what makes automatic demangling
+    # true for this public entry point and not only for the CLI in front of
+    # it. An explicit True/False still wins. Deliberately *not* resolved
+    # here: it is carried into the envelope as `None` and resolved by
+    # `render_envelope`, so both public entry points apply one rule in one
+    # place and cannot drift (CodeRabbit/CI, PR #1284).
     envelope = build_report_envelope(
         result,
         old,
@@ -160,6 +179,49 @@ def render_output(
 _SUPPORTED_FORMATS = frozenset(
     {"json", "sarif", "html", "junit", "markdown", "md", "review"}
 )
+
+
+#: Every format whose output a person reads. Plan slice 7o: demangling is
+#: resolved from this set alone -- there is no user-facing
+#: ``--view demangle``/``no-demangle`` decision any more, because there is no
+#: longer a reason to make one (see :func:`~abicheck.demangle.demangle_text`:
+#: a demangled name carries its exact mangled spelling with it, and every
+#: machine projection carries both names).
+#: ``"md"`` is here because it is a real alias ``render_output`` accepts and
+#: routes to the identical Markdown projection (``_PROJECTORS``), not a
+#: near-miss spelling -- omitting it made the same rendering demangle under
+#: one of its two documented names and not the other (Codex review, PR
+#: #1284). Any alias added to ``_PROJECTORS`` for a human format belongs
+#: here too; ``tests/test_view_internal_grammar.py`` asserts that every
+#: format aliasing a human projector resolves the same way its target does.
+HUMAN_FORMATS: frozenset[str] = frozenset(
+    {"markdown", "md", "review", "html", "text", ONELINE_FORMAT}
+)
+
+
+def resolve_demangle_for_format(fmt: str) -> bool:
+    """Whether *fmt*'s rendered output demangles C++ symbols.
+
+    ON for every human-facing format, OFF for the machine formats
+    (json/sarif/junit) whose consumers match on the raw mangled symbol --
+    those carry the demangled name in their own ``demangled_symbol`` field
+    instead, so nothing is hidden from them either.
+
+    Owned here rather than in the CLI (Codex review, PR #1284): "which
+    formats demangle" is a property of the rendering, so the typed API has
+    to resolve it the same way the CLI does or a direct
+    :func:`render_output` caller keeps getting raw-only human output while
+    the CLI's identical request does not -- the front-end divergence
+    ``render_output``'s own ``show_recommendation`` docstring already
+    records one instance of. ``cli_compare_options`` re-exports it under its
+    historical private name; the dependency may not run the other way
+    (ADR-061's engine/CLI boundary).
+
+    Still resolved *per format* rather than once per run: a machine primary
+    format paired with a human ``-o`` destination must not inherit the
+    other's answer.
+    """
+    return fmt in HUMAN_FORMATS
 
 
 def _reject_unsupported_format(fmt: str) -> None:
@@ -188,6 +250,27 @@ def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
         ValidationError: For unrecognised output format.
     """
     _reject_unsupported_format(fmt)
+    # The envelope carries its own `report_mode`, and nothing validated it:
+    # `build_report_envelope` and a directly-constructed `ReportEnvelope`
+    # both accept any string, so an envelope holding a retired or unknown
+    # mode rendered (HTML in particular ignores the field entirely) instead
+    # of raising. Every *other* public rendering entry point checks; this
+    # one is one of them (CodeRabbit review, PR #1284).
+    _reject_unsupported_report_mode(envelope.options.report_mode)
+    # Demangling is a property of the format being projected, not of the
+    # envelope -- one envelope is rendered into several formats, and a
+    # single stored bool cannot be right for a human format and a machine
+    # one at once. `RenderOptions.demangle=None` (the default) means
+    # "resolve it here"; an explicit True/False from the caller still wins.
+    # Resolving in `render_output` alone is what made the two public entry
+    # points produce different bytes for the same evaluation (plan slice 7o).
+    if envelope.options.demangle is None:
+        envelope = replace(
+            envelope,
+            options=replace(
+                envelope.options, demangle=resolve_demangle_for_format(fmt)
+            ),
+        )
     projection: Callable[[ReportEnvelope], str] = _PROJECTIONS[fmt]
     return projection(envelope)
 
@@ -261,7 +344,9 @@ def _project_html(envelope: ReportEnvelope) -> str:
         show_only=envelope.options.show_only,
         show_impact=envelope.options.show_impact,
         severity_config=envelope.severity_config,
-        demangle=envelope.options.demangle,
+        # `render_envelope` has already resolved the tri-state for this
+        # format, so a projection only ever sees a real bool.
+        demangle=bool(envelope.options.demangle),
         envelope=envelope,
     )
 
@@ -317,9 +402,10 @@ def _project_markdown(envelope: ReportEnvelope) -> str:
 
     Gap-C disposition for Markdown's own remaining facts: ``severity_groups``'
     headed-section grouping is **presentation** over already-classified
-    findings, and the ``leaf``/``root-cause`` views are separate documents by
-    design (ADR-061 Phase 2's scope decision). Both are arrangements, not
-    second opinions; neither classifies anything the envelope did not decide.
+    findings, and the ``root-cause`` view is a separate document by design
+    (ADR-061 Phase 2's scope decision; ``leaf`` was retired by plan slice
+    7o). Both are arrangements, not second opinions; neither classifies
+    anything the envelope did not decide.
     """
     opts = envelope.options
     md = to_markdown(

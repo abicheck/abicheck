@@ -83,6 +83,65 @@ def _release_md_coverage_warnings(
     return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
 
 
+def _release_md_disposed_findings(
+    library_results: list[dict[str, object]],
+) -> list[str]:
+    """What a rule or scoping decision disposed of, per library, by name.
+
+    ADR-067's record-before-disposing rule applies to the artifact a user
+    *requested*, not only to the terminal: a release that suppressed or
+    scoped out its entire breaking set could otherwise render a passing
+    Markdown report naming neither the findings nor the rules that hid them,
+    with the detail only ever reaching a transient stderr echo (Codex review,
+    PR #1284 -- raised twice, the second time observing that the structured
+    blocks this slice added reached JSON and had no Markdown consumer).
+
+    Reads the same two per-library blocks the release JSON carries
+    (``suppression``/``surface_scope``, built by
+    ``reporter.disposition_ledger_blocks``), so the two formats cannot
+    disagree about what was disposed. Absent when nothing was, which keeps
+    every release report produced without those settings unchanged. The
+    aggregate ``disposition_audit`` section still renders below; it carries
+    the *counts* and rule provenance, and this carries the findings those
+    counts stand for.
+    """
+    rows: list[str] = []
+    for lib in library_results:
+        name = lib["library"]
+        suppression = cast("dict[str, object]", lib.get("suppression") or {})
+        for entry in cast(
+            "list[dict[str, object]]", suppression.get("suppressed_changes") or []
+        ):
+            rule = cast("dict[str, object]", entry.get("rule") or {})
+            why = rule.get("reason") or rule.get("id") or "suppressed"
+            rows.append(
+                f"| `{name}` | suppressed | `{entry.get('kind', '?')}` "
+                f"| `{entry.get('symbol', '?')}` | {why} |"
+            )
+        scope = cast("dict[str, object]", lib.get("surface_scope") or {})
+        for entry in cast(
+            "list[dict[str, object]]", scope.get("out_of_surface_changes") or []
+        ):
+            why = entry.get("reason") or "outside the public surface"
+            rows.append(
+                f"| `{name}` | scoped out | `{entry.get('kind', '?')}` "
+                f"| `{entry.get('symbol', '?')}` | {why} |"
+            )
+    if not rows:
+        return []
+    return [
+        "",
+        "## 🔕 Disposed Findings",
+        "",
+        "Detected, then disposed of by a rule or by scoping. Listed because a "
+        "passing release may not hide them.",
+        "",
+        "| Library | Disposition | Kind | Symbol | Rule / reason |",
+        "|---|---|---|---|---|",
+        *rows,
+    ]
+
+
 def _release_md_evidence_contract(
     library_results: list[dict[str, object]],
 ) -> list[str]:

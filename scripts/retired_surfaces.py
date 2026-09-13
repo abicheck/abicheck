@@ -196,6 +196,21 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        "--view demangle/no-demangle/patterns/filtered/suppressions/leaf "
+        "(plan slice 7o: the first five became unconditional disclosure or "
+        "automatic behavior; 'leaf' retired against 'root-cause' on a "
+        "129-pair measurement)",
+        (
+            "--view demangle",
+            "--view no-demangle",
+            "--view patterns",
+            "--view filtered",
+            "--view suppressions",
+            "--view leaf",
+        ),
+        frozenset(),
+    ),
+    (
         "--report-mode/--show-only/--demangle/--no-demangle/--explain-patterns"
         " (ADR-068 D4/Phase 5: collapsed into one repeatable --view option)",
         (
@@ -1068,6 +1083,19 @@ def retired_surface_scan_targets(
     schema) -- its `flow:`/command text can name a retired flag exactly like
     its README can, invisible to a scan that only walked `*.md` there.
 
+    `skills-src/**/*.md` is the hand-authored source for the published Agent
+    Skills (ADR-058), and it is the highest-stakes instance of this same gap
+    rather than merely the next one: those fragments are instructions an
+    *agent* follows, so a retired spelling there is not a stale sentence a
+    reader can route around -- it is a command the skill tells an agent to
+    run, which now exits 64. Plan slice 7o retired five `--view` tokens and
+    left `--view leaf` in `shared/root-cause-grouping.md` and
+    `--view suppressions` in `shared/policies-and-suppressions.md`, invisible
+    here because this sweep had never walked that tree (Codex review, PR
+    #1284). The *source* is scanned rather than the three generated skill
+    trees (`.agents/`, `.claude/`, `.gemini/`), which are build output --
+    the same source-not-artifact direction the case READMEs above take.
+
     `.github/workflows/**/*.{yml,yaml}` is this repository's own CI, which a
     reader (including a contributor copying a job) can see -- a stale
     `require-complete-analysis:`/`env-matrix:`-shaped Action input surviving
@@ -1081,7 +1109,8 @@ def retired_surface_scan_targets(
     `catalog/ground_truth.json`, `README.md`, `AGENTS.md`,
     `tools/<tool>/README.md`, `examples/workflows/<name>/README.md`,
     `examples/workflows/<name>/workflow.yaml`,
-    `.github/workflows/<name>.yml`), which cannot collide with a
+    `skills-src/<path>.md`, `.github/workflows/<name>.yml`), which cannot
+    collide with a
     docs-relative key, so an allowlist entry stays unambiguous.
     """
     targets = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
@@ -1116,6 +1145,12 @@ def retired_surface_scan_targets(
         targets += [
             (p, f"examples/workflows/{p.relative_to(workflows_dir).as_posix()}")
             for p in sorted(workflows_dir.rglob("workflow.yaml"))
+        ]
+    skills_src_dir = root / "skills-src"
+    if skills_src_dir.is_dir():
+        targets += [
+            (p, f"skills-src/{p.relative_to(skills_src_dir).as_posix()}")
+            for p in sorted(skills_src_dir.rglob("*.md"))
         ]
     gha_workflows_dir = root / ".github" / "workflows"
     if gha_workflows_dir.is_dir():

@@ -32,7 +32,7 @@ cat > .abicheck.yml <<'EOF'
 compile:
   frontend: clang
 EOF
-abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --view filtered --config .abicheck.yml
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding

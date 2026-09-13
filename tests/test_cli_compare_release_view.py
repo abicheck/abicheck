@@ -560,132 +560,58 @@ class TestReleaseViewShowOnly:
         assert "Filtered by" not in result.output
 
 
-class TestReleaseViewDemangle:
-    """``--view demangle``/``--view no-demangle`` on a directory/package input."""
+class TestReleaseViewDemangleIsAutomatic:
+    """Plan slice 7o: demangling on a directory/package input, with no
+    token to ask for or refuse it."""
 
-    def test_demangled_by_default_in_release_markdown(self, tmp_path: Path) -> None:
+    def test_release_markdown_carries_both_names(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke("compare", str(old_dir), str(new_dir))
         assert result.exit_code == 4, result.output
         assert _DEMANGLED in result.output
-        assert _MANGLED not in result.output
-
-    def test_no_demangle_keeps_mangled_name_in_release_markdown(
-        self, tmp_path: Path
-    ) -> None:
-        old_dir, new_dir = _write_removed_function_pair(tmp_path)
-
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "no-demangle",
-        )
-        assert result.exit_code == 4, result.output
+        # The exact symbol stays copyable beside the readable name -- which
+        # is what let the `no-demangle` token retire without a capability
+        # loss (there is no longer anything it could recover).
         assert _MANGLED in result.output
-        assert _DEMANGLED not in result.output
 
-    def test_demangle_is_a_no_op_for_release_json(self, tmp_path: Path) -> None:
-        """JSON is a machine format -- symbols always stay raw/mangled,
-        matching a single-pair `compare --format json`'s own behaviour."""
+    def test_release_json_keeps_the_raw_symbol(self, tmp_path: Path) -> None:
+        """JSON is a machine format -- `symbol` always stays raw/mangled,
+        matching a single-pair `compare -o json=-`'s own behaviour."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "-o",
-            "json=-",
-            "--view",
-            "demangle",
-        )
+        result = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert result.exit_code == 4, result.output
         assert _MANGLED in result.output
 
+    def test_the_retired_tokens_are_usage_errors(self, tmp_path: Path) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-class TestReleaseViewPatterns:
-    """``--view patterns`` on a directory/package input: a per-library
-    stderr echo, never part of the rendered report body."""
+        for token in ("demangle", "no-demangle"):
+            result = _invoke("compare", str(old_dir), str(new_dir), "--view", token)
+            assert result.exit_code == 64, (token, result.output)
 
-    def test_patterns_does_not_crash_and_does_not_change_the_report_body(
+
+class TestReleaseViewPatternsIsUnconditional:
+    """Plan slice 7o: the per-library pattern ledger is disclosed without a
+    token -- and, as on a single pair, stays quiet when there is nothing to
+    disclose rather than printing a per-library "none" banner."""
+
+    def test_the_report_body_is_unchanged_and_quiet_when_there_is_nothing(
         self, tmp_path: Path
     ) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        baseline = _invoke("compare", str(old_dir), str(new_dir))
-        with_patterns = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "patterns",
-        )
-        assert with_patterns.exit_code == baseline.exit_code == 4
-        # `--view patterns`'s only visible effect is the per-library stderr
-        # echo (CliRunner's `.output` merges stdout+stderr, so the raw
-        # report body -- from the "# ABI Release Comparison" header onward
-        # -- is what must stay byte-identical, not the whole captured
-        # stream).
-        assert "No pattern-aware modulations applied." in with_patterns.output
-        report_marker = "# ABI Release Comparison"
-        assert (
-            baseline.output[baseline.output.index(report_marker) :]
-            == (with_patterns.output[with_patterns.output.index(report_marker) :])
-        )
-
-
-class TestReleaseViewPatternsMultiLibraryOrdering:
-    """Codex review, fresh evidence ("Serialize pattern-ledger output after
-    parallel comparison"): with multiple matched libraries, the default
-    parallel (``jobs=0``) fan-out used to echo each library's pattern
-    ledger directly from inside its own ``ThreadPoolExecutor`` worker
-    thread -- several independent ``click.echo`` writes per library, free
-    to interleave nondeterministically with a sibling library's under real
-    thread scheduling. Proves each library's ledger block is now complete
-    and appears in ``matched_keys`` order, not interleaved."""
-
-    def test_pattern_ledger_blocks_appear_complete_and_in_order(
-        self, tmp_path: Path
-    ) -> None:
-        names = ("liba", "libb", "libc", "libd")
-        old_dir, new_dir = _write_removed_function_pair_multi(tmp_path, names)
-
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "patterns",
-        )
+        result = _invoke("compare", str(old_dir), str(new_dir))
         assert result.exit_code == 4, result.output
+        assert "Pattern-aware modulations" not in result.output
+        assert "No pattern-aware modulations applied." not in result.output
 
-        # Each library's own "== <name>.json ==" header (old_path.name --
-        # these are stored snapshot pairs, not real .so binaries) appears
-        # exactly once, and in matched_keys (alphabetical) order -- proves
-        # the echo was collected and replayed by the single-threaded
-        # post-processing loop, not interleaved by several worker threads
-        # racing to write.
-        headers = [f"== {name}.json ==" for name in names]
-        positions = [result.output.index(h) for h in headers]
-        assert positions == sorted(positions), result.output
-        for header in headers:
-            assert result.output.count(header) == 1, result.output
+    def test_the_retired_token_is_a_usage_error(self, tmp_path: Path) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        # Each header is immediately followed by its own complete
-        # "No pattern-aware modulations applied." line before the next
-        # library's header starts -- an interleaved write would instead
-        # show one library's header followed by a foreign line.
-        for i, header in enumerate(headers):
-            start = result.output.index(header)
-            end = (
-                result.output.index(headers[i + 1])
-                if i + 1 < len(headers)
-                else len(result.output)
-            )
-            block = result.output[start:end]
-            assert "No pattern-aware modulations applied." in block, block
+        result = _invoke("compare", str(old_dir), str(new_dir), "--view", "patterns")
+        assert result.exit_code == 64, result.output
 
 
 class TestReleaseViewReportModeRejected:
@@ -694,7 +620,9 @@ class TestReleaseViewReportModeRejected:
     graph, so both are rejected with a clear usage error instead of being
     silently ignored."""
 
-    def test_leaf_is_rejected_for_a_directory_operand(self, tmp_path: Path) -> None:
+    def test_leaf_is_retired_outright(self, tmp_path: Path) -> None:
+        """Plan slice 7o retired `leaf` for every operand shape, so it no
+        longer reaches the release-specific rejection below at all."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
@@ -705,8 +633,8 @@ class TestReleaseViewReportModeRejected:
             "leaf",
         )
         assert result.exit_code == 64, result.output
-        assert "--view leaf is not available" in result.output
-        assert "directories or packages" in result.output
+        assert "retired" in result.output
+        assert "root-cause" in result.output
 
     def test_root_cause_is_rejected_for_a_directory_operand(
         self, tmp_path: Path
@@ -753,9 +681,7 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
     non-dry-run invocation exits 64. A dry run must never validate an
     invocation the real run would then reject."""
 
-    def test_leaf_is_rejected_under_dry_run_for_a_directory_operand(
-        self, tmp_path: Path
-    ) -> None:
+    def test_leaf_is_retired_outright_under_dry_run(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
@@ -767,7 +693,7 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
             "leaf",
         )
         assert result.exit_code == 64, result.output
-        assert "--view leaf is not available" in result.output
+        assert "retired" in result.output
 
     def test_root_cause_is_rejected_under_dry_run_for_a_directory_operand(
         self, tmp_path: Path
@@ -857,86 +783,28 @@ class TestReleaseProjectPolicyOverrideRejectedUnderDryRun:
         assert result.exit_code == 0, result.output
 
 
-class TestReleaseViewFilteredRejected:
-    """Codex review (PR #1180, fresh evidence): unlike ``report_mode``,
-    ``show_filtered`` was never threaded through ``_dispatch_release_
-    compare`` to the release engine at all -- so ``compare OLD_DIR NEW_DIR
-    --view filtered`` was accepted but silently produced the identical
-    output an invocation without the token would, the one thing a
-    rendering selector must never do (ADR-068 D4). Rejected outright
-    instead, the same way ``leaf``/``root-cause`` are -- the release
-    engine doesn't render this ledger per library yet.
+class TestReleaseViewFilteredRetired:
+    """Plan slice 7o: `--view filtered` was rejected for a directory/package
+    operand because the release engine never threaded the ledger into its
+    per-library renderer, so accepting it would have produced output
+    identical to an invocation without it. The token is gone, so the
+    rejection is too -- but the underlying gap is *not* closed: the release
+    renderer still shows no per-library scope ledger. That is recorded in
+    the plan's 7o section as a missing feature rather than expressed as a
+    usage error for a spelling that no longer exists."""
 
-    ``--view suppressions`` is deliberately NOT covered by this class: it
-    already has its own, narrower rejection
-    (``cli_compare_options._reject_set_input_flags``, proven by
-    ``tests/test_cli_compare_audit_suppressions.py::TestRejectedOnSetInputs``)
-    that fires only together with a real ``--suppress`` file and is a
-    harmless no-op without one -- a first version of this fix rejected it
-    unconditionally here too, which regressed that no-op back to a blanket
-    rejection (caught by CI, see this file's own git history)."""
-
-    def test_filtered_is_rejected_for_a_directory_operand(self, tmp_path: Path) -> None:
+    def test_the_retired_token_is_a_usage_error(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "filtered",
-        )
+        result = _invoke("compare", str(old_dir), str(new_dir), "--view", "filtered")
         assert result.exit_code == 64, result.output
-        assert "--view filtered is not available" in result.output
-        assert "directories or packages" in result.output
+        assert "retired" in result.output
 
-    def test_filtered_is_rejected_under_dry_run_for_a_directory_operand(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_plain_release_comparison_still_succeeds(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--dry-run",
-            "--view",
-            "filtered",
-        )
-        assert result.exit_code == 64, result.output
-        assert "--view filtered is not available" in result.output
-
-    def test_suppressions_with_no_suppress_stays_a_no_op(self, tmp_path: Path) -> None:
-        """Companion, the exact regression CI caught: ``--view
-        suppressions`` alone (no ``--suppress``) must still be accepted as
-        a no-op on a directory/package operand, not rejected."""
-        old_dir, new_dir = _write_removed_function_pair(tmp_path)
-
-        result = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--view",
-            "suppressions",
-        )
+        result = _invoke("compare", str(old_dir), str(new_dir))
         assert result.exit_code == 4, result.output
-
-    def test_full_and_impact_still_accepted_alongside_the_rejection(
-        self, tmp_path: Path
-    ) -> None:
-        """Companion: the new rejection must not regress the two modes a
-        directory/package release fan-out genuinely supports."""
-        old_dir, new_dir = _write_removed_function_pair(tmp_path)
-
-        for token in ("full", "impact"):
-            result = _invoke(
-                "compare",
-                str(old_dir),
-                str(new_dir),
-                "--view",
-                token,
-            )
-            assert result.exit_code == 4, (token, result.output)
 
 
 class TestReleaseViewImpactAggregate:

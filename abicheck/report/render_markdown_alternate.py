@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Markdown's ``--report-mode leaf``/``root-cause`` ``ReportDocument`` pair.
+"""Markdown's ``--view root-cause`` ``ReportDocument`` pair.
 
 ADR-061 Phase 2 item 1's last two Markdown views. Split out of
 ``render_markdown_document.py`` once that module (review digest + full mode
@@ -89,12 +89,8 @@ from .render_markdown import (
     render_suppression_note,
 )
 from .render_markdown_document import (
-    _change_row,
     _impact_table_from_mapping,
-    _not_evaluated_mapping,
     _opt_asdict,
-    _render_change_row,
-    _render_not_evaluated_lines,
     _reporter_markdown,
     _resolve_displayed_changes,
     _suppression_note_from_mapping,
@@ -104,37 +100,6 @@ from .surface_changes import (
     compute_surface_changes,
     render_surface_changes_section,
 )
-
-
-def _render_leaf_type_change_row(row: Mapping[str, Any]) -> list[str]:
-    """Row-based counterpart of ``render_markdown._format_leaf_type_change``
-    (``--report-mode leaf``'s ``### {symbol} — {desc}`` type-change entry).
-    Kept here rather than in ``render_markdown_document.py`` since only leaf
-    mode uses it -- mirrors that module's own ``_row_contract_tag`` helper,
-    imported below rather than duplicated.
-    """
-    from .render_markdown_document import _row_contract_tag
-
-    lines = [f"### {row['symbol']} — {row['description']}"]
-    impact = row.get("impact")
-    if impact:
-        lines.append(f"\n> {impact}")
-    affected = row.get("affected_symbols")
-    if affected:
-        lines.append(f"\n**Affected interfaces ({len(affected)}):**")
-        for sym in affected[:10]:
-            lines.append(f"- `{sym}`")
-        if len(affected) > 10:
-            lines.append(f"- ... ({len(affected) - 10} more)")
-    caused_count = row.get("caused_count") or 0
-    if caused_count > 0:
-        lines.append(f"\n> {caused_count} derived change(s) collapsed")
-    tag = _row_contract_tag(row)
-    if tag is not None:
-        lines.append(f"\n> Contract: {tag}")
-    lines.append("")
-    return lines
-
 
 # ---------------------------------------------------------------------------
 # Shared preamble (--report-mode leaf / root-cause)
@@ -232,145 +197,6 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Leaf mode (--report-mode leaf)
 # ---------------------------------------------------------------------------
-
-
-def build_leaf_document(
-    result: Any,
-    *,
-    show_impact: bool = False,
-    show_only: str | None = None,
-    show_recommendation: bool = False,
-    severity_config: Any = None,
-) -> ReportDocument:
-    """``--report-mode leaf`` (root type changes with affected-interface
-    lists) as a ``ReportDocument``. See this module's own docstring for
-    scope."""
-    rm = _reporter_markdown()
-    preamble, changes = _view_preamble_mapping(
-        result,
-        "leaf-change view",
-        show_only=show_only,
-        show_recommendation=show_recommendation,
-        severity_config=severity_config,
-    )
-
-    from ..checker import _ROOT_TYPE_CHANGE_KINDS
-    from ..report_model import ReportModel
-
-    # ADR-049 D1 (see reporter_markdown._to_markdown_leaf's own note): leaf
-    # mode groups purely by ChangeKind, so the not-evaluated partition has to
-    # happen before that grouping, not after.
-    not_evaluated = ReportModel.classify_not_evaluated(changes)
-    excluded_ids = {id(c) for c in not_evaluated}
-    scored = [c for c in changes if id(c) not in excluded_ids]
-
-    type_changes = [c for c in scored if c.kind in _ROOT_TYPE_CHANGE_KINDS]
-    non_type_changes = [c for c in scored if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
-
-    leaf_sections = rm.compute_leaf_type_sections(type_changes, result.policy)
-    not_evaluated_section = rm.compute_not_evaluated(not_evaluated)
-
-    d: dict[str, Any] = {
-        **preamble,
-        "report_mode": "leaf",
-        "severity_summary": (
-            asdict(
-                rm.compute_severity_summary(
-                    changes,
-                    severity_config,
-                    all_changes=list(result.changes),
-                    policy=result.policy,
-                    kind_sets=result._effective_kind_sets(),
-                    policy_file=result.policy_file,
-                )
-            )
-            if severity_config is not None
-            else None
-        ),
-        "type_sections": [
-            {
-                "heading": s.heading,
-                "rows": [_change_row(c, result.evidence_tiers) for c in s.changes],
-            }
-            for s in leaf_sections.sections
-        ],
-        "non_type_changes": (
-            [_change_row(c, result.evidence_tiers) for c in non_type_changes]
-            if non_type_changes
-            else None
-        ),
-        "not_evaluated": _not_evaluated_mapping(
-            not_evaluated_section, result.evidence_tiers
-        ),
-        "empty_message": (
-            None
-            if changes
-            else (
-                "_No changes match the current filter._"
-                if (show_only and result.changes)
-                else "_No ABI changes detected._"
-            )
-        ),
-        "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
-        "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
-        "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
-        "show_impact": show_impact,
-        "impact_table": (
-            _opt_asdict(rm.compute_impact_table(result, displayed_changes=changes))
-            if show_impact
-            else None
-        ),
-    }
-    return ReportDocument.from_mapping(d)
-
-
-def render_leaf_document(doc: ReportDocument) -> str:
-    """Project a leaf-mode ``ReportDocument`` to its Markdown text."""
-    d: dict[str, Any] = doc.to_mapping()
-    lines = _render_view_preamble(d)
-
-    if d["severity_summary"] is not None:
-        summary_rows = tuple(
-            SeverityRow(**row) for row in d["severity_summary"]["rows"]
-        )
-        lines += render_severity_summary(SeveritySummary(rows=summary_rows))
-
-    for section in d["type_sections"]:
-        lines += [section["heading"], ""]
-        for row in section["rows"]:
-            lines += _render_leaf_type_change_row(row)
-
-    if d["non_type_changes"] is not None:
-        lines += ["## Non-Type Changes", ""]
-        for row in d["non_type_changes"]:
-            lines.append(_render_change_row(row))
-        lines.append("")
-
-    lines += _render_not_evaluated_lines(d["not_evaluated"])
-
-    if d["empty_message"] is not None:
-        lines.append(d["empty_message"])
-
-    lines += render_redundancy_note(
-        None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
-    )
-    lines += render_suppression_note(
-        _suppression_note_from_mapping(d["suppression_note"])
-    )
-    lines += render_out_of_surface_note(
-        None
-        if d["out_of_surface_note"] is None
-        else OutOfSurfaceNote(**d["out_of_surface_note"])
-    )
-    if d["show_impact"]:
-        lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
-    lines += render_footer()
-    # New defect 5 fix: every Markdown report format must end with a
-    # trailing newline (POSIX text-file convention), matching
-    # `render_markdown_document.render_markdown_document`'s identical fix
-    # and `render_markdown.render_review_digest`'s pre-existing
-    # `.rstrip() + "\n"` pattern.
-    return "\n".join(lines).rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------

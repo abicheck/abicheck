@@ -341,6 +341,11 @@ def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
         # read this file directly, and it is the one repository *input* the
         # directory entries do not carry (Codex review).
         "repo_facts.json",
+        # ruff's own config. Unlike the entries above this is not read by a
+        # test *as data* -- it changes what `ruff format --check` DECIDES
+        # inside the copy, and its absence aborted the whole lane at stats
+        # collection (see the behavioural test below).
+        "ruff.toml",
         "scripts",
         "skills-src",
         # `test_gen_agent_skills.py` compares the committed publication trees
@@ -730,3 +735,56 @@ def test_mutmut_is_version_pinned() -> None:
     """An unpinned install is how this lane silently changed behaviour before."""
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "mutmut>=3.7,<4" in text
+
+
+def test_a_formatting_exclusion_is_honoured_inside_the_copied_tree() -> None:
+    """Every config that *changes a verdict* inside `mutants/` must travel
+    with it -- asserted by running the real tool, not by reading the list.
+
+    This is the failure the list-shaped tests above could not see. `ruff.toml`
+    carries `[format] exclude = [".../kinds.pyi"]`, because that stub's
+    formatting authority is `gen_changekind_stub.py` rather than the
+    formatter. Leave the file behind and the copy loses the exclusion, so
+    `ruff format --check abicheck/` reformats `kinds.pyi`, a test asserting a
+    formatted tree fails *inside the copy* while the real tree is clean, and
+    `mutmut run` aborts at stats collection -- before one mutant is measured,
+    which is why it reads as "0 survivors" nowhere and a dead lane everywhere.
+
+    A list-membership assertion would not have caught it either: the entry was
+    missing precisely because nobody knew to add it. So the oracle here is the
+    tool's own answer over a tree built the way mutmut builds one, which is
+    the same check for the next config anyone forgets.
+    """
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    excluded = REPO_ROOT / "abicheck" / "model" / "change_catalog" / "kinds.pyi"
+    if not excluded.exists():  # pragma: no cover - the stub is committed
+        pytest.skip("the format-excluded stub is not present")
+
+    copied = set(_mutmut_config().get("also_copy", []))
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        dest = root / excluded.relative_to(REPO_ROOT)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(excluded, dest)
+        # Exactly what mutmut would place beside the sources: the copied
+        # root-level *files*, nothing else.
+        for name in copied:
+            src = REPO_ROOT / name
+            if src.is_file():
+                shutil.copy2(src, root / src.name)
+        proc = subprocess.run(  # noqa: S603 - fixed argv, this interpreter
+            [sys.executable, "-m", "ruff", "format", "--check", "abicheck/"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert proc.returncode == 0, (
+        "a formatting exclusion is not honoured inside the copied tree -- "
+        "mutmut would abort at stats collection. ruff said:\n"
+        f"{proc.stdout}{proc.stderr}"
+    )

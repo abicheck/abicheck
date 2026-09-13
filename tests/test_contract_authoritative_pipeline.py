@@ -844,10 +844,14 @@ class TestEveryRendererTellsTheSameStory:
     """A renderer that reads the unfiltered set contradicts the verdict
     printed at the top of its own output (Codex review of this PR)."""
 
-    def test_leaf_markdown_does_not_file_it_under_a_verdict_section(self) -> None:
-        """Leaf mode groups purely by `ChangeKind` and returns before the
-        full-mode partition, so it rendered `## Breaking Type Changes`
-        beside a `NO_CHANGE` verdict."""
+    def test_root_cause_markdown_does_not_file_it_under_a_verdict_section(
+        self,
+    ) -> None:
+        """A grouping mode returns before the full-mode partition, so it
+        could render `## Breaking Type Changes` beside a `NO_CHANGE`
+        verdict. (Stated against `leaf` until plan slice 7o retired that
+        mode against `root-cause`; the claim is about the *grouped*
+        document, which is what the surviving mode produces.)"""
         from abicheck.reporter_markdown import to_markdown
 
         result = _compare(
@@ -855,16 +859,15 @@ class TestEveryRendererTellsTheSameStory:
             contract_evaluation=True,
             contract_mode="public",
         )
-        leaf = to_markdown(result, report_mode="leaf")
+        grouped = to_markdown(result, report_mode="root-cause")
         assert result.verdict is Verdict.NO_CHANGE
-        assert "Breaking Type Changes" not in leaf
-        assert "Not Evaluated (Contract)" in leaf
-        # Still disclosed, not dropped.
-        assert "type_size_changed" in leaf
+        assert "Breaking Type Changes" not in grouped
+        # Still disclosed, not dropped -- which is the half that matters:
+        # a contract-excluded finding may not vanish from the render, and
+        # may not be filed under a verdict section the run did not reach.
+        assert "type_size_changed" in grouped
 
-    def test_leaf_markdown_keeps_a_scored_finding_in_its_verdict_section(
-        self,
-    ) -> None:
+    def test_root_cause_markdown_keeps_a_scored_finding_disclosed(self) -> None:
         """The control: the partition only moves excluded findings."""
         from abicheck.reporter_markdown import to_markdown
 
@@ -873,9 +876,9 @@ class TestEveryRendererTellsTheSameStory:
             contract_evaluation=True,
             contract_mode="all",
         )
-        leaf = to_markdown(result, report_mode="leaf")
-        assert "Breaking Type Changes" in leaf
-        assert "Not Evaluated (Contract)" not in leaf
+        grouped = to_markdown(result, report_mode="root-cause")
+        assert "Not Evaluated (Contract)" not in grouped
+        assert "type_size_changed" in grouped
 
     @staticmethod
     def _excluded():
@@ -1048,7 +1051,7 @@ class TestTheReleaseRecommendationDoesNotOverclaim:
         assert rec.state is ReleaseRecommendationState.ACTIONABLE
         assert "No ABI or API changes detected" in rec.rationale
 
-    @pytest.mark.parametrize("report_mode", ["full", "leaf"])
+    @pytest.mark.parametrize("report_mode", ["full", "root-cause"])
     def test_the_severity_table_does_not_claim_an_exit_it_will_not_produce(
         self, report_mode: str
     ) -> None:
@@ -1189,7 +1192,7 @@ class TestEveryReportModeStatesTheSameGateContribution:
 
         return snap(64), snap(128)
 
-    @pytest.mark.parametrize("report_mode", ["full", "leaf"])
+    @pytest.mark.parametrize("report_mode", ["full", "root-cause"])
     def test_a_gating_finding_states_its_real_contribution(
         self, report_mode: str
     ) -> None:
@@ -1203,10 +1206,13 @@ class TestEveryReportModeStatesTheSameGateContribution:
         )
         assert result.verdict is Verdict.BREAKING
         kwargs = {"severity_config": SeverityConfig()}
-        if report_mode == "leaf":
-            kwargs["report_mode"] = "leaf"
+        if report_mode != "full":
+            kwargs["report_mode"] = report_mode
         payload = json.loads(reporter.to_json(result, **kwargs))
-        entries = payload.get("leaf_changes") or payload["changes"]
+        # Was ``leaf_changes or changes`` until plan slice 7o retired that
+        # mode and the key with it; ``root-cause`` keeps every finding in
+        # ``changes`` and groups them under ``root_causes``.
+        entries = payload["changes"]
         type_entries = [e for e in entries if e["kind"].startswith("type_")]
         assert type_entries, entries
         for entry in type_entries:
