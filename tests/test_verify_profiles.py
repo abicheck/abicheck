@@ -827,3 +827,89 @@ class TestUnitTestsPerPlatformTimeout:
             f"main ({observed_windows_minutes_on_main}), or it will keep "
             "cancelling healthy runs"
         )
+
+
+# --- ci.yml's unit-tests job log volume -----------------------------------
+
+
+class TestUnitTestJobLogVolume:
+    """Every `pytest` invocation in ci.yml's `unit-tests` job must stay quiet.
+
+    `-v` prints one line per test; on a ~26k-test suite spread over five
+    matrix legs that is enough console output for GitHub to truncate the
+    displayed log, which hides the failures the log exists to show. The
+    guard is written over *every* pytest invocation the job runs (parsed
+    from the workflow, not a pinned line), because the flood came back each
+    time a new leg was added with `-v` copied from its sibling. Failures
+    stay fully visible: `-r fE` keeps the short summary, `--tb=short` keeps
+    the traceback, and each invocation writes its own JUnit XML.
+    """
+
+    @staticmethod
+    def _invocations() -> list[str]:
+        yaml = pytest.importorskip("yaml")
+        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        commands: list[str] = []
+        for step in workflow["jobs"]["unit-tests"]["steps"]:
+            for line in str(step.get("run", "")).splitlines():
+                line = line.strip()
+                if line.startswith("pytest "):
+                    commands.append(line)
+        assert commands, "no pytest invocation found in ci.yml's unit-tests job"
+        return commands
+
+    def test_no_invocation_is_verbose(self) -> None:
+        offenders = [c for c in self._invocations() if " -v" in f" {c} "]
+        assert not offenders, (
+            "ci.yml's unit-tests job must not run pytest verbosely — one line "
+            f"per test truncates the CI log: {offenders}"
+        )
+
+    def test_every_invocation_is_quiet(self) -> None:
+        offenders = [c for c in self._invocations() if " -q" not in f" {c} "]
+        assert not offenders, f"missing -q: {offenders}"
+
+    def test_every_invocation_keeps_a_failure_summary(self) -> None:
+        offenders = [c for c in self._invocations() if "-r fE" not in c]
+        assert not offenders, (
+            f"quiet mode still owes a short failure/error summary (-r fE): {offenders}"
+        )
+
+    @staticmethod
+    def _junit_path(command: str) -> str:
+        match = re.search(r"--junitxml=(.*?\.xml)", command)
+        assert match is not None, f"no JUnit XML record for: {command}"
+        return match.group(1)
+
+    def test_every_invocation_writes_its_own_junit_xml(self) -> None:
+        """Per *step*, not per job: the four platform legs are mutually
+        exclusive `if:` conditions, so they may share a filename, but two
+        invocations in one step would overwrite each other's results."""
+        yaml = pytest.importorskip("yaml")
+        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        for step in workflow["jobs"]["unit-tests"]["steps"]:
+            commands = [
+                line.strip()
+                for line in str(step.get("run", "")).splitlines()
+                if line.strip().startswith("pytest ")
+            ]
+            paths = [self._junit_path(c) for c in commands]
+            assert len(set(paths)) == len(paths), (
+                f"two invocations in step {step.get('name')!r} would overwrite "
+                f"each other's results: {paths}"
+            )
+
+    def test_result_files_are_unique_per_matrix_leg(self) -> None:
+        for command in self._invocations():
+            path = self._junit_path(command)
+            assert "runner.os" in path and "matrix.python-version" in path, (
+                f"JUnit XML path must vary per OS/Python leg, else matrix legs "
+                f"collide in the upload artifact: {path}"
+            )
+
+    def test_the_coverage_table_skips_fully_covered_modules(self) -> None:
+        covered = [c for c in self._invocations() if "--cov=" in c]
+        assert covered, "expected a coverage-collecting invocation"
+        for command in covered:
+            assert "--cov-report=term:skip-covered" in command, command
+            assert "--cov-report=term-missing" not in command, command
