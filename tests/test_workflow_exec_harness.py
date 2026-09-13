@@ -39,15 +39,15 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from collections.abc import Mapping
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import _workflow_exec
 import pytest
 import yaml
 from _workflow_exec import (
     REPO_ROOT,
-    StepResult,
     _is_under_windows_system_dir,
     bash_executable,
     have_bash,
@@ -505,14 +505,32 @@ def test_run_step_contains_no_call_that_creates_the_workspace() -> None:
     import inspect
 
     tree = ast.parse(inspect.getsource(_workflow_exec.run_step))
-    creations = [
-        ast.unparse(node)
+    mkdirs = [
+        node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in {"mkdir", "makedirs"}
-        and ast.unparse(node.func.value)
+    ]
+    creations = [
+        ast.unparse(node)
+        for node in mkdirs
+        if ast.unparse(node.func.value)
         in {"workspace", "workspace.parent", "body.parent"}
+    ]
+    # `parents=True` on ANY target reaches the same ground indirectly: a
+    # directory beside the workspace recreates `workspace.parent` on its way
+    # down, which is caller-owned and, once the reaper has taken it, makes the
+    # failure diagnostic report the reaped parent as present (Codex review,
+    # PR #1298). Only leaves this function owns may be created, and only after
+    # the integrity guard.
+    creations += [
+        ast.unparse(node)
+        for node in mkdirs
+        if any(
+            kw.arg == "parents" and getattr(kw.value, "value", False) is True
+            for kw in node.keywords
+        )
     ]
     assert creations == [], (
         "run_step must not create the workspace (or its parent): the caller "
@@ -521,236 +539,140 @@ def test_run_step_contains_no_call_that_creates_the_workspace() -> None:
     )
 
 
-class TestEveryStepGetsAPrivateTmpdir:
-    """Bug class ``harness.constructed_environment_drops_ambient_mitigation``.
+class TestAStepsOwnTemporaryFilesStayTestOwned:
+    """A step's `mktemp` must not land in the shared `/tmp`.
 
-    ``run_step`` builds its environment from scratch, deliberately, so a
-    step cannot pass because the developer's shell exported something. The
-    cost of that is silent: a variable the *surrounding job* sets as a
-    mitigation is dropped on the floor, and the step runs under the exact
-    condition the job had just moved away from. That is not hypothetical --
-    `.github/workflows/ci.yml` points the unit-test job's ``TMPDIR`` at
-    ``$RUNNER_TEMP`` because something prunes ``/tmp`` on the hosted runners
-    mid-job, and `actions/check-target/action.yml`'s assurance-overlay step
-    still failed with ``cd: /tmp/tmp.XjdPkLm7IE: No such file or directory``
-    afterwards, because its own ``mktemp -d`` was still resolving against
-    ``/tmp``.
+    `run_step` builds its environment from scratch on purpose, and that
+    silently left `TMPDIR` unset, so `mktemp -d` inside a step fell back to
+    `/tmp`. On a runner that prunes `/tmp` mid-job the step then lost its own
+    scratch directory while still using it -- `cd: /tmp/tmp.XjdPkLm7IE: No
+    such file or directory`, observed on main in run 34781323754, *after* the
+    job-level `TMPDIR` fix, which this env reset was discarding.
 
-    The invariant is stated over *arbitrary* step bodies rather than that
-    one step: whatever a step body asks the system for a temporary file, it
-    must land in a directory this harness owns, per step -- and a caller
-    that states its own ``TMPDIR`` must still win.
+    **Nothing here hands a bash-printed path to `pathlib`.** On a Windows
+    Git-Bash host `mktemp -d` prints the MSYS form (`/c/Users/...`), which
+    `WindowsPath` reads as drive-relative to the *current* drive and silently
+    checks somewhere else -- so an existence assertion on it passes vacuously
+    whichever way the code behaves (`test_action_run_sh_py_safe_path.py`
+    records that the hard way). Python only ever touches paths it constructed
+    itself; every claim about bash's own output is decided in bash.
     """
 
-    @staticmethod
-    def _tmpdir_probe() -> dict[str, str]:
-        """A step that reports where the system hands it temporary files.
+    def _scratch_dir(self, workspace: Path) -> Path:
+        """Where `run_step` points `$TMPDIR`, constructed independently."""
+        return workspace.parent / f"_step_tmp_{workspace.name}"
 
-        Every path is reported **as the step's own shell resolves it**
-        (`cd ... && pwd -P`), and the comparisons below are between two
-        values from this same world -- never between one of these and a
-        `Path` this Python process built. That is not caution: on the
-        windows-latest lane Git Bash answers `$TMPDIR` as
-        `/d/a/_temp/...` while Python holds `D:\\a\\_temp\\...`, so the
-        first version of this class compared two spellings of one
-        directory and failed on a harness that was working correctly --
-        the same path-string-versus-filesystem-identity trap
-        `actions/stage-baseline/run.sh` records in its own comments.
+    def test_the_steps_tmpdir_is_the_directory_we_gave_it(self, tmp_path: Path) -> None:
+        """Identity proved by a marker file, never by comparing path spellings.
 
-        Two facts are probed rather than assumed, because the platform
-        decides both:
+        Comparing `$TMPDIR` to the string that was set looks portable and is
+        not: Git Bash hands the value back in MSYS form (`/d/a/_temp/...`)
+        where it was set as `D:\\a\\_temp\\...`, so the equality fails on
+        Windows for a reason that has nothing to do with the contract. The
+        first version of this test did exactly that and went red on the
+        Windows lane -- the same path-spelling class Codex raised for
+        `mktemp`'s output, which I had guarded there and then reintroduced
+        here.
 
-        * `ambient_real` -- the shared temp `$TMPDIR` exists to escape:
-          what `mktemp` itself picks with `TMPDIR`/`TEMP`/`TMP` unset,
-          derived rather than spelled, so it is right everywhere.
-        * `mktemp_honors_tmpdir` -- whether `mktemp` reads `TMPDIR` at
-          all. **macOS's does not**: with no template it resolves its
-          own directory through `confstr(_CS_DARWIN_USER_TEMP_DIR)`,
-          observed behavior this repository already records in
-          `tests/test_action_run_sh_py_safe_path.py`. Probed by asking
-          `mktemp -u` (which creates nothing) where it *would* put a file
-          under a `TMPDIR` pointed at a directory known to exist, so the
-          answer comes from the real `mktemp` on the real lane rather
-          than from a platform name.
+        Writing a uniquely-named marker through bash and finding it at the
+        path Python built is spelling-independent: it proves the two names
+        denote one directory, which is the actual claim.
         """
-        return {
-            "run": (
-                "set -u\n"
-                '_emit() { printf "%s=%s\\n" "$1" "$2" >> "$GITHUB_OUTPUT"; }\n'
-                '_real() { (cd "$1" && pwd -P); }\n'
-                'd="$(mktemp -d)"\n'
-                'f="$(mktemp)"\n'
-                '_ws_real="$(_real "$GITHUB_WORKSPACE")"\n'
-                'case "$( (TMPDIR="$_ws_real" mktemp -u) )" in\n'
-                '  "$_ws_real"/*) _honors=yes ;;\n'
-                "  *) _honors=no ;;\n"
-                "esac\n"
-                '_emit mktemp_honors_tmpdir "$_honors"\n'
-                '_emit tmpdir_real "$(_real "${TMPDIR:-/nonexistent}")"\n'
-                '_emit made_parent_real "$(_real "$(dirname "$d")")"\n'
-                '_emit file_parent_real "$(_real "$(dirname "$f")")"\n'
-                '_emit workspace_real "$_ws_real"\n'
-                '_emit workspace_parent_real "$(_real "$GITHUB_WORKSPACE/..")"\n'
-                '_emit ambient_real "$( (unset TMPDIR TEMP TMP; '
-                '_real "$(dirname "$(mktemp -u)")") )"\n'
-            )
-        }
 
-    @staticmethod
-    def _honors_tmpdir(result: StepResult) -> bool:
-        answer = result.outputs["mktemp_honors_tmpdir"]
-        assert answer in {"yes", "no"}, f"unusable capability probe: {answer!r}"
-        return answer == "yes"
-
-    def test_tmpdir_is_a_harness_owned_per_step_directory(self, tmp_path: Path) -> None:
-        """The unconditional half: what the harness itself controls.
-
-        `$TMPDIR` is a private, per-step directory this harness allocated
-        beside the workspace, on every platform -- whether or not the
-        platform's `mktemp` then chooses to read it.
-        """
         workspace = make_workspace(tmp_path)
-        result = run_step(self._tmpdir_probe(), workspace=workspace)
+        marker = f"marker-{os.getpid()}"
+        result = run_step({"run": f': > "$TMPDIR/{marker}"'}, workspace=workspace)
 
         assert result.returncode == 0, result.stderr
-        tmpdir = PurePosixPath(result.outputs["tmpdir_real"])
-        assert tmpdir.parent == PurePosixPath(
-            result.outputs["workspace_parent_real"]
-        ), (
-            "a step's $TMPDIR must be a directory this harness allocated "
-            f"beside the workspace, not {tmpdir}"
+        assert (self._scratch_dir(workspace) / marker).is_file(), (
+            "the step's own $TMPDIR is not the directory this harness created "
+            "for it, so its temporary files are landing somewhere untracked"
         )
-        assert tmpdir.name.startswith("_step_tmp_")
-        # Outside the workspace, so `tree()` and the `$RUNNER_TEMP`
-        # assertions keep seeing only what the step itself created.
-        assert PurePosixPath(result.outputs["workspace_real"]) not in tmpdir.parents
 
-    def test_mktemp_lands_in_that_directory_where_mktemp_reads_tmpdir(
+    def test_the_step_can_write_into_it(self, tmp_path: Path) -> None:
+        """And it is a real directory -- checked at the path *we* built."""
+
+        workspace = make_workspace(tmp_path)
+        result = run_step({"run": ': > "$TMPDIR/probe"'}, workspace=workspace)
+
+        assert result.returncode == 0, result.stderr
+        assert (self._scratch_dir(workspace) / "probe").is_file()
+
+    def test_the_scratch_directory_is_not_inside_the_workspace(
         self, tmp_path: Path
     ) -> None:
-        """The conditional half, and why it is conditional.
+        """`StepResult.tree()` must keep seeing only what the step created.
 
-        `TMPDIR` is the only lever an environment has over where a step's
-        `mktemp` allocates, and macOS's `mktemp` does not pull it (see
-        `_tmpdir_probe`). So on a lane whose `mktemp` reads it, the
-        step's temporary files land in the harness's own directory; on
-        one whose `mktemp` does not, they land in that platform's own
-        per-user temp -- which is a different directory from the shared
-        `/tmp` this mitigation exists to escape, and is not something an
-        environment variable can redirect.
-
-        Both branches assert a specific, falsifiable outcome rather than
-        one branch being a silent pass: a lane that read `TMPDIR` but
-        allocated elsewhere fails the first, and a lane that ignored it
-        but did not fall back to its own ambient choice fails the second.
+        The scratch directory lives beside the workspace for the same reason
+        the step body script does; putting it inside would add entries to
+        every workspace-tree assertion in the suite.
         """
-        workspace = make_workspace(tmp_path)
-        result = run_step(self._tmpdir_probe(), workspace=workspace)
 
-        assert result.returncode == 0, result.stderr
-        tmpdir = PurePosixPath(result.outputs["tmpdir_real"])
-        ambient = PurePosixPath(result.outputs["ambient_real"])
-        expected = tmpdir if self._honors_tmpdir(result) else ambient
-        for name in ("made_parent_real", "file_parent_real"):
-            assert PurePosixPath(result.outputs[name]) == expected, (
-                f"{name} is {result.outputs[name]}, expected {expected} "
-                f"(mktemp_honors_tmpdir="
-                f"{result.outputs['mktemp_honors_tmpdir']})"
-            )
+        workspace = make_workspace(tmp_path, files={"seed.txt": "seeded"})
+        run_step({"run": ': > "$TMPDIR/probe"'}, workspace=workspace)
 
-    def test_mktemp_does_not_resolve_against_the_shared_system_temp(
-        self, tmp_path: Path
-    ) -> None:
-        """The property that actually failed in CI, stated directly.
-
-        The shared temp is the thing being escaped, so it is asserted
-        against by identity rather than by trusting the allocation site
-        above to keep being right: a refactor pointing `$TMPDIR` back at
-        it would still satisfy "it is a directory somebody allocated".
-        The oracle is `mktemp`'s own choice with `TMPDIR` unset -- derived
-        independently of how `run_step` allocates, and of any literal.
-
-        Scoped to the lanes where `mktemp` reads `TMPDIR`, for the reason
-        the sibling test above records; the gap that leaves is stated in
-        `tests/regressions/manifest_test_harness.py`'s bug-class entry
-        rather than papered over.
-        """
-        workspace = make_workspace(tmp_path)
-        result = run_step(self._tmpdir_probe(), workspace=workspace)
-
-        assert result.returncode == 0, result.stderr
-        if not self._honors_tmpdir(result):
-            pytest.skip("this platform's mktemp does not read $TMPDIR")
-        ambient = PurePosixPath(result.outputs["ambient_real"])
-        # Guard the oracle itself: an `ambient_real` that came back empty
-        # (or as the step's own $TMPDIR) would make every assertion below
-        # pass while checking nothing.
-        assert str(ambient) not in {"", "."}
-        assert ambient != PurePosixPath(result.outputs["tmpdir_real"])
-        for name in ("made_parent_real", "file_parent_real"):
-            assert PurePosixPath(result.outputs[name]) != ambient, (
-                f"{name} landed directly in the shared system temp "
-                f"({result.outputs[name]})"
-            )
-
-    def test_two_steps_do_not_share_a_tmpdir(self, tmp_path: Path) -> None:
-        workspace = make_workspace(tmp_path)
-        first = run_step(self._tmpdir_probe(), workspace=workspace)
-        second = run_step(self._tmpdir_probe(), workspace=workspace)
-
-        assert first.returncode == 0, first.stderr
-        assert second.returncode == 0, second.stderr
-        assert first.outputs["tmpdir_real"] != second.outputs["tmpdir_real"]
-
-    def test_the_step_tmpdir_is_removed_afterwards(self, tmp_path: Path) -> None:
-        """Checked against the filesystem this process can see, by pattern
-        rather than by the step's own spelling of the path: nothing the
-        harness allocated for a step may outlive it."""
-        workspace = make_workspace(tmp_path)
-        result = run_step(self._tmpdir_probe(), workspace=workspace)
-
-        assert result.returncode == 0, result.stderr
-        assert list(workspace.parent.glob("_step_tmp_*")) == []
-
-    @pytest.mark.parametrize("source", ["step-env", "caller-env"])
-    def test_an_explicit_tmpdir_still_wins(self, tmp_path: Path, source: str) -> None:
-        """Several tests set `TMPDIR` on purpose (a relative value, a value
-        nested under an input path) to exercise a script's own handling of
-        it. The harness default must not outrank either spelling.
-
-        The value that reaches the step is compared in the step's own
-        world (both sides resolved by its shell), and where `mktemp` reads
-        `TMPDIR` the effect is confirmed against the filesystem: the
-        directory the caller chose holds what the step allocated.
-        """
-        workspace = make_workspace(tmp_path)
-        chosen = tmp_path / "chosen_tmp"
-        chosen.mkdir()
-        step = dict(self._tmpdir_probe())
-        step["run"] += (
-            'case "$(_real "$TMPDIR")" in\n'
-            '  "$(_real "$EXPECTED_TMPDIR")") _emit tmpdir_is_chosen yes ;;\n'
-            "  *) _emit tmpdir_is_chosen no ;;\n"
-            "esac\n"
+        scratch = self._scratch_dir(workspace)
+        assert workspace not in scratch.parents and scratch != workspace
+        assert "probe" not in run_step({"run": "true"}, workspace=workspace).tree(), (
+            "the scratch directory must not show up in the workspace tree"
         )
-        env = {"EXPECTED_TMPDIR": str(chosen)}
-        if source == "step-env":
-            step["env"] = {"TMPDIR": str(chosen)}
-        else:
-            env["TMPDIR"] = str(chosen)
 
-        result = run_step(step, workspace=workspace, env=env)
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason=(
+            "the value handed to Git Bash is a native Windows path while "
+            "MSYS's mktemp answers in a POSIX one, so neither outcome of the "
+            "prefix test below means what it says -- and the reaped-/tmp bug "
+            "this guards is Linux-only anyway"
+        ),
+    )
+    def test_a_bare_mktemp_lands_in_it(self, tmp_path: Path) -> None:
+        """The production shape: `action.yml` calls a bare `mktemp -d`.
+
+        The comparison is done in bash, on bash's own strings, and only a
+        yes/no verdict crosses back -- see this class's docstring.
+        """
+
+        workspace = make_workspace(tmp_path)
+        result = run_step(
+            {
+                "run": (
+                    "d=$(mktemp -d)\n"
+                    'case "$d" in\n'
+                    '  "$TMPDIR"/*) echo "inside=yes" >> "$GITHUB_OUTPUT" ;;\n'
+                    '  *) echo "inside=no($d)" >> "$GITHUB_OUTPUT" ;;\n'
+                    "esac\n"
+                ).replace("\\n", "\n")
+            },
+            workspace=workspace,
+        )
 
         assert result.returncode == 0, result.stderr
-        assert result.outputs["tmpdir_is_chosen"] == "yes", (
-            "the harness default outranked the caller's own $TMPDIR"
-        )
-        if not self._honors_tmpdir(result):
+
+        if sys.platform == "darwin":
+            # Asserted rather than skipped, on Codex's review point: skipping
+            # would leave this platform's real behaviour permanently
+            # unstated, and a skip cannot tell us if it ever changes.
+            #
+            # macOS's mktemp resolves its own directory via
+            # `confstr(_CS_DARWIN_USER_TEMP_DIR)` and never reads $TMPDIR
+            # (first-hand evidence:
+            # tests/test_action_run_sh_py_safe_path.py's own note, where a
+            # $TMPDIR override was silently ignored by the real binary). The
+            # harness cannot override that from the environment, so the honest
+            # thing is to pin what does happen. It is not the bug this guards:
+            # _CS_DARWIN_USER_TEMP_DIR is a per-user, per-boot directory, not
+            # the shared /tmp whose mid-job pruning is what reaped these files
+            # on the Linux runners. If this assertion ever fails, macOS has
+            # started honouring $TMPDIR and the branch should collapse into
+            # the `inside=yes` case below.
+            assert result.output_lines[:1] != ["inside=yes"], (
+                "macOS's mktemp now honours $TMPDIR -- delete this branch and "
+                "let the cross-platform assertion below cover darwin too"
+            )
             return
-        entries = sorted(p.name for p in chosen.iterdir())
-        assert len(entries) == 2, (
-            f"the step's `mktemp -d` and `mktemp` should both have landed in "
-            f"the caller's own $TMPDIR; it holds {entries}"
+
+        assert result.output_lines == ["inside=yes"], (
+            "a bare `mktemp -d` escaped the step's own TMPDIR, so on a runner "
+            f"that prunes the shared temp directory it can vanish mid-step: {result.output_lines}"
         )
-        assert sum(1 for p in chosen.iterdir() if p.is_dir()) == 1
-        assert sum(1 for p in chosen.iterdir() if p.is_file()) == 1

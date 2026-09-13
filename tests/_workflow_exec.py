@@ -382,22 +382,29 @@ def run_step(
     """
     github_output = workspace / "_github_output"
 
-    # A private `$TMPDIR` for this one step, for the same reason
-    # `.github/workflows/ci.yml` points the whole unit-test job's `TMPDIR` at
-    # `$RUNNER_TEMP`: something prunes `/tmp` on the hosted runners *while a
-    # job is running*, and a step body's own `mktemp -d` scratch directory is
-    # one of the things observed to vanish mid-step (`cd: /tmp/tmp.XXXXXXXXXX:
-    # No such file or directory`, reported by
-    # `actions/check-target/action.yml`'s assurance-overlay step). That job-
-    # level mitigation cannot reach here: this environment is built from
-    # scratch rather than inherited, so without an entry of its own every
-    # executed step still resolved `mktemp` against the shared `/tmp` the job
-    # had just moved away from. Per step rather than per session, and outside
-    # the workspace (like the body script below), so `StepResult.tree()` and
-    # the `$RUNNER_TEMP` assertions keep seeing only what the step itself
-    # created, and two concurrently-executing steps cannot observe each
-    # other's scratch files.
-    step_tmpdir = workspace.parent / f"_step_tmp_{os.getpid()}_{next(_BODY_COUNTER)}"
+    # A scratch directory for whatever the step's own `mktemp` creates.
+    #
+    # Beside the workspace rather than inside it, for the same reason the step
+    # body script is: `StepResult.tree()` and the `$RUNNER_TEMP` assertions
+    # must keep seeing only what the step itself created in the workspace.
+    #
+    # It exists because this env is built from scratch, which silently left
+    # `TMPDIR` unset: `mktemp -d` inside a step then fell back to `/tmp`, and
+    # on a runner that prunes `/tmp` mid-job the step lost its own scratch
+    # directory while still using it -- `cd: /tmp/tmp.XjdPkLm7IE: No such file
+    # or directory`, observed on main in run 34781323754 AFTER the job-level
+    # `TMPDIR` fix, which this env reset was discarding. Declaring it here
+    # keeps the from-scratch guarantee (nothing is inherited from the
+    # developer's shell) while making the step's temporary files land
+    # somewhere test-owned.
+    # The path only; the directory itself is created inside `_run`, AFTER the
+    # workspace-integrity guard. `parents=True` here would recreate a reaped
+    # `workspace.parent` -- caller-owned ground that
+    # `test_run_step_contains_no_call_that_creates_the_workspace` forbids this
+    # function to create, and recreating it would also make the failure
+    # diagnostic misleading by reporting the reaped parent as present (Codex
+    # review, PR #1298).
+    step_tmp = workspace.parent / f"_step_tmp_{workspace.name}"
 
     step_env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -405,7 +412,7 @@ def run_step(
         "GITHUB_OUTPUT": str(github_output),
         "GITHUB_WORKSPACE": str(workspace),
         "RUNNER_TEMP": str(workspace / "_runner_temp"),
-        "TMPDIR": str(step_tmpdir),
+        "TMPDIR": str(step_tmp),
     }
     # The step's own declared env, with unresolved ${{ }} expressions left to
     # the caller to substitute — a test that forgets is passing a literal
@@ -455,14 +462,8 @@ def run_step(
         # callback must not undo it.
         require_workspace(workspace)
         (workspace / "_runner_temp").mkdir(exist_ok=True)
-        # Recreated on every attempt, not only on the first: the step owns
-        # what it puts here and may well have removed the directory itself
-        # (an EXIT trap over its own `mktemp -d`), and a retry handed a
-        # missing `$TMPDIR` is the very failure this exists to prevent.
-        # No `parents=True`: the workspace's parent must already exist, and
-        # creating it here would fabricate exactly the tree the guard above
-        # refuses to rebuild.
-        step_tmpdir.mkdir(exist_ok=True)
+        # No `parents=True`: only this leaf is ours to create.
+        step_tmp.mkdir(exist_ok=True)
         body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
         body.write_bytes(step["run"].encode("utf-8"))
         # Git Bash wants forward slashes, but a backslash is a legal *filename*
@@ -510,13 +511,7 @@ def run_step(
     # PR #1292, against tests/test_mutation_workflow_execution.py). `run_step`
     # cannot reset a sink it was never told about, so the loss is attributed
     # and reported here rather than papered over with a fabricated second run.
-    try:
-        proc, output_bytes = run_writing_env_file(github_output, _run)
-    finally:
-        # Unconditional, like the body script above: a caller whose workspace
-        # parent is not a pytest-managed temporary directory would otherwise
-        # accumulate one scratch directory per step.
-        shutil.rmtree(step_tmpdir, ignore_errors=True)
+    proc, output_bytes = run_writing_env_file(github_output, _run)
     decoded = output_bytes.decode("utf-8", errors="replace")
     lines = [line for line in decoded.splitlines() if line != ""]
     return StepResult(

@@ -164,8 +164,13 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_workflow_exec_harness.py",),
         public_surfaces=("github-action",),
         axes={
-            "allocator": ("mktemp-directory", "mktemp-file"),
-            "tmpdir_source": ("harness-default", "step-env", "caller-env"),
+            "claim": (
+                "tmpdir-is-the-directory-we-made",
+                "step-can-write-into-it",
+                "not-inside-the-workspace",
+                "a-bare-mktemp-lands-in-it",
+            ),
+            "platform": ("linux", "macos-darwin-user-temp", "windows-git-bash"),
         },
         known_gaps=(
             KnownGap(
@@ -188,14 +193,16 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "So on the macOS lanes a step's own `mktemp` still "
                     "allocates in that per-user directory -- which is not the "
                     "shared `/tmp` this class is about, and which nothing in "
-                    "the environment can redirect. The tests probe the real "
-                    "`mktemp`'s behavior rather than a platform name and "
-                    "assert the reachable half there; `.github/workflows/"
-                    "ci.yml`'s own job-level `TMPDIR` mitigation has exactly "
-                    "the same limit, and closing it would mean interposing on "
-                    "what a step body executes, not setting a variable."
+                    "the environment can redirect. `test_a_bare_mktemp_"
+                    "lands_in_it` pins that platform's real behavior rather "
+                    "than skipping it, so the day macOS starts reading "
+                    "`TMPDIR` the branch fails and collapses; "
+                    "`.github/workflows/ci.yml`'s own job-level `TMPDIR` "
+                    "mitigation has exactly the same limit, and closing it "
+                    "would mean interposing on what a step body executes, "
+                    "not setting a variable."
                 ),
-                reference="PR #1299 (Codex review)",
+                reference="PR #1298 (Codex review)",
             ),
         ),
     ),
