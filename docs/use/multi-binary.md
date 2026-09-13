@@ -872,7 +872,7 @@ side for a loaded `BundleFacts` and `compare_bundle_from_facts()`:
 
 ```python
 from abicheck.bundle import discover_artifact_set
-from abicheck.bundle_facts import compare_bundle_from_facts
+from abicheck.workflows.bundle_facts_compare import compare_bundle_from_facts
 from abicheck.package import discover_shared_libraries
 from abicheck.serialization import load_bundle_facts
 
