@@ -413,7 +413,7 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         # (`test_a_prepared_tree_with_tools_is_measurable`) enforced it:
         # it passed an empty tmp_path, mocked tool availability, and
         # asserted MEASURED under a name describing readiness.
-        fixed_by=(),
+        fixed_by=(1277,),
         seed_tests=("tests/test_l2_real_profiles.py",),
         axes={
             "operand_side": ("historical", "candidate"),
