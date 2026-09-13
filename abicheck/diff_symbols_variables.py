@@ -23,6 +23,7 @@ cycle). ``diff_symbols._check_variable`` is the sole caller.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from .checker_types import Change
@@ -33,11 +34,18 @@ from .compare.elf_only_demangle import (
 from .compare.fact_comparison import compare_facts
 from .diff_helpers import make_change
 from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
-from .elf_symbol_filter import exported_symbol_names
+from .elf_symbol_filter import (
+    exported_symbol_names,
+    is_abi_relevant_elf_symbol,
+)
 from .model import AbiSnapshot, AccessLevel, Variable
 from .model.change_catalog.kinds import ChangeKind
-from .model.surface_facts import surface_fact_summary
-from .name_classification import _find_matching_close
+from .model.surface_facts import (
+    is_abi_visible,
+    is_export_table_only_record,
+    surface_fact_summary,
+)
+from .name_classification import _find_matching_close, is_local_rtti_symbol
 
 
 def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
@@ -328,6 +336,8 @@ def _var_removed(
     v_old: Variable,
     new_all: dict[str, Variable] | None = None,
     old_exported_symbols: frozenset[str] = frozenset(),
+    compare_surviving: Callable[[str, Variable, Variable], Iterable[Change]]
+    | None = None,
 ) -> list[Change]:
     """A public variable with no peer in the NEW side's public surface.
 
@@ -337,14 +347,30 @@ def _var_removed(
     that side, is an evidence gap rather than a removal -- see
     ``export_transition.surface_exit_is_evidence_gap``. Defaulted so a
     caller with no full map behaves exactly as before.
+
+    *compare_surviving* is the matched-pair comparison to run on such a
+    surviving declaration instead (``diff_symbols._check_variable``, passed
+    in because that function lives in the module which imports *this* one).
+    Omitted, the pair is simply not reported -- but every production caller
+    passes it, since a real type change on a surviving declaration must
+    still be reported (Codex review, P1).
     """
-    if new_all is not None and _export_transition.surface_exit_is_evidence_gap(
+    v_new = None if new_all is None else new_all.get(mangled)
+    if v_new is not None and _export_transition.surface_exit_is_evidence_gap(
         v_old,
-        new_all.get(mangled),
+        v_new,
         old_exported_symbols=old_exported_symbols,
         key=mangled,
     ):
-        return []
+        # Matched, not discarded (Codex review, P1) -- see the identical
+        # reasoning at `diff_symbols._match_old_function`'s own call: the
+        # declaration is on both sides, so a real type or const-qualification
+        # change on it is still comparable and must still be reported.
+        return (
+            []
+            if compare_surviving is None
+            else list(compare_surviving(mangled, v_old, v_new))
+        )
     return [
         make_change(
             ChangeKind.VAR_REMOVED,
@@ -388,3 +414,28 @@ def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> frozenset[str
             ),
         )
     )
+
+
+def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
+    """Return public/ELF-only variables from *snap*.
+
+    Excludes RTTI/vtable symbols of function-local types (lambda closures and
+    other in-function types): they are not nameable public ABI and only churn
+    across builds (RD2-4).
+    """
+    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
+    return {
+        k: v
+        for k, v in snap.variable_map.items()
+        if (
+            is_abi_visible(v)
+            and (
+                not is_export_table_only_record(v)
+                or is_abi_relevant_elf_symbol(
+                    k,
+                    filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+                )
+            )
+            and not is_local_rtti_symbol(k)
+        )
+    }

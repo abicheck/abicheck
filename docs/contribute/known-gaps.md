@@ -73,13 +73,17 @@ looked like the obvious fix and wasn't.
   pair) rather than per member. A bundle whose members have disjoint public
   header sets would therefore parse each member's candidate side against
   the union.
-  (c) **Header-depth bundle cost is not calibrated for this shape.** The
-  same measured six-member run took ~84 min wall and 20.4 GiB peak RSS --
-  past both the 45-minute job timeout and the 16 GB runner the L2 job
-  budgets for -- while the release fan-out still sizes its per-member
-  concurrency off `_RELEASE_JOB_MEM_BUDGET_GIB = 1.0`, a binary-depth
-  figure. Routing a bundle check at header depth without re-calibrating
-  that budget trades a silent narrowing for an OOM.
+  (c) **Header-depth bundle cost still does not fit the runner.** The
+  per-worker *memory budget* half of this is closed:
+  `release_job_mem_budget_gib(depth)` now defaults to 4.0 GiB at `headers`
+  (6.0 at `build`/`source`) instead of the binary-depth 1.0 GiB, so the
+  fan-out clamps its worker count instead of overcommitting. What remains
+  is the total: the measured six-member run took ~84 min wall and 20.4 GiB
+  peak RSS, past both the 45-minute job timeout and the 16 GB runner the
+  L2 job budgets for. A correct per-worker budget makes the run *fit in
+  memory by running fewer members at once* -- which costs wall-clock on a
+  job that is already over its timeout. Routing a bundle check at header
+  depth needs a runner/timeout decision, not another budget constant.
   (d) **No first-party Action emits a bundle-facts document.** The
   producer itself exists and is reachable -- `compare`'s release fan-out
   takes `--bundle-facts-out`, forwardable today through the root Action's

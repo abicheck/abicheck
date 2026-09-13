@@ -93,6 +93,7 @@ from .diff_symbols_variables import (
     _check_variable_alignment,
     _is_access_narrowing,
     _observed_exports,
+    _public_variables,
     _var_added,
     _var_removed,
     _without_top_level_const,
@@ -249,31 +250,6 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
         k: v
         for k, v in funcs.items()
         if _export_transition.survives_export_narrowing(k, v, exported, name_counts)
-    }
-
-
-def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
-    """Return public/ELF-only variables from *snap*.
-
-    Excludes RTTI/vtable symbols of function-local types (lambda closures and
-    other in-function types): they are not nameable public ABI and only churn
-    across builds (RD2-4).
-    """
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
-    return {
-        k: v
-        for k, v in snap.variable_map.items()
-        if (
-            is_abi_visible(v)
-            and (
-                not is_export_table_only_record(v)
-                or is_abi_relevant_elf_symbol(
-                    k,
-                    filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
-                )
-            )
-            and not _is_local_type_rtti(k)
-        )
     }
 
 
@@ -896,17 +872,25 @@ def _match_old_function(
         matched_by_name.add(f_old.name)
         return result
 
-    # A declaration that is still there on the NEW side and only left the
-    # *compared surface* because this run established less contract evidence
-    # for that side is an evidence gap, not a removal -- see
-    # `export_transition.surface_exit_is_evidence_gap`.
-    if _export_transition.surface_exit_is_evidence_gap(
+    # Still declared on the NEW side, and out of its *compared surface* only
+    # because this run established less contract evidence there: an evidence
+    # gap, not a removal -- and then a matched pair, whose signature is still
+    # compared. See `export_transition.surface_exit_is_evidence_gap`.
+    if f_new_all is not None and _export_transition.surface_exit_is_evidence_gap(
         f_old,
         f_new_all,
         old_exported_symbols=old_exported_symbols,
         key=mangled,
     ):
-        return []
+        return list(
+            _check_function_signature(
+                mangled,
+                f_old,
+                f_new_all,
+                params_unconfirmed=params_unconfirmed,
+                is_llp64=is_llp64,
+            )
+        )
     return [_check_removed_function(mangled, f_old, new_all, elf_only_mode)]
 
 
@@ -1314,7 +1298,13 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
         on_removed=lambda m, v: _var_removed(
-            m, v, new.variable_map, _old_exported_variables
+            m,
+            v,
+            new.variable_map,
+            _old_exported_variables,
+            compare_surviving=lambda k, o, n: _check_variable(
+                k, o, n, cv_facts_reliable=cv_facts_reliable
+            ),
         ),
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(

@@ -337,8 +337,7 @@ def surface_exit_is_evidence_gap(
 
     This is the same rule :func:`_export_was_lost` already applies on the
     matched-pair path ("exported before, unknown now" is a gap, not a
-    transition); the unmatched path simply never applied it. Four conditions,
-    all required:
+    transition); the unmatched path simply never applied it.
 
     * the entity is still declared on the NEW side (a declaration that is
       genuinely gone is a real removal, and is reported);
@@ -351,6 +350,17 @@ def surface_exit_is_evidence_gap(
       (membership tested for *key*, the same map key the surface was built
       under). A caller that passes neither still gets the fact-only answer;
     * NEW is not confirmed exported (if it is, nothing left any surface);
+    A caller that gets ``True`` here must then treat the pair as **matched**
+    and compare it, never drop it (Codex review, P1). The declaration is on
+    both sides, so its signature/type is still comparable, and weakening the
+    evidence for one question ("is this still in the promised surface?") must
+    not silence a different one the evidence does answer ("did its return
+    type change?"). Emitting nothing would leave a real change on such a
+    declaration reported by nothing at all -- as would the pre-fix behaviour,
+    which reported a manufactured visibility finding and no signature diff.
+
+    Four conditions, all required:
+
     * OLD's place in the surface rested on real producer contract evidence
       while NEW's own (b) was never established by a producer. A NEW side
       that *observed* the declaration out of the contract (a genuine move to

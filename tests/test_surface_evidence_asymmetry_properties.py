@@ -176,6 +176,51 @@ class TestSurfaceEvidenceAsymmetry:
         }
         assert reported == set(names)
 
+    @given(names=_names)
+    @settings(deadline=None, max_examples=40)
+    def test_a_real_signature_change_on_a_surviving_declaration_reports(
+        self, names: list[str]
+    ) -> None:
+        """The surviving declaration is *matched*, not discarded.
+
+        Narrowing the conclusion about one question ("is this still in the
+        promised surface?") must not silence a different one the evidence
+        does answer ("did its signature change?"). The declaration is on
+        both sides, so a real return-type change on it is still comparable
+        -- and is reported by neither the pre-fix behaviour (a manufactured
+        visibility finding, and no signature diff) nor a bare "emit
+        nothing". Codex review, P1.
+        """
+        old = _snapshot(names, evidence=True)
+        new = _snapshot(names, evidence=False)
+        for fn in new.functions:
+            fn.return_type = "int"  # was "void"
+        reported = {
+            c.symbol
+            for c in compare(old, new).changes
+            if c.kind is ChangeKind.FUNC_RETURN_CHANGED
+        }
+        assert reported == set(names)
+
+    @given(names=_names)
+    @settings(deadline=None, max_examples=40)
+    def test_a_real_variable_type_change_on_a_survivor_reports(
+        self, names: list[str]
+    ) -> None:
+        """:meth:`test_a_real_signature_change_on_a_surviving_declaration_reports`
+        for data symbols, whose surviving-pair comparison is reached through
+        a separate call site and so needs its own guard."""
+        old = _snapshot(names, evidence=True, variables=True)
+        new = _snapshot(names, evidence=False, variables=True)
+        for var in new.variables:
+            var.type = "long"  # was "int"
+        reported = {
+            c.symbol
+            for c in compare(old, new).changes
+            if c.kind is ChangeKind.VAR_TYPE_CHANGED
+        }
+        assert reported == set(names)
+
     @given(names=_names, variables=st.booleans())
     @settings(deadline=None, max_examples=40)
     def test_an_observed_negative_on_the_new_side_still_reports(

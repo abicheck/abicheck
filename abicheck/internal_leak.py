@@ -506,7 +506,7 @@ def _seed_queue_from_variables(
     queue: collections.deque[tuple[str, list[str]]],
 ) -> None:
     """Enqueue type candidates derived from all public variable types."""
-    from .diff_symbols import _public_variables
+    from .diff_symbols_variables import _public_variables
 
     for var in _public_variables(snap).values():
         if var.type:

@@ -101,7 +101,7 @@ when both are set.
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
 | `ABICHECK_SNAPSHOT_MAX_DECODED_BYTES` | positive integer (bytes); a malformed or non-positive value is ignored | `DEFAULT_MAX_DECODED_BYTES` | Ceiling on the *decoded* size of a snapshot envelope, enforced incrementally during decompression — a stream that exceeds it is rejected rather than buffered. Raise it to read a legitimately large snapshot (e.g. a big bundle member at header depth). | `snapshot_io.py` (`_max_decoded_bytes`) |
-| `ABICHECK_SNAPSHOT_MAX_STORED_BYTES` | positive integer (bytes); same parsing rule | `DEFAULT_MAX_STORED_BYTES` | Ceiling on the *stored* (on-disk) size abicheck will buffer before decoding at all. Independent of the decoded ceiling — a valid multi-member gzip stream's overhead scales with member count, not payload size. | `snapshot_io.py` (`_max_stored_bytes`) |
+| `ABICHECK_SNAPSHOT_MAX_STORED_BYTES` | positive integer (bytes); same parsing rule | `DEFAULT_MAX_STORED_BYTES` | Ceiling on the *stored* (on-disk) size abicheck will buffer before decoding at all, applied to a **gzip or zstd** envelope only — a plain (uncompressed) file's stored size equals its decoded size, so it is checked against the decoded ceiling above instead. Deliberately independent of that ceiling: a valid multi-member gzip stream's overhead scales with member count, not payload size, so raising the decoded ceiling must not widen this one. | `snapshot_io.py` (`_max_stored_bytes`, `read_snapshot_bytes`) |
 
 ---
 

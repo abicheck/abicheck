@@ -41,7 +41,7 @@ from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
     make_change,
 )
-from .diff_symbols import _public_variables
+from .diff_symbols_variables import _public_variables
 from .diff_types_surface import (
     _RESERVED_FIELD_RE,
     _directly_referenced,
