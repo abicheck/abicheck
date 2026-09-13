@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -51,6 +52,11 @@ from .workflows.aggregate import (
     ExpectedTargets,
     aggregate_reports_dir,
 )
+from .workflows.aggregate.expected_input import (
+    ExpectedInputError,
+    ExpectedInputKind,
+    classify_expected_input,
+)
 
 
 @main.command("aggregate")
@@ -63,21 +69,15 @@ from .workflows.aggregate import (
     "manifest",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help='Expected-target manifest (JSON: {"targets": [{"id", "required"}]}). '
-    "The single source of truth for which targets the matrix must produce — "
-    "generate it in the plan job and feed the same file to both the matrix and "
-    "this gate so they never drift.",
-)
-@click.option(
-    "--run-plan",
-    "run_plan_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="A project run-plan.json (from `abicheck project plan`), projected "
-    "to the expected-target manifest shape internally -- an alternative to "
-    "--manifest that skips the separate projection step. Each check's own "
-    "check_id becomes the expected target id, matching what `check-target` "
-    "writes as every report's target_id.",
+    help="The set of targets this matrix was supposed to produce. Either "
+    "shape is accepted and recognized by its own content: an expected-target "
+    'manifest (JSON: {"targets": [{"id", "required"}]}), or an `abicheck '
+    "project plan` run-plan.json (declaring schema: abicheck.run-plan/vN), "
+    "projected to the manifest shape internally so each check's own check_id "
+    "becomes the expected target id — which is what `check-target` writes as "
+    "every report's target_id. The single source of truth for the expected "
+    "set: generate it in the plan job and feed the same file to both the "
+    "matrix and this gate so they never drift.",
 )
 @click.option(
     "--discovered-only",
@@ -85,16 +85,18 @@ from .workflows.aggregate import (
     is_flag=True,
     default=False,
     help="Explicitly aggregate whatever reports are present, with NO coverage "
-    "gate. Required to run without --manifest/--run-plan — because with no "
-    "declared target set the gate cannot tell a missing required target from "
-    "an intentionally absent one.",
+    "gate. Required to run without --manifest — because with no declared "
+    "target set the gate cannot tell a missing required target from an "
+    "intentionally absent one. Deliberately a flag of its own rather than "
+    "something inferred from an absent or empty manifest: it states that the "
+    "operator has no expected inventory, which no document's contents can "
+    "say for them.",
 )
 @export_options(["text", "json"], default_format="text")
 @verbose_option
 def aggregate_cmd(
     reports_dir: Path,
     manifest: Path | None,
-    run_plan_path: Path | None,
     discovered_only: bool,
     exports: ExportSet,
     verbose: bool,
@@ -103,10 +105,12 @@ def aggregate_cmd(
 
     REPORTS_DIR holds the per-target ``compare``/``scan`` JSON reports
     downloaded from the build matrix (one ``abi-report-<target>.json`` per
-    leg). Provide the expected-target set with ``--manifest`` or
-    ``--run-plan`` (recommended for a `project plan`-driven workflow), or opt
-    into ``--discovered-only`` to aggregate whatever is present with no
-    coverage gate.
+    leg). Provide the expected-target set with ``--manifest`` -- either a
+    hand-authored expected-target manifest or an ``abicheck project plan``
+    run-plan.json, recognized by the document's own schema rather than by
+    its filename (plan slice 7q retired the separate ``--run-plan`` flag) --
+    or opt into ``--discovered-only`` to aggregate whatever is present with
+    no coverage gate.
 
     The gate policy for an unavailable required target
     (``missing_required: fail|warn``) or a report outside the expected set
@@ -126,9 +130,7 @@ def aggregate_cmd(
     """
     _setup_verbosity(verbose)
 
-    expected, policy_source_hint = _resolve_expected(
-        manifest, run_plan_path, discovered_only
-    )
+    expected, policy_source_hint = _resolve_expected(manifest, discovered_only)
 
     try:
         result = aggregate_reports_dir(
@@ -155,69 +157,74 @@ def aggregate_cmd(
 
 def _resolve_expected(
     manifest: Path | None,
-    run_plan_path: Path | None,
     discovered_only: bool,
 ) -> tuple[ExpectedTargets | None, str]:
-    """Resolve the expected-target set from exactly one source, or usage error.
+    """Resolve the expected-target set from *manifest*, or usage error.
 
-    Precedence is deliberately *exclusive*, not merging: ``--discovered-only``,
-    ``--manifest``, and ``--run-plan`` are three distinct ways to say what the
-    target set is, and combining them is ambiguous. (The ad-hoc
-    ``--expect``/``--optional`` id lists were a fourth; they are gone --
-    an expected-target set is a file the plan job and the gate share, and
+    ``--discovered-only`` and ``--manifest`` are two distinct statements
+    about the expected set -- "there is no declared inventory" and "here it
+    is" -- so combining them stays ambiguous and stays rejected. (The ad-hoc
+    ``--expect``/``--optional`` id lists were a third; they are gone -- an
+    expected-target set is a file the plan job and the gate share, and
     retyping it on the command line was the drift the manifest exists to
-    prevent.)
+    prevent. ``--run-plan`` was a fourth, retired by plan slice 7q: it named
+    a second *schema* for this same input, which the document itself
+    already declares.)
 
     Returns the expected-target set plus a ``policy_source_hint`` label
-    (``"manifest"``/``"run-plan"``) naming which source it came from --
-    :func:`~.workflows.aggregate.resolve_gate_policy` reports this back in the
-    result's ``effective_policy.source`` whenever that source's own ``gate``
-    block actually supplied a value.
+    (``"manifest"``/``"run-plan"``) naming which shape it came from --
+    :func:`~.workflows.aggregate.resolve_gate_policy` reports this back in
+    the result's ``effective_policy.source`` whenever that source's own
+    ``gate`` block actually supplied a value. Both shapes are read through
+    :meth:`ExpectedTargets.from_manifest_data`, so the field cannot tell
+    them apart; the classifier can, and says which.
     """
-    sources_given = sum([manifest is not None, run_plan_path is not None])
-
     if discovered_only:
-        if sources_given:
+        if manifest is not None:
             raise click.UsageError(
-                "--discovered-only cannot be combined with --manifest/--run-plan"
+                "--discovered-only cannot be combined with --manifest"
             )
         return None, "default"
-    if sources_given > 1:
+    if manifest is None:
         raise click.UsageError(
-            "--manifest and --run-plan are mutually exclusive expected-target sources"
+            "no expected-target set: pass --manifest (the targets the matrix "
+            "must produce, as an expected-target manifest or an `abicheck "
+            "project plan` run-plan.json), or --discovered-only to aggregate "
+            "whatever is present with no coverage gate"
         )
-    if manifest is not None:
-        try:
-            return ExpectedTargets.from_manifest_file(manifest), "manifest"
-        except AggregateError as exc:
-            raise click.UsageError(str(exc)) from exc
-    if run_plan_path is not None:
-        from .buildsource.run_plan import RunPlan, to_aggregate_manifest
 
-        try:
-            raw = json.loads(run_plan_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise click.UsageError(f"cannot read {run_plan_path}: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise click.UsageError(f"{run_plan_path} must contain a JSON object.")
-        try:
-            plan = RunPlan.from_dict(raw)
-        except AggregateError as exc:
-            raise click.UsageError(f"{run_plan_path}: {exc}") from exc
-        try:
-            return (
-                ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan)),
-                "run-plan",
-            )
-        except AggregateError as exc:
-            raise click.UsageError(
-                f"{run_plan_path}: {exc} — an empty run-plan.json has no "
-                "targets to aggregate; regenerate it with `abicheck project "
-                "plan` (dropping --allow-empty), or aggregate with "
-                "--discovered-only instead"
-            ) from exc
-    raise click.UsageError(
-        "no expected-target set: pass --manifest or --run-plan (the targets "
-        "the matrix must produce), or --discovered-only to aggregate whatever "
-        "is present with no coverage gate"
-    )
+    try:
+        kind, document = classify_expected_input(manifest)
+    except ExpectedInputError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    if kind is ExpectedInputKind.RUN_PLAN:
+        return _expected_from_run_plan(manifest, document)
+    try:
+        return ExpectedTargets.from_manifest_data(document), "manifest"
+    except AggregateError as exc:
+        raise click.UsageError(f"{manifest}: {exc}") from exc
+
+
+def _expected_from_run_plan(
+    path: Path, document: dict[str, Any]
+) -> tuple[ExpectedTargets | None, str]:
+    """Project an already-classified run-plan document to the expected set."""
+    from .buildsource.run_plan import RunPlan, to_aggregate_manifest
+
+    try:
+        plan = RunPlan.from_dict(document)
+    except AggregateError as exc:
+        raise click.UsageError(f"{path}: {exc}") from exc
+    try:
+        return (
+            ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan)),
+            "run-plan",
+        )
+    except AggregateError as exc:
+        raise click.UsageError(
+            f"{path}: {exc} — an empty run-plan.json has no targets to "
+            "aggregate; regenerate it with `abicheck project plan` once at "
+            "least one check resolves, or aggregate with --discovered-only "
+            "instead"
+        ) from exc

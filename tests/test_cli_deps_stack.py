@@ -543,3 +543,133 @@ class TestStackCheckCommand:
         )
         assert result.exit_code != 0
         assert "same sysroot" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Defaulted environment roots (one-comparison-product.md Phase 7l, `deps` item)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultedEnvironmentRoot:
+    """An unspecified `--sysroot`/`--old-root`/`--new-root` is this host's
+    own filesystem, and every projection has to say so rather than print a
+    bare `/` that reads like a chosen deployment environment.
+
+    The discriminating case is an *explicitly given* `/`: a report that
+    labels that one "defaulted" is just as wrong as one that labels the
+    fallback as chosen, so each assertion below has its explicit twin.
+    """
+
+    @staticmethod
+    def _elf(tmp_path: Path, name: str = "myapp") -> Path:
+        binary = tmp_path / name
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        return binary
+
+    def test_single_env_result_records_the_defaulted_root(self, tmp_path) -> None:
+        from abicheck.stack_checker import check_single_env
+
+        binary = self._elf(tmp_path)
+        defaulted = check_single_env(binary)
+        assert defaulted.baseline_env == "/"
+        assert defaulted.baseline_env_defaulted is True
+        assert defaulted.candidate_env_defaulted is True
+
+        chosen = check_single_env(binary, sysroot=tmp_path)
+        assert chosen.baseline_env == str(tmp_path)
+        assert chosen.baseline_env_defaulted is False
+
+    def test_json_projection_states_it_for_both_sides(self) -> None:
+        from abicheck.report.stack import compute_stack_report_mapping
+
+        result = _make_result("/app", baseline_env="/", candidate_env="/img")
+        result.baseline_env_defaulted = True
+        mapping = compute_stack_report_mapping(result)
+        assert mapping["baseline_env_defaulted"] is True
+        # Always emitted, so an absent key can never be read as "chosen".
+        assert mapping["candidate_env_defaulted"] is False
+
+    def test_markdown_and_html_annotate_only_the_defaulted_side(self) -> None:
+        from abicheck.report.stack import DEFAULTED_ROOT_NOTE
+        from abicheck.stack_html import stack_to_html
+        from abicheck.stack_report import stack_to_markdown
+
+        result = _make_result("/app", baseline_env="/", candidate_env="/img")
+        result.baseline_env_defaulted = True
+        for rendered in (stack_to_markdown(result), stack_to_html(result)):
+            assert DEFAULTED_ROOT_NOTE in rendered
+            # One annotation, on the defaulted side only.
+            assert rendered.count(DEFAULTED_ROOT_NOTE) == 1
+
+        chosen = _make_result("/app", baseline_env="/", candidate_env="/img")
+        for rendered in (stack_to_markdown(chosen), stack_to_html(chosen)):
+            assert DEFAULTED_ROOT_NOTE not in rendered
+
+    def test_single_environment_report_states_it_too(self, tmp_path) -> None:
+        """A `deps tree` has one root on both sides, so the two env values
+        are necessarily equal -- the differing-roots test alone made the
+        note unreachable in Markdown and HTML, leaving it only in JSON and
+        the plan (Codex review, PR #1278)."""
+        from abicheck.report.stack import DEFAULTED_ROOT_NOTE
+        from abicheck.stack_html import stack_to_html
+        from abicheck.stack_report import stack_to_markdown
+
+        defaulted = _make_result("/app", baseline_env="/", candidate_env="/")
+        defaulted.baseline_env_defaulted = True
+        defaulted.candidate_env_defaulted = True
+        for rendered in (stack_to_markdown(defaulted), stack_to_html(defaulted)):
+            assert DEFAULTED_ROOT_NOTE in rendered
+            # One root, reported once -- not as a baseline/candidate pair
+            # that would read as two environments.
+            assert rendered.count(DEFAULTED_ROOT_NOTE) == 1
+            assert "Baseline" not in rendered
+
+        chosen = _make_result("/app", baseline_env="/img", candidate_env="/img")
+        for rendered in (stack_to_markdown(chosen), stack_to_html(chosen)):
+            assert DEFAULTED_ROOT_NOTE not in rendered
+
+    def test_deps_tree_plan_states_the_defaulted_sysroot(self, tmp_path) -> None:
+        from abicheck.report.stack import DEFAULTED_ROOT_NOTE
+
+        binary = self._elf(tmp_path)
+        runner = CliRunner()
+        defaulted = runner.invoke(main, ["deps", "tree", str(binary), "--dry-run"])
+        assert DEFAULTED_ROOT_NOTE in defaulted.output
+        assert "sysroot: /" in defaulted.output
+
+        chosen = runner.invoke(
+            main, ["deps", "tree", str(binary), "--sysroot", str(tmp_path), "--dry-run"]
+        )
+        assert DEFAULTED_ROOT_NOTE not in chosen.output
+
+    @pytest.mark.parametrize("explicit_side", ["old", "new", "both", "neither"])
+    def test_deps_compare_plan_labels_exactly_the_defaulted_roots(
+        self, tmp_path, explicit_side: str
+    ) -> None:
+        """Including the case the value alone cannot answer: an explicit
+        `--old-root /` is a choice, and must not be labelled a fallback."""
+        from abicheck.report.stack import DEFAULTED_ROOT_NOTE
+
+        other = tmp_path / "img"
+        other.mkdir()
+        args = ["deps", "compare", "usr/bin/x"]
+        if explicit_side in ("old", "both"):
+            args += ["--old-root", "/"]
+        if explicit_side in ("new", "both"):
+            args += ["--new-root", str(other)]
+        if explicit_side == "old":
+            # --new-root must differ from --old-root, so name it too.
+            args += ["--new-root", str(other)]
+        if explicit_side in ("neither", "new"):
+            pass
+        args.append("--dry-run")
+
+        result = CliRunner().invoke(main, args)
+        expected_notes = {"old": 0, "both": 0, "new": 1, "neither": 0}[explicit_side]
+        if explicit_side == "neither":
+            # Both roots default to `/`, which the command rejects as a
+            # no-op comparison before any plan is emitted -- so this case
+            # asserts the usage error, not a label.
+            assert result.exit_code == 64
+            return
+        assert result.output.count(DEFAULTED_ROOT_NOTE) == expected_notes

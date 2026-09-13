@@ -129,6 +129,12 @@ abicheck deps tree /usr/bin/myapp -o json=deps.json
 abicheck deps tree ./app --sysroot /path/to/container/rootfs
 ```
 
+With no `--sysroot`, the analysis runs against the current host filesystem
+(`/`). That is a fallback, not a deployment environment anyone selected, so
+the resolved plan (`--dry-run`) and the report both label the root
+`defaulted` — an explicitly given `--sysroot /` is a choice and is never
+labelled that way.
+
 Exit codes: `0` all dependencies resolved, `1` missing dependencies/symbols.
 
 ### `deps compare`
@@ -140,7 +146,11 @@ abicheck deps compare usr/lib/libfoo.so.1 \
 ```
 
 `--old-root`/`--new-root` (each default `/`) point at the two sysroots to
-compare `BINARY` across. Exit codes: `0` PASS, `1` WARN (loads but ABI risk),
+compare `BINARY` across. A root left at its default is reported as
+`defaulted` — in the resolved plan, and in the JSON
+(`baseline_env_defaulted`/`candidate_env_defaulted`), Markdown and HTML
+reports — so `/` beside a named image root cannot be misread as a second
+environment someone chose. Exit codes: `0` PASS, `1` WARN (loads but ABI risk),
 `4` FAIL (load failure or binary ABI break).
 
 ## Renamed/restructured flags (0.5.0, ADR-040)

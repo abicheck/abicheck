@@ -251,10 +251,47 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
     ),
     (
         "aggregate --expect/--optional/--report-prefix (the expected-target"
-        " set is declared by --manifest or --run-plan, or waived with"
-        " --discovered-only; the report-filename prefix is fixed)",
+        " set is declared by --manifest, or waived with --discovered-only;"
+        " the report-filename prefix is fixed)",
         ("--report-prefix", "--expect", "--optional"),
         frozenset({"AGENTS.md"}),
+    ),
+    (
+        "project plan --allow-empty (one-comparison-product.md slice 7r: an"
+        " empty selection is now answered by what CONFIG declared -- no"
+        " checks[] declared is an explained skipped plan that exits 0, and"
+        " declared-but-unresolved is an error with no bypass)",
+        ("--allow-empty",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "reference/run-plan-schema.md",
+                "reference/reusable-workflows.md",
+                "learn/products-not-libraries.md",
+                # `git commit --allow-empty` -- git's own flag, unrelated to
+                # the retired `project plan` one. Line-scoped, so a real
+                # `project plan --allow-empty` added elsewhere in this
+                # workflow is still flagged.
+                ".github/workflows/schedule-check-project-failure-path.yml#L94",
+            }
+        ),
+    ),
+    (
+        "aggregate --run-plan (one-comparison-product.md slice 7q: a run plan"
+        " is a second schema for --manifest's own input, and --manifest now"
+        " recognizes it from the document's own content -- `aggregate"
+        " --manifest run-plan.json`)",
+        ("--run-plan",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                # Documents the fold itself, pointing a reader at --manifest.
+                "reference/run-plan-schema.md",
+                "use/aggregate-reports.md",
+            }
+        ),
     ),
     (
         "the four per-category --severity-<category> flags (hidden duplicates"

@@ -742,19 +742,19 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
 **Declaring the expected-target set (required — one of):**
 
 - `--manifest abi-targets.json` (recommended) — the single source of truth for
-  which targets the matrix must produce: `{"targets": [{"id": "linux-x86_64",
-  "required": true}, ...]}`. Generate it once in the plan job and feed the same
-  file to both the matrix and this gate so they never drift.
-- `--run-plan run-plan.json` — a project run-plan from `abicheck project
-  plan`, projected to the same expected-target shape internally (recommended
-  for a `project plan`-driven workflow instead of a separate manifest
-  projection step); each check's own `check_id` becomes the expected target
-  id, matching what `check-target` writes as every report's `target_id`.
+  which targets the matrix must produce. Two document shapes are accepted and
+  told apart by their own content, never by filename: an expected-target
+  manifest (`{"targets": [{"id": "linux-x86_64", "required": true}, ...]}`),
+  or an `abicheck project plan` run-plan (`schema: abicheck.run-plan/vN`),
+  projected to the same expected-target shape internally — each check's own
+  `check_id` becomes the expected target id, matching what `check-target`
+  writes as every report's `target_id`. Generate it once in the plan job and
+  feed the same file to both the matrix and this gate so they never drift.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
   **no required-target coverage gate** (a missing target is simply not
   counted, never a coverage failure — the `contract_coverage` axis is
   unaffected and still applies to whatever *is* present). Required to run
-  without `--manifest`/`--run-plan`: with no declared target set the gate cannot
+  without `--manifest`: with no declared target set the gate cannot
   tell a missing required target from an intentionally absent one, so a bare
   `aggregate reports/` is a usage error (exit `64`), not a silent pass.
 

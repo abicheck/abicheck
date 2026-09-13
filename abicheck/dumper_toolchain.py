@@ -36,6 +36,7 @@ from .dumper_ast_config import (
     _header_declared_identifiers,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
+from .extract.env_flags import env_flag
 
 # E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
 # package owns "read a binary/debug/header/build fact") alongside the new
@@ -347,24 +348,14 @@ def _stamp_ast_parser(
 
 
 def _ast_fallback_enabled() -> bool:
-    return os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return env_flag("ABICHECK_ALLOW_AST_FALLBACK")
 
 
 def _allow_unsupported_castxml_enabled() -> bool:
     """Explicit opt-in override for the CastXML version gate
     (``castxml_policy``). Same convention as ``_ast_fallback_enabled`` — a
     hard failure by default, degraded only on deliberate request."""
-    return os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return env_flag("ABICHECK_ALLOW_UNSUPPORTED_CASTXML")
 
 
 def _auto_ast_fallback_eligible(backend: str) -> bool:

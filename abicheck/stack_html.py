@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 # Shared page chrome (document frame, embedded stylesheet, footer).
 from .html_template import render_document, render_footer
+from .report.stack import DEFAULTED_ROOT_NOTE, show_environment_section
 
 _STACK_VERDICT_STYLE = {
     "pass": ("#1b5e20", "#c8e6c9"),
@@ -68,15 +69,36 @@ def stack_to_html(result: StackCheckResult) -> str:
         f"<tr><th>Risk score</th><td><code>{h(str(result.risk_score))}</code></td></tr>",
     ]
 
-    if (
-        result.baseline_env
-        and result.candidate_env
-        and result.baseline_env != result.candidate_env
-    ):
-        summary_rows += [
-            f"<tr><th>Baseline env</th><td><code>{h(result.baseline_env)}</code></td></tr>",
-            f"<tr><th>Candidate env</th><td><code>{h(result.candidate_env)}</code></td></tr>",
-        ]
+    if show_environment_section(result):
+        if result.baseline_env == result.candidate_env:
+            summary_rows += [
+                f"<tr><th>Root</th><td><code>{h(result.baseline_env)}</code>"
+                + (
+                    f" <em>({h(DEFAULTED_ROOT_NOTE)})</em>"
+                    if result.baseline_env_defaulted
+                    else ""
+                )
+                + "</td></tr>",
+            ]
+        else:
+            summary_rows += [
+                f"<tr><th>Baseline env</th><td>"
+                f"<code>{h(result.baseline_env)}</code>"
+                + (
+                    f" <em>({h(DEFAULTED_ROOT_NOTE)})</em>"
+                    if result.baseline_env_defaulted
+                    else ""
+                )
+                + "</td></tr>",
+                f"<tr><th>Candidate env</th><td>"
+                f"<code>{h(result.candidate_env)}</code>"
+                + (
+                    f" <em>({h(DEFAULTED_ROOT_NOTE)})</em>"
+                    if result.candidate_env_defaulted
+                    else ""
+                )
+                + "</td></tr>",
+            ]
 
     summary_html = "\n".join(summary_rows)
 
