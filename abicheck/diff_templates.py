@@ -45,15 +45,22 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from functools import partial
 from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
+from .compare.template_surface import (
+    cpo_identity as _cpo_id,
+    qualified_declaration_name as _qualified_function_name,  # noqa: F401  (re-exported)
+    reconciled_cpo_surfaces,
+    reconciled_public_functions,
+)
 from .diff_helpers import make_change
-from .model.surface_facts import in_public_surface, is_public_export
+from .model.surface_facts import is_public_export
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot, Function
+    from .model import AbiSnapshot, Function, Variable
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -123,16 +130,6 @@ def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
     top-level ``<`` followed by a non-bracket character."""
     return bool(name) and bool(_TEMPLATE_ARGS_RE.search(name))
-
-
-def _qualified_function_name(name: str, mangled: str) -> str:
-    if "::" in name or "<" in name:
-        return name
-    if mangled.startswith("_Z"):
-        from .demangle import demangle_batch
-
-        return demangle_batch([mangled]).get(mangled, name)
-    return name
 
 
 def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
@@ -436,11 +433,6 @@ def _strip_leading_return_type(sig: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _public_functions(snap: AbiSnapshot) -> list[Function]:
-    """Return the subset of public functions in *snap*."""
-    return [f for f in snap.functions if in_public_surface(f)]
-
-
 def _normalize_mach_o_mangled(mangled: str) -> str:
     """Strip a Mach-O direct-clang mangled name's extra platform leading
     underscore (``__Z...`` -> ``_Z...``).
@@ -687,8 +679,7 @@ def detect_internal_template_leaks(
     The detector is intentionally per-stem rather than per-instantiation
     so a reviewer sees one finding even when 30 instantiations shift.
     """
-    old_funcs = _public_functions(old)
-    new_funcs = _public_functions(new)
+    old_funcs, new_funcs = reconciled_public_functions(old, new)
     # One batched demangle call across both sides -- not two -- so a symbol
     # unchanged between old and new resolves to byte-identical canonical
     # text on both sides regardless of demangle_batch's own dict-ordering.
@@ -728,6 +719,26 @@ def detect_internal_template_leaks(
 # ---------------------------------------------------------------------------
 
 
+def _cpo_function_stem(qname: str) -> str:
+    """A function's CPO stem: the reduction `_func_names` compares on, named
+    once so the cross-kind join keys on exactly what the comparison uses.
+
+    Only a function *template* instantiation's demangling leaks a return
+    type ahead of the qualified name, and that is checked on the pre-strip
+    qname since the template args are the tell. A non-template name that
+    contains a space for an unrelated reason -- an ABI thunk marker like
+    "non-virtual thunk to lib::sort()" -- must not go through the stripper:
+    it would keep only the text after the last space and collide with an
+    unrelated same-named CPO variable (Codex review).
+    """
+    stem = _strip_param_signature(_strip_template_args(qname))
+    return (
+        _strip_leading_return_type(stem)
+        if _looks_like_template_instantiation(qname)
+        else stem
+    )
+
+
 def detect_cpo_kind_changed(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -748,33 +759,17 @@ def detect_cpo_kind_changed(
     only in variables (new), or vice versa, triggers the finding.
     """
 
-    def _func_names(snap: AbiSnapshot) -> set[str]:
+    def _func_names(funcs: list[Function]) -> set[str]:
         out: set[str] = set()
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
-                stem = _strip_param_signature(_strip_template_args(qname))
-                # Only a function *template* instantiation's demangling ever
-                # leaks a return type ahead of the qualified name (checked on
-                # the pre-strip qname, since the template args themselves are
-                # the tell). A non-template name that happens to contain a
-                # space for an unrelated reason — e.g. an ABI thunk marker
-                # like "non-virtual thunk to lib::sort()" — must not go
-                # through the stripper: it would take the text after the
-                # last space ("lib::sort") and wrongly collide with an
-                # unrelated same-named CPO variable (Codex review).
-                if _looks_like_template_instantiation(qname):
-                    stem = _strip_leading_return_type(stem)
-                out.add(stem)
+                out.add(_cpo_function_stem(qname))
         return out
 
-    def _var_names(snap: AbiSnapshot) -> set[str]:
+    def _var_names(variables: list[Variable]) -> set[str]:
         out: set[str] = set()
-        for v in snap.variables:
-            if not in_public_surface(v):
-                continue
+        for v in variables:
             # castxml never namespace-qualifies Variable.name itself, but a
             # real external-linkage variable's mangled name demangles to the
             # full qualified path (_qualified_function_name works for a
@@ -785,10 +780,16 @@ def detect_cpo_kind_changed(
                 out.add(qname)
         return out
 
-    old_funcs = _func_names(old)
-    old_vars = _var_names(old)
-    new_funcs = _func_names(new)
-    new_vars = _var_names(new)
+    # Reconciled populations on both halves of this comparison -- see
+    # compare/template_surface.py. Functions *and* variables: this detector
+    # compares one against the other, so an asymmetry in either is enough.
+    old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(
+        old, new, identity=partial(_cpo_id, function_stem=_cpo_function_stem)
+    )
+    old_funcs = _func_names(old_fs)
+    old_vars = _var_names(old_vs)
+    new_funcs = _func_names(new_fs)
+    new_vars = _var_names(new_vs)
 
     changes: list[Change] = []
 
@@ -854,11 +855,9 @@ def detect_overload_set_rerouted(
     overload (silent re-routing).
     """
 
-    def _by_stem(snap: AbiSnapshot) -> dict[str, list[Function]]:
+    def _by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
         out: dict[str, list[Function]] = defaultdict(list)
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             stem = _strip_template_args(qname)
             out[stem].append(f)
@@ -888,8 +887,9 @@ def detect_overload_set_rerouted(
             sig += f" {ref_qual}"
         return sig
 
-    old_by_stem = _by_stem(old)
-    new_by_stem = _by_stem(new)
+    old_by_stem, new_by_stem = (
+        _by_stem(funcs) for funcs in reconciled_public_functions(old, new)
+    )
 
     changes: list[Change] = []
     for stem in sorted(set(old_by_stem) & set(new_by_stem)):
@@ -985,7 +985,9 @@ def detect_mandatory_template_param_added(
     """
     from .model import ScopeOrigin
 
-    def _arities(snap: AbiSnapshot) -> tuple[dict[str, set[int]], dict[str, bool]]:
+    def _arities(
+        snap: AbiSnapshot, funcs: list[Function]
+    ) -> tuple[dict[str, set[int]], dict[str, bool]]:
         out: dict[str, set[int]] = defaultdict(set)
         # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
         # observation is reliably public — a Visibility.PUBLIC function, or a
@@ -995,9 +997,7 @@ def detect_mandatory_template_param_added(
         # this degrades to "public only if a public function contributed"
         # automatically for the common case.
         is_public: dict[str, bool] = defaultdict(bool)
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             if "<" not in qname:
                 continue
@@ -1018,8 +1018,9 @@ def detect_mandatory_template_param_added(
                     is_public[stem] = True
         return out, is_public
 
-    old_ar, old_public = _arities(old)
-    new_ar, new_public = _arities(new)
+    reconciled_old, reconciled_new = reconciled_public_functions(old, new)
+    old_ar, old_public = _arities(old, reconciled_old)
+    new_ar, new_public = _arities(new, reconciled_new)
 
     changes: list[Change] = []
     for stem in sorted(set(old_ar) & set(new_ar)):
@@ -1096,18 +1097,17 @@ def detect_unspecified_return_now_named(
     they gained or lost a deduced return.
     """
 
-    def _index(snap: AbiSnapshot) -> dict[tuple[str, tuple[str, ...]], str]:
+    def _index(funcs: list[Function]) -> dict[tuple[str, tuple[str, ...]], str]:
         out: dict[tuple[str, tuple[str, ...]], str] = {}
-        for f in snap.functions:
-            if not in_public_surface(f):
-                continue
+        for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             key = (qname, tuple(p.type for p in f.params))
             out[key] = f.return_type
         return out
 
-    old_idx = _index(old)
-    new_idx = _index(new)
+    old_idx, new_idx = (
+        _index(funcs) for funcs in reconciled_public_functions(old, new)
+    )
 
     changes: list[Change] = []
     for key in sorted(set(old_idx) & set(new_idx)):
@@ -1323,7 +1323,7 @@ def demote_lambda_closure_unexported_findings(
     ``changes``.
     """
     from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, Verdict
-    from .diff_symbols import _public_functions
+    from .diff_symbols import _reconciled_function_surfaces
     from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
     from .finding_identity_ctor_dtor import (
@@ -1350,8 +1350,7 @@ def demote_lambda_closure_unexported_findings(
     # own bare-name export fallback exists because castxml/DWARF can
     # under-mangle a name the real ELF table still carries correctly, so both
     # spellings must be checked before ever claiming absence.
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for change in changes:
         if change.kind not in _LAMBDA_CLOSURE_DEMOTABLE_KINDS:

@@ -30,13 +30,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+from .compare.template_surface import reconciled_public_function_maps
 from .model import (
     AbiSnapshot,
     Function,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
-from .model.surface_facts import in_public_surface
 
 
 @dataclass(frozen=True)
@@ -98,8 +98,9 @@ def _match_functions_by_mangled(
 ) -> Iterator[TypeSlotChange]:
     """Yield slot changes for public functions sharing a mangled name, plus
     pair leftovers (mangled name changed) by unambiguous demangled name."""
-    old_fns = {f.mangled: f for f in old.functions if in_public_surface(f)}
-    new_fns = {f.mangled: f for f in new.functions if in_public_surface(f)}
+    # The shared evidence-gap-reconciled surface, not a raw
+    # `in_public_surface` pair -- see compare/template_surface.py.
+    old_fns, new_fns = reconciled_public_function_maps(old, new)
     matched_new: set[str] = set()
     for key in set(old_fns) & set(new_fns):
         matched_new.add(key)

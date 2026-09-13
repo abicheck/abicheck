@@ -31,11 +31,11 @@ from __future__ import annotations
 import re
 
 from .checker_types import Change
+from .compare.template_surface import reconciled_public_functions
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
-from .model.surface_facts import in_public_surface
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
 # e.g. 'B5cxx11' -> tag 'cxx11'. Tags may repeat (a name can carry several).
@@ -90,15 +90,19 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect per-symbol Itanium ABI-tag set changes (e.g. gained/lost cxx11)."""
     changes: list[Change] = []
 
+    # The shared evidence-gap-reconciled surface, not a raw
+    # `in_public_surface` pair: an ABI-tag change *is* a mangled-name change
+    # (`_Z3fooB3barv` -> `_Z3foov`), so under an asymmetry the pair never met
+    # and the observed tag change was reported as a bare removal plus
+    # addition instead (Codex review, P2). See compare/template_surface.py --
+    # its alias tier pairs exactly this shape, since the declared name is
+    # what survives a tag change.
+    reconciled_old, reconciled_new = reconciled_public_functions(old, new)
     old_map: dict[str, Function] = {
-        f.mangled: f
-        for f in old.functions
-        if in_public_surface(f) and isinstance(f.mangled, str) and f.mangled
+        f.mangled: f for f in reconciled_old if isinstance(f.mangled, str) and f.mangled
     }
     new_map: dict[str, Function] = {
-        f.mangled: f
-        for f in new.functions
-        if in_public_surface(f) and isinstance(f.mangled, str) and f.mangled
+        f.mangled: f for f in reconciled_new if isinstance(f.mangled, str) and f.mangled
     }
 
     removed = set(old_map) - set(new_map)

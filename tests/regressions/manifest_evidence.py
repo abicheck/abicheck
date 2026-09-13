@@ -38,6 +38,66 @@ __all__ = ["EVIDENCE_BUG_CLASSES"]
 
 EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="evidence.surface_membership_asymmetry",
+        invariant=(
+            "A declaration may not enter or leave the *compared* public "
+            "surface because of an asymmetry in what the two sides' runs "
+            "established, as opposed to a change in the library. Each "
+            "side's surface is built from that side's own facts, and "
+            "in_public_contract (b) is only established when that side's "
+            "producer was given a public-header set -- so two captures of "
+            "an unchanged library, one with that set and one without, "
+            "disagree about every promised-but-unexported declaration (a "
+            "public inline member, one a version script keeps out of "
+            ".dynsym). The removal path must read that disagreement as an "
+            "evidence gap and narrow its conclusion, exactly as the "
+            "matched-pair export path already does ('exported before, "
+            "unknown now' is a gap, not a transition), never as a "
+            "func_visibility_changed whose old and new values are the same "
+            "value, nor as a var_removed for a variable still declared on "
+            "both sides -- and, symmetrically, when it is the OLD side that "
+            "lacks the evidence, not as the func_added/var_added the same "
+            "unchanged declaration reads as on the way *in*. Both halves, "
+            "because a fix and an invariant covering only the exit half "
+            "leaves the identical defect reproducible through the entry "
+            "one. The surviving pair is then compared, never dropped: "
+            "narrowing the conclusion about surface membership must not "
+            "silence a real signature or type change the evidence does "
+            "answer. Narrowing only: a declaration genuinely gone, an "
+            "export the OLD artifact's own table confirms it had, and a "
+            "NEW-side producer that *observed* the declaration out of the "
+            "contract all still report."
+        ),
+        fixed_by=(1280,),
+        seed_tests=("tests/test_surface_evidence_asymmetry_properties.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "`diff_filtering` is excluded on purpose rather than "
+                    "for budget: it is a redundancy filter, and a narrower "
+                    "population there keeps findings rather than hiding "
+                    "them. "
+                    "The seed tests drive `checker.compare()` over "
+                    "generated in-memory snapshots -- no CLI, no typed API, "
+                    "and no stored-BundleFacts operand, which is the route "
+                    "the defect was actually measured on (a six-member "
+                    "bundle: 1,343 func_visibility_changed with "
+                    "old_value == new_value == 'hidden', plus 248 "
+                    "var_removed, against zero on the same evidence "
+                    "through the single-pair and stored-member-directory "
+                    "routes). The asymmetry itself is also only *narrowed* "
+                    "here, not disclosed: a run whose two sides were "
+                    "captured under different contract evidence still has "
+                    "no finding, report field, or assurance row naming "
+                    "that fact, so a user cannot tell a genuinely clean "
+                    "comparison from one whose surface was silently "
+                    "unequal on both sides."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="evidence.export_presence_as_declaration_presence",
         invariant=(
             "Three independent observations about a declaration -- (a) a "

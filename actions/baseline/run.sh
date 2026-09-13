@@ -18,6 +18,7 @@ PROJECT_REF="${INPUT_PROJECT_REF:-}"
 PROFILE="${INPUT_PROFILE:-}"
 BUILD_INFO="${INPUT_BUILD_INFO:-}"
 DEPTH="${INPUT_DEPTH:-}"
+BUILD_CONFIG="${INPUT_BUILD_CONFIG:-}"
 BASELINE_GENERATION="${INPUT_BASELINE_GENERATION:-}"
 GENERATOR_GIT_SHA="${INPUT_GENERATOR_GIT_SHA:-}"
 GENERATOR_ACTION_REF="${INPUT_GENERATOR_ACTION_REF:-}"
@@ -30,6 +31,13 @@ _fail() {
   echo "::error::$1"
   exit 1
 }
+
+# Fail before the first dump rather than after it: an explicit build-config
+# is a deliberate operator signal, and a typo'd path that only surfaces as
+# the Nth library's dump error has already burned the run.
+if [[ -n "$BUILD_CONFIG" && ! -r "$BUILD_CONFIG" ]]; then
+  _fail "build-config '$BUILD_CONFIG' does not exist or is not readable."
+fi
 
 case "$VALIDATION" in
   strict | none) ;;
@@ -170,6 +178,7 @@ while IFS=$'\x1f' read -r name artifact header include stage_binary; do
   fi
   [[ -n "$BUILD_INFO" ]] && CMD+=(--build-info "$BUILD_INFO")
   [[ -n "$DEPTH" ]] && CMD+=(--depth "$DEPTH")
+  [[ -n "$BUILD_CONFIG" ]] && CMD+=(--config "$BUILD_CONFIG")
   [[ -n "$PROJECT_REF" ]] && CMD+=(--version "$PROJECT_REF")
   [[ "$SNAPSHOT_COMPRESSION" != "none" ]] && CMD+=(--compression "$SNAPSHOT_COMPRESSION")
   CMD+=(-o "$OUTPUT_DIR/$name$SNAPSHOT_SUFFIX")

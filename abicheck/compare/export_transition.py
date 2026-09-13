@@ -31,15 +31,20 @@ reads and the ``Visibility.PUBLIC`` entry in
 
 from __future__ import annotations
 
+from collections.abc import Container
+
 from ..checker_types import Change
 from ..diff_helpers import make_change
 from ..model import Function, Variable
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.surface_facts import (
     has_observed_contract_evidence,
+    in_public_contract,
     is_abi_visible,
     is_binary_exported,
+    is_confirmed_false,
     is_export_confirmed_absent,
+    is_legacy_derived,
     surface_fact_summary,
 )
 from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
@@ -53,6 +58,7 @@ __all__ = [
     "check_variable_export_gained",
     "check_variable_export_lost",
     "deleted_declaration_is_public",
+    "surface_exit_is_evidence_gap",
 ]
 
 
@@ -303,3 +309,83 @@ def check_variable_export_lost(
             surface_facts=surface_fact_summary(v_new),
         )
     ]
+
+
+def surface_exit_is_evidence_gap(
+    old: Function | Variable,
+    new_decl: Function | Variable | None,
+    *,
+    old_exported_symbols: Container[str] = frozenset(),
+    key: str = "",
+) -> bool:
+    """Whether *old*'s disappearance from the compared public surface is an
+    asymmetry in this run's *evidence*, not an observed change.
+
+    ``diff_symbols._public_functions``/``_public_variables`` build each side's
+    public surface from that side's own facts, and one of the facts they read
+    -- ``in_public_contract`` (b) -- is only ever *established* by a producer
+    the run actually gave a public-header set to. So two snapshots of the same
+    library, one captured with that set and one without, disagree about which
+    declarations belong to the surface even when nothing about the library
+    changed: every promised-but-unexported declaration (a public inline
+    member, one a version script keeps out of ``.dynsym``) is in OLD's surface
+    and absent from NEW's. The removal path then read that as a transition and
+    reported it -- ``FUNC_VISIBILITY_CHANGED`` with ``old_value ==
+    new_value == "hidden"`` for a function whose visibility did not change, or
+    ``VAR_REMOVED`` for a variable still declared on both sides -- an ABI
+    break manufactured out of missing evidence.
+
+    This is the same rule :func:`_export_was_lost` already applies on the
+    matched-pair path ("exported before, unknown now" is a gap, not a
+    transition); the unmatched path simply never applied it.
+
+    * the entity is still declared on the NEW side (a declaration that is
+      genuinely gone is a real removal, and is reported);
+    * OLD was not exported. Asked of two independent sources, because a
+      lost export *is* an observation (reported by :func:`check_export_lost`
+      and the removal path) and must never be suppressed: the declaration's
+      own (c), and -- since a legacy/pre-split record's (c) is re-derived
+      from the ``visibility`` enum rather than observed -- the OLD
+      artifact's own export table, passed in as *old_exported_symbols*
+      (membership tested for *key*, the same map key the surface was built
+      under). A caller that passes neither still gets the fact-only answer;
+    * NEW is not confirmed exported (if it is, nothing left any surface);
+    A caller that gets ``True`` here must then treat the pair as **matched**
+    and compare it, never drop it (Codex review, P1). The declaration is on
+    both sides, so its signature/type is still comparable, and weakening the
+    evidence for one question ("is this still in the promised surface?") must
+    not silence a different one the evidence does answer ("did its return
+    type change?"). Emitting nothing would leave a real change on such a
+    declaration reported by nothing at all -- as would the pre-fix behaviour,
+    which reported a manufactured visibility finding and no signature diff.
+
+    Four conditions, all required:
+
+    * OLD's place in the surface rested on real producer contract evidence
+      while NEW's own (b) was never established by a producer. A NEW side
+      that *observed* the declaration out of the contract (a genuine move to
+      a private header) is a real finding and is not suppressed -- only a
+      value re-derived from the legacy ``visibility`` enum counts as
+      unestablished, exactly as :func:`has_observed_contract_evidence` treats
+      it on the positive side.
+    """
+    if new_decl is None:
+        return False
+    if is_binary_exported(new_decl):
+        return False
+    # OLD must not have been exported, asked of both available sources: the
+    # declaration's own (c), and the OLD artifact's observed export table.
+    # The second is what makes a legacy/pre-split record safe here -- its (c)
+    # is re-derived from the `visibility` enum rather than observed, so a
+    # real export loss would otherwise be suppressed on evidence that never
+    # looked at the binary. That is the one failure worse than the
+    # manufactured finding this guard removes.
+    if key in old_exported_symbols or is_binary_exported(old):
+        return False
+    if not has_observed_contract_evidence(old):
+        return False
+    new_contract = in_public_contract(new_decl)
+    observed_out_of_contract = is_confirmed_false(
+        new_contract
+    ) and not is_legacy_derived(new_contract)
+    return not has_observed_contract_evidence(new_decl) and not observed_out_of_contract

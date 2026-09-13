@@ -49,6 +49,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
+from .compare.template_surface import (
+    qualified_declaration_name as _qualified_function_name,
+    reconciled_abi_visible_functions,
+)
 from .diff_helpers import make_change
 
 # Re-exports — the generic detectors were extracted to dedicated modules
@@ -65,7 +69,6 @@ from .diff_serialization import (  # noqa: F401
 )
 from .diff_templates import (  # noqa: F401
     _looks_like_template_instantiation,
-    _qualified_function_name,
     _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
@@ -77,7 +80,6 @@ from .model.export_index import (
     build_raw_export_index,
     pe_export_ids_with_ordinal_placeholder as _pe_export_ids,
 )
-from .model.surface_facts import is_abi_visible
 from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
@@ -219,8 +221,7 @@ def detect_sycl_overload_set_removal(
     # included for consistency with the sibling ISA-dropped detector, though
     # a param-type check can't fire in symbols-only mode anyway (no header
     # info means Function.params is always empty there).
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
     new_mangled = {f.mangled for f in new_funcs}
     # Bare-name -> {distinct qualified_names}, merged from both sides, so a
     # bare param spelling (``queue&``) can be resolved to its real namespace
@@ -511,8 +512,7 @@ def detect_cpu_dispatch_isa_dropped(
     # this detector is calibrated as an L0 (symbols-only) signal, where every
     # real exported function is ELF_ONLY, never PUBLIC; excluding it would
     # empty out old_funcs/new_funcs and silently disable case83 in that mode.
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
     new_mangled = {f.mangled for f in new_funcs}
     removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
     all_surviving_stems = _build_all_surviving_stems(new_funcs)
@@ -669,8 +669,12 @@ def detect_tag_type_renamed(
     if not removed_empties or not added_empties:
         return []
     added_by_ns = _group_by_namespace(added_empties)
-    old_mangled = {f.mangled for f in old.functions if is_abi_visible(f)}
-    new_mangled = {f.mangled for f in new.functions if is_abi_visible(f)}
+    # Reconciled, not raw: this reads a *remangling* out of the difference
+    # between two symbol sets, so a declaration dropped for want of contract
+    # evidence looks exactly like a renamed tag (Codex review, P2).
+    r_old, r_new = reconciled_abi_visible_functions(old, new)
+    old_mangled = {f.mangled for f in r_old}
+    new_mangled = {f.mangled for f in r_new}
     only_removed = old_mangled - new_mangled
     only_added = new_mangled - old_mangled
     findings: list[Change] = []
@@ -819,8 +823,7 @@ def detect_default_template_arg_changed(
 
     old.index()
     new.index()
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
     new_mangled = {f.mangled for f in new_funcs}
     removed = [f for f in old_funcs if f.mangled not in new_mangled]
     # Key by *qualified* callable stem (full namespace path with all

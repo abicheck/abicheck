@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import abicheck.process_resources as process_resources
 from abicheck import cli_compare_release_pairwise as release_pairwise
+from abicheck.workflows import release_jobs
 
 
 class TestReleaseJobMemBudget:
@@ -86,7 +87,13 @@ class TestCompareReleaseLibrariesMemoryClamp:
 
     def test_auto_jobs_are_reduced_to_fit_memory(self, monkeypatch, capsys) -> None:
         monkeypatch.setattr("os.cpu_count", lambda: 64)
-        monkeypatch.setattr(release_pairwise, "_release_jobs_mem_cap", lambda: 2)
+        # The memory probe itself, not the wrapper: worker sizing moved to
+        # `workflows.release_jobs.resolve_release_worker_count`, so patching
+        # a CLI-side wrapper the code no longer calls would leave this test
+        # asserting against the real host's memory.
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 2
+        )
         captured_jobs: list[int] = []
 
         def _fake_sequential(matched_keys, common_args):
@@ -113,7 +120,9 @@ class TestCompareReleaseLibrariesMemoryClamp:
         assert "reduced 64 -> 2" in capsys.readouterr().err
 
     def test_explicit_jobs_are_never_clamped(self, monkeypatch, capsys) -> None:
-        monkeypatch.setattr(release_pairwise, "_release_jobs_mem_cap", lambda: 1)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
+        )
         captured_jobs: list[int] = []
 
         def _fake_parallel(matched_keys, common_args, old_map, max_workers):

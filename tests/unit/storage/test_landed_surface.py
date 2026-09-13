@@ -69,6 +69,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.entity_ids",
     "abicheck.storage.fact_availability",
     "abicheck.storage.ref_ids",
+    "abicheck.storage.env_limits",
 )
 
 
