@@ -31,7 +31,7 @@ from .checker_types import (  # noqa: F401
     DiffResult,
     LibraryMetadata,
 )
-from .comparability import check_contracts_comparable, dimension_assurance
+from .comparability import check_contracts_comparable, comparability_outcome
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -1056,10 +1056,10 @@ def compare(
         if old is not None
         else None
     )
-    assurance: Literal["none"] | None = "none" if mismatch is not None else None
-    # E-S2 (cli-cleanup-phase-two.md Block 5): `assurance`'s per-dimension
-    # breakdown -- see comparability.dimension_assurance's own doc.
-    comparability_assurance = dimension_assurance(mismatch)
+    # `assurance` ("none" only for a FATAL mismatch forced through
+    # --diagnostic-comparison) and E-S2's per-dimension breakdown; both are
+    # facts about a ComparabilityMismatch, so comparability.py owns them.
+    assurance, comparability_assurance = comparability_outcome(mismatch)
     # Propagate *why* a diagnostic-mode comparison is untrustworthy into the
     # existing human-readable coverage_warnings disclosure (CodeRabbit
     # review, PR #624): the non-diagnostic (raising) path already surfaces

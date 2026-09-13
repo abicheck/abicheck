@@ -387,3 +387,93 @@ def _include_sequence_is_additive_owned_growth(
         # weakened this raises rather than silently skipping trailing slots.
         for old_slot, new_slot in zip(old_slots, new_slots, strict=True)
     )
+
+
+def _header_sequence_is_interior_insertion(
+    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
+) -> bool:
+    """Whether *new_value* is *old_value* with genuinely-new headers INSERTED,
+    preserving every existing header's relative order -- the strictly weaker
+    shape :func:`_header_sequence_is_additive_reorder_free` deliberately
+    rejects.
+
+    Same guards as that function (both sides decodable, neither holding a
+    duplicate, neither collapsed to the ``<single-header>`` sentinel, every
+    extra entry itself a scope-confirmed newly-added header), with one
+    difference: the old sequence need only be an order-preserving
+    *subsequence* of the new one, not its exact prefix. ``[data.h, log.h]``
+    -> ``[data.h, json.h, log.h]`` is this shape; ``[a.h, b.h]`` ->
+    ``[b.h, a.h]`` is not, and neither is a growth whose extra entries the
+    declared *surface* never confirms as new.
+
+    **This is not a comparability waiver and must never be used as one.**
+    A trailing append proves every existing header's preprocessing context
+    is byte-for-byte what it was; an interior insertion proves only that no
+    existing header MOVED relative to another -- ``log.h`` is now parsed
+    with ``json.h``'s macros/pragmas already in effect, which can genuinely
+    change its AST. What this shape does establish is that the divergence is
+    a header ADDITION rather than a reordering or an unrelated compile-
+    context drift, which is what lets
+    ``comparability_profile._check_profile_fingerprint_comparable`` record it
+    as a bounded, dimension-scoped assurance reduction on a comparison that
+    still runs, instead of refusing to produce any verdict at all. See that
+    function's own ``fatal=False`` branch for the reasoning.
+
+    Returns False for a pure trailing append too (``new_list[:len(old)] ==
+    old_list``): that is the full-assurance waiver's own shape, already
+    handled upstream, and reporting it here as well would degrade a pair
+    that needs no degrading.
+    """
+    if old_value is None or new_value is None:
+        return False
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return False
+    if len(old_list) != len(set(old_list)) or len(new_list) != len(set(new_list)):
+        return False
+    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) <= len(old_list):
+        return False
+    if new_list[: len(old_list)] == old_list:
+        return False  # a pure trailing append: the full-assurance waiver's shape
+    if not set(old_list) <= set(new_list):
+        return False
+    # Order-preserving subsequence check: every old entry must still appear,
+    # in the same relative order, among the new entries.
+    it = iter(new_list)
+    if not all(entry in it for entry in old_list):
+        return False
+    if scope_new_headers is None:
+        return False
+    return (set(new_list) - set(old_list)) <= scope_new_headers
+
+
+def inserted_header_entries(old_value: str | None, new_value: str | None) -> list[str]:
+    """The ``header_sequence`` entries present in *new_value* and not in
+    *old_value*, in their new-side order.
+
+    What a caller should NAME when reporting an insertion (CodeRabbit
+    review, PR #1274). ``_scope_newly_added_headers`` answers a different
+    question -- every header newly added to the declared *surface* -- and
+    :func:`_header_sequence_is_interior_insertion` only requires the
+    sequence's own additions to be a SUBSET of that set. A header declared
+    public but never fed to the L2 frontend is in one and not the other, so
+    reporting the scope set would name a header that was not inserted
+    anywhere.
+
+    Empty when either side is absent or undecodable: a caller that has
+    already established the insertion shape should fall back to its own
+    wording rather than assert a list it cannot derive.
+    """
+    if old_value is None or new_value is None:
+        return []
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return []
+    old_entries = set(old_list)
+    return [entry for entry in new_list if entry not in old_entries]
