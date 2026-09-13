@@ -27,7 +27,7 @@ of in a detector module already at its debt baseline.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,7 +39,11 @@ from ..elf_symbol_filter import (
 )
 from ..model import Function
 from ..model.surface_facts import in_public_surface, is_abi_visible
-from .surface_reconcile import reconcile_declaration_lists
+from .surface_reconcile import (
+    RECONCILED_ABI_VISIBLE,
+    RECONCILED_FUNCTION_MAPS,
+    reconcile_declaration_lists,
+)
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Variable
@@ -126,6 +130,11 @@ def reconciled_public_function_maps(
     declaration. Later wins on a duplicate key, matching the dict
     comprehensions this replaces.
     """
+    cached: tuple[dict[str, Function], dict[str, Function]] | None = _cached(
+        old, new, RECONCILED_FUNCTION_MAPS
+    )
+    if cached is not None:
+        return cached
     reconciled_old, reconciled_new = reconcile_declaration_lists(
         public_functions(old),
         public_functions(new),
@@ -144,9 +153,14 @@ def reconciled_public_function_maps(
             getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
     )
-    return (
-        {key(f): f for f in reconciled_old},
-        {key(f): f for f in reconciled_new},
+    return _store(
+        old,
+        new,
+        RECONCILED_FUNCTION_MAPS,
+        (
+            {key(f): f for f in reconciled_old},
+            {key(f): f for f in reconciled_new},
+        ),
     )
 
 
@@ -253,14 +267,27 @@ def reconciled_cpo_surfaces(
 def qualified_declaration_name(name: str, mangled: str) -> str:
     """A declaration's namespace-qualified name.
 
-    Moved here from ``diff_templates`` because it is an *identity* rule and
-    this module is what keys surfaces on it. castxml does not
-    namespace-qualify a variable's name, so the qualified spelling has to be
-    recovered from the mangling; two ``foo``s in different namespaces are
-    otherwise one key, and a first-seen merge then resolves the collision by
-    list order rather than by identity (Codex review, P2).
+        Moved here from ``diff_templates`` because it is an *identity* rule and
+        this module is what keys surfaces on it. castxml does not
+        namespace-qualify a variable's name, so the qualified spelling has to be
+        recovered from the mangling; two ``foo``s in different namespaces are
+        otherwise one key, and a first-seen merge then resolves the collision by
+        list order rather than by identity (Codex review, P2).
+
+    ``<`` still reads as "this is a template spelling, take it as given" --
+        dropping that entirely changes what several template detectors see, and
+        two of their tests say so -- but not when the name *starts* with
+        ``operator``: ``operator<``, ``operator<=`` and ``operator<<`` are
+        unqualified names that merely contain the character, so ``A::operator<``
+        and ``B::operator<`` both reduced to one alias and reconciliation paired
+        two unrelated declarations (Codex review, P1). A qualified operator
+        carries ``::`` and is caught by the first test.
+
+        Cached because the alias index calls this once per declaration in both
+        full maps, and demangling is the expensive step in building it; the
+        result is a pure function of the two spellings.
     """
-    if "::" in name or "<" in name:
+    if "::" in name or ("<" in name and not name.startswith("operator")):
         return name
     if mangled.startswith("_Z"):
         from ..demangle import demangle_batch
@@ -296,6 +323,29 @@ def abi_visible_functions(snap: AbiSnapshot) -> list[Function]:
     return [f for f in snap.functions if is_abi_visible(f)]
 
 
+_T = TypeVar("_T")
+
+
+def _cached(old: AbiSnapshot, new: AbiSnapshot, slot: str) -> Any:
+    """The result already computed for exactly this pair, if any.
+
+    The same per-pair memo `surface_reconcile` applies to the two
+    mangled-keyed surfaces, for the surfaces this module owns: several
+    detectors ask for each of them, and building one resolves an identity
+    for every declaration in both full maps. Without this the PR-vs-base
+    performance gate measured `add_remove` 33-37% slower -- the second time
+    in this change that recomputing a shared join per detector showed up
+    there rather than in any test.
+    """
+    entry = old.__dict__.get(slot)
+    return entry[1] if entry is not None and entry[0] is new else None
+
+
+def _store(old: AbiSnapshot, new: AbiSnapshot, slot: str, result: _T) -> _T:
+    old.__dict__[slot] = (new, result)
+    return result
+
+
 def reconciled_abi_visible_functions(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> tuple[list[Function], list[Function]]:
@@ -310,18 +360,28 @@ def reconciled_abi_visible_functions(
     and a false `SYCL_OVERLOAD_SET_REMOVED` on identical declarations (Codex
     review, P1).
     """
-    return reconcile_declaration_lists(
-        abi_visible_functions(old),
-        abi_visible_functions(new),
-        old_all=old.functions,
-        new_all=new.functions,
-        key=lambda f: f.mangled or f.name,
-        alias_key=alias_identity,
-        old_exported=exported_symbol_names(
-            getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
-        ),
-        new_exported=exported_symbol_names(
-            getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
+    cached: tuple[list[Function], list[Function]] | None = _cached(
+        old, new, RECONCILED_ABI_VISIBLE
+    )
+    if cached is not None:
+        return cached
+    return _store(
+        old,
+        new,
+        RECONCILED_ABI_VISIBLE,
+        reconcile_declaration_lists(
+            abi_visible_functions(old),
+            abi_visible_functions(new),
+            old_all=old.functions,
+            new_all=new.functions,
+            key=lambda f: f.mangled or f.name,
+            alias_key=alias_identity,
+            old_exported=exported_symbol_names(
+                getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
+            ),
+            new_exported=exported_symbol_names(
+                getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
+            ),
         ),
     )
 

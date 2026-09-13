@@ -60,7 +60,11 @@ if TYPE_CHECKING:
     from ..model import Function, Variable
 
 __all__ = [
+    "RECONCILED_ABI_VISIBLE",
+    "RECONCILED_CPO",
     "RECONCILED_FUNCTIONS",
+    "RECONCILED_FUNCTION_MAPS",
+    "RECONCILIATION_SLOTS",
     "RECONCILED_VARIABLES",
     "cached_reconciliation",
     "invalidate_reconciliation",
@@ -197,6 +201,23 @@ def _admit(
 #: Cache keys for the two per-pair reconciliations below.
 RECONCILED_FUNCTIONS = "_abicheck_reconciled_functions"
 RECONCILED_VARIABLES = "_abicheck_reconciled_variables"
+#: The surfaces `compare.template_surface` memoises on the same snapshot.
+#: Declared here, with the two above, because :func:`invalidate_reconciliation`
+#: is what must clear *every* slot -- a memo whose name lives only next to its
+#: producer is one the release path silently keeps alive, which is exactly
+#: what the lifetime test caught when these three were added.
+RECONCILED_ABI_VISIBLE = "_abicheck_reconciled_abi_visible"
+RECONCILED_FUNCTION_MAPS = "_abicheck_reconciled_function_maps"
+RECONCILED_CPO = "_abicheck_reconciled_cpo"
+
+#: Every per-pair memo slot, so invalidation cannot fall behind the set.
+RECONCILIATION_SLOTS = (
+    RECONCILED_FUNCTIONS,
+    RECONCILED_VARIABLES,
+    RECONCILED_ABI_VISIBLE,
+    RECONCILED_FUNCTION_MAPS,
+    RECONCILED_CPO,
+)
 
 _ReconciledPair = tuple[dict[str, _Decl], dict[str, _Decl]]
 
@@ -365,7 +386,7 @@ def invalidate_reconciliation(old: AbiSnapshot | None) -> None:
     """
     if old is None:
         return
-    for slot in (RECONCILED_FUNCTIONS, RECONCILED_VARIABLES):
+    for slot in RECONCILIATION_SLOTS:
         old.__dict__.pop(slot, None)
 
 
