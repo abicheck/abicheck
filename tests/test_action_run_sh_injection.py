@@ -92,6 +92,14 @@ _ESCAPE_PAYLOADS = (
 
 _ALL_PAYLOADS = _REAL_BREAK_PAYLOADS + _PERCENT_PAYLOADS + _ESCAPE_PAYLOADS
 
+#: The exact workflow commands the payloads above try to forge. A line that
+#: *starts* with one of these was produced by the payload and nothing else.
+_FORGED_COMMANDS = (
+    "::error::PWNED",
+    "::set-output name=pwned::yes",
+    "::add-mask::secret",
+)
+
 #: One reachable invocation per interpolating site, so the sweep covers all
 #: six rather than the one that prompted the review. Each maps the attacked
 #: variable to the surrounding inputs needed to reach its guard.
@@ -124,16 +132,6 @@ _SITES = {
     },
 }
 
-_FORGEABLE_PREFIXES = (
-    "::error::",
-    "::warning::",
-    "::notice::",
-    "::set-output",
-    "::add-mask",
-    "::add-path",
-    "::save-state",
-)
-
 
 def _run(env_extra: dict[str, str], bash_options: list[str] | None = None):
     require_bash()
@@ -156,24 +154,31 @@ def _run(env_extra: dict[str, str], bash_options: list[str] | None = None):
     )
 
 
-def _forged_lines(output: str) -> list[str]:
-    """Lines that are themselves workflow commands, minus the script's own.
+def _annotation_lines(output: str) -> list[str]:
+    """Every line the runner would parse as a workflow command."""
+    return [line for line in output.splitlines() if line.startswith("::")]
 
-    A payload's text appearing *inside* the script's single annotation is
-    fine -- that is the value being quoted back to the user. What must never
-    happen is a line that the runner will parse as a command of its own.
+
+def _forged_lines(output: str) -> list[str]:
+    """Lines the *payload* produced, as opposed to ones the script owns.
+
+    Attribution is by content, not position. An earlier version exempted
+    only an `::error::` on the first line, which is wrong in any environment
+    where `run.sh` legitimately annotates first -- e.g. a runner whose
+    `python3` cannot import abicheck emits a `::warning::` before reaching
+    the guard, and that oracle then reported the script's own warning *and*
+    its correctly-sanitized error as forgeries, failing 47 cases while
+    nothing was actually wrong (Codex review). An oracle that fires on a
+    safe run is not a weaker test, it is a broken one.
+
+    A line starting with one of the payloads' own commands can only have
+    come from a payload; :func:`_annotation_lines` then backs that up with a
+    count comparison against a benign run, which catches a forged command
+    this list does not enumerate.
     """
-    lines = output.splitlines()
-    forged: list[str] = []
-    for index, line in enumerate(lines):
-        if not line.startswith(_FORGEABLE_PREFIXES):
-            continue
-        # The script's own annotation is the one it emitted deliberately;
-        # every other command line came from the payload.
-        if index == 0 and line.startswith("::error::"):
-            continue
-        forged.append(line)
-    return forged
+    return [
+        line for line in _annotation_lines(output) if line.startswith(_FORGED_COMMANDS)
+    ]
 
 
 @pytest.mark.parametrize("payload", _ALL_PAYLOADS)
@@ -186,12 +191,26 @@ def test_no_input_value_can_forge_a_workflow_command(var: str, payload: str) -> 
     a defense that held only at the reported site would be the narrow patch
     this repository's own guidance rejects.
     """
-    result = _run({**_SITES[var], var: payload})
-    combined = result.stdout + result.stderr
+    attack = _run({**_SITES[var], var: payload})
+    combined = attack.stdout + attack.stderr
     forged = _forged_lines(combined)
     assert not forged, (
         f"{var} payload {payload!r} forged workflow command line(s) {forged}:\n"
         f"{combined}"
+    )
+
+    # The general half: whatever the payload spells, it must not add a
+    # workflow-command *line*. Compared against the same invocation with a
+    # benign value, so annotations the script legitimately owns in this
+    # environment (a `::warning::` about the resolved interpreter, say) are
+    # counted on both sides and cancel out.
+    benign = _run({**_SITES[var], var: "benign-value"})
+    attack_lines = _annotation_lines(combined)
+    benign_lines = _annotation_lines(benign.stdout + benign.stderr)
+    assert len(attack_lines) <= len(benign_lines), (
+        f"{var} payload {payload!r} added {len(attack_lines) - len(benign_lines)} "
+        f"workflow-command line(s) that a benign value does not produce.\n"
+        f"attack: {attack_lines}\nbenign: {benign_lines}"
     )
 
 
