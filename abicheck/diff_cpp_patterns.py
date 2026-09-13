@@ -80,7 +80,6 @@ from .model.export_index import (
     build_raw_export_index,
     pe_export_ids_with_ordinal_placeholder as _pe_export_ids,
 )
-from .model.surface_facts import is_abi_visible
 from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
@@ -670,8 +669,12 @@ def detect_tag_type_renamed(
     if not removed_empties or not added_empties:
         return []
     added_by_ns = _group_by_namespace(added_empties)
-    old_mangled = {f.mangled for f in old.functions if is_abi_visible(f)}
-    new_mangled = {f.mangled for f in new.functions if is_abi_visible(f)}
+    # Reconciled, not raw: this reads a *remangling* out of the difference
+    # between two symbol sets, so a declaration dropped for want of contract
+    # evidence looks exactly like a renamed tag (Codex review, P2).
+    r_old, r_new = reconciled_abi_visible_functions(old, new)
+    old_mangled = {f.mangled for f in r_old}
+    new_mangled = {f.mangled for f in r_new}
     only_removed = old_mangled - new_mangled
     only_added = new_mangled - old_mangled
     findings: list[Change] = []
