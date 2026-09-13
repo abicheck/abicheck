@@ -347,8 +347,14 @@ class TestBashResolutionNeverFallsBackToWhatItRejected:
     def test_the_two_public_functions_agree_on_this_machine(self) -> None:
         """The invariant the defect broke, on whatever platform runs this:
         `have_bash()` is true exactly when what `bash_executable()` returns is
-        a real bash. Their disagreement was the whole finding."""
-        require_bash()
+        a real bash. Their disagreement was the whole finding.
+
+        Deliberately unguarded, unlike every migrated call site: this test
+        never shells out, so there is no stub to run -- and a bash-less or
+        stub-only machine is precisely the state where the two functions
+        disagreed, so skipping there would retire the assertion exactly where
+        it earns its keep (CodeRabbit review). An over-eager guard inserted
+        here by the migration sweep, not a call site."""
         assert have_bash() is (not is_wsl_launcher_stub(bash_executable()))
 
 

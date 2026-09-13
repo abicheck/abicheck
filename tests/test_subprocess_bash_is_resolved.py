@@ -53,7 +53,9 @@ call site, and only the *first* element of an argv list is the program.
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 import _workflow_exec
 import pytest
@@ -63,6 +65,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 
 #: The retired private clone. Banned as a name, not merely as a definition.
 _CLONE_NAME = "_bash_executable"
+
+T = TypeVar("T")
 
 
 #: Callables whose first positional argument is an argv sequence.
@@ -83,6 +87,31 @@ def _test_modules() -> list[Path]:
     module that defines them.
     """
     return sorted(TESTS_DIR.rglob("*.py"))
+
+
+def _scan(rule: Callable[[str], list[T]], path: Path) -> list[T]:
+    """Apply one scan to one file, naming the file if it will not parse.
+
+    `ast.parse` reports a `SyntaxError` against `"<unknown>"`, so a malformed
+    module added under `tests/` would fail all three rules at once without
+    saying which file it was (CodeRabbit review). Re-raised rather than
+    skipped: an unparseable module is a real problem, and one this scan is
+    well placed to notice.
+    """
+    try:
+        return rule(path.read_text(encoding="utf-8"))
+    except SyntaxError as exc:
+        raise AssertionError(
+            f"{_display(path)} does not parse, so it cannot be scanned: {exc}"
+        ) from exc
+
+
+def _display(path: Path) -> str:
+    """`path` relative to `tests/` when it lives there, else in full."""
+    try:
+        return path.relative_to(TESTS_DIR).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def _argv_program(node: ast.Call) -> ast.expr | None:
@@ -241,11 +270,20 @@ def _unguarded_resolutions(source: str) -> list[str]:
         hoist a guard it already has.
         """
         for stmt in getattr(fn, "body", []):
-            if (
-                isinstance(stmt, ast.Expr)
-                and isinstance(stmt.value, ast.Call)
-                and getattr(stmt.value.func, "id", None) == "require_bash"
-            ):
+            if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)):
+                continue
+            # Both call forms, matching how `_names_called` reads a
+            # resolution: reading only `func.id` here while accepting
+            # `func.attr` there made the two halves disagree, so a function
+            # guarding with `_workflow_exec.require_bash()` was reported
+            # unguarded (CodeRabbit review).
+            func = stmt.value.func
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", None)
+            )
+            if name == "require_bash":
                 return stmt.lineno
         return None
 
@@ -313,7 +351,7 @@ class TestNoModuleSpellsBashItself:
     def test_no_test_module_passes_a_bare_bash_program(self) -> None:
         offenders = {}
         for path in _test_modules():
-            hits = _bare_bash_call_sites(path.read_text(encoding="utf-8"))
+            hits = _scan(_bare_bash_call_sites, path)
             if hits:
                 offenders[path.relative_to(TESTS_DIR).as_posix()] = hits
         assert offenders == {}, (
@@ -326,7 +364,7 @@ class TestNoModuleSpellsBashItself:
     def test_no_test_module_clones_the_resolver(self) -> None:
         offenders = {}
         for path in _test_modules():
-            hits = _private_clone_lines(path.read_text(encoding="utf-8"))
+            hits = _scan(_private_clone_lines, path)
             if hits:
                 offenders[path.relative_to(TESTS_DIR).as_posix()] = hits
         assert offenders == {}, (
@@ -360,6 +398,13 @@ class TestNoModuleSpellsBashItself:
         modules in this very migration (Codex review, P1).
         """
         assert _private_clone_lines(reference) == [1]
+
+    def test_an_unparseable_module_names_itself(self, tmp_path: Path) -> None:
+        """A `SyntaxError` from `ast.parse` blames `"<unknown>"` otherwise."""
+        broken = tmp_path / "broken_module.py"
+        broken.write_text("def f(\n", encoding="utf-8")
+        with pytest.raises(AssertionError, match="does not parse"):
+            _scan(_bare_bash_call_sites, broken)
 
     def test_prose_about_the_retired_clones_is_not_a_mention(self) -> None:
         """Otherwise this module, whose subject is that name, bans itself."""
@@ -453,7 +498,7 @@ class TestEveryResolvedCallSiteGuardsFirst:
     def test_every_function_that_resolves_also_guards(self) -> None:
         offenders = {}
         for path in _test_modules():
-            hits = _unguarded_resolutions(path.read_text(encoding="utf-8"))
+            hits = _scan(_unguarded_resolutions, path)
             if hits:
                 offenders[path.relative_to(TESTS_DIR).as_posix()] = hits
         assert offenders == {}, (
@@ -471,9 +516,14 @@ class TestEveryResolvedCallSiteGuardsFirst:
         indirect = (
             "def f():\n    cmd = [bash_executable(), p]\n    subprocess.run(cmd)\n"
         )
+        qualified = (
+            "def f():\n    _workflow_exec.require_bash()\n"
+            "    subprocess.run([_workflow_exec.bash_executable(), p])\n"
+        )
         assert _unguarded_resolutions(unguarded) == ["f"]
         assert _unguarded_resolutions(indirect) == ["f"]
         assert _unguarded_resolutions(guarded) == []
+        assert _unguarded_resolutions(qualified) == []
 
     @pytest.mark.parametrize(
         "source",
