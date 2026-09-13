@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 
 from .bundle_detector_heuristics import (
     DEFAULT_SYSTEM_SYMBOLS,
+    _import_existed_in_old,
     _import_is_external,
     _looks_system_symbol,
     _strip_namespace_prefix,
@@ -239,13 +240,33 @@ def _detect_intra_dep_removed(
                 # No version-compatible sibling ever provided this symbol to
                 # this consumer, so *this release removed nothing* -- see the
                 # "`ever_provided_in_bundle` is a precondition" paragraph in
-                # the docstring above. Whatever satisfied the import in OLD
-                # (the host process's global namespace; an LD_PRELOAD; a
-                # dependency outside the bundle) is equally available in NEW,
-                # and nothing observed here changed.
-                if outward_edges_all_system:
-                    continue
-                if symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
+                # the docstring above.
+                #
+                # Whether the import may then be *dropped* turns on a second
+                # question the removal precondition does not answer: did OLD
+                # carry this same import at all? If it did, whatever
+                # satisfied it in OLD (the host process's global namespace;
+                # an LD_PRELOAD; a dependency outside the bundle) is equally
+                # available in NEW and nothing observed here changed -- the
+                # evidence *for* externality is that the same unresolved
+                # import shipped before. A *newly introduced* import has no
+                # such history: nothing anywhere shows it was ever satisfied,
+                # so a vendor-symbol typo in a new library would otherwise
+                # leave a clean bundle result behind while failing at load
+                # time. Those stay listed as the RISK kind rather than being
+                # suppressed by outward-edge or symbol-name evidence that
+                # only ever spoke to whether *this release* changed anything.
+                existed_in_old = _import_existed_in_old(consumer, symbol, old)
+                if existed_in_old:
+                    if outward_edges_all_system:
+                        continue
+                    if symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
+                        continue
+                elif symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
+                    # A newly introduced import of a *recognised system*
+                    # symbol is the ordinary case of a new library calling
+                    # libc, not a typo -- the symbol name itself is the
+                    # evidence, and it does not depend on release history.
                     continue
                 # Still unaccounted for -- but only ever a RISK, and under
                 # the kind that does not claim a diff-confirmed removal.
@@ -254,11 +275,21 @@ def _detect_intra_dep_removed(
                         kind=ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY,
                         symbol=symbol,
                         description=(
-                            f"{consumer.library} imports {symbol}, and no library "
-                            f"in the bundle exports it -- in the new bundle or the "
-                            f"old one. Not a regression of this release: the "
-                            f"import was already satisfied from outside the "
-                            f"bundle (or not at all) before it."
+                            (
+                                f"{consumer.library} imports {symbol}, and no "
+                                f"library in the bundle exports it -- in the new "
+                                f"bundle or the old one. Not a regression of this "
+                                f"release: the import was already satisfied from "
+                                f"outside the bundle (or not at all) before it."
+                            )
+                            if existed_in_old
+                            else (
+                                f"{consumer.library} imports {symbol}, which is "
+                                f"new in this release and which no library in the "
+                                f"bundle exports. Nothing observed shows the import "
+                                f"was ever satisfied, so it must be provided from "
+                                f"outside the bundle at load time."
+                            )
                         ),
                         consumer_library=consumer.library,
                         affected_libraries=[consumer.library],

@@ -622,6 +622,38 @@ def _looks_system_version(version: str) -> bool:
     return any(version.startswith(prefix) for prefix in _SYSTEM_VERSION_PREFIXES)
 
 
+def _import_existed_in_old(
+    consumer: ConsumerEntry,
+    symbol: str,
+    old: BundleSnapshot,
+) -> bool:
+    """Did OLD carry this same (library, symbol, version) import?
+
+    The removal precondition ``ever_provided_in_bundle`` answers whether a
+    *bundle sibling* used to satisfy an import. This answers the separate,
+    weaker question its callers also need: whether the import *existed at
+    all* before this release.
+
+    The two are independent, and conflating them is how a newly introduced
+    unresolved import gets dropped. "The import shipped unresolved before"
+    is real evidence that something outside the bundle provides it -- the
+    release before this one loaded. A *new* import has no such history, so
+    outward ``DT_NEEDED`` edges (vacuously satisfied for a zero-``DT_NEEDED``
+    consumer) prove nothing about it, and suppressing it on that basis would
+    let a vendor-symbol typo in a new library produce a clean bundle result.
+
+    Matched on the library *and* the exact required symbol version: an import
+    that moved from ``sym@V1`` to ``sym@V2`` is a new requirement, and OLD
+    having loaded the former says nothing about the latter. Matching on the
+    symbol name alone would be the more permissive (finding-dropping)
+    direction, which is the wrong way to fail here.
+    """
+    return any(
+        entry.library == consumer.library and entry.version == consumer.version
+        for entry in old.resolution.consumers_of(symbol)
+    )
+
+
 def _import_is_external(
     consumer: ConsumerEntry,
     consumer_meta: ElfMetadata,

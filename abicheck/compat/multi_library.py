@@ -41,23 +41,106 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..checker_types import DiffResult
+from ..policy.analysis_assurance_merge import merge_analysis_assurance
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 def _soname_stem(path: Path) -> str:
-    """``libfoo.so.1.2.3`` -> ``libfoo``; ``libfoo.dylib`` -> ``libfoo``.
+    """``libfoo.so.1.2.3`` -> ``libfoo``; ``libfoo.1.dylib`` -> ``libfoo``.
 
     Everything from the first ``.so``/``.dylib``/``.dll`` component onward is
     dropped, so every version suffix of one library collapses to one key.
+
+    That alone handles only the ELF convention, where the version *follows*
+    the extension. macOS and Windows put it *before* (``libfoo.1.dylib``,
+    ``libfoo-1.dll``), which truncation at the marker leaves as ``libfoo.1``
+    -- so ``libfoo.1.dylib`` and ``libfoo.2.dylib`` would key apart and a
+    SONAME bump would read as one library removed and another added, which is
+    the exact failure the stem pass exists to prevent. Trailing all-numeric
+    ``.``/``-``/``_``-separated components are therefore stripped as well.
+
+    The result is never empty: see the fallback at the end of the body.
+
+    Only *fully numeric* trailing components are stripped, so a name whose
+    real identity ends in a word (``libfoo_debug``) keeps it. A library whose
+    own name genuinely ends in a number (``libjpeg.8``) collapses with its
+    other versions, which is the intended reading -- that *is* the version
+    convention -- and pairing it is still gated on both sides resolving to a
+    single candidate.
     """
     name = path.name
     for marker in (".so", ".dylib", ".dll"):
         idx = name.find(marker)
         if idx != -1:
-            return name[:idx]
-    return path.stem
+            name = name[:idx]
+            break
+    else:
+        name = path.stem
+    stripped = _strip_trailing_version(name)
+    # A file named exactly ``.so`` (or ``.dylib``) truncates to nothing, and
+    # an empty key is the one value that collapses *unrelated* libraries into
+    # one group -- ``.so`` and ``.dylib`` would key together and pair. Fall
+    # back to the full filename, which keys such a file only with itself.
+    return stripped or path.name
+
+
+def _strip_trailing_version(name: str) -> str:
+    """*name* with every trailing all-numeric ``.``/``-``/``_`` component removed.
+
+    Never strips the whole name: ``"1.2"`` stays ``"1.2"`` rather than
+    collapsing to ``""``, which would key every such library together.
+    """
+    separators = (".", "-", "_")
+    while True:
+        cut = max((name.rfind(sep) for sep in separators), default=-1)
+        if cut <= 0:
+            return name
+        head, tail = name[:cut], name[cut + 1 :]
+        if not tail.isdigit():
+            return name
+        name = head
+
+
+def _pair_on_key(
+    old_libs: list[Path],
+    new_libs: list[Path],
+    key: Callable[[Path], str],
+    pairs: list[tuple[Path, Path]],
+) -> list[Path]:
+    """Pair OLD with NEW on *key*, appending to *pairs*; return unpaired OLD.
+
+    A key is paired only when **both** sides resolve it to exactly one
+    candidate. Ambiguity on either side leaves every candidate under that key
+    unpaired rather than picking one.
+
+    This symmetry is the whole point. A recursive ``<libs>`` expansion
+    routinely finds the same basename under several directories -- an
+    architecture split (``lib/intel64/libfoo.so`` beside
+    ``lib/ia32/libfoo.so``) is the ordinary case, not a corner one. Keying a
+    dictionary by basename silently keeps whichever entry was inserted last,
+    so the run would compare one architecture's OLD against another's NEW and
+    report the rest as merely unpaired -- a wrong verdict presented as a
+    complete one. The unpaired entries are returned, and the caller reports
+    them as uncompared coverage (ADR-065: unmatched is not removed), which is
+    the honest answer when the descriptor does not say which is which.
+    """
+    old_by_key: dict[str, list[Path]] = {}
+    for p in old_libs:
+        old_by_key.setdefault(key(p), []).append(p)
+    new_by_key: dict[str, list[Path]] = {}
+    for p in new_libs:
+        new_by_key.setdefault(key(p), []).append(p)
+
+    unpaired: list[Path] = []
+    for k, olds in old_by_key.items():
+        news = new_by_key.get(k, [])
+        if len(olds) == 1 and len(news) == 1:
+            pairs.append((olds[0], news[0]))
+        else:
+            unpaired.extend(olds)
+    return unpaired
 
 
 def pair_libraries(
@@ -70,37 +153,26 @@ def pair_libraries(
     SONAME bump (``libfoo.so.1`` -> ``libfoo.so.2``) pair rather than read as
     one library removed and a different one added.
 
-    A stem shared by several libraries on one side is left unpaired on that
-    stem: guessing which ``libfoo.so.1``/``libfoo.so.2`` in OLD corresponds
-    to which in NEW would silently attribute one library's findings to
-    another. Unpaired entries are returned, not dropped, and the caller
-    reports them.
+    Both passes pair a key only when **both** sides resolve it to exactly one
+    candidate (:func:`_pair_on_key`). A key shared by several libraries on
+    either side is left unpaired: guessing which ``libfoo.so.1``/
+    ``libfoo.so.2`` in OLD corresponds to which in NEW -- or which
+    ``lib/intel64/libfoo.so``/``lib/ia32/libfoo.so`` a bare ``libfoo.so``
+    means -- would silently attribute one library's findings to another.
+    Unpaired entries are returned, not dropped, and the caller reports them.
     """
-    remaining_new = list(new_libs)
     pairs: list[tuple[Path, Path]] = []
-    unmatched_old: list[Path] = []
 
-    by_name = {p.name: p for p in remaining_new}
-    for old in old_libs:
-        match = by_name.pop(old.name, None)
-        if match is not None:
-            pairs.append((old, match))
-        else:
-            unmatched_old.append(old)
-    remaining_new = list(by_name.values())
+    unmatched_old = _pair_on_key(
+        list(old_libs), list(new_libs), lambda p: p.name, pairs
+    )
+    matched_new_ids = {id(n) for _o, n in pairs}
+    remaining_new = [p for p in new_libs if id(p) not in matched_new_ids]
 
     # Second pass over what the exact-name pass could not place.
-    stems: dict[str, list[Path]] = {}
-    for p in remaining_new:
-        stems.setdefault(_soname_stem(p), []).append(p)
-    still_unmatched_old: list[Path] = []
-    for old in unmatched_old:
-        candidates = stems.get(_soname_stem(old), [])
-        if len(candidates) == 1:
-            pairs.append((old, candidates[0]))
-            stems[_soname_stem(old)] = []
-        else:
-            still_unmatched_old.append(old)
+    still_unmatched_old = _pair_on_key(
+        unmatched_old, remaining_new, _soname_stem, pairs
+    )
 
     matched_new = {id(n) for _o, n in pairs}
     new_only = [p for p in new_libs if id(p) not in matched_new]
@@ -150,6 +222,7 @@ def _union_sorted(values: Sequence[object]) -> list[object]:
 #: * ``"worst"``   -- ordinal fields where the release takes the worst value.
 #: * ``"all"``     -- booleans true only if true for every library.
 #: * ``"any"``     -- booleans true if true for any library.
+#: * ``"assurance_block"`` -- the ``analysis_assurance`` roll-up.
 #: * ``"first"``   -- genuinely run-wide values, identical across libraries
 #:   because they come from the same descriptor/CLI invocation.
 #: * ``"drop"``    -- per-library objects with no defined release-level
@@ -202,6 +275,13 @@ _FIELD_POLICY: dict[str, str] = {
     "effective_depth": "worst",
     "contract_coverage": "worst",
     "assurance": "worst",
+    # The one per-library *object* with a defined release-level aggregate:
+    # see `analysis_assurance_merge.merge_analysis_assurance` for what rolls
+    # up (every judgement axis, to its weakest member) and what deliberately
+    # does not (per-library accounting). Dropping it is not neutral -- the
+    # reporters omit the block entirely and `--require-complete-analysis`
+    # stops gating on a member whose evidence was partial or failed.
+    "analysis_assurance": "assurance_block",
     "scope_resolved": "all",
     "evidence_contract_error": "any",
     "budget_overflow": "any",
@@ -218,7 +298,6 @@ _FIELD_POLICY: dict[str, str] = {
     "comparability_assurance": "drop",
     "contract_context": "drop",
     "contract_conflicts": "drop",
-    "analysis_assurance": "drop",
     "use_case_impact": "drop",
     "evaluation_config": "drop",
     "disposition_ledger": "drop",
@@ -360,6 +439,8 @@ def merge_results(results: Sequence[DiffResult], *, label: str) -> DiffResult:
             merged[f.name] = all(values)
         elif policy == "any":
             merged[f.name] = any(values)
+        elif policy == "assurance_block":
+            merged[f.name] = merge_analysis_assurance(values)  # type: ignore[arg-type]
         elif policy == "drop":
             merged[f.name] = _field_default(f)
         else:  # pragma: no cover - guarded by test_merge_policy_values_are_known

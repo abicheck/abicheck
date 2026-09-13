@@ -20,15 +20,18 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.analysis_assurance import AnalysisAssurance
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.compat.descriptor import CompatDescriptor
 from abicheck.compat.multi_library import (
     _FIELD_POLICY,
     _WORST_SCALES,
+    _soname_stem,
     merge_results,
     pair_libraries,
 )
+from abicheck.policy.analysis_assurance_merge import merge_analysis_assurance
 
 
 def _result(
@@ -142,7 +145,17 @@ class TestMergePolicyIsExhaustive:
         assert not stale, f"policy entries for nonexistent fields: {stale}"
 
     def test_policy_values_are_known(self) -> None:
-        known = {"first", "concat", "union", "sum", "worst", "all", "any", "drop"}
+        known = {
+            "first",
+            "concat",
+            "union",
+            "sum",
+            "worst",
+            "all",
+            "any",
+            "drop",
+            "assurance_block",
+        }
         unknown = {v for v in _FIELD_POLICY.values()} - known
         assert not unknown, f"unknown merge policies: {sorted(unknown)}"
 
@@ -371,7 +384,7 @@ class TestLibsDirectoryDiscoveryIsPlatformAware:
         return f
 
     def test_macho_and_pe_libraries_are_discovered(self, tmp_path: Path) -> None:
-        from abicheck.compat._helpers import expand_descriptor_libs
+        from abicheck.compat.descriptor_expansion import expand_descriptor_libs
 
         d = tmp_path / "libs"
         self._write(d, "libfoo.dylib", "macho")
@@ -383,7 +396,7 @@ class TestLibsDirectoryDiscoveryIsPlatformAware:
     def test_non_binaries_are_not_discovered(self, tmp_path: Path) -> None:
         """Vacuity guard: a rule that accepted everything would pass the
         test above and quietly feed a README to the binary parser."""
-        from abicheck.compat._helpers import expand_descriptor_libs
+        from abicheck.compat.descriptor_expansion import expand_descriptor_libs
 
         d = tmp_path / "libs"
         self._write(d, "libfoo.dylib", "macho")
@@ -394,7 +407,7 @@ class TestLibsDirectoryDiscoveryIsPlatformAware:
     def test_an_empty_directory_still_raises(self, tmp_path: Path) -> None:
         """Expanding to nothing would let a descriptor pointing at the wrong
         tree produce a confident verdict off an empty surface."""
-        from abicheck.compat._helpers import expand_descriptor_libs
+        from abicheck.compat.descriptor_expansion import expand_descriptor_libs
         from abicheck.errors import ValidationError
 
         d = tmp_path / "libs"
@@ -404,13 +417,13 @@ class TestLibsDirectoryDiscoveryIsPlatformAware:
             expand_descriptor_libs([d])
 
     def test_a_file_operand_passes_through_untouched(self, tmp_path: Path) -> None:
-        from abicheck.compat._helpers import expand_descriptor_libs
+        from abicheck.compat.descriptor_expansion import expand_descriptor_libs
 
         f = self._write(tmp_path, "libfoo.dylib", "macho")
         assert expand_descriptor_libs([f]) == [f]
 
     def test_nested_directories_are_searched(self, tmp_path: Path) -> None:
-        from abicheck.compat._helpers import expand_descriptor_libs
+        from abicheck.compat.descriptor_expansion import expand_descriptor_libs
 
         self._write(tmp_path / "libs" / "sub", "libnested.dylib", "macho")
         assert [p.name for p in expand_descriptor_libs([tmp_path / "libs"])] == [
@@ -714,3 +727,257 @@ class TestWorstScalesAreOrderedWorstLast:
         )
         assert merged.effective_depth == "binary"
         assert merged.evidence_tier == EvidenceTier.ELF_ONLY
+
+
+class TestPairingIsAmbiguitySafeOnBothSides:
+    """No pair is emitted unless *both* sides resolve the key uniquely.
+
+    A recursive ``<libs>`` expansion routinely finds one basename under
+    several directories -- an architecture split is the ordinary case for a
+    release like Intel MKL, not a corner one. Keying a dictionary by basename
+    silently kept the last insertion, so the run compared one architecture's
+    OLD against another's NEW and reported the rest as merely unpaired: a
+    wrong verdict presented as a complete one (Codex review).
+
+    Stated as the primitive's contract rather than as one repro, per
+    ``AGENTS.md``'s primitive-level property guidance -- the original defect
+    is invisible in every non-duplicated case, which is most of them.
+    """
+
+    def test_no_emitted_pair_ever_spans_an_ambiguous_key(self) -> None:
+        """The invariant, swept over every duplication shape on either side.
+
+        The oracle is independent of the implementation: count how many
+        candidates each side has for the paired key and require both to be 1.
+        """
+        shapes = {
+            "dup-new": (["a/libfoo.so"], ["x/libfoo.so", "y/libfoo.so"]),
+            "dup-old": (["x/libfoo.so", "y/libfoo.so"], ["a/libfoo.so"]),
+            "dup-both": (
+                ["x/libfoo.so", "y/libfoo.so"],
+                ["a/libfoo.so", "b/libfoo.so"],
+            ),
+            "dup-stem-new": (["a/libfoo.so.1"], ["x/libfoo.so.2", "y/libfoo.so.3"]),
+            "dup-stem-old": (["x/libfoo.so.1", "y/libfoo.so.2"], ["a/libfoo.so.3"]),
+            "clean": (["x/libfoo.so", "y/libbar.so"], ["a/libfoo.so", "b/libbar.so"]),
+        }
+        offenders: list[str] = []
+        for label, (olds, news) in shapes.items():
+            old_paths = [Path(p) for p in olds]
+            new_paths = [Path(p) for p in news]
+            pairs, old_only, new_only = pair_libraries(old_paths, new_paths)
+            for o, n in pairs:
+                n_old = sum(1 for p in old_paths if p.name == o.name)
+                n_new = sum(1 for p in new_paths if p.name == n.name)
+                if o.name == n.name and not (n_old == 1 and n_new == 1):
+                    offenders.append(f"{label}: paired {o} with {n}")
+            # Nothing is ever lost: every input appears exactly once in the
+            # union of pairs and unpaired lists.
+            seen_old = [o for o, _n in pairs] + list(old_only)
+            seen_new = [n for _o, n in pairs] + list(new_only)
+            if sorted(seen_old) != sorted(old_paths):
+                offenders.append(f"{label}: OLD not accounted for")
+            if sorted(seen_new) != sorted(new_paths):
+                offenders.append(f"{label}: NEW not accounted for")
+        assert not offenders, offenders
+
+    def test_duplicate_basenames_are_left_unpaired_not_guessed(self) -> None:
+        """The concrete architecture-split case, and its negative control.
+
+        Without the second half, an implementation that paired *nothing* would
+        satisfy the first half completely.
+        """
+        old = [Path("lib/intel64/libfoo.so"), Path("lib/ia32/libfoo.so")]
+        new = [Path("lib/intel64/libfoo.so"), Path("lib/ia32/libfoo.so")]
+        pairs, old_only, new_only = pair_libraries(old, new)
+        assert pairs == []
+        assert len(old_only) == 2 and len(new_only) == 2
+
+        # Negative control: an unambiguous release still pairs.
+        pairs, old_only, new_only = pair_libraries(
+            [Path("lib/libfoo.so")], [Path("lib/libfoo.so")]
+        )
+        assert [(o.name, n.name) for o, n in pairs] == [("libfoo.so", "libfoo.so")]
+        assert old_only == [] and new_only == []
+
+
+class TestSonameStemNormalisesEveryPlatformsVersionConvention:
+    """ELF puts the version after the extension, macOS/Windows before it.
+
+    Truncating at the extension marker handles only the first, so
+    ``libfoo.1.dylib``/``libfoo.2.dylib`` keyed apart and a SONAME bump read
+    as one library removed and another added (Codex review).
+    """
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            # ELF: version follows the extension.
+            ("libfoo.so", "libfoo"),
+            ("libfoo.so.1", "libfoo"),
+            ("libfoo.so.1.2.3", "libfoo"),
+            # macOS: version precedes it.
+            ("libfoo.dylib", "libfoo"),
+            ("libfoo.1.dylib", "libfoo"),
+            ("libfoo.1.2.3.dylib", "libfoo"),
+            # Windows.
+            ("foo.dll", "foo"),
+            ("foo-1.dll", "foo"),
+            ("foo_2.dll", "foo"),
+            # A name whose identity ends in a word keeps it.
+            ("libfoo_debug.so.1", "libfoo_debug"),
+            ("libfoo-static.1.dylib", "libfoo-static"),
+            # A name that is nothing but a version is not stripped away
+            # (``Path.stem`` drops the last component, the version strip then
+            # leaves the rest standing) -- collapsing it to ``""`` would key
+            # every such file together.
+            ("1.2", "1"),
+        ],
+    )
+    def test_stem(self, name: str, expected: str) -> None:
+        assert _soname_stem(Path("some/dir") / name) == expected
+
+    def test_a_stem_is_never_empty(self) -> None:
+        """The guarantee that matters: an empty key would collapse unrelated
+        libraries into one group. Swept over the degenerate shapes rather
+        than asserted for one."""
+        for name in ("1", "1.2", "1.2.3", ".so", ".dylib", "lib.so.1", "-1", "_1"):
+            assert _soname_stem(Path(name)) != "", name
+
+    def test_every_version_of_one_library_shares_one_stem(self) -> None:
+        """The property the pairing pass actually depends on, stated over
+        generated version shapes rather than the two spellings that were
+        reported."""
+        for template in ("lib{}.so{}", "lib{}{}.dylib", "{}{}.dll"):
+            for base in ("foo", "bar_baz", "qux-quux"):
+                stems = {
+                    _soname_stem(Path(template.format(base, suffix)))
+                    for suffix in ("", ".1", ".2", ".10", ".1.2", ".2.0.1")
+                }
+                assert len(stems) == 1, (template, base, stems)
+
+    def test_a_soname_bump_pairs_on_every_platform(self) -> None:
+        """End to end through ``pair_libraries``, with the must-not-pair
+        control beside it: two genuinely different libraries must not be
+        collapsed by the same normalisation."""
+        for old_name, new_name in [
+            ("libfoo.so.1", "libfoo.so.2"),
+            ("libfoo.1.dylib", "libfoo.2.dylib"),
+            ("foo-1.dll", "foo-2.dll"),
+        ]:
+            pairs, old_only, new_only = pair_libraries(
+                [Path(old_name)], [Path(new_name)]
+            )
+            assert [(o.name, n.name) for o, n in pairs] == [(old_name, new_name)]
+            assert old_only == [] and new_only == []
+
+        pairs, old_only, new_only = pair_libraries(
+            [Path("libfoo.1.dylib")], [Path("libbar.1.dylib")]
+        )
+        assert pairs == []
+        assert len(old_only) == 1 and len(new_only) == 1
+
+
+class TestAssuranceIsRolledUpNotDropped:
+    """Merging must publish a release-wide assurance block.
+
+    Dropping it is not neutral: every reporter omits the block, so a member
+    whose evidence was ``partial``/``failed``/``not_comparable`` contributes
+    no release-wide signal and ``--require-complete-analysis`` stops gating on
+    it -- incomplete evidence silently upgraded to no stated concern, which is
+    the inversion of ``vision.md``'s "weaker evidence narrows conclusions"
+    (Codex review).
+    """
+
+    def test_the_merged_result_carries_one(self) -> None:
+        merged = merge_results(
+            [
+                _result(
+                    "liba", analysis_assurance=AnalysisAssurance(status="complete")
+                ),
+                _result("libb", analysis_assurance=AnalysisAssurance(status="partial")),
+            ],
+            label="release",
+        )
+        assert merged.analysis_assurance is not None
+        assert merged.analysis_assurance.status == "partial"
+
+    @pytest.mark.parametrize(
+        ("statuses", "expected"),
+        [
+            (["complete", "complete"], "complete"),
+            (["complete", "partial"], "partial"),
+            (["partial", "failed"], "failed"),
+            (["complete", "not_comparable"], "not_comparable"),
+            (["not_comparable", "failed"], "failed"),
+            # "no claim was made" is not a good claim.
+            (["complete", "not_requested"], "not_requested"),
+            (["not_requested", "partial"], "partial"),
+        ],
+    )
+    def test_status_takes_the_weakest_member(
+        self, statuses: list[str], expected: str
+    ) -> None:
+        merged = merge_analysis_assurance(
+            [AnalysisAssurance(status=s) for s in statuses]  # type: ignore[arg-type]
+        )
+        assert merged is not None
+        assert merged.status == expected
+
+    def test_the_rule_is_order_insensitive(self) -> None:
+        """A roll-up that depended on which library was read first would give
+        one release two different assurances depending on directory order."""
+        blocks = [
+            AnalysisAssurance(status="complete", schema_staleness_status="clean"),
+            AnalysisAssurance(status="partial", schema_staleness_status="stale"),
+            AnalysisAssurance(status="failed", l0_context_status="asymmetric"),
+        ]
+        first = merge_analysis_assurance(blocks)
+        second = merge_analysis_assurance(list(reversed(blocks)))
+        assert first is not None and second is not None
+        assert dataclasses.replace(first, notes=()) == dataclasses.replace(
+            second, notes=()
+        )
+
+    def test_optimistic_defaults_are_never_carried_over_a_worse_member(self) -> None:
+        """``schema_staleness_status`` defaults to ``"clean"``, so a naive
+        field-wise merge would report a stale release as clean."""
+        merged = merge_analysis_assurance(
+            [
+                AnalysisAssurance(status="complete"),
+                AnalysisAssurance(status="complete", schema_staleness_status="stale"),
+            ]
+        )
+        assert merged is not None
+        assert merged.schema_staleness_status == "stale"
+
+    def test_the_shallowest_effective_depth_wins(self) -> None:
+        merged = merge_analysis_assurance(
+            [
+                AnalysisAssurance(status="complete", effective_depth="source"),
+                AnalysisAssurance(status="complete", effective_depth="binary"),
+            ]
+        )
+        assert merged is not None
+        assert merged.effective_depth == "binary"
+
+    def test_a_lone_member_passes_through_unchanged(self) -> None:
+        """A one-library descriptor and the scalar path must agree
+        (``AGENTS.md``'s "one model, any cardinality")."""
+        only = AnalysisAssurance(status="partial", effective_depth="headers")
+        assert merge_analysis_assurance([only]) is only
+
+    def test_absent_blocks_are_skipped_not_read_as_complete(self) -> None:
+        assert merge_analysis_assurance([None, None]) is None
+        merged = merge_analysis_assurance([None, AnalysisAssurance(status="failed")])
+        assert merged is not None and merged.status == "failed"
+
+    def test_the_rollup_says_accounting_is_not_aggregated(self) -> None:
+        """The accounting blocks are per-library and are left at their own
+        "nothing requested / nothing evaluated" defaults. A reader must not
+        have to infer that from an empty block."""
+        merged = merge_analysis_assurance(
+            [AnalysisAssurance(status="complete"), AnalysisAssurance(status="partial")]
+        )
+        assert merged is not None
+        assert any("not aggregated" in n for n in merged.notes)

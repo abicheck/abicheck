@@ -4565,6 +4565,144 @@ class TestExtraNeededAllSystemPrimitive:
         "is the end-to-end reproduction of the reported ELF case."
     ),
 )
+class TestNewlyIntroducedUnresolvedImportsStayVisible:
+    """A *new* unresolved import is never dropped by removal-era evidence.
+
+    ``ever_provided_in_bundle`` answers whether a bundle sibling used to
+    satisfy an import; it does not answer whether the import *existed*
+    before. Conflating the two is how a newly introduced unresolved import
+    disappeared: for a zero-``DT_NEEDED`` consumer ``extra_needed_all_system``
+    is vacuously true, so the suppression branch fired for an import nothing
+    anywhere shows was ever satisfied -- a vendor-symbol typo in a new library
+    then produced a clean bundle result while failing at load time (Codex
+    review).
+
+    The grid below is the point rather than any one cell: the defect is
+    invisible in the cells where some *other* evidence happens to suppress or
+    report, so a single example proves nothing about the rule. The oracle is
+    the fixture's own construction -- did OLD carry this import? -- never
+    anything the detector computes.
+    """
+
+    #: ``DT_NEEDED`` shapes. Zero edges is MKL's shape and the one that made
+    #: ``extra_needed_all_system`` vacuously true; the others must behave the
+    #: same way, since the import's *history* is what decides, not its edges.
+    _NEEDED = {
+        "zero": [],
+        "system-only": ["libc.so.6"],
+        "non-system": ["libvendor_other.so.3"],
+    }
+    #: A recognised system symbol is suppressed on its own name in either
+    #: case -- a new library calling libc is the ordinary case, and that
+    #: evidence does not depend on release history. A vendor-shaped name has
+    #: no such standing.
+    #: ``memcpy`` is on ``DEFAULT_SYSTEM_SYMBOLS``; ``fflush`` deliberately
+    #: is *not* (checked by ``test_the_grid_is_not_vacuous``), which is why
+    #: MKL's 293 ``fflush``/``sincos``/``MPI_Finalize`` imports reached the
+    #: removal path at all -- the name allow-list never covered them.
+    _SYMBOLS = {"allow-listed": "memcpy", "vendor-shaped": "acme_new_op"}
+
+    def _bundles(
+        self, needed: list[str], symbol: str, *, in_old: bool
+    ) -> tuple[BundleSnapshot, BundleSnapshot]:
+        """NEW imports *symbol* unresolved; OLD carries the same import only
+        when *in_old*. Neither side has any in-bundle provider for it, so
+        ``ever_provided_in_bundle`` is false in both cases -- the *only*
+        difference between the two is the import's history."""
+        new = _snapshot(
+            {
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1", needed=list(needed), imports=[symbol]
+                ),
+            }
+        )
+        old = _snapshot(
+            {
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=list(needed),
+                    imports=[symbol] if in_old else [],
+                ),
+            }
+        )
+        return old, new
+
+    def _findings(self, old: BundleSnapshot, new: BundleSnapshot, symbol: str) -> list:
+        return [
+            f
+            for f in compare_bundle(old, new, per_library_results=[]).bundle_findings
+            if f.symbol == symbol
+        ]
+
+    def test_a_new_unresolved_vendor_import_is_reported_across_the_grid(self) -> None:
+        """Swept, and batched so one run names every disagreeing cell."""
+        disagreed: list[str] = []
+        for shape, needed in self._NEEDED.items():
+            old, new = self._bundles(needed, "acme_new_op", in_old=False)
+            kinds = {f.kind for f in self._findings(old, new, "acme_new_op")}
+            if ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY not in kinds:
+                disagreed.append(f"{shape}: reported {sorted(k.value for k in kinds)}")
+        assert not disagreed, disagreed
+
+    def test_it_is_never_reported_as_a_removal(self) -> None:
+        """The kind matters as much as the presence: nothing was removed, so
+        the diff-confirmed ``BREAKING`` kind must not be the one that fires.
+        This is what distinguishes the fix from simply restoring the original
+        over-report."""
+        offenders: list[str] = []
+        for shape, needed in self._NEEDED.items():
+            for label, symbol in self._SYMBOLS.items():
+                for in_old in (True, False):
+                    old, new = self._bundles(needed, symbol, in_old=in_old)
+                    for f in self._findings(old, new, symbol):
+                        if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED:
+                            offenders.append(f"{shape}/{label}/in_old={in_old}")
+        assert not offenders, offenders
+
+    def test_an_import_old_already_carried_is_still_suppressed(self) -> None:
+        """The negative control. Without it, "report everything" would pass
+        the test above in full -- and reporting every pre-existing external
+        import is the 293-finding false positive this whole area exists to
+        stop. Suppression here rests on real evidence: the same unresolved
+        import shipped before, and that release loaded."""
+        still_reported: list[str] = []
+        for shape, needed in self._NEEDED.items():
+            if needed and not all(n.startswith("libc") for n in needed):
+                # A non-system outward edge is not evidence of externality,
+                # so this shape is legitimately still reported -- the
+                # allow-list branch never claimed otherwise.
+                continue
+            old, new = self._bundles(needed, "acme_new_op", in_old=True)
+            if self._findings(old, new, "acme_new_op"):
+                still_reported.append(shape)
+        assert not still_reported, still_reported
+
+    def test_a_new_import_of_a_system_symbol_is_suppressed_on_its_name(self) -> None:
+        """The symbol-name allow-list is history-independent, so a new library
+        calling ``memcpy`` is not a finding even though the import is new."""
+        for shape, needed in self._NEEDED.items():
+            old, new = self._bundles(needed, "memcpy", in_old=False)
+            assert not self._findings(old, new, "memcpy"), shape
+
+    def test_the_grid_is_not_vacuous(self) -> None:
+        """Guards the fixtures themselves: if ``acme_new_op`` were quietly
+        allow-listed, or the consumer's import never reached the resolution
+        graph, every assertion above would pass while testing nothing."""
+        old, new = self._bundles([], "acme_new_op", in_old=False)
+        assert "acme_new_op" in new.resolution.consumers
+        assert not new.resolution.providers_for("acme_new_op")
+        assert self._findings(old, new, "acme_new_op")
+        assert "acme_new_op" not in DEFAULT_SYSTEM_SYMBOLS
+        assert "memcpy" in DEFAULT_SYSTEM_SYMBOLS
+        # The symbol the real MKL report was flooded with is *not* on the
+        # allow-list: had it been, none of those 293 findings would have
+        # reached the removal path and this area's defect would have stayed
+        # hidden. Pinned so a future allow-list edit cannot quietly turn the
+        # grid above into a test of the name check instead of the history
+        # check.
+        assert "fflush" not in DEFAULT_SYSTEM_SYMBOLS
+
+
 class TestZeroDtNeededBundleEndToEnd:
     """The reported defect against real compiled binaries, through the public
     ``compare`` workflow rather than the detector alone.

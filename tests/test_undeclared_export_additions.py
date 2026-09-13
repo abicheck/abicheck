@@ -18,7 +18,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
-from abicheck.diff_undeclared_exports import _diff_undeclared_exports
+from abicheck.compare.undeclared_exports import _diff_undeclared_exports
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function
 
@@ -115,11 +115,28 @@ class TestItDoesNotStealTheOrdinaryDiffsWork:
         new = _snap(["keep", "gained"], elf_only=True)
         assert _diff_undeclared_exports(old, new) == []
 
-    def test_one_sided_elf_only_mode_also_suppresses(self) -> None:
-        old = _snap(["keep"], elf_only=True)
-        new = _snap(["keep", "gained"])
-        assert _diff_undeclared_exports(old, new) == []
-        assert _diff_undeclared_exports(new, old) == []
+    def test_only_the_new_sides_mode_decides(self) -> None:
+        """The guard keys off NEW alone, and that asymmetry is load-bearing.
+
+        An *addition* is a symbol in NEW and not in OLD, so the ordinary diff
+        can only name it when it reached NEW's ``function_map`` -- which
+        ``dumper_elf_fallback`` does only for a headerless NEW. In the mixed
+        shape (ELF-only OLD, header-aware NEW) an undeclared new export is in
+        neither map, so suppressing here as well would lose the addition
+        entirely with nothing else reporting it. Suppressing on OLD's mode was
+        the original defect (Codex review); this states the rule that replaced
+        it, in both directions, so neither half can regress alone.
+        """
+        elf_only_old = _snap(["keep"], elf_only=True)
+        header_aware_new = _snap(["keep", "gained"])
+        gained = _diff_undeclared_exports(elf_only_old, header_aware_new)
+        assert [c.symbol for c in gained] == ["gained"]
+
+        # The mirror: a headerless NEW is the ordinary diff's business, and
+        # OLD being header-aware does not change that.
+        header_aware_old = _snap(["keep"])
+        elf_only_new = _snap(["keep", "gained"], elf_only=True)
+        assert _diff_undeclared_exports(header_aware_old, elf_only_new) == []
 
 
 class TestMissingEvidenceNeverFabricates:
@@ -216,3 +233,23 @@ class TestIdentityAndDedupRegistration:
 
         registry.ensure_loaded()
         assert "undeclared_exports" in set(registry.detector_names)
+
+
+class TestTheDetectorIsActuallyRegistered:
+    """Registration is the one failure mode a move makes silent.
+
+    Detector discovery globs ``abicheck.diff_*`` at the top level; this
+    detector's owner is ``abicheck/compare/``, so it reaches the registry only
+    through ``detector_registry._EXTRA_DETECTOR_MODULES``. Drop that entry and
+    nothing raises anywhere -- the module never imports, the decorator never
+    runs, and the detector stops producing findings while every direct unit
+    test in this file keeps passing, because they all call the function
+    themselves. This is the only test here that goes through the registry.
+    """
+
+    def test_it_reaches_the_real_registry(self) -> None:
+        from abicheck.detector_registry import registry
+
+        registry.ensure_loaded()
+        names = set(registry.detector_names)
+        assert "undeclared_exports" in names, sorted(names)

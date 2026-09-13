@@ -53,7 +53,7 @@ def test_compat_check_cmd_descriptor_parse_error_exits_6(tmp_path, monkeypatch):
     new_desc.write_text("<xml/>", encoding="utf-8")
 
     monkeypatch.setattr(
-        "abicheck.compat.cli.parse_descriptor",
+        "abicheck.compat.run_inputs.parse_descriptor",
         lambda *_, **__: (_ for _ in ()).throw(ValueError("bad")),
     )
 
@@ -96,7 +96,7 @@ def test_compat_check_cmd_breaking_exits_1_and_writes_report(tmp_path, monkeypat
     new_d = CompatDescriptor(version="2.0", headers=[], libs=[new_so])
 
     monkeypatch.setattr(
-        "abicheck.compat.cli.parse_descriptor",
+        "abicheck.compat.run_inputs.parse_descriptor",
         lambda p, **_kw: old_d if p == old_desc else new_d,
     )
     monkeypatch.setattr("abicheck.compat.cli.dump", lambda *_args, **_kwargs: _snap())

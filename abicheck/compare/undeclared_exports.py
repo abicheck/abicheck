@@ -26,15 +26,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .detector_registry import registry
-from .diff_helpers import make_change
-from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
-from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
-from .model.change_catalog.kinds import ChangeKind
+from ..detector_registry import registry
+from ..diff_helpers import make_change
+from ..diff_symbols_renames import _should_filter_transitive_runtime_symbols
+from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+from ..model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
-    from .checker_types import Change
-    from .model import AbiSnapshot
+    from ..checker_types import Change
+    from ..model import AbiSnapshot
 
 
 @registry.detector("undeclared_exports")
@@ -74,11 +74,21 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
         # other side as newly added (ADR-028/049 -- missing evidence never
         # fabricates a finding).
         return []
-    # A headerless comparison already reports these through the ordinary
-    # function diff, because `dumper_elf_fallback` puts export-only records
-    # in `function_map` for exactly that case. Emitting here too would
+    # A headerless NEW already reports these through the ordinary function
+    # diff, because `dumper_elf_fallback` puts export-only records in
+    # `function_map` for exactly that case. Emitting here too would
     # double-report every added symbol in every binary-depth run.
-    if getattr(old, "elf_only_mode", False) or getattr(new, "elf_only_mode", False):
+    #
+    # NEW's mode is what decides that, and OLD's is deliberately not
+    # consulted. An *addition* is a symbol present in NEW and absent from
+    # OLD, so the ordinary diff can only name it if it reached NEW's
+    # `function_map` -- which the fallback does only for a headerless NEW.
+    # In the mixed shape (ELF-only OLD, header-aware NEW) an undeclared new
+    # export is in neither map, so keying the guard off OLD as well would
+    # suppress the one detector that can see it and lose the addition
+    # entirely. There is no double-report risk from that shape, because the
+    # ordinary diff never reported it in the first place.
+    if getattr(new, "elf_only_mode", False):
         return []
 
     filter_transitive = _should_filter_transitive_runtime_symbols(new)

@@ -24,7 +24,6 @@ Commands:
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -34,14 +33,11 @@ import click
 
 from ..checker import compare
 from ..dumper import dump
-from ..errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+from ..errors import ProfileMismatchError, ScopeMismatchError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
-from ..serialization import load_snapshot, save_snapshot
+from ..serialization import save_snapshot
 from ..workflows.extraction import (
-    import_abicc_perl_dump,
-    is_abicc_perl_dump_file,
-    looks_like_perl_dump,
     suppress_streaming_prune,
 )
 from ..workflows.pattern_preprocessor_scan import grant_live_source_licence
@@ -78,12 +74,24 @@ from ._helpers import (  # noqa: F401
     _setup_logging as _setup_logging,
     _warn_stub_flags as _warn_stub_flags,
     _write_affected_list as _write_affected_list,
+)
+from .descriptor import CompatDescriptor, parse_descriptor
+from .descriptor_expansion import (  # noqa: F401
     build_descriptor_suppression as build_descriptor_suppression,
     expand_descriptor_headers as expand_descriptor_headers,
     expand_descriptor_libs as expand_descriptor_libs,
 )
-from .descriptor import CompatDescriptor, parse_descriptor
-from .multi_library import merge_results, pair_libraries
+from .multi_library import merge_results
+from .multi_library_run import (
+    _descriptor_compile_options,
+    _no_library_pair_error,
+    _plan_library_pairs,
+    _record_unpaired_libraries,
+)
+from .run_inputs import (
+    _emit_compat_info_notes,
+    _load_compat_inputs,
+)
 from .xml_report import write_xml_report
 
 # Re-exports for backwards compatibility (these used to be defined inline).
@@ -1095,82 +1103,6 @@ def compat_check_cmd(  # noqa: PLR0913
 #    abicheck.compat.cli.dump / parse_descriptor / compare resolve correctly) ──
 
 
-def _emit_compat_info_notes(
-    *,
-    quiet: bool,
-    compat_html: bool,
-    use_dumps: bool,
-    filter_path: Path | None,
-    params_path: Path | None,
-    app_path: Path | None,
-    arch: str | None,
-    keep_cxx: bool,
-    keep_reserved: bool,
-    count_symbols: str | None,
-    count_all_symbols: str | None,
-) -> None:
-    """Emit informational notes for ABICC-compat flags with limited effect."""
-    notes: list[str] = []
-    if compat_html:
-        notes.append(
-            "Note: -compat-html / -old-style enabled: HTML will match ABICC element IDs."
-        )
-    if use_dumps:
-        notes.append(
-            "Note: -use-dumps is accepted; abicheck auto-detects JSON dumps by extension."
-        )
-    if filter_path:
-        notes.append(
-            f"Note: -filter {filter_path} is accepted for compatibility (not yet applied)."
-        )
-    if params_path:
-        notes.append(
-            f"Note: -params {params_path} is accepted for compatibility (not yet applied)."
-        )
-    if app_path:
-        notes.append(
-            f"Note: -app {app_path} is accepted for compatibility (not yet applied)."
-        )
-    if arch:
-        notes.append(f"Note: -arch {arch} is recorded for informational purposes.")
-    if keep_cxx:
-        notes.append(
-            "Note: -keep-cxx is accepted; abicheck includes all exported symbols by default."
-        )
-    if keep_reserved:
-        notes.append(
-            "Note: -keep-reserved is accepted; abicheck reports all field changes by default."
-        )
-    if count_symbols:
-        notes.append(
-            f"Note: -count-symbols {count_symbols} is accepted for compatibility (not yet applied)."
-        )
-    if count_all_symbols:
-        notes.append(
-            f"Note: -count-all-symbols {count_all_symbols} is accepted for compatibility (not yet applied)."
-        )
-    for note in notes:
-        _do_echo(note, quiet)
-
-
-def _parse_compat_descriptors(
-    old_desc: Path,
-    new_desc: Path,
-    old_relpath: str | None,
-    new_relpath: str | None,
-) -> tuple[CompatDescriptor | AbiSnapshot, CompatDescriptor | AbiSnapshot]:
-    """Parse old/new descriptors or dumps with compat-mode error mapping."""
-    try:
-        return (
-            _load_descriptor_or_dump(old_desc, relpath=old_relpath),
-            _load_descriptor_or_dump(new_desc, relpath=new_relpath),
-        )
-    # TypeError: a malformed nested contract field rejected at the storage
-    # boundary (storage AGENTS.md invariant 6), caught like a bad descriptor.
-    except (TypeError, ValueError, FileNotFoundError, OSError) as exc:
-        _compat_fail("parsing descriptor", exc)
-
-
 def _snapshot_from_compat_input(
     data: CompatDescriptor | AbiSnapshot,
     vnum_override: str | None,
@@ -1258,137 +1190,6 @@ def _snapshot_from_compat_input(
     return grant_live_source_licence(snap), desc.version
 
 
-def _load_descriptor_or_dump(
-    path: Path, *, relpath: str | None = None
-) -> CompatDescriptor | AbiSnapshot:
-    """Load either an ABICC XML descriptor or a JSON ABI dump.
-
-    Returns:
-        CompatDescriptor for XML descriptor files, AbiSnapshot for JSON dumps.
-
-    Raises:
-        ValueError: If the file is an ABICC Perl dump (unsupported format).
-    """
-    # ABICC Perl dump support (minimal migration-focused importer)
-    if path.suffix == ".dump":
-        return import_abicc_perl_dump(path)
-
-    # Heuristic: if the file is JSON, load as a dump
-    if path.suffix == ".json":
-        return load_snapshot(path)
-
-    # ADR-059 (Codex review): `compat dump -dump-path v1.json.gz`/`.json.zst`
-    # writes a valid compressed snapshot (its documented companion command,
-    # AGENTS.md), but Path.suffix only sees the *last* component ("gz"/
-    # "zst"), so those fell through to the XML-descriptor heuristic below
-    # and failed before ever reaching load_snapshot(). Recognize the
-    # canonical compressed suffixes directly, and fall back to magic-byte
-    # detection (never trusts the filename either way) so a compressed
-    # snapshot written under a neutral name is still dispatched correctly.
-    name = path.name.lower()
-    if name.endswith((".json.gz", ".json.zst")):
-        return load_snapshot(path)
-    from ..workflows.storage import SnapshotCompression, detect_snapshot_compression
-
-    try:
-        compression_hint = detect_snapshot_compression(path)
-    except SnapshotError:
-        compression_hint = SnapshotCompression.NONE
-    if compression_hint is not SnapshotCompression.NONE:
-        return load_snapshot(path)
-
-    # For XML files, peek at content to detect ABICC Perl dump disguised as .xml
-    # (ABICC -dump-format xml produces a different XML schema than descriptors)
-    try:
-        head = path.read_text(encoding="utf-8", errors="replace")[:512]
-    except OSError:
-        head = ""
-
-    # Detect ABICC Perl Data::Dumper format (starts with $VAR1 = { or similar)
-    if looks_like_perl_dump(head):
-        return import_abicc_perl_dump(path)
-
-    # Detect ABICC XML dump format (contains <ABI_dump_* or <abi_dump tags)
-    if "<ABI_dump" in head or "<abi_dump" in head or "ABI_COMPLIANCE_CHECKER" in head:
-        raise ValueError(
-            f"ABICC XML dump format detected: {path}\n"
-            "  abicheck currently supports ABICC Perl Data::Dumper dumps, not ABICC XML dumps.\n"
-            "  If possible, generate the default ABI.dump (Perl) format with abi-dumper,\n"
-            "  or convert via descriptor using 'abicheck compat dump' to abicheck JSON."
-        )
-
-    # Otherwise parse as XML descriptor. Directory operands in <headers>/
-    # <libs> are expanded here, at the boundary, so every downstream consumer
-    # sees a concrete file list -- ABICC's ordinary usage points both elements
-    # at directories, and an unexpanded one previously reached the header
-    # parser as `#include "<dir>"` / the binary parser as "Unrecognised binary
-    # format".
-    desc = parse_descriptor(path, relpath=relpath)
-    return dataclasses.replace(
-        desc,
-        headers=expand_descriptor_headers(desc.headers),
-        libs=expand_descriptor_libs(desc.libs),
-    )
-
-
-def _load_compat_inputs(
-    old_desc: Path,
-    new_desc: Path,
-    relpath: str | None,
-    relpath1: str | None,
-    relpath2: str | None,
-    skip_headers: Path | None,
-    quiet: bool,
-) -> tuple[CompatDescriptor | AbiSnapshot, CompatDescriptor | AbiSnapshot, set[str]]:
-    """Resolve relpath overrides, notify about Perl dumps, parse descriptors, load skip-headers set.
-
-    Returns (old_d, new_d, skip_headers_set).
-    """
-    old_relpath = relpath1 or relpath
-    new_relpath = relpath2 or relpath
-
-    old_is_abicc_perl = is_abicc_perl_dump_file(old_desc)
-    new_is_abicc_perl = is_abicc_perl_dump_file(new_desc)
-    if old_is_abicc_perl or new_is_abicc_perl:
-        _do_echo(
-            "Info: ABICC Perl ABI.dump input detected. "
-            "Using migration-focused importer (full ABICC dump parity is not guaranteed). "
-            "Prefer abicheck JSON dumps for best fidelity.",
-            quiet,
-        )
-
-    old_d, new_d = _parse_compat_descriptors(
-        old_desc, new_desc, old_relpath, new_relpath
-    )
-    skip_headers_set = _load_skip_headers(skip_headers)
-    if skip_headers_set:
-        _do_echo(
-            f"Applying -skip-headers: excluding {len(skip_headers_set)} header(s).",
-            quiet,
-        )
-
-    return old_d, new_d, skip_headers_set
-
-
-def _descriptor_compile_options(desc: CompatDescriptor) -> str:
-    """The descriptor's own ``<include_paths>``/``<defines>``/
-    ``<gcc_options>`` as one compile-flag string.
-
-    A ``<headers>`` directory very often only parses with the include roots
-    and defines the descriptor itself declares -- MKL's does. Those elements
-    were read by nothing before, so a descriptor that fully specified how to
-    compile its own headers still failed to compile them, for a reason that
-    named neither the descriptor nor the missing flag.
-
-    Appended *after* any ``-gcc-options`` given on the command line, so an
-    explicit CLI flag stays last-wins where the compiler treats it that way.
-    """
-    parts = [f"-I{p}" for p in desc.include_paths]
-    parts += [d if d.startswith("-D") else f"-D{d}" for d in desc.defines]
-    parts += list(desc.gcc_options)
-    return " ".join(parts)
-
-
 class _SnapshotOptions(TypedDict):
     """The dump options every library in one ``compat check`` run shares.
 
@@ -1409,103 +1210,6 @@ class _SnapshotOptions(TypedDict):
     sysroot: Path | None
     nostdinc: bool
     lang: str | None
-
-
-def _plan_library_pairs(
-    old_d: CompatDescriptor | AbiSnapshot,
-    new_d: CompatDescriptor | AbiSnapshot,
-) -> tuple[list[tuple[Path, Path]], list[Path], list[Path]] | None:
-    """Pair the two sides' ``<libs>`` entries, or ``None`` for no fan-out.
-
-    ``None`` -- **not** an empty pair list -- is how "this is not a
-    multi-library comparison" is reported: either side being an
-    already-built snapshot (a JSON/Perl dump names no library list), or both
-    naming one library or fewer. The single-library path then runs exactly
-    as it did before, which keeps this change inert for every ordinary
-    one-library descriptor.
-
-    The distinction is load-bearing. Returning ``[]`` for both "no fan-out
-    applies" and "a multi-library plan that paired nothing" let the caller's
-    ``or [(None, None)]`` fallback turn the second case into "compare
-    ``libs[0]`` against ``libs[0]``" -- two *unrelated* libraries, yielding a
-    real verdict that the unpaired-library warnings appended afterwards
-    could not undo (Codex review). A zero-pair multi-library plan is now
-    returned as one, and the caller refuses to produce a verdict from it.
-    """
-    if not isinstance(old_d, CompatDescriptor) or not isinstance(
-        new_d, CompatDescriptor
-    ):
-        return None
-    if len(old_d.libs) <= 1 and len(new_d.libs) <= 1:
-        return None
-    return pair_libraries(old_d.libs, new_d.libs)
-
-
-def _no_library_pair_error(
-    unpaired_old: list[Path], unpaired_new: list[Path]
-) -> ScopeMismatchError:
-    """The error for a multi-library comparison in which nothing paired.
-
-    ADR-065: "a run that completed zero comparisons never reads as a clean
-    pass". With no pair there is no comparison to draw a verdict from, and
-    the alternative -- comparing the first library of each side regardless
-    of whether they are the same library -- produces a confident verdict
-    about two unrelated artifacts.
-
-    ``ScopeMismatchError`` so it classifies as compat exit 9 (not_comparable,
-    ADR-050 D2), which is what actually happened: the two descriptors name
-    library sets that cannot be put into correspondence.
-    """
-    return ScopeMismatchError(
-        "No library in the old descriptor pairs with one in the new "
-        "descriptor, so no comparison could be run. Old: "
-        + (", ".join(p.name for p in unpaired_old) or "(none)")
-        + "; new: "
-        + (", ".join(p.name for p in unpaired_new) or "(none)")
-        + ". Libraries are paired by filename, then by version-insensitive "
-        "stem; rename or list matching libraries, or compare one pair "
-        "directly."
-    )
-
-
-def _record_unpaired_libraries(
-    result: DiffResult,
-    unpaired_old: list[Path],
-    unpaired_new: list[Path],
-    quiet: bool,
-) -> DiffResult:
-    """Record libraries present on only one side as coverage warnings.
-
-    Deliberately **not** findings. A descriptor's ``<libs>`` list is a
-    selection, and an entry with no counterpart on the other side is "not
-    supplied there", which is not the same fact as "removed from the
-    release" (ADR-065: *absent is not removed* -- proving a removal needs
-    inventory evidence a descriptor does not carry). Reporting them as
-    removals would manufacture exactly the false break this whole change set
-    exists to stop; dropping them silently would hide that the run covered
-    less than the descriptor named. A coverage warning is the disposition
-    that says both.
-    """
-    if not unpaired_old and not unpaired_new:
-        return result
-    warnings = [
-        *(
-            f"Library {p.name} is named by the old descriptor with no "
-            f"counterpart in the new one; it was not compared (not evidence "
-            f"of removal -- a descriptor names a selection, not an inventory)."
-            for p in unpaired_old
-        ),
-        *(
-            f"Library {p.name} is named by the new descriptor with no "
-            f"counterpart in the old one; it was not compared."
-            for p in unpaired_new
-        ),
-    ]
-    for w in warnings:
-        _do_echo(f"Warning: {w}", quiet)
-    return dataclasses.replace(
-        result, coverage_warnings=[*result.coverage_warnings, *warnings]
-    )
 
 
 def _take_snapshots_with_logging(
