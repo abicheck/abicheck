@@ -141,3 +141,20 @@
   uncompressed however large it grows -- correct, and undiscoverable at the
   ~384 MB per side a real MKL dump reaches. `dump` now points at
   `.json.zst`/`.json.gz` once a plain snapshot passes 64 MB.
+- **Per-finding `library` in a multi-library report, and a `finding_id` that
+  respects it.** Report schema **4.6** declares the optional `library` key a
+  multi-library `compat` run already emitted, and `report_finding_id` folds
+  it in when present. Two paired DSOs in one release routinely produce
+  findings whose every identity field is equal -- a shared symbol removed
+  from both -- so they hashed to one id and a consumer indexing the report
+  by id kept one and silently dropped the other. A scalar comparison leaves
+  the field unset, so its ids are byte-for-byte unchanged.
+- **The release-wide assurance roll-up no longer overstates coverage.** Each
+  axis now has an explicit worst-last scale ordered by how much assurance
+  its label asserts, replacing a lexicographic pick over the non-best
+  values. Merging `graph_completeness` `"degraded"` with `"not_collected"`
+  returned `"degraded"`, asserting release-wide that a source graph *was*
+  collected when one member collected none; `"asymmetric"` beat
+  `"not_evaluated"` the same accidental way. Every member's own notes are
+  still unioned into the merged block, so the specific detected defect is
+  reported even when the one-word label defers to the least-claiming member.

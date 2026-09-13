@@ -1813,6 +1813,16 @@ def report_finding_id(c: object) -> str:
     disambiguator = getattr(c, "disambiguator", None)
     if disambiguator:
         parts.append(str(disambiguator))
+    # `library` under the same conditional rule, for the same reason: it is
+    # `None` for every scalar comparison, so every id this function has ever
+    # produced is unchanged. Two paired DSOs in one multi-library `compat`
+    # run routinely produce findings with an identical kind/symbol/value/
+    # location/description -- a shared symbol removed from both -- which
+    # hashed to one id, so a consumer indexing by `finding_id` kept one and
+    # dropped the other (Codex review).
+    library = getattr(c, "library", None)
+    if library:
+        parts.append(str(library))
     key = "\x1f".join(parts)
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 

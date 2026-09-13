@@ -121,17 +121,70 @@ def _worst_status(values: Sequence[str]) -> str:
     return max(values, key=rank)
 
 
-def _weakest(values: Sequence[str], *, best: str) -> str:
-    """*best* only when every member says so; otherwise a non-*best* member.
+#: One explicit worst-last scale per axis field, replacing a lexicographic
+#: ``sorted(...)[0]`` pick over the non-best values.
+#:
+#: The ordering rule is a single question asked of each label: **how much
+#: assurance does this label assert?** Weakest -- the label asserting the
+#: least -- goes last, so :func:`max` over the index picks it. That is the
+#: direction ``AGENTS.md``'s "weaker evidence narrows conclusions" requires
+#: of a release-wide roll-up: the merged label may understate what some
+#: member achieved, never overstate what every member supports.
+#:
+#: This is why a *no-evidence* label ranks below a *detected-defect* one on
+#: every axis that has both (``not_collected`` below ``degraded``,
+#: ``not_evaluated`` below ``asymmetric``): "degraded" asserts a graph was
+#: collected release-wide, which is false the moment one member collected
+#: none -- the exact overstatement Codex's review named. Nothing is lost by
+#: ranking it that way, because :func:`merge_analysis_assurance` unions every
+#: member's own ``notes``, so the specific detected defect is still reported;
+#: only the one-word release-wide label defers to the least-claiming member.
+#:
+#: The lexicographic pick this replaces got that backwards by accident rather
+#: than by design: it returned ``"degraded"`` for {``degraded``,
+#: ``not_collected``} and ``"asymmetric"`` for {``asymmetric``,
+#: ``not_evaluated``} purely because ``d`` < ``n`` and ``a`` < ``n``.
+_AXIS_WORST_LAST: dict[str, tuple[str, ...]] = {
+    "l0_context_status": ("clean", "asymmetric", "not_evaluated"),
+    "header_context_status": (
+        "clean",
+        "drift_detected",
+        "asymmetric",
+        "not_evaluated",
+    ),
+    "dwarf_context_status": ("clean", "asymmetric", "not_evaluated"),
+    "l3_context_status": ("clean", "asymmetric", "not_evaluated"),
+    "fact_set_comparability": (
+        "comparable",
+        "inconsistent",
+        "unknown",
+        "not_applicable",
+    ),
+    "graph_completeness": (
+        "complete",
+        "degraded",
+        "narrowed",
+        "unknown",
+        "not_collected",
+    ),
+    "schema_staleness_status": ("clean", "degraded"),
+}
 
-    Used for the axis fields whose own default is the optimistic value
-    (``schema_staleness_status`` defaults to ``"clean"``), where carrying
-    the default forward would turn "one member was stale" into a clean
-    release-wide claim. Deterministic by sorting rather than by input order,
-    so the merged block does not depend on which library was read first.
+
+def _weakest(values: Sequence[str], *, axis: str) -> str:
+    """The least-claiming of *values* on *axis*'s :data:`_AXIS_WORST_LAST` scale.
+
+    An unrecognised value wins outright, for the same reason
+    :func:`_worst_status` ranks one worst: a label this build cannot place
+    is not evidence of a good one. Deterministic for two equally-unplaceable
+    values by sorting them, so the merged block never depends on which
+    library was read first.
     """
-    others = sorted({v for v in values if v != best})
-    return best if not others else others[0]
+    scale = _AXIS_WORST_LAST[axis]
+    unranked = sorted({v for v in values if v not in scale})
+    if unranked:
+        return unranked[0]
+    return max(values, key=scale.index)
 
 
 def _shallowest_depth(values: Sequence[str]) -> str | None:
@@ -191,25 +244,25 @@ def merge_analysis_assurance(
         effective_depth=_shallowest_depth(effective) if effective else None,
         depth_satisfied=all(satisfied) if satisfied else None,
         l0_context_status=_weakest(
-            [b.l0_context_status for b in present], best="clean"
+            [b.l0_context_status for b in present], axis="l0_context_status"
         ),
         header_context_status=_weakest(
-            [b.header_context_status for b in present], best="clean"
+            [b.header_context_status for b in present], axis="header_context_status"
         ),
         dwarf_context_status=_weakest(
-            [b.dwarf_context_status for b in present], best="clean"
+            [b.dwarf_context_status for b in present], axis="dwarf_context_status"
         ),
         l3_context_status=_weakest(
-            [b.l3_context_status for b in present], best="clean"
+            [b.l3_context_status for b in present], axis="l3_context_status"
         ),
         fact_set_comparability=_weakest(
-            [b.fact_set_comparability for b in present], best="comparable"
+            [b.fact_set_comparability for b in present], axis="fact_set_comparability"
         ),
         graph_completeness=_weakest(
-            [b.graph_completeness for b in present], best="complete"
+            [b.graph_completeness for b in present], axis="graph_completeness"
         ),
         schema_staleness_status=_weakest(
-            [b.schema_staleness_status for b in present], best="clean"
+            [b.schema_staleness_status for b in present], axis="schema_staleness_status"
         ),
         layout_unverified_detectors=tuple(layout_unverified),
         notes=tuple(notes),

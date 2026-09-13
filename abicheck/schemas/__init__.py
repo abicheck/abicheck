@@ -934,7 +934,14 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``not_evaluated`` where a pre-4.5 run reported ``introduced``/
 #:       ``resolved`` from the current runner's filesystem. No verdict,
 #:       severity, or exit code moves -- this block never reached any of them.
-REPORT_SCHEMA_VERSION = "4.5"  #: 4.5 -- see the comment immediately above.
+#: 4.6 -- additive per-finding ``library``: the DSO a finding was attributed
+#:       to in a multi-library ``compat`` run (``compat/multi_library.py``).
+#:       Absent -- not ``null`` -- for every scalar comparison, which is
+#:       every pre-4.6 report. ``finding_id`` folds it in when present, so
+#:       two paired DSOs producing an otherwise-identical finding no longer
+#:       collide on one id; a scalar comparison's ids are bit-for-bit
+#:       unchanged, since the field is absent there.
+REPORT_SCHEMA_VERSION = "4.6"  #: 4.6 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

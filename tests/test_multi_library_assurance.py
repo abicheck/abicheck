@@ -35,7 +35,10 @@ from abicheck.analysis_assurance import AnalysisAssurance
 from abicheck.checker_policy import Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.compat.multi_library import merge_results
-from abicheck.policy.analysis_assurance_merge import merge_analysis_assurance
+from abicheck.policy.analysis_assurance_merge import (
+    _AXIS_WORST_LAST as _AXIS_WORST_LAST_KEYS,
+    merge_analysis_assurance,
+)
 
 
 def _result(
@@ -274,3 +277,65 @@ class TestEveryAssuranceFieldHasAMergePolicy:
         from abicheck.policy.analysis_assurance_merge import FIELD_MERGE_POLICY
 
         assert sum(1 for v in FIELD_MERGE_POLICY.values() if v == "weakest") >= 7
+
+
+class TestWeakestAxisScales:
+    """``_weakest`` must pick the least-claiming label, not the first one.
+
+    The previous implementation sorted the non-best values and took index
+    ``0``, so the merged label depended on the alphabet: ``{"degraded",
+    "not_collected"}`` merged to ``"degraded"``, asserting release-wide that
+    a source graph *was* collected when one member collected none (Codex
+    review). These state the ordering as a contract rather than pinning the
+    one reported pair.
+    """
+
+    def test_every_weakest_field_has_a_scale(self):
+        from abicheck.policy.analysis_assurance_merge import (
+            _AXIS_WORST_LAST,
+            FIELD_MERGE_POLICY,
+        )
+
+        weakest = {f for f, p in FIELD_MERGE_POLICY.items() if p == "weakest"}
+        assert weakest == set(_AXIS_WORST_LAST)
+
+    @pytest.mark.parametrize("axis", sorted(_AXIS_WORST_LAST_KEYS))
+    def test_merged_label_is_never_stronger_than_any_member(self, axis):
+        """For every *pair* on every axis, the result is the weaker member.
+
+        Exhaustive over each scale's own cross product rather than the one
+        reported example, so a future reordering that reintroduces an
+        overstating pick fails here regardless of which two labels it
+        involves.
+        """
+        from abicheck.policy.analysis_assurance_merge import (
+            _AXIS_WORST_LAST,
+            _weakest,
+        )
+
+        scale = _AXIS_WORST_LAST[axis]
+        for i, a in enumerate(scale):
+            for j, b in enumerate(scale):
+                expected = a if i >= j else b
+                assert _weakest([a, b], axis=axis) == expected, (axis, a, b)
+                assert _weakest([b, a], axis=axis) == expected, (axis, b, a)
+
+    def test_no_evidence_outranks_a_detected_defect(self):
+        """The specific overstatement the review named, on both axes with it."""
+        from abicheck.policy.analysis_assurance_merge import _weakest
+
+        assert (
+            _weakest(["degraded", "not_collected"], axis="graph_completeness")
+            == "not_collected"
+        )
+        assert (
+            _weakest(["asymmetric", "not_evaluated"], axis="l0_context_status")
+            == "not_evaluated"
+        )
+
+    def test_unrecognised_label_wins_outright(self):
+        from abicheck.policy.analysis_assurance_merge import _weakest
+
+        assert _weakest(["clean", "who-knows"], axis="l0_context_status") == (
+            "who-knows"
+        )
