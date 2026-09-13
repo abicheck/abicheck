@@ -193,6 +193,7 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
         "experimental_graduated",
         "experimental_removed_without_replacement",
         "mandatory_template_param_added",
+        "cpo_kind_changed",
     )
 
     @staticmethod
@@ -592,3 +593,83 @@ class TestAClassTemplateFindingIsATypeFinding:
         for c in types_only:
             assert types._check_element(c, c.kind.value)
             assert not functions._check_element(c, c.kind.value)
+
+
+class TestABinaryEntityIsNotADeclarationFinding:
+    """A kind declared `BINARY` whose own text names a function, variable or
+    type is a review queue, not an error — but it must be a *reviewed* one.
+
+    This is the fourth oracle, and it exists because this exact
+    misclassification has now been found four separate times by reading
+    entries: `anon_field_changed`, `base_class_*`, `source_level_kind_changed`,
+    then `calling_convention_changed` (carries a function's mangled symbol
+    and `entity_id`) and `tls_var_size_changed` (carries the TLS variable's
+    own symbol) — the last of which no reviewer flagged; this audit did.
+
+    Unlike the other three oracles it is deliberately allowlist-shaped
+    rather than absolute: measured over the catalog it names 12 legitimate
+    binary-level kinds whose impact text simply *mentions* a declaration
+    ("struct/enum layout comparison is degraded"), so an unconditional rule
+    would be 86% noise. Listing each one with a reason makes the next
+    addition a decision someone made rather than a silence.
+    """
+
+    #: Binary-level kind -> why its text names a declaration anyway.
+    REVIEWED_BINARY_KINDS = {
+        "dwarf_info_missing": "an evidence fact about the binary; names struct/enum only to say what can no longer be compared",
+        "vector_abi_changed": "a toolchain-wide ABI trait of the binary, not of one declaration",
+        "sycl_pi_entrypoint_removed": "a plugin-interface fact keyed by plugin, not a C++ declaration",
+        "integer_model_changed": "a whole-binary data-model trait (LP64/LLP64)",
+        "char8t_migration": "a whole-binary dialect/ABI trait; names the declaration it was observed on",
+        "bit_int_width_changed": "a target ABI trait for _BitInt widths",
+        "threadsafe_statics_mode_changed": "a compiler-mode trait of the binary",
+        "struct_return_convention_changed": "a target calling-convention trait, not one function's attribute",
+        "elf_class_changed": "an ELF container fact: the whole file changed word size",
+        "long_double_abi_changed": "a target floating-point ABI trait",
+        "pe_ordinal_retargeted": "a PE export-table fact keyed by ordinal",
+        "pe_import_load_mode_changed": "a PE import-table fact about how the module is bound at load time",
+        "wchar_model_changed": "a whole-binary character-model trait",
+    }
+
+    def _suspects(self):
+        import re
+
+        impacts = REGISTRY.impact_text()
+        out = []
+        for kind in ChangeKind:
+            if REGISTRY.entity_for(kind.value) is not ChangeEntity.BINARY:
+                continue
+            text = (REGISTRY.description_template_for(kind.value) or "") + " "
+            text += impacts.get(kind.value, "")[:160]
+            if re.search(
+                r"\b(function|method|variable|struct|class|typedef|field|enum)\b",
+                text,
+                re.I,
+            ):
+                out.append(kind.value)
+        return out
+
+    def test_the_oracle_still_matches_something(self):
+        """Vacuity guard."""
+        assert len(self._suspects()) >= 5
+
+    def test_every_suspect_is_reviewed(self):
+        unreviewed = [
+            k for k in self._suspects() if k not in self.REVIEWED_BINARY_KINDS
+        ]
+        assert not unreviewed, (
+            "These kinds are declared BINARY but their own text names a "
+            "declaration-level subject. Check what the detector actually "
+            "attaches the finding to; if BINARY is right, add a reason to "
+            f"REVIEWED_BINARY_KINDS: {unreviewed}"
+        )
+
+    def test_the_allowlist_does_not_go_stale(self):
+        """An entry for a kind that is no longer BINARY, or no longer
+        matches, is a leftover that would hide the next real one."""
+        stale = [k for k in self.REVIEWED_BINARY_KINDS if k not in self._suspects()]
+        assert not stale, stale
+
+    def test_every_reason_says_something(self):
+        for kind, reason in self.REVIEWED_BINARY_KINDS.items():
+            assert len(reason) > 25, kind

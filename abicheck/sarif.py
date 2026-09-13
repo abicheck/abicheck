@@ -757,10 +757,16 @@ def to_sarif(
     instead of changing SARIF's one-result-per-finding structure -- unlike
     JSON/markdown's dedicated grouped rendering, this keeps every existing
     SARIF/code-scanning consumer working unchanged while letting a
-    root-cause-aware one group results by ``rootCauseId``. Any other value
-    (including ``"leaf"``) renders as ``full``, unchanged from before this
-    parameter existed.
+    root-cause-aware one group results by ``rootCauseId``. Any other
+    *supported* value renders as ``full``, unchanged from before this
+    parameter existed; a retired one (``"leaf"``) or an unknown one raises
+    ``ValidationError`` rather than silently rendering something else.
     """
+    # The one shared check every public rendering entry point applies.
+    from .report.report_modes import reject_unsupported_report_mode
+
+    reject_unsupported_report_mode(report_mode)
+
     tool_version = _tool_version()
     gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
     disposition_audit_dict = disposition_audit_dict_reusing_document(

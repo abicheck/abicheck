@@ -1095,9 +1095,10 @@ def to_junit_xml(
         attributes to each ``<failure>`` element (see
         :func:`_root_cause_lookup`); it does not restructure the
         per-symbol ``<testcase>`` tree the way JSON/markdown/SARIF's
-        root-cause mode regroups findings. Any other value (e.g.
-        ``"leaf"``/``"impact"``) renders identically to ``"full"``, same as
-        before this parameter existed.
+        root-cause mode regroups findings. Any other *supported* value
+        (``"impact"``) renders identically to ``"full"``, same as before
+        this parameter existed; a retired mode (``"leaf"``) or an unknown
+        one raises ``ValidationError``.
     report_document:
         ADR-061 gap C shared build; forwarded to :func:`_build_testsuite`.
     envelope:
@@ -1110,6 +1111,11 @@ def to_junit_xml(
     str
         JUnit XML document as a string.
     """
+    # The one shared check every public rendering entry point applies.
+    from .report.report_modes import reject_unsupported_report_mode
+
+    reject_unsupported_report_mode(report_mode)
+
     root = ET.Element("testsuites")
     root.set("name", "abicheck")
 

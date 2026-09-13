@@ -79,7 +79,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         _B,
         impact="Function calling convention changed; registers/stack usage differs, call crashes.",
         policy_overrides={"plugin_abi": _C},
-        entity=_ENT.BINARY,
+        entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,
     ),
     _E(

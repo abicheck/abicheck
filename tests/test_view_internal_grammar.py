@@ -1112,3 +1112,65 @@ class TestEveryCollectionThatSerializesIsPrewarmed:
         omitting any one of them is detectable."""
         _, expected = self._result_with_a_distinct_symbol_per_collection()
         assert len(expected) == len(self.SERIALIZED_COLLECTIONS)
+
+
+class TestEveryPublicRendererRejectsARetiredMode:
+    """The retirement is enforced at *every* public rendering entry point,
+    not at the ones somebody remembered.
+
+    Centralizing the check (`report/report_modes.py`) was the fix; it did
+    not by itself route `sarif.to_sarif` or `junit_report.to_junit_xml`
+    through it, and both docstrings still promised that `leaf` "renders as
+    full" (Codex review, PR #1284). Stated as a sweep over the entry points
+    rather than one call each, so a renderer added later is covered by
+    adding its name here and nothing else.
+    """
+
+    def _result(self):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+        )
+
+    def _entry_points(self):
+        from abicheck.junit_report import to_junit_xml
+        from abicheck.report.dispatch_markdown import to_markdown
+        from abicheck.reporter import to_json
+        from abicheck.sarif import to_sarif
+
+        return {
+            "to_json": to_json,
+            "to_markdown": to_markdown,
+            "to_sarif": to_sarif,
+            "to_junit_xml": to_junit_xml,
+        }
+
+    @pytest.mark.parametrize("mode", ["leaf", "not-a-mode", ""])
+    def test_each_rejects_a_retired_or_unknown_mode(self, mode):
+        from abicheck.errors import ValidationError
+
+        result = self._result()
+        for name, fn in self._entry_points().items():
+            with pytest.raises(ValidationError):
+                fn(result, report_mode=mode)
+            assert name  # names the failing entry point in the traceback
+
+    @pytest.mark.parametrize("mode", ["full", "impact", "root-cause"])
+    def test_each_still_accepts_every_supported_mode(self, mode):
+        """The other half: rejection must not have narrowed what works."""
+        result = self._result()
+        for name, fn in self._entry_points().items():
+            assert fn(result, report_mode=mode) is not None, name
+
+    def test_the_retired_message_names_the_replacement(self):
+        from abicheck.errors import ValidationError
+        from abicheck.reporter import to_json
+
+        with pytest.raises(ValidationError, match="root-cause"):
+            to_json(self._result(), report_mode="leaf")

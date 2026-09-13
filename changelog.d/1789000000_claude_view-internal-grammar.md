@@ -42,10 +42,11 @@
   own description always said.
 
 - **Every public rendering entry point rejects the retired `leaf` mode.**
-  `reporter.to_json` and `report.to_markdown` shared none of
-  `render_output`'s check, so a caller passing `report_mode="leaf"` to
-  either silently received a *full* report instead of an error. One owner
-  now (`report/report_modes.py`).
+  `reporter.to_json`, `report.to_markdown`, `sarif.to_sarif` and
+  `junit_report.to_junit_xml` shared none of `render_output`'s check, so a
+  caller passing `report_mode="leaf"` to any of them silently received a
+  *full* report instead of an error. One owner now
+  (`report/report_modes.py`).
 
 ### Removed
 

@@ -127,6 +127,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "took the CPO's address.",
         description_template="Public name '{name}' was a {old} in old and is a {new} in new. Call syntax preserved; decltype, extern templates, and trait specializations break.",
         entity=_ENT.FUNCTION,
+        entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
     _E(

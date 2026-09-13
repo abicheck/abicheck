@@ -810,6 +810,9 @@ def detect_cpo_kind_changed(
                 old="function",
                 new="variable (function-object / CPO)",
                 new_value="variable",
+                # Polymorphic: the *new* side is stated, since the finding's
+                # point is what a call site must bind against now.
+                entity_discriminator="variable",
                 public_reachable=True,
                 reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 reachability_kind="direct_public_symbol",
@@ -826,6 +829,7 @@ def detect_cpo_kind_changed(
                 old="variable (function-object / CPO)",
                 new="function",
                 old_value="variable",
+                entity_discriminator="function",
                 public_reachable=True,
                 reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 reachability_kind="direct_public_symbol",

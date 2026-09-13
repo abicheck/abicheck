@@ -1307,7 +1307,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         impact="Exported thread-local (TLS) variable size changed; consumers using copy "
         "relocations or direct TLS access will read/write out of bounds.",
         description_template="TLS variable size changed: {name} ({old} → {new} bytes)",
-        entity=_ENT.BINARY,
+        entity=_ENT.VARIABLE,
         operation=_OP.MODIFIED,
     ),
     _E(
