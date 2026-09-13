@@ -776,7 +776,7 @@ def test_a_formatting_exclusion_is_honoured_inside_the_copied_tree() -> None:
             src = REPO_ROOT / name
             if src.is_file():
                 shutil.copy2(src, root / src.name)
-        proc = subprocess.run(
+        proc = subprocess.run(  # noqa: S603 - fixed argv, this interpreter
             [sys.executable, "-m", "ruff", "format", "--check", "abicheck/"],
             cwd=root,
             capture_output=True,
