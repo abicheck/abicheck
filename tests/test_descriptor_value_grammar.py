@@ -132,3 +132,55 @@ class TestEmittedFlagsSurviveReSplitting:
         """Quoting everything would round-trip fine and still be wrong: the
         emitted string is user-visible in diagnostics."""
         assert join_gcc_options(["-O2", "-DFOO=1"]) == "-O2 -DFOO=1"
+
+
+class TestGccOptionsUsesTheSharedSplitter:
+    """`<gcc_options>` is parsed with `split_gcc_options`, not `str.split`.
+
+    A plain split broke a shell-valid quoted argument into fragments with
+    quote characters still attached, and `_descriptor_compile_options` then
+    quoted those already-corrupted fragments -- so the compiler received
+    nonexistent include paths and malformed definitions (Codex review).
+
+    It was also the one place that did not agree with `join_gcc_options`,
+    which the same values are re-emitted through: parser and emitter had two
+    different grammars for one string.
+
+    Bug class: two sides of a round trip implemented independently.
+    """
+
+    def _tokens(self, tmp_path, text):
+        desc = parse_descriptor(
+            _descriptor(tmp_path, f"<gcc_options>\n  {text}\n</gcc_options>\n")
+        )
+        return desc.gcc_options
+
+    def test_a_quoted_path_survives(self, tmp_path):
+        assert self._tokens(tmp_path, '-I"/opt/Program Files/inc"') == [
+            "-I/opt/Program Files/inc"
+        ]
+
+    def test_a_quoted_define_survives(self, tmp_path):
+        assert self._tokens(tmp_path, '-DNAME="a b"') == ["-DNAME=a b"]
+
+    def test_unquoted_whitespace_still_tokenises(self, tmp_path):
+        """The behaviour the shell grammar is *for*, which must not be lost:
+        `-I /path` is two tokens because that is how they reach a compiler."""
+        assert self._tokens(tmp_path, "-I /opt/inc -O2") == ["-I", "/opt/inc", "-O2"]
+
+    def test_parser_and_emitter_agree(self, tmp_path):
+        """The round trip stated end to end, which is what was broken: parse a
+        descriptor, emit its flags, re-split them, get the same tokens."""
+        desc = parse_descriptor(
+            _descriptor(
+                tmp_path,
+                '<gcc_options>\n  -I"/opt/Program Files/inc" -DNAME="a b" -O2\n'
+                "</gcc_options>\n",
+            )
+        )
+        emitted = _descriptor_compile_options(desc)
+        assert split_gcc_options(emitted) == [
+            "-I/opt/Program Files/inc",
+            "-DNAME=a b",
+            "-O2",
+        ]

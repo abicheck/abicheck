@@ -108,6 +108,26 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
 
     filter_transitive = _should_filter_transitive_runtime_symbols(new)
 
+    # Every ABI-relevant export name OLD carried, across *both* symbol
+    # classes, computed once. A name present here is not an addition however
+    # its type changed, which the per-class subtraction below cannot see on
+    # its own: an export that keeps its name and changes ELF type
+    # (`STT_OBJECT` -> `STT_FUNC`) is absent from the function-only
+    # `old_exports`, so it read as newly added and `func_added_elf_only` was
+    # emitted alongside the `symbol_type_changed` that already describes the
+    # real modification -- corrupting the addition count and, through it,
+    # `-warn-newsym` and `semver.recommend_release`'s MINOR bump (Codex
+    # review; reproduced on real binaries with a variable turned into a
+    # function of the same name).
+    old_export_names: set[str] = set()
+    for types in (FUNCTION_SYMBOL_TYPES, VARIABLE_SYMBOL_TYPES):
+        old_export_names |= exported_symbol_names(
+            old_elf,
+            types,
+            abi_relevant_only=True,
+            filter_transitive_runtime_symbols=filter_transitive,
+        )
+
     changes: list[Change] = []
     # Functions and data symbols, the same way. Splitting the loop was the
     # first shape and it lost the data half outright: an undeclared
@@ -141,7 +161,10 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
             abi_relevant_only=True,
             filter_transitive_runtime_symbols=filter_transitive,
         )
-        gained = new_exports - old_exports
+        # `old_export_names`, not just this class's `old_exports`: see above.
+        # NEW's own type still decides *which* kind a genuinely new name gets,
+        # which is why the per-class `new_exports` stays as it is.
+        gained = new_exports - old_exports - old_export_names
         if not gained:
             continue
 

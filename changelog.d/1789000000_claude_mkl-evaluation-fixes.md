@@ -224,3 +224,58 @@
   "contains no shared libraries" and a mixed one compared part of the
   selected set without saying so. Deduplication is now by resolved target, so
   the chain still collapses to one entry.
+- **A symbol that changes ELF type is not an addition.** The undeclared-export
+  detector subtracted OLD's exports *within each symbol class*, so a name
+  going `STT_OBJECT` -> `STT_FUNC` was absent from the function-only old set
+  and read as newly gained: `func_added_elf_only` was emitted alongside the
+  `symbol_type_changed` that already described the real change, corrupting the
+  addition count and, through it, `-warn-newsym` and `recommend_release`'s
+  MINOR bump. Every name OLD exported is now subtracted first, in either
+  class; NEW's own type still decides which kind a genuinely new name gets.
+- **A descriptor's `<skip_headers>`/`<skip_including>` are recorded like
+  `--exclude-header`.** They narrow the parsed surface identically, but were
+  filtered without being recorded, so the comparability check saw two empty
+  exclusion sets. Against a stored operand carrying no contract -- an older
+  snapshot or an imported ABICC dump, where `scope_fingerprint` cannot refuse
+  either -- the comparison proceeded and declarations omitted from NEW came
+  back as removals with a breaking verdict. The recorder moved to
+  `model/header_exclusion_record.py` in the process: three layers produce a
+  narrowed snapshot, and `compat/cli.py` is a `frontends` module that may not
+  import `extract`.
+- **A weak import that becomes strong is a new requirement.** The
+  bundle-import history predicate matched on library and version only, so a
+  *weak* OLD import counted as evidence that something outside the bundle
+  provided the symbol. It is not: the loader resolves an unresolved weak
+  symbol to `0`/`NULL`, so OLD loading proves nothing. The new strong import
+  was then suppressed on the vacuously-satisfied outward-edge rule, and a
+  candidate that now fails to load could report `NO_CHANGE`. The OLD match
+  must now be non-weak; the callers already skip a weak NEW consumer.
+- **`<gcc_options>` is parsed with the shared splitter.** A plain
+  `str.split()` broke a shell-valid quoted argument (`-I"/opt/Program
+  Files/inc"`) into fragments with quote characters still attached, which
+  `_descriptor_compile_options` then quoted again -- so the compiler received
+  nonexistent paths and malformed defines. It was also the one place that
+  disagreed with `join_gcc_options`, the emitter the same values pass
+  through: parser and emitter had two grammars for one string, and now share
+  `split_gcc_options` on POSIX and Windows alike.
+- **A descriptor skip and a native exclusion are no longer conflated.** The
+  two are matched by different rules -- a descriptor's
+  `<skip_headers>`/`<skip_including>` by exact basename or path, native
+  `--exclude-header` by `fnmatch` -- so the same text names two different
+  scopes: `*.h` excludes every header natively and nothing at all through a
+  descriptor. Both wrote the raw text into `excluded_header_patterns`, so the
+  comparability gate read two entirely different achieved surfaces as equal
+  and could report fabricated additions or removals. Only what the matching
+  rule could achieve is recorded now, and a wildcard in a descriptor skip is
+  reported as ineffective rather than silently doing nothing. Whether real
+  ABICC globs there is an open parity question (`docs/contribute/known-gaps.md`).
+- **The exclusion gate and its warning no longer contradict each other.** The
+  comparability check compared exclusion *sets* while the coverage warning
+  compared *tuples*, so a native run's CLI order against a compat path's
+  sorted record was accepted as comparable and then reported as having
+  differing exclusions whose findings might be scope artefacts -- a false
+  reduced-confidence diagnostic on a pair the tool had just declared
+  comparable. Both now call one predicate
+  (`model.header_exclusion_record.exclusions_are_symmetric`), and the message
+  renders its patterns sorted, for the same reason the comparison ignores
+  order.

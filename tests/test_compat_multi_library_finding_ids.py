@@ -92,8 +92,6 @@ class TestFindingIdDistinguishesLibraries:
         """Emitted-but-undeclared is the gap the schema bump closes."""
         import json
 
-        from abicheck.schemas import REPORT_SCHEMA_VERSION
-
         schema = json.loads(
             (
                 Path(__file__).resolve().parents[1]
@@ -105,7 +103,12 @@ class TestFindingIdDistinguishesLibraries:
         prop = schema["$defs"]["change"]["properties"]["library"]
         assert prop["type"] == "string"
         assert "library" not in schema["$defs"]["change"].get("required", [])
-        assert REPORT_SCHEMA_VERSION == "4.6"
+        # Deliberately *not* pinning REPORT_SCHEMA_VERSION. The claim here is
+        # that the emitted key is declared and optional; the version this
+        # landed under (4.6) is history, and asserting it made an unrelated
+        # bump elsewhere fail this test -- which is what happened the moment
+        # main reached 5.0. A version pin belongs with whatever change owns
+        # the bump, not on every field that rode one.
 
 
 class TestLibraryAttributionReachesEveryProjection:
