@@ -789,3 +789,255 @@ class TestScenariosMustBeAnswerableByTheirOperands:
             "two different revisions" in problem
             for problem in profiles.validate_profile(bad)
         )
+
+
+class TestOutputContentsAreValidated:
+    """An output file's existence is not a result.
+
+    `is_file()` accepts a zero-byte file, so a timed command that creates or
+    truncates its destination and then dies before writing published MEASURED
+    on nothing (Codex review) -- the same container-vs-contents defect as the
+    empty prepared tree and the empty header root, one level further down.
+    """
+
+    def _ready(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+        materialize_operands(profiles.SVS, tmp_path)
+        status = profiles.resolve_status(
+            profiles.SVS, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "READY", status.reason
+        return status
+
+    @pytest.mark.parametrize(
+        "name, content, expected",
+        [
+            ("report.json", "", "empty file"),
+            ("report.txt", "", "empty file"),
+            ("report.json", '{"a": ', "not readable JSON"),
+            ("report.json", "not json at all", "not readable JSON"),
+            ("report.json", "\x00\x01\x02", "not readable JSON"),
+        ],
+    )
+    def test_an_unreadable_output_cannot_promote(
+        self, monkeypatch, tmp_path, name, content, expected
+    ):
+        ready = self._ready(monkeypatch, tmp_path)
+        output = tmp_path / "out" / name
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content)
+        with pytest.raises(ValueError, match="readable result"):
+            profiles.promote_to_measured(
+                ready,
+                profiles.MeasurementResult(
+                    "svs", ("svs_runtime",), 4.0, output_paths=(output,)
+                ),
+            )
+        assert expected in profiles.output_content_problem(output)
+
+    @pytest.mark.parametrize(
+        "name, content",
+        [
+            ("report.json", '{"libraries": ["svs_runtime"]}'),
+            ("report.txt", "svs_runtime 4.0s"),
+            ("report.md", "# results"),
+        ],
+    )
+    def test_a_readable_output_promotes(self, monkeypatch, tmp_path, name, content):
+        # Vacuity guard, and a scope statement: only formats this module claims
+        # to understand are parsed. A non-empty .txt/.md is accepted as-is
+        # rather than guessed at.
+        ready = self._ready(monkeypatch, tmp_path)
+        output = tmp_path / "out" / name
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content)
+        assert profiles.output_content_problem(output) is None
+        promoted = profiles.promote_to_measured(
+            ready,
+            profiles.MeasurementResult(
+                "svs", ("svs_runtime",), 4.0, output_paths=(output,)
+            ),
+        )
+        assert promoted.status == "MEASURED"
+
+    def test_one_bad_output_among_several_is_enough(self, monkeypatch, tmp_path):
+        ready = self._ready(monkeypatch, tmp_path)
+        good = tmp_path / "good.json"
+        good.write_text("{}")
+        empty = tmp_path / "empty.json"
+        empty.write_text("")
+        with pytest.raises(ValueError, match="readable result"):
+            profiles.promote_to_measured(
+                ready,
+                profiles.MeasurementResult(
+                    "svs", ("svs_runtime",), 4.0, output_paths=(good, empty)
+                ),
+            )
+
+
+class TestASuppliedDistributionMustProveItsIdentity:
+    """A prebuilt side is whatever someone put in the directory.
+
+    Nothing about a supplied distribution is pinned by construction, so any SVS
+    tree with the right layout satisfied the operand guards and was then
+    labelled with the profile's `old_revision` -- a measurement published under
+    an identity it never established (Codex review). A side built from a pinned
+    revision has no such gap: it is identified by the revision it was built
+    from.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _tools_present(self, monkeypatch):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+
+    def test_the_released_baseline_asserts_its_own_version(self):
+        assertion = profiles.SVS.identity_assertions[0]
+        assert assertion.path == "include/svs/runtime/version.h"
+        assert assertion.must_contain == 'SVS_RUNTIME_VERSION_STRING "0.4.0"'
+
+    def test_a_correctly_identified_distribution_is_ready(self, tmp_path):
+        materialize_operands(profiles.SVS, tmp_path)
+        assert (
+            profiles.resolve_status(
+                profiles.SVS, prepared_root=tmp_path, requested=True
+            ).status
+            == "READY"
+        )
+
+    @pytest.mark.parametrize(
+        "version", ["0.3.0", "0.4.1", "0.5.0", "1.0.0", "0.40.0", "10.4.0"]
+    )
+    def test_a_different_release_is_rejected(self, tmp_path, version):
+        # Several independently-chosen siblings, including the near-misses a
+        # substring check could get wrong in either direction ("0.40.0" and
+        # "10.4.0" both contain digits of "0.4.0" without being it).
+        materialize_operands(profiles.SVS, tmp_path)
+        evidence = (
+            profiles.SVS.side_root(tmp_path, "old") / "include/svs/runtime/version.h"
+        )
+        evidence.write_text(f'#define SVS_RUNTIME_VERSION_STRING "{version}"\n')
+        status = profiles.resolve_status(
+            profiles.SVS, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "BLOCKED", (version, status.reason)
+        assert any("is not v0.4.0" in entry for entry in status.missing_inputs)
+
+    def test_a_built_side_needs_no_assertion(self, tmp_path):
+        # The candidate side is built from a pinned SHA, so it is identified by
+        # construction -- applying the baseline's assertion to it would demand
+        # evidence a from-source build has no reason to carry.
+        materialize_operands(profiles.SVS, tmp_path)
+        evidence = (
+            profiles.SVS.side_root(tmp_path, "new") / "include/svs/runtime/version.h"
+        )
+        evidence.write_text('#define SVS_RUNTIME_VERSION_STRING "9.9.9"\n')
+        assert (
+            profiles.resolve_status(
+                profiles.SVS, prepared_root=tmp_path, requested=True
+            ).status
+            == "READY"
+        )
+
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_every_supplied_side_carries_an_assertion(self, profile_id):
+        # The invariant, over every profile: a supplied side without one would
+        # accept any tree with the right layout.
+        profile = profiles.PROFILES[profile_id]
+        supplied = [
+            side
+            for side in ("old", "new")
+            if profile.source_for_side(side) == "prebuilt_distribution"
+        ]
+        if supplied:
+            assert profile.identity_assertions, profile_id
+        assert profiles.validate_profile(profile) == []
+
+    def test_a_supplied_side_without_an_assertion_is_rejected(self):
+        bad = dataclasses.replace(profiles.SVS, identity_assertions=())
+        assert any(
+            "no identity assertion" in problem
+            for problem in profiles.validate_profile(bad)
+        )
+
+    def test_an_empty_assertion_is_rejected(self):
+        bad = dataclasses.replace(
+            profiles.SVS,
+            identity_assertions=(
+                profiles.IdentityAssertion(
+                    path="include/svs/runtime/version.h",
+                    must_contain="  ",
+                    describes="nothing",
+                ),
+            ),
+        )
+        assert any(
+            "satisfied by anything" in problem
+            for problem in profiles.validate_profile(bad)
+        )
+
+    def test_a_pinned_header_digest_is_enforced_when_set(self, tmp_path):
+        # `expected_header_digest` is unset on every shipped profile, because no
+        # published SVS distribution digest has been computed here and inventing
+        # one would be the fabricated evidence this module rejects. It is a real
+        # hook, not an inert field: when set, it gates.
+        materialize_operands(profiles.SVS, tmp_path)
+        pinned = dataclasses.replace(
+            profiles.SVS, expected_header_digest="sha256:" + "0" * 64
+        )
+        status = profiles.resolve_status(pinned, prepared_root=tmp_path, requested=True)
+        assert status.status == "BLOCKED"
+        assert any("not the pinned" in entry for entry in status.missing_inputs)
+
+    def test_the_matching_digest_is_accepted(self, tmp_path):
+        materialize_operands(profiles.SVS, tmp_path)
+        actual = profiles.digest_tree(
+            profiles.SVS.side_root(tmp_path, "old") / "include/svs/runtime"
+        )
+        pinned = dataclasses.replace(profiles.SVS, expected_header_digest=actual)
+        assert (
+            profiles.resolve_status(
+                pinned, prepared_root=tmp_path, requested=True
+            ).status
+            == "READY"
+        )
+
+    @pytest.mark.parametrize(
+        "version, rejected", [("0.4.0", False), ("0.5.1", True), (None, True)]
+    )
+    def test_the_generated_guard_enforces_it_too(self, tmp_path, version, rejected):
+        """Executed, not text-asserted.
+
+        The identity guard's own message contains an apostrophe ("the runtime's
+        own version macro"), which broke the generated script's quoting — every
+        guard line failed to parse, and a text assertion would have reported the
+        expected strings present throughout. Only running it caught that.
+        """
+        script = profiles.prepare_script(profiles.SVS)
+        guard = "\n".join(
+            line
+            for line in script.splitlines()
+            if line.startswith("if ") or line.startswith("ROOT=")
+        )
+        root = tmp_path / "svs_old"
+        (root / "lib").mkdir(parents=True)
+        (root / "lib/libsvs_runtime.so").write_bytes(b"\x7fELF")
+        (root / "include/svs/runtime").mkdir(parents=True)
+        (root / "include/svs/runtime/api_defs.h").write_text("int x;")
+        if version is not None:
+            (root / "include/svs/runtime/version.h").write_text(
+                f'#define SVS_RUNTIME_VERSION_STRING "{version}"\n'
+            )
+        result = subprocess.run(
+            ["bash", "-c", "set -u\n" + guard],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if rejected:
+            assert result.returncode == 1, result.stdout
+            assert "is not v0.4.0" in result.stderr
+        else:
+            assert result.returncode == 0, result.stderr

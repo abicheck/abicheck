@@ -78,6 +78,7 @@ downloads or builds anything on import.
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -201,6 +202,28 @@ class LibraryTarget:
 
 
 @dataclass(frozen=True)
+class IdentityAssertion:
+    """A checkable claim about a SUPPLIED distribution's own content.
+
+    A prebuilt side is not built from a pinned revision, so nothing about it is
+    pinned by construction: any distribution with the right layout satisfied the
+    operand guards and was then labelled with the profile's `old_revision`
+    (Codex review). A supplied artifact has to *say what it is*, and the honest
+    check is against evidence the distribution itself carries -- SVS installs
+    ``svs/runtime/version.h``, whose ``SVS_RUNTIME_VERSION_STRING`` macro names
+    the release. That is a real assertion about the supplied bytes rather than a
+    digest nobody has computed.
+    """
+
+    #: Path to the evidence, relative to that side's own operand root.
+    path: str
+    #: Literal text that must appear in it.
+    must_contain: str
+    #: What satisfying it proves, used in the failure message.
+    describes: str
+
+
+@dataclass(frozen=True)
 class RealProfile:
     """A pinned real-integration profile."""
 
@@ -259,6 +282,18 @@ class RealProfile:
     #: Distribution packages needed beyond ``required_tools`` -- a header-only
     #: dependency has no binary on PATH, so tool presence cannot detect it.
     system_packages: tuple[str, ...] = ()
+    #: Claims a SUPPLIED (``prebuilt_distribution``) side must satisfy, checked
+    #: against the distribution's own content. Empty for a profile with no
+    #: supplied side, since a side built from a pinned revision is already
+    #: identified by the revision it was built from.
+    identity_assertions: tuple[IdentityAssertion, ...] = ()
+    #: A pinned ``digest_tree`` value a supplied side's header tree must match,
+    #: when one is known. Deliberately unset for every profile today: no
+    #: published SVS distribution digest has been computed here, and inventing
+    #: one would be exactly the fabricated evidence this module exists to
+    #: reject. When set, it is enforced -- which is what keeps this a real hook
+    #: rather than a field nothing reads.
+    expected_header_digest: str | None = None
     #: Scenario shapes this profile is meant to exercise, from
     #: ``SCENARIO_EXPECTATIONS``. No default: a scenario carries the expectation
     #: that applies to this profile's findings, and a default would let a profile
@@ -454,6 +489,18 @@ SVS = RealProfile(
     # completed measurement.
     side_commands={"old": ()},
     side_sources={"old": "prebuilt_distribution"},
+    # The supplied baseline must say that it IS v0.4.0. Upstream installs this
+    # header as part of the runtime's PUBLIC_HEADER set, and its
+    # SVS_RUNTIME_VERSION_STRING macro is the distribution's own statement of
+    # its release -- so any other SVS distribution dropped into the side root
+    # is rejected instead of being labelled v0.4.0.
+    identity_assertions=(
+        IdentityAssertion(
+            path="include/svs/runtime/version.h",
+            must_contain='SVS_RUNTIME_VERSION_STRING "0.4.0"',
+            describes="the runtime's own version macro naming release 0.4.0",
+        ),
+    ),
     required_tools=("git", "cmake", "g++"),
     approx_build_minutes=45,
     approx_disk_gb=6,
@@ -722,6 +769,28 @@ def validate_profile(profile: RealProfile) -> list[str]:
                 "yet carries build commands -- rebuilding a published artifact "
                 "measures the rebuild, not the artifact consumers received"
             )
+    supplied = [
+        side
+        for side in ("old", "new")
+        if profile.source_for_side(side) == "prebuilt_distribution"
+    ]
+    if profile.identity_assertions and not supplied:
+        problems.append(
+            f"{profile.id}: declares identity assertions but has no supplied "
+            "side to check them against, so they gate nothing"
+        )
+    if supplied and not profile.identity_assertions:
+        problems.append(
+            f"{profile.id}: side(s) {supplied} are supplied distributions with "
+            "no identity assertion -- any tree with the right layout would be "
+            "accepted and then labelled with this profile's revision"
+        )
+    for assertion in profile.identity_assertions:
+        if not assertion.must_contain.strip() or not assertion.describes.strip():
+            problems.append(
+                f"{profile.id}: identity assertion on {assertion.path!r} is "
+                "empty, so it is satisfied by anything"
+            )
     for side in profile.side_commands:
         if side not in ("old", "new"):
             problems.append(
@@ -880,6 +949,56 @@ def missing_inputs(
                         f"{side}/{lib.name}: {include_root} (include root: {problem})"
                     )
     return missing
+
+
+def identity_problems(profile: RealProfile, prepared_root: Path) -> list[str]:
+    """Ways a SUPPLIED side fails to prove it is the artifact the profile names.
+
+    Only supplied sides are checked: a side built from a pinned revision is
+    identified by the revision it was built from, while a prebuilt distribution
+    is whatever someone put in the directory. Every declared assertion is
+    checked, plus ``expected_header_digest`` when the profile pins one -- which
+    is the one place :func:`digest_tree` is enforced rather than merely
+    available.
+    """
+    problems: list[str] = []
+    for side in ("old", "new"):
+        if profile.source_for_side(side) != "prebuilt_distribution":
+            continue
+        root = profile.side_root(prepared_root, side)
+        for assertion in profile.identity_assertions:
+            evidence = root / assertion.path
+            if not evidence.is_file():
+                problems.append(
+                    f"{side}: {assertion.path} is absent, so the supplied "
+                    f"distribution cannot show {assertion.describes}"
+                )
+                continue
+            try:
+                text = evidence.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:  # pragma: no cover - unreadable checked file
+                problems.append(f"{side}: {assertion.path} is unreadable ({exc})")
+                continue
+            if assertion.must_contain not in text:
+                problems.append(
+                    f"{side}: {assertion.path} does not contain "
+                    f"{assertion.must_contain!r}, so this is not "
+                    f"{profile.revision_for_side(side)} -- the supplied "
+                    f"distribution must show {assertion.describes}"
+                )
+        if profile.expected_header_digest is not None:
+            for lib in profile.l2_libraries:
+                for header_root in lib.public_headers:
+                    target = root / header_root
+                    if not target.is_dir():
+                        continue
+                    actual = digest_tree(target)
+                    if actual != profile.expected_header_digest:
+                        problems.append(
+                            f"{side}: {header_root} digests {actual}, not the "
+                            f"pinned {profile.expected_header_digest}"
+                        )
+    return problems
 
 
 def missing_tools(profile: RealProfile) -> list[str]:
@@ -1147,6 +1266,22 @@ def resolve_status(
             measurable_libraries=[lib.name for lib in buildable],
             blocked_libraries=dict(partial.blocked_libraries) if partial else {},
         )
+    wrong_identity = identity_problems(profile, prepared_root)
+    if wrong_identity:
+        # After the operand check: a side missing its evidence file is reported
+        # as a missing operand first, which names the more basic problem.
+        return ProfileStatus(
+            profile.id,
+            "BLOCKED",
+            reason=(
+                "a supplied distribution does not prove it is the artifact this "
+                "profile names, so a measurement of it would be published under "
+                "the wrong identity"
+            ),
+            toolchain=toolchain_identity(profile),
+            missing_inputs=wrong_identity,
+            measurable_libraries=[lib.name for lib in buildable],
+        )
     if partial is not None:
         return partial
     return ProfileStatus(
@@ -1159,6 +1294,29 @@ def resolve_status(
         toolchain=toolchain_identity(profile),
         measurable_libraries=[lib.name for lib in buildable],
     )
+
+
+def output_content_problem(path: Path) -> str | None:
+    """Why *path* is not a readable measurement result, or ``None`` when it is.
+
+    Existence is not a result. A timed command that creates or truncates its
+    destination and then fails before writing leaves a zero-byte file, and a
+    crash mid-write leaves a truncated one -- both satisfy ``is_file()``. Where
+    the format is one this module recognises, it is parsed rather than assumed:
+    a half-written JSON report has bytes and no readable content.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:  # pragma: no cover - stat failure on a checked file
+        return f"unreadable ({exc})"
+    if size == 0:
+        return "empty file"
+    if path.suffix == ".json":
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return f"not readable JSON ({exc})"
+    return None
 
 
 @dataclass(frozen=True)
@@ -1202,7 +1360,15 @@ def promote_to_measured(
       list and a duration alone -- the completed-work-without-evidence state
       this whole split exists to prevent (Codex and CodeRabbit review, which
       found the same hole independently);
-    * an output path that is not an existing file is an unvalidated output.
+    * an output path that is not an existing file is an unvalidated output;
+    * an EMPTY output file is the same defect one level down: a timed command
+      that creates or truncates its destination and then dies before writing
+      leaves a zero-byte file, which `is_file()` happily accepts (Codex
+      review). A file entry is not a result, for the same reason a directory
+      entry is not a prepared tree;
+    * an output whose format this module recognises must actually parse. A
+      truncated or half-written JSON report is a file with bytes in it and
+      no readable result.
 
     A ``PARTIAL`` status may be promoted, but only over the libraries it said
     were measurable -- promoting it over a blocked library would republish the
@@ -1285,6 +1451,19 @@ def promote_to_measured(
             f"{status.profile_id}: measurement output(s) {absent} are not existing "
             "files, so the result is unvalidated"
         )
+    unreadable = [
+        f"{path}: {problem}"
+        for path, problem in (
+            (str(path), output_content_problem(Path(path)))
+            for path in result.output_paths
+        )
+        if problem is not None
+    ]
+    if unreadable:
+        raise ValueError(
+            f"{status.profile_id}: measurement output(s) {unreadable} hold no "
+            "readable result, so nothing is validated by their existence"
+        )
     return ProfileStatus(
         status.profile_id,
         "MEASURED",
@@ -1305,6 +1484,11 @@ def promote_to_measured(
             "promoted_from": status.status,
         },
     )
+
+
+def _shell_single_quote(text: str) -> str:
+    """*text* as one single-quoted shell word, safe for arbitrary content."""
+    return "'" + text.replace("'", "'\\''") + "'"
 
 
 def _find_header_predicate() -> str:
@@ -1428,21 +1612,39 @@ def prepare_script(profile: RealProfile) -> str:
                     "this host's toolchain, not the artifact consumers received.",
                 ]
             )
+            # Every message goes through `_shell_single_quote`: the identity
+            # assertions' own prose contains apostrophes ("the runtime's own
+            # version macro"), which silently broke the generated script's
+            # quoting until a test executed it instead of reading it.
             for operand, kind in _supplied_side_operands(profile):
+                message = _shell_single_quote(
+                    f"missing {side} side {kind}: {profile.id}_{side}/{operand}"
+                    f" -- extract the {profile.project} {revision} distribution"
+                    f" into {profile.id}_{side}"
+                )
                 lines.append(
                     f"if [ ! {'-f' if kind == 'file' else '-d'} "
-                    f"{side_root}/{operand} ]; then echo 'missing {side} side "
-                    f"{kind}: {profile.id}_{side}/{operand} -- extract the "
-                    f"{profile.project} {revision} distribution into "
-                    f"{profile.id}_{side}' >&2; exit 1; fi"
+                    f"{side_root}/{operand} ]; then echo {message} >&2; exit 1; fi"
+                )
+            for assertion in profile.identity_assertions:
+                message = _shell_single_quote(
+                    f"{side} side is not {revision}: {profile.id}_{side}/"
+                    f"{assertion.path} does not show {assertion.describes}"
+                )
+                lines.append(
+                    f"if ! grep -q {_shell_single_quote(assertion.must_contain)} "
+                    f"{side_root}/{assertion.path} 2>/dev/null; then echo "
+                    f"{message} >&2; exit 1; fi"
                 )
             for header_root in _supplied_side_header_roots(profile):
+                message = _shell_single_quote(
+                    f"missing {side} side header evidence: {profile.id}_{side}/"
+                    f"{header_root} holds no header file"
+                )
                 lines.append(
                     f'if [ -z "$(find {side_root}/{header_root} -type f '
                     f"\\( {_find_header_predicate()} \\) -print -quit "
-                    f"2>/dev/null)\" ]; then echo 'missing {side} side header "
-                    f"evidence: {profile.id}_{side}/{header_root} holds no "
-                    f"header file' >&2; exit 1; fi"
+                    f'2>/dev/null)" ]; then echo {message} >&2; exit 1; fi'
                 )
             continue
         for command in commands:

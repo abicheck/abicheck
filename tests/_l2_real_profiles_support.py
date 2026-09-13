@@ -67,6 +67,15 @@ def materialize_operands(profile, prepared_root: Path) -> Path:
                 else:
                     target.mkdir(parents=True, exist_ok=True)
                     (target / "api.h").write_text("/* header */")
+        # A supplied distribution must also prove which artifact it is, so the
+        # fixture writes the evidence each declared assertion looks for.
+        if profile.source_for_side(side) == "prebuilt_distribution":
+            for assertion in profile.identity_assertions:
+                evidence = root / assertion.path
+                evidence.parent.mkdir(parents=True, exist_ok=True)
+                evidence.write_text(
+                    f"/* fixture */\n#define {assertion.must_contain}\n"
+                )
     return prepared_root
 
 

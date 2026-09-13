@@ -582,9 +582,10 @@ class TestPrepareScriptIsolatesEachCommand:
         ]
         assert commands, "a profile with no commands would pass this vacuously"
         for line in commands:
-            if line.startswith("if [ "):
-                # A supplied side's operand guards are whole-script assertions,
-                # not commands run inside one side's tree.
+            if line.startswith("if "):
+                # A supplied side's operand and identity guards are
+                # whole-script assertions, not commands run inside one side's
+                # tree.
                 assert "exit 1" in line, line
                 continue
             assert line.startswith('( cd "$ROOT" && '), line
