@@ -279,6 +279,29 @@ jobs:
       # this is requested under a configuration where it silently falls
       # back without the repo saying so.
       COVERAGE_CORE: sysmon
+      # Keep every temporary file this job writes OFF the shared `/tmp`.
+      #
+      # Evidence, from one run (34778392930, `unit-tests (ubuntu-latest,
+      # 3.14)`): three unrelated consumers each lost a file under `/tmp`
+      # while still using it.
+      #   * an xdist worker's whole basetemp -- `.../popen-gw0: MISSING`,
+      #     reported by the harness guard added for exactly this;
+      #   * `action/run.sh`'s own `mktemp -d` scratch directory --
+      #     `cd: /tmp/tmp.r4jnmBWtyh: No such file or directory`;
+      #   * gcc's own intermediate object, mid-link --
+      #     `ld: cannot find /tmp/ccQIceDH.o: No such file or directory`.
+      # No test touches the second or third, so this is not test-owned
+      # state being mishandled: something prunes `/tmp` on these runners
+      # while the job is running. That had been surfacing as a handful of
+      # unattributable `FileNotFoundError`s per lane, a different set each
+      # time, none reproducible locally.
+      #
+      # `$RUNNER_TEMP` is job-private and is not under `/tmp`, so pointing
+      # `TMPDIR` at it moves all three at once: `tempfile.gettempdir()`
+      # (hence pytest's own basetemp), `mktemp`, and the compilers. One
+      # variable rather than a per-consumer fix, because the consumers have
+      # nothing in common except the directory they were using.
+      TMPDIR: ${{ runner.temp }}
     strategy:
       fail-fast: false
       matrix:

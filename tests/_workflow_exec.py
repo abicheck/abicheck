@@ -419,6 +419,12 @@ def run_step(
     # launcher on a stub-only runner, which is what `_assurance_overlay_exec`
     # was doing (Codex review, PR #1255).
     require_bash()
+    # Resolved in the guarding function, not in the `_run` closure -- see
+    # `TestEveryResolvedCallSiteGuardsFirst` in
+    # `tests/test_subprocess_bash_is_resolved.py`: the resolution and the guard
+    # must sit in the same function, or a runner whose only bash is the WSL
+    # launcher stub executes it instead of skipping.
+    bash = bash_executable()
 
     def _run() -> subprocess.CompletedProcess[str]:
         # The workspace is deliberately NOT created here, on any attempt. If it
@@ -447,7 +453,7 @@ def run_step(
                 # real step failed — every `assert result.returncode == 0` in the
                 # workflow tests was weaker than the thing it models (CodeRabbit
                 # review).
-                [bash_executable(), "-eo", "pipefail", script_arg],
+                [bash, "-eo", "pipefail", script_arg],
                 cwd=workspace,
                 env=step_env,
                 capture_output=True,
