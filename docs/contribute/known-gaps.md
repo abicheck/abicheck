@@ -9162,3 +9162,47 @@ Not attempted in the PR that found this because it changes a public
 partition and a report schema — see this file's own precedent that a
 partition change is an ADR-scoped decision, not a follow-up patch. The
 measurement above is the evidence; the decision is open.
+
+## Declared-header order is still load-bearing because the driver TU is sequential
+
+`profile_fingerprint`'s `header_sequence` field records declared-header
+*order*, and it does so for a real reason: `dumper.py` generates one
+aggregate driver translation unit that `#include`s the declared headers in
+sequence, so a header's macros/pragmas can change how every header parsed
+after it resolves.
+
+The comparability gate originally waived only a strict *trailing* append
+(`_header_sequence_is_additive_reorder_free`), which is the one shape that
+proves no existing header's preprocessing context changed. That is correct
+for a deliberately declared `-H a.h -H b.h` order and badly mis-fitted to a
+directory-discovered one, where the order is an incidental product of
+sorting whatever the sweep found. Real integration evidence: a project
+adding one public header named `json.h` to a set sorting as
+`data.h, log.h, ...` landed it in the *middle*, the waiver declined, and an
+ordinary public-header addition refused the entire comparison —
+`profile_fingerprint mismatch; differing fields: header_sequence`, no
+verdict, and no findings on any axis, the binary's own exported-symbol
+identity included.
+
+**What was fixed:** the *disposition*, not the extraction fact. An
+order-preserving insertion of headers the scope fingerprint independently
+confirms as new is now a non-fatal `ComparabilityMismatch` (`fatal=False`,
+`comparability_profile._declared_header_insertion_mismatch`): the comparison
+runs and the residual risk is recorded as a bounded assurance reduction on
+the `declaration`/`layout` dimensions, per the product rule "weaker evidence
+narrows conclusions". Nothing is hidden — the reason reaches
+`coverage_warnings` and the per-dimension breakdown reaches
+`DiffResult.comparability_assurance`.
+
+**What remains open:** the sequential aggregate TU itself. An insertion
+genuinely does change later headers' parse context, so the bounded outcome
+is honest rather than merely convenient, and a real *reorder* of existing
+headers is still a hard refusal because nothing in the declared surface
+explains it. Parsing each declared header in an independently scoped TU
+would make declared order non-load-bearing outright — a reorder would then
+be comparable at full assurance too, and this whole carve-out family could
+retire — but that is a dumper change carrying a per-header TU cost, and it
+was deliberately not attempted alongside the disposition fix.
+`--diagnostic-comparison` is explicitly **not** the answer to any of this:
+it downgrades assurance wholesale instead of resolving the extraction
+question.

@@ -615,6 +615,7 @@ def _report_not_comparable(
     *,
     fmt: str,
     output: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...] = (),
 ) -> None:
     """Surface an ADR-050 D2 comparability-gate hard failure to the user.
 
@@ -630,10 +631,26 @@ def _report_not_comparable(
     :func:`sarif.to_sarif_not_comparable`/
     :func:`junit_report.to_junit_xml_not_comparable`, so CI tooling
     consuming those artifacts sees the failure instead of a missing file.
-    ``markdown``/``html``/``review`` get the same clear stderr message a
-    ``click.UsageError`` would produce and no output file — those are
-    human-facing formats already reading this stderr output, and neither has
-    an equivalent "run failed" document convention worth fabricating one for.
+    ``markdown``/``html``/``review``/``text``/``oneline`` get the same clear
+    stderr message a ``click.UsageError`` would produce, plus the small
+    dedicated refusal document :func:`_report_run_aborted` renders for them
+    (PR #1180) -- a human-facing target must not stay silently absent, or
+    keep a stale prior-run document, on a refused run either.
+
+    *secondary_writes* -- every additional ``-o FORMAT=DEST``/``--write``
+    target the invocation requested, forwarded to :func:`_report_run_aborted`
+    exactly as every other abort path through it already does
+    (``cli_compare_helpers.run_compare``'s budget-overflow abort,
+    ``compare_no_baseline``). Leaving it at the empty default -- this
+    caller's behavior until now -- meant a run refused on comparability
+    wrote only its PRIMARY output: ``--format review -o report.md --write
+    json=report.json`` produced the human-facing refusal and no
+    ``report.json`` at all, so a CI wrapper expecting that sidecar reported
+    a generic "missing comparison report" error instead of the real
+    operational outcome (``verdict: null`` plus the structured refusal
+    reason the JSON renderer here already produces). Every requested output
+    must describe the same outcome -- a refusal included -- not only a
+    completed comparison.
     """
     kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
     message = str(exc)
@@ -650,7 +667,8 @@ def _report_not_comparable(
 
     _report_run_aborted(
         kind, message, old.library, old.version, new.version,
-        fmt=fmt, output=output, operational=OperationalStatus.NOT_COMPARABLE,
+        fmt=fmt, output=output, secondary_writes=secondary_writes,
+        operational=OperationalStatus.NOT_COMPARABLE,
     )
 
 

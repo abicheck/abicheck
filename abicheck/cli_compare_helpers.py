@@ -1814,7 +1814,10 @@ def run_compare(
             contract_mode=resolved_contract_mode,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
-        _report_not_comparable(exc, old, new, fmt=fmt, output=output)
+        _report_not_comparable(
+            exc, old, new, fmt=fmt, output=output,
+            secondary_writes=secondary_writes,
+        )
         sys.exit(_EXIT_NOT_COMPARABLE)
     except deadline.DeadlineExceeded as exc:
         # ADR-068 §3 #19: budget expired during classification itself (the

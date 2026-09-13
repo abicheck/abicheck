@@ -830,11 +830,31 @@ class ComparabilityMismatch:
     pipeline's own per-finding assurance (rather than merely exposing it on
     the mismatch descriptor) is E-S2's own next slice, not this one -- see
     that plan section's own status note.
+
+    ``fatal`` (default ``True``) is what separates a mismatch that REFUSES
+    the comparison from one that merely BOUNDS it. A ``fatal=False``
+    descriptor is returned by :func:`check_contracts_comparable` in both
+    modes and never raised: the pair still gets a real verdict, and the
+    divergence is recorded as an assurance reduction on exactly the
+    ``dimensions`` named (``checker.compare`` carries it into
+    ``DiffResult.comparability_assurance`` and ``coverage_warnings``)
+    rather than disposed of as a refusal. Only a divergence whose SHAPE is
+    itself positive evidence about what changed may be non-fatal -- see
+    ``comparability_profile``'s declared-header-insertion branch, the only
+    producer today. This is the product rule "weaker evidence narrows
+    conclusions" applied literally: an ordinary public-header addition
+    lowers assurance on the declaration/layout axes, it does not make two
+    snapshots incomparable.
+
+    ``assurance: "none"`` stays reserved for a fatal mismatch forced
+    through with ``--diagnostic-comparison``; a non-fatal one never sets
+    it, because nothing was forced.
     """
 
     kind: str  # "scope" | "profile" | "dependency_scope"
     reason: str
     dimensions: frozenset[str] = frozenset()
+    fatal: bool = True
 
 
 def _check_dependency_scope_comparable(
@@ -1378,14 +1398,24 @@ def check_contracts_comparable(
         lambda: _check_scope_fingerprint_comparable(old.contract, new.contract),
         lambda: _check_profile_fingerprint_comparable(old, new),
     )
+    # A non-fatal descriptor (ComparabilityMismatch.fatal=False) is neither
+    # raised nor allowed to end the scan: it bounds the comparison instead of
+    # refusing it, so a genuinely fatal mismatch on a later axis must still
+    # win over it. Only the profile axis produces one today (and it is checked
+    # last), so this loop shape is future-proofing, not a live case.
+    bounded: ComparabilityMismatch | None = None
     for check in checks:
         mismatch = check()
         if mismatch is None:
             continue
+        if not mismatch.fatal:
+            if bounded is None:
+                bounded = mismatch
+            continue
         if diagnostic:
             return mismatch
         raise _MISMATCH_ERRORS[mismatch.kind](mismatch.reason)
-    return None
+    return bounded
 
 
 def dimension_assurance(

@@ -1056,7 +1056,18 @@ def compare(
         if old is not None
         else None
     )
-    assurance: Literal["none"] | None = "none" if mismatch is not None else None
+    # `mismatch.fatal`, not merely `mismatch is not None`: a NON-fatal
+    # descriptor (comparability.ComparabilityMismatch.fatal=False -- today, a
+    # declared-header INSERTION, see comparability_profile's own branch) is
+    # returned in both modes and bounds the comparison instead of refusing it.
+    # Nothing was forced through a refusal there, so `assurance: "none"` --
+    # which means "this result came from --diagnostic-comparison, do not trust
+    # it" -- must not be stamped; the reduction is carried by
+    # `comparability_assurance`'s per-dimension breakdown and the warning
+    # below, both of which a non-fatal mismatch populates identically.
+    assurance: Literal["none"] | None = (
+        "none" if mismatch is not None and mismatch.fatal else None
+    )
     # E-S2 (cli-cleanup-phase-two.md Block 5): `assurance`'s per-dimension
     # breakdown -- see comparability.dimension_assurance's own doc.
     comparability_assurance = dimension_assurance(mismatch)

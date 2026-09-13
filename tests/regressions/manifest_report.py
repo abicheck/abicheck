@@ -354,4 +354,54 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.refusal_reaches_only_the_primary_output",
+        invariant=(
+            "Every output an invocation requested describes the SAME "
+            "outcome, and an operational refusal (not comparable, budget "
+            "exhausted) is an outcome — not an excuse to write fewer "
+            "documents than a completed comparison would. A secondary "
+            "`-o FORMAT=DEST` target must never be silently absent, or keep "
+            "a stale prior-run document, on a run that refused; the "
+            "structured formats carry a null verdict plus the refusal "
+            "reason so a consumer reads the operational outcome instead of "
+            "inferring a generic missing-report error. Stated per format "
+            "and per refusal kind against each format's own structural "
+            "oracle, since file existence alone also passes for a stale "
+            "document."
+        ),
+        # Real integration evidence: `compare -o review=r.md -o json=r.json`
+        # on a not-comparable pair wrote the Markdown refusal and no JSON at
+        # all. `_report_run_aborted` had accepted `secondary_writes` since
+        # PR #1178 and every other abort path forwarded it -- the
+        # comparability-refusal caller alone left it at the empty default,
+        # so the wrapper consuming that sidecar reported its own
+        # "missing comparison reports" usage error and the real reason was
+        # lost exactly where it was needed.
+        fixed_by=(1178, 1273),
+        seed_tests=("tests/test_cli_comparability_gate.py",),
+        public_surfaces=("cli",),
+        axes={
+            "secondary_format": (
+                "json",
+                "sarif",
+                "junit",
+                "markdown",
+                "review",
+                "html",
+            ),
+            "refusal_kind": ("scope_mismatch", "profile_mismatch"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the native `compare` refusal path is held to this "
+                    "by a seed test. The release fan-out and `compat check` "
+                    "have their own abort wiring; neither is covered here."
+                ),
+                reference="abicheck/cli_compare_release.py",
+                canary_test=None,
+            ),
+        ),
+    ),
 )

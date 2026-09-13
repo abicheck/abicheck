@@ -248,4 +248,65 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="comparability.incidental_ordering_treated_as_contract",
+        invariant=(
+            "A comparability refusal must rest on evidence that the two "
+            "sides are genuinely not comparable — not on an extraction fact "
+            "whose value the user never chose. Declared-header ORDER is "
+            "load-bearing only where it changes an existing header's parse "
+            "context; a growth that preserves every existing header's "
+            "relative order and adds only headers the scope fingerprint "
+            "independently confirms as new is an ADDITION, and an addition "
+            "bounds a comparison (a dimension-scoped assurance reduction, "
+            "recorded with its reason) instead of refusing to produce any "
+            "verdict. The outcome must not depend on WHERE the added header "
+            "sorts, and the invariant is stated over every insertion "
+            "position and every permutation — not over the one reported "
+            "header name."
+        ),
+        # Real integration evidence: a project whose public headers are
+        # discovered by a sorted directory sweep added one header named
+        # `json.h`, which sorts between `data.h` and `log.h`. The only
+        # waiver was a strict TRAILING append, so an ordinary public-header
+        # addition produced `profile_fingerprint mismatch; differing fields:
+        # header_sequence`, no verdict, and no findings on ANY axis — the
+        # binary's own exported-symbol conclusions included, which a header
+        # insertion cannot touch at all.
+        fixed_by=(1273,),
+        seed_tests=("tests/test_comparability_gate_header_insertion.py",),
+        # The seed tests call `check_contracts_comparable`/`checker.compare`
+        # directly, never through Click or `abicheck.service`.
+        public_surfaces=(),
+        axes={
+            "insertion_position": ("first", "interior", "trailing"),
+            "sequence_shape": (
+                "single-insertion",
+                "multi-insertion",
+                "reorder",
+                "shrink",
+                "duplicate",
+                "sentinel",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The DISPOSITION is corrected, not the extraction fact "
+                    "underneath it: the aggregate driver TU still parses "
+                    "declared headers sequentially, so an insertion really "
+                    "does change later headers' preprocessing context and "
+                    "the bounded outcome is an honest one. Parsing each "
+                    "declared header in an independently scoped TU would "
+                    "make declared order non-load-bearing outright — even a "
+                    "reorder would then be comparable at full assurance — "
+                    "but that is a dumper change with a real per-header TU "
+                    "cost, not attempted here. A genuine reorder of "
+                    "existing headers therefore remains a hard refusal."
+                ),
+                reference="abicheck/comparability_sequences.py",
+                canary_test=None,
+            ),
+        ),
+    ),
 )
