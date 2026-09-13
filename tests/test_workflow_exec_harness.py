@@ -39,9 +39,8 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import _workflow_exec
 import pytest
@@ -544,13 +543,38 @@ class TestEveryStepGetsAPrivateTmpdir:
 
     @staticmethod
     def _tmpdir_probe() -> dict[str, str]:
+        """A step that reports where the system hands it temporary files.
+
+        Every path is reported **as the step's own shell resolves it**
+        (`cd ... && pwd -P`), and the comparisons below are between two
+        values from this same world -- never between one of these and a
+        `Path` this Python process built. That is not caution: on the
+        windows-latest lane Git Bash answers `$TMPDIR` as
+        `/d/a/_temp/...` while Python holds `D:\\a\\_temp\\...`, so the
+        first version of this class compared two spellings of one
+        directory and failed on a harness that was working correctly --
+        the same path-string-versus-filesystem-identity trap
+        `actions/stage-baseline/run.sh` records in its own comments.
+
+        `ambient_real` is the oracle for "the shared system temp": what
+        `mktemp` picks with `TMPDIR` unset, derived rather than spelled,
+        so it is right on every platform and cannot drift from what the
+        harness is escaping.
+        """
         return {
             "run": (
-                'printf "tmpdir=%s\\n" "${TMPDIR:-<unset>}" >> "$GITHUB_OUTPUT"\n'
+                "set -u\n"
+                '_emit() { printf "%s=%s\\n" "$1" "$2" >> "$GITHUB_OUTPUT"; }\n'
+                '_real() { (cd "$1" && pwd -P); }\n'
                 'd="$(mktemp -d)"\n'
-                'printf "made=%s\\n" "$d" >> "$GITHUB_OUTPUT"\n'
                 'f="$(mktemp)"\n'
-                'printf "file=%s\\n" "$f" >> "$GITHUB_OUTPUT"\n'
+                '_emit tmpdir_real "$(_real "${TMPDIR:-/nonexistent}")"\n'
+                '_emit made_parent_real "$(_real "$(dirname "$d")")"\n'
+                '_emit file_parent_real "$(_real "$(dirname "$f")")"\n'
+                '_emit workspace_real "$(_real "$GITHUB_WORKSPACE")"\n'
+                '_emit workspace_parent_real "$(_real "$GITHUB_WORKSPACE/..")"\n'
+                '_emit ambient_real "$( (unset TMPDIR TEMP TMP; '
+                '_real "$(dirname "$(mktemp -u)")") )"\n'
             )
         }
 
@@ -559,18 +583,21 @@ class TestEveryStepGetsAPrivateTmpdir:
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
         assert result.returncode == 0, result.stderr
-        tmpdir = Path(result.outputs["tmpdir"])
-        assert tmpdir.parent == workspace.parent, (
+        tmpdir = PurePosixPath(result.outputs["tmpdir_real"])
+        assert tmpdir.parent == PurePosixPath(
+            result.outputs["workspace_parent_real"]
+        ), (
             "a step's $TMPDIR must be a directory this harness allocated "
             f"beside the workspace, not {tmpdir}"
         )
-        # Outside the workspace and outside $RUNNER_TEMP, so `tree()` and the
-        # `$RUNNER_TEMP` assertions keep seeing only the step's own output.
-        assert workspace not in tmpdir.parents
-        for name in ("made", "file"):
-            created = Path(result.outputs[name])
-            assert tmpdir in created.parents, (
-                f"`mktemp` resolved {created} outside the step's own $TMPDIR"
+        assert tmpdir.name.startswith("_step_tmp_")
+        # Outside the workspace, so `tree()` and the `$RUNNER_TEMP`
+        # assertions keep seeing only what the step itself created.
+        assert PurePosixPath(result.outputs["workspace_real"]) not in tmpdir.parents
+        for name in ("made_parent_real", "file_parent_real"):
+            assert PurePosixPath(result.outputs[name]) == tmpdir, (
+                f"`mktemp` resolved {result.outputs[name]} outside the "
+                "step's own $TMPDIR"
             )
 
     def test_mktemp_does_not_resolve_against_the_shared_system_temp(
@@ -578,26 +605,27 @@ class TestEveryStepGetsAPrivateTmpdir:
     ) -> None:
         """The property that actually failed in CI, stated directly.
 
-        `/tmp` is the thing being escaped, so assert against it by identity
-        rather than trusting the allocation site above to keep being right:
-        a future refactor that points `$TMPDIR` back at the shared temp
-        would still satisfy "it is a directory somebody allocated".
+        The shared temp is the thing being escaped, so it is asserted
+        against by identity rather than by trusting the allocation site
+        above to keep being right: a refactor pointing `$TMPDIR` back at
+        it would still satisfy "it is a directory somebody allocated".
+        The oracle is `mktemp`'s own choice with `TMPDIR` unset -- derived
+        independently of how `run_step` allocates, and of any literal.
         """
         workspace = make_workspace(tmp_path)
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
         assert result.returncode == 0, result.stderr
-        # `# nosec`: bandit's B108 is about a module *using* a hardcoded
-        # temporary path; here the literal is the assertion's target -- the
-        # directory this test exists to prove a step never lands in. It is
-        # named alongside `tempfile.gettempdir()` rather than through it,
-        # because `$TMPDIR` in this very process would otherwise move the
-        # oracle along with the thing being checked.
-        shared = {Path("/tmp"), Path(tempfile.gettempdir())}  # nosec B108
-        for name in ("made", "file"):
-            created = Path(result.outputs[name])
-            assert created.parent not in shared, (
-                f"{name} landed directly in the shared system temp ({created})"
+        ambient = PurePosixPath(result.outputs["ambient_real"])
+        # Guard the oracle itself: an `ambient_real` that came back empty
+        # (or as the step's own $TMPDIR) would make every assertion below
+        # pass while checking nothing.
+        assert str(ambient) not in {"", "."}
+        assert ambient != PurePosixPath(result.outputs["tmpdir_real"])
+        for name in ("made_parent_real", "file_parent_real"):
+            assert PurePosixPath(result.outputs[name]) != ambient, (
+                f"{name} landed directly in the shared system temp "
+                f"({result.outputs[name]})"
             )
 
     def test_two_steps_do_not_share_a_tmpdir(self, tmp_path: Path) -> None:
@@ -607,20 +635,28 @@ class TestEveryStepGetsAPrivateTmpdir:
 
         assert first.returncode == 0, first.stderr
         assert second.returncode == 0, second.stderr
-        assert first.outputs["tmpdir"] != second.outputs["tmpdir"]
+        assert first.outputs["tmpdir_real"] != second.outputs["tmpdir_real"]
 
     def test_the_step_tmpdir_is_removed_afterwards(self, tmp_path: Path) -> None:
+        """Checked against the filesystem this process can see, by pattern
+        rather than by the step's own spelling of the path: nothing the
+        harness allocated for a step may outlive it."""
         workspace = make_workspace(tmp_path)
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
         assert result.returncode == 0, result.stderr
-        assert not Path(result.outputs["tmpdir"]).exists()
+        assert list(workspace.parent.glob("_step_tmp_*")) == []
 
     @pytest.mark.parametrize("source", ["step-env", "caller-env"])
     def test_an_explicit_tmpdir_still_wins(self, tmp_path: Path, source: str) -> None:
         """Several tests set `TMPDIR` on purpose (a relative value, a value
         nested under an input path) to exercise a script's own handling of
-        it. The harness default must not outrank either spelling."""
+        it. The harness default must not outrank either spelling.
+
+        Asserted by filesystem identity -- the directory the caller chose
+        holds what the step allocated -- rather than by comparing the
+        step's reported path against this process's spelling of it.
+        """
         workspace = make_workspace(tmp_path)
         chosen = tmp_path / "chosen_tmp"
         chosen.mkdir()
@@ -634,5 +670,10 @@ class TestEveryStepGetsAPrivateTmpdir:
         result = run_step(step, workspace=workspace, env=env)
 
         assert result.returncode == 0, result.stderr
-        assert Path(result.outputs["tmpdir"]) == chosen
-        assert Path(result.outputs["made"]).parent == chosen
+        entries = sorted(p.name for p in chosen.iterdir())
+        assert len(entries) == 2, (
+            f"the step's `mktemp -d` and `mktemp` should both have landed in "
+            f"the caller's own $TMPDIR; it holds {entries}"
+        )
+        assert sum(1 for p in chosen.iterdir() if p.is_dir()) == 1
+        assert sum(1 for p in chosen.iterdir() if p.is_file()) == 1
