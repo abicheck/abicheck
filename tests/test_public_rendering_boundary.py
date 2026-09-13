@@ -688,3 +688,82 @@ class TestDemanglingIsIdempotentAndReachesEveryHumanPath:
         for rel in ("compat/cli.py", "annotations_step_summary.py"):
             src = pathlib.Path("abicheck", rel).read_text(encoding="utf-8")
             assert "demangle=True" in src, rel
+
+
+class TestThePatternModulationLedgerRendersWhatTheProducerWrites:
+    """Built from a real `PatternModulation`, never a hand-made dict.
+
+    That distinction is the whole point of this class. The first version of
+    this renderer read `m["rule"]`; the producer writes `rule_id`. A fixture
+    invented alongside the renderer agreed with the renderer and passed, so
+    every real report would have rendered `?` in the Rule column while the
+    test stayed green (Codex review, PR #1284) — the same synthetic-object
+    failure this PR already hit once.
+    """
+
+    def _modulation(self, **kw):
+        from abicheck.pattern_verdicts import PatternModulation
+
+        fields = {
+            "symbol": "_ZN3lib4goneEi",
+            "original_category": "abi_breaking",
+            "new_category": "quality",
+            "rule_id": "detail_ns_rule",
+            "reason": "internal detail namespace",
+            "evidence_tier": "header",
+            "edges_matched": ("a->b",),
+        }
+        fields.update(kw)
+        return PatternModulation(**fields)
+
+    def _report(self, modulation):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.report.dispatch_markdown import to_markdown
+
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol=modulation.symbol,
+                    description="removed",
+                )
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        result.pattern_modulations = [modulation.to_dict()]
+        return to_markdown(result, demangle=True)
+
+    def _row(self, md, needle):
+        rows = [ln for ln in md.splitlines() if needle in ln and ln.startswith("|")]
+        assert len(rows) == 1, md
+        return rows[0]
+
+    def test_the_rule_that_fired_is_named(self):
+        md = self._report(self._modulation())
+        assert "detail_ns_rule" in md, md
+        assert "| `?` |" not in md, "the renderer read a key the producer never writes"
+
+    def test_the_reason_is_named(self):
+        assert "internal detail namespace" in self._report(self._modulation())
+
+    def test_every_key_the_renderer_reads_exists_on_the_producer(self):
+        """States the contract directly, so a renamed producer field fails
+        here rather than silently degrading to `?` in a report."""
+        produced = self._modulation().to_dict()
+        for key in ("symbol", "rule_id", "reason"):
+            assert key in produced, (key, sorted(produced))
+
+    def test_an_operator_symbol_keeps_the_table_intact(self):
+        """`_ZN3FooorERKS_` demangles to `Foo::operator|(Foo const&)`, and the
+        whole-document pass inserts that pipe after the row was built."""
+        import re
+
+        md = self._report(self._modulation(symbol="_ZN3FooorERKS_"))
+        row = self._row(md, "detail_ns_rule")
+        assert "operator" in row, row
+        assert len(re.split(r"(?<!\\)\|", row.strip().strip("|"))) == 3, row

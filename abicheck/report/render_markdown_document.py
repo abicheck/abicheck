@@ -830,5 +830,5 @@ def render_markdown_document(doc: ReportDocument) -> str:
     if d["demangle"]:
         from ..demangle import demangle_text
 
-        text = demangle_text(text)
+        text = demangle_text(text, escape_table_pipes=True)  # Foo::operator|
     return text

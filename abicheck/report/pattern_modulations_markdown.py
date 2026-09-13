@@ -44,6 +44,12 @@ def render_pattern_modulations_from_mapping(d: Any) -> list[str]:
     was missing. Absent when no rule fired, which is every run with ADR-027's
     opt-in `--pattern-verdicts` off, i.e. the default.
     """
+    # `rule_id`, which is what `PatternModulation.to_dict()` actually writes
+    # (and what `cli_audit` reads) -- not `rule`. Reading the wrong key
+    # rendered `?` in every real report's Rule column while a hand-built
+    # fixture passed, because the fixture was invented here rather than taken
+    # from the producer (Codex review, PR #1284). The tests now build the
+    # real dataclass.
     if not d:
         return []
     rows = [m for m in d if isinstance(m, Mapping)]
@@ -61,7 +67,8 @@ def render_pattern_modulations_from_mapping(d: Any) -> list[str]:
     ]
     for m in rows:
         lines.append(
-            f"| `{md_cell(m.get('symbol', '?'))}` | `{md_cell(m.get('rule', '?'))}` "
+            f"| `{md_cell(m.get('symbol', '?'))}` "
+            f"| `{md_cell(m.get('rule_id', '?'))}` "
             f"| {md_cell(m.get('reason', ''))} |"
         )
     return lines
