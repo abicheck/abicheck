@@ -35,8 +35,17 @@ session-wide cache directory -- the obvious way to make this "even faster"
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
+# The *same* module object pytest itself loaded, not a second copy: `tests/` has
+# no `__init__.py`, so pytest's prepend import mode puts this file's directory on
+# `sys.path` and loads the conftest as the top-level module `conftest` -- verified
+# by identity, which matters because the allocator caches its bucket in a
+# module-level dict. Imported here rather than inside each test so the tests read
+# as ordinary calls.
+import conftest  # noqa: E402
 import pytest
 
 from abicheck import dumper_cache, snapshot_cache
@@ -157,7 +166,6 @@ class TestTheAllocatorSurvivesItsDirectoryTreeVanishing:
     @staticmethod
     def _allocate(basetemp: Path) -> Path:
         """One allocation through the real allocator, with a real factory."""
-        import conftest
 
         return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
 
@@ -169,7 +177,6 @@ class TestTheAllocatorSurvivesItsDirectoryTreeVanishing:
     def test_allocation_recovers_after_a_deletion(
         self, tmp_path: Path, remove: str
     ) -> None:
-        import shutil
 
         root = tmp_path / "root"
         basetemp = root / "pytest-0" / "popen-gw0"
@@ -199,8 +206,6 @@ class TestTheAllocatorSurvivesItsDirectoryTreeVanishing:
         rather than because the allocator heals. This reproduces the pre-fix
         allocator verbatim and requires it to fail.
         """
-        import shutil
-        import tempfile
 
         basetemp = tmp_path / "pytest-0" / "popen-gw0"
         basetemp.mkdir(parents=True)
@@ -244,7 +249,6 @@ class TestRecoveryKeepsPytestsPrivacyGuarantees:
 
     @staticmethod
     def _allocate(basetemp: Path) -> Path:
-        import conftest
 
         return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
 
@@ -320,7 +324,6 @@ class TestValidationStopsAtPytestsOwnRoot:
 
     @staticmethod
     def _allocate(basetemp: Path) -> Path:
-        import conftest
 
         return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
 
@@ -379,10 +382,6 @@ class TestValidationStopsAtPytestsOwnRoot:
         outside `/tmp` -- it failed the moment the same test ran under pytest's
         default temp root, which is how the false premise surfaced.
         """
-        import shutil
-        import tempfile
-
-        import conftest
 
         root = Path(tempfile.mkdtemp(prefix="marker-free-"))
         try:
@@ -401,7 +400,6 @@ class TestValidationStopsAtPytestsOwnRoot:
 
     def test_the_owned_region_is_the_marker_and_everything_under_it(self) -> None:
         """The boundary as a pure function, independent of any filesystem."""
-        import conftest
 
         leaf = Path("/tmp/pytest-of-someone/pytest-3/popen-gw2")
         assert conftest._pytest_owned_levels(leaf) == [
