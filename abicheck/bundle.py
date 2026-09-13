@@ -335,10 +335,24 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     )
 
 
-#: Bytes sniffed when classifying an uncompressed stored snapshot document.
-#: Only the first non-whitespace byte is consulted; the rest is slack for
-#: leading whitespace a hand-formatted document may carry.
-_STORED_SNAPSHOT_SNIFF_BYTES = 64
+#: Chunk size for the uncompressed-snapshot sniff. Only the first
+#: *non-whitespace* byte decides, so this is a read granularity, not a
+#: window the document has to fit its opening brace inside -- see
+#: `_STORED_SNAPSHOT_MAX_LEADING_WHITESPACE`.
+_STORED_SNAPSHOT_SNIFF_CHUNK_BYTES = 4096
+
+#: How much leading JSON whitespace the sniff will skip before giving up.
+#: A fixed 64-byte window was the first version of this and was wrong: JSON
+#: (and therefore `serialization.load_snapshot`) tolerates unlimited leading
+#: whitespace, so a document the canonical reader accepts classified as
+#: "not a snapshot", got routed to live-ELF handling, and was silently
+#: dropped from the bundle graph -- the exact silent-pass failure this
+#: module's stored-member split exists to prevent (Codex review, PR #1269).
+#: A bound is still required (this runs on arbitrary files in a release
+#: directory), but it is set where no legitimate document lives and a
+#: pathological one is cheap to reject, rather than at a formatting-plausible
+#: 64 bytes.
+_STORED_SNAPSHOT_MAX_LEADING_WHITESPACE = 1 << 20  # 1 MiB
 
 
 def _looks_like_stored_snapshot_file(path: Path) -> bool:
@@ -348,6 +362,14 @@ def _looks_like_stored_snapshot_file(path: Path) -> bool:
     first non-whitespace byte opens a JSON object -- never by filename
     suffix, matching `snapshot_io.detect_compression_from_bytes`'s own
     "never trusts a filename" rule and `_path_looks_like_elf`'s magic sniff.
+
+    Leading whitespace is skipped under a bound rather than inside a fixed
+    window: JSON tolerates any amount of it, so every document
+    `serialization.load_snapshot` accepts must classify here too. A document
+    that classifies as "not a snapshot" is not merely read by a different
+    reader -- it is routed to live-ELF handling and dropped from the graph
+    entirely, so a false negative here is the same silent pass as never
+    having recognised the operand shape at all.
 
     This exists because `build_bundle_snapshot_mixed`'s stored-member split
     originally recognised only *directory*-backed packages
@@ -378,10 +400,20 @@ def _looks_like_stored_snapshot_file(path: Path) -> bool:
         if detect_snapshot_compression(path) is not SnapshotCompression.NONE:
             return True
         with open(path, "rb") as f:
-            prefix = f.read(_STORED_SNAPSHOT_SNIFF_BYTES)
+            skipped = 0
+            while skipped <= _STORED_SNAPSHOT_MAX_LEADING_WHITESPACE:
+                chunk = f.read(_STORED_SNAPSHOT_SNIFF_CHUNK_BYTES)
+                if not chunk:
+                    # End of file with nothing but whitespace in it: not a
+                    # document, and `json.loads` would reject it too.
+                    return False
+                stripped = chunk.lstrip()
+                if stripped:
+                    return stripped[:1] == b"{"
+                skipped += len(chunk)
     except (OSError, SnapshotError):
         return False
-    return prefix.lstrip()[:1] == b"{"
+    return False
 
 
 def _is_stored_member(path: Path) -> bool:

@@ -242,12 +242,58 @@ class TestStoredSnapshotFileClassification:
         assert _looks_like_stored_snapshot_file(d) is False
         assert _looks_like_stored_snapshot_file(tmp_path / "absent") is False
 
-    def test_leading_whitespace_is_tolerated(self, tmp_path: Path) -> None:
-        """Detection is by content, not filename, so a hand-formatted
-        document with leading whitespace still classifies."""
-        path = tmp_path / "ws.json"
-        path.write_bytes(b'\n\t  {"elf": {}}')
+    @pytest.mark.parametrize(
+        "padding", [0, 1, 63, 64, 65, 4095, 4096, 4097, 8192, 100_000]
+    )
+    def test_any_leading_whitespace_the_canonical_reader_tolerates(
+        self, tmp_path: Path, padding: int
+    ) -> None:
+        """Codex review, PR #1269 (P2): the first version sniffed a fixed
+        64-byte window, so a document with >=64 leading whitespace bytes
+        classified as "not a snapshot", was routed to live-ELF handling and
+        dropped from the graph -- the same silent pass this module exists to
+        prevent.
+
+        The oracle is deliberately independent of the predicate: a document
+        the *canonical* reader (`json.loads` over `read_snapshot_text`)
+        accepts as an object must classify here too. The padding values sweep
+        the old boundary and both sides of the new chunk size, so a future
+        window-shaped implementation fails rather than passing on one
+        hand-picked input.
+        """
+        from abicheck.snapshot_io import read_snapshot_text
+
+        path = tmp_path / f"ws-{padding}.json"
+        path.write_bytes(b"\n" * padding + b'{"elf": {}}')
+
+        canonical = json.loads(read_snapshot_text(path))
+        assert isinstance(canonical, dict), "oracle did not parse -- test is vacuous"
         assert _looks_like_stored_snapshot_file(path) is True
+
+    def test_mixed_whitespace_kinds_are_skipped(self, tmp_path: Path) -> None:
+        """All four JSON whitespace bytes, not only newlines."""
+        path = tmp_path / "mixed.json"
+        path.write_bytes(b" \t\r\n" * 2048 + b'{"elf": {}}')
+        assert _looks_like_stored_snapshot_file(path) is True
+
+    def test_whitespace_only_file_is_not_a_snapshot(self, tmp_path: Path) -> None:
+        """The complement: skipping whitespace must not turn a blank file
+        into a document."""
+        path = tmp_path / "blank.json"
+        path.write_bytes(b"\n" * 10_000)
+        assert _looks_like_stored_snapshot_file(path) is False
+
+    def test_unbounded_whitespace_is_still_refused(self, tmp_path: Path) -> None:
+        """The bound is real -- a pathological file is rejected rather than
+        scanned forever. Asserted at the documented bound, so a future change
+        to it is deliberate and visible."""
+        from abicheck.bundle import _STORED_SNAPSHOT_MAX_LEADING_WHITESPACE
+
+        path = tmp_path / "pathological.json"
+        path.write_bytes(
+            b"\n" * (_STORED_SNAPSHOT_MAX_LEADING_WHITESPACE + 8192) + b'{"elf": {}}'
+        )
+        assert _looks_like_stored_snapshot_file(path) is False
 
 
 class TestMalformedFileMemberIsSkippedNotFatal:
