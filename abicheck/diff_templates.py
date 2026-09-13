@@ -720,8 +720,17 @@ def detect_internal_template_leaks(
 
 
 def _cpo_function_stem(qname: str) -> str:
-    """The reduction `_func_names` applies, as one named function so the
-    cross-kind join keys on exactly what the comparison compares."""
+    """A function's CPO stem: the reduction `_func_names` compares on, named
+    once so the cross-kind join keys on exactly what the comparison uses.
+
+    Only a function *template* instantiation's demangling leaks a return
+    type ahead of the qualified name, and that is checked on the pre-strip
+    qname since the template args are the tell. A non-template name that
+    contains a space for an unrelated reason -- an ABI thunk marker like
+    "non-virtual thunk to lib::sort()" -- must not go through the stripper:
+    it would keep only the text after the last space and collide with an
+    unrelated same-named CPO variable (Codex review).
+    """
     stem = _strip_param_signature(_strip_template_args(qname))
     return (
         _strip_leading_return_type(stem)
@@ -755,19 +764,7 @@ def detect_cpo_kind_changed(
         for f in funcs:
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
-                stem = _strip_param_signature(_strip_template_args(qname))
-                # Only a function *template* instantiation's demangling ever
-                # leaks a return type ahead of the qualified name (checked on
-                # the pre-strip qname, since the template args themselves are
-                # the tell). A non-template name that happens to contain a
-                # space for an unrelated reason — e.g. an ABI thunk marker
-                # like "non-virtual thunk to lib::sort()" — must not go
-                # through the stripper: it would take the text after the
-                # last space ("lib::sort") and wrongly collide with an
-                # unrelated same-named CPO variable (Codex review).
-                if _looks_like_template_instantiation(qname):
-                    stem = _strip_leading_return_type(stem)
-                out.add(stem)
+                out.add(_cpo_function_stem(qname))
         return out
 
     def _var_names(variables: list[Variable]) -> set[str]:
