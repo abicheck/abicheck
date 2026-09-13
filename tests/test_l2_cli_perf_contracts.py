@@ -27,9 +27,9 @@ duration argument cannot be configured into silently measuring nothing.
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -51,6 +51,18 @@ def _load(name: str):
 harness = _load("check_l2_cli_perf")
 receipt_mod = _load("perf_receipt")
 fixtures = _load("l2_cli_fixture")
+
+
+def ast_dump(node) -> str:
+    import ast
+
+    return ast.dump(node)
+
+
+def ast_unparse(node) -> str:
+    import ast
+
+    return ast.unparse(node)
 
 
 def _run(native_invocations: dict[str, int]) -> object:
@@ -307,39 +319,44 @@ class TestMeasuredSubprocessesGetANeutralCwd:
         assert "SHADOW" not in installed.stdout
         assert installed.returncode == 0, installed.stderr
 
+    @staticmethod
+    def _run_measured_calls():
+        """Every `run_measured(...)` call the harness makes, wherever it lives.
+
+        Searched over the whole module rather than one function, so the executor
+        moving (it has: out of a `run_scenario` closure and into
+        `_StepExecutor.__call__`) cannot quietly make these assertions vacuous.
+        """
+        import ast
+        import inspect
+
+        tree = ast.parse(inspect.getsource(harness))
+        return [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "run_measured"
+        ]
+
     def test_every_measured_run_is_given_an_explicit_cwd(self):
         # Asserted on the call rather than on a comment: the defect is the
         # *absence* of a cwd argument, which no output can reveal (both
         # configurations produce a valid-looking receipt).
-        import ast
-        import inspect
-
-        source = inspect.getsource(harness.run_scenario)
-        calls = [
-            node
-            for node in ast.walk(ast.parse(textwrap.dedent(source)))
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "id", None) == "run_measured"
-        ]
-        assert calls, "run_scenario must execute the measured subprocesses"
+        calls = self._run_measured_calls()
+        assert calls, "the harness must execute the measured subprocesses somewhere"
         for call in calls:
-            assert "cwd" in {kw.arg for kw in call.keywords}, ast.dump(call)
+            assert "cwd" in {kw.arg for kw in call.keywords}, ast_dump(call)
 
     def test_the_cwd_is_not_the_harness_own_directory(self):
         # The fix is only a fix if the directory handed over is a per-scenario
         # work directory; passing `cwd=Path.cwd()` would satisfy the previous
         # assertion and change nothing.
-        import ast
-        import inspect
-
-        source = textwrap.dedent(inspect.getsource(harness.run_scenario))
-        for node in ast.walk(ast.parse(source)):
-            if (
-                isinstance(node, ast.Call)
-                and getattr(node.func, "id", None) == "run_measured"
-            ):
-                cwd = next(kw.value for kw in node.keywords if kw.arg == "cwd")
-                assert isinstance(cwd, ast.Name) and cwd.id == "work", ast.dump(cwd)
+        for call in self._run_measured_calls():
+            cwd = next(kw.value for kw in call.keywords if kw.arg == "cwd")
+            # `self.work` (the executor's own per-scenario directory) or a bare
+            # `work`; never a call such as `Path.cwd()`.
+            rendered = ast_unparse(cwd)
+            assert rendered in ("self.work", "work"), rendered
 
 
 class TestTheUnchangedControlRejectsEveryManufacturedFinding:
@@ -465,3 +482,209 @@ def _stub_library() -> object:
         headers=[Path("/tmp/stub.h")],
         include_dir=Path("/tmp"),
     )
+
+
+def _batch(counts: list[int]) -> list[object]:
+    return [_run({"header_extraction": n}) for n in counts]
+
+
+class TestEveryWarmRepetitionMustShowTheCacheServing:
+    """One cache hit must not certify a batch in which the others re-extracted.
+
+    The first version reduced each batch with `min()` and compared the two
+    numbers, so a single warm repetition hitting the cache validated the whole
+    scenario while the rest extracted in full — the gated median could then
+    describe an uncached run while the receipt reported a served cache. No
+    reducer over repetitions can express "each repetition was warm", so the
+    comparison is per index-aligned pair.
+    """
+
+    def test_all_warm_repetitions_served_passes(self):
+        runs = {"cold": _batch([2, 2, 2]), "warm": _batch([0, 0, 0])}
+        assert harness._warm_cache_problems(runs) == []
+
+    @pytest.mark.parametrize(
+        "warm,bad",
+        [
+            ([0, 2, 0], [1]),
+            ([2, 0, 0], [0]),
+            ([0, 0, 2], [2]),
+            ([2, 2, 0], [0, 1]),
+            ([3, 3, 3], [0, 1, 2]),
+        ],
+    )
+    def test_any_unserved_repetition_fails_and_is_named(self, warm, bad):
+        # Every position, not just the one a `min()` reduction happened to miss
+        # first, and the failure names which repetitions were wrong.
+        runs = {"cold": _batch([2, 2, 2]), "warm": _batch(warm)}
+        problems = harness._warm_cache_problems(runs)
+        assert len(problems) == len(bad), problems
+        for index in bad:
+            assert any(f"repetition {index}:" in p for p in problems), (index, problems)
+
+    def test_a_min_reduction_would_have_passed_the_mixed_case(self):
+        # States the defect directly, so the test cannot drift back: under the
+        # old rule (min of each batch) a batch with one served repetition looked
+        # identical to a fully served one.
+        runs = {"cold": _batch([2, 2, 2]), "warm": _batch([0, 2, 2])}
+        assert min(0, 2, 2) < min(2, 2, 2), "the old rule really did pass this"
+        assert harness._warm_cache_problems(runs)
+
+    def test_a_cold_repetition_that_extracted_nothing_fails(self):
+        # The other direction: a cache root that was not actually fresh means
+        # nothing in the scenario measures a cold state.
+        runs = {"cold": _batch([2, 0, 2]), "warm": _batch([0, 0, 0])}
+        problems = harness._warm_cache_problems(runs)
+        assert any("not actually fresh" in p for p in problems), problems
+
+    def test_unpairable_batches_fail_rather_than_being_reduced(self):
+        runs = {"cold": _batch([2, 2]), "warm": _batch([0])}
+        problems = harness._warm_cache_problems(runs)
+        assert problems and "cannot pair" in problems[0]
+
+    @pytest.mark.parametrize(
+        "cold,warm,expected",
+        [
+            ([2, 2, 2], [0, 0, 0], "full"),
+            ([2, 2, 2], [1, 1, 1], "partial"),
+            ([2, 2, 2], [2, 2, 2], "none"),
+            ([2, 2, 2], [0, 2, 0], "none"),
+            ([2, 2, 2], [0, 1, 0], "partial"),
+        ],
+    )
+    def test_the_reported_service_is_the_worst_repetition(self, cold, warm, expected):
+        # Reporting the *best* repetition is the mislabelling half of the same
+        # defect: a batch served once and missed twice is not a "full" cache.
+        runs = {"cold": _batch(cold), "warm": _batch(warm)}
+        assert harness._classify_cache_service(runs) == expected
+
+
+class TestEveryInvalidationRepetitionMustReExtract:
+    """The mirror image: `max()` let one re-extraction excuse stale repetitions.
+
+    Serving stale evidence is the correctness bug this control exists to catch,
+    so a repetition that served it must fail even when a sibling repetition did
+    the work.
+    """
+
+    def test_all_repetitions_re_extracting_passes(self):
+        scenario = harness.scenario_cache_invalidation(
+            fixtures.FixtureSpec(
+                shape="simple",
+                headers=1,
+                libraries=1,
+                change="break",
+                distinct_contexts=False,
+            )
+        )
+        runs = {"after_dependency_change": _batch([2, 2, 2])}
+        problems = [
+            p
+            for p in scenario.validate(Path("/nonexistent"), runs)
+            if "snapshot" not in p
+        ]
+        assert problems == [], problems
+
+    @pytest.mark.parametrize("after", [[0, 2, 2], [2, 0, 2], [2, 2, 0], [0, 0, 0]])
+    def test_any_stale_repetition_fails(self, after):
+        # The first three cases are exactly the ones a `max()` reduction passed:
+        # one repetition re-extracted, so the batch's maximum was nonzero.
+        scenario = harness.scenario_cache_invalidation(
+            fixtures.FixtureSpec(
+                shape="simple",
+                headers=1,
+                libraries=1,
+                change="break",
+                distinct_contexts=False,
+            )
+        )
+        runs = {"after_dependency_change": _batch(after)}
+        problems = scenario.validate(Path("/nonexistent"), runs)
+        assert any("stale" in p for p in problems), problems
+
+
+class TestAStepMustProduceItsOwnOutput:
+    """A declared output that this run did not write is not a measurement.
+
+    Two halves, both needed: the path is unlinked before every invocation, and a
+    missing file afterwards is a failure rather than (as before) only being
+    size-checked when present. Without the pair, a repetition that exited with
+    an allowed code and rendered nothing was validated against the *previous*
+    repetition's file.
+    """
+
+    def _step(self, out: Path) -> object:
+        return harness.Step("s", ["true"], output=out, ok_exit_codes=(0, 2, 4))
+
+    def _ok_run(self, code: int = 0) -> object:
+        run = _run({"header_extraction": 0})
+        run.exit_code = code
+        return run
+
+    def test_a_missing_output_fails(self, tmp_path):
+        problems = harness._step_failure(
+            self._step(tmp_path / "absent.json"),
+            self._ok_run(),
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+        )
+        assert problems and "wrote no output" in problems[0]
+
+    @pytest.mark.parametrize("code", [0, 2, 4])
+    def test_a_missing_output_fails_for_every_allowed_exit_code(self, tmp_path, code):
+        # The reported shape: an *allowed* verdict exit with no rendered report.
+        assert harness._step_failure(
+            self._step(tmp_path / "absent.json"),
+            self._ok_run(code),
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+        )
+
+    def test_a_present_output_passes(self, tmp_path):
+        out = tmp_path / "present.json"
+        out.write_text("{}", encoding="utf-8")
+        assert (
+            harness._step_failure(
+                self._step(out),
+                self._ok_run(),
+                timeout=10,
+                one_side=None,
+                check_extraction=False,
+            )
+            is None
+        )
+
+    def test_a_step_declaring_no_output_is_unaffected(self, tmp_path):
+        step = harness.Step("s", ["true"], ok_exit_codes=(0,))
+        assert (
+            harness._step_failure(
+                step,
+                self._ok_run(),
+                timeout=10,
+                one_side=None,
+                check_extraction=False,
+            )
+            is None
+        )
+
+    def test_the_executor_unlinks_the_output_before_running(self, tmp_path):
+        # Without this, "the file exists" after a run does not mean this run
+        # wrote it, and the existence check above would accept a stale file.
+        stale = tmp_path / "stale.json"
+        stale.write_text('{"from": "a previous repetition"}', encoding="utf-8")
+        executor = harness._StepExecutor(
+            work=tmp_path,
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            timeout=30,
+            rss_interval=0.05,
+            spy=None,
+        )
+        # A command that exits 0 and writes nothing -- the exact shape the stale
+        # file used to mask.
+        executor(
+            harness.Step("noop", [sys.executable, "-c", ""], output=stale),
+            timed=False,
+        )
+        assert not stale.exists(), "the stale output survived the run"

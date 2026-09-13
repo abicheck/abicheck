@@ -55,6 +55,10 @@ def _load(name: str):
 
 
 harness = _load("check_l2_cli_perf")
+# `rejected_baseline_scenarios` lives in the gating sibling and is not used by the
+# parent, so it is imported from its owner rather than kept as a re-export the
+# parent never calls (which reads as dead code to every linter that looks).
+gating = _load("l2_cli_gating")
 receipt_mod = _load("perf_receipt")
 fixtures = _load("l2_cli_fixture")
 
@@ -601,7 +605,7 @@ class TestAFailedBaselineNeverGates:
             self._scenario("good", "ok", 1.0),
             self._scenario("bad", "failed", 0.2),
         ]
-        assert harness.rejected_baseline_scenarios(scenarios) == ["bad"]
+        assert gating.rejected_baseline_scenarios(scenarios) == ["bad"]
 
     def test_load_baseline_returns_both_halves(self, tmp_path):
         path = tmp_path / "base.json"
@@ -624,7 +628,7 @@ class TestAFailedBaselineNeverGates:
         # reporting a clean pass against a broken base.
         points, rejected = (
             harness.gated_points([self._scenario("s", "failed", 0.2)]),
-            harness.rejected_baseline_scenarios([self._scenario("s", "failed", 0.2)]),
+            gating.rejected_baseline_scenarios([self._scenario("s", "failed", 0.2)]),
         )
         assert points == {}
         assert rejected == ["s"]

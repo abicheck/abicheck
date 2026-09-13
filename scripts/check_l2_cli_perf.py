@@ -87,7 +87,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import os
 import shutil
 import subprocess
@@ -307,47 +306,67 @@ def _check_extraction(
     if observed is None:
         return ["no native-invocation observation recorded (spy not installed?)"]
     if expectation == "forbidden":
-        # Needs no calibration: the contract is an absolute zero -- and it is a
-        # zero over EVERY observed native invocation, not only the extraction
-        # bucket. A stored-operand path claims no compiler ran at all, so an
-        # `include_pass`, a `--version` probe, or anything classified `other`
-        # falsifies the claim exactly as an AST extraction does. Checking only
-        # `header_extraction` would let a regression that starts spawning
-        # `clang++ -M` or `g++ --version` while loading two stored snapshots
-        # pass a scenario whose entire point is that it spawns nothing.
-        nonzero = {
-            kind: count
-            for kind, count in (run.native_invocations or {}).items()
-            if count
-        }
-        if nonzero:
-            detail = ", ".join(
-                f"{kind}={count}" for kind, count in sorted(nonzero.items())
-            )
-            return [
-                f"native compiler invocation(s) observed ({detail}) on a "
-                "stored-operand path that must perform none -- the stored "
-                "snapshot was re-extracted, or the path grew a new native call"
-            ]
-    elif expectation == "one_side":
-        if observed == 0:
-            return ["zero header extractions: the live side was never extracted"]
-        if one_side is not None and observed > one_side:
-            return [
-                f"{observed} header extraction(s) observed, but one side costs "
-                f"{one_side} (calibrated from this scenario's own setup dump) -- "
-                "the stored operand appears to have been re-extracted"
-            ]
-    elif expectation == "both_sides":
-        if observed == 0:
-            return ["zero header extractions: neither operand was extracted"]
-        if one_side is not None and observed < one_side * 2:
-            return [
-                f"{observed} header extraction(s) observed, expected at least "
-                f"{one_side * 2} for two live operands (one side costs "
-                f"{one_side}, calibrated from a setup dump)"
-            ]
+        return _no_native_invocation_problems(run)
+    if expectation in ("one_side", "both_sides"):
+        return _live_extraction_problems(observed, expectation, one_side=one_side)
     return []
+
+
+def _live_extraction_problems(
+    observed: int, expectation: str, *, one_side: int | None
+) -> list[str]:
+    """The two live-operand contracts: a lower bound always, an upper bound when calibrated.
+
+    The lower bound ("something was extracted") needs no calibration and is the
+    "faster because it stopped working" direction. The count bound is checked only
+    against an *independently* calibrated single-side cost; with none available it
+    is deliberately left unchecked and reported as such, rather than checked
+    against a number derived from the step under test.
+    """
+    sides = 1 if expectation == "one_side" else 2
+    if observed == 0:
+        subject = "the live side" if sides == 1 else "neither operand"
+        verb = "was never extracted" if sides == 1 else "was extracted"
+        return [f"zero header extractions: {subject} {verb}"]
+    if one_side is None:
+        return []
+    if sides == 1 and observed > one_side:
+        return [
+            f"{observed} header extraction(s) observed, but one side costs "
+            f"{one_side} (calibrated from this scenario's own setup dump) -- "
+            "the stored operand appears to have been re-extracted"
+        ]
+    if sides == 2 and observed < one_side * 2:
+        return [
+            f"{observed} header extraction(s) observed, expected at least "
+            f"{one_side * 2} for two live operands (one side costs "
+            f"{one_side}, calibrated from a setup dump)"
+        ]
+    return []
+
+
+def _no_native_invocation_problems(run: CommandRun) -> list[str]:
+    """The ``forbidden`` contract: an absolute zero over EVERY invocation kind.
+
+    Needs no calibration, and deliberately is not limited to the extraction
+    bucket. A stored-operand path claims no compiler ran *at all*, so an
+    ``include_pass``, a ``--version`` probe, or anything classified ``other``
+    falsifies the claim exactly as an AST extraction does. Checking only
+    ``header_extraction`` let a regression that starts spawning ``clang++ -M`` or
+    ``g++ --version`` while loading two stored snapshots pass the one scenario
+    whose entire point is that it spawns nothing.
+    """
+    nonzero = {
+        kind: count for kind, count in (run.native_invocations or {}).items() if count
+    }
+    if not nonzero:
+        return []
+    detail = ", ".join(f"{kind}={count}" for kind, count in sorted(nonzero.items()))
+    return [
+        f"native compiler invocation(s) observed ({detail}) on a "
+        "stored-operand path that must perform none -- the stored "
+        "snapshot was re-extracted, or the path grew a new native call"
+    ]
 
 
 def uncalibrated_contracts(steps: list[Step], one_side: int | None) -> list[str]:
@@ -367,6 +386,53 @@ def uncalibrated_contracts(steps: list[Step], one_side: int | None) -> list[str]
         for step in steps
         if step.extraction in ("one_side", "both_sides")
     ]
+
+
+def _extraction_counts(batch: list[CommandRun]) -> list[int]:
+    return [(run.native_invocations or {}).get("header_extraction", 0) for run in batch]
+
+
+def _warm_cache_problems(runs: dict[str, list[CommandRun]]) -> list[str]:
+    """Every cold/warm repetition must individually show the cache serving.
+
+    Per repetition, deliberately, and paired by index -- repetition *i* runs
+    cold then warm against one cache lifecycle, so `runs["cold"][i]` and
+    `runs["warm"][i]` are the two halves of one observation.
+
+    The first version reduced each batch with `min()` and compared the two
+    numbers. That let ONE warm repetition hitting the cache certify the whole
+    scenario while the others re-extracted in full -- so the gated median could
+    describe an uncached run while the receipt reported a served cache, which is
+    a mislabelled benchmark rather than a missed one (Codex review). A reduction
+    across repetitions cannot express "each repetition was warm", so there is no
+    reducer that fixes this: the comparison has to be per pair.
+    """
+    cold = runs.get("cold") or []
+    warm = runs.get("warm") or []
+    if not cold or not warm:
+        return ["cold/warm runs missing"]
+    if len(cold) != len(warm):
+        return [
+            f"{len(cold)} cold vs {len(warm)} warm repetition(s) -- cannot pair "
+            "them, so no repetition's cache state is established"
+        ]
+    problems: list[str] = []
+    for index, (cold_n, warm_n) in enumerate(
+        zip(_extraction_counts(cold), _extraction_counts(warm))
+    ):
+        if cold_n == 0:
+            problems.append(
+                f"repetition {index}: the cold run performed no header extraction "
+                "at all -- the cache root was not actually fresh, so nothing here "
+                "measures a cold state"
+            )
+        elif warm_n >= cold_n:
+            problems.append(
+                f"repetition {index}: warm extracted {warm_n} vs cold {cold_n} -- no "
+                "cache served, so this repetition is not the warm state it is "
+                "labelled as"
+            )
+    return problems
 
 
 # ── scenarios ─────────────────────────────────────────────────────────────────
@@ -741,28 +807,7 @@ def scenario_warm_cache(spec: fixtures.FixtureSpec, suites=("extended",)) -> Sce
     def validate(work: Path, runs: dict[str, list[CommandRun]]) -> list[str]:
         problems = _validate_snapshot(work / "cold.abi.json")
         problems += _validate_snapshot(work / "warm.abi.json")
-        cold = runs.get("cold") or []
-        warm = runs.get("warm") or []
-        if not cold or not warm:
-            return problems + ["cold/warm runs missing"]
-
-        def extractions(batch: list[CommandRun]) -> int:
-            return min(
-                (r.native_invocations or {}).get("header_extraction", 0) for r in batch
-            )
-
-        cold_n, warm_n = extractions(cold), extractions(warm)
-        if cold_n == 0:
-            problems.append(
-                "the cold run performed no header extraction at all -- the cache "
-                "root was not actually fresh, so nothing here measures a cold state"
-            )
-        elif warm_n >= cold_n:
-            problems.append(
-                f"warm run extracted {warm_n} vs cold {cold_n}: no cache served, so "
-                "this scenario is not measuring a warm state despite being labelled one"
-            )
-        return problems
+        return problems + _warm_cache_problems(runs)
 
     return Scenario(
         id=f"cold_then_warm_cache[{spec.profile_id}]",
@@ -811,13 +856,21 @@ def scenario_cache_invalidation(
         after = runs.get("after_dependency_change") or []
         if not after:
             return problems + ["no post-change run recorded"]
-        extracted = max(
-            (r.native_invocations or {}).get("header_extraction", 0) for r in after
-        )
-        if extracted == 0:
+        # EVERY repetition, not `max()` over the batch: reusing stale evidence is
+        # the correctness bug this control exists to catch, and one repetition
+        # that did re-extract was enough to certify a batch in which the others
+        # had served the pre-change snapshot (Codex review -- the mirror image of
+        # the warm-cache `min()` defect above).
+        stale = [
+            index
+            for index, run in enumerate(after)
+            if (run.native_invocations or {}).get("header_extraction", 0) == 0
+        ]
+        if stale:
             problems.append(
-                "no header extraction after a transitive dependency header changed "
-                "-- the cache served stale evidence"
+                f"repetition(s) {stale} performed no header extraction after a "
+                "transitive dependency header changed -- the cache served stale "
+                f"evidence (of {len(after)} repetition(s))"
             )
         return problems
 
@@ -1114,7 +1167,19 @@ def _step_failure(
         problems = _check_extraction(run, step.extraction, one_side=one_side)
         if problems:
             return [f"step {step.name}: {p}" for p in problems]
-    if step.output is not None and step.output.exists():
+    if step.output is not None:
+        # REQUIRED, not merely size-checked-if-present. A step that declares an
+        # output and exits with an allowed code but renders nothing is not a
+        # measurement, and the previous shape let it pass silently -- worse,
+        # combined with repetitions reusing one path, final validation would then
+        # read the *previous* repetition's report and credit this run's (faster,
+        # incomplete) timing (Codex review). `execute()` unlinks the path before
+        # every invocation, so "exists" here means this run wrote it.
+        if not step.output.exists():
+            return [
+                f"step {step.name} exited {run.exit_code} but wrote no output at "
+                f"{step.output.name} -- the run did not render what it was asked for"
+            ]
         size = step.output.stat().st_size
         if size > MAX_OUTPUT_BYTES:
             return [f"step {step.name} wrote {size} bytes, over the cap"]
@@ -1229,16 +1294,68 @@ def _step_receipt(step: Step, batch: list[CommandRun]) -> dict[str, Any]:
     }
 
 
-def run_scenario(
-    scenario: Scenario,
-    *,
-    repeat: int,
-    timeout: float,
-    rss_interval: float,
-    keep_spy: bool = True,
-) -> dict[str, Any]:
-    """Build, prepare, measure and validate one scenario. Returns its receipt."""
-    result: dict[str, Any] = {
+@dataclass
+class _StepExecutor:
+    """Runs one step as a measured subprocess. A class, not a closure.
+
+    Lifted out of `run_scenario` so that function states the measurement rather
+    than carrying the subprocess mechanics (and its own local namespace) too.
+
+    Two decisions here are load-bearing and were both real defects first:
+
+    * the subprocess gets a NEUTRAL cwd, never the harness's own. `_cli()` runs
+      `python -m abicheck`, and `-m` puts the *current directory* first on
+      `sys.path`, so launched from an abicheck checkout the measured CLI imports
+      that checkout's `abicheck/` rather than the installed one. The PR-vs-base
+      CI lane is exactly where that bites: it runs HEAD's harness against BASE's
+      editable install, so a head-rooted cwd made the "base" measurement execute
+      HEAD's product while the receipt correctly identified the base package. A
+      per-scenario work directory also keeps `.abicheck.yml` discovery from
+      finding this repository's own config. Every path in `argv` is absolute, so
+      nothing else depends on the cwd.
+    * the declared output is unlinked before every invocation, so "the file
+      exists" afterwards means *this* run wrote it. Reusing the path across
+      repetitions let a repetition that rendered nothing be validated against the
+      previous one's file -- a stale, complete-looking report certifying an
+      incomplete, faster run.
+    """
+
+    work: Path
+    env: dict[str, str]
+    timeout: float
+    rss_interval: float
+    spy: NativeInvocationSpy | None
+
+    def __call__(self, step: Step, *, timed: bool) -> CommandRun:
+        if self.spy is not None:
+            # Guarded: with --no-spy the shim directory was never created, so
+            # resetting its log raises FileNotFoundError. Found by the overhead
+            # measurement this flag exists to enable -- the flag's whole purpose
+            # is to run the lane without the spy, and it could not.
+            self.spy.reset()
+        if step.output is not None:
+            step.output.unlink(missing_ok=True)
+        run = run_measured(
+            step.argv,
+            cwd=self.work,
+            env=self.env,
+            timeout=self.timeout,
+            sample_rss=step.sample_rss and timed,
+            rss_interval=self.rss_interval,
+        )
+        run.native_invocations = self.spy.kind_counts() if self.spy is not None else {}
+        return run
+
+
+def _blank_receipt(scenario: Scenario) -> dict[str, Any]:
+    """A scenario's receipt before anything has been measured.
+
+    ``status`` starts ``ok`` and ``validation`` starts ``not_run`` on purpose: an
+    early return (a fixture that would not build, a setup step that failed)
+    overwrites ``status``, so a row that reads ``ok``/``not_run`` is visibly a run
+    that never reached validation rather than one that silently passed it.
+    """
+    return {
         "id": scenario.id,
         "description": scenario.description,
         "profile": scenario.spec.profile_id,
@@ -1249,60 +1366,65 @@ def run_scenario(
         "validation_problems": [],
         "steps": [],
     }
+
+
+@dataclass
+class _ScenarioArea:
+    """One scenario's throwaway directories, and the environment they imply.
+
+    Exists so `run_scenario` states the measurement rather than the bookkeeping:
+    the paths are fixed by convention, the per-scenario cache root is what makes
+    "cold application cache" true at all, and `XDG_CACHE_HOME` is the same
+    variable `dumper_cache._cache_path` honors.
+    """
+
+    root: Path
+
+    def __post_init__(self) -> None:
+        self.build_root = self.root / "fixture"
+        self.work = self.root / "work"
+        self.cache_root = self.root / "cache"
+        self.work.mkdir(parents=True, exist_ok=True)
+        self.cache_root.mkdir(parents=True, exist_ok=True)
+
+    def env(self, spy: NativeInvocationSpy | None) -> dict[str, str]:
+        base = dict(os.environ)
+        base["XDG_CACHE_HOME"] = str(self.cache_root)
+        return spy.env(base) if spy is not None else base
+
+
+def run_scenario(
+    scenario: Scenario,
+    *,
+    repeat: int,
+    timeout: float,
+    rss_interval: float,
+    keep_spy: bool = True,
+) -> dict[str, Any]:
+    """Build, prepare, measure and validate one scenario. Returns its receipt."""
+    result = _blank_receipt(scenario)
     with tempfile.TemporaryDirectory(prefix="l2cli_") as tmp:
-        root = Path(tmp)
-        build_root = root / "fixture"
-        work = root / "work"
-        work.mkdir(parents=True, exist_ok=True)
-        cache_root = root / "cache"
-        cache_root.mkdir(parents=True, exist_ok=True)
-        spy = NativeInvocationSpy(root / "spy")
+        area = _ScenarioArea(Path(tmp))
+        work, cache_root = area.work, area.cache_root
+        spy = NativeInvocationSpy(area.root / "spy")
         if keep_spy:
             spy.install()
         result["spy_shimmed_tools"] = list(spy.shimmed)
 
-        fixture, build_rows = _build_fixture_for(scenario, build_root)
+        fixture, build_rows = _build_fixture_for(scenario, area.build_root)
         result.update(build_rows)
         if fixture is None:
             return result
 
-        base_env = dict(os.environ)
-        # A per-scenario cache root is what makes "cold application cache" true.
-        # XDG_CACHE_HOME is the same variable dumper_cache._cache_path honors.
-        base_env["XDG_CACHE_HOME"] = str(cache_root)
-        env = spy.env(base_env) if keep_spy else base_env
+        env = area.env(spy if keep_spy else None)
 
-        def execute(step: Step, *, timed: bool) -> CommandRun:
-            # Guarded: with --no-spy the shim directory was never created, so
-            # resetting its log raises FileNotFoundError. Found by the
-            # overhead measurement this flag exists to enable -- the flag's
-            # whole purpose is to run the lane without the spy, and it could
-            # not.
-            if keep_spy:
-                spy.reset()
-            run = run_measured(
-                step.argv,
-                # A NEUTRAL cwd, never the harness's own. `_cli()` runs
-                # `python -m abicheck`, and `-m` puts the *current directory*
-                # first on sys.path -- so launched from an abicheck checkout,
-                # the measured CLI imports that checkout's `abicheck/` package
-                # rather than the installed one. The PR-vs-base CI lane is
-                # exactly where that bites: it runs HEAD's harness against
-                # BASE's editable install, so a head-rooted cwd made the "base"
-                # measurement execute HEAD's product and reduced the regression
-                # comparison to head-versus-head while the receipt correctly
-                # identified the base package (Codex review). A per-scenario
-                # work directory also keeps `.abicheck.yml` discovery from
-                # finding this repository's own config. Every path in `argv` is
-                # absolute, so nothing else depends on the cwd.
-                cwd=work,
-                env=env,
-                timeout=timeout,
-                sample_rss=step.sample_rss and timed,
-                rss_interval=rss_interval,
-            )
-            run.native_invocations = spy.kind_counts() if keep_spy else {}
-            return run
+        execute = _StepExecutor(
+            work=work,
+            env=env,
+            timeout=timeout,
+            rss_interval=rss_interval,
+            spy=spy if keep_spy else None,
+        )
 
         # Untimed setup (pre-dumping a stored operand, etc.).
         setup_rows, setup_failure = _run_setup_steps(
@@ -1316,18 +1438,7 @@ def run_scenario(
 
         measured = scenario.steps(fixture, work)
         runs: dict[str, list[CommandRun]] = {}
-        # Calibrated from the SETUP dumps only -- never from a measured step's
-        # own count, which would make the comparison self-referential (see
-        # _check_extraction's docstring). A setup dump of one library with one
-        # side's headers is exactly "one operand's extraction cost".
-        one_side: int | None = None
-        if keep_spy:
-            for entry in result["steps"]:
-                if entry["scope"] == "setup" and entry["name"].startswith("prep_dump"):
-                    calibrated = _one_side_extractions(entry["native_invocations"])
-                    if calibrated is not None:
-                        one_side = calibrated
-                        break
+        one_side = _calibrate_one_side(result["steps"]) if keep_spy else None
         result["one_side_extraction_calibration"] = one_side
         abort = _run_measured_steps(
             measured,
@@ -1345,22 +1456,59 @@ def run_scenario(
             result["status"] = "failed"
             result["validation_problems"] += abort
             return result
-        # Validation, strictly after every timed window.
-        result["uncalibrated_contracts"] = (
-            uncalibrated_contracts(measured, one_side) if keep_spy else []
+        _validate_and_record(
+            result,
+            scenario=scenario,
+            measured=measured,
+            runs=runs,
+            work=work,
+            one_side=one_side,
+            keep_spy=keep_spy,
         )
-        problems = scenario.validate(work, runs)
-        result["validation"] = "passed" if not problems else "failed"
-        result["validation_problems"] += problems
-        if problems:
-            result["status"] = "failed"
-
-        result["steps"].extend(
-            _step_receipt(step, runs[step.name]) for step in measured
-        )
-        if scenario.cache_mode == "cold_then_warm":
-            result["observed_cache_service"] = _classify_cache_service(runs)
     return result
+
+
+def _calibrate_one_side(step_rows: list[dict[str, Any]]) -> int | None:
+    """One operand's header-extraction cost, from the SETUP dumps only.
+
+    Never from a measured step's own count, which would make the comparison
+    self-referential (see `_check_extraction`'s docstring). A setup dump of one
+    library with one side's headers is exactly "one operand's extraction cost".
+    """
+    for entry in step_rows:
+        if entry["scope"] == "setup" and entry["name"].startswith("prep_dump"):
+            calibrated = _one_side_extractions(entry["native_invocations"])
+            if calibrated is not None:
+                return calibrated
+    return None
+
+
+def _validate_and_record(
+    result: dict[str, Any],
+    *,
+    scenario: Scenario,
+    measured: list[Step],
+    runs: dict[str, list[CommandRun]],
+    work: Path,
+    one_side: int | None,
+    keep_spy: bool,
+) -> None:
+    """Run the scenario's own validation and fold the outcome into its receipt.
+
+    Strictly after every timed window, which is what lets it be thorough: it
+    loads snapshots through the product's own codec and walks whole change sets.
+    """
+    result["uncalibrated_contracts"] = (
+        uncalibrated_contracts(measured, one_side) if keep_spy else []
+    )
+    problems = scenario.validate(work, runs)
+    result["validation"] = "passed" if not problems else "failed"
+    result["validation_problems"] += problems
+    if problems:
+        result["status"] = "failed"
+    result["steps"].extend(_step_receipt(step, runs[step.name]) for step in measured)
+    if scenario.cache_mode == "cold_then_warm":
+        result["observed_cache_service"] = _classify_cache_service(runs)
 
 
 def _classify_cache_service(runs: dict[str, list[CommandRun]]) -> str:
@@ -1370,113 +1518,42 @@ def _classify_cache_service(runs: dict[str, list[CommandRun]]) -> str:
     if not cold or not warm:
         return "unknown"
 
-    def n(batch: list[CommandRun]) -> int:
-        return min(
-            (r.native_invocations or {}).get("header_extraction", 0) for r in batch
-        )
+    if len(cold) != len(warm):
+        return "unknown"
 
-    cold_n, warm_n = n(cold), n(warm)
-    if warm_n == 0:
-        return "full"
-    if warm_n < cold_n:
-        return "partial"
-    return "none"
+    def one(cold_n: int, warm_n: int) -> str:
+        if warm_n == 0:
+            return "full"
+        return "partial" if warm_n < cold_n else "none"
 
-
-# ── gating ────────────────────────────────────────────────────────────────────
-def gated_points(scenarios: list[dict[str, Any]]) -> dict[tuple[str, str], float]:
-    """``(scenario id, step name) -> median wall seconds`` for gated steps only.
-
-    Only ``scope == "full_cli"`` steps are gated. The nested startup and
-    resolution windows are recorded for diagnosis but never gated: they are
-    inside the number that *is* gated, so gating them too would charge one
-    slowdown twice and make a single regression look like three.
-    """
-    out: dict[tuple[str, str], float] = {}
-    for scenario in scenarios:
-        # A scenario that did not pass is not a measurement. Its timings exist in
-        # the receipt (the receipt is written before the exit code is decided, on
-        # purpose -- a failed run's numbers are diagnostic), but using them as a
-        # baseline would gate a PR against a base run whose L2 correctness
-        # validation failed: a base that fell back to binary-only evidence is
-        # *faster*, so the head would be measured against a number no correct run
-        # produces. Skipped on both sides for symmetry -- the same filter runs
-        # over this run's own scenarios, so a failed head scenario never
-        # contributes a point either.
-        if scenario.get("status") != "ok":
-            continue
-        for step in scenario.get("steps", []):
-            if step.get("gated") and is_gateable(step.get("wall_seconds")):
-                out[(scenario["id"], step["name"])] = float(step["wall_seconds"])
-    return out
+    # The WORST repetition, not the best. A batch where one repetition was served
+    # in full and the rest not at all is not a "full" cache service, and reporting
+    # it as one is the mislabelling half of the same defect `_warm_cache_problems`
+    # rejects (the old code reduced both batches with `min()`, which reports the
+    # most favourable repetition).
+    observed = {
+        one(cold_n, warm_n)
+        for cold_n, warm_n in zip(_extraction_counts(cold), _extraction_counts(warm))
+    }
+    for label in ("none", "partial", "full"):
+        if label in observed:
+            return label
+    return "unknown"
 
 
-def rejected_baseline_scenarios(scenarios: list[dict[str, Any]]) -> list[str]:
-    """Scenario ids a baseline carries but that :func:`gated_points` refuses.
-
-    Reported rather than silently dropped: "the baseline had three scenarios and
-    two are usable" is information a reader needs to judge the gate's coverage,
-    and the whole-run "shares no gated point" failure only fires when *every*
-    one is unusable.
-    """
-    return [
-        str(scenario.get("id"))
-        for scenario in scenarios
-        if scenario.get("status") != "ok"
-    ]
-
-
-def load_baseline(path: Path) -> tuple[dict[tuple[str, str], float], list[str]]:
-    """A baseline report's gated points, plus the scenario ids it refused.
-
-    Returns both halves so the caller can state what it is gating against: a
-    baseline whose scenarios failed validation contributes no points, and saying
-    so is the difference between "nothing to gate" and "gated against a broken
-    base".
-    """
-    data = json.loads(path.read_text(encoding="utf-8"))
-    scenarios = data.get("scenarios", [])
-    return gated_points(scenarios), rejected_baseline_scenarios(scenarios)
-
-
-def check_regressions(
-    current: dict[tuple[str, str], float],
-    baseline: dict[tuple[str, str], float],
-    threshold: GateThreshold,
-) -> list[str]:
-    failures = []
-    for key, value in sorted(current.items()):
-        base = baseline.get(key)
-        if not is_gateable(base):
-            continue
-        allowed = threshold.allowed_delta(base)
-        if value > base + allowed:
-            failures.append(
-                f"{key[0]} / {key[1]}: {value:.3f}s > baseline {base:.3f}s + "
-                f"{allowed:.3f}s allowed ({(value / base - 1) * 100:+.0f}%) "
-                f"[tolerance={threshold.tolerance} "
-                f"min_delta_seconds={threshold.min_delta} source={threshold.source}]"
-            )
-    return failures
-
-
-def required_coverage_failures(
-    scenarios: list[dict[str, Any]], required_ids: list[str]
-) -> list[str]:
-    """Every required scenario shape must have actually been measured.
-
-    A run missing one of the six CLI forms is **not** a clean pass, however
-    green the forms it did run look. Matched on the scenario-id prefix before
-    the profile suffix, so an id carrying a different fixture profile still
-    counts as covering its shape.
-    """
-    measured = {s["id"].split("[", 1)[0] for s in scenarios if s.get("status") == "ok"}
-    return [
-        f"required scenario shape {shape!r} was not measured successfully"
-        for shape in required_ids
-        if shape not in measured
-    ]
-
+# ── gating ─────────────────────────────────────────────────────────────────────
+# Split into `l2_cli_gating.py` once this file crossed the AI-readiness
+# `file-size` gate's 2000-line hard cap a second time -- a mechanical
+# extraction, unchanged function bodies. The split is along a real seam: nothing
+# in there touches a `Step` or a `Scenario`, only the receipt dicts a completed
+# run produced, which is why it can be imported here rather than the other way
+# round.
+from l2_cli_gating import (  # noqa: E402
+    check_regressions as check_regressions,
+    gated_points as gated_points,
+    load_baseline as load_baseline,
+    required_coverage_failures as required_coverage_failures,
+)
 
 REQUIRED_PR_SHAPES = [
     "dump_l2",
@@ -1703,29 +1780,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def resolve_threshold_from_args(args: argparse.Namespace) -> GateThreshold:
+    """The effective regression threshold, with the provenance of its two numbers.
 
-    unsuitable = host_unsuitable_reason()
-    if unsuitable:
-        if args.require_toolchain:
-            print(f"FAIL: --require-toolchain given but {unsuitable}.")
-            return 1
-        print(f"SKIP: {unsuitable} — nothing measured (exit 0, no coverage claimed).")
-        return 0
-
-    scenarios = select_scenarios(args.suite, args.scenario)
-    if not scenarios:
-        print(f"FAIL: --scenario {args.scenario} matched nothing.")
-        return 1
-
-    # "explicit" iff either flag was *supplied*. Deriving it from the tolerance
-    # alone mislabelled the CI lane's own `--regress-min-delta-seconds 0.6` as
-    # "default", and deriving it by value comparison mislabelled an explicitly
-    # stated default-equal value the same way. The field exists so a reader can
-    # check that a strict value was honored, so it has to track the statement,
-    # not the number.
-    threshold = GateThreshold(
+    ``source`` is ``"explicit"`` iff either flag was *supplied*. Deriving it from
+    the tolerance alone mislabelled the CI lane's own
+    ``--regress-min-delta-seconds 0.6`` as ``"default"``, and deriving it by value
+    comparison mislabelled an explicitly stated default-equal value the same way.
+    The field exists so a reader can check that a strict value was honored, so it
+    has to track the statement, not the number.
+    """
+    return GateThreshold(
         tolerance=(
             DEFAULT_REGRESS_TOLERANCE
             if args.regress_tolerance is None
@@ -1744,6 +1809,31 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+
+def scenario_failures(results: list[dict[str, Any]]) -> list[str]:
+    """One message per scenario whose status is not ``ok``.
+
+    A skipped scenario is a failure here too: this harness's skip path is for a
+    host that cannot run it at all (decided once, up front), so a skip reaching
+    this point means a scenario the run claimed to cover produced nothing.
+    """
+    return [
+        f"{result['id']}: {result['status']}: "
+        + "; ".join(result["validation_problems"] or [result.get("skip_reason") or "?"])
+        for result in results
+        if result["status"] != "ok"
+    ]
+
+
+def _measure_and_report(
+    scenarios: list[Scenario], args: argparse.Namespace
+) -> tuple[list[dict[str, Any]], float, float]:
+    """Run every scenario, print the table, and report the lane's own cost.
+
+    Returns the receipts plus the two cost figures a reader needs kept apart:
+    total wall time, and the fixture compilation inside it that is setup and is
+    excluded from every measured window.
+    """
     started = time.perf_counter()
     results = [
         run_scenario(
@@ -1756,7 +1846,6 @@ def main(argv: list[str] | None = None) -> int:
         for scenario in scenarios
     ]
     lane_seconds = time.perf_counter() - started
-
     _print_table(results, markdown=args.markdown)
     build_seconds = sum(r.get("fixture_build_seconds") or 0.0 for r in results)
     print(
@@ -1764,6 +1853,28 @@ def main(argv: list[str] | None = None) -> int:
         f"{build_seconds:.1f}s is fixture compilation (setup, excluded from every "
         "measured window)."
     )
+    return results, lane_seconds, build_seconds
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    unsuitable = host_unsuitable_reason()
+    if unsuitable:
+        if args.require_toolchain:
+            print(f"FAIL: --require-toolchain given but {unsuitable}.")
+            return 1
+        print(f"SKIP: {unsuitable} — nothing measured (exit 0, no coverage claimed).")
+        return 0
+
+    scenarios = select_scenarios(args.suite, args.scenario)
+    if not scenarios:
+        print(f"FAIL: --scenario {args.scenario} matched nothing.")
+        return 1
+
+    threshold = resolve_threshold_from_args(args)
+
+    results, lane_seconds, build_seconds = _measure_and_report(scenarios, args)
 
     receipt = build_receipt(
         harness="check_l2_cli_perf",
@@ -1794,15 +1905,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
     )
 
-    failures: list[str] = []
-    for result in results:
-        if result["status"] != "ok":
-            failures.append(
-                f"{result['id']}: {result['status']}: "
-                + "; ".join(
-                    result["validation_problems"] or [result.get("skip_reason") or "?"]
-                )
-            )
+    failures = scenario_failures(results)
     # A narrowed run is explicitly not a coverage-claiming run. Required-shape
     # coverage is enforced for a full pr-suite run -- where a missing shape must
     # never read as a clean pass -- and reported-but-not-enforced when the caller
