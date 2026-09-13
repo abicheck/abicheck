@@ -629,21 +629,56 @@ def expand_descriptor_libs(paths: Sequence[Path]) -> list[Path]:
     same ABICC-compatibility gap: a directory value previously reached the
     binary parser directly and failed with "Unrecognised binary format".
 
-    Expansion goes through ``package.discover_shared_libraries``, which
-    already owns the real question here (ET_DYN vs. a PIE executable that
-    merely ends in ``.so``, symlink handling, versioned sonames) rather than
-    globbing ``*.so*``. ``include_private=True`` because a descriptor's
-    ``<libs>`` directory was named *explicitly* by the user: the
-    public-lib-path filter exists to pick payload out of an extracted
-    package tree, and applying it to a directory someone pointed at by hand
-    would silently drop the libraries they asked for.
+    Discovery is by **file magic**, across all three container formats
+    (``binary_utils.detect_binary_format``), not by suffix and not
+    ELF-only. The first version delegated to
+    ``package.discover_shared_libraries``, which recognises ELF alone -- so a
+    ``<libs>`` directory expanded to nothing on macOS and Windows and this
+    function then hard-errored, making the whole capability silently
+    Linux-only (caught by the macOS integration lane). A descriptor naming a
+    directory of ``.dylib``/``.dll`` files is exactly as legitimate as one
+    naming ``.so`` files.
+
+    Executables are excluded as far as magic allows: an ELF entry is checked
+    against ``package._is_elf_shared_object`` (ET_DYN, no ``PT_INTERP``, no
+    ``DF_1_PIE``), which is the one format where that distinction is cheap
+    and already implemented here. For PE and Mach-O the magic alone does not
+    separate a library from a program, so the filename is used as the
+    secondary signal -- a deliberate, documented weakening rather than
+    silently returning nothing, which is what the ELF-only version did.
+
+    A directory holding no shared library at all still raises: expanding to
+    an empty list would let a descriptor pointing at the wrong tree produce
+    a confident verdict off an empty surface.
     """
-    from ..package import discover_shared_libraries
+    from ..binary_utils import detect_binary_format
+    from ..package import _is_elf_shared_object
+
+    def _is_library(path: Path) -> bool:
+        fmt = detect_binary_format(path)
+        if fmt is None:
+            return False
+        if fmt == "elf":
+            return _is_elf_shared_object(path)
+        # PE/Mach-O: magic cannot tell a library from an executable, so the
+        # name carries the distinction (`.dylib`, `.so`, `.dll`, and the
+        # versioned `libfoo.1.dylib`/`libfoo.so.1` spellings).
+        name = path.name.lower()
+        return (
+            ".dylib" in name
+            or ".so" in name
+            or name.endswith(".dll")
+            or ".dll." in name
+        )
 
     out: list[Path] = []
     for p in paths:
         if p.is_dir():
-            found = discover_shared_libraries(p, include_private=True)
+            found = sorted(
+                entry
+                for entry in p.rglob("*")
+                if entry.is_file() and not entry.is_symlink() and _is_library(entry)
+            )
             if not found:
                 raise ValidationError(
                     f"Descriptor <libs> directory contains no shared libraries: {p}"

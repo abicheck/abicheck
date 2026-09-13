@@ -15,6 +15,7 @@ every other header individually.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -162,6 +163,19 @@ class TestExcludeHeaderReachesTheRequest:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "the negative control this test depends on does not hold off ELF: "
+        "on Mach-O/PE a header-AST failure degrades to export-table mode "
+        "with a warning rather than failing the dump, so the clashing "
+        "directory 'succeeds' without the flag and there is no condition "
+        "left for the flag to rescue. The test's own guard detects that "
+        "and fails loudly rather than passing vacuously -- which is how "
+        "this was found -- so it is scoped rather than weakened. The "
+        "filter itself is covered platform-independently above."
+    ),
+)
 class TestExcludeHeaderEndToEnd:
     """The reported blocker itself, against a real compiler and header AST.
 

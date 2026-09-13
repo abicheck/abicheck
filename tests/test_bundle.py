@@ -4555,6 +4555,16 @@ class TestExtraNeededAllSystemPrimitive:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "the zero-DT_NEEDED shape this reproduces is ELF-specific: `gcc "
+        "-shared -nostdlib` is not accepted the same way on Darwin, and "
+        "Mach-O/PE have no DT_NEEDED at all. The emission rule itself is "
+        "covered platform-independently by the property grid above; this "
+        "is the end-to-end reproduction of the reported ELF case."
+    ),
+)
 class TestZeroDtNeededBundleEndToEnd:
     """The reported defect against real compiled binaries, through the public
     ``compare`` workflow rather than the detector alone.

@@ -15,6 +15,7 @@ and nothing absent on one side is manufactured into a removal.
 from __future__ import annotations
 
 import dataclasses
+import sys
 from pathlib import Path
 
 import pytest
@@ -342,7 +343,92 @@ class TestUnpairedLibrariesAreRecorded:
         assert _record_unpaired_libraries(r, [], [], True) is r
 
 
+class TestLibsDirectoryDiscoveryIsPlatformAware:
+    """``<libs>`` directory expansion must work on every container format.
+
+    Found by the macOS integration lane. The first version delegated to
+    ``package.discover_shared_libraries``, which recognises ELF only, so a
+    ``<libs>`` directory expanded to nothing off Linux and the caller then
+    hard-errored -- making the whole capability silently Linux-only while
+    every Linux test passed.
+
+    Written against synthetic magic bytes rather than compiled artifacts so
+    it exercises all three formats *on any host*: a test that could only
+    build the host's own format is exactly what let the gap through.
+    """
+
+    #: Minimal leading magic for each container format.
+    MAGIC = {
+        "elf": b"\x7fELF",
+        "macho": b"\xcf\xfa\xed\xfe",
+        "pe": b"MZ\x90\x00",
+    }
+
+    def _write(self, directory: Path, name: str, fmt: str) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        f = directory / name
+        f.write_bytes(self.MAGIC[fmt] + b"\x00" * 64)
+        return f
+
+    def test_macho_and_pe_libraries_are_discovered(self, tmp_path: Path) -> None:
+        from abicheck.compat._helpers import expand_descriptor_libs
+
+        d = tmp_path / "libs"
+        self._write(d, "libfoo.dylib", "macho")
+        self._write(d, "libbar.1.dylib", "macho")
+        self._write(d, "baz.dll", "pe")
+        found = {p.name for p in expand_descriptor_libs([d])}
+        assert found == {"libfoo.dylib", "libbar.1.dylib", "baz.dll"}
+
+    def test_non_binaries_are_not_discovered(self, tmp_path: Path) -> None:
+        """Vacuity guard: a rule that accepted everything would pass the
+        test above and quietly feed a README to the binary parser."""
+        from abicheck.compat._helpers import expand_descriptor_libs
+
+        d = tmp_path / "libs"
+        self._write(d, "libfoo.dylib", "macho")
+        (d / "README.txt").write_text("not a binary", encoding="utf-8")
+        (d / "notes.json").write_text("{}", encoding="utf-8")
+        assert {p.name for p in expand_descriptor_libs([d])} == {"libfoo.dylib"}
+
+    def test_an_empty_directory_still_raises(self, tmp_path: Path) -> None:
+        """Expanding to nothing would let a descriptor pointing at the wrong
+        tree produce a confident verdict off an empty surface."""
+        from abicheck.compat._helpers import expand_descriptor_libs
+        from abicheck.errors import ValidationError
+
+        d = tmp_path / "libs"
+        d.mkdir()
+        (d / "README.txt").write_text("nothing here", encoding="utf-8")
+        with pytest.raises(ValidationError, match="no shared libraries"):
+            expand_descriptor_libs([d])
+
+    def test_a_file_operand_passes_through_untouched(self, tmp_path: Path) -> None:
+        from abicheck.compat._helpers import expand_descriptor_libs
+
+        f = self._write(tmp_path, "libfoo.dylib", "macho")
+        assert expand_descriptor_libs([f]) == [f]
+
+    def test_nested_directories_are_searched(self, tmp_path: Path) -> None:
+        from abicheck.compat._helpers import expand_descriptor_libs
+
+        self._write(tmp_path / "libs" / "sub", "libnested.dylib", "macho")
+        assert [p.name for p in expand_descriptor_libs([tmp_path / "libs"])] == [
+            "libnested.dylib"
+        ]
+
+
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "asserts concrete verdict/exit semantics for a removed symbol, "
+        "which this environment can only verify for ELF. Directory "
+        "discovery itself -- the part that was Linux-only and is now not "
+        "-- is covered on every platform by "
+        "TestLibsDirectoryDiscoveryIsPlatformAware above."
+    ),
+)
 class TestCompatCheckMultiLibraryEndToEnd:
     """The descriptor path itself, against real binaries.
 
