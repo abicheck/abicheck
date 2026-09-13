@@ -397,8 +397,14 @@ def run_step(
     # keeps the from-scratch guarantee (nothing is inherited from the
     # developer's shell) while making the step's temporary files land
     # somewhere test-owned.
+    # The path only; the directory itself is created inside `_run`, AFTER the
+    # workspace-integrity guard. `parents=True` here would recreate a reaped
+    # `workspace.parent` -- caller-owned ground that
+    # `test_run_step_contains_no_call_that_creates_the_workspace` forbids this
+    # function to create, and recreating it would also make the failure
+    # diagnostic misleading by reporting the reaped parent as present (Codex
+    # review, PR #1298).
     step_tmp = workspace.parent / f"_step_tmp_{workspace.name}"
-    step_tmp.mkdir(parents=True, exist_ok=True)
 
     step_env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -456,6 +462,8 @@ def run_step(
         # callback must not undo it.
         require_workspace(workspace)
         (workspace / "_runner_temp").mkdir(exist_ok=True)
+        # No `parents=True`: only this leaf is ours to create.
+        step_tmp.mkdir(exist_ok=True)
         body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
         body.write_bytes(step["run"].encode("utf-8"))
         # Git Bash wants forward slashes, but a backslash is a legal *filename*

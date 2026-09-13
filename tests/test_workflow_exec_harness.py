@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -504,14 +505,32 @@ def test_run_step_contains_no_call_that_creates_the_workspace() -> None:
     import inspect
 
     tree = ast.parse(inspect.getsource(_workflow_exec.run_step))
-    creations = [
-        ast.unparse(node)
+    mkdirs = [
+        node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in {"mkdir", "makedirs"}
-        and ast.unparse(node.func.value)
+    ]
+    creations = [
+        ast.unparse(node)
+        for node in mkdirs
+        if ast.unparse(node.func.value)
         in {"workspace", "workspace.parent", "body.parent"}
+    ]
+    # `parents=True` on ANY target reaches the same ground indirectly: a
+    # directory beside the workspace recreates `workspace.parent` on its way
+    # down, which is caller-owned and, once the reaper has taken it, makes the
+    # failure diagnostic report the reaped parent as present (Codex review,
+    # PR #1298). Only leaves this function owns may be created, and only after
+    # the integrity guard.
+    creations += [
+        ast.unparse(node)
+        for node in mkdirs
+        if any(
+            kw.arg == "parents" and getattr(kw.value, "value", False) is True
+            for kw in node.keywords
+        )
     ]
     assert creations == [], (
         "run_step must not create the workspace (or its parent): the caller "
@@ -530,29 +549,43 @@ class TestAStepsOwnTemporaryFilesStayTestOwned:
     such file or directory`, observed on main in run 34781323754, *after* the
     job-level `TMPDIR` fix, which this env reset was discarding.
 
-    Asserted by running a real `mktemp -d` through the harness rather than by
-    reading `step_env`: the claim is about where the step's files actually
-    land, and an assertion on the dict would pass just as well if bash ignored
-    the variable.
+    **Nothing here hands a bash-printed path to `pathlib`.** On a Windows
+    Git-Bash host `mktemp -d` prints the MSYS form (`/c/Users/...`), which
+    `WindowsPath` reads as drive-relative to the *current* drive and silently
+    checks somewhere else -- so an existence assertion on it passes vacuously
+    whichever way the code behaves (`test_action_run_sh_py_safe_path.py`
+    records that the hard way). Python only ever touches paths it constructed
+    itself; every claim about bash's own output is decided in bash.
     """
 
-    def test_mktemp_inside_a_step_lands_in_a_test_owned_directory(
-        self, tmp_path: Path
-    ) -> None:
+    def _scratch_dir(self, workspace: Path) -> Path:
+        """Where `run_step` points `$TMPDIR`, constructed independently."""
+        return workspace.parent / f"_step_tmp_{workspace.name}"
+
+    def test_the_step_is_given_a_test_owned_tmpdir(self, tmp_path: Path) -> None:
+        """Portable on every lane: the step echoes the value, we compare strings.
+
+        `$TMPDIR` is compared as the *string* we set, never parsed as a path,
+        so the Windows MSYS-vs-native spelling question never arises.
+        """
+
         workspace = make_workspace(tmp_path)
         result = run_step(
-            {"run": 'echo "scratch=$(mktemp -d)" >> "$GITHUB_OUTPUT"'},
-            workspace=workspace,
+            {"run": 'echo "tmpdir=$TMPDIR" >> "$GITHUB_OUTPUT"'}, workspace=workspace
         )
 
         assert result.returncode == 0, result.stderr
         (line,) = result.output_lines
-        scratch = Path(line.split("=", 1)[1])
-        assert scratch.is_dir(), scratch
-        assert tmp_path in scratch.parents, (
-            f"{scratch} is outside the test's own tree, so a reaper of the "
-            "shared temp directory can take it while the step is still using it"
-        )
+        assert line == f"tmpdir={self._scratch_dir(workspace)}", line
+
+    def test_the_step_can_write_into_it(self, tmp_path: Path) -> None:
+        """And it is a real directory -- checked at the path *we* built."""
+
+        workspace = make_workspace(tmp_path)
+        result = run_step({"run": ': > "$TMPDIR/probe"'}, workspace=workspace)
+
+        assert result.returncode == 0, result.stderr
+        assert (self._scratch_dir(workspace) / "probe").is_file()
 
     def test_the_scratch_directory_is_not_inside_the_workspace(
         self, tmp_path: Path
@@ -565,11 +598,54 @@ class TestAStepsOwnTemporaryFilesStayTestOwned:
         """
 
         workspace = make_workspace(tmp_path, files={"seed.txt": "seeded"})
+        run_step({"run": ': > "$TMPDIR/probe"'}, workspace=workspace)
+
+        scratch = self._scratch_dir(workspace)
+        assert workspace not in scratch.parents and scratch != workspace
+        assert "probe" not in run_step({"run": "true"}, workspace=workspace).tree(), (
+            "the scratch directory must not show up in the workspace tree"
+        )
+
+    @pytest.mark.skipif(
+        sys.platform == "darwin",
+        reason=(
+            "macOS's mktemp resolves its own directory via "
+            "confstr(_CS_DARWIN_USER_TEMP_DIR) and ignores $TMPDIR entirely "
+            "(documented in tests/test_action_run_sh_py_safe_path.py), so a "
+            "bare `mktemp -d` there is not expected to honour it"
+        ),
+    )
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason=(
+            "the value handed to Git Bash is a native Windows path, so where "
+            "MSYS's mktemp places its result is a separate question from the "
+            "reaped-/tmp bug this guards, which is Linux-only"
+        ),
+    )
+    def test_a_bare_mktemp_lands_in_it(self, tmp_path: Path) -> None:
+        """The production shape: `action.yml` calls a bare `mktemp -d`.
+
+        The comparison is done in bash, on bash's own strings, and only a
+        yes/no verdict crosses back -- see this class's docstring.
+        """
+
+        workspace = make_workspace(tmp_path)
         result = run_step(
-            {"run": 'echo "scratch=$(mktemp -d)" >> "$GITHUB_OUTPUT"'},
+            {
+                "run": (
+                    "d=$(mktemp -d)\n"
+                    'case "$d" in\n'
+                    '  "$TMPDIR"/*) echo "inside=yes" >> "$GITHUB_OUTPUT" ;;\n'
+                    '  *) echo "inside=no($d)" >> "$GITHUB_OUTPUT" ;;\n'
+                    "esac\n"
+                ).replace("\\n", "\n")
+            },
             workspace=workspace,
         )
 
-        scratch = Path(result.output_lines[0].split("=", 1)[1])
-        assert workspace not in scratch.parents, scratch
-        assert scratch != workspace
+        assert result.returncode == 0, result.stderr
+        assert result.output_lines == ["inside=yes"], (
+            "a bare `mktemp -d` escaped the step's own TMPDIR, so on a runner "
+            f"that prunes the shared temp directory it can vanish mid-step: {result.output_lines}"
+        )
