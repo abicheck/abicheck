@@ -57,14 +57,48 @@ _JOB_LEVEL_FORBIDDEN = ("runner", "steps", "job", "env")
 
 #: The `jobs.<id>.*` keys whose values GitHub evaluates as expressions and
 #: that are not themselves step definitions.
+#:
+#: `runs-on` is the one most worth having: the runner is *being selected* when
+#: it is evaluated, so `runs-on: ${{ runner.os }}` is rejected for exactly the
+#: reason the rest of this list is, and leaving it out let the same
+#: whole-workflow rejection through an adjacent field (Codex review, PR #1294).
 _JOB_LEVEL_EXPRESSION_KEYS = (
     "env",
     "if",
     "name",
+    "runs-on",
     "timeout-minutes",
     "continue-on-error",
     "strategy",
+    "container",
+    "services",
+    "concurrency",
+    "with",
+    "secrets",
 )
+
+#: Deliberately NOT swept, because the forbidden set is not uniform across
+#: job-level keys and a blanket rule is wrong here: `jobs.<id>.outputs` may use
+#: `steps` (`${{ steps.x.outputs.y }}` is the standard idiom -- ten real
+#: workflows in this repository do it) and `job`/`runner`/`env` besides, and
+#: `jobs.<id>.defaults.run` may use `env`. `environment` splits *within itself*:
+#: its `url` may use `steps` -- that is GitHub's own Pages idiom, and
+#: `pages.yml` here uses it -- while its `name` may not.
+#:
+#: Each of these was found by the sweep reporting a real, valid workflow as
+#: rejected, which is the false-positive failure mode this module already had
+#: to fix once. That is the boundary: keys are listed above only where all four
+#: names are genuinely unavailable, and widening past it means re-implementing
+#: GitHub's context-availability table sub-key by sub-key -- a second,
+#: unverifiable copy of a specification this repository does not own, whose
+#: errors present as blocked valid changes.
+_JOB_LEVEL_KEYS_WITH_WIDER_ACCESS = ("outputs", "defaults", "environment")
+
+#: Keys GitHub evaluates as an expression even without `${{ }}` delimiters.
+#: `if: runner.os == 'Linux'` is valid shorthand, and reading only delimited
+#: expressions accepted exactly the reference this module exists to reject
+#: (Codex review, PR #1294).
+_IMPLICIT_EXPRESSION_KEYS = ("if",)
 
 
 def _without_string_literals(expression: str) -> str:
@@ -85,26 +119,40 @@ def _root_contexts(expression: str) -> set[str]:
     is rooted in `github` -- which is permitted at job level -- and `runner`
     there is an input's property name that GitHub never resolves as a context.
     Matching any dotted occurrence would fail that workflow even though GitHub
-    accepts it, so a preceding `.` (or an identifier character, for a name
-    like `my_runner`) disqualifies the match.
+    accepts it, so a preceding `.` (or an identifier character, for a name like
+    `my_runner`) disqualifies the match.
+
+    A root is recognised by what precedes and follows it, not by a trailing
+    `.`: GitHub also dereferences by index and passes a whole context to a
+    function, so `runner['temp']` and `toJSON(runner)` reference `runner` just
+    as `runner.temp` does, and a rule keyed on the dot accepted both (Codex
+    review, PR #1294). Every identifier in the expression is returned; the
+    caller intersects with the names it forbids, so ordinary function names
+    (`success`, `contains`) and permitted contexts are simply not asked about.
     """
     stripped = _without_string_literals(expression)
-    return {
-        m.group(1)
-        for m in re.finditer(
-            r"(?<![A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_-]*)\s*\.", stripped
+    return set(
+        re.findall(
+            r"(?<![A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])", stripped
         )
-    }
+    )
 
 
-def _expressions(value: object) -> list[str]:
-    """Every `${{ ... }}` body anywhere inside *value*, recursively."""
+def _expressions(value: object, *, implicit: bool = False) -> list[str]:
+    """Every expression body inside *value*, recursively.
+
+    With *implicit*, a string carrying no `${{ }}` at all is itself the body --
+    the shorthand GitHub accepts for `if:`.
+    """
     if isinstance(value, str):
-        return re.findall(r"\$\{\{(.*?)\}\}", value, flags=re.DOTALL)
+        delimited = re.findall(r"\$\{\{(.*?)\}\}", value, flags=re.DOTALL)
+        if delimited or not implicit:
+            return delimited
+        return [value]
     if isinstance(value, dict):
-        return [e for v in value.values() for e in _expressions(v)]
+        return [e for v in value.values() for e in _expressions(v, implicit=implicit)]
     if isinstance(value, list):
-        return [e for v in value for e in _expressions(v)]
+        return [e for v in value for e in _expressions(v, implicit=implicit)]
     return []
 
 
@@ -116,7 +164,8 @@ def _job_level_violations(document: dict) -> list[str]:
         for key in _JOB_LEVEL_EXPRESSION_KEYS:
             if key not in job:
                 continue
-            for expression in _expressions(job[key]):
+            implicit = key in _IMPLICIT_EXPRESSION_KEYS
+            for expression in _expressions(job[key], implicit=implicit):
                 for context in sorted(
                     _root_contexts(expression) & set(_JOB_LEVEL_FORBIDDEN)
                 ):
@@ -244,3 +293,105 @@ class TestOnlyARootContextReferenceCounts:
         for expression in naive:
             assert re.search(r"\brunner\s*\.", expression), expression
             assert _job_level_violations(self._job(expression)) == [], expression
+
+
+class TestEveryFormAReferenceCanTake:
+    """A root reference is not always `name.` -- three shapes slipped past.
+
+    All three were false *negatives*: the gate accepted a document GitHub
+    rejects, which is the quieter failure, since the gate then looks healthy
+    while protecting nothing. Raised by Codex on PR #1294 after the
+    false-positive narrowing, which is the direction a narrowing tends to
+    overshoot in.
+    """
+
+    def _job(self, key: str, value: object) -> dict:
+        return {"jobs": {"j": {key: value, "steps": [{"run": "true"}]}}}
+
+    def test_an_if_without_delimiters_is_still_an_expression(self) -> None:
+        """`if: runner.os == 'Linux'` is valid shorthand, and still rejected."""
+
+        assert _job_level_violations(self._job("if", "runner.os == 'Linux'")) != []
+
+    def test_an_implicit_if_naming_a_permitted_context_is_accepted(self) -> None:
+        """The shorthand must not become "any bare `if` is a violation"."""
+
+        assert (
+            _job_level_violations(self._job("if", "github.event_name == 'push'")) == []
+        )
+
+    @pytest.mark.parametrize(
+        "expression",
+        ("${{ runner['temp'] }}", "${{ toJSON(runner) }}", "${{ runner }}"),
+        ids=("index", "whole-context-argument", "bare"),
+    )
+    def test_a_reference_without_a_trailing_dot_is_still_one(
+        self, expression: str
+    ) -> None:
+        assert _job_level_violations(self._job("name", expression)) != []
+
+    def test_runs_on_is_swept(self) -> None:
+        """The runner is being *selected* when `runs-on` is evaluated."""
+
+        assert _job_level_violations(self._job("runs-on", "${{ runner.os }}")) != []
+
+    @pytest.mark.parametrize("key", ("container", "services", "concurrency", "with"))
+    def test_the_other_narrow_keys_are_swept(self, key: str) -> None:
+        assert _job_level_violations(self._job(key, "${{ runner.os }}")) != []
+
+
+class TestKeysWhoseAccessIsWiderAreLeftAlone:
+    """Not every job-level key forbids these names, and guessing wrong blocks work.
+
+    Each case here was found by the sweep reporting a real, valid workflow in
+    this repository as rejected while the list was being widened. They are
+    pinned as tests rather than only as a comment, because the tempting next
+    edit is to add the key back for symmetry.
+    """
+
+    def test_outputs_may_use_steps(self) -> None:
+        """`${{ steps.x.outputs.y }}` in `jobs.<id>.outputs` is the idiom."""
+
+        document = {
+            "jobs": {
+                "j": {
+                    "outputs": {"matrix": "${{ steps.discover.outputs.matrix }}"},
+                    "steps": [{"run": "true"}],
+                }
+            }
+        }
+        assert _job_level_violations(document) == []
+
+    def test_an_environment_url_may_use_steps(self) -> None:
+        """GitHub's own Pages idiom; `pages.yml` in this repository uses it."""
+
+        document = {
+            "jobs": {
+                "j": {
+                    "environment": {
+                        "name": "github-pages",
+                        "url": "${{ steps.deployment.outputs.page_url }}",
+                    },
+                    "steps": [{"run": "true"}],
+                }
+            }
+        }
+        assert _job_level_violations(document) == []
+
+    def test_defaults_run_may_use_env(self) -> None:
+        document = {
+            "jobs": {
+                "j": {
+                    "defaults": {"run": {"working-directory": "${{ env.DIR }}"}},
+                    "steps": [{"run": "true"}],
+                }
+            }
+        }
+        assert _job_level_violations(document) == []
+
+    def test_the_excluded_keys_are_disjoint_from_the_swept_ones(self) -> None:
+        """Vacuity guard: an excluded key must not also be in the sweep."""
+
+        assert not (
+            set(_JOB_LEVEL_KEYS_WITH_WIDER_ACCESS) & set(_JOB_LEVEL_EXPRESSION_KEYS)
+        )
