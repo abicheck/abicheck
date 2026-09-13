@@ -242,3 +242,19 @@
   `model/header_exclusion_record.py` in the process: three layers produce a
   narrowed snapshot, and `compat/cli.py` is a `frontends` module that may not
   import `extract`.
+- **A weak import that becomes strong is a new requirement.** The
+  bundle-import history predicate matched on library and version only, so a
+  *weak* OLD import counted as evidence that something outside the bundle
+  provided the symbol. It is not: the loader resolves an unresolved weak
+  symbol to `0`/`NULL`, so OLD loading proves nothing. The new strong import
+  was then suppressed on the vacuously-satisfied outward-edge rule, and a
+  candidate that now fails to load could report `NO_CHANGE`. The OLD match
+  must now be non-weak; the callers already skip a weak NEW consumer.
+- **`<gcc_options>` is parsed with the shared splitter.** A plain
+  `str.split()` broke a shell-valid quoted argument (`-I"/opt/Program
+  Files/inc"`) into fragments with quote characters still attached, which
+  `_descriptor_compile_options` then quoted again -- so the compiler received
+  nonexistent paths and malformed defines. It was also the one place that
+  disagreed with `join_gcc_options`, the emitter the same values pass
+  through: parser and emitter had two grammars for one string, and now share
+  `split_gcc_options` on POSIX and Windows alike.
