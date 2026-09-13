@@ -150,16 +150,18 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
         }
     )
 
+    runner_temp.mkdir(exist_ok=True)
+
     # Through `run_writing_env_files`, not a bare `subprocess.run`: the step is
-    # re-run against a rebuilt tree if either file it writes did not survive
+    # re-run against recreated files if either file it writes did not survive
     # the call -- see tests/_tmp_tree_resilience.py for why that is recovery
-    # rather than tolerance. BOTH files are named, because both are read back
+    # rather than tolerance, and why a deletion that reaches this `tmp_path`
+    # (taking `bindir`'s stub and the input libraries with it) is refused
+    # instead of retried. BOTH files are named, because both are read back
     # below: guarding only `$GITHUB_OUTPUT` left `$GITHUB_STEP_SUMMARY`'s own
     # read outside the retry boundary, which is the same bug one file to the
-    # right (CodeRabbit, PR #1292). `runner_temp` is recreated alongside them,
-    # since whatever removed one removed the others beside it.
+    # right (CodeRabbit, PR #1292).
     def _run() -> subprocess.CompletedProcess[str]:
-        runner_temp.mkdir(parents=True, exist_ok=True)
         return subprocess.run(
             [bash_executable(), str(RUN_SH)],
             capture_output=True,

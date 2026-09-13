@@ -21,10 +21,26 @@ from _tmp_tree_resilience import (
     run_writing_env_files,
 )
 
-#: Every part of the tree above (and including) the environment file whose
-#: removal has to be survivable. Named by how far up the deletion reached,
-#: because that is exactly what distinguishes the plausible deleters.
-REMOVALS = ("the file alone", "its directory", "the whole tree above it")
+#: How far up the tree a deletion reached. The distinction is the whole
+#: contract, not a taxonomy: only "the file alone" leaves the caller's own
+#: fixtures (a stub on $PATH, input libraries, a seeded workspace) in place, so
+#: only it may be retried. The two deeper ones must fail loudly instead of
+#: re-running the step against a directory this module would have fabricated.
+RECOVERABLE = "the file alone"
+UNFAITHFUL = ("its directory", "the whole tree above it")
+REMOVALS = (RECOVERABLE, *UNFAITHFUL)
+
+
+def _workspace(tmp_path: Path) -> Path:
+    """The caller-owned directory an environment file lives in.
+
+    Created by the *caller*, never by the helper under test: a real harness's
+    fixtures live here, and fabricating it is exactly what
+    `TestARetryThatCouldNotBeFaithfulIsRefused` forbids.
+    """
+    workspace = tmp_path / "tree" / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
 
 
 def _remove(env_file: Path, how: str) -> None:
@@ -37,11 +53,11 @@ def _remove(env_file: Path, how: str) -> None:
 
 
 class TestAStepWhoseOutputVanishedIsRunAgain:
-    @pytest.mark.parametrize("how", REMOVALS)
-    def test_a_single_loss_is_recovered_whatever_was_removed(
+    @pytest.mark.parametrize("how", [RECOVERABLE])
+    def test_a_single_loss_is_recovered_when_the_fixtures_survived(
         self, tmp_path: Path, how: str
     ) -> None:
-        env_file = tmp_path / "tree" / "workspace" / "env_file"
+        env_file = _workspace(tmp_path) / "env_file"
         calls: list[int] = []
 
         def run() -> str:
@@ -60,11 +76,11 @@ class TestAStepWhoseOutputVanishedIsRunAgain:
         assert payload == b"answer=second\n"
         assert len(calls) == 2, "the step must actually have been run again"
 
-    @pytest.mark.parametrize("how", REMOVALS)
+    @pytest.mark.parametrize("how", [RECOVERABLE])
     def test_a_step_that_loses_it_every_time_fails_with_the_tree_state(
         self, tmp_path: Path, how: str
     ) -> None:
-        env_file = tmp_path / "tree" / "workspace" / "env_file"
+        env_file = _workspace(tmp_path) / "env_file"
         calls: list[int] = []
 
         def run() -> str:
@@ -86,7 +102,7 @@ class TestAStepWhoseOutputVanishedIsRunAgain:
     def test_a_step_that_never_loses_it_runs_exactly_once(self, tmp_path: Path) -> None:
         """Vacuity guard: recovery must not become "run everything twice"."""
 
-        env_file = tmp_path / "tree" / "workspace" / "env_file"
+        env_file = _workspace(tmp_path) / "env_file"
         calls: list[int] = []
 
         def run() -> str:
@@ -100,7 +116,7 @@ class TestAStepWhoseOutputVanishedIsRunAgain:
     def test_each_attempt_starts_from_an_empty_file(self, tmp_path: Path) -> None:
         """A retry must not let the lost attempt's leftovers into the answer."""
 
-        env_file = tmp_path / "tree" / "workspace" / "env_file"
+        env_file = _workspace(tmp_path) / "env_file"
         seen: list[bytes] = []
 
         def run() -> str:
@@ -161,11 +177,11 @@ class TestEveryRequiredFileIsGuarded:
     """
 
     @pytest.mark.parametrize("victim", range(3))
-    @pytest.mark.parametrize("how", REMOVALS)
+    @pytest.mark.parametrize("how", [RECOVERABLE])
     def test_losing_any_one_of_them_re_runs_the_step(
         self, tmp_path: Path, victim: int, how: str
     ) -> None:
-        files = [tmp_path / "tree" / "workspace" / f"file{i}" for i in range(3)]
+        files = [_workspace(tmp_path) / f"file{i}" for i in range(3)]
         calls: list[int] = []
 
         def run() -> str:
@@ -190,7 +206,7 @@ class TestEveryRequiredFileIsGuarded:
     ) -> None:
         """Not merely the first requested one, which is sitting right there."""
 
-        files = [tmp_path / "tree" / "workspace" / f"file{i}" for i in range(3)]
+        files = [_workspace(tmp_path) / f"file{i}" for i in range(3)]
 
         def run() -> str:
             files[victim].unlink()
@@ -207,10 +223,73 @@ class TestEveryRequiredFileIsGuarded:
     def test_the_single_file_wrapper_is_the_one_file_case(self, tmp_path: Path) -> None:
         """Vacuity guard: the wrapper must delegate, not keep a second copy."""
 
-        env_file = tmp_path / "tree" / "workspace" / "env_file"
+        env_file = _workspace(tmp_path) / "env_file"
 
         def run() -> str:
             env_file.write_bytes(b"answer=only\n")
             return "kept"
 
         assert run_writing_env_file(env_file, run) == ("kept", b"answer=only\n")
+
+
+class TestARetryThatCouldNotBeFaithfulIsRefused:
+    """A deletion that reached the fixtures must fail, never silently re-run.
+
+    Reported by Codex on PR #1292 and the sharper half of this module's
+    contract. The caller's own fixtures -- the stub `abicheck` on `$PATH`, the
+    input libraries, the payload blobs, a workspace's seeded files -- live in
+    the same tree as the environment file. This module can recreate the file;
+    it cannot recreate any of those. Re-running into a directory it had just
+    fabricated would replace a crash with a confident *wrong* answer (an Action
+    `ERROR`/127 from a stub that is no longer on disk), which is worse than the
+    flake the retry exists to fix.
+
+    Stated over both deeper removal depths and asserted on the *observable*
+    consequence -- the step is not called a second time -- rather than on the
+    message alone, since a helper that retried and then happened to fail would
+    still produce a plausible-looking error.
+    """
+
+    @pytest.mark.parametrize("how", UNFAITHFUL)
+    def test_the_step_is_not_run_again(self, tmp_path: Path, how: str) -> None:
+        env_file = _workspace(tmp_path) / "env_file"
+        fixture = env_file.parent / "stub-on-PATH"
+        calls: list[bool] = []
+
+        def run() -> str:
+            calls.append(fixture.exists())
+            _remove(env_file, how)
+            return "lost"
+
+        fixture.write_bytes(b"#!/bin/sh\n")
+
+        with pytest.raises(AssertionError) as excinfo:
+            run_writing_env_file(env_file, run)
+
+        assert calls == [True], (
+            "the step ran once, with its fixtures; it must not be run a second "
+            f"time against a fabricated empty directory (calls: {calls})"
+        )
+        assert not fixture.exists(), "the fixture really did go with the tree"
+        message = str(excinfo.value)
+        assert str(env_file) in message and "not retried" in message, message
+
+    @pytest.mark.parametrize("how", UNFAITHFUL)
+    def test_a_tree_already_gone_before_the_step_is_refused_too(
+        self, tmp_path: Path, how: str
+    ) -> None:
+        """The same judgement on entry, not only after an attempt.
+
+        A caller can reach this helper with its tree already reaped -- the loss
+        does not have to happen during the step to have taken the fixtures.
+        """
+
+        env_file = _workspace(tmp_path) / "env_file"
+        env_file.write_bytes(b"")
+        _remove(env_file, how)
+        calls: list[int] = []
+
+        with pytest.raises(AssertionError, match="not retried"):
+            run_writing_env_file(env_file, lambda: calls.append(1))
+
+        assert calls == [], "the step must never run without its fixtures"
