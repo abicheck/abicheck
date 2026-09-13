@@ -319,6 +319,7 @@ public:
   W() = default;
   ~W() = default;
   W(const W&) = default;
+  W& operator=(const W&) = default;
   void declared_only() const;
   static int counter() { return 0; }
   operator bool() const { return v_; }
@@ -328,6 +329,16 @@ private:
   bool v_;
 };
 typedef struct { int anon_member() const { return k; } int k; } Unnamed;
+struct Outer {
+  static int stat_body() { return 1; }
+  static int stat_declared();
+  virtual void v() { }
+  virtual ~Outer() = default;
+  Outer();
+  struct Nested { int f() { return 2; } void g(); };
+};
+inline Outer::Outer() = default;
+void Outer::Nested::g() { }
 void free_declared(int);
 inline void free_inline(int) {}
 constexpr int free_constexpr(int x) { return x; }
@@ -427,6 +438,37 @@ def test_two_backends_agree_on_is_inline_for_every_shared_declaration(tmp_path):
     assert not disagreements, f"backends disagree on is_inline: {disagreements}"
     # Both answers must occur, or agreement would be trivially satisfiable.
     assert {v for key in shared for v in clang_idx[key]} == {True, False}
+
+
+_SPACESHIP_HEADER = """
+#include <compare>
+namespace lib {
+struct P {
+  int a;
+  bool operator==(const P&) const = default;
+  auto operator<=>(const P&) const = default;
+};
+}
+"""
+
+
+@_LINUX_ONLY
+@_NEEDS_CLANG
+def test_cpp20_defaulted_comparisons_are_inline(tmp_path):
+    """Covered here rather than in the differential: castxml 0.7.0 cannot parse
+    `operator<=>` at all, so this shape has no cross-backend oracle and would
+    break the corpus. Asserted against real clang instead.
+
+    A defaulted comparison operator is a definition in the class body, so it is
+    implicitly inline and owes no export -- and unlike the other shapes, both
+    frontends being silent here would look like agreement rather than a gap,
+    which is the one blind spot a differential cannot see.
+    """
+    header = tmp_path / "spaceship.hpp"
+    header.write_text(_SPACESHIP_HEADER)
+    by_name = {fn.name: fn for fn in _clang_functions(header)}
+    assert by_name["operator=="].is_inline is True
+    assert by_name["operator<=>"].is_inline is True
 
 
 # ── end to end, where the report came from ──────────────────────────────────
