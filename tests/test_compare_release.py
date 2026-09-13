@@ -1744,3 +1744,35 @@ def test_release_json_omits_severity_block_without_config() -> None:
         None,
     )
     assert "severity" not in json.loads(out)
+
+
+class TestTheInvokeHelpersKeepTheirStreamContract:
+    """`_invoke` returns stdout alone and `_invoke_combined` includes stderr.
+
+    Both halves matter, and other modules import these helpers: `_invoke`
+    returning stdout is what keeps the unconditional ledgers out of a
+    `-o json=-` document, and a caller asserting on a *message* needs the
+    combined form. `test_release_request_parity.py` imported `_invoke` and
+    asserted a usage error's text, which silently became unreachable when
+    `_invoke` stopped carrying stderr (found by a full local run, not by the
+    targeted ones). Pinned here rather than in each importer, since the
+    contract belongs to the helpers.
+    """
+
+    def test_invoke_returns_stdout_without_stderr(self, tmp_path: Path) -> None:
+        # A usage error: message on stderr, nothing on stdout.
+        code, out = _invoke("compare", "--no-such-flag")
+        assert code != 0
+        assert "no-such-flag" not in out
+
+    def test_invoke_combined_carries_the_stderr_message(self, tmp_path: Path) -> None:
+        code, out = _invoke_combined("compare", "--no-such-flag")
+        assert code != 0
+        assert "no-such-flag" in out
+
+    def test_both_agree_on_the_exit_code(self, tmp_path: Path) -> None:
+        """The streams differ; the verdict must not."""
+        assert (
+            _invoke("compare", "--no-such-flag")[0]
+            == _invoke_combined("compare", "--no-such-flag")[0]
+        )
