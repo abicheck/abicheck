@@ -122,6 +122,53 @@ def test_middle_sorting_public_header_addition_is_fully_comparable(tmp_path):
     assert check_contracts_comparable(old, new) is None
 
 
+def test_an_existing_headers_leaking_edit_is_compared_at_full_assurance(tmp_path):
+    """The symmetry that decides how an addition may be priced.
+
+    The hazard an interior insertion carries is that a header parsed after it
+    in the aggregate driver TU now sees macros/pragmas it did not see before.
+    That hazard is NOT specific to an insertion: an EXISTING declared header
+    that gains ``#define LEAK`` and ``#pragma pack(push, 1)`` between two
+    versions does the same thing to every header after it -- and this contract
+    compares that at full assurance, deliberately, because a declared header's
+    content is not part of ``profile_fingerprint`` at all
+    (``comparability_fields._header_identities`` keys a header by its
+    root-relative path, never its bytes).
+
+    This test states that as an executable fact rather than a claim in a
+    docstring: as long as it passes, pricing an ADDED header's sort position
+    as reduced assurance is an inconsistency, not a safeguard -- it would make
+    assurance depend on the new header's spelling while the strictly larger
+    hazard next door goes unpriced. If this test ever fails because header
+    content joins the fingerprint, the insertion question genuinely reopens
+    and this file's waiver should be revisited with it.
+    """
+    leaky = "#define LEAK 1\n#pragma pack(push, 1)\nint a(int);\n"
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new"
+    old_headers = _headers(old_root, _OLD_HEADERS)
+    new_headers = _headers(new_root, _OLD_HEADERS)
+    # The FIRST declared header, so its leak reaches every header after it.
+    new_headers[0].write_text(leaky, encoding="utf-8")
+
+    def _snapshot(headers, version):
+        return AbiSnapshot(
+            library="libpvxs.so",
+            version=version,
+            contract=compute_extraction_contract(
+                l2_frontend_ran=True,
+                declared_headers=headers,
+                public_header_paths=headers,
+                depfile_resolved_paths=headers,
+            ),
+        )
+
+    old = _snapshot(old_headers, "1.3")
+    new = _snapshot(new_headers, "1.4")
+    assert old.contract.profile_fingerprint == new.contract.profile_fingerprint
+    assert check_contracts_comparable(old, new) is None
+
+
 def test_trailing_append_keeps_full_assurance(tmp_path):
     """The strictly-safe shape is not degraded by this change: a header that
     sorts AFTER every existing one changes no existing header's parse context,
