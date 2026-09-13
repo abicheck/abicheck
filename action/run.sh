@@ -2632,6 +2632,27 @@ if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
   exit 1
 fi
 
+# require-complete-analysis: RETIRED (rulings.py deferred-option followup --
+# hard removal, no deprecation window). The CLI's own
+# --require-complete-analysis flag is gone entirely (config-only now,
+# .abicheck.yml's assurance.require_complete); validate-inputs.sh already
+# rejects a non-empty/false input before this step ever runs, so this is
+# defense in depth for anyone invoking run.sh directly (same rationale as
+# every other pre-validated guard in this file).
+#
+# Checked here, before the mode dispatch, rather than inside the compare
+# branch where it used to live: retirement is a property of the input, not
+# of which branch happens to run (the ordering rule
+# `tests/test_action_run_contract.py` states for the other tombstones), and
+# `validate-inputs.sh` rejects this one on every mode. Buried in the compare
+# arm, the "defense in depth for anyone invoking run.sh directly" the
+# comment above claims was true only for `mode: compare` -- a direct
+# `mode: dump` run with the input set proceeded to analyse (Codex review).
+if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+  echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+  exit 1
+fi
+
 # Replaces every literal (non-glob) occurrence of $2 in $1 with $3, via
 # prefix/suffix parameter-expansion pattern REMOVAL (`%%`/`#`) plus plain
 # string concatenation for the inserted text -- NOT
@@ -3506,18 +3527,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # wall-clock guard isn't wired to that path, ADR-068 D2).
   if [[ "$_NO_BASELINE" != "true" ]]; then
     add_single_flag "--budget" "${INPUT_BUDGET:-}"
-  fi
-
-  # require-complete-analysis: RETIRED (rulings.py deferred-option followup
-  # -- hard removal, no deprecation window). The CLI's own
-  # --require-complete-analysis flag is gone entirely (config-only now,
-  # .abicheck.yml's assurance.require_complete); validate-inputs.sh already
-  # rejects a non-empty/false input before this step ever runs, so this is
-  # defense in depth for anyone invoking run.sh directly (same rationale as
-  # every other pre-validated guard in this file).
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-    echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
-    exit 1
   fi
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then

@@ -285,29 +285,43 @@ def test_run_sh_refuses_the_same_input_independently(name: str) -> None:
     itself rather than lean on the preflight step -- defense in depth, since
     the two scripts are separate entry points.
 
+    Swept over every mode, for the same reason the preflight check is. A
+    rejection sitting inside one mode's own branch is not this contract:
+    `require-complete-analysis` was guarded only in the compare arm, so a
+    direct `run.sh` run with `mode: dump` and the input set went on to
+    analyse -- while a compare-only version of this test passed (Codex
+    review). Retirement is a property of the input, not of which branch
+    happens to run.
+
     The exemptions come from `_NON_RUN_SH_INPUTS`, the existing registry of
     inputs the "Run abicheck" step never forwards; for those, preflight is
     the whole contract and the ordering test above is what backs it.
     """
-    result = _run_script(
-        RUN_SH,
-        {
-            "INPUT_MODE": "compare",
-            "INPUT_NEW_LIBRARY": "libfoo.so",
-            _input_env_var(name): _meaningful_value(RETIRED_INPUTS[name]),
-            # run.sh would otherwise try to do real work; the retired-input
-            # rejections all precede the mode dispatch, so it never gets there.
-            "GITHUB_STEP_SUMMARY": os.devnull,
-            "GITHUB_OUTPUT": os.devnull,
-        },
-    )
-    combined = result.stdout + result.stderr
-    assert result.returncode != 0, (
-        f"run.sh accepts retired input {name!r}; only the preflight step "
-        f"rejects it, so an entry point that skips preflight runs a narrower "
-        f"analysis silently.\n{combined}"
-    )
-    assert name in combined, f"run.sh rejects {name!r} without naming it.\n{combined}"
+    for mode in ("compare", "dump", "deps-tree", "deps-compare"):
+        result = _run_script(
+            RUN_SH,
+            {
+                "INPUT_MODE": mode,
+                "INPUT_NEW_LIBRARY": "libfoo.so",
+                _input_env_var(name): _meaningful_value(RETIRED_INPUTS[name]),
+                # run.sh would otherwise try to do real work; every
+                # retired-input rejection precedes the mode dispatch, so it
+                # never gets there.
+                "GITHUB_STEP_SUMMARY": os.devnull,
+                "GITHUB_OUTPUT": os.devnull,
+            },
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"run.sh accepts retired input {name!r} on mode {mode!r}; only "
+            f"the preflight step rejects it, so an entry point that skips "
+            f"preflight runs a narrower analysis silently.\n{combined}"
+        )
+        assert name in combined, (
+            f"run.sh exits non-zero for {name!r} on mode {mode!r} but never "
+            f"names it -- that is some other error, not this input's "
+            f"rejection.\n{combined}"
+        )
 
 
 @pytest.mark.parametrize("name", sorted(RETIRED_INPUTS))
