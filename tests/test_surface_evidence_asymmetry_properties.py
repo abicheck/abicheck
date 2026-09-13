@@ -36,6 +36,7 @@ defect, not from `export_transition`'s own predicate.
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
@@ -253,6 +254,29 @@ class TestSurfaceEvidenceAsymmetry:
             if c.kind is ChangeKind.PARAM_DEFAULT_VALUE_CHANGED
         }
         assert reported == set(names)
+
+    @pytest.mark.parametrize("evidence_on_old", [True, False])
+    def test_an_extern_c_linkage_change_is_still_paired(
+        self, evidence_on_old: bool
+    ) -> None:
+        """The pair survives a key change, not just an evidence gap.
+
+        An ``extern "C"`` declaration is spelled by its bare name on one side
+        and by a C++ mangling on the other, so an exact-key lookup misses the
+        peer: the surviving pair read as a removal plus an addition instead
+        of the linkage change it is (Codex review, P2). Asserted in both
+        directions, since either side can be the one lacking evidence.
+        """
+        old = _snapshot(["c_func"], evidence=evidence_on_old)
+        new = _snapshot(["_Z6c_funcv"], evidence=not evidence_on_old)
+        old.functions[0].name = new.functions[0].name = "c_func"
+        old.functions[0].is_extern_c = True
+        new.functions[0].is_extern_c = False
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert not (kinds & _SURFACE_EXIT_KINDS), (
+            f"the pair was split into a removal/addition: {kinds}"
+        )
+        assert ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED in kinds
 
     @given(names=_names, variables=st.booleans())
     @settings(deadline=None, max_examples=40)

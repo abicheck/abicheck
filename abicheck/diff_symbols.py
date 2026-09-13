@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .checker_types import Change
@@ -272,7 +272,35 @@ def _reconciled_function_surfaces(
         new_all=new.function_map,
         old_exported=_observed_exports(old, FUNCTION_SYMBOL_TYPES),
         new_exported=_observed_exports(new, FUNCTION_SYMBOL_TYPES),
+        resolve_in_old=_full_map_alias_resolver(old.function_map),
+        resolve_in_new=_full_map_alias_resolver(new.function_map),
     )
+
+
+def _full_map_alias_resolver(
+    full_map: dict[str, Function],
+) -> Callable[[str, Function], Function | None]:
+    """Resolve a key to *full_map*'s declaration through the same
+    ambiguity-safe ``extern "C"`` alias tier ``_match_old_function`` uses.
+
+    An ``extern "C"`` declaration is spelled by its bare name on one side and
+    by a C++ mangling on the other, so an exact-key lookup misses the peer
+    and the surviving pair reads as a removal plus an addition instead of the
+    linkage change it is (Codex review, P2). Eligibility is unchanged from
+    the symbol join: an extern-C declaration may match any single same-named
+    peer, a C++ one only an extern-C peer -- and "no candidate" and "several
+    candidates" both answer ``None``, so an overload set is never guessed at.
+    """
+    index = SymbolIdentityIndex.for_functions(full_map)
+
+    def _resolve(key: str, decl: Function) -> Function | None:
+        match = index.unique_alias_match(
+            f"name:{decl.name}",
+            where=None if decl.is_extern_c else _is_extern_c_function,
+        )
+        return None if match is None else match.declaration
+
+    return _resolve
 
 
 def _reconciled_variable_surfaces(

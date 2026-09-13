@@ -47,7 +47,7 @@ loses a population it had before.
 
 from __future__ import annotations
 
-from collections.abc import Container
+from collections.abc import Callable, Container
 from typing import TYPE_CHECKING, TypeVar
 
 from .export_transition import surface_exit_is_evidence_gap
@@ -61,6 +61,13 @@ __all__ = ["reconcile_surfaces"]
 
 _Decl = TypeVar("_Decl", "Function", "Variable")
 
+#: Resolve one side's key to the other side's declaration when the two sides
+#: spell it differently, using the caller's own ambiguity-safe identity tier
+#: (``SymbolIdentityIndex``). Passed in rather than imported: the identity
+#: machinery lives outside this package, and the rule for *which* alias is
+#: legitimate belongs to the symbol join, not here.
+_Resolver = Callable[[str, "_Decl"], "_Decl | None"]
+
 
 def reconcile_surfaces(
     old_map: Mapping[str, _Decl],
@@ -70,6 +77,8 @@ def reconcile_surfaces(
     new_all: Mapping[str, _Decl],
     old_exported: Container[str] = frozenset(),
     new_exported: Container[str] = frozenset(),
+    resolve_in_old: _Resolver[_Decl] | None = None,
+    resolve_in_new: _Resolver[_Decl] | None = None,
 ) -> tuple[dict[str, _Decl], dict[str, _Decl]]:
     """Both surfaces, with evidence-gap-only differences reconciled.
 
@@ -85,16 +94,58 @@ def reconcile_surfaces(
     """
     reconciled_old = dict(old_map)
     reconciled_new = dict(new_map)
-    for key in old_map.keys() - new_map.keys():
-        peer = new_all.get(key)
-        if peer is not None and surface_exit_is_evidence_gap(
-            old_map[key], peer, old_exported_symbols=old_exported, key=key
-        ):
-            reconciled_new[key] = peer
-    for key in new_map.keys() - old_map.keys():
-        peer = old_all.get(key)
-        if peer is not None and surface_exit_is_evidence_gap(
-            new_map[key], peer, old_exported_symbols=new_exported, key=key
-        ):
-            reconciled_old[key] = peer
+    _admit(
+        src=old_map,
+        dst=reconciled_new,
+        other=new_map,
+        other_all=new_all,
+        exported=old_exported,
+        resolve=resolve_in_new,
+    )
+    _admit(
+        src=new_map,
+        dst=reconciled_old,
+        other=old_map,
+        other_all=old_all,
+        exported=new_exported,
+        resolve=resolve_in_old,
+    )
     return reconciled_old, reconciled_new
+
+
+def _admit(
+    *,
+    src: Mapping[str, _Decl],
+    dst: dict[str, _Decl],
+    other: Mapping[str, _Decl],
+    other_all: Mapping[str, _Decl],
+    exported: Container[str],
+    resolve: _Resolver[_Decl] | None,
+) -> None:
+    """Re-admit, into *dst*, each of *src*'s declarations the other side
+    dropped from its surface purely for want of contract evidence.
+
+    One direction of :func:`reconcile_surfaces`, written once and called
+    twice: the rule is symmetric, and two hand-mirrored copies are how the
+    addition half of this very defect survived a round of review.
+    """
+    for key in src.keys() - other.keys():
+        peer = other_all.get(key)
+        if peer is None and resolve is not None:
+            # The declaration may be spelled under a different key on the
+            # other side -- an `extern "C"` declaration gaining or losing its
+            # C++ mangling is the real case (Codex review, P2), and the
+            # symbol join already pairs those through an ambiguity-safe
+            # alias tier. An exact-key-only lookup missed it, so the pair
+            # read as a removal on one side and an addition on the other,
+            # instead of the linkage change it is.
+            peer = resolve(key, src[key])
+            if peer is not None and any(p is peer for p in other.values()):
+                # Already in the other side's surface under its own key: the
+                # symbol join's own alias tier pairs them, and admitting a
+                # second copy here would double-report the same declaration.
+                continue
+        if peer is not None and surface_exit_is_evidence_gap(
+            src[key], peer, old_exported_symbols=exported, key=key
+        ):
+            dst[key] = peer
