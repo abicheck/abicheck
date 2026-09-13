@@ -154,12 +154,12 @@ def _write_baseline_set(
 
 
 def _compare_dirs(old_dir: Path, new_dir: Path) -> dict:
-    """Run the real public workflow -- ``abicheck compare OLD NEW --format
-    json`` over two directories -- and return the parsed release summary."""
+    """Run the real public workflow -- ``abicheck compare OLD NEW --output
+    json=-`` over two directories -- and return the parsed release summary."""
     from abicheck.cli import main
 
     result = CliRunner().invoke(
-        main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+        main, ["compare", str(old_dir), str(new_dir), "--output", "json=-"]
     )
     assert result.stdout, (
         f"no JSON on stdout (exit {result.exit_code}):\n{result.output}"
