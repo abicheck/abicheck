@@ -683,7 +683,6 @@ class TestABinaryEntityIsNotADeclarationFinding:
         "char8t_migration": "a whole-binary dialect/ABI trait; names the declaration it was observed on",
         "bit_int_width_changed": "a target ABI trait for _BitInt widths",
         "threadsafe_statics_mode_changed": "a compiler-mode trait of the binary",
-        "struct_return_convention_changed": "a target calling-convention trait, not one function's attribute",
         "elf_class_changed": "an ELF container fact: the whole file changed word size",
         "long_double_abi_changed": "a target floating-point ABI trait",
         "pe_ordinal_retargeted": "a PE export-table fact keyed by ordinal",
@@ -972,9 +971,9 @@ class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
     """
 
     def _entity(self, kinds):
-        from abicheck.internal_leak import _unanimous_trigger_entity
+        from abicheck.change_registry import unanimous_entity_for
 
-        return _unanimous_trigger_entity(kinds)
+        return unanimous_entity_for(kinds)
 
     def test_a_variable_trigger_yields_a_variable_finding(self):
         assert self._entity(["var_removed"]) == "variable"
@@ -1077,3 +1076,67 @@ class TestJUnitClassnamesComeFromTheCatalog:
 
         seen = {self._classname(k.value) for k in ChangeKind}
         assert seen == {"functions", "variables", "types", "enums", "metadata"}
+
+
+class TestADataOnlyProducerYieldsAVariableFinding:
+    """Five kinds were declared `BINARY` whose producers emit them *only* for
+    data symbols or *only* per function, so `--view show=variables` /
+    `show=functions` omitted them and the JSON `entity` was wrong (Codex
+    review, PR #1284).
+
+    The oracle here is the producer's own gate, not a name: each of these is
+    guarded on `SymbolType.OBJECT/COMMON/TLS` (or, for the return-convention
+    kind, emitted once per public function name). `struct_return_convention_
+    changed` additionally had a *reviewed* allowlist entry asserting it was
+    "a target calling-convention trait, not one function's attribute" -- true
+    about its cause, but the finding is keyed to the function whose callers
+    break, which is what the display dimension answers.
+    """
+
+    DATA_ONLY = (
+        "symbol_size_changed",
+        "symbol_size_changed_const_object",
+        "symbol_size_changed_internal",
+        "exported_object_alignment_reduced",
+        "protected_visibility_changed",
+    )
+
+    def test_every_data_only_kind_is_a_variable(self):
+        from abicheck.model.change_catalog.dimensions import ChangeEntity
+
+        wrong = {
+            k: REGISTRY.entity_for(k)
+            for k in self.DATA_ONLY
+            if REGISTRY.entity_for(k) is not ChangeEntity.VARIABLE
+        }
+        assert not wrong, wrong
+
+    def test_they_are_shown_by_the_variables_filter(self):
+        f = ShowOnlyFilter(frozenset(), frozenset({"variables"}), frozenset())
+        for kind in self.DATA_ONLY:
+            assert f._check_element(None, kind), (
+                f"{kind} is hidden from --view show=variables"
+            )
+
+    def test_a_per_function_finding_is_a_function(self):
+        from abicheck.model.change_catalog.dimensions import ChangeEntity
+
+        assert (
+            REGISTRY.entity_for("struct_return_convention_changed")
+            is ChangeEntity.FUNCTION
+        )
+
+    def test_a_disappeared_instantiation_is_a_removal(self):
+        """`instantiation_missing_from_binary` fires when an old exported
+        instantiation is absent from the new export set while its siblings
+        survive -- a disappearance, so `show=removed` must list it."""
+        from abicheck.model.change_catalog.dimensions import ChangeOperation
+
+        assert (
+            REGISTRY.operation_for("instantiation_missing_from_binary")
+            is ChangeOperation.REMOVED
+        )
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        assert removed._check_action(
+            "instantiation_missing_from_binary", removed.actions
+        )

@@ -392,7 +392,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "against the old headers may use aligned loads (SIMD) that now "
         "fault or fall back to slow paths.",
         description_template="Exported object alignment reduced: {name} ({old} → {new} bytes)",
-        entity=_ENT.BINARY,
+        entity=_ENT.VARIABLE,  # producer gates on OBJECT/COMMON/TLS
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -832,7 +832,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "symbols this can break copy relocations; for functions it changes "
         "interposition semantics. The symbol remains exported.",
         description_template="Data symbol visibility changed: {name} ({old} → {new}); may break copy relocations",
-        entity=_ENT.BINARY,
+        entity=_ENT.VARIABLE,  # functions use func_visibility_protected_changed
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -1003,7 +1003,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "Proven from DWARF/ABI facts, so BREAKING; the flag-only signal stays "
         "as the generic abi_relevant_build_flag_changed (RISK).",
         policy_overrides={"plugin_abi": _C},
-        entity=_ENT.BINARY,
+        entity=_ENT.FUNCTION,  # emitted per public function name
         operation=_OP.MODIFIED,
     ),
     _E(

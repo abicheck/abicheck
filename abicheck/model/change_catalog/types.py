@@ -548,7 +548,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "the public header's `extern template` declarations.",
         description_template="Template instantiation '{name}' was exported by the old library but is missing from the new binary. Other instantiations of '{detail}' still exist, so the public header very likely still advertises this one. Consumers built against the old header link cleanly but fail at load time with an undefined-symbol error.",
         entity=_ENT.FUNCTION,
-        operation=_OP.MODIFIED,
+        operation=_OP.REMOVED,  # the instantiation is gone from the exports
     ),
     _E(
         "layout_unverifiable",

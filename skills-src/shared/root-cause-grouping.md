@@ -31,9 +31,9 @@ is invisible to the user — they see a confident grouping that the tool would
 not reproduce. Read `root_causes` first; only reason beyond it for what it
 demonstrably does not cover.
 
-Other report modes exist for different jobs: `--view leaf` for the
-individual findings, `--view impact` for the impact-analysis view, and
-the default `full`. The impact model is owned by
+Other report modes exist for different jobs: `--view impact` for the
+impact-analysis view, and the default `full`, which already lists the
+individual findings. The impact model is owned by
 [the impact analysis page](../../docs/learn/impact-analysis.md).
 
 ## What to do with the groups

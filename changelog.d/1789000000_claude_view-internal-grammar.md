@@ -138,3 +138,18 @@
 - **A release's ledger blocks survive lockstep SONAME suppression.** They were
   snapshotted before that release-wide pass ran, so a superseded member named
   neither the `lockstep_soname_bump` rule nor the finding it hid.
+
+- **Five findings reach the display filter they belong to.** `symbol_size_changed`
+  and its two siblings, `exported_object_alignment_reduced` and
+  `protected_visibility_changed` are emitted only for data symbols
+  (`OBJECT`/`COMMON`/`TLS`) yet were declared as binary-surface findings, so
+  `--view show=variables` omitted them; `struct_return_convention_changed` is
+  emitted once per public function and is now a function finding; and
+  `instantiation_missing_from_binary` reports an export that disappeared, so it
+  belongs to `--view show=removed`.
+
+- **The published Agent Skills no longer recommend retired spellings.** The
+  skill sources still told agents to run `--view leaf` and `--view suppressions`,
+  both of which now exit 64. `skills-src/` has joined the retired-surface sweep
+  so the next retirement cannot leave that tree stale — it is the highest-stakes
+  place for it, since an agent runs those commands rather than reading them.

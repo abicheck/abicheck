@@ -1045,7 +1045,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         _B,
         impact="ELF symbol size changed; copy relocations or memcpy-based consumers get truncated/oversized data.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
-        entity=_ENT.BINARY,
+        entity=_ENT.VARIABLE,  # OBJECT/COMMON/TLS only
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -1055,7 +1055,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "Old non-PIE consumers may have copy relocations sized from the old DSO symbol, so a later DSO can "
         "truncate or otherwise mis-copy data at load time.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
-        entity=_ENT.BINARY,
+        entity=_ENT.VARIABLE,  # OBJECT/COMMON/TLS only
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -1065,7 +1065,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "exported data remains part of the dynamic ABI and size changes can break copy relocations "
         "or direct data consumers. Override severity via --policy only when the symbol is known private.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
-        entity=_ENT.BINARY,
+        entity=_ENT.VARIABLE,  # OBJECT/COMMON/TLS only
         operation=_OP.MODIFIED,
     ),
     _E(
