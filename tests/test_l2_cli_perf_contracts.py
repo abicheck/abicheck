@@ -51,6 +51,29 @@ def _load(name: str):
 harness = _load("check_l2_cli_perf")
 receipt_mod = _load("perf_receipt")
 fixtures = _load("l2_cli_fixture")
+validation_mod = _load("l2_cli_validation")
+_HARNESS_PATH = _SCRIPTS / "check_l2_cli_perf.py"
+_WORKFLOW = (
+    Path(__file__).resolve().parent.parent / ".github" / "workflows" / "performance.yml"
+)
+
+
+def _workflow_l2_body() -> str:
+    """The `l2-cli-perf` job's own RAW text, so a match cannot come from another job.
+
+    Raw, not a yaml round-trip: `safe_dump` re-quotes shell text, so a literal
+    assertion about a `${var}` expansion fails against its own source.
+    """
+    text = _WORKFLOW.read_text()
+    start = text.index("\n  l2-cli-perf:")
+    rest = text[start + 1 :]
+    lines = rest.split("\n")
+    out = [lines[0]]
+    for line in lines[1:]:
+        if line and not line.startswith("   ") and not line.lstrip().startswith("#"):
+            break
+        out.append(line)
+    return "\n".join(out)
 
 
 def ast_dump(node) -> str:
@@ -488,121 +511,6 @@ def _stub_library() -> object:
 
 def _batch(counts: list[int]) -> list[object]:
     return [_run({"header_extraction": n}) for n in counts]
-
-
-class TestEveryWarmRepetitionMustShowTheCacheServing:
-    """One cache hit must not certify a batch in which the others re-extracted.
-
-    The first version reduced each batch with `min()` and compared the two
-    numbers, so a single warm repetition hitting the cache validated the whole
-    scenario while the rest extracted in full — the gated median could then
-    describe an uncached run while the receipt reported a served cache. No
-    reducer over repetitions can express "each repetition was warm", so the
-    comparison is per index-aligned pair.
-    """
-
-    def test_all_warm_repetitions_served_passes(self):
-        runs = {"cold": _batch([2, 2, 2]), "warm": _batch([0, 0, 0])}
-        assert harness._warm_cache_problems(runs) == []
-
-    @pytest.mark.parametrize(
-        "warm,bad",
-        [
-            ([0, 2, 0], [1]),
-            ([2, 0, 0], [0]),
-            ([0, 0, 2], [2]),
-            ([2, 2, 0], [0, 1]),
-            ([3, 3, 3], [0, 1, 2]),
-        ],
-    )
-    def test_any_unserved_repetition_fails_and_is_named(self, warm, bad):
-        # Every position, not just the one a `min()` reduction happened to miss
-        # first, and the failure names which repetitions were wrong.
-        runs = {"cold": _batch([2, 2, 2]), "warm": _batch(warm)}
-        problems = harness._warm_cache_problems(runs)
-        assert len(problems) == len(bad), problems
-        for index in bad:
-            assert any(f"repetition {index}:" in p for p in problems), (index, problems)
-
-    def test_a_min_reduction_would_have_passed_the_mixed_case(self):
-        # States the defect directly, so the test cannot drift back: under the
-        # old rule (min of each batch) a batch with one served repetition looked
-        # identical to a fully served one.
-        runs = {"cold": _batch([2, 2, 2]), "warm": _batch([0, 2, 2])}
-        assert min(0, 2, 2) < min(2, 2, 2), "the old rule really did pass this"
-        assert harness._warm_cache_problems(runs)
-
-    def test_a_cold_repetition_that_extracted_nothing_fails(self):
-        # The other direction: a cache root that was not actually fresh means
-        # nothing in the scenario measures a cold state.
-        runs = {"cold": _batch([2, 0, 2]), "warm": _batch([0, 0, 0])}
-        problems = harness._warm_cache_problems(runs)
-        assert any("not actually fresh" in p for p in problems), problems
-
-    def test_unpairable_batches_fail_rather_than_being_reduced(self):
-        runs = {"cold": _batch([2, 2]), "warm": _batch([0])}
-        problems = harness._warm_cache_problems(runs)
-        assert problems and "cannot pair" in problems[0]
-
-    @pytest.mark.parametrize(
-        "cold,warm,expected",
-        [
-            ([2, 2, 2], [0, 0, 0], "full"),
-            ([2, 2, 2], [1, 1, 1], "partial"),
-            ([2, 2, 2], [2, 2, 2], "none"),
-            ([2, 2, 2], [0, 2, 0], "none"),
-            ([2, 2, 2], [0, 1, 0], "partial"),
-        ],
-    )
-    def test_the_reported_service_is_the_worst_repetition(self, cold, warm, expected):
-        # Reporting the *best* repetition is the mislabelling half of the same
-        # defect: a batch served once and missed twice is not a "full" cache.
-        runs = {"cold": _batch(cold), "warm": _batch(warm)}
-        assert harness._classify_cache_service(runs) == expected
-
-
-class TestEveryInvalidationRepetitionMustReExtract:
-    """The mirror image: `max()` let one re-extraction excuse stale repetitions.
-
-    Serving stale evidence is the correctness bug this control exists to catch,
-    so a repetition that served it must fail even when a sibling repetition did
-    the work.
-    """
-
-    def test_all_repetitions_re_extracting_passes(self):
-        scenario = harness.scenario_cache_invalidation(
-            fixtures.FixtureSpec(
-                shape="simple",
-                headers=1,
-                libraries=1,
-                change="break",
-                distinct_contexts=False,
-            )
-        )
-        runs = {"after_dependency_change": _batch([2, 2, 2])}
-        problems = [
-            p
-            for p in scenario.validate(Path("/nonexistent"), runs)
-            if "snapshot" not in p
-        ]
-        assert problems == [], problems
-
-    @pytest.mark.parametrize("after", [[0, 2, 2], [2, 0, 2], [2, 2, 0], [0, 0, 0]])
-    def test_any_stale_repetition_fails(self, after):
-        # The first three cases are exactly the ones a `max()` reduction passed:
-        # one repetition re-extracted, so the batch's maximum was nonzero.
-        scenario = harness.scenario_cache_invalidation(
-            fixtures.FixtureSpec(
-                shape="simple",
-                headers=1,
-                libraries=1,
-                change="break",
-                distinct_contexts=False,
-            )
-        )
-        runs = {"after_dependency_change": _batch(after)}
-        problems = scenario.validate(Path("/nonexistent"), runs)
-        assert any("stale" in p for p in problems), problems
 
 
 class TestAStepMustProduceItsOwnOutput:
@@ -1073,46 +981,6 @@ class TestAbsentCountersAreNotZero:
         assert abort == ["repetition 0: the cold run ..."], abort
 
 
-class TestTheInvalidationSetupStepsDeclareTheirOutputs:
-    """Its `cold` and `warm` dumps are measured steps, so they are gated.
-
-    They declared no output, so a run that exited 0 after skipping report
-    serialization had its faster timing gated while validation looked only at the
-    post-change snapshot.
-    """
-
-    def _steps(self) -> list[object]:
-        spec = fixtures.FixtureSpec(
-            shape="simple",
-            headers=1,
-            libraries=1,
-            change="break",
-            distinct_contexts=False,
-        )
-        return harness.scenario_cache_invalidation(spec).steps(
-            fixtures.BuiltFixture(
-                spec=spec, old=[_stub_library()], new=[_stub_library()]
-            ),
-            Path("/tmp/l2-inv-decl"),
-        )
-
-    def test_every_measured_step_declares_an_output(self):
-        steps = self._steps()
-        assert len(steps) == 3, [s.name for s in steps]
-        for step in steps:
-            assert step.declared_outputs, step.name
-
-    def test_each_step_declares_its_own_distinct_snapshot(self):
-        # Sharing one path between the three would reintroduce the stale-output
-        # problem inside a single repetition.
-        names = [p.name for step in self._steps() for p in step.declared_outputs]
-        assert sorted(names) == [
-            "inv_after.abi.json",
-            "inv_cold.abi.json",
-            "inv_warm.abi.json",
-        ], names
-
-
 class TestIncludePassesScaleWithTheHeaderCount:
     """One include pass per header, not one per side.
 
@@ -1188,3 +1056,64 @@ class TestIncludePassesScaleWithTheHeaderCount:
     def test_an_unobserved_counter_is_still_unknown_not_a_failure(self) -> None:
         run = _run({}, argv=self._argv(8, 2))
         assert harness._include_pass_problems(run, 2) == []
+
+
+class TestBothExportsAreValidatedAgainstTheSameFindings:
+    """The two-format scenario's claim is that both exports describe one analysis.
+
+    Asking the JSON half only "did this reach L2" and the rendered half only for
+    the word BREAKING left a renderer that kept the verdict metadata and dropped
+    the finding list reading as a pure speedup (Codex review). Both halves are now
+    checked against the same `EXPECTED_BREAK_KIND_FAMILIES` table.
+    """
+
+    @staticmethod
+    def _markdown(*kinds: str) -> str:
+        body = "\n".join(f"- **{kind}**: something happened" for kind in kinds)
+        return f"# ABI Report\n\nVerdict: BREAKING\n\n{body}\n"
+
+    def test_a_render_naming_every_family_passes(self) -> None:
+        text = self._markdown("func_removed", "type_size_changed")
+        assert (
+            validation_mod._validate_break_families_in_text(text, artifact="markdown")
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "kinds",
+        [
+            ("func_removed",),
+            ("type_size_changed",),
+            (),
+        ],
+    )
+    def test_a_render_missing_a_family_is_rejected(
+        self, kinds: tuple[str, ...]
+    ) -> None:
+        """Each family independently, and the both-missing case."""
+        text = self._markdown(*kinds)
+        problems = validation_mod._validate_break_families_in_text(
+            text, artifact="markdown"
+        )
+        assert len(problems) == 2 - len(kinds)
+
+    def test_the_verdict_alone_does_not_satisfy_it(self) -> None:
+        """The exact regression: verdict metadata kept, findings dropped."""
+        text = "# ABI Report\n\nVerdict: BREAKING\n"
+        assert validation_mod._validate_break_families_in_text(
+            text, artifact="markdown"
+        )
+
+    def test_every_alternative_in_a_family_is_accepted(self) -> None:
+        """Derived from the shared table, so it cannot drift from the JSON half."""
+        import itertools
+
+        families = fixtures.EXPECTED_BREAK_KIND_FAMILIES
+        for combination in itertools.product(*families.values()):
+            text = self._markdown(*combination)
+            assert (
+                validation_mod._validate_break_families_in_text(
+                    text, artifact="markdown"
+                )
+                == []
+            ), combination

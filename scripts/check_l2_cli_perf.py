@@ -183,6 +183,7 @@ from l2_cli_validation import (  # noqa: E402
     _surface_state_kinds as _surface_state_kinds,
     _validate_audit as _validate_audit,
     _validate_audit_reached_l2 as _validate_audit_reached_l2,
+    _validate_break_families_in_text as _validate_break_families_in_text,
     _validate_break_findings as _validate_break_findings,
     _validate_l2_reached as _validate_l2_reached,
     _validate_snapshot as _validate_snapshot,
@@ -492,19 +493,27 @@ def scenario_two_formats(
         ]
 
     def validate(work: Path, runs: dict[str, list[CommandRun]]) -> list[str]:
-        problems = _validate_l2_reached(
-            _load_report(work / "fmt.json"), sides=("old", "new")
-        )
+        report = _load_report(work / "fmt.json")
+        problems = _validate_l2_reached(report, sides=("old", "new"))
+        # Both artifacts get the SAME finding expectation, not one each. The
+        # JSON half was previously checked only for "did this reach L2", so a
+        # renderer or a comparison that dropped the removal/layout findings
+        # while keeping the verdict metadata was accepted as a faster run
+        # (Codex review).
+        if spec.change == "break":
+            problems += [f"json export: {p}" for p in _validate_break_findings(report)]
         markdown_path = work / "fmt.md"
         if not markdown_path.exists():
             return problems + ["the second export produced no file at all"]
         markdown = markdown_path.read_text(encoding="utf-8")
         if "ABI Report" not in markdown:
             problems.append("the markdown render is not a recognisable ABI report")
-        # Both artifacts must describe the same analysis. A renderer that
-        # dropped the finding would otherwise read as a pure speedup here.
-        if spec.change == "break" and "BREAKING" not in markdown.upper():
-            problems.append("the markdown render does not state the breaking verdict")
+        if spec.change == "break":
+            if "BREAKING" not in markdown.upper():
+                problems.append(
+                    "the markdown render does not state the breaking verdict"
+                )
+            problems += _validate_break_families_in_text(markdown, artifact="markdown")
         return problems
 
     return Scenario(
@@ -768,6 +777,15 @@ def scenario_multi_library(spec: fixtures.FixtureSpec) -> Scenario:
         steps=steps,
         validate=validate,
         suites=("extended",),
+        # One cache lifecycle across the whole set, reset once per repetition
+        # rather than before each member. With the default "cold" mode every
+        # library's comparison started from an empty cache, so the shared-context
+        # arm could never reuse anything the previous library warmed -- which is
+        # the single thing that distinguishes it from the distinct-context arm,
+        # and the reason the set is measured as a workload rather than as N
+        # independent scenarios (Codex review). The set still *begins* cold, so
+        # the first member is not served by a previous repetition.
+        cache_mode="shared_workload",
     )
 
 
@@ -795,7 +813,9 @@ def _one_side_extractions(observed: dict[str, int] | None) -> int | None:
 
 #: Cache modes whose steps form one *sequence* that must begin cold, with the
 #: steps inside it deliberately sharing whatever the earlier ones warmed.
-_SEQUENCE_CACHE_MODES = frozenset({"cold_then_warm", "invalidation_control"})
+_SEQUENCE_CACHE_MODES = frozenset(
+    {"cold_then_warm", "invalidation_control", "shared_workload"}
+)
 
 
 def _reset_cache(cache_root: Path) -> None:
@@ -1607,6 +1627,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=finite_positive_float_arg,
         default=0.02,
     )
+    p.add_argument(
+        "--count-gateable-points",
+        type=Path,
+        default=None,
+        metavar="RECEIPT",
+        help=(
+            "Print how many gated (scenario, step) points RECEIPT can supply as a "
+            "baseline, then exit without measuring anything. Exists so a CI lane "
+            "can ask whether a base receipt is usable as a baseline using the same "
+            "rule the gate itself applies, instead of approximating it with the "
+            "file's size or the base run's exit status."
+        ),
+    )
     p.add_argument("--json-out", type=Path, default=None)
     p.add_argument("--markdown", action="store_true")
     p.add_argument(
@@ -1703,8 +1736,39 @@ def _measure_and_report(
     return results, lane_seconds, build_seconds
 
 
+def _report_gateable_point_count(path: Path) -> int:
+    """Print the number of baseline points *path* can supply, and nothing else.
+
+    The question a CI lane actually needs answered before gating against a base
+    receipt, asked of the gate's own rule rather than approximated. Neither of
+    the two available approximations is correct: the file being non-empty says
+    nothing, since a run that failed every scenario still writes a full
+    diagnostic receipt, and the base run's exit status is too strict in the other
+    direction -- one failed scenario out of seven exits nonzero while the other
+    six remain perfectly good baselines, and `gated_points` already drops the
+    failed one. Zero is the case that matters: gating against a receipt with no
+    usable point makes the harness fail for zero overlap, which turns an
+    unmeasurable base into a failed PR (Codex review).
+
+    Prints 0 and succeeds for a receipt that is unreadable or has no points --
+    "cannot be used as a baseline" is the same answer either way, and the caller
+    is asking a question, not running a check.
+    """
+    try:
+        baseline, _ = load_baseline(path)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(0)
+        print(f"NOTE: {path} is unusable as a baseline: {exc}", file=sys.stderr)
+        return 0
+    print(len(baseline))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if args.count_gateable_points is not None:
+        return _report_gateable_point_count(args.count_gateable_points)
 
     unsuitable = host_unsuitable_reason()
     if unsuitable:

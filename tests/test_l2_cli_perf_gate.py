@@ -553,13 +553,31 @@ class TestCacheLifecyclePerRepetition:
         # silently clearing caches for scenarios that did not ask.
         assert not harness._needs_cold_cache("warm_only", self._step("x"), 0)
 
-    def test_both_sequence_modes_are_registered(self):
-        # Guards the predicate against a third sequence-shaped mode being added
-        # without being listed, which would reintroduce the bug for it alone.
-        assert harness._SEQUENCE_CACHE_MODES == {
-            "cold_then_warm",
-            "invalidation_control",
+    def test_every_mode_a_scenario_declares_is_registered(self):
+        """Every non-`cold` mode any scenario uses must be listed, derived not pinned.
+
+        This previously pinned the set to its two members by name, and it earned
+        its keep: adding `shared_workload` for the multi-library set failed it
+        immediately, which is exactly the bug it guards (a sequence-shaped mode
+        that the predicate does not recognise never resets at all, so repetition
+        2 is served by repetition 1's cache).
+
+        It now derives the expectation instead. `cold` is the only per-step mode
+        by construction -- it is the default, and it means "reset before each
+        step" -- so any other mode a scenario declares is a sequence and must be
+        registered. That catches a new unregistered mode without needing an edit
+        each time one is legitimately added, which is what turns a guard into
+        maintenance.
+        """
+        declared = {
+            scenario.cache_mode
+            for scenario in harness.pr_suite() + harness.extended_suite()
         }
+        assert declared - {"cold"}, "no scenario declares a sequence mode at all"
+        assert (declared - {"cold"}) <= harness._SEQUENCE_CACHE_MODES
+        # And nothing is registered that no scenario uses: a stale entry would
+        # make the predicate lenient for a mode that no longer exists.
+        assert harness._SEQUENCE_CACHE_MODES <= declared
 
 
 class TestAFailedBaselineNeverGates:
