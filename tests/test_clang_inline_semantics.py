@@ -75,6 +75,9 @@ from abicheck.model.identity import Anonymous, InlineNamespace, Namespace, Recor
 _RECORD = (Record("W"),)
 _NAMESPACE = (Namespace("ns"),)
 _NESTED = (Namespace("ns"), Record("W"))
+_ANON_RECORD = (Anonymous("struct", 0),)
+_ANON_UNION = (Anonymous("union", 0),)
+_ANON_NAMESPACE = (Anonymous("namespace", 0),)
 _MEMBER_KINDS = (
     "CXXMethodDecl",
     "CXXConstructorDecl",
@@ -104,7 +107,35 @@ def test_encloses_class_scope_reads_only_the_innermost_segment():
     assert encloses_class_scope((InlineNamespace("v1"),)) is False
     # A record enclosing a *namespace* is not an in-class definition.
     assert encloses_class_scope((Record("W"), Namespace("ns"))) is False
-    assert encloses_class_scope((Record("W"), Anonymous("u", "k"))) is False
+    assert encloses_class_scope((Record("W"), Anonymous("namespace", 0))) is False
+
+
+@pytest.mark.parametrize("scope", [_ANON_RECORD, _ANON_UNION])
+def test_unnamed_record_is_a_class_scope(scope):
+    """`typedef struct { int f() { … } } W;` -- ordinary C-compatible header
+    style, and the parser spells its scope `Anonymous(kind="struct")`, never
+    `Record`, so matching on `Record` alone left every such member non-inline
+    and owing an export. castxml reports them inline (checked against 0.7.0).
+    """
+    assert encloses_class_scope(scope) is True
+    assert is_effectively_inline(_node("CXXMethodDecl", body=True), scope) is True
+
+
+def test_anonymous_namespace_is_not_a_class_scope():
+    """The other `Anonymous` kind, which must keep answering False.
+
+    An anonymous namespace is not a class scope, so widening on the bare
+    `Anonymous` type rather than its `kind` would have been wrong.
+    """
+    assert encloses_class_scope(_ANON_NAMESPACE) is False
+    assert (
+        is_effectively_inline(_node("FunctionDecl", body=True), _ANON_NAMESPACE)
+        is False
+    )
+    assert (
+        is_effectively_inline(_node("CXXMethodDecl", body=True), _ANON_NAMESPACE)
+        is False
+    )
 
 
 @pytest.mark.parametrize("scope", [(), _NAMESPACE, _RECORD, _NESTED])
@@ -229,7 +260,7 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
     seen = set()
     domain = itertools.product(
         ("FunctionDecl",) + _MEMBER_KINDS,
-        ((), _NAMESPACE, _RECORD, _NESTED),
+        ((), _NAMESPACE, _RECORD, _NESTED, _ANON_RECORD, _ANON_NAMESPACE),
         (None, True),
         (None, True),
         (False, True),
@@ -274,6 +305,7 @@ public:
 private:
   bool v_;
 };
+typedef struct { int anon_member() const { return k; } int k; } Unnamed;
 void free_declared(int);
 inline void free_inline(int) {}
 constexpr int free_constexpr(int x) { return x; }

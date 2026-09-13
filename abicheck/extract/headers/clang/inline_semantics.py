@@ -64,7 +64,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....model.identity import Record, ScopePath
+from ....model.identity import Anonymous, Record, ScopePath
 
 __all__ = ["encloses_class_scope", "is_effectively_inline"]
 
@@ -81,6 +81,13 @@ _MEMBER_KINDS = frozenset(
 )
 
 
+#: ``Anonymous.kind`` values that name a *class* scope rather than a namespace.
+#: An unnamed record is an everyday header shape (``typedef struct { … } W;``),
+#: and its members are implicitly inline exactly like a named record's; an
+#: anonymous *namespace* is not a class scope at all and must not match.
+_ANONYMOUS_RECORD_KINDS = frozenset({"struct", "class", "union"})
+
+
 def encloses_class_scope(scope_path: ScopePath) -> bool:
     """Whether *scope_path*'s innermost segment is a class/struct/union.
 
@@ -91,8 +98,21 @@ def encloses_class_scope(scope_path: ScopePath) -> bool:
     the enclosing scope tells them apart. ``_ClangAstParser`` records an
     out-of-line ``void W::f() {}`` at the translation-unit level with an empty
     scope path, and the in-class declaration under a ``Record`` segment.
+
+    An **unnamed** record reaches the parser as ``Anonymous(kind="struct")``
+    instead, never as ``Record`` -- so matching ``Record`` alone missed every
+    member of a ``typedef struct { … } W;``, which is ordinary C-compatible
+    header style. ``Anonymous`` also covers anonymous *namespaces*, which are
+    not class scopes, hence the kind check rather than the bare type.
     """
-    return bool(scope_path) and isinstance(scope_path[-1], Record)
+    if not scope_path:
+        return False
+    innermost = scope_path[-1]
+    if isinstance(innermost, Record):
+        return True
+    return (
+        isinstance(innermost, Anonymous) and innermost.kind in _ANONYMOUS_RECORD_KINDS
+    )
 
 
 def _has_compound_body(node: dict[str, Any]) -> bool:
