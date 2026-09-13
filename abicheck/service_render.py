@@ -402,9 +402,10 @@ def _project_markdown(envelope: ReportEnvelope) -> str:
 
     Gap-C disposition for Markdown's own remaining facts: ``severity_groups``'
     headed-section grouping is **presentation** over already-classified
-    findings, and the ``leaf``/``root-cause`` views are separate documents by
-    design (ADR-061 Phase 2's scope decision). Both are arrangements, not
-    second opinions; neither classifies anything the envelope did not decide.
+    findings, and the ``root-cause`` view is a separate document by design
+    (ADR-061 Phase 2's scope decision; ``leaf`` was retired by plan slice
+    7o). Both are arrangements, not second opinions; neither classifies
+    anything the envelope did not decide.
     """
     opts = envelope.options
     md = to_markdown(
