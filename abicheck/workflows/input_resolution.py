@@ -56,10 +56,10 @@ from ..compile_context import CompileContext
 from ..errors import AbicheckError, SnapshotError, ValidationError
 from ..extract.header_exclusions import (
     apply_header_exclusions_to_inputs,
-    record_header_exclusions,
     reject_exclusions_against_a_manifest,
 )
 from ..model import AbiSnapshot, Function
+from ..model.header_exclusion_record import record_header_exclusions
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 
@@ -437,7 +437,7 @@ def resolve_input(
 
     What this wrapper adds is one line: the snapshot records the
     ``--exclude-header`` patterns it was built under
-    (:func:`~abicheck.extract.header_exclusions.record_header_exclusions`).
+    (:func:`~abicheck.model.header_exclusion_record.record_header_exclusions`).
     That stamp is deliberately here rather than at each of the resolution
     body's eight exits -- a snapshot that reached one of them unstamped
     would claim a complete surface it does not have, and "the branch nobody

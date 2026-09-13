@@ -6818,6 +6818,37 @@ recorded patterns keep meaning "what this extraction actually did". Not
 attempted here, since it is a manifest-schema change with its own migration
 rather than a review-round fix.
 
+### Whether ABICC's `<skip_headers>` accepts a glob is unverified
+
+A descriptor's `<skip_headers>`/`<skip_including>` are matched here as exact
+header basenames or paths (`compat/_helpers._resolve_headers_from_list`),
+while the native `--exclude-header` is `fnmatch`. So the same text names two
+different scopes: `*.h` excludes every header natively and nothing at all
+through a descriptor.
+
+That divergence was reported through the snapshot's recorded scope, where it
+was worse than a usability wart: both paths wrote the raw text into
+`excluded_header_patterns`, so a descriptor-narrowed snapshot and a
+natively-narrowed one recorded `("*.h",)` for two entirely different achieved
+surfaces, and the ADR-050 comparability gate accepted the pair -- able to
+report fabricated additions or removals (Codex review on PR #1286). Fixed by
+recording only what the matching rule could actually achieve
+(`model.header_exclusion_record.exact_match_patterns_only`): a pattern with
+no metacharacter means the same thing under both rules and is recorded
+unchanged, one with a metacharacter narrowed nothing under exact matching and
+is not recorded. `compat check`/`compat dump` now say so out loud
+(`compat.run_inputs.record_descriptor_skips`) rather than ignoring the rule
+silently.
+
+**What is still open is the parity question underneath it.** The other
+candidate fix -- make descriptor skips use `fnmatch` too -- would have made
+both paths agree, and may well be what real `abi-compliance-checker` does.
+It was not taken, because taking it would change ABICC drop-in behaviour on a
+*guess* about ABICC's own semantics, which is a parity claim needing evidence
+from the real tool (an `abicc`-marked comparison), not a comparability fix
+smuggled into a review round. Until someone checks it against real ABICC, a
+glob in `<skip_headers>` is reported as ineffective rather than honoured.
+
 ### The composite Action's single `--write` slot can leave its unconditional coverage/assurance/severity floors without a structured report
 
 **Superseded** (ADR-063 Phase 6, Track T8): the SARIF-fallback/HTML-gap

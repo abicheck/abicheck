@@ -415,7 +415,7 @@ class TestAStoredSnapshotKeepsItsOwnExclusions:
         """The negative control. Skipping the stamp for *everything* would
         satisfy both assertions above and silently undo the recording this
         field exists for."""
-        from abicheck.extract.header_exclusions import record_header_exclusions
+        from abicheck.model.header_exclusion_record import record_header_exclusions
         from abicheck.model.snapshot import AbiSnapshot
 
         fresh = AbiSnapshot(library="libfoo.so", version="1.0")
@@ -587,3 +587,102 @@ class TestAsymmetricExclusionsAreNotComparable:
         mismatch = check_contracts_comparable(old, new, diagnostic=True)
         assert mismatch is not None
         assert mismatch.kind == "scope"
+
+
+class TestTheGateAndTheWarningAgree:
+    """One field, one comparison.
+
+    `_check_header_exclusions_comparable` compared *sets*;
+    `header_exclusion_warnings` compared *tuples*. So a native run's CLI
+    order (`--exclude-header z.h --exclude-header a.h`) against a compat
+    path's sorted record (`("a.h", "z.h")`) was accepted by the gate and then
+    reported by the warning as differing exclusions whose findings might be
+    scope artefacts — a false reduced-confidence diagnostic on a pair the
+    tool had just declared comparable (Codex review).
+
+    Bug class: two implementations of one comparison, drifting apart. Both
+    now call `model.header_exclusion_record.exclusions_are_symmetric`.
+    """
+
+    @staticmethod
+    def _pair(old_patterns, new_patterns):
+        from abicheck.model import AbiSnapshot
+
+        return (
+            AbiSnapshot(
+                library="libfoo.so", version="1", excluded_header_patterns=old_patterns
+            ),
+            AbiSnapshot(
+                library="libfoo.so", version="2", excluded_header_patterns=new_patterns
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        ("old_patterns", "new_patterns"),
+        [
+            (("z.h", "a.h"), ("a.h", "z.h")),
+            (("a.h",), ("a.h", "a.h")),
+            ((), ()),
+            (("a.h", "b.h"), ("b.h", "a.h")),
+            (("a.h", "b.h"), ("a.h",)),
+            ((), ("a.h",)),
+            (("a.h",), ("b.h",)),
+        ],
+    )
+    def test_the_two_never_disagree(self, old_patterns, new_patterns):
+        """The invariant, over both symmetric and asymmetric inputs: the gate
+        refusing and the warning claiming a difference are the same answer."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.confidence import (
+            HEADER_EXCLUSION_WARNING_MARKER,
+            header_exclusion_warnings,
+        )
+        from abicheck.errors import ScopeMismatchError
+
+        old, new = self._pair(old_patterns, new_patterns)
+        try:
+            check_contracts_comparable(old, new)
+            gate_refused = False
+        except ScopeMismatchError:
+            gate_refused = True
+
+        warned_of_difference = any(
+            HEADER_EXCLUSION_WARNING_MARKER in w and "differ between the two sides" in w
+            for w in header_exclusion_warnings(old, new)
+        )
+        assert gate_refused == warned_of_difference, (old_patterns, new_patterns)
+
+    def test_reordering_does_not_raise_a_false_alarm(self):
+        """The reported case, pinned directly."""
+        from abicheck.confidence import header_exclusion_warnings
+
+        old, new = self._pair(("z.h", "a.h"), ("a.h", "z.h"))
+        warnings = header_exclusion_warnings(old, new)
+        assert not [w for w in warnings if "differ between the two sides" in w]
+        # It still discloses the narrowing itself -- silence would be wrong
+        # too, since both sides *are* narrower than their operands name.
+        assert [w for w in warnings if "were excluded from the parsed surface" in w]
+
+    def test_a_real_difference_is_still_reported(self):
+        """The negative control: a warning path that never claims a
+        difference would satisfy the test above completely."""
+        from abicheck.confidence import header_exclusion_warnings
+
+        old, new = self._pair((), ("b.h",))
+        assert [
+            w
+            for w in header_exclusion_warnings(old, new)
+            if "differ between the two sides" in w
+        ]
+
+    def test_the_message_renders_in_a_stable_order(self):
+        """Two runs that excluded the same headers must not read differently,
+        which is the same reason the comparison ignores order."""
+        from abicheck.confidence import header_exclusion_warnings
+
+        one, _ = self._pair(("z.h", "a.h"), ())
+        two, _ = self._pair(("a.h", "z.h"), ())
+        empty_new = self._pair((), ())[1]
+        assert header_exclusion_warnings(one, empty_new) == header_exclusion_warnings(
+            two, empty_new
+        )

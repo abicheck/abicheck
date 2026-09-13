@@ -67,6 +67,7 @@ from xml.etree.ElementTree import Element  # noqa: S405
 
 import defusedxml.ElementTree as ET
 
+from .._compiler_options import split_gcc_options
 from ..errors import ValidationError
 
 log = logging.getLogger(__name__)
@@ -363,19 +364,24 @@ def _get_lines(get_all: Callable[[str], list[str]], tag: str) -> list[str]:
 def _get_flag_tokens(get_all: Callable[[str], list[str]], tag: str) -> list[str]:
     """Shell-like whitespace tokens across every *tag* element.
 
-    For ``<gcc_options>`` alone, where whitespace tokenization *is* the
-    grammar: a value like ``-I /some/path`` is two tokens because that is
-    exactly how the two reach a compiler command line. Every other element
-    holds one value per line -- see :func:`_get_lines`.
+    For ``<gcc_options>`` alone, where shell tokenization *is* the grammar:
+    a value like ``-I /some/path`` is two tokens because that is exactly how
+    the two reach a compiler command line. Every other element holds one
+    value per line -- see :func:`_get_lines`.
 
-    A flag whose own argument contains a space cannot be expressed this way,
-    which is the same limitation a shell command line has; an include path is
-    the case that matters in practice and ``<include_paths>`` handles it
-    correctly.
+    Uses the repository's own :func:`~abicheck._compiler_options.
+    split_gcc_options` rather than ``str.split``, so a shell-valid quoted
+    argument survives: ``-I"/opt/Program Files/inc" -DNAME="a b"`` is two
+    tokens, not five with quote fragments still attached (Codex review).
+    A plain split also made this the one place that did *not* agree with
+    :func:`~abicheck._compiler_options.join_gcc_options`, which the same
+    values are re-emitted through -- so the emitter quoted fragments the
+    parser had already corrupted. Parser and emitter now share one grammar,
+    on POSIX and Windows alike.
     """
     out: list[str] = []
     for raw in get_all(tag):
-        out.extend(raw.split())
+        out.extend(split_gcc_options(raw))
     return out
 
 

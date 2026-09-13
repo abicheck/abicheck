@@ -82,9 +82,21 @@ def import_existed_in_old(
     having loaded the former says nothing about the latter. Matching on the
     symbol name alone would be the more permissive (finding-dropping)
     direction, which is the wrong way to fail here.
+
+    A **weak** OLD import is not a requirement at all -- the loader resolves
+    an unresolved weak symbol to ``0``/``NULL``, so OLD loading is not
+    evidence that anything outside the bundle ever provided it. A weak import
+    that became strong in NEW is therefore a genuinely new requirement, and
+    treating OLD's weak entry as history let it be suppressed on the vacuous
+    outward-edge rule -- a candidate that now fails to load could come back
+    ``NO_CHANGE`` (Codex review). The callers already skip a weak *NEW*
+    consumer before reaching here (``bundle_detectors``/
+    ``bundle_unresolved_audit``), so this only has to answer for OLD.
     """
     return any(
-        entry.library == consumer.library and entry.version == consumer.version
+        entry.library == consumer.library
+        and entry.version == consumer.version
+        and not entry.weak
         for entry in old.resolution.consumers_of(symbol)
     )
 

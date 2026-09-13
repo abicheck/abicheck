@@ -41,7 +41,10 @@ from abicheck.bundle_detector_heuristics import (
 from abicheck.bundle_models import BundleSnapshot, ResolutionGraph
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.elf_metadata import ElfMetadata
-from abicheck.workflows.bundle_import_evidence import extra_needed_all_system
+from abicheck.workflows.bundle_import_evidence import (
+    extra_needed_all_system,
+    import_existed_in_old,
+)
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -650,3 +653,81 @@ class TestAuditModeSkipsWhatItCannotJudge:
             }
         )
         assert [f.symbol for f in self._detect(with_sibling)] == ["tp_entry"]
+
+
+class TestAWeakOldImportIsNotEvidenceOfAnExternalProvider:
+    """Weak-to-strong is a new requirement, not a pre-existing one.
+
+    `import_existed_in_old` compared library and version only, so a weak OLD
+    import counted as history. But the loader resolves an unresolved *weak*
+    symbol to `0`/`NULL` -- OLD loading says nothing about anything outside
+    the bundle providing it. `classify_unresolved_import` then suppressed the
+    new strong import on the vacuous outward-edge rule, and a candidate that
+    now fails to load could come back `NO_CHANGE` (Codex review).
+
+    Bug class: an equality that omits the field carrying the semantics --
+    the same shape as the ELF-type-change addition, one module over.
+
+    Stated at the predicate, not only through `compare_bundle`: `ConsumerEntry`
+    is the shape the question is about, and `test_bundle._meta` cannot build a
+    weak import at all (`ElfImport.binding` is the only route, and only
+    `bundle.py` maps it), so a caller-level test could not reach this case
+    without first widening an unrelated fixture helper.
+    """
+
+    @staticmethod
+    def _old_with(*entries: tuple[str, str, bool]) -> BundleSnapshot:
+        """A snapshot whose resolution reports *entries* as consumers of `s`."""
+        from abicheck.bundle_models import ConsumerEntry
+
+        snap = _snapshot({})
+        snap.resolution = ResolutionGraph(
+            consumers={
+                "s": [
+                    ConsumerEntry(library=lib, version=ver, weak=weak)
+                    for lib, ver, weak in entries
+                ]
+            }
+        )
+        return snap
+
+    @staticmethod
+    def _new_consumer(version: str = ""):
+        from abicheck.bundle_models import ConsumerEntry
+
+        return ConsumerEntry(library="libc.so", version=version, weak=False)
+
+    def test_a_weak_old_import_is_not_history(self):
+        old = self._old_with(("libc.so", "", True))
+        assert not import_existed_in_old(self._new_consumer(), "s", old)
+
+    def test_a_strong_old_import_is_history(self):
+        """The negative control: a predicate returning False always would
+        satisfy the claim above completely."""
+        old = self._old_with(("libc.so", "", False))
+        assert import_existed_in_old(self._new_consumer(), "s", old)
+
+    def test_a_strong_entry_beside_a_weak_one_still_counts(self):
+        """Two libraries can import the same symbol; only the matching
+        consumer's own entry decides, and a weak sibling must not veto it."""
+        old = self._old_with(("libc.so", "", False), ("libother.so", "", True))
+        assert import_existed_in_old(self._new_consumer(), "s", old)
+
+    def test_a_weak_entry_for_this_library_does_not_borrow_anothers_strength(self):
+        old = self._old_with(("libc.so", "", True), ("libother.so", "", False))
+        assert not import_existed_in_old(self._new_consumer(), "s", old)
+
+    def test_the_version_rule_still_applies(self):
+        """The pre-existing half of the predicate, re-asserted so a future
+        edit cannot trade one correctness rule for the other."""
+        old = self._old_with(("libc.so", "V1", False))
+        assert import_existed_in_old(self._new_consumer("V1"), "s", old)
+        assert not import_existed_in_old(self._new_consumer("V2"), "s", old)
+
+    @pytest.mark.parametrize(
+        ("old_weak", "expected"),
+        [(True, False), (False, True)],
+    )
+    def test_the_rule_is_exactly_old_weakness(self, old_weak, expected):
+        old = self._old_with(("libc.so", "", old_weak))
+        assert import_existed_in_old(self._new_consumer(), "s", old) is expected

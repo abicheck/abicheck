@@ -38,12 +38,11 @@ from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
+from ..model.header_exclusion_record import exclusions_are_symmetric
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
-
-    from ..model import AbiSnapshot
 
 
 def apply_header_exclusions(
@@ -130,33 +129,6 @@ def apply_header_exclusions_to_inputs(
     return apply_header_exclusions(expanded, exclude_headers)
 
 
-def record_header_exclusions(
-    snapshot: AbiSnapshot,
-    exclude_headers: Sequence[str],
-    *,
-    extracted_now: bool = True,
-) -> AbiSnapshot:
-    """*snapshot* carrying the ``--exclude-header`` patterns it was built under.
-
-    Returns it unchanged when there were none, so every run that does not use
-    the flag produces a byte-identical snapshot to before this existed.
-
-    *extracted_now* is ``False`` for an operand this run **loaded** rather
-    than extracted. Such a snapshot parsed no headers in this invocation, so
-    this run's patterns say nothing about it -- and it already carries the
-    patterns it was really built under. Stamping anyway overwrote that
-    provenance with an unrelated request: a snapshot dumped under
-    ``original.h``, loaded under ``--exclude-header current.h``, came back
-    claiming ``current.h`` (Codex review, reproduced). Worse than a wrong
-    label, it can make an asymmetric pair look symmetric -- which is exactly
-    the comparison the recorded patterns exist to expose.
-    """
-    if not exclude_headers or not extracted_now:
-        return snapshot
-    snapshot.excluded_header_patterns = tuple(exclude_headers)
-    return snapshot
-
-
 def reject_exclusions_against_a_manifest(
     exclude_headers: Sequence[str],
     dump_manifest: object | None,
@@ -220,10 +192,10 @@ def exclusion_asymmetry_reason(
     surface identically. Only a genuine difference in what was excluded is
     a difference in what was compared.
     """
+    if exclusions_are_symmetric(old_patterns, new_patterns):
+        return None
     old_set = frozenset(old_patterns)
     new_set = frozenset(new_patterns)
-    if old_set == new_set:
-        return None
 
     def _render(patterns: frozenset[str]) -> str:
         return ", ".join(sorted(patterns)) if patterns else "none"
