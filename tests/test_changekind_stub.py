@@ -37,6 +37,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import pickle
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -147,3 +149,71 @@ def test_members_pickle_by_qualified_reference():
 
     restored = pickle.loads(pickle.dumps(ChangeKind.FUNC_REMOVED))
     assert restored is ChangeKind.FUNC_REMOVED
+
+
+STUB_RELPATH = "abicheck/model/change_catalog/kinds.pyi"
+
+
+def _ruff(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "ruff", *args],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_the_formatter_leaves_the_generated_stub_alone_on_an_explicit_path():
+    """`ruff format` must skip the stub however it is invoked.
+
+    `ruff.toml` excludes `kinds.pyi` from formatting because
+    `gen_changekind_stub.py --check` is its formatting authority and fails on
+    any byte it would not itself write. But ruff normally ignores `exclude`
+    for a path named on the command line, and `pre-commit` invokes its hooks
+    with exactly that -- the changed files as arguments. So the exclusion held
+    for `verify.py`'s directory-walking `fmt-check` and was silently bypassed
+    by the `ruff-format` hook, which would reformat a regenerated stub and
+    leave `--check` rejecting it, with no way through the normal hook
+    workflow (Codex review on PR #1271).
+
+    This asserts the *mechanism* by running the two invocation shapes, not
+    the presence of `force-exclude` in `ruff.toml` -- asserting config text
+    is the failure mode `AGENTS.md` records from #705 -> #758, and it would
+    not have caught this bug at all, since the original `exclude` line was
+    present and correct while the hook ignored it.
+    """
+    if shutil.which(sys.executable) is None:  # pragma: no cover - defensive
+        return
+    for argv in (
+        [STUB_RELPATH],  # how pre-commit invokes it
+        ["abicheck/"],  # how verify.py invokes it
+    ):
+        proc = _ruff("format", "--check", *argv)
+        assert proc.returncode == 0, (
+            f"`ruff format --check {' '.join(argv)}` wants to rewrite a "
+            f"generated file; `gen_changekind_stub.py --check` would then "
+            f"reject the result:\n{proc.stdout}\n{proc.stderr}"
+        )
+
+
+def test_linting_still_reaches_the_generated_stub():
+    """The exclusion is formatting-only -- it must not silently drop lint.
+
+    The negative half of the test above: `force-exclude` applies to every
+    exclusion ruff knows about, so it would be easy to widen the stub's
+    format-only exemption into a lint exemption without noticing. A stub that
+    nothing lints is how an unused import or an undefined name reaches mypy's
+    view of `ChangeKind`.
+    """
+    stub = REPO_DIR / STUB_RELPATH
+    original = stub.read_text(encoding="utf-8")
+    try:
+        stub.write_text(original + "\nimport os\n", encoding="utf-8")
+        for argv in ([STUB_RELPATH], ["abicheck/"]):
+            proc = _ruff("check", *argv)
+            assert proc.returncode != 0, (
+                f"`ruff check {' '.join(argv)}` did not flag an unused import "
+                f"in the generated stub -- lint no longer reaches it"
+            )
+    finally:
+        stub.write_text(original, encoding="utf-8")

@@ -1,3 +1,14 @@
+# Exclusions must hold for explicitly-passed paths too, not just directory
+# walks. `pre-commit` invokes its hooks with the changed files as arguments,
+# and ruff normally ignores `exclude` for a path named on the command line
+# (see ruff's own `force-exclude` docs, which name pre-commit as the case).
+# Without this, the `[format] exclude` below is honored by `verify.py`'s
+# directory-walking `fmt-check` but silently bypassed by the `ruff-format`
+# hook: committing a regenerated `kinds.pyi` would have the hook reformat it
+# and `gen_changekind_stub.py --check` then reject it, with no way through the
+# normal hook workflow. Local and CI must enforce the same contract.
+force-exclude = true
+
 [lint]
 select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]  # line length
