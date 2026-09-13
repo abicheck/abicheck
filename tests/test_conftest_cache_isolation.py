@@ -303,6 +303,116 @@ class TestRecoveryKeepsPytestsPrivacyGuarantees:
             os.umask(previous)
 
 
+class TestValidationStopsAtPytestsOwnRoot:
+    """Nothing above `pytest-of-<user>` is ours to check or to repair.
+
+    Validating every ancestor reaches `/tmp` and `/`, and that is worse than the
+    bug the recovery fixes (Codex review). On an ordinary non-root runner the
+    ownership check raises on root-owned `/tmp` during the very first autouse
+    allocation, so every test in the session errors. Running as root it is worse
+    still: the group/other fixup would strip `/tmp` from its usual `01777` and
+    break the machine's shared temp directory for everyone.
+
+    So the boundary is asserted directly, with a stand-in for `/tmp` whose mode
+    and ownership are deliberately *wrong* by the rules that apply inside
+    pytest's root.
+    """
+
+    @staticmethod
+    def _allocate(basetemp: Path) -> Path:
+        import conftest
+
+        return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> tuple[Path, Path]:
+        """A `/tmp`-like ancestor holding a pytest root, returned as (system, leaf)."""
+        system = tmp_path / "tmp-like"
+        system.mkdir(mode=0o755)
+        return system, system / "pytest-of-someone" / "pytest-0" / "popen-gw0"
+
+    def test_a_system_ancestors_mode_is_left_alone(self, tmp_path: Path) -> None:
+        """The destructive half: `/tmp` must keep its world-writable mode."""
+        system, leaf = self._tree(tmp_path)
+        before = system.stat().st_mode
+        self._allocate(leaf)
+        assert system.stat().st_mode == before
+
+    def test_a_sticky_world_writable_ancestor_keeps_its_sticky_bit(
+        self, tmp_path: Path
+    ) -> None:
+        """Stated as the real `/tmp` shape, 01777, since that is what would break."""
+        system = tmp_path / "tmp-like-sticky"
+        system.mkdir()
+        system.chmod(0o1777)
+        self._allocate(system / "pytest-of-someone" / "pytest-0" / "popen-gw0")
+        assert system.stat().st_mode & 0o7777 == 0o1777
+
+    @pytest.mark.skipif(
+        not hasattr(os, "getuid") or os.getuid() != 0,
+        reason="needs root to create a directory owned by another user",
+    )
+    def test_a_foreign_owned_system_ancestor_does_not_raise(
+        self, tmp_path: Path
+    ) -> None:
+        """The every-test-errors half: `/tmp` is root's, and a test run is not."""
+        system, leaf = self._tree(tmp_path)
+        os.chown(system, 1, 1)
+        assert self._allocate(leaf).is_dir()
+
+    def test_the_pytest_root_itself_is_still_validated(self, tmp_path: Path) -> None:
+        """The boundary is inclusive: the marker directory is pytest's, so ours."""
+        system, leaf = self._tree(tmp_path)
+        root = system / "pytest-of-someone"
+        root.mkdir(mode=0o755)
+        self._allocate(leaf)
+        assert root.stat().st_mode & 0o077 == 0
+
+    def test_with_an_explicit_basetemp_only_that_directory_is_owned(self) -> None:
+        """`--basetemp` has no marker; pytest creates just that one directory.
+
+        Deliberately NOT built under `tmp_path`: by default `tmp_path` lives
+        inside `/tmp/pytest-of-<user>/pytest-N/...`, so a path under it always
+        has a marker ancestor and this case would silently become the
+        marker-found one. The first version of this test did exactly that and
+        passed only because the suite was being run with `--basetemp` pointed
+        outside `/tmp` -- it failed the moment the same test ran under pytest's
+        default temp root, which is how the false premise surfaced.
+        """
+        import shutil
+        import tempfile
+
+        import conftest
+
+        root = Path(tempfile.mkdtemp(prefix="marker-free-"))
+        try:
+            assert not any(
+                level.name.startswith("pytest-of-") for level in (root, *root.parents)
+            ), f"{root} is not marker-free, so this case would not be exercised"
+            parent = root / "chosen-by-the-caller"
+            parent.mkdir(mode=0o755)
+            basetemp = parent / "basetemp"
+            assert conftest._pytest_owned_levels(basetemp) == [basetemp]
+            self._allocate(basetemp)
+            assert parent.stat().st_mode & 0o777 == 0o755
+            assert basetemp.stat().st_mode & 0o077 == 0
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_the_owned_region_is_the_marker_and_everything_under_it(self) -> None:
+        """The boundary as a pure function, independent of any filesystem."""
+        import conftest
+
+        leaf = Path("/tmp/pytest-of-someone/pytest-3/popen-gw2")
+        assert conftest._pytest_owned_levels(leaf) == [
+            Path("/tmp/pytest-of-someone"),
+            Path("/tmp/pytest-of-someone/pytest-3"),
+            leaf,
+        ]
+        assert Path("/tmp") not in conftest._pytest_owned_levels(leaf)
+        assert Path("/") not in conftest._pytest_owned_levels(leaf)
+
+
 class _FactoryStub:
     """The one method `_snapshot_cache_bucket` uses off `pytest.TempPathFactory`.
 

@@ -132,21 +132,52 @@ def _recreate_private_tree(path: Path) -> None:
     own.
 
     The uid and symlink checks are skipped where the platform cannot express
-    them (no ``os.getuid`` on Windows), exactly as pytest skips them.
+    them (no ``os.getuid`` on Windows), exactly as pytest skips them. They also
+    apply only within pytest's own root -- see `_pytest_owned_levels`.
     """
-    missing = [parent for parent in (path, *path.parents) if not parent.exists()]
-    for level in reversed(missing):
+    owned = _pytest_owned_levels(path)
+    # Anything ABOVE pytest's own root is the system's, not ours: create a
+    # missing level plainly and never validate or chmod it.
+    for level in reversed([p for p in path.parents if p not in owned]):
+        if not level.exists():
+            level.mkdir(exist_ok=True)
+    for level in owned:
         # `exist_ok` for the race where a sibling worker creates the same
         # level first -- that is cooperation, not the planted-path case the
-        # validation below covers.
+        # validation covers. An already-existing level is validated too: the
+        # planted path this guards against is one that exists when recovery
+        # runs.
         level.mkdir(mode=0o700, exist_ok=True)
         _require_private_dir(level)
-    # Ancestors that already existed are validated too: the planted path this
-    # guards against is one that exists when recovery runs.
-    for parent in (path, *path.parents):
-        if parent == parent.parent:  # the filesystem root, nobody's to own
-            break
-        _require_private_dir(parent)
+
+
+def _pytest_owned_levels(path: Path) -> list[Path]:
+    """*path* and the ancestors pytest itself owns, outermost first.
+
+    The boundary matters more than it looks, and getting it wrong is worse than
+    the bug this recovery fixes (Codex review). Validating *every* ancestor
+    walks into `/tmp` and `/`, which nobody running tests owns: on an ordinary
+    non-root runner the ownership check then raises on `/tmp` during the first
+    autouse allocation, so every test errors -- and running as root it is worse
+    than that, because the group/other fixup would strip `/tmp` down from its
+    usual `01777` and break the whole machine's shared temp directory.
+
+    pytest's own root is `<temproot>/pytest-of-<user>`; everything at or below
+    it is created, owned and privacy-checked by pytest, and that is exactly the
+    region this recovery may assert about. Found by name rather than by
+    comparing against `tempfile.gettempdir()`, because `PYTEST_DEBUG_TEMPROOT`,
+    a `TMPDIR` that changed mid-session, and a resolved symlink all move the
+    temp root without moving the marker.
+
+    With `--basetemp` there is no such marker: pytest creates exactly that one
+    directory (`mkdir(mode=0o700)`) and treats its parents as the caller's, so
+    the owned region is the path itself.
+    """
+    chain = [path, *path.parents]
+    for index, level in enumerate(chain):
+        if level.name.startswith("pytest-of-"):
+            return list(reversed(chain[: index + 1]))
+    return [path]
 
 
 def _require_private_dir(path: Path) -> None:

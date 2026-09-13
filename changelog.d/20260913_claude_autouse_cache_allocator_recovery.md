@@ -13,3 +13,7 @@
   -- since these paths are predictable and sit on a temp root shared between
   users, so a `parents=True` recreate under the process umask would leave the
   hierarchy traversable and accept a path planted in the deletion window.
+  Those checks apply only within pytest's own `pytest-of-<user>` root: asserting
+  ownership or repairing modes on ancestors above it would error every test on a
+  runner that does not own the shared temp directory, and as root would strip that
+  directory's world-writable mode machine-wide.
