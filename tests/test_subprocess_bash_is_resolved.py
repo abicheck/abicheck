@@ -68,6 +68,10 @@ _CLONE_NAME = "_bash_executable"
 
 T = TypeVar("T")
 
+#: The availability guard, and the module a qualified call must name.
+_GUARD_NAME = "require_bash"
+_RESOLVER_MODULE_NAME = "_workflow_exec"
+
 
 #: Callables whose first positional argument is an argv sequence.
 _SUBPROCESS_ENTRY_POINTS = frozenset(
@@ -208,6 +212,24 @@ def _bare_bash_call_sites(source: str) -> list[int]:
     return hits
 
 
+def _is_guard_call(call: ast.Call) -> bool:
+    """Is *call* the real `require_bash()`, bare or qualified by its module?
+
+    A bare name is trusted: the module-level import is what binds it, and no
+    rule here can see past a deliberately shadowed import without a full
+    symbol table. A qualified call must name `_workflow_exec`, so an
+    unrelated object's same-named method cannot pose as the guard.
+    """
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id == _GUARD_NAME
+    if isinstance(func, ast.Attribute) and func.attr == _GUARD_NAME:
+        return (
+            isinstance(func.value, ast.Name) and func.value.id == _RESOLVER_MODULE_NAME
+        )
+    return False
+
+
 def _unguarded_resolutions(source: str) -> list[str]:
     """Names of functions that resolve bash, shell out, and never guard.
 
@@ -277,13 +299,14 @@ def _unguarded_resolutions(source: str) -> list[str]:
             # `func.attr` there made the two halves disagree, so a function
             # guarding with `_workflow_exec.require_bash()` was reported
             # unguarded (CodeRabbit review).
-            func = stmt.value.func
-            name = (
-                func.attr
-                if isinstance(func, ast.Attribute)
-                else getattr(func, "id", None)
-            )
-            if name == "require_bash":
+            #
+            # The receiver is checked, unlike on the resolution side, because
+            # the two directions fail differently: a stricter resolution rule
+            # only asks for a guard that is already there, while a looser
+            # guard rule lets an unrelated `helper.require_bash()` stand in
+            # for the real one and silently permits the subprocess (Codex
+            # review). So a qualified guard must name `_workflow_exec`.
+            if _is_guard_call(stmt.value):
                 return stmt.lineno
         return None
 
@@ -524,6 +547,13 @@ class TestEveryResolvedCallSiteGuardsFirst:
         assert _unguarded_resolutions(indirect) == ["f"]
         assert _unguarded_resolutions(guarded) == []
         assert _unguarded_resolutions(qualified) == []
+        # A same-named method on some other object is not the guard: unlike
+        # the resolution side, a false negative here permits the subprocess.
+        wrong_receiver = (
+            "def f():\n    helper.require_bash()\n"
+            "    subprocess.run([_workflow_exec.bash_executable(), p])\n"
+        )
+        assert _unguarded_resolutions(wrong_receiver) == ["f"]
 
     @pytest.mark.parametrize(
         "source",
