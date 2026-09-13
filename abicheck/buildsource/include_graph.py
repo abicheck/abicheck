@@ -492,16 +492,31 @@ class ClangIncludeExtractor:
         out: dict[str, list[str]] = {}
         failures = 0
         attempted = 0
+        serial_spend = 0.0
         time_budget_exhausted = False
         scan_deadline_exceeded = False
         for planned_unit, outcome in zip(planned, outcomes, strict=True):
             unit_id = planned_unit.unit_id
-            if outcome.kind == "aggregate_expired":
+            # Where a one-at-a-time walk would have run out of budget. Under a
+            # pool several probes overlap, so a *later* unit can still start
+            # before the deadline even though a serial pass would never have
+            # reached it -- folding those made the include map (and the `changed`
+            # scope built from it) depend on the worker count, against this
+            # method's own equivalence contract (Codex review, PR #1275).
+            # Accumulating each probe's own cost puts the cutoff where the same
+            # per-unit costs would have put it serially; contention can only
+            # inflate those costs, so this errs toward the smaller, serial-like
+            # result rather than toward keeping extra work.
+            if (
+                outcome.kind == "aggregate_expired"
+                or serial_spend >= self.aggregate_timeout_s
+            ):
                 # The sequential loop never *started* a unit once its own
                 # aggregate wall-clock budget was gone; this is that same
                 # stop, reported from wherever the budget actually ran out.
                 time_budget_exhausted = True
                 break
+            serial_spend += outcome.elapsed
             # Counted here, after the not-started case above: every outcome
             # below is a unit a compiler was actually invoked for.
             attempted += 1

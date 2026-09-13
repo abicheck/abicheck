@@ -73,6 +73,59 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="perf.equivalence_rewrite_bound_measured_in_the_wrong_unit",
+        invariant=(
+            "A rewrite that replaces a hot path must state its bound in the "
+            "unit that actually governs the resource, and in the safe "
+            "direction. Three distinct ways the same rewrite got this wrong: "
+            "a memory bound expressed in *node count* when the resource is "
+            "*bytes*; that byte figure computed as a lower bound (a character "
+            "count) when only an upper bound can authorise encoding something "
+            "whole, since `ensure_ascii` expands one character to six; and a "
+            "recursion-depth cap small enough that it silently disabled the "
+            "memory bound for anything nested below it. Equivalence has the "
+            "same failure: a pass parallelised under a *wall-clock* budget "
+            "cannot fold 'whatever finished', because more units start before "
+            "the deadline than a serial walk would reach -- the cutoff has to "
+            "be reconstructed from each unit's own measured cost. The guard "
+            "in every case is a fixture built to be small in the wrong unit "
+            "and large in the right one, plus -- for the equivalence half -- "
+            "the same input at several worker counts."
+        ),
+        # Found in review on the PR that added bounded chunking to the clang
+        # AST cache write and bounded parallelism to the include-map pass. Every
+        # test written for both features passed against all four defects,
+        # because each fixture was large in the unit the code happened to
+        # measure.
+        fixed_by=(1275,),
+        seed_tests=(
+            "tests/test_dumper_cache_json_chunking.py",
+            "tests/test_include_graph_parallel.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "wrong_unit": ("node-count-vs-bytes", "characters-vs-encoded-bytes"),
+            "bound_disabled_by": ("recursion-depth-cap",),
+            "worker_count": ("serial", "two", "four"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A single oversized *scalar* is irreducible -- a 100 MB "
+                    "string value encodes as one fragment, because JSON has "
+                    "nowhere to break it. Inherent rather than unfixed, and "
+                    "absent from the AST shapes this writer serves, but it "
+                    "means the byte bound is a bound on *subtrees*, not on "
+                    "peak memory in the limit. Likewise the serial-cutoff "
+                    "reconstruction matches a serial walk only insofar as "
+                    "per-unit costs are unaffected by contention; it errs "
+                    "toward folding less, never more."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="perf.shared_resource_gate_keyed_on_a_per_caller_value",
         invariant=(
             "A process-wide bound on a scarce resource must be one object "

@@ -907,6 +907,18 @@ component figures, not an end-to-end speedup claim.
   a second full-size copy of a tree that can be multiple GB, which is why the
   streaming write exists at all. The plain (non-DPC++) path still streams a raw
   file copy of clang's own stdout and pays none of this.
+
+  Three review rounds sharpened what "bounded subtree" has to mean, and all
+  three are easy to get wrong again. The bound is on node count **and** encoded
+  bytes, because neither implies the other -- a few nodes holding long
+  template-qualified spellings are small by count and hundreds of MiB by byte.
+  The byte figure must be an **upper** bound on the encoded size, since a
+  "small enough" answer is what authorises encoding a subtree whole and
+  `ensure_ascii=True` expands any non-ASCII or control character to a
+  six-character escape, so a plain character count *undershoots*. And the
+  recursion-depth cap must not be small enough to disable the byte bound: it is
+  derived from `sys.getrecursionlimit()`, because a fixed small cap means "no
+  memory bound below this depth" for any document whose bulk sits deeper.
 - **Per-header `clang -M` include-map fan-out**
   (`buildsource/include_graph_workers.py`). The probes are independent
   subprocesses, so the pass was wall-clock-bound on nothing but
@@ -947,6 +959,14 @@ component figures, not an end-to-end speedup claim.
   the umbrella silently loses edges the per-header probes see. The safe win
   is scheduling the same invocations better, never changing the compilation
   context.
+
+  One equivalence subtlety a pool introduces that the serial pass could not
+  have: with a *wall-clock* budget, "started before the deadline" is true for
+  more units under a pool than a one-at-a-time walk would ever have reached, so
+  folding every completed outcome made the include map depend on the worker
+  count. The fold therefore accumulates each probe's own measured cost and cuts
+  where those same costs would have exhausted the budget serially -- contention
+  can only inflate them, so it errs toward the smaller, serial-like result.
 
 
 ## L4 source-replay (dump-side) performance

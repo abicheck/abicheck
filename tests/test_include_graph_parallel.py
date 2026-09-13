@@ -697,6 +697,48 @@ class TestDeadlinesUnderParallelism:
         assert "stopped after 0 compile units" not in exhausted[0]
         assert "stopped after 3 compile units" in exhausted[0]
 
+    def test_budget_exhaustion_cuts_at_the_same_unit_for_every_worker_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The folded set at budget exhaustion does not depend on ``jobs``.
+
+        Regression test for a defect found in review. A probe only reported
+        ``aggregate_expired`` if it *started* after the deadline -- and under a
+        pool, units a serial pass would never have reached start early alongside
+        a slow first unit and finish fine. Their maps were folded, so the include
+        map, and the `changed` scope built from it, differed by worker count:
+        exactly what this method's equivalence contract denies.
+
+        Real sleeps and a real clock, because the property is about *each
+        probe's own* cost rather than wall-clock elapsed: a shared fake clock is
+        advanced by whichever thread runs next, so it cannot express "this probe
+        took 100 ms" under a pool at all. The assertion is the invariant itself
+        -- every worker count folds the same set -- not a pinned count, which
+        would be a timing bet.
+        """
+
+        def slow_probe(cmd: list[str], **_k: object):
+            time.sleep(0.1)
+            source = cmd[-1]
+            return subprocess.CompletedProcess(cmd, 0, f"o: {source} inc/x.h", "")
+
+        monkeypatch.setattr(igw.deadline, "run_bounded", slow_probe)
+
+        results = []
+        for jobs in (1, 2, 4):
+            extractor = ClangIncludeExtractor(jobs=jobs, aggregate_timeout_s=0.35)
+            folded = sorted(extractor.extract_from_build(_build(8)))
+            results.append(
+                (folded, [d for d in extractor.diagnostics if "time budget" in d])
+            )
+
+        serial_units, serial_diags = results[0]
+        assert serial_diags, "the serial walk must actually hit the budget"
+        assert 0 < len(serial_units) < 8, serial_units
+        for jobs, (units, diags) in zip((2, 4), results[1:], strict=True):
+            assert units == serial_units, f"jobs={jobs} folded a different set"
+            assert bool(diags) is True
+
     def test_compile_unit_cap_is_planned_before_any_work(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

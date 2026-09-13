@@ -170,6 +170,14 @@ class ProbeOutcome:
     completed process), ``unit_timeout``/``scan_deadline``/``error`` (``detail``
     carries the message), or ``aggregate_expired`` (this unit never ran because
     the extractor's own wall-clock budget was already gone).
+
+    ``elapsed`` is how long this probe occupied a worker (0.0 for one that never
+    ran). The fold needs it to reconstruct where a *serial* walk would have run
+    out of budget: under a pool several probes overlap, so "started before the
+    deadline" is true for more units than a one-at-a-time pass would ever have
+    reached, and folding all of them made the include map depend on the worker
+    count (Codex review, PR #1275). Summing these instead puts the cutoff where
+    the same per-unit costs would have put it serially.
     """
 
     kind: str
@@ -177,6 +185,7 @@ class ProbeOutcome:
     stderr: str = ""
     returncode: int = 0
     detail: str = ""
+    elapsed: float = 0.0
 
 
 def host_job_limit(
@@ -414,6 +423,7 @@ def _run_probe(
             # narrower scope so this call is bound by whichever is
             # tighter (Codex review, PR #591).
             per_call_timeout = min(per_call_timeout, scan_remaining)
+        started_at = time.monotonic()
         try:
             # Process-group-safe on timeout, same as the L2/L4/L5 clang calls.
             with deadline.deadline_scope(per_call_timeout):
@@ -440,10 +450,20 @@ def _run_probe(
                 except deadline.DeadlineExceeded:
                     pass
                 else:
-                    return ProbeOutcome("unit_timeout", detail=str(exc))
-            return ProbeOutcome("scan_deadline", detail=str(exc))
+                    return ProbeOutcome(
+                        "unit_timeout",
+                        detail=str(exc),
+                        elapsed=time.monotonic() - started_at,
+                    )
+            return ProbeOutcome(
+                "scan_deadline",
+                detail=str(exc),
+                elapsed=time.monotonic() - started_at,
+            )
         except (OSError, subprocess.SubprocessError) as exc:
-            return ProbeOutcome("error", detail=str(exc))
+            return ProbeOutcome(
+                "error", detail=str(exc), elapsed=time.monotonic() - started_at
+            )
     finally:
         slots.release()
     # ``getattr`` rather than direct attribute access on ``stderr``/
@@ -459,4 +479,5 @@ def _run_probe(
         stdout=getattr(proc, "stdout", "") or "",
         stderr=getattr(proc, "stderr", "") or "",
         returncode=getattr(proc, "returncode", 0) or 0,
+        elapsed=time.monotonic() - started_at,
     )

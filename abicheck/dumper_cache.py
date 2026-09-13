@@ -195,18 +195,39 @@ _JSON_CHUNK_NODE_LIMIT = 200_000
 #: only when it is small in *both* dimensions.
 _JSON_CHUNK_BYTE_LIMIT = 8 << 20
 
-#: Hard cap on how deep :func:`_write_json_chunked` descends before it
-#: delegates a subtree whole regardless of size. Bounds this module's own
-#: Python recursion independently of the size probe, which is also what makes
-#: a cyclic input (impossible from ``json.load``, but not from a hand-built
-#: dict) terminate here and raise from the C encoder's own circular-reference
-#: check rather than blowing the stack in this walk. Deliberately well past
-#: where a clang AST keeps anything *large*: the translation unit's top-level
-#: ``inner`` list and the per-declaration subtrees under it are the first few
-#: levels, and the genuinely deep nesting further down (expression trees) is
-#: small by then, so the memory bound below is reached in practice long
-#: before this cap is.
-_JSON_CHUNK_MAX_DEPTH = 40
+#: Worst-case encoded characters per input character under
+#: ``ensure_ascii=True``: a non-ASCII or control character becomes
+#: ``\uXXXX``. Used to keep :func:`_subtree_exceeds`'s byte figure an upper
+#: bound (see its docstring for why a lower bound was wrong).
+_MAX_ESCAPE = 6
+
+#: Floor for the descent-depth cap below, so a caller that has lowered the
+#: interpreter's recursion limit still gets a useful amount of chunking.
+_JSON_CHUNK_MIN_DEPTH = 40
+
+
+def _max_descent_depth() -> int:
+    """How deep :func:`_write_json_chunked` may descend on this stack.
+
+    The cap exists only to bound *this module's* Python recursion (one frame
+    per level) and, with it, to make a cyclic input -- impossible from
+    ``json.load``, but not from a hand-built dict -- terminate here and raise
+    from the C encoder's own circular-reference check instead of blowing the
+    stack.
+
+    Derived from the live recursion limit rather than a fixed small number,
+    because the cap and the memory bound are in tension: past the cap a large
+    subtree is delegated whole, so a *low* cap silently disables the byte bound
+    for any document whose bulk sits deeper than it (a fixed 40 did exactly
+    that -- Codex review, PR #1275). A quarter of the recursion limit leaves
+    ample headroom for whatever stack the caller already occupies while putting
+    the cap far beyond any depth at which a document remains encodable at all:
+    ``json.dumps`` itself raises ``RecursionError`` past the same limit, so the
+    residual unbounded case is confined to documents the stdlib encoder could
+    not have written either way.
+    """
+    return max(_JSON_CHUNK_MIN_DEPTH, sys.getrecursionlimit() // 4)
+
 
 #: Encoded-fragment bytes buffered before one ``write`` call. Keeps the
 #: structural fragments ("{", "\"inner\": [", ", ") from costing one
@@ -224,11 +245,18 @@ def _subtree_exceeds(obj: object, limit: int, byte_limit: int = -1) -> bool:
     long strings is small by count and large by bytes, and that is the shape
     that made a node-only bound insufficient.
 
-    The byte figure is a *lower-bound estimate*, not the exact encoding:
-    strings contribute their own length plus quoting (escaping can only make
-    the real output longer, never shorter), everything else a small constant.
-    Under-estimating is the safe direction for a bound used to decide "small
-    enough to encode whole" only when it answers ``False``.
+    The byte figure is a deliberate **upper** bound on the encoded size, which
+    is the only safe direction here: a ``False`` answer is what authorises
+    encoding a subtree whole, so an estimate that can come in *under* the real
+    size is no bound at all. An earlier revision had this backwards -- it used
+    ``len(s)`` and called under-counting safe -- which ``ensure_ascii=True``
+    (``json``'s default, and this writer's) makes plainly wrong: every
+    non-ASCII character becomes a six-character ``\\uXXXX`` escape, as does any
+    control character, so a subtree of Unicode identifier spellings estimated
+    at a fraction of what it really encodes to (Codex review, PR #1275).
+    Each character is therefore charged its worst case of six, plus two for the
+    quotes. That over-charges plain ASCII by ~6x, which only ever splits
+    earlier than strictly necessary -- the harmless direction.
 
     Stops the moment either answer is known, so the probe costs
     O(min(size, limit)) regardless of how large the subtree really is -- that
@@ -251,11 +279,11 @@ def _subtree_exceeds(obj: object, limit: int, byte_limit: int = -1) -> bool:
                 # Keys are encoded too; counted here rather than pushed, since
                 # a key is never itself descended into.
                 for key in cur:
-                    weight += len(key) + 4 if type(key) is str else 8
+                    weight += _MAX_ESCAPE * len(key) + 4 if type(key) is str else 8
         elif type(cur) is list:
             stack.extend(cur)
         elif check_bytes:
-            weight += len(cur) + 2 if type(cur) is str else 8
+            weight += _MAX_ESCAPE * len(cur) + 2 if type(cur) is str else 8
         if check_bytes and weight > byte_limit:
             return True
     return False
@@ -285,10 +313,13 @@ def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
     every subtree that is small enough to the one-shot C encoder whole.
     "Small enough" is decided by :func:`_subtree_exceeds`, not by depth
     alone, so a single enormous namespace subtree is still split rather than
-    encoded in one piece -- and by node count *and* estimated encoded bytes,
+    encoded in one piece -- and by node count *and* an upper bound on encoded
+    bytes,
     since a few nodes holding very long strings are small by one measure and
     huge by the other. The peak transient string therefore stays bounded by
-    :data:`_JSON_CHUNK_BYTE_LIMIT` no matter how the tree is shaped.
+    :data:`_JSON_CHUNK_BYTE_LIMIT` for every subtree shallower than
+    :func:`_max_descent_depth`, which is every subtree in a document the stdlib
+    encoder could write at all.
 
     One thing no bound here can split is a *single scalar*: a 100 MB string
     value encodes as one fragment, because JSON has nowhere to break it. That
@@ -308,6 +339,7 @@ def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
     re-deriving that coercion here would be a second implementation of it to
     keep byte-identical. Clang ASTs never contain one, so nothing is lost.
     """
+    max_depth = _max_descent_depth()
     parts: list[str] = []
     size = 0
 
@@ -321,7 +353,7 @@ def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
             size = 0
 
     def walk(node: object, depth: int) -> None:
-        if depth < _JSON_CHUNK_MAX_DEPTH and _subtree_exceeds(
+        if depth < max_depth and _subtree_exceeds(
             node, _JSON_CHUNK_NODE_LIMIT, _JSON_CHUNK_BYTE_LIMIT
         ):
             if type(node) is dict:

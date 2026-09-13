@@ -39,16 +39,18 @@ import io
 import json
 import math
 import random
+import sys
 from pathlib import Path
 
 import pytest
 
 from abicheck.dumper_cache import (
     _JSON_CHUNK_BYTE_LIMIT,
-    _JSON_CHUNK_MAX_DEPTH,
+    _JSON_CHUNK_MIN_DEPTH,
     _JSON_CHUNK_NODE_LIMIT,
     _JSON_WRITE_BUFFER,
     _atomic_write_json,
+    _max_descent_depth,
     _subtree_exceeds,
     _write_json_chunked,
 )
@@ -231,12 +233,52 @@ def test_depth_cap_delegates_instead_of_recursing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Past the cap a large subtree is delegated whole rather than descended."""
-    monkeypatch.setattr("abicheck.dumper_cache._JSON_CHUNK_MAX_DEPTH", 2)
+    monkeypatch.setattr("abicheck.dumper_cache._max_descent_depth", lambda: 2)
     document = {"a": {"b": {"c": _wide_ast(1_000)}}}
     fragments: list[str] = []
     _write_json_chunked(document, fragments.append)
     assert "".join(fragments) == json.dumps(document)
-    assert _JSON_CHUNK_MAX_DEPTH > 2  # the real cap is not this test's value
+    assert _max_descent_depth() > 2  # the real cap is not this test's value
+
+
+def test_the_depth_cap_does_not_disable_the_memory_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large subtree nested 100 deep is still split, not encoded whole.
+
+    Regression test for a defect found in review: the cap was a fixed 40, so a
+    document whose bulk sat deeper than that skipped the size checks *because
+    of depth alone* and went to one ``json.dumps`` -- recursion protection
+    silently disabling the memory bound it is supposed to coexist with.
+
+    100 levels is past the old cap and far short of both the new one and the
+    depth at which ``json.dumps`` itself raises, so this asserts the bound
+    holds where a document is genuinely encodable.
+    """
+    nested: object = _wide_ast(60_000)
+    for _ in range(100):
+        nested = {"kind": "NamespaceDecl", "inner": [nested]}
+    assert _max_descent_depth() > 100, "the cap must clear this fixture"
+
+    fragments: list[str] = []
+    _write_json_chunked(nested, fragments.append)
+    assert "".join(fragments) == json.dumps(nested)
+    assert max(len(f) for f in fragments) < 4 * _JSON_WRITE_BUFFER
+    assert len(fragments) > 8
+
+
+def test_the_descent_cap_tracks_the_recursion_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap is derived, not a constant, and never drops below its floor.
+
+    Deriving it is what keeps the memory bound alive at depth: a fixed small
+    cap is indistinguishable from "no bound below it".
+    """
+    monkeypatch.setattr(sys, "getrecursionlimit", lambda: 4000)
+    assert _max_descent_depth() == 1000
+    monkeypatch.setattr(sys, "getrecursionlimit", lambda: 50)
+    assert _max_descent_depth() == _JSON_CHUNK_MIN_DEPTH
 
 
 def test_atomic_write_json_round_trips_a_document_past_the_chunk_threshold(
@@ -314,19 +356,50 @@ def test_a_byte_heavy_subtree_is_split_even_though_its_node_count_is_small() -> 
     assert len(fragments) > 8
 
 
-def test_the_byte_probe_is_opt_in_and_estimates_below_the_real_encoding() -> None:
-    """A negative byte limit checks node count alone; the estimate never overshoots.
+def test_the_byte_estimate_is_an_upper_bound_on_the_real_encoding() -> None:
+    """The estimate must never come in *under* the real encoded size.
 
-    Under-estimating is the safe direction for a bound that decides "small
-    enough to encode whole" only when it answers ``False`` -- an estimate above
-    the true size would split more than necessary, one below it never delegates
-    something too large.
+    Regression test for a defect found in review, and for reasoning I had
+    backwards: a ``False`` answer from this probe is what authorises encoding a
+    subtree whole, so an estimate that can undershoot is no bound at all. The
+    first version charged ``len(s)`` per string and called under-counting
+    "safe" -- which ``ensure_ascii=True`` makes wrong, since a non-ASCII or
+    control character becomes a six-character escape.
+
+    Stated as the property over documents chosen to span the expansion range
+    (plain ASCII 1x, non-ASCII ~6x, control characters 6x), not over the one
+    Unicode example: any string content where the estimate undershoots is a
+    subtree that can be handed to ``json.dumps`` whole.
     """
+    documents: list[object] = [
+        _byte_heavy_ast(count=4, spelling_length=1_000),
+        {"name": "Ünïcode" * 500, "inner": ["日本語" * 300]},
+        {"raw": "\x01\x02\x03" * 400},
+        {"mixed": ['a"b\\c' * 200, "Ünïcode" * 200, "plain" * 200]},
+        {"deep": {"deeper": {"deepest": "ü" * 2_000}}},
+    ]
+    for document in documents:
+        real = len(json.dumps(document))
+        # Under any limit below the true encoded size the probe must say "too
+        # big" -- that is exactly what makes it an upper bound.
+        assert _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, real - 1), document
+        # And not so loose as to be useless: never more than the worst-case
+        # per-character expansion plus the structural constant.
+        assert not _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, 6 * real + 64), (
+            document
+        )
+
+    # A `len(s)`-based estimate would have undershot the Unicode case, which is
+    # the vacuity guard: without it this test passes for the old formula too.
+    unicode_doc = {"name": "Ünïcode" * 500}
+    naive = sum(len(v) for v in unicode_doc.values()) + 32
+    assert naive < len(json.dumps(unicode_doc)), (
+        "fixture must be one where a character-count estimate undershoots"
+    )
+
+
+def test_the_byte_probe_is_opt_in() -> None:
+    """A negative byte limit checks node count alone."""
     document = _byte_heavy_ast(count=4, spelling_length=1_000)
     assert not _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, -1)
-
-    real = len(json.dumps(document))
-    # The estimate is bracketed: it must exceed a limit just under the real
-    # encoded size, and must not exceed one comfortably above it.
-    assert _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, real // 2)
-    assert not _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, real * 2)
+    assert _subtree_exceeds(document, 3, -1)
