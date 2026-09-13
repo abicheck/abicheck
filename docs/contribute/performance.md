@@ -495,16 +495,27 @@ measurement aid, never a cheaper way to run the lane.
 
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
-`scripts/l2_real_profiles.py` pins the three live integrations declaratively:
-each profile's revisions, the libraries and headers actually in L2 scope, the
-required tools and approximate build cost, and reproducible prepare commands.
-They are **periodic/manual only** — an ordinary PR must never download and build
-oneDAL (~120 build-minutes, ~25 GB).
+`scripts/l2_real_profiles.py` pins the live integrations declaratively: each
+profile's revisions (and how each side's operands are *obtained*), the libraries
+and headers actually in L2 scope, the required tools and approximate build cost,
+and reproducible prepare commands. They are **periodic/manual only** — an
+ordinary PR must never download and build oneDAL (~120 build-minutes, ~25 GB).
+
+SVS carries **two** profiles, deliberately not folded into one: `svs` compares
+the released **v0.4.0 runtime distribution** against PR #387's head — the
+comparison the integration actually gates on, and the one that exposed the real
+ABI change — while `svs_pr_base` compares the PR's merge base against its head.
+The latter is a useful additional smoke test and cannot substitute for the
+former, since it cannot expose a change that entered the branch before the merge
+base. The released side is *consumed*, not rebuilt: rebuilding a release from
+its tag measures the rebuilding host's toolchain rather than the artifact
+consumers received, and when the release and CI artifacts already exist there is
+no reason to rebuild at all.
 
 The rule the module exists to enforce: **an unavailable profile is reported
 `PARTIAL`/`BLOCKED`/`NOT_RUN` with a concrete reason, never silently replaced by a
 synthetic substitute, and a synthetic number is never published under a real
-project's name.** Three further constraints it encodes:
+project's name.** Five further constraints it encodes:
 
 - **No declarative L2 bundle capability exists today.** A multi-library profile
   is measured as the supported set of per-library L2 operations — the set's
@@ -519,7 +530,29 @@ project's name.** Three further constraints it encodes:
   substitution (check out the new revision, build both binaries, point both
   `--header` sets at the working tree) runs fine, is faster, and is not a
   temporal L2 comparison. PVXS must also not be measured by running the
-  project's own script with `--depth source`: that is an L4/L5 measurement.
+  project's own script with `--depth source`: that is an L4/L5 measurement. It
+  must also be the baseline the integration *declares* — which is why SVS's
+  release-to-candidate and PR-base comparisons are separate profiles.
+- **Readiness is not a measurement.** `resolve_status` answers only whether a
+  host *could* measure a profile, so its positive answers are `READY` and
+  `PARTIAL`. It once returned `MEASURED` for any request whose `prepared_root`
+  merely existed — an empty directory, neither side's library, neither side's
+  headers, no comparison run. Every declared operand is now checked on both
+  sides (`missing_inputs`), and `MEASURED` is reachable only through
+  `promote_to_measured`, which requires a completed timed window with validated
+  output.
+- **A scenario's findings mean what that scenario says they mean.** Every
+  declared scenario carries an expectation (`SCENARIO_EXPECTATIONS`). "Any
+  finding is a false positive by construction" holds for a *literal
+  self-comparison* and for nothing else: two independent builds under one
+  controlled contract are to be **investigated** against the recorded compiler,
+  flags, dependencies and artifact evidence, and two intentionally different
+  build variants differ in contract on purpose. SVS's own PR artifacts make the
+  point — the default and public-only builds have byte-identical runtime headers
+  and materially different exported-symbol sets — so identical header text
+  plainly does not guarantee identical binary evidence. Treating all three
+  alike risks reading correct detection of a build-induced ABI change as a
+  scanner defect, or suppressing it to satisfy the wrong expectation.
 
 ## Coverage gaps this workflow does not close
 

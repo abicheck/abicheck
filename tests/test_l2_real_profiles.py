@@ -30,37 +30,30 @@ worth more guarding than the arithmetic is.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
-
-_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-if str(_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS))
-
-_spec = importlib.util.spec_from_file_location(
-    "l2_real_profiles", _SCRIPTS / "l2_real_profiles.py"
+from _l2_real_profiles_support import (
+    SCRIPTS as _SCRIPTS,
+    materialize_operands,
+    profiles,
 )
-assert _spec and _spec.loader
-profiles = importlib.util.module_from_spec(_spec)
-sys.modules["l2_real_profiles"] = profiles
-_spec.loader.exec_module(profiles)
 
 
 class TestProfileDefinitions:
-    def test_all_three_integrations_are_defined(self):
-        assert set(profiles.PROFILES) == {"onedal", "svs", "pvxs"}
+    def test_every_live_integration_is_defined(self):
+        # SVS carries two profiles because it has two distinct comparisons: the
+        # release-to-candidate one the integration gates on, and a PR-base smoke
+        # test that cannot substitute for it.
+        assert set(profiles.PROFILES) == {"onedal", "svs", "svs_pr_base", "pvxs"}
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_every_profile_is_structurally_valid(self, profile_id):
         assert profiles.validate_profile(profiles.PROFILES[profile_id]) == []
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_every_profile_names_its_upstream_reference(self, profile_id):
         # A measurement must be traceable to the change it was taken for.
         assert profiles.PROFILES[profile_id].reference.startswith("https://")
@@ -89,16 +82,127 @@ class TestProfileDefinitions:
         assert core.public_headers != ioc.public_headers
         assert core.context != ioc.context
 
-    def test_svs_scopes_to_published_runtime_headers_not_the_whole_tree(self):
+    @pytest.mark.parametrize("profile_id", ["svs", "svs_pr_base"])
+    def test_svs_declares_the_real_runtime_integration_inputs(self, profile_id):
+        # The profile originally declared lib/libsvs_shared.so,
+        # include/svs/lib/runtime.h, and a repository-root build with
+        # -DSVS_BUILD_SHARED=ON. None of those exist in any SVS distribution:
+        # upstream's bindings/cpp/CMakeLists.txt defines `svs_runtime` as the
+        # shared-library target and installs its PUBLIC_HEADER set into
+        # include/svs/runtime, and the root project neither adds that subproject
+        # nor declares SVS_BUILD_SHARED. A profile pointing at absent paths is
+        # unmeasurable while reading as valid.
+        library = profiles.PROFILES[profile_id].l2_libraries[0]
+        assert library.artifact == "lib/libsvs_runtime.so"
+        assert library.public_headers == ("include/svs/runtime",)
+
+    @pytest.mark.parametrize("profile_id", ["svs", "svs_pr_base"])
+    def test_svs_builds_the_runtime_subproject_not_the_repository_root(
+        self, profile_id
+    ):
+        profile = profiles.PROFILES[profile_id]
+        built = [
+            command
+            for side in ("old", "new")
+            for command in profile.commands_for_side(side)
+            if command.startswith("cmake -S")
+        ]
+        assert built, profile_id
+        assert all("bindings/cpp" in command for command in built), built
+        # The option that never existed must not come back.
+        assert not any("SVS_BUILD_SHARED" in c for c in built), built
+
+    def test_svs_scopes_to_the_installed_runtime_headers_not_the_whole_tree(self):
         # Scoping L2 at the whole include/ tree would measure a largely
         # header-only source tree instead of the runtime library's contract.
         headers = profiles.SVS.l2_libraries[0].public_headers
-        assert headers and all(h.endswith(".h") for h in headers)
+        assert headers == ("include/svs/runtime",)
+        assert not any(h == "include" for h in headers)
 
-    def test_svs_keeps_temporal_and_equivalence_as_separate_scenarios(self):
-        # One number cannot mean both "did this change break the ABI" and "is
-        # the analysis stable across two builds of one revision".
-        assert set(profiles.SVS.scenarios) == {"temporal", "equivalence"}
+    def test_svs_gates_on_the_released_baseline_not_the_pr_base(self):
+        # The integration explicitly selects the released v0.4.0 runtime
+        # distribution as its baseline; that is the comparison that exposed the
+        # real ABI change. A PR-base comparison cannot expose a change that
+        # entered the branch before the merge base.
+        assert profiles.SVS.old_revision == "v0.4.0"
+        assert profiles.SVS.source_for_side("old") == "prebuilt_distribution"
+        assert profiles.SVS.scenarios == ("temporal_release",)
+
+    def test_the_pr_base_comparison_is_a_separate_profile(self):
+        # Kept separate rather than folded in as a second scenario: one result
+        # cannot mean both "did this release-to-candidate change break the ABI"
+        # and "did this branch change it since its merge base".
+        pr_base = profiles.PROFILES["svs_pr_base"]
+        assert pr_base.old_revision == "8052bd9f0f78b759cad2bc5168ab37c4f66f0670"
+        assert pr_base.new_revision == profiles.SVS.new_revision
+        assert "temporal_pr_base" in pr_base.scenarios
+        assert "temporal_release" not in pr_base.scenarios
+
+    def test_a_released_baseline_is_consumed_rather_than_rebuilt(self):
+        # Rebuilding a release from its tag measures this host's toolchain, not
+        # the artifact consumers actually received -- and there is no reason to
+        # rebuild when the release artifact already exists.
+        assert profiles.SVS.commands_for_side("old") == ()
+        assert profiles.SVS.commands_for_side("new")
+
+
+class TestScenarioExpectations:
+    """A scenario's findings mean what that scenario says they mean.
+
+    The SVS profile previously declared that any finding between two independent
+    builds of one revision is "a false positive by construction". That holds for
+    a literal self-comparison and for nothing else: two independent builds are
+    not one artifact, and two deliberately different build variants do not even
+    share a contract -- SVS's own PR artifacts make the point, with
+    byte-identical runtime headers on the default and public-only builds and
+    materially different exported-symbol sets. Under the old expectation a
+    harness would read correct detection of a build-induced ABI change as a
+    scanner defect, or suppress it to satisfy the wrong expectation.
+    """
+
+    def test_only_a_literal_self_comparison_forecloses_findings(self):
+        self_cmp = profiles.SCENARIO_EXPECTATIONS["self_comparison"]
+        assert "no introduced compatibility regression" in self_cmp
+
+    def test_independent_rebuilds_are_investigated_not_dismissed(self):
+        rebuild = profiles.SCENARIO_EXPECTATIONS["rebuild_equivalence"]
+        assert "INVESTIGATED" in rebuild
+        assert "false positive by construction" not in rebuild
+
+    def test_build_variants_are_not_automatically_false_positives(self):
+        variant = profiles.SCENARIO_EXPECTATIONS["variant_comparison"]
+        assert "never automatically labelled false positives" in variant
+
+    def test_no_scenario_declares_findings_false_positives_by_construction(self):
+        # The specific claim that made the old expectation wrong, foreclosed
+        # across the whole vocabulary rather than in the one profile that had it.
+        for scenario, expectation in profiles.SCENARIO_EXPECTATIONS.items():
+            assert "by construction" not in expectation, scenario
+
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_every_shipped_scenario_states_its_expectation(self, profile_id):
+        profile = profiles.PROFILES[profile_id]
+        assert profile.scenarios
+        for scenario in profile.scenarios:
+            assert profiles.SCENARIO_EXPECTATIONS[scenario]
+
+    def test_an_unexplained_scenario_is_rejected(self):
+        bad = profiles.RealProfile(
+            id="t",
+            project="p",
+            reference="https://example.invalid/pr/1",
+            repository="https://example.invalid/p.git",
+            old_revision="aaa",
+            new_revision="bbb",
+            libraries=(profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),),
+            per_side_commands=("build {root}",),
+            required_tools=("git",),
+            scenarios=("vibes",),
+        )
+        assert any(
+            "states no expectation" in problem
+            for problem in profiles.validate_profile(bad)
+        )
 
 
 class TestValidationCatchesDishonestDefinitions:
@@ -113,7 +217,9 @@ class TestValidationCatchesDishonestDefinitions:
             "old_revision": "aaa",
             "new_revision": "bbb",
             "libraries": (profiles.LibraryTarget("l", "lib/l.so", ("inc/l.h",)),),
+            "per_side_commands": ("build {revision} into {root}",),
             "required_tools": ("git",),
+            "scenarios": ("temporal_pr_base",),
         }
         base.update(overrides)
         return profiles.RealProfile(**base)
@@ -246,13 +352,19 @@ class TestStatusReporting:
         assert status.status == "NOT_RUN"
         assert "not selected" in status.reason
 
-    def test_a_prepared_tree_with_tools_is_measurable(self, monkeypatch, tmp_path):
+    def test_a_prepared_tree_with_tools_and_operands_is_ready(
+        self, monkeypatch, tmp_path
+    ):
+        # READY, not MEASURED: every precondition holds and nothing has run.
         monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
         monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {"git": "git 2"})
+        materialize_operands(profiles.SVS, tmp_path)
         status = profiles.resolve_status(
             profiles.SVS, prepared_root=tmp_path, requested=True
         )
-        assert status.status == "MEASURED"
+        assert status.status == "READY"
+        assert status.missing_inputs == []
+        assert status.measurement is None
 
     def test_every_status_is_from_the_declared_vocabulary(self, monkeypatch, tmp_path):
         monkeypatch.setattr(profiles.shutil, "which", lambda tool: None)
@@ -271,7 +383,7 @@ class TestStatusReporting:
             status = profiles.resolve_status(
                 profile, prepared_root=tmp_path, requested=True
             )
-            assert status.status != "MEASURED"
+            assert status.status not in ("MEASURED", "READY")
             assert status.reason
 
 
@@ -345,7 +457,7 @@ class TestRevisionsArePinned:
     def test_a_real_revision_is_not_a_placeholder(self, revision):
         assert not profiles.is_placeholder_revision(revision)
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_every_shipped_profile_is_pinned_to_real_revisions(self, profile_id):
         profile = profiles.PROFILES[profile_id]
         assert not profiles.is_placeholder_revision(profile.old_revision)
@@ -408,32 +520,43 @@ class TestPrepareScriptBuildsBothSides:
     produce the old-vs-new pair it advertised.
     """
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_both_revisions_appear_in_the_script(self, profile_id):
         profile = profiles.PROFILES[profile_id]
         script = profiles.prepare_script(profile)
         assert profile.old_revision in script
         assert profile.new_revision in script
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_each_side_gets_its_own_tree(self, profile_id):
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
         assert f"{profile_id}_old" in script
         assert f"{profile_id}_new" in script
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
-    def test_every_profile_declares_per_side_commands(self, profile_id):
-        # A profile with an empty list here can only ever build one side, which is
-        # the defect this guards against reappearing.
-        assert profiles.PROFILES[profile_id].per_side_commands
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_every_side_is_either_built_or_explicitly_supplied(self, profile_id):
+        # A side with neither commands nor a prebuilt declaration can never
+        # exist, which is the defect this guards against reappearing. A prebuilt
+        # side is not an exemption: the script fails loudly when it is absent
+        # (see TestSideAcquisitionIsDeclared).
+        profile = profiles.PROFILES[profile_id]
+        for side in ("old", "new"):
+            assert profile.commands_for_side(side) or (
+                profile.source_for_side(side) == "prebuilt_distribution"
+            ), (profile_id, side)
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
-    def test_the_build_step_runs_once_per_side(self, profile_id):
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_the_build_step_runs_once_per_built_side(self, profile_id):
         profile = profiles.PROFILES[profile_id]
         script = profiles.prepare_script(profile)
-        # The worktree creation is per side by construction, so count it: one per
-        # side and no more.
-        assert script.count("worktree add") == 2
+        built = [
+            side
+            for side in ("old", "new")
+            if profile.source_for_side(side) == "build_from_revision"
+        ]
+        # The worktree creation is per built side by construction, so count it:
+        # one per built side and no more.
+        assert script.count("worktree add") == len(built), built
 
 
 class TestPrepareScriptIsolatesEachCommand:
@@ -445,11 +568,11 @@ class TestPrepareScriptIsolatesEachCommand:
     old-side build.
     """
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_the_script_captures_a_root(self, profile_id):
         assert 'ROOT="$(pwd)"' in profiles.prepare_script(profiles.PROFILES[profile_id])
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_every_command_line_is_a_rooted_subshell(self, profile_id):
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
         commands = [
@@ -459,19 +582,31 @@ class TestPrepareScriptIsolatesEachCommand:
         ]
         assert commands, "a profile with no commands would pass this vacuously"
         for line in commands:
+            if line.startswith("if "):
+                # A supplied side's operand and identity guards are
+                # whole-script assertions, not commands run inside one side's
+                # tree.
+                assert "exit 1" in line, line
+                continue
             assert line.startswith('( cd "$ROOT" && '), line
             assert line.endswith(" )"), line
 
     def test_a_cd_inside_one_command_cannot_leak_into_the_next(self):
         # The property, stated directly: two consecutive `cd X` commands both
         # resolve X against the root, not against each other.
-        script = profiles.prepare_script(profiles.SVS)
-        cd_lines = [ln for ln in script.splitlines() if "svs_old" in ln]
+        # SVS_PR_BASE rather than SVS: it builds both sides from source, so its
+        # old side really is a sequence of consecutive commands in one tree.
+        script = profiles.prepare_script(profiles.SVS_PR_BASE)
+        cd_lines = [
+            ln
+            for ln in script.splitlines()
+            if "svs_pr_base_old" in ln and not ln.startswith("#")
+        ]
         assert len(cd_lines) >= 2
         for line in cd_lines:
             assert line.startswith('( cd "$ROOT" && ')
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_the_rendered_script_is_valid_shell(self, profile_id):
         # Parse-checked rather than eyeballed: a script nobody can run is not
         # reproduction instructions. `bash -n` needs no network and builds nothing.
@@ -483,7 +618,7 @@ class TestPrepareScriptIsolatesEachCommand:
 
 
 class TestPrepareScript:
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_it_is_a_runnable_reproducible_script(self, profile_id):
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
         assert script.startswith("#!/usr/bin/env bash")
@@ -493,13 +628,13 @@ class TestPrepareScript:
         assert "{repository}" not in script
         assert "{old_revision}" not in script
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_it_states_that_preparation_is_excluded_from_measurement(self, profile_id):
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
         assert "SETUP" in script
         assert "excluded from every measured window" in script
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_it_states_the_resource_cost_up_front(self, profile_id):
         # So a lane can decline before spending an hour finding out.
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
@@ -535,7 +670,7 @@ class TestPrepareScriptUsesAbsoluteWorktreePaths:
     the one profile that was read first.
     """
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_every_worktree_operand_is_root_anchored(self, profile_id):
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
         worktree_lines = [ln for ln in script.splitlines() if "worktree add" in ln]
@@ -544,7 +679,7 @@ class TestPrepareScriptUsesAbsoluteWorktreePaths:
             # The operand after the revision/flags must begin at $ROOT.
             assert '"$ROOT"/' in line.split("worktree add", 1)[1], line
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_no_rendered_path_operand_is_bare_relative(self, profile_id):
         # The general invariant behind the one bug: the side root never appears
         # in the script as a bare relative name, in any command, not only the
@@ -630,6 +765,7 @@ class TestPartialCoverageSurvivesAMissingContextTool:
             "which",
             lambda tool: None if tool == "icpx" else "/usr/bin",
         )
+        materialize_operands(profiles.ONEDAL, tmp_path)
         status = profiles.resolve_status(
             profiles.ONEDAL, prepared_root=tmp_path, requested=True
         )
@@ -661,21 +797,25 @@ class TestPartialCoverageSurvivesAMissingContextTool:
                 None if tool in ("icpx", "nonexistent-host-cc") else "/usr/bin"
             ),
         )
+        materialize_operands(variant, tmp_path)
         status = profiles.resolve_status(
             variant, prepared_root=tmp_path, requested=True
         )
         assert status.status == "BLOCKED", status.reason
         assert "no part of this profile can be measured" in status.reason
 
-    def test_a_complete_toolchain_still_reports_measured(self, monkeypatch, tmp_path):
+    def test_a_complete_toolchain_still_reports_ready(self, monkeypatch, tmp_path):
         # Vacuity guard: PARTIAL must not be the answer whenever context_tools is
         # non-empty.
         monkeypatch.setattr(profiles.shutil, "which", lambda tool: "/usr/bin/" + tool)
+        materialize_operands(profiles.ONEDAL, tmp_path)
         status = profiles.resolve_status(
             profiles.ONEDAL, prepared_root=tmp_path, requested=True
         )
-        assert status.status == "MEASURED", status.reason
-        assert status.measurable_libraries == []
+        assert status.status == "READY", status.reason
+        assert status.measurable_libraries == [
+            lib.name for lib in profiles.ONEDAL.l2_libraries
+        ]
 
     def test_a_missing_profile_wide_tool_still_blocks_everything(
         self, monkeypatch, tmp_path
@@ -706,7 +846,7 @@ class TestPartialCoverageSurvivesAMissingContextTool:
         assert status.status == "BLOCKED"
         assert "no prepared build tree" in status.reason
 
-    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_every_context_tool_belongs_to_a_real_context(self, profile_id):
         # A context_tools key naming no library's context gates nothing, which
         # would be an inert declaration reading as a real restriction.
@@ -729,6 +869,9 @@ class TestTheStatusVocabularyCoversWhatResolveStatusReturns:
     def test_partial_is_declared(self):
         assert "PARTIAL" in profiles.STATUSES
 
+    def test_ready_is_declared(self):
+        assert "READY" in profiles.STATUSES
+
     def test_the_partial_branch_really_produces_a_declared_status(
         self, monkeypatch, tmp_path
     ):
@@ -737,6 +880,7 @@ class TestTheStatusVocabularyCoversWhatResolveStatusReturns:
             "which",
             lambda tool: None if tool == "icpx" else "/usr/bin",
         )
+        materialize_operands(profiles.ONEDAL, tmp_path)
         status = profiles.resolve_status(
             profiles.ONEDAL, prepared_root=tmp_path, requested=True
         )
@@ -749,7 +893,9 @@ class TestTheStatusVocabularyCoversWhatResolveStatusReturns:
         # and a hand-listed expectation would not notice it.
         source = (_SCRIPTS / "l2_real_profiles.py").read_text(encoding="utf-8")
         returned = set(re.findall(r'ProfileStatus\(\s*[^,]+,\s*"([A-Z_]+)"', source))
-        returned |= set(re.findall(r'"(MEASURED|PARTIAL|BLOCKED|NOT_RUN)"', source))
+        returned |= set(
+            re.findall(r'"(MEASURED|READY|PARTIAL|BLOCKED|NOT_RUN)"', source)
+        )
         undeclared = sorted(returned - set(profiles.STATUSES))
         assert undeclared == [], undeclared
 
