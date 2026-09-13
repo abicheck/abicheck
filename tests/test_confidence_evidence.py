@@ -1124,7 +1124,6 @@ class TestNoteIfSameBinaryCompared:
             embedded_snapshot,
             real_so,
             show_redundant=False,
-            show_filtered=False,
         )
         assert result.coverage_warnings == []
 

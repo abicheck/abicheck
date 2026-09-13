@@ -166,7 +166,6 @@ def test_json_report_carries_the_surface_changes_block() -> None:
 
 def test_review_digest_and_full_markdown_itemize_every_group() -> None:
     from abicheck.reporter_markdown import (
-        _to_markdown_leaf,
         _to_markdown_root_cause,
         to_markdown,
         to_review_digest,
@@ -181,7 +180,7 @@ def test_review_digest_and_full_markdown_itemize_every_group() -> None:
     assert "_ZN3foo9brand_newEv" in digest
     assert "_ZN3foo4goneEv" in digest
 
-    for render in (to_markdown, _to_markdown_leaf, _to_markdown_root_cause):
+    for render in (to_markdown, _to_markdown_root_cause):
         text = render(result)
         assert "## Surface changes" in text, render.__name__
         assert "_ZN3foo9brand_newEv" in text, render.__name__
@@ -195,7 +194,6 @@ def test_surface_changes_honors_show_only_like_every_other_section() -> None:
     ``result.changes``."""
     from abicheck import reporter
     from abicheck.reporter_markdown import (
-        _to_markdown_leaf,
         _to_markdown_root_cause,
         to_markdown,
     )
@@ -205,7 +203,6 @@ def test_surface_changes_honors_show_only_like_every_other_section() -> None:
 
     for payload_fn in (
         lambda: reporter.to_json(result, show_only="breaking"),
-        lambda: reporter.to_json(result, report_mode="leaf", show_only="breaking"),
         lambda: reporter.to_json(
             result, report_mode="root-cause", show_only="breaking"
         ),
@@ -213,7 +210,7 @@ def test_surface_changes_honors_show_only_like_every_other_section() -> None:
         block = json.loads(payload_fn())["surface_changes"]
         assert block["additions"] == [], payload_fn
 
-    for render in (to_markdown, _to_markdown_leaf, _to_markdown_root_cause):
+    for render in (to_markdown, _to_markdown_root_cause):
         text = render(result, show_only="breaking")
         assert "_ZN3foo9brand_newEv" not in text, render.__name__
 
@@ -242,24 +239,25 @@ def test_review_digest_document_round_trips_without_a_surface_changes_key() -> N
     assert "Additions" not in text  # nothing to itemize without the field
 
 
-def test_leaf_document_round_trips_without_a_surface_changes_key() -> None:
+def test_root_cause_document_round_trips_without_a_surface_changes_key() -> None:
     """Same backward-compatibility guarantee as the review digest, for the
-    shared leaf/root-cause preamble (``_render_view_preamble``)."""
+    view preamble (``_render_view_preamble``). Stated against the
+    root-cause document since plan slice 7o retired the leaf one."""
     from abicheck.report.document import ReportDocument
     from abicheck.report.render_markdown_alternate import (
-        build_leaf_document,
-        render_leaf_document,
+        build_root_cause_document,
+        render_root_cause_document,
     )
 
     old, new = _snapshots()
     result = compare(old, new)
 
-    doc = build_leaf_document(result)
+    doc = build_root_cause_document(result)
     mapping = doc.to_mapping()
     del mapping["surface_changes"]
     pre_39_doc = ReportDocument.from_mapping(mapping)
 
-    text = render_leaf_document(pre_39_doc)
+    text = render_root_cause_document(pre_39_doc)
     assert "ABI Report" in text
     assert "## Surface changes" not in text
 

@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import string
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import MISSING, dataclass, field, fields
 from enum import Enum
 from typing import Any
 
@@ -149,14 +149,6 @@ class ChangeKindMeta:
     kind: str  # ChangeKind enum value (e.g. "func_removed")
     default_verdict: Verdict
     impact: str = ""
-    # Plan slice 7o: the two canonical display dimensions, declared here
-    # rather than parsed back out of ``kind``. ``None`` is accepted by the
-    # constructor (the same way an empty ``impact`` is) and rejected by
-    # ``_validate_entry`` for any entry that actually reaches a registry,
-    # so a direct ``ChangeKindMeta("x", Verdict.BREAKING)`` in a test stays
-    # legal while the production catalog cannot carry an unclassified kind.
-    entity: ChangeEntity | None = None
-    operation: ChangeOperation | None = None
     is_addition: bool = False
     policy_overrides: Mapping[str, Verdict] = field(default_factory=dict)
     # Optional ``str.format``-style template for a finding's per-change
@@ -169,6 +161,21 @@ class ChangeKindMeta:
     # when the text embeds computed offsets, demangled signatures, vtable slot
     # indices, counts, etc. that no fixed template can express.
     description_template: str | None = None
+    # Plan slice 7o: the two canonical display dimensions, declared here
+    # rather than parsed back out of ``kind``. ``None`` is accepted by the
+    # constructor (the same way an empty ``impact`` is) and rejected by
+    # ``_validate_entry`` for any entry that actually reaches a registry,
+    # so a direct ``ChangeKindMeta("x", Verdict.BREAKING)`` in a test stays
+    # legal while the production catalog cannot carry an unclassified kind.
+    #
+    # Declared **last**, deliberately: ``__setstate__`` restores a slotted
+    # dataclass from a positional, field-declaration-order tuple, so a new
+    # field inserted anywhere but the end would silently re-map every
+    # position after it when loading a pickle written by an older build
+    # (caught by ``test_setstate_normalizes_a_legacy_plain_dict_policy_
+    # overrides``, whose six-value legacy state is exactly that shape).
+    entity: ChangeEntity | None = None
+    operation: ChangeOperation | None = None
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
@@ -304,7 +311,27 @@ class ChangeKindMeta:
             values = dict(state)
         else:
             field_names = [f.name for f in fields(self)]
-            values = dict(zip(field_names, state, strict=True))
+            if len(state) > len(field_names):
+                raise ValueError(
+                    "ChangeKindMeta.__setstate__ got more values than this "
+                    "build has fields — the pickle was written by a newer "
+                    "abicheck"
+                )
+            # A *shorter* tuple is a pickle from a build with fewer fields
+            # (plan slice 7o added `entity`/`operation`): fill the trailing
+            # fields from their own declared defaults rather than refusing
+            # to load. Loading it is the honest outcome -- the catalog entry
+            # it restores is genuinely missing those two facts, and
+            # `_validate_entry` is what refuses such an entry when it
+            # actually reaches a registry.
+            values = dict(zip(field_names, state, strict=False))
+            for field_def in fields(self):
+                if field_def.name in values:
+                    continue
+                if field_def.default is not MISSING:
+                    values[field_def.name] = field_def.default
+                elif field_def.default_factory is not MISSING:  # type: ignore[misc]
+                    values[field_def.name] = field_def.default_factory()  # type: ignore[misc]
         overrides = values.get("policy_overrides")
         if not isinstance(overrides, _ImmutableDict):
             values["policy_overrides"] = _ImmutableDict(overrides or {})

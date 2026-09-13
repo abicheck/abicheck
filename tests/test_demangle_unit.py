@@ -871,7 +871,13 @@ class TestDemangleText:
             _mod, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"}
         )
         out = _mod.demangle_text("New public function: _Z3foov; see also _Z3foov.")
-        assert out == "New public function: foo(); see also foo()."
+        # Plan slice 7o: each replacement keeps the exact mangled spelling
+        # in brackets, so human output stays copyable into nm/objdump/a
+        # suppression selector -- which is what let `--view demangle`/
+        # `no-demangle` retire without a capability loss.
+        assert out == (
+            "New public function: foo() [_Z3foov]; see also foo() [_Z3foov]."
+        )
 
     def test_leaves_unresolved_tokens_unchanged(self, monkeypatch):
         monkeypatch.setattr(_mod, "demangle_batch", lambda syms, **kw: {})
@@ -908,7 +914,7 @@ class TestDemangleText:
             _mod, "demangle_batch", lambda syms, **kw: {"__ZN3Foo3barEv": "Foo::bar()"}
         )
         out = _mod.demangle_text("removed: __ZN3Foo3barEv")
-        assert out == "removed: Foo::bar()"
+        assert out == "removed: Foo::bar() [__ZN3Foo3barEv]"
         assert "_Foo::bar()" not in out
 
 

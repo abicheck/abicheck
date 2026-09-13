@@ -1723,7 +1723,7 @@ def test_reclassified_by_falls_back_to_to_verdict_for_a_directly_constructed_rul
     assert d["changes"][0]["reclassified_by"] == "COMPATIBLE"
 
 
-def test_reclassified_by_and_policy_reclassify_present_in_leaf_mode(
+def test_reclassified_by_and_policy_reclassify_present_in_root_cause_mode(
     tmp_path: Path,
 ) -> None:
     """Codex review: `--report-mode leaf` builds its own leaf-entry dict
@@ -1760,8 +1760,11 @@ reclassify:
         policy_file=pf,
     )
 
-    d = json.loads(to_json(diff, report_mode="leaf"))
-    assert d["leaf_changes"][0]["reclassified_by"] == "COMDAT-inline demotions"
+    d = json.loads(to_json(diff, report_mode="root-cause"))
+    assert (
+        d["root_causes"][0]["findings"][0]["reclassified_by"]
+        == "COMDAT-inline demotions"
+    )
     assert d["changes"][0]["reclassified_by"] == "COMDAT-inline demotions"
     assert d["policy_reclassify"] == [
         {

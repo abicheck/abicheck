@@ -155,15 +155,13 @@ class TestEvidenceDepthOutOfBandPack:
         assert payload["old_evidence_depth"] == "binary"
         assert payload["new_evidence_depth"] == "headers"
 
-    def test_report_mode_leaf_and_root_cause_also_carry_it(
-        self, tmp_path: Path
-    ) -> None:
+    def test_report_mode_root_cause_also_carries_it(self, tmp_path: Path) -> None:
         # The pre-existing fold-in applied unconditionally whenever fmt ==
         # "json", regardless of --report-mode -- the new pre-render fields
-        # must reach every JSON builder (_to_json_leaf/_to_json_root_cause)
+        # must reach every JSON builder (_to_json_root_cause included)
         # the same way, not just the default full mode.
         old_p, new_p = self._write_snapshots(tmp_path)
-        for mode in ("leaf", "root-cause"):
+        for mode in ("full", "root-cause"):
             result = CliRunner().invoke(
                 main,
                 [

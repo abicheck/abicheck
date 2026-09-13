@@ -104,6 +104,11 @@ def _diff_result(changes: list[Change], **kw: object) -> DiffResult:
     )
 
 
+def _grouped_findings(doc: dict) -> list[dict]:
+    """Every finding a ``--view root-cause`` document exposes, flattened."""
+    return [f for group in doc.get("root_causes", []) for f in group["findings"]]
+
+
 class _AllSuppression:
     """Duck-typed suppression: suppresses every change."""
 
@@ -288,7 +293,7 @@ class TestReporterChangeToDict:
 
 
 class TestReporterJsonLeaf:
-    def test_leaf_json_severity_from_sets(self) -> None:
+    def test_root_cause_json_severity_from_sets(self) -> None:
         # Lines 471-481: _severity_from_sets covers breaking/api_break/risk/compatible.
         from abicheck.reporter import to_json
 
@@ -300,15 +305,17 @@ class TestReporterJsonLeaf:
             _change(ChangeKind.ENUM_MEMBER_ADDED, "ns::E3"),  # compatible
         ]
         result = _diff_result(changes, verdict=Verdict.BREAKING)
-        out = json.loads(to_json(result, report_mode="leaf"))
+        out = json.loads(to_json(result, report_mode="root-cause"))
         assert out["verdict"] == "BREAKING"
-        severities = {lc["kind"]: lc["severity"] for lc in out["leaf_changes"]}
+        severities = {lc["kind"]: lc["severity"] for lc in _grouped_findings(out)}
         assert severities["type_size_changed"] == "breaking"
         assert severities["enum_member_renamed"] == "api_break"
         assert severities["enum_last_member_value_changed"] == "risk"
         assert severities["enum_member_added"] == "compatible"
 
-    def test_leaf_json_surfaces_reachability_fields_for_root_type_change(self) -> None:
+    def test_root_cause_json_surfaces_reachability_fields_for_root_type_change(
+        self,
+    ) -> None:
         # ADR-044 P1 item 4: a root TYPE_* change routes through the
         # hand-rolled _leaf_entry, not _change_to_dict — it needs its own
         # copy of the same structured reachability fields, since this is
@@ -323,8 +330,8 @@ class TestReporterJsonLeaf:
             reachability_proof_path="ns::Pub → field:impl_ → ns::detail::Impl",
         )
         result = _diff_result([c], verdict=Verdict.BREAKING)
-        out = json.loads(to_json(result, report_mode="leaf"))
-        entry = out["leaf_changes"][0]
+        out = json.loads(to_json(result, report_mode="root-cause"))
+        entry = _grouped_findings(out)[0]
         assert entry["public_reachable"] is True
         assert entry["reachability_kind"] == "value_embedding"
         assert (
@@ -332,19 +339,19 @@ class TestReporterJsonLeaf:
             == "ns::Pub → field:impl_ → ns::detail::Impl"
         )
 
-    def test_leaf_json_omits_reachability_fields_when_unset(self) -> None:
+    def test_root_cause_json_omits_reachability_fields_when_unset(self) -> None:
         from abicheck.reporter import to_json
 
         result = _diff_result(
             [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::T")], verdict=Verdict.BREAKING
         )
-        out = json.loads(to_json(result, report_mode="leaf"))
-        entry = out["leaf_changes"][0]
+        out = json.loads(to_json(result, report_mode="root-cause"))
+        entry = _grouped_findings(out)[0]
         assert "public_reachable" not in entry
         assert "reachability_kind" not in entry
         assert "reachability_proof_path" not in entry
 
-    def test_leaf_json_unknown_severity_with_override(self) -> None:
+    def test_root_cause_json_unknown_severity_with_override(self) -> None:
         # Line 481: a kind moved out of all sets via policy override → "unknown".
         from abicheck.policy_file import PolicyFile
         from abicheck.reporter import to_json
@@ -356,8 +363,8 @@ class TestReporterJsonLeaf:
             verdict=Verdict.COMPATIBLE,
             policy_file=pf,
         )
-        out = json.loads(to_json(result, report_mode="leaf"))
-        assert out["leaf_changes"][0]["severity"] == "unknown"
+        out = json.loads(to_json(result, report_mode="root-cause"))
+        assert _grouped_findings(out)[0]["severity"] == "unknown"
 
 
 class TestReporterMarkdown:
@@ -378,17 +385,17 @@ class TestReporterMarkdown:
         md = to_markdown(_diff_result(changes, verdict=Verdict.BREAKING))
         assert "ABI Report" in md
 
-    def test_markdown_leaf_no_changes(self) -> None:
+    def test_markdown_root_cause_no_changes(self) -> None:
         # Line 411: leaf-mode markdown "_No ABI changes detected._".
         from abicheck.reporter import to_markdown
 
         md = to_markdown(
-            _diff_result([], verdict=Verdict.NO_CHANGE), report_mode="leaf"
+            _diff_result([], verdict=Verdict.NO_CHANGE), report_mode="root-cause"
         )
         assert "_No ABI changes detected._" in md
-        assert "leaf-change view" in md
+        assert "ABI Report" in md
 
-    def test_markdown_leaf_with_type_changes(self) -> None:
+    def test_markdown_root_cause_with_type_changes(self) -> None:
         from abicheck.reporter import to_markdown
 
         changes = [
@@ -396,9 +403,9 @@ class TestReporterMarkdown:
             _change(ChangeKind.FUNC_REMOVED, "rm"),
         ]
         md = to_markdown(
-            _diff_result(changes, verdict=Verdict.BREAKING), report_mode="leaf"
+            _diff_result(changes, verdict=Verdict.BREAKING), report_mode="root-cause"
         )
-        assert "leaf-change view" in md
+        assert "ABI Report" in md
 
 
 class TestReporterSectionSeverityLabel:

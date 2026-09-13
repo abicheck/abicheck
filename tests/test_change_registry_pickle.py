@@ -26,7 +26,13 @@ import pickle
 
 import pytest
 
-from abicheck.change_registry import ChangeKindMeta, ChangeKindRegistry, Verdict
+from abicheck.change_registry import (
+    ChangeEntity,
+    ChangeKindMeta,
+    ChangeKindRegistry,
+    ChangeOperation,
+    Verdict,
+)
 
 
 def test_registry_pickle_revalidates_on_load():
@@ -44,7 +50,13 @@ def test_registry_pickle_revalidates_on_load():
     exactly like any other construction path.
     """
     # A registry the constructor legitimately accepts round-trips.
-    ok_entry = ChangeKindMeta("ok_kind", Verdict.BREAKING, impact="i")
+    ok_entry = ChangeKindMeta(
+        "ok_kind",
+        Verdict.BREAKING,
+        impact="i",
+        entity=ChangeEntity.FUNCTION,
+        operation=ChangeOperation.REMOVED,
+    )
     reg = ChangeKindRegistry([ok_entry])
     rehydrated = pickle.loads(pickle.dumps(reg))
     assert set(rehydrated.entries) == {"ok_kind"}
@@ -77,7 +89,13 @@ def test_registry_setstate_revalidates_a_pre_reduce_legacy_pickle():
     freshly ``__new__``-created instance exercises the exact code path a
     real legacy pickle would hit.
     """
-    ok_entry = ChangeKindMeta("ok_kind", Verdict.BREAKING, impact="i")
+    ok_entry = ChangeKindMeta(
+        "ok_kind",
+        Verdict.BREAKING,
+        impact="i",
+        entity=ChangeEntity.FUNCTION,
+        operation=ChangeOperation.REMOVED,
+    )
     restored = object.__new__(ChangeKindRegistry)
     restored.__setstate__({"_entries": {"ok_kind": ok_entry}})
     assert set(restored.entries) == {"ok_kind"}
@@ -99,7 +117,13 @@ def test_registry_setstate_refuses_to_mutate_an_already_initialized_instance():
     time. Guarded the same way ``ChangeKindMeta.__setstate__`` guards
     its own instance.
     """
-    ok_entry = ChangeKindMeta("ok_kind", Verdict.BREAKING, impact="i")
+    ok_entry = ChangeKindMeta(
+        "ok_kind",
+        Verdict.BREAKING,
+        impact="i",
+        entity=ChangeEntity.FUNCTION,
+        operation=ChangeOperation.REMOVED,
+    )
     reg = ChangeKindRegistry([ok_entry])
     with pytest.raises(TypeError, match="already-initialized"):
         reg.__setstate__({"_entries": {}})
