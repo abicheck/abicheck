@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import (
-    exact_match_patterns_only,
+    EXACT_MATCHING,
     record_header_exclusions,
 )
 from ..serialization import load_snapshot
@@ -252,6 +252,12 @@ def _parse_compat_descriptors(
         _compat_fail("parsing descriptor", exc)
 
 
+#: fnmatch's own metacharacters -- the ones that make a native
+#: `--exclude-header` pattern a glob, and that a descriptor's exact
+#: membership can never match.
+_GLOB_METACHARACTERS = frozenset("*?[")
+
+
 def warn_glob_skips_do_nothing(skips: list[str], quiet: bool) -> None:
     """Say so when a descriptor skip could only have matched as a glob.
 
@@ -265,7 +271,7 @@ def warn_glob_skips_do_nothing(skips: list[str], quiet: bool) -> None:
     requirement, recorded in `docs/contribute/known-gaps.md`; this only
     reports what *this* implementation did.
     """
-    ignored = [s for s in skips if s not in exact_match_patterns_only(skips)]
+    ignored = [s for s in skips if _GLOB_METACHARACTERS & set(s)]
     if not ignored:
         return
     _do_echo(
@@ -291,4 +297,8 @@ def record_descriptor_skips(
     keeps producing.
     """
     warn_glob_skips_do_nothing(skips, quiet)
-    return record_header_exclusions(snapshot, exact_match_patterns_only(skips))
+    # The patterns *and* the rule they were matched by. Recording the text
+    # alone -- or trying to decide from the text which patterns mean the same
+    # thing under both rules -- was falsified twice; see
+    # `exclusions_are_symmetric`.
+    return record_header_exclusions(snapshot, skips, matching=EXACT_MATCHING)

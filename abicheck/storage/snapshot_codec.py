@@ -536,6 +536,10 @@ def decode_snapshot(
         # every pre-v47 snapshot, which loads as "no exclusions", matching
         # what every such snapshot actually was: the flag did not exist.
         excluded_header_patterns=tuple(d.get("excluded_header_patterns") or ()),
+        # Schema v48. Absent on a v47 snapshot, which loads as "glob" --
+        # correct for every one of them: the only producer that existed then
+        # was the native `--exclude-header` path, which is fnmatch.
+        excluded_header_matching=d.get("excluded_header_matching") or "glob",
         language_profile=d.get("language_profile"),
         scope_fallback=d.get("scope_fallback"),
         dependency_info=dep_info,

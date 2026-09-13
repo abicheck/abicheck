@@ -279,3 +279,17 @@
   (`model.header_exclusion_record.exclusions_are_symmetric`), and the message
   renders its patterns sorted, for the same reason the comparison ignores
   order.
+- **The header-exclusion matching rule is recorded, not guessed from the
+  pattern** (`AbiSnapshot.excluded_header_matching`, schema v48). Native
+  `--exclude-header` is `fnmatch` and additionally tries `*/<pattern>`, so
+  `include/foo.h` excludes `/pkg/include/foo.h`; a descriptor's
+  `<skip_headers>` is exact basename-or-path membership and keeps it. Two
+  successive attempts to decide comparability from the pattern *text* were
+  falsified -- recording the raw text for both rules, then dropping only
+  metacharacter-bearing patterns, which is wrong for any pattern containing a
+  path separator. Two sides are now comparable only if they narrowed by the
+  same patterns under the same rule. A pre-v48 snapshot loads as `"glob"`,
+  correct for every one of them since the native path was the only producer.
+  The cost is accepted deliberately: a descriptor and a native run naming a
+  bare `b.h` do achieve the same thing and are refused anyway, because
+  nothing in the patterns alone proves which pairs are equivalent.

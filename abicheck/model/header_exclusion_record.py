@@ -33,6 +33,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+#: The two rules a run may have matched its exclusion patterns by. ``glob``
+#: is native ``--exclude-header`` (fnmatch, plus a ``*/<pattern>`` try);
+#: ``exact`` is a descriptor's ``<skip_headers>`` basename-or-path
+#: membership. Recorded rather than inferred -- see
+#: :func:`exclusions_are_symmetric`.
+GLOB_MATCHING = "glob"
+EXACT_MATCHING = "exact"
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -44,6 +52,7 @@ def record_header_exclusions(
     exclude_headers: Sequence[str],
     *,
     extracted_now: bool = True,
+    matching: str = GLOB_MATCHING,
 ) -> AbiSnapshot:
     """*snapshot* carrying the ``--exclude-header`` patterns it was built under.
 
@@ -63,49 +72,15 @@ def record_header_exclusions(
     if not exclude_headers or not extracted_now:
         return snapshot
     snapshot.excluded_header_patterns = tuple(exclude_headers)
+    snapshot.excluded_header_matching = matching
     return snapshot
 
 
-#: The characters that make an ``--exclude-header`` pattern a *glob*.
-#: ``fnmatch``'s own metacharacter set, which is what the native path matches
-#: with (``extract.header_exclusions``).
-_GLOB_METACHARACTERS = frozenset("*?[")
-
-
-def exact_match_patterns_only(patterns: Sequence[str]) -> tuple[str, ...]:
-    """*patterns* minus any that only mean something under glob matching.
-
-    The two producers of this field do **not** share a matching rule. The
-    native ``--exclude-header`` path is ``fnmatch``; a descriptor's
-    ``<skip_headers>``/``<skip_including>`` is exact basename-or-path
-    membership (``compat/_helpers._resolve_headers_from_list``). So the same
-    text can name two different achieved scopes: ``*.h`` excludes *every*
-    header natively and *nothing* through a descriptor.
-
-    Recording the raw text for both made those two look identical, so the
-    comparability gate accepted a descriptor-narrowed snapshot against a
-    natively-narrowed one and could report fabricated additions or removals
-    (Codex review) -- the same "a request recorded as achieved" failure this
-    field exists to prevent, arriving from the other side.
-
-    A pattern with no metacharacter behaves identically under both rules, so
-    it is recorded unchanged and a descriptor/native pair naming plain header
-    names still compares equal. One *with* a metacharacter narrowed nothing
-    under exact matching, so it is not part of the achieved scope and is not
-    recorded. The caller is expected to say so out loud rather than drop it
-    silently -- see ``compat/cli.py``'s use.
-
-    Deliberately not the other candidate fix, "make descriptor skips use
-    fnmatch too": that changes ABICC drop-in behaviour on a guess about what
-    real ABICC does with a glob in ``<skip_headers>``, which is a parity
-    question with its own evidence requirement, not a comparability fix.
-    Recorded in ``docs/contribute/known-gaps.md`` instead.
-    """
-    return tuple(p for p in patterns if not (_GLOB_METACHARACTERS & set(p)))
-
-
 def exclusions_are_symmetric(
-    old_patterns: Sequence[str], new_patterns: Sequence[str]
+    old_patterns: Sequence[str],
+    new_patterns: Sequence[str],
+    old_matching: str = GLOB_MATCHING,
+    new_matching: str = GLOB_MATCHING,
 ) -> bool:
     """Whether two sides were narrowed by the same set of patterns.
 
@@ -123,5 +98,34 @@ def exclusions_are_symmetric(
     other order, narrows the surface identically. Callers rendering the
     patterns for a human should sort them for the same reason -- two runs
     that did the same thing should not read differently.
+
+    **The matching mode is part of the comparison, not an afterthought.**
+    The same text is not the same scope under both rules: native
+    ``--exclude-header`` is ``fnmatch`` and additionally tries
+    ``*/<pattern>``, so ``include/foo.h`` excludes ``/pkg/include/foo.h``;
+    a descriptor's exact membership does not, so it keeps it.
+
+    Two rounds of review falsified two successive attempts to decide this
+    from the *pattern text* -- first recording the raw text for both, then
+    dropping only metacharacter-bearing patterns on the theory that a plain
+    spelling means the same thing under both rules. It does not, for any
+    pattern containing a path separator (Codex review, with that exact
+    counterexample). Per this repository's own "attempted twice, reverted
+    twice" discipline, the third attempt is not another text heuristic: the
+    mode is recorded as the fact it is, and two sides are comparable only
+    if they narrowed by the same patterns *under the same rule*.
+
+    The cost is accepted deliberately: a descriptor skip and a native
+    exclusion naming a bare ``b.h`` do achieve the same thing, and are now
+    refused anyway. Refusing a comparable pair costs a run; accepting an
+    incomparable one manufactures findings, and nothing in the patterns
+    alone proves which case a given pair is.
     """
-    return frozenset(old_patterns) == frozenset(new_patterns)
+    if frozenset(old_patterns) != frozenset(new_patterns):
+        return False
+    # Mode only matters when there is something for it to have matched: a
+    # side that excluded nothing is not narrower under any rule, so a
+    # snapshot with no patterns stays comparable with anything.
+    if not old_patterns and not new_patterns:
+        return True
+    return old_matching == new_matching

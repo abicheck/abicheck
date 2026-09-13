@@ -327,7 +327,11 @@ def header_exclusion_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list
     #
     # Rendered sorted for the same reason the comparison ignores order: two
     # runs that excluded the same headers should not read differently.
-    if old is not None and not exclusions_are_symmetric(old_patterns, new_patterns):
+    old_matching = getattr(old, "excluded_header_matching", "glob") or "glob"
+    new_matching = getattr(new, "excluded_header_matching", "glob") or "glob"
+    if old is not None and not exclusions_are_symmetric(
+        old_patterns, new_patterns, old_matching, new_matching
+    ):
         return [
             f"Header exclusions differ between the two sides "
             f"({HEADER_EXCLUSION_WARNING_MARKER}): old "

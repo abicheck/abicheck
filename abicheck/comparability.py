@@ -953,6 +953,8 @@ def _check_header_exclusions_comparable(
     reason = exclusion_asymmetry_reason(
         getattr(old, "excluded_header_patterns", ()) or (),
         getattr(new, "excluded_header_patterns", ()) or (),
+        getattr(old, "excluded_header_matching", "glob") or "glob",
+        getattr(new, "excluded_header_matching", "glob") or "glob",
     )
     if reason is None:
         return None

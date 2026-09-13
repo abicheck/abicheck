@@ -228,8 +228,12 @@ class AbiSnapshot:
     )
 
     # Schema v47 -- the `--exclude-header PATTERN` values this snapshot was
-    # dumped under, empty when none were given. Rules, rationale and readers:
+    # dumped under, empty when none were given; v48 adds the rule they were
+    # matched *by*, because the same text is not the same scope under both
+    # (`"glob"` fnmatch, `"exact"` descriptor membership). Rules, rationale
+    # and readers: `model/header_exclusion_record.py`,
     # `extract/header_exclusions.py`, `confidence.header_exclusion_warnings`.
+    excluded_header_matching: str = field(default="glob", kw_only=True)
     excluded_header_patterns: tuple[str, ...] = field(
         default_factory=tuple, kw_only=True
     )
