@@ -934,8 +934,12 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``not_evaluated`` where a pre-4.5 run reported ``introduced``/
 #:       ``resolved`` from the current runner's filesystem. No verdict,
 #:       severity, or exit code moves -- this block never reached any of them.
-#: 4.6 -- plan slice 7o (`--view`'s internal grammar). Three machine-contract
-#:       changes, one of them a removal:
+#: 5.0 -- BREAKING (Codex review, PR #1284): plan slice 7o (`--view`'s
+#:       internal grammar). A MAJOR bump, not the 4.6 this first carried:
+#:       the policy above reserves MAJOR for removing a key, and a
+#:       consumer told to accept any 4.x report would otherwise receive a
+#:       document missing `leaf_changes`/`non_type_changes` while still
+#:       announcing 4.x. Four machine-contract changes, one a removal:
 #:       * additive per-finding ``entity``: the canonical ``ChangeEntity``
 #:         (``function``/``variable``/``type``/``enum``/``binary``/``build``/
 #:         ``source``/``analysis``) the change catalog declares, emitted
@@ -951,14 +955,14 @@ _ARTIFACT_NAMES = frozenset(
 #:         finding, not only an ``ELF_ONLY``-visibility one, so a machine
 #:         consumer carries both names (additive in practice: the key
 #:         appears on more findings, never with a different meaning).
-#:       * **removed**: the ``leaf`` report mode and with it the
-#:         ``leaf_changes``/``non_type_changes`` keys. Retired on a
+#:       * **removed** (what makes this MAJOR): the ``leaf`` report mode and
+#:         with it the ``leaf_changes``/``non_type_changes`` keys. Retired on a
 #:         measurement, not an argument -- over the 129 catalog library pairs
 #:         that build in this environment, ``leaf`` and ``root-cause``
 #:         exposed the identical finding set in all 93 cases that had
 #:         findings, and ``leaf``'s headline section was empty in 40 of them.
 #:         ``root_causes``/``root_cause_count`` is the supported grouping.
-REPORT_SCHEMA_VERSION = "4.6"  #: 4.6 -- see the comment immediately above.
+REPORT_SCHEMA_VERSION = "5.0"  #: 5.0 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

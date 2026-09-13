@@ -135,6 +135,7 @@ def render_output(
         return to_stat(result, severity_config=severity_config)
 
     _reject_unsupported_format(fmt)
+    _reject_unsupported_report_mode(report_mode)
     envelope = build_report_envelope(
         result,
         old,
@@ -166,6 +167,45 @@ def _reject_unsupported_format(fmt: str) -> None:
     if fmt not in _SUPPORTED_FORMATS:
         raise ValidationError(
             f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
+        )
+
+
+#: Report modes this function renders. Plan slice 7o retired ``"leaf"``
+#: against ``"root-cause"`` on a 129-pair measurement; kept here as a named
+#: retirement rather than simply absent because a *silent* fall-through is
+#: what the check below exists to stop.
+_SUPPORTED_REPORT_MODES: frozenset[str] = frozenset({"full", "impact", "root-cause"})
+_RETIRED_REPORT_MODES: dict[str, str] = {
+    "leaf": (
+        "use report_mode='root-cause': measured over 129 real library pairs, "
+        "the two exposed the identical finding set in every one of the 93 "
+        "with findings, and 'leaf' rendered an empty headline section in 40 "
+        "of them"
+    ),
+}
+
+
+def _reject_unsupported_report_mode(report_mode: str) -> None:
+    """Reject a retired or unknown ``report_mode`` at the public boundary.
+
+    Codex review, PR #1284: retiring ``leaf`` from the Click parser does not
+    retire the *documented Python* rendering path. A typed-API caller passing
+    ``report_mode="leaf"`` to :func:`render_output` would otherwise fall
+    through to a full report -- a silently different document shape, which is
+    strictly worse than an error, since the caller keeps rendering and never
+    learns the mode is gone. ``abicheck/AGENTS.md`` treats the typed API as
+    public surface, so the retirement is enforced where that surface is, not
+    only where Click is.
+    """
+    if report_mode in _RETIRED_REPORT_MODES:
+        raise ValidationError(
+            f"report_mode={report_mode!r} was retired (plan slice 7o): "
+            f"{_RETIRED_REPORT_MODES[report_mode]}"
+        )
+    if report_mode not in _SUPPORTED_REPORT_MODES:
+        raise ValidationError(
+            f"Unsupported report mode: {report_mode!r} "
+            f"(expected one of {sorted(_SUPPORTED_REPORT_MODES)})"
         )
 
 

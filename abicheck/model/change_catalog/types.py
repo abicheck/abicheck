@@ -68,7 +68,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "pointer adjustment for that base and every field after it shifts; old "
         "binaries read the wrong addresses.",
         description_template="Base class '{detail}' moved within '{name}' ({old} → {new} bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses.",
-        entity=_ENT.FUNCTION,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -86,7 +86,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "layout accesses inherited members and virtual dispatch "
         "through the wrong offset.",
         description_template="Base class order reordered: {name} — this-pointer adjustments changed",
-        entity=_ENT.FUNCTION,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -99,7 +99,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "code compiled against the previous scheme locates the base "
         "subobject incorrectly.",
         description_template="Base class virtual inheritance changed: {name} — {detail}",
-        entity=_ENT.FUNCTION,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(

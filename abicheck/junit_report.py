@@ -56,6 +56,7 @@ from .report.junit_disposition import (
     # so every existing caller and test resolves unchanged).
     add_disposition_audit_properties as _add_disposition_audit_properties,
 )
+from .report.junit_properties import add_demangled_symbol_property, testcase_properties
 from .report.junit_scope import append_env_matrix_suite, append_scope_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
@@ -429,6 +430,7 @@ def _emit_testcases(
             tc.set("name", sym)
             tc.set("classname", classname)
             if sym in change_by_symbol:
+                add_demangled_symbol_property(tc, change_by_symbol[sym])
                 _maybe_add_failure(
                     tc,
                     change_by_symbol[sym],
@@ -446,6 +448,7 @@ def _emit_testcases(
             tc = ET.SubElement(ts, "testcase")
             tc.set("name", sym)
             tc.set("classname", _classname_for(c))
+            add_demangled_symbol_property(tc, c)
             _maybe_add_failure(
                 tc,
                 c,
@@ -908,7 +911,9 @@ def _add_contract_properties(
     relevance = contract_relevance_of(change)
     if relevance is None:
         return
-    props = ET.SubElement(tc, "properties")
+    # One shared block, never a second (Codex review, PR #1284): see
+    # `report.junit_properties.testcase_properties` for why.
+    props = testcase_properties(tc)
 
     def _prop(name: str, value: str) -> None:
         p = ET.SubElement(props, "property")
@@ -986,14 +991,7 @@ def _add_correlation_property(tc: ET.Element, change: Change) -> None:
     # sibling element -- JUnit consumers, including this repo's own tests,
     # look up a testcase's properties via `tc.find("properties")`, which
     # only ever sees the first such element (Codex review).
-    props = tc.find("properties")
-    if props is None:
-        # tc.insert(0, ...), not ET.SubElement (which would append after any
-        # <failure> a primary change already added) -- see this function's
-        # own docstring for why ordering matters here.
-        props = ET.Element("properties")
-        tc.insert(0, props)
-    p = ET.SubElement(props, "property")
+    p = ET.SubElement(testcase_properties(tc), "property")
     p.set("name", "abicheck.correlated_change_kind")
     p.set("value", change.correlated_change_kind)
 

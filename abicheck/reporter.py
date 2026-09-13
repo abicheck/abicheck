@@ -462,6 +462,12 @@ def _to_json_root_cause(
     ``strongest_evidence_level``/``evidence_levels`` (see
     :func:`~abicheck.root_cause_evidence.root_cause_group_evidence`) without adopting its id scheme.
     """
+    # Plan slice 7o (Codex review, PR #1284): this mode builds its finding
+    # dicts directly rather than through `report.build.build_report_document`,
+    # so it needs its own batched demangle -- see
+    # `prewarm_change_demangling`'s own docstring for why one per-projection
+    # call is not enough.
+    prewarm_change_demangling(result)
     changes = list(result.changes)
     if show_only:
         changes = apply_show_only(
@@ -1011,12 +1017,6 @@ def to_json(
     # A `stat` parameter used to short-circuit to `to_stat_json` here. Call
     # `to_stat_json` directly for the summary-only document; this function
     # renders the full report.
-    # Plan slice 7o: every finding's dict now resolves a `demangled_symbol`
-    # (resolve_demangled_symbol). One batched `c++filt` call up front keeps
-    # that from forking a subprocess per symbol on a host without the
-    # in-process `cxxfilt` package -- the same prewarm appcompat_html.py
-    # already does for its own per-row demangling.
-    _prewarm_change_demangling(result)
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result,
@@ -1263,8 +1263,23 @@ def release_finding_detail_lines(entry: dict[str, object]) -> list[str]:
     return lines
 
 
-def _prewarm_change_demangling(result: Any) -> None:
-    """Batch-demangle every finding's symbol once, ahead of serialization."""
+def prewarm_change_demangling(result: Any) -> None:
+    """Batch-demangle every finding's symbol once, ahead of serialization.
+
+    Plan slice 7o makes every finding's dict resolve a ``demangled_symbol``
+    (:func:`resolve_demangled_symbol`), so one batched ``c++filt`` call up
+    front is what keeps a host without the in-process ``cxxfilt`` package
+    from forking a subprocess per distinct symbol -- the same prewarm
+    ``appcompat_html.py`` already does for its own per-row demangling.
+
+    Called from ``report.build.build_report_document``, not from
+    ``to_json`` (Codex review, PR #1284): the document builder is the one
+    chokepoint *every* projection goes through -- ``to_json``, the
+    ``ReportEnvelope`` path (``service_render.render_output``), and
+    ``report.build``'s own callers -- so prewarming at ``to_json`` alone
+    left the envelope path, which is what the CLI actually renders
+    through, forking per symbol before it was ever reached.
+    """
     from .demangle import prewarm_demangle_batch
 
     changes = list(getattr(result, "changes", ()) or ())

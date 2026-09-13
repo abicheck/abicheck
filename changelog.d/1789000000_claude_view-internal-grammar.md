@@ -35,4 +35,4 @@
 - **Every machine projection carries both symbol names.**
   `demangled_symbol` is now resolved for any Itanium-mangled finding, not
   only an `ELF_ONLY`-visibility one, and each finding carries its declared
-  `entity` beside the `operation` field it already had (report schema 4.6).
+  `entity` beside the `operation` field it already had (report schema 5.0).

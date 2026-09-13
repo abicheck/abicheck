@@ -2683,11 +2683,25 @@
         },
         "operation": {
           "type": "string",
-          "description": "Structured classification of the finding derived from its kind's own suffix (the same classification --view show=...'s added/removed/changed tokens use): 'added'/'removed' kinds map directly, everything else (parameter/type/layout changes, renames, etc.) is 'modified'.",
+          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification --view show=...'s added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was.",
           "enum": [
             "added",
             "removed",
             "modified"
+          ]
+        },
+        "entity": {
+          "type": "string",
+          "description": "Schema 5.0: which kind of thing this finding is *about*, as the change catalog declares it (`ChangeKindMeta.entity`) -- the canonical element dimension --view show=...'s element tokens resolve through (`functions`/`variables`/`types`/`enums`/`elf` for the first five, plus `build`/`source`/`analysis`, which the superseded name-prefix classification could not express at all). Declared once per kind beside its verdict, never inferred from the kind's name. \"analysis\" marks a finding about the analysis itself (coverage, surface metrics, evidence gaps) rather than about one declaration.",
+          "enum": [
+            "function",
+            "variable",
+            "type",
+            "enum",
+            "binary",
+            "build",
+            "source",
+            "analysis"
           ]
         },
         "finding_id": {
@@ -2735,7 +2749,7 @@
         },
         "demangled_symbol": {
           "type": "string",
-          "description": "Schema 3.14: a human-readable demangling of `symbol`/`old_value`, present only on a func_removed_elf_only finding, or a var_removed finding whose old-side variable is elf_only-visibility \u2014 the one case where the old-side declaration has no header-derived pretty name to source one from, so `symbol`/`old_value` stay the raw mangled spelling. Omitted for every other finding, including a header-backed removal (whose old_value is already demangled text) and any case where demangling the mangled name produces nothing new. `symbol`/`old_value` themselves are never demangled (machine formats keep raw symbols for matching); this field is the one deliberate exception."
+          "description": "Schema 5.0: a human-readable demangling of this finding's `symbol`, present on every finding whose symbol is an Itanium-mangled C++ name and whose demangling differs from it -- so a machine consumer always carries both names. `symbol`/`old_value` themselves are never rewritten and stay the exact mangled spelling, which is what makes this field's presence mean \"this differs from symbol\". Omitted when the symbol is not Itanium-mangled (an MSVC-decorated PE export is never demangled -- see `abicheck/demangle.py`), when no demangler is available on the host, or when demangling produces nothing new. Before 5.0 (schema 3.14) this was emitted only for a func_removed_elf_only finding, or a var_removed finding whose old-side variable is elf_only-visibility -- the one case whose `symbol`/`old_value` carried no readable name at all."
         },
         "surface_facts": {
           "type": "object",

@@ -1763,7 +1763,14 @@ class TestContractEvaluationProperties:
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         tc = root.find("testsuite/testcase[@name='_Z3foov']")
-        assert tc.find("properties") is None
+        # The testcase may still carry a <properties> block -- plan slice 7o
+        # puts the demangled symbol there for every mangled finding (Codex
+        # review, PR #1284) -- but none of the *contract* properties, which
+        # is what this test is about.
+        props = tc.find("properties")
+        names = set() if props is None else {p.get("name") for p in props}
+        assert not {n for n in names if n.startswith("abicheck.contract_")}
+        assert "abicheck.compatibility_evaluation_status" not in names
 
     def test_correlated_change_kind_reaches_properties(self) -> None:
         # Cross-detector correlation (e.g. LAYOUT_UNVERIFIABLE annotated by

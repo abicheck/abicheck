@@ -113,6 +113,13 @@ def _build_pair(tmp_path, target: str | None, suffix: str):
     return paths[0], paths[1]
 
 
+def _demangler_available() -> bool:
+    from abicheck.demangle import demangle
+
+    resolved = demangle(_GONE_MANGLED)
+    return bool(resolved) and resolved != _GONE_MANGLED
+
+
 def _compare(old, new):
     """The whole CompareResult -- renderers need the two snapshots too."""
     from abicheck.service import CompareRequest, InputSpec
@@ -507,3 +514,308 @@ class TestParseViewTokensProperties:
     def test_an_empty_show_value_is_a_usage_error(self):
         with pytest.raises(ValueError, match="at least one token"):
             parse_view_tokens(("show=",))
+
+
+# ── Review round 1 (Codex, PR #1284) ────────────────────────────────────────
+
+
+class TestPublishedSchemaDeclaresTheNewContract:
+    """A machine contract nobody can discover is not a contract.
+
+    The change object allows additional properties, so an undeclared
+    `entity` validates silently while schema-driven clients and generated
+    documentation cannot see it.
+    """
+
+    def _change_props(self):
+        from abicheck.schemas import load_compare_report_schema
+
+        return load_compare_report_schema()["$defs"]["change"]["properties"]
+
+    def test_entity_is_declared_with_the_catalog_s_own_vocabulary(self):
+        prop = self._change_props()["entity"]
+        assert set(prop["enum"]) == {e.value for e in ChangeEntity}
+
+    def test_operation_is_declared_with_the_catalog_s_own_vocabulary(self):
+        prop = self._change_props()["operation"]
+        assert set(prop["enum"]) == {o.value for o in ChangeOperation}
+
+    def test_the_schema_no_longer_describes_a_suffix_derived_operation(self):
+        description = self._change_props()["operation"]["description"]
+        assert "suffix" not in description.split("Schema 5.0")[0]
+
+    def test_demangled_symbol_is_no_longer_described_as_elf_only(self):
+        description = self._change_props()["demangled_symbol"]["description"]
+        assert "present on every finding" in description
+
+    def test_the_removal_is_versioned_as_a_major_change(self):
+        """`leaf_changes`/`non_type_changes` were part of the 4.x contract;
+        the schema's own policy reserves MAJOR for removing a key."""
+        from abicheck.schemas import REPORT_SCHEMA_VERSION
+
+        assert REPORT_SCHEMA_VERSION.split(".")[0] == "5"
+
+    def test_a_real_report_validates_against_the_published_schema(self, tmp_path):
+        from abicheck.schemas import load_compare_report_schema
+        from tests.schema_validation import validate_instance
+
+        old, new = _build_pair(tmp_path, None, ".so")
+        doc = _json_doc(_compare(old, new).diff)
+        validate_instance(doc, load_compare_report_schema())
+        assert {c["entity"] for c in doc["changes"]} <= {e.value for e in ChangeEntity}
+
+
+class TestDemanglingIsPrewarmedOnEveryProjection:
+    """One batched `c++filt` call, not one subprocess per symbol.
+
+    The prewarm belongs on the shared document builder every projection
+    reaches, not on one serializer: `to_json` alone left the envelope path
+    -- which is what the CLI actually renders through -- forking per
+    distinct symbol on a host without the in-process `cxxfilt` package.
+    """
+
+    def _result_with_mangled_findings(self, count: int):
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import Change, DiffResult
+
+        changes = [
+            Change(ChangeKind.FUNC_REMOVED, f"_ZN3lib4gone{i}Ev", "removed")
+            for i in range(count)
+        ]
+        return DiffResult(
+            old_version="1",
+            new_version="2",
+            library="lib",
+            changes=changes,
+            verdict=Verdict.BREAKING,
+        )
+
+    def _count_batches(self, monkeypatch, render):
+        import abicheck.demangle as dm
+
+        calls: list[int] = []
+        real = dm.demangle_batch
+
+        def _spy(symbols, **kwargs):
+            calls.append(len(list(symbols)))
+            return real(symbols, **kwargs)
+
+        monkeypatch.setattr(dm, "demangle_batch", _spy)
+        # A cold cache is the whole point: a warm one hides a missing prewarm.
+        monkeypatch.setattr(dm, "_BATCH_CACHE_OK", {})
+        monkeypatch.setattr(dm, "_BATCH_CACHE_FAIL", set())
+        render()
+        return calls
+
+    def test_the_envelope_path_prewarms_before_serializing_findings(self, monkeypatch):
+        from abicheck.model import AbiSnapshot
+        from abicheck.service_render import render_output
+
+        result = self._result_with_mangled_findings(12)
+        calls = self._count_batches(
+            monkeypatch,
+            lambda: render_output(
+                "json", result, AbiSnapshot(library="lib", version="1")
+            ),
+        )
+        # One batched call covering every distinct symbol, before the
+        # per-finding dicts resolve theirs one at a time.
+        assert calls, "no batched demangle ran on the envelope path"
+        assert max(calls) >= 12, calls
+
+    def test_the_root_cause_projection_prewarms_too(self, monkeypatch):
+        from abicheck import reporter
+
+        result = self._result_with_mangled_findings(12)
+        calls = self._count_batches(
+            monkeypatch,
+            lambda: reporter.to_json(result, report_mode="root-cause"),
+        )
+        assert calls and max(calls) >= 12, calls
+
+
+class TestRetirementIsEnforcedAtThePublicApiToo:
+    """Retiring a mode from Click does not retire the typed API.
+
+    A caller passing the retired value would otherwise get a *different
+    document shape* with no error -- strictly worse than a failure, since
+    nothing tells them the mode is gone.
+    """
+
+    def _render(self, mode):
+        from abicheck.checker_types import DiffResult
+        from abicheck.model import AbiSnapshot
+        from abicheck.service_render import render_output
+
+        return render_output(
+            "json",
+            DiffResult(old_version="1", new_version="2", library="lib"),
+            AbiSnapshot(library="lib", version="1"),
+            report_mode=mode,
+        )
+
+    def test_the_retired_mode_is_rejected_not_silently_widened(self):
+        from abicheck.errors import ValidationError
+
+        with pytest.raises(ValidationError, match="retired"):
+            self._render("leaf")
+
+    def test_the_error_names_the_replacement(self):
+        from abicheck.errors import ValidationError
+
+        with pytest.raises(ValidationError, match="root-cause"):
+            self._render("leaf")
+
+    def test_an_unknown_mode_is_rejected_as_well(self):
+        from abicheck.errors import ValidationError
+
+        with pytest.raises(ValidationError, match="Unsupported report mode"):
+            self._render("nonsense")
+
+    @pytest.mark.parametrize("mode", ["full", "impact", "root-cause"])
+    def test_every_surviving_mode_still_renders(self, mode):
+        assert self._render(mode)
+
+
+class TestJunitCarriesBothNames:
+    """The machine-format half of deliverable 2, for the one projection
+    that had no field to carry the readable name."""
+
+    def _xml(self):
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.junit_report import to_junit_xml
+
+        change = Change(ChangeKind.FUNC_REMOVED, _GONE_MANGLED, "removed")
+        return to_junit_xml(
+            DiffResult(
+                old_version="1",
+                new_version="2",
+                library="lib",
+                changes=[change],
+                verdict=Verdict.BREAKING,
+            )
+        )
+
+    def test_the_testcase_keeps_the_exact_symbol_as_its_identity(self):
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        assert _GONE_MANGLED in self._xml()
+
+    def test_the_readable_name_travels_as_a_property(self):
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(self._xml())
+        props = {
+            p.get("name"): p.get("value")
+            for tc in root.iter("testcase")
+            for block in tc.findall("properties")
+            for p in block
+        }
+        assert props.get("abicheck.demangled_symbol") == _GONE_DEMANGLED
+
+    def test_a_testcase_carries_at_most_one_properties_block(self):
+        """Every consumer reads properties through a single
+        `tc.find("properties")`, so a second block is invisible."""
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(self._xml())
+        for tc in root.iter("testcase"):
+            assert len(tc.findall("properties")) <= 1
+
+
+class TestBaseClassLayoutFindingsAreTypeEntities:
+    """A base subobject moving within a record is a *type* layout break.
+
+    `surface.py` already routes this family through type-level
+    reachability because the symbol is the owning type; classifying it as
+    a function meant `--view show=types` hid it and `show=functions`
+    wrongly included it.
+    """
+
+    KINDS = (
+        "base_class_offset_changed",
+        "base_class_position_changed",
+        "base_class_virtual_changed",
+    )
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_declared_as_a_type_entity(self, kind):
+        assert entity_for_kind(kind) == ChangeEntity.TYPE.value
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_shown_by_the_types_token_and_not_the_functions_token(self, kind):
+        types_filter = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        functions_filter = ShowOnlyFilter(
+            frozenset(), frozenset({"functions"}), frozenset()
+        )
+        assert types_filter._check_element(kind)
+        assert not functions_filter._check_element(kind)
+
+    def test_it_agrees_with_the_type_level_surface_routing(self):
+        """The independent oracle: `surface.py`'s own type-level family."""
+        from abicheck.surface import _TYPE_LEVEL_KIND_NAMES
+
+        for kind in _TYPE_LEVEL_KIND_NAMES:
+            if entity_for_kind(kind) is None:
+                continue
+            assert entity_for_kind(kind) in {
+                ChangeEntity.TYPE.value,
+                ChangeEntity.ENUM.value,
+                ChangeEntity.ANALYSIS.value,
+            }, kind
+
+
+class TestCatalogDimensionsAreKeywordOnly:
+    """`model/AGENTS.md`: appended public dataclass fields with defaults are
+    keyword-only, so an outside caller cannot couple them to declaration
+    order and the next appended field cannot silently break them."""
+
+    def test_they_cannot_be_passed_positionally(self):
+        from abicheck.model.change_catalog.registry import (
+            ChangeKindMeta,
+            Verdict,
+        )
+
+        with pytest.raises(TypeError):
+            ChangeKindMeta(
+                "k",
+                Verdict.BREAKING,
+                "impact",
+                False,
+                {},
+                None,
+                ChangeEntity.TYPE,
+                ChangeOperation.ADDED,
+            )
+
+    def test_a_legacy_positional_pickle_still_restores(self):
+        """They are declared *last* so an older build's positional state
+        tuple keeps mapping to the same fields."""
+        from abicheck.model.change_catalog.registry import ChangeKindMeta, Verdict
+
+        legacy_state = [
+            "test_kind",
+            Verdict.BREAKING,
+            "impact text",
+            False,
+            {"plugin_abi": Verdict.COMPATIBLE},
+            None,
+        ]
+        restored = object.__new__(ChangeKindMeta)
+        restored.__setstate__(legacy_state)
+        assert restored.kind == "test_kind"
+        assert dict(restored.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
+        # The two fields the older build did not have read as unset, which
+        # `_validate_entry` is what refuses if such an entry reaches a registry.
+        assert restored.entity is None and restored.operation is None
+
+    def test_a_real_catalog_entry_round_trips_through_pickle(self):
+        import pickle
+
+        entry = REGISTRY.entries["func_removed"]
+        restored = pickle.loads(pickle.dumps(entry))
+        assert restored.entity is entry.entity
+        assert restored.operation is entry.operation

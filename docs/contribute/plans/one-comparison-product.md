@@ -1827,7 +1827,10 @@ mechanism* first and an option count second:
      `ChangeEntity.BINARY`) so the old invocation is unchanged.
      Per-finding `operation` values may move in JSON for a kind the suffix
      rule classified wrongly, and each finding now carries `entity` beside
-     it — report schema **4.6**.
+     it — report schema **5.0**, a MAJOR bump because the `leaf` removal
+     takes two keys with it (Codex review, PR #1284: a consumer told to
+     accept any 4.x report would otherwise get a document that no longer
+     satisfies the contract it implemented).
   4. **`leaf` re-examined against `root-cause` with a measurement, per the
      7g/7k precedent — and retired.** 129 real library pairs were built
      from the catalog corpus (`catalog/cases/*/v1.{c,cpp}` + `v2`, compiled
@@ -1850,7 +1853,7 @@ mechanism* first and an option count second:
      `--view leaf` exits 64 naming `root-cause`, `_to_json_leaf`/
      `_to_markdown_leaf`/`build_leaf_document` and the leaf row/section
      renderers are deleted, and the `leaf_changes`/`non_type_changes` JSON
-     keys go with them (the same 4.6 schema bump). The acceptance bar is
+     keys go with them (what makes that bump MAJOR). The acceptance bar is
      met by asserting what the retired mode's *own* tests asserted — the
      root type grouped with its affected-interface list, and the non-type
      findings alongside it — against `root-cause`, rather than by asserting

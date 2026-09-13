@@ -168,14 +168,21 @@ class ChangeKindMeta:
     # so a direct ``ChangeKindMeta("x", Verdict.BREAKING)`` in a test stays
     # legal while the production catalog cannot carry an unclassified kind.
     #
+    # Keyword-only (Codex review, PR #1284), per ``model/AGENTS.md``'s
+    # "append new fields at the end, keyword-only where a default is
+    # needed": these dataclasses are public API, and a defaulted *positional*
+    # parameter lets an outside caller couple these two dimensions to
+    # declaration order, which is exactly what the next appended field would
+    # then silently break.
+    #
     # Declared **last**, deliberately: ``__setstate__`` restores a slotted
     # dataclass from a positional, field-declaration-order tuple, so a new
     # field inserted anywhere but the end would silently re-map every
     # position after it when loading a pickle written by an older build
     # (caught by ``test_setstate_normalizes_a_legacy_plain_dict_policy_
     # overrides``, whose six-value legacy state is exactly that shape).
-    entity: ChangeEntity | None = None
-    operation: ChangeOperation | None = None
+    entity: ChangeEntity | None = field(default=None, kw_only=True)
+    operation: ChangeOperation | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
