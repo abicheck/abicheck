@@ -45,11 +45,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from functools import partial
 from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .compare.template_surface import (
+    cpo_identity as _cpo_id,
+    qualified_declaration_name as _qualified_function_name,  # noqa: F401  (re-exported)
     reconciled_cpo_surfaces,
     reconciled_public_functions,
 )
@@ -127,16 +130,6 @@ def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
     top-level ``<`` followed by a non-bracket character."""
     return bool(name) and bool(_TEMPLATE_ARGS_RE.search(name))
-
-
-def _qualified_function_name(name: str, mangled: str) -> str:
-    if "::" in name or "<" in name:
-        return name
-    if mangled.startswith("_Z"):
-        from .demangle import demangle_batch
-
-        return demangle_batch([mangled]).get(mangled, name)
-    return name
 
 
 def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
@@ -726,6 +719,17 @@ def detect_internal_template_leaks(
 # ---------------------------------------------------------------------------
 
 
+def _cpo_function_stem(qname: str) -> str:
+    """The reduction `_func_names` applies, as one named function so the
+    cross-kind join keys on exactly what the comparison compares."""
+    stem = _strip_param_signature(_strip_template_args(qname))
+    return (
+        _strip_leading_return_type(stem)
+        if _looks_like_template_instantiation(qname)
+        else stem
+    )
+
+
 def detect_cpo_kind_changed(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -782,7 +786,9 @@ def detect_cpo_kind_changed(
     # Reconciled populations on both halves of this comparison -- see
     # compare/template_surface.py. Functions *and* variables: this detector
     # compares one against the other, so an asymmetry in either is enough.
-    old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(old, new)
+    old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(
+        old, new, identity=partial(_cpo_id, function_stem=_cpo_function_stem)
+    )
     old_funcs = _func_names(old_fs)
     old_vars = _var_names(old_vs)
     new_funcs = _func_names(new_fs)

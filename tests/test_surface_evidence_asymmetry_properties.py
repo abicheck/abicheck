@@ -838,6 +838,111 @@ class TestAbiTagAndCrossKindDetectors:
         assert detect_cpo_kind_changed(old, new) == []
 
 
+class TestCrossKindReconciliationIsOrderIndependent:
+    """The cross-kind join keys on identity, so its result cannot depend on
+    the order declarations happen to appear in.
+
+    It keyed on the bare declared name, and castxml does not
+    namespace-qualify a variable's name -- so two `foo`s in different
+    namespaces collided on one key and the first-seen rule resolved the
+    collision by *list order* (Codex review, P2). `AGENTS.md` treats
+    order-dependence in a shared merge primitive as a defect in itself,
+    whatever any one caller currently exercises, which is why this asserts
+    the invariant rather than the reported scenario.
+    """
+
+    @staticmethod
+    def _old(manglings: list[str]) -> AbiSnapshot:
+        """An evidence-poor side whose declarations share a leaf name and
+        differ only in namespace -- the shape castxml produces."""
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled=mangled,
+                    return_type="void",
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=None,
+                )
+                for mangled in manglings
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @staticmethod
+    def _new() -> AbiSnapshot:
+        """The evidence-bearing side: `ns1::foo` is now a variable. Only the
+        variable, so the finding turns entirely on *which* of OLD's
+        same-leaf-name functions reconciliation pairs it with."""
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            variables=[
+                Variable(
+                    name="foo",
+                    mangled="_ZN3ns13fooE",
+                    type="S",
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=Fact.present(True),
+                )
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @given(
+        manglings=st.permutations(["_ZN3ns13fooEv", "_ZN3ns23fooEv", "_ZN3ns33fooEv"])
+    )
+    @settings(deadline=None, max_examples=12)
+    def test_every_declaration_order_reports_the_real_transition(
+        self, manglings: list[str]
+    ) -> None:
+        """`ns1::foo` became a variable, so every permutation must report it.
+
+        The oracle is the transition the fixture was *built* to contain, not
+        a reference run of the same code -- comparing permutations against
+        each other would pass just as well if every one of them were wrong
+        in the same way. Under the bare-name key this reported the finding
+        when `ns1` happened to come first and nothing when it did not.
+        """
+        from abicheck.diff_templates import detect_cpo_kind_changed
+
+        assert [
+            c.kind for c in detect_cpo_kind_changed(self._old(manglings), self._new())
+        ] == [ChangeKind.CPO_KIND_CHANGED]
+
+    def test_a_namespace_qualified_peer_is_not_resolved_by_position(self) -> None:
+        """The identity itself: two same-leaf-name declarations resolve to
+        their own namespace's peer or to nothing -- never to whichever came
+        first."""
+        from abicheck.compare.template_surface import cpo_identity
+        from abicheck.diff_templates import _cpo_function_stem
+
+        def identity(decl: Function | Variable) -> str:
+            return cpo_identity(decl, function_stem=_cpo_function_stem)
+
+        first = Function(name="foo", mangled="_ZN3ns13fooEv", return_type="void")
+        second = Function(name="foo", mangled="_ZN3ns23fooEv", return_type="void")
+        assert identity(first) != identity(second)
+        assert identity(first) == "ns1::foo"
+        # And it agrees across kinds: the function and the variable it became
+        # are one identity, which is what lets the cross-kind join pair them
+        # at all -- the raw qualified names differ (`ns1::foo()` vs
+        # `ns1::foo`).
+        assert identity(Variable(name="foo", mangled="_ZN3ns13fooE", type="S")) == (
+            identity(first)
+        )
+
+
 class TestReconciliationDoesNotOutliveTheComparison:
     """The memo must not keep either snapshot's data alive after `compare()`
     returns.

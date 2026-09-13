@@ -26,7 +26,7 @@ of in a detector module already at its debt baseline.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,11 +36,12 @@ from ..elf_symbol_filter import (
     VARIABLE_SYMBOL_TYPES,
     exported_symbol_names,
 )
+from ..model import Function
 from ..model.surface_facts import in_public_surface
 from .surface_reconcile import reconcile_declaration_lists
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot, Function, Variable
+    from ..model import AbiSnapshot, Variable
 
 __all__ = [
     "public_functions",
@@ -178,7 +179,10 @@ def reconciled_public_variables(
 
 
 def reconciled_cpo_surfaces(
-    old: AbiSnapshot, new: AbiSnapshot
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    identity: Callable[[Any], str],
 ) -> tuple[list[Function], list[Variable], list[Function], list[Variable]]:
     """Both sides' function and variable populations for the CPO detector,
     reconciled *across* kinds as well as within them.
@@ -193,9 +197,19 @@ def reconciled_cpo_surfaces(
     ``CPO_KIND_CHANGED`` was lost (Codex review, P2).
 
     The cross-kind pass reuses the same admission rule, parameterized over
-    the two declaration types rather than copied, and resolves on the
-    declared name -- the one spelling both kinds carry, and the same
+    the two declaration types rather than copied, and resolves on the same
     ambiguity-safe "single peer or nothing" tier used everywhere else here.
+
+    *identity* is supplied by the caller rather than chosen here, and it must
+    be the detector's own: a bare ``Function.name``/``Variable.name`` is not
+    an identity across namespaces -- castxml does not namespace-qualify a
+    variable's name at all, so two declarations of ``foo`` in different
+    namespaces collide on it, and the first-seen rule then resolves the
+    collision by *list order* rather than by identity (Codex review, P2).
+    An order-dependent merge is a defect in its own right here, whatever a
+    given caller currently exercises: ``AGENTS.md`` records six review rounds
+    spent on exactly that failure in the last shared merge primitive this
+    repository grew.
     """
     old_funcs, new_funcs = reconciled_public_functions(old, new)
     old_vars, new_vars = reconciled_public_variables(old, new)
@@ -204,8 +218,8 @@ def reconciled_cpo_surfaces(
         new_vars,
         old_all=old.functions,
         new_all=new.variables,
-        key=lambda d: d.name,
-        alias_key=lambda d: d.name,
+        key=identity,
+        alias_key=identity,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
@@ -218,8 +232,8 @@ def reconciled_cpo_surfaces(
         new_funcs,
         old_all=old.variables,
         new_all=new.functions,
-        key=lambda d: d.name,
-        alias_key=lambda d: d.name,
+        key=identity,
+        alias_key=identity,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), VARIABLE_SYMBOL_TYPES
         ),
@@ -228,3 +242,44 @@ def reconciled_cpo_surfaces(
         ),
     )
     return (cross_old_funcs, cross_old_vars, cross_new_funcs, cross_new_vars)
+
+
+def qualified_declaration_name(name: str, mangled: str) -> str:
+    """A declaration's namespace-qualified name.
+
+    Moved here from ``diff_templates`` because it is an *identity* rule and
+    this module is what keys surfaces on it. castxml does not
+    namespace-qualify a variable's name, so the qualified spelling has to be
+    recovered from the mangling; two ``foo``s in different namespaces are
+    otherwise one key, and a first-seen merge then resolves the collision by
+    list order rather than by identity (Codex review, P2).
+    """
+    if "::" in name or "<" in name:
+        return name
+    if mangled.startswith("_Z"):
+        from ..demangle import demangle_batch
+
+        return demangle_batch([mangled]).get(mangled, name)
+    return name
+
+
+def cpo_identity(
+    decl: Function | Variable, *, function_stem: Callable[[str], str]
+) -> str:
+    """The CPO detector's identity: the qualified name, reduced to the stem
+    that identifies the *customization point* rather than one spelling of it.
+
+    It has to agree across kinds, which the raw qualified name does not: a
+    function demangles to ``ns1::foo()`` and the variable it became to
+    ``ns1::foo``, so keying on the qualified name alone pairs neither. The
+    detector already reduces a function to that stem for its own comparison;
+    *function_stem* is that same reduction, passed in rather than
+    reimplemented so the join and the comparison cannot drift apart.
+
+    Never the bare declared name: castxml does not namespace-qualify a
+    variable's name, so two ``foo``s in different namespaces would collide
+    on one key and a first-seen merge would then resolve the collision by
+    list order (Codex review, P2).
+    """
+    qname = qualified_declaration_name(decl.name, decl.mangled) or decl.name
+    return function_stem(qname) if isinstance(decl, Function) else qname
