@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 
 import _workflow_exec
@@ -407,3 +408,113 @@ class TestRequireBashSkipsRatherThanRunsTheStub:
         silently empty every shell-based module -- fails here."""
         monkeypatch.setattr(_workflow_exec, "have_bash", lambda: True)
         require_bash()
+
+
+class TestRunStepNeverFabricatesAVanishedWorkspace:
+    """The harness itself must not re-create the directory it runs the step in.
+
+    Stated against the real `run_step`, not against the guard it calls: the
+    guard existing proves nothing about whether this harness still reaches for
+    `mkdir`, and a `mkdir(parents=True, exist_ok=True)` here reads as harmless
+    housekeeping. It is not -- with the workspace reaped between preparation
+    and the step, it hands the body an empty checkout, and a body that does not
+    happen to need the seeded files exits 0 and returns plausible outputs for a
+    workspace that no longer exists (Codex review, PR #1292).
+
+    The body below is exactly that kind: it writes an output and never touches
+    the seed, so it is the case that *passes* if the fabrication comes back.
+    """
+
+    def test_a_workspace_reaped_before_the_step_fails_loudly(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path, files={"seed.txt": "seeded"})
+        step = {"run": 'echo "answer=ok" >> "$GITHUB_OUTPUT"'}
+
+        class _ReapingEnv(Mapping):
+            """Removes the workspace at the moment the step env is assembled.
+
+            A `Mapping` rather than a `dict` subclass on purpose: `dict.update`
+            takes a C fast path for dict subclasses and never calls an
+            overridden `keys`/`items`, so a subclass hook silently never fires
+            and the test passes for the wrong reason. It also carries a real
+            entry, because `run_step` merges it as `env or {}` and an empty
+            mapping is falsy -- which is how the first version of this test
+            passed while deleting nothing at all.
+            """
+
+            def __init__(self, target: Path) -> None:
+                self._target = target
+
+            def __iter__(self):
+                shutil.rmtree(self._target, ignore_errors=True)
+                return iter(("REAPED",))
+
+            def __len__(self) -> int:
+                return 1
+
+            def __getitem__(self, key):
+                if key == "REAPED":
+                    return "1"
+                raise KeyError(key)
+
+        with pytest.raises(AssertionError) as excinfo:
+            run_step(step, workspace=workspace, env=_ReapingEnv(workspace))
+
+        assert not workspace.exists(), (
+            "the harness must not have re-created the workspace; a step run in "
+            "a fabricated empty one returns an answer for a checkout that is gone"
+        )
+        # Either guard may be the one that fires -- which depends only on where
+        # in the sequence the reaper landed -- so the assertion is on the
+        # consequence they share: no answer was produced for a checkout that is
+        # gone. The message must still name the workspace.
+        assert str(workspace) in str(excinfo.value), excinfo.value
+
+    def test_an_intact_workspace_still_runs_normally(self, tmp_path: Path) -> None:
+        """Vacuity guard: the ordinary path must be untouched by the check."""
+
+        workspace = make_workspace(tmp_path, files={"seed.txt": "seeded"})
+        result = run_step(
+            {"run": 'echo "answer=ok" >> "$GITHUB_OUTPUT"'}, workspace=workspace
+        )
+        assert result.returncode == 0
+        assert result.output_lines == ["answer=ok"]
+        assert (workspace / "seed.txt").read_text(encoding="utf-8") == "seeded"
+
+
+def test_run_step_contains_no_call_that_creates_the_workspace() -> None:
+    """Structural, because the behavioural test above cannot reach this.
+
+    A reaper that strikes before `run_writing_env_file` prepares the output
+    file trips *that* guard first, so an end-to-end test can never distinguish
+    a `run_step` that would have fabricated the workspace from one that would
+    not -- the window between preparation and the step is not reachable from
+    outside. What is checkable is the thing that regressed: this harness must
+    not contain a call that creates the directory it was handed. `mkdir` on
+    `$RUNNER_TEMP` (which the harness owns) stays allowed; `mkdir` on the
+    workspace itself, or on its parent, does not.
+
+    The direct behaviour of the guard this leaves in its place is covered by
+    `TestAVanishedWorkspaceIsNeverFabricated` in
+    `tests/test_tmp_tree_resilience.py`.
+    """
+
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(_workflow_exec.run_step))
+    creations = [
+        ast.unparse(node)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"mkdir", "makedirs"}
+        and ast.unparse(node.func.value)
+        in {"workspace", "workspace.parent", "body.parent"}
+    ]
+    assert creations == [], (
+        "run_step must not create the workspace (or its parent): the caller "
+        "seeds fixtures there, and a fabricated empty one lets a step that "
+        f"does not need them return a plausible answer. Found: {creations}"
+    )

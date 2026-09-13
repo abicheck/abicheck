@@ -17,6 +17,7 @@ import pytest
 from _tmp_tree_resilience import (
     ATTEMPTS,
     describe_tree,
+    require_workspace,
     run_writing_env_file,
     run_writing_env_files,
 )
@@ -350,3 +351,72 @@ class TestRetryingIsOptedIntoPerCaller:
 
         assert run_writing_env_file(env_file, run, retry=True) == ("kept", b"ok\n")
         assert calls == [1, 1]
+
+
+class TestAVanishedWorkspaceIsNeverFabricated:
+    """`mkdir(exist_ok=True)` on a caller-populated directory is not harmless.
+
+    Codex (PR #1292) reproduced the consequence: with the workspace removed
+    after the environment file was created but before the step started, a
+    `mkdir` there let the step run in an empty checkout, and a step that did
+    not happen to need the lost `seed.txt` exited 0 and returned `answer=ok`
+    for a workspace that no longer existed. A silent wrong answer, on the very
+    first attempt -- no retry required. This is the same judgement the helper
+    makes about the environment files' own parents, stated at the other place
+    a directory could be created out from under the caller.
+    """
+
+    def test_a_missing_workspace_fails_instead_of_being_created(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+
+        with pytest.raises(AssertionError) as excinfo:
+            require_workspace(workspace)
+
+        assert not workspace.exists(), "the guard must not create what it checks"
+        message = str(excinfo.value)
+        assert str(workspace) in message and "MISSING" in message, message
+
+    def test_a_present_workspace_passes_and_is_untouched(self, tmp_path: Path) -> None:
+        """Vacuity guard: the check must not reject the ordinary case."""
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "seed.txt").write_text("seeded", encoding="utf-8")
+
+        require_workspace(workspace)
+
+        assert (workspace / "seed.txt").read_text(encoding="utf-8") == "seeded"
+
+    def test_the_step_never_runs_against_a_workspace_that_lost_its_seed(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex's reproduction, end to end through the helper.
+
+        The step here is one that does not need the seed -- exactly the case
+        that used to pass while the fixture was gone.
+        """
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "seed.txt").write_text("seeded", encoding="utf-8")
+        env_file = workspace / "_github_output"
+        calls: list[int] = []
+
+        def run() -> str:
+            calls.append(1)
+            require_workspace(workspace)
+            env_file.write_bytes(b"answer=ok\n")
+            return "ran"
+
+        # The reaper takes the workspace between preparation and the step.
+        def reaping_run() -> str:
+            shutil.rmtree(workspace)
+            return run()
+
+        with pytest.raises(AssertionError, match="fixtures seeded there are gone"):
+            run_writing_env_file(env_file, reaping_run)
+
+        assert calls == [1], "the step body must not have produced an answer"
+        assert not workspace.exists(), "nothing may have recreated the workspace"
