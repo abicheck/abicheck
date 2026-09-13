@@ -267,11 +267,6 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1269,),
         seed_tests=("tests/test_bundle_stored_file_members.py",),
         public_surfaces=(),
-        axes={
-            "operand_shape": ("package_directory", "snapshot_file"),
-            "compression": ("none", "gzip", "zstd", "auto"),
-            "envelope": ("flat", "sectioned"),
-        },
         known_gaps=(
             KnownGap(
                 description=(
@@ -288,6 +283,32 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="abicheck/bundle.py::build_bundle_snapshot_mixed",
                 canary_test=None,
             ),
+            KnownGap(
+                description=(
+                    "The bundle sniff is not the first gate: "
+                    "`workflows.release_inputs.collect_release_inputs` "
+                    "filters a release directory through "
+                    "`classify.AbiJsonClassifier`, whose own 4096-byte probe "
+                    "rejects a valid uncompressed snapshot padded with more "
+                    "leading JSON whitespace than that -- so such a member is "
+                    "lost upstream of the bundle path and never reaches the "
+                    "sniff at all. Pre-existing and not introduced by the "
+                    "operand-shape fix; closing it means widening a "
+                    "tool-wide input classifier, which governs far more than "
+                    "bundle members. What is enforced instead is the "
+                    "*relationship*: everything discovery accepts, the bundle "
+                    "sniff accepts too "
+                    "(TestDiscoveryAndBundleSniffAgree), so the two cannot "
+                    "drift into the dangerous direction."
+                ),
+                reference="PR #1269 (Codex review)",
+                canary_test="tests/test_bundle_stored_file_members.py",  # TestUpstreamDiscoveryProbeBoundCanary
+            ),
         ),
+        axes={
+            "operand_shape": ("package_directory", "snapshot_file"),
+            "compression": ("none", "gzip", "zstd", "auto"),
+            "envelope": ("flat", "sectioned"),
+        },
     ),
 )

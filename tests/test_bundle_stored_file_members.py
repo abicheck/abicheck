@@ -480,3 +480,112 @@ class TestSchemaCeiling:
         path.write_text(self._document(below))
         elf, _ = _stored_file_snapshot_evidence(path)
         assert elf is not None
+
+
+class TestDiscoveryAndBundleSniffAgree:
+    """Codex review, PR #1269 (P2): the bundle sniff is not the first gate a
+    release member passes -- `workflows.release_inputs.collect_release_inputs`
+    filters the directory first, through `classify.AbiJsonClassifier`, which
+    reads a bounded 4096-byte probe of its own.
+
+    The invariant that actually matters is the *relationship* between the two,
+    and its direction: whatever discovery hands downstream, the bundle sniff
+    must accept. A member surviving discovery only to be dropped by the sniff
+    is the silent-pass failure this module exists to prevent; the reverse
+    (the sniff being more permissive than discovery) costs nothing, because
+    the sniff never sees a file discovery already refused.
+
+    Pinned here through the *real* discovery function rather than by
+    comparing two constants, so widening either side without the other fails.
+    """
+
+    def _release_dir(self, tmp_path: Path) -> Path:
+        release = tmp_path / "release"
+        release.mkdir()
+        _write(_snapshot("liba.so.1"), release / "a.abicheck.json", "none")
+        _write(_snapshot("libb.so.1"), release / "b.abicheck.json", "gzip")
+        _write(_snapshot("libc.so.1"), release / "c.abicheck.json", "zstd")
+        _write(_snapshot("libd.so.1"), release / "d.abicheck.json", "auto")
+        # Non-members that must not be discovered either way.
+        (release / "README.md").write_text("# notes\n")
+        (release / "manifest.txt").write_text("liba.so.1\n")
+        return release
+
+    def test_everything_discovery_accepts_the_bundle_sniff_accepts(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.workflows.release_inputs import collect_release_inputs
+
+        release = self._release_dir(tmp_path)
+        discovered = collect_release_inputs(release)
+
+        assert discovered, "discovery found nothing -- test would be vacuous"
+        rejected = [
+            p.name for p in discovered if not _looks_like_stored_snapshot_file(p)
+        ]
+        assert rejected == [], (
+            "discovery handed these members downstream but the bundle sniff "
+            f"refuses them, so they are dropped from the graph: {rejected}"
+        )
+
+    def test_discovered_members_all_resolve_into_the_graph(
+        self, tmp_path: Path
+    ) -> None:
+        """The end-to-end consequence of the same relationship: each
+        discovered member reaches `metadata`, not just the predicate."""
+        from abicheck.workflows.release_inputs import collect_release_inputs
+
+        release = self._release_dir(tmp_path)
+        discovered = collect_release_inputs(release)
+
+        snap = build_bundle_snapshot_mixed({p.stem: p for p in discovered})
+        assert sorted(snap.metadata) == sorted(p.stem for p in discovered)
+
+
+class TestUpstreamDiscoveryProbeBoundCanary:
+    """Canary for the tracked residual on
+    `evidence.operand_shape_silently_unresolved`
+    (`tests/regressions/manifest_evidence.py`).
+
+    It asserts the *residual's own bound* rather than the eventually-correct
+    behaviour, which is what makes it fail loudly in **either** direction
+    without an xfail: if discovery widens (the gap closes) or narrows (the
+    gap widens), this test breaks and the registry entry must be revisited.
+
+    The residual: `classify.AbiJsonClassifier` reads a bounded probe, so a
+    valid uncompressed snapshot padded with more leading JSON whitespace
+    than that probe is dropped at discovery -- upstream of the bundle sniff,
+    which would accept it. Closing this means changing a tool-wide input
+    classifier, which governs far more than bundle members, so it is
+    tracked rather than fixed here.
+    """
+
+    def test_discovery_still_drops_a_whitespace_padded_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.classify import AbiJsonClassifier
+        from abicheck.workflows.release_inputs import collect_release_inputs
+
+        release = tmp_path / "release"
+        release.mkdir()
+        # A control member, so discovery succeeds and the assertion below is
+        # about *this* file rather than about an empty directory.
+        _write(_snapshot("libok.so.1"), release / "ok.abicheck.json", "none")
+
+        padded = release / "padded.abicheck.json"
+        padded.write_bytes(
+            b"\n" * (AbiJsonClassifier._JSON_PROBE_BYTES + 1)
+            + (release / "ok.abicheck.json").read_bytes()
+        )
+
+        discovered = {p.name for p in collect_release_inputs(release)}
+
+        assert "ok.abicheck.json" in discovered, "control member was not discovered"
+        assert "padded.abicheck.json" not in discovered, (
+            "discovery now accepts a whitespace-padded snapshot -- the "
+            "residual tracked on evidence.operand_shape_silently_unresolved "
+            "has closed; update that registry entry and drop this canary"
+        )
+        # ...while the bundle sniff would have accepted it. That asymmetry is
+        # the gap, stated executably rather than only in prose.
+        assert _looks_like_stored_snapshot_file(padded) is True
