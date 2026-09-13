@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.checker_types import Change
 from abicheck.diff_undeclared_exports import _diff_undeclared_exports
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function
@@ -154,6 +155,41 @@ class TestIdentityAndDedupRegistration:
         assert (
             _EQUIVALENT_CHANGE_CATEGORIES["func_added_elf_only"]
             == _EQUIVALENT_CHANGE_CATEGORIES["func_added"]
+        )
+
+    def test_two_different_added_symbols_stay_distinct(self) -> None:
+        """The must-not-merge half of the identity claim.
+
+        Mapping ``func_added_elf_only`` into ``func_added``'s equivalence
+        category makes "these two collapse" true; it says nothing about
+        "these two stay distinct", and an identity that collapsed *every*
+        addition would satisfy the first claim completely. Two genuinely
+        different added exports must resolve to different identities.
+        """
+        from abicheck.finding_identity import resolve_change_identity
+
+        a = Change(
+            kind=ChangeKind.FUNC_ADDED_ELF_ONLY, symbol="added_a", description=""
+        )
+        b = Change(
+            kind=ChangeKind.FUNC_ADDED_ELF_ONLY, symbol="added_b", description=""
+        )
+        assert resolve_change_identity(a) != resolve_change_identity(b)
+
+    def test_the_same_symbol_collapses_across_the_two_addition_tiers(self) -> None:
+        """And the must-merge half, stated on real identities rather than on
+        the category table alone: the same symbol reported by the
+        header-aware and export-only tiers is one addition, not two."""
+        from abicheck.finding_identity import resolve_change_identity
+
+        header_tier = Change(
+            kind=ChangeKind.FUNC_ADDED, symbol="gained", description=""
+        )
+        export_tier = Change(
+            kind=ChangeKind.FUNC_ADDED_ELF_ONLY, symbol="gained", description=""
+        )
+        assert resolve_change_identity(header_tier) == resolve_change_identity(
+            export_tier
         )
 
     def test_it_is_in_the_cross_detector_dedup_table(self) -> None:
