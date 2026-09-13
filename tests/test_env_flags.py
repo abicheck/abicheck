@@ -47,7 +47,7 @@ import pytest
 
 from abicheck import cc_wrapper
 from abicheck.buildsource import build_evidence, preprocessor_facts
-from abicheck.model.env_flags import BOOLEAN_ENV_FLAGS, env_flag, parse_env_flag
+from abicheck.extract.env_flags import BOOLEAN_ENV_FLAGS, env_flag, parse_env_flag
 
 #: The value domain, and what each value means — written out literally,
 #: independent of the parser under test. `None` means "resolves to the
@@ -243,8 +243,8 @@ class TestNoHandRolledParserSurvives:
         root = Path(__file__).resolve().parent.parent / "abicheck"
         offenders: list[str] = []
         for path in sorted(root.rglob("*.py")):
-            if path.name == "env_flags.py":
-                continue
+            if path == root / "extract" / "env_flags.py":
+                continue  # the shared parser itself
             source = path.read_text(encoding="utf-8")
             if "environ" not in source and "getenv" not in source:
                 continue

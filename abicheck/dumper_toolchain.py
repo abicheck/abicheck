@@ -36,6 +36,7 @@ from .dumper_ast_config import (
     _header_declared_identifiers,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
+from .extract.env_flags import env_flag
 
 # E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
 # package owns "read a binary/debug/header/build fact") alongside the new
@@ -46,7 +47,6 @@ from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .extract.toolchain_identity import (
     _compiler_family_from_toolchain as _compiler_family_from_toolchain,
 )
-from .model.env_flags import env_flag
 
 log = logging.getLogger(__name__)
 

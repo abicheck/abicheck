@@ -49,14 +49,26 @@ The rules, stated once:
   its default), so unifying on it changes no behaviour beyond the token
   sets themselves and the ``ABICHECK_CC_DISABLE`` bug.
 
-Lives in ``model`` (ADR-061's innermost ring, importing nothing) because
-every layer reads these knobs -- ``extract``, ``workflows``, ``buildsource``
-and the ``abicheck-cc`` wrapper alike -- and ``model`` is the one layer all
-of them may import. What it owns is a shared vocabulary, in the same sense
-the fact/enum modules beside it are: which names are boolean knobs, and what
-a value means. It is not a flat-root leaf for the same reason (`root-module`
-in ``scripts/check_architecture.py``): an undeclared root module has no
-owner, and this one has an obvious one.
+**Why ``extract/`` owns this.** Every knob in the registry below governs
+how evidence is captured -- whether the AST frontend may fall back, whether
+an unsupported castxml is allowed, whether the system-include probe runs,
+whether the streaming pruner engages, whether COMDAT groups and the
+preprocessor pre-scan are collected, whether the two sides extract
+concurrently, and whether the ``abicheck-cc`` wrapper captures at all. That
+is one coherent responsibility, and it is this package's
+(``AGENTS.md``: "read a binary, debug, header, build, or source fact").
+Every reader is itself classified ``extract``, except the compare
+pipeline's concurrency check, and ``workflows -> extract`` is a permitted
+direction.
+
+It was briefly placed in ``model/`` on the reasoning that every layer may
+import that ring. That was wrong on the contract, not merely on taste:
+``model/`` owns *shapes* and answers "what is this fact", never "how was it
+produced" (``abicheck/model/AGENTS.md``), while this module reads the live
+process environment and resolves a runtime input. Putting behavior there
+would have made the innermost ring a general-purpose utility layer and
+invited configuration resolution at arbitrary call sites (Codex review,
+PR #1278).
 """
 
 from __future__ import annotations

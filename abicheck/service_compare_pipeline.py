@@ -58,7 +58,7 @@ from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
-from .model.env_flags import env_flag
+from .extract.env_flags import env_flag
 from .policy.depth_projection import (
     project_build_source_pack_to_depth,
     project_pair_to_depth,

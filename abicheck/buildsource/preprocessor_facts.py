@@ -55,7 +55,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
 from .. import deadline, process_resources
-from ..model.env_flags import env_flag
+from ..extract.env_flags import env_flag
 from ..parallel_probe import OrderedDiagnostics, run_parallel_probes
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 from .preprocessor_probe_families import (

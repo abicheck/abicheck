@@ -68,7 +68,7 @@ from .buildsource.inputs_emit import (
     init_inputs_pack,
 )
 from .buildsource.source_abi import SourceAbiTu
-from .model.env_flags import env_flag
+from .extract.env_flags import env_flag
 
 #: Tokens that mark an invocation as preprocess-/dependency-only — it produces no
 #: object that ships in the artifact, so capturing facts for it would pollute the
