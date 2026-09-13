@@ -32,7 +32,7 @@ instead of as one more bare ``FileNotFoundError``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TypeVar
 
@@ -67,22 +67,43 @@ def describe_tree(env_file: Path) -> str:
     )
 
 
-def run_writing_env_file(env_file: Path, run: Callable[[], T]) -> tuple[T, bytes]:
-    """Run *run* with *env_file* freshly created, and return it with the bytes.
+def run_writing_env_files(
+    env_files: Sequence[Path], run: Callable[[], T]
+) -> tuple[T, list[bytes]]:
+    """Run *run* with every path in *env_files* freshly created; return their bytes.
+
+    Stated over *all* the files the caller must read back, not just the one
+    this fix was reported against (CodeRabbit, PR #1292): the shell harness
+    reads `$GITHUB_OUTPUT` **and** `$GITHUB_STEP_SUMMARY`, and guarding only
+    the first left the second's `read_text` outside the retry boundary --
+    which is the original bug, moved one file to the right. Whatever removed
+    one of these removed the others beside it, so they are recovered together
+    or not at all.
 
     *run* must be re-runnable: it is called again, against a rebuilt tree, if
-    the file it was pointed at did not survive the call.
+    any file it was pointed at did not survive the call.
     """
     losses: list[str] = []
     for _ in range(ATTEMPTS):
-        _prepare(env_file)
+        for env_file in env_files:
+            _prepare(env_file)
         result = run()
         try:
-            return result, env_file.read_bytes()
-        except FileNotFoundError:
-            losses.append(describe_tree(env_file))
+            return result, [env_file.read_bytes() for env_file in env_files]
+        except FileNotFoundError as exc:
+            # The tree of the file that actually went missing, not of the
+            # first one: naming a path that is sitting right there would send
+            # the next reader after the wrong deleter.
+            losses.append(describe_tree(Path(exc.filename or env_files[0])))
     raise AssertionError(
-        f"{env_file} did not survive any of {ATTEMPTS} attempts at running the "
-        "step that writes it, so the step's own output was never observable. "
-        "Tree state after each attempt, outermost path first:\n  " + "\n  ".join(losses)
+        f"{', '.join(str(f) for f in env_files)} did not all survive any of "
+        f"{ATTEMPTS} attempts at running the step that writes them, so the "
+        "step's own output was never observable. Tree state after each "
+        "attempt, outermost path first:\n  " + "\n  ".join(losses)
     )
+
+
+def run_writing_env_file(env_file: Path, run: Callable[[], T]) -> tuple[T, bytes]:
+    """The single-file case of `run_writing_env_files`."""
+    result, payloads = run_writing_env_files([env_file], run)
+    return result, payloads[0]

@@ -14,7 +14,12 @@ import shutil
 from pathlib import Path
 
 import pytest
-from _tmp_tree_resilience import ATTEMPTS, describe_tree, run_writing_env_file
+from _tmp_tree_resilience import (
+    ATTEMPTS,
+    describe_tree,
+    run_writing_env_file,
+    run_writing_env_files,
+)
 
 #: Every part of the tree above (and including) the environment file whose
 #: removal has to be survivable. Named by how far up the deletion reached,
@@ -140,3 +145,72 @@ class TestTheDiagnosticDistinguishesTheDeleters:
         env_file.parent.mkdir()
         env_file.write_bytes(b"")
         assert "MISSING" not in describe_tree(env_file)
+
+
+class TestEveryRequiredFileIsGuarded:
+    """Recovery is owed to *each* file the caller reads back, not the first one.
+
+    The reported shape of this (CodeRabbit, PR #1292) was the shell harness
+    guarding `$GITHUB_OUTPUT` while reading `$GITHUB_STEP_SUMMARY` afterwards:
+    the summary's own `read_text` then sat outside the retry boundary, which is
+    the original bug moved one file to the right. So the invariant is stated
+    over *which* of the required files went missing -- parametrized by index,
+    not pinned to the reported second file -- and over each one's payload
+    arriving intact, since a helper that recovered but returned the files in
+    the wrong order would satisfy a bare "it did not raise".
+    """
+
+    @pytest.mark.parametrize("victim", range(3))
+    @pytest.mark.parametrize("how", REMOVALS)
+    def test_losing_any_one_of_them_re_runs_the_step(
+        self, tmp_path: Path, victim: int, how: str
+    ) -> None:
+        files = [tmp_path / "tree" / "workspace" / f"file{i}" for i in range(3)]
+        calls: list[int] = []
+
+        def run() -> str:
+            calls.append(1)
+            for index, path in enumerate(files):
+                path.write_bytes(b"payload-%d\n" % index)
+            if len(calls) == 1:
+                _remove(files[victim], how)
+            return "kept"
+
+        result, payloads = run_writing_env_files(files, run)
+
+        assert len(calls) == 2, f"losing file{victim} must re-run the step"
+        assert result == "kept"
+        assert payloads == [b"payload-0\n", b"payload-1\n", b"payload-2\n"], (
+            "each requested file's own bytes, in the order they were requested"
+        )
+
+    @pytest.mark.parametrize("victim", range(3))
+    def test_the_diagnostic_names_the_file_that_went_missing(
+        self, tmp_path: Path, victim: int
+    ) -> None:
+        """Not merely the first requested one, which is sitting right there."""
+
+        files = [tmp_path / "tree" / "workspace" / f"file{i}" for i in range(3)]
+
+        def run() -> str:
+            files[victim].unlink()
+            return "lost"
+
+        with pytest.raises(AssertionError) as excinfo:
+            run_writing_env_files(files, run)
+
+        message = str(excinfo.value)
+        assert f"{files[victim]}: MISSING" in message, message
+        for survivor in (f for i, f in enumerate(files) if i != victim):
+            assert f"{survivor}: MISSING" not in message, message
+
+    def test_the_single_file_wrapper_is_the_one_file_case(self, tmp_path: Path) -> None:
+        """Vacuity guard: the wrapper must delegate, not keep a second copy."""
+
+        env_file = tmp_path / "tree" / "workspace" / "env_file"
+
+        def run() -> str:
+            env_file.write_bytes(b"answer=only\n")
+            return "kept"
+
+        assert run_writing_env_file(env_file, run) == ("kept", b"answer=only\n")

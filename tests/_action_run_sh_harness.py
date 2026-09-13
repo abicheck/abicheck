@@ -35,7 +35,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _tmp_tree_resilience import run_writing_env_file
+from _tmp_tree_resilience import run_writing_env_files
 from _workflow_exec import bash_executable, require_bash
 
 ACTION_DIR = Path(__file__).resolve().parents[1] / "action"
@@ -150,15 +150,15 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
         }
     )
 
-    # Through `run_writing_env_file`, not a bare `subprocess.run`: the step is
-    # re-run against a rebuilt tree if `$GITHUB_OUTPUT` did not survive the
-    # call -- see tests/_tmp_tree_resilience.py for why that is recovery
-    # rather than tolerance. `summary`/`runner_temp` are recreated with it,
+    # Through `run_writing_env_files`, not a bare `subprocess.run`: the step is
+    # re-run against a rebuilt tree if either file it writes did not survive
+    # the call -- see tests/_tmp_tree_resilience.py for why that is recovery
+    # rather than tolerance. BOTH files are named, because both are read back
+    # below: guarding only `$GITHUB_OUTPUT` left `$GITHUB_STEP_SUMMARY`'s own
+    # read outside the retry boundary, which is the same bug one file to the
+    # right (CodeRabbit, PR #1292). `runner_temp` is recreated alongside them,
     # since whatever removed one removed the others beside it.
     def _run() -> subprocess.CompletedProcess[str]:
-        summary.parent.mkdir(parents=True, exist_ok=True)
-        if not summary.exists():
-            summary.write_text("", encoding="utf-8")
         runner_temp.mkdir(parents=True, exist_ok=True)
         return subprocess.run(
             [bash_executable(), str(RUN_SH)],
@@ -169,7 +169,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             check=False,
         )
 
-    proc, out_bytes = run_writing_env_file(out, _run)
+    proc, (out_bytes, summary_bytes) = run_writing_env_files([out, summary], _run)
     outputs: dict = {}
     for line in out_bytes.decode("utf-8", errors="replace").splitlines():
         if "=" in line:
@@ -177,7 +177,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             outputs[key] = value
     outputs["_stdout"] = proc.stdout
     outputs["_exit"] = proc.returncode
-    outputs["_summary"] = summary.read_text(encoding="utf-8")
+    outputs["_summary"] = summary_bytes.decode("utf-8", errors="replace")
     return outputs
 
 
