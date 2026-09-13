@@ -34,6 +34,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, cast
 
+from .._compiler_options import join_gcc_options
 from ..analysis_assurance import AnalysisAssurance
 from ..errors import ScopeMismatchError
 from ..policy.evidence_status import Confidence
@@ -68,7 +69,13 @@ def _descriptor_compile_options(desc: CompatDescriptor) -> str:
     parts = [f"-I{p}" for p in desc.include_paths]
     parts += [d if d.startswith("-D") else f"-D{d}" for d in desc.defines]
     parts += list(desc.gcc_options)
-    return " ".join(parts)
+    # Quoted, not `" ".join(...)`: every consumer of a `gcc_options` *string*
+    # splits it again with the shlex-derived rule, so an `<include_paths>`
+    # value containing a space -- a Windows SDK under `C:\Program Files` --
+    # would arrive as two nonexistent paths. That became reachable the moment
+    # the descriptor parser stopped whitespace-splitting such a value
+    # (Codex review), so the two fixes only work together.
+    return join_gcc_options(parts)
 
 
 def _plan_library_pairs(

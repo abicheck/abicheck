@@ -36,6 +36,7 @@ from unittest import mock
 import pytest
 from click.testing import CliRunner
 
+from abicheck._compiler_options import split_gcc_options
 from abicheck.compat.cli import compat_group
 
 
@@ -152,3 +153,96 @@ class TestDirectoryOperandsReachTheDumper:
         assert result.exit_code == 0, result.output
         assert captured["path"] == tree / "libs" / "libfoo.so"
         assert [h.name for h in captured["headers"]] == ["a.h"]
+
+
+class TestTheDescriptorsCompileAndSkipFieldsAreApplied:
+    """Expanding the directories was half the wiring.
+
+    `compat dump` still passed the CLI's `gcc_options` and the *unfiltered*
+    header list, so a descriptor relying on `<include_paths>`, `<defines>`,
+    `<gcc_options>`, `<skip_headers>` or `<skip_including>` dumped a
+    different surface than the identical descriptor under `compat check` --
+    which breaks the documented dump-then-compare workflow at its root,
+    since the two sides are then not the same contract (Codex review).
+
+    Bug class: the same one the directory expansion had, one layer down --
+    a descriptor capability wired into one of two public consumers.
+    """
+
+    def _run(self, tree: Path, body: str, captured: dict):
+        desc = tree / "d.xml"
+        desc.write_text(body)
+
+        def _fake_dump(path, **kwargs):
+            captured["headers"] = list(kwargs.get("headers") or [])
+            captured["gcc_options"] = kwargs.get("gcc_options")
+            from abicheck.model import AbiSnapshot
+
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        with mock.patch("abicheck.compat.cli.dump", side_effect=_fake_dump):
+            return CliRunner().invoke(
+                compat_group,
+                [
+                    "dump",
+                    "-lib",
+                    "foo",
+                    "-dump",
+                    str(desc),
+                    "-dump-path",
+                    str(tree / "out.json"),
+                ],
+            )
+
+    def test_skip_headers_removes_the_named_header(self, tree):
+        captured: dict = {}
+        result = self._run(
+            tree,
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            "<libs>\n  libs\n</libs>\n<skip_headers>\n  b.h\n</skip_headers>\n",
+            captured,
+        )
+        assert result.exit_code == 0, result.output
+        assert [h.name for h in captured["headers"]] == ["a.h"]
+
+    def test_skip_including_is_honoured_too(self, tree):
+        """The sibling element, which the parser unions into the same set --
+        covering only `<skip_headers>` would leave half the claim untested."""
+        captured: dict = {}
+        result = self._run(
+            tree,
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            "<libs>\n  libs\n</libs>\n<skip_including>\n  a.h\n</skip_including>\n",
+            captured,
+        )
+        assert result.exit_code == 0, result.output
+        assert [h.name for h in captured["headers"]] == ["b.h"]
+
+    def test_include_paths_and_defines_reach_the_dumper(self, tree):
+        captured: dict = {}
+        result = self._run(
+            tree,
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            "<libs>\n  libs\n</libs>\n"
+            "<include_paths>\n  /opt/inc\n</include_paths>\n"
+            "<defines>\n  FOO=1\n</defines>\n",
+            captured,
+        )
+        assert result.exit_code == 0, result.output
+        tokens = split_gcc_options(captured["gcc_options"] or "")
+        assert "-I/opt/inc" in tokens
+        assert "-DFOO=1" in tokens
+
+    def test_a_descriptor_without_those_elements_passes_none(self, tree):
+        """The negative control: an unconditional empty string would make
+        every plain descriptor's dump differ from what it was."""
+        captured: dict = {}
+        result = self._run(
+            tree,
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            "<libs>\n  libs\n</libs>\n",
+            captured,
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["gcc_options"] is None
+        assert sorted(h.name for h in captured["headers"]) == ["a.h", "b.h"]

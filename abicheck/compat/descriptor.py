@@ -217,22 +217,24 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
         headers=headers,
         libs=libs,
         path=path,
-        # ABICC accepts both one-per-element and whitespace/newline-separated
-        # lists inside a single element; `_get_tokens` handles both so a
-        # descriptor written either way behaves identically.
-        skip_headers=_get_tokens(_get_all, "skip_headers")
-        + _get_tokens(_get_all, "skip_including"),
-        skip_namespaces=_get_tokens(_get_all, "skip_namespaces"),
-        skip_constants=_get_tokens(_get_all, "skip_constants"),
-        skip_symbols=_get_tokens(_get_all, "skip_symbols"),
-        skip_types=_get_tokens(_get_all, "skip_types"),
+        # ABICC accepts both one-per-element and newline-separated lists
+        # inside a single element; `_get_lines` handles both, so a descriptor
+        # written either way behaves identically -- and a value containing a
+        # space (a Windows SDK path) survives. `<gcc_options>` alone takes the
+        # shell-like whitespace grammar, via `_get_flag_tokens`.
+        skip_headers=_get_lines(_get_all, "skip_headers")
+        + _get_lines(_get_all, "skip_including"),
+        skip_namespaces=_get_lines(_get_all, "skip_namespaces"),
+        skip_constants=_get_lines(_get_all, "skip_constants"),
+        skip_symbols=_get_lines(_get_all, "skip_symbols"),
+        skip_types=_get_lines(_get_all, "skip_types"),
         include_paths=[
             _resolve(t, resolve_base)
-            for t in _get_tokens(_get_all, "include_paths")
-            + _get_tokens(_get_all, "add_include_paths")
+            for t in _get_lines(_get_all, "include_paths")
+            + _get_lines(_get_all, "add_include_paths")
         ],
-        defines=_get_tokens(_get_all, "defines"),
-        gcc_options=_get_tokens(_get_all, "gcc_options"),
+        defines=_get_lines(_get_all, "defines"),
+        gcc_options=_get_flag_tokens(_get_all, "gcc_options"),
     )
 
 
@@ -336,18 +338,40 @@ def _strip_xml_declaration(text: str) -> str:
     return stripped[end + 2 :]
 
 
-def _get_tokens(get_all: Callable[[str], list[str]], tag: str) -> list[str]:
-    """Whitespace-separated tokens across every *tag* element.
+def _get_lines(get_all: Callable[[str], list[str]], tag: str) -> list[str]:
+    r"""One value per line across every *tag* element.
 
     ABICC descriptors spell a list either way -- one element per value, or
     one element holding a newline-separated block -- and real descriptors mix
-    the two. Splitting on whitespace covers both; no supported element's
-    values may contain a space (they are header names, namespaces, symbol
-    names and compile flags), so this cannot split one value in half.
+    the two. Splitting on *lines* covers both without assuming a value has no
+    internal space, which the previous whitespace split did: this docstring
+    used to claim "no supported element's values may contain a space", and a
+    Windows SDK include path under ``C:\Program Files`` falsifies it outright
+    (Codex review). That split turned one real path into two nonexistent
+    ones, and a ``<defines>`` value with whitespace into two corrupted
+    macros, so a descriptor naming valid build inputs failed.
 
-    The one case it would: a ``<gcc_options>`` value like ``-I /some/path``,
-    which splits into two tokens -- which is correct, since that is exactly
-    how the two tokens reach a compiler command line anyway.
+    Blank lines are dropped and each value is stripped, so the common
+    indented block spelling round-trips.
+    """
+    out: list[str] = []
+    for raw in get_all(tag):
+        out.extend(line.strip() for line in raw.splitlines() if line.strip())
+    return out
+
+
+def _get_flag_tokens(get_all: Callable[[str], list[str]], tag: str) -> list[str]:
+    """Shell-like whitespace tokens across every *tag* element.
+
+    For ``<gcc_options>`` alone, where whitespace tokenization *is* the
+    grammar: a value like ``-I /some/path`` is two tokens because that is
+    exactly how the two reach a compiler command line. Every other element
+    holds one value per line -- see :func:`_get_lines`.
+
+    A flag whose own argument contains a space cannot be expressed this way,
+    which is the same limitation a shell command line has; an include path is
+    the case that matters in practice and ``<include_paths>`` handles it
+    correctly.
     """
     out: list[str] = []
     for raw in get_all(tag):

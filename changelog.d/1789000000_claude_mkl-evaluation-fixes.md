@@ -201,3 +201,26 @@
   findings were indistinguishable in the projection most readers open. Added
   as a row and an attribute respectively, both omitted entirely for a scalar
   comparison.
+- **`compat dump` applies the whole descriptor, not just its directories.**
+  Expanding `<headers>`/`<libs>` was half the wiring: the dump still received
+  the CLI's `gcc_options` and the unfiltered header list, so a descriptor
+  relying on `<include_paths>`, `<defines>`, `<gcc_options>`, `<skip_headers>`
+  or `<skip_including>` dumped a *different surface* than the identical
+  descriptor under `compat check` -- which breaks the dump-then-compare
+  workflow at its root, since the two sides are then not the same contract.
+- **A descriptor value may contain a space.** The parser whitespace-split
+  every element on a stated invariant the input does not obey: a Windows SDK
+  include path under `C:\Program Files` became two nonexistent paths, and a
+  `<defines>` value with whitespace two corrupted macros. Value elements now
+  split on lines; `<gcc_options>` alone keeps the shell-like grammar, where
+  whitespace tokenization genuinely is the grammar. The emitted flag string
+  is quoted to match (`_compiler_options.join_gcc_options`, the inverse of
+  `split_gcc_options`) -- parsing a spaced path correctly buys nothing if its
+  own consumer re-breaks it one layer down.
+- **A symlinked library is resolved, not dropped.** Excluding symlinks was a
+  shortcut for collapsing a SONAME chain, and it silently dropped what an SDK
+  actually ships: an overlay directory of links into a store elsewhere, where
+  every selected library vanished -- a symlink-only directory reported
+  "contains no shared libraries" and a mixed one compared part of the
+  selected set without saying so. Deduplication is now by resolved target, so
+  the chain still collapses to one entry.

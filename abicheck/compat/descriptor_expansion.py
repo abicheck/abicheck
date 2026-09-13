@@ -134,11 +134,33 @@ def expand_descriptor_libs(paths: Sequence[Path]) -> list[Path]:
     out: list[Path] = []
     for p in paths:
         if p.is_dir():
-            found = sorted(
-                entry
-                for entry in p.rglob("*")
-                if entry.is_file() and not entry.is_symlink() and _is_library(entry)
-            )
+            # Symlinks are *resolved and deduplicated*, not excluded. Excluding
+            # them (the first version) was a shortcut for collapsing a SONAME
+            # chain -- `libfoo.so` -> `libfoo.so.1` -> `libfoo.so.1.2`, three
+            # names for one file -- and it silently dropped the case an SDK
+            # actually ships: an overlay directory of symlinks into a store
+            # elsewhere. There every selected library vanished, so a
+            # symlink-only directory raised "contains no shared libraries" and
+            # a mixed one compared a verdict over part of the selected set
+            # without saying so (Codex review).
+            #
+            # `is_file()` already follows the link, so a broken symlink is
+            # skipped here exactly as before. Deduplication is by resolved
+            # target, and the *first* name in sorted order wins, which is the
+            # unversioned `libfoo.so` spelling for a real chain.
+            seen: set[Path] = set()
+            found: list[Path] = []
+            for entry in sorted(p.rglob("*")):
+                if not entry.is_file() or not _is_library(entry):
+                    continue
+                try:
+                    target = entry.resolve()
+                except OSError:  # pragma: no cover - defensive
+                    target = entry
+                if target in seen:
+                    continue
+                seen.add(target)
+                found.append(entry)
             if not found:
                 raise ValidationError(
                     f"Descriptor <libs> directory contains no shared libraries: {p}"

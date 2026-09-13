@@ -338,16 +338,39 @@ def compat_dump_cmd(
         click.echo(f"Error: library not found: {so_path}", err=True)
         sys.exit(2)
 
+    # The descriptor's own <skip_headers>/<skip_including> and its
+    # <include_paths>/<defines>/<gcc_options>, applied exactly as
+    # `_snapshot_from_compat_input` applies them for `compat check`.
+    # Expanding the directories alone was not enough: this call still passed
+    # the CLI's `gcc_options` and the unfiltered header list, so a descriptor
+    # relying on those elements dumped a *different surface* than the
+    # identical descriptor under `compat check` -- which silently breaks the
+    # documented dump-then-compare workflow, since the two sides are then not
+    # the same contract (Codex review).
+    #
+    # Descriptor flags FIRST, the command line's own `-gcc-options` last, the
+    # same last-wins ordering `_snapshot_from_compat_input` fixed and for the
+    # same reason: a descriptor is the project's recorded default, not an
+    # override of what the user explicitly asked for.
+    headers_for_dump = _resolve_headers_from_list(
+        None,
+        None,
+        desc.headers,
+        skip_headers=set(desc.skip_headers) or None,
+    )
+    combined_gcc_options = " ".join(
+        opt for opt in (_descriptor_compile_options(desc), gcc_options) if opt
+    )
     try:
         # No dependency-scope wrapper downstream (Codex review, PR #840) -- same reasoning as _snapshot_from_compat_input's call.
         with suppress_streaming_prune():
             snap = dump(
                 so_path,
-                headers=desc.headers,
+                headers=headers_for_dump,
                 version=desc.version,
                 gcc_path=gcc_path,
                 gcc_prefix=gcc_prefix,
-                gcc_options=gcc_options,
+                gcc_options=combined_gcc_options or None,
                 sysroot=sysroot,
                 nostdinc=nostdinc,
                 lang=lang,
