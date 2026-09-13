@@ -40,6 +40,7 @@ from _l2_real_profiles_support import (
     materialize_operands,
     profiles,
 )
+from _workflow_exec import bash_executable, require_bash
 
 
 class TestProfileDefinitions:
@@ -608,11 +609,16 @@ class TestPrepareScriptIsolatesEachCommand:
 
     @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_the_rendered_script_is_valid_shell(self, profile_id):
+        require_bash()
         # Parse-checked rather than eyeballed: a script nobody can run is not
         # reproduction instructions. `bash -n` needs no network and builds nothing.
         script = profiles.prepare_script(profiles.PROFILES[profile_id])
         proc = subprocess.run(
-            ["bash", "-n"], input=script, capture_output=True, text=True, check=False
+            [bash_executable(), "-n"],
+            input=script,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert proc.returncode == 0, proc.stderr
 
