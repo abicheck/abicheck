@@ -307,6 +307,25 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="abicheck/comparability_sequences.py",
                 canary_test=None,
             ),
+            KnownGap(
+                description=(
+                    "A bounded run's findings are still scored by ordinary "
+                    "policy: `comparability_assurance` marks declaration and "
+                    "layout unverified, but no per-finding assurance wiring "
+                    "exists (ADR-050 E-S2 defers it), so if an inserted "
+                    "header's macros/pragmas did hide a later declaration, "
+                    "the resulting finding would score a normal verdict. It "
+                    "cannot become a silent clean pass -- the reduction is in "
+                    "`coverage_warnings`, `comparability_assurance`, and "
+                    "`AnalysisAssurance.status == 'partial'`, which "
+                    "`assurance.require_complete` gates on -- and the "
+                    "pre-change behavior (a hard refusal) failed such a run "
+                    "too, so no run that previously passed can now fail. "
+                    "Closing it needs per-finding dimension attribution."
+                ),
+                reference="PR #1274 (Codex review, second P1)",
+                canary_test=None,
+            ),
         ),
     ),
     BugClass(

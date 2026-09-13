@@ -375,3 +375,155 @@ class TestCompareRecordsRatherThanRefuses:
         assert not any(
             "declared header sequence" in w for w in result.coverage_warnings
         )
+
+
+# ---------------------------------------------------------------------------
+# The bounded path's own boundaries (Codex review, PR #1274)
+# ---------------------------------------------------------------------------
+
+
+class TestOnlyAHeaderSequenceDivergenceIsBounded:
+    """`unexplained` must be EXACTLY `{"header_sequence"}`.
+
+    `_unexplained_profile_fields` has already removed every field a carve-out
+    verified, so anything still in that set is by construction a divergence
+    NO carve-out could corroborate. An `include_sequence` surviving there is a
+    changed `-I` topology (two include roots swapped, say), and include-search
+    order decides which dependency header an `#include` resolves to — a
+    different, unbounded hazard from the declared-header insertion this branch
+    reasons about, and one nothing here corroborates.
+
+    Tested at the guard itself rather than through a fixture: every other
+    precondition is held identically to the bounded case (real contracts from
+    the real insertion pair), so `unexplained` is the only variable.
+    """
+
+    def _contracts(self, tmp_path):
+        old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
+        new = _snap(tmp_path / "new", (*_OLD_HEADERS, "json.h"), "1.4")
+        return old.contract, new.contract
+
+    def _call(self, tmp_path, unexplained):
+        from abicheck.comparability_profile import (
+            _declared_header_insertion_mismatch,
+        )
+
+        old_contract, new_contract = self._contracts(tmp_path)
+        return _declared_header_insertion_mismatch(
+            old_contract,
+            new_contract,
+            unknown_differing=set(),
+            differing=set(unexplained),
+            unexplained=set(unexplained),
+        )
+
+    def test_header_sequence_alone_is_bounded(self, tmp_path):
+        """Vacuity guard for the whole class: the accepted set really is
+        accepted here, so the rejections below mean something."""
+        got = self._call(tmp_path, {"header_sequence"})
+        assert got is not None and got.fatal is False
+
+    @pytest.mark.parametrize(
+        "unexplained",
+        [
+            # The reported P1: a header insertion riding alongside an
+            # include-topology change no carve-out could explain.
+            {"header_sequence", "include_sequence"},
+            # An include_sequence-only divergence carries no insertion at all.
+            {"include_sequence"},
+            # Any other profile field alongside it is a genuine, uncorroborated
+            # compile-context difference.
+            {"header_sequence", "compiler_family"},
+            {"header_sequence", "language_standard"},
+            {"header_sequence", "macro_ops"},
+            {"header_sequence", "target_triple"},
+            {"header_sequence", "include_sequence", "macro_ops"},
+            # Nothing unexplained at all is not this function's case.
+            set(),
+        ],
+    )
+    def test_anything_else_stays_fatal(self, tmp_path, unexplained):
+        assert self._call(tmp_path, unexplained) is None
+
+    def test_an_unrecognized_field_is_never_bounded(self, tmp_path):
+        """Fail-closed: a field this build does not recognize, and an
+        absent/malformed `profile_fields` (empty `differing`), are the two
+        cases `_profile_mismatch_reason` answers first and neither has a
+        verified shape to reason from."""
+        assert (
+            self._call_raw(
+                tmp_path, unknown={"future_field"}, differing={"header_sequence"}
+            )
+            is None
+        )
+        assert self._call_raw(tmp_path, unknown=set(), differing=set()) is None
+
+    def _call_raw(self, tmp_path, unknown, differing):
+        from abicheck.comparability_profile import (
+            _declared_header_insertion_mismatch,
+        )
+
+        old_contract, new_contract = self._contracts(tmp_path)
+        return _declared_header_insertion_mismatch(
+            old_contract,
+            new_contract,
+            unknown_differing=unknown,
+            differing=differing,
+            unexplained={"header_sequence"},
+        )
+
+
+class TestBoundedMismatchReachesTheAssuranceRollup:
+    """`compute_analysis_assurance` must not report `complete` for a run whose
+    own `comparability_assurance` says a dimension is unverified.
+
+    It previously special-cased only `assurance == "none"`, so the two
+    assurance fields of one report contradicted each other and
+    `assurance.require_complete` declined to gate a run that is, by its own
+    account, not complete.
+    """
+
+    def _assurance(self, tmp_path, new_names):
+        from abicheck.analysis_assurance import compute_analysis_assurance
+        from abicheck.checker import compare
+
+        old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
+        new = _snap(tmp_path / "new", new_names, "1.4")
+        return compute_analysis_assurance(compare(old, new), old, new)
+
+    def test_an_insertion_reports_partial(self, tmp_path):
+        assert self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).status == "partial"
+
+    def test_the_note_names_the_unverified_dimensions(self, tmp_path):
+        notes = self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).notes
+        assert any(
+            "declaration" in n and "layout" in n and "reduced assurance" in n
+            for n in notes
+        )
+
+    def test_it_is_partial_not_not_comparable(self, tmp_path):
+        """A verdict WAS produced and every other axis was genuinely computed;
+        only some dimensions carry reduced assurance. Collapsing that to
+        `not_comparable` would discard the axes this run did establish."""
+        assert self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).status != (
+            "not_comparable"
+        )
+
+    def test_an_unchanged_pair_carries_no_comparability_note(self, tmp_path):
+        """Vacuity guard, and it earned its place: these fixtures carry no
+        binary, so an UNCHANGED pair already reads `partial` on an unrelated
+        axis ("public surface could not be resolved"). `status == "partial"`
+        alone therefore proves nothing about this change — the note is what
+        distinguishes the two, so it is the note this class asserts on, and
+        the note must be absent when there is no insertion."""
+        assurance = self._assurance(tmp_path, _OLD_HEADERS)
+        assert not any("reduced assurance" in n for n in assurance.notes)
+
+    def test_the_insertion_is_what_adds_the_note(self, tmp_path):
+        """The two runs differ by exactly the inserted header, so the note
+        appearing in one and not the other attributes it to the insertion
+        rather than to any axis both runs share."""
+        with_insertion = self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).notes
+        without = self._assurance(tmp_path, _OLD_HEADERS).notes
+        added = [n for n in with_insertion if n not in without]
+        assert any("reduced assurance" in n for n in added)

@@ -9232,3 +9232,22 @@ was deliberately not attempted alongside the disposition fix.
 `--diagnostic-comparison` is explicitly **not** the answer to any of this:
 it downgrades assurance wholesale instead of resolving the extraction
 question.
+
+**A second residual, on the bounded path itself** (Codex review, PR #1274):
+a bounded run's findings are scored by ordinary compatibility policy.
+`comparability_assurance` marks `declaration`/`layout` unverified, but no
+per-finding assurance wiring exists yet — ADR-050 E-S2 explicitly defers
+"consuming this into the diff pipeline's own per-finding assurance" to a
+later slice — so if an inserted header's macros or pragmas *did* hide a
+later declaration, the resulting finding would score a normal verdict
+rather than being held back as resting on unverified evidence.
+
+Two things bound that, and they are why the bounded disposition is still
+the better one. It can never become a silent clean pass: the reduction is
+recorded in `coverage_warnings`, in `comparability_assurance`, and in
+`AnalysisAssurance.status == "partial"` — which `assurance.require_complete`
+gates on. And the pre-change behavior for the same input was a hard
+`ProfileMismatchError` (exit 16), which also failed the run, so no
+invocation that previously passed can now fail; what changed is that a
+*correct* addition now gets a verdict instead of a refusal. Closing the
+residual needs per-finding dimension attribution, not a change here.

@@ -399,14 +399,20 @@ def _declared_header_insertion_mismatch(
     """
     if unknown_differing or not differing:
         return None
-    if not unexplained:
-        return None
-    if not unexplained <= (_HEADER_SEQUENCE_FIELDS | _INCLUDE_SEQUENCE_FIELDS):
-        return None
-    if not _HEADER_SEQUENCE_FIELDS <= unexplained:
-        # An include_sequence-only divergence carries no declared-header
-        # insertion to reason about -- it is a different -I/--header topology
-        # change, which this branch has no evidence about and must not waive.
+    if unexplained != _HEADER_SEQUENCE_FIELDS:
+        # EXACTLY `header_sequence`, not a subset of it plus `include_sequence`
+        # (Codex review, PR #1274, first P1). A *verified* additive
+        # include-sequence growth -- the one an inferred header-owning root
+        # produces alongside any header addition -- has already been removed
+        # from `unexplained` by `_unexplained_profile_fields`' own carve-out,
+        # so an include_sequence still sitting here is by construction one
+        # that carve-out REFUSED: a changed -I topology, e.g. two include
+        # roots swapped. Include-search order decides which dependency header
+        # a given `#include` resolves to, which is a different and unbounded
+        # hazard from the declared-header insertion this branch reasons about
+        # -- and nothing here corroborates it. An include_sequence-only
+        # divergence is likewise none of this branch's business: there is no
+        # declared-header insertion to reason about at all.
         return None
     if not _scope_growth_corroborated(old_contract, new_contract):
         return None
