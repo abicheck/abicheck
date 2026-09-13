@@ -408,7 +408,7 @@ The number is a consequence of the model, not the goal.
 > itemized, per flag, every option standing between them and the targets —
 > see its own table in §6 Phase 7. Read that, not this, for where the
 > surface actually is: as of that slice `compare` was at **50** (from 78 at
-> the original audit, 56 at the start of the slice) and `dump` at **21**; live today, after Phase 7n, **44** and **18** (7l measured 47/18 before that merge)
+> the original audit, 56 at the start of the slice) and `dump` at **21**; live today, re-derived by Click introspection after 7n/7q/7r, **40** and **18** (7l measured 47/18 before 7n's merge)
 > (from 39 / 24). Both targets remain reachable, and every residual option
 > has a named owner and a named blocker; two of them are *deliberate keeps*
 > that the targets below predate.
@@ -1599,7 +1599,7 @@ can no longer grow unruled. **Counts after 7k: `compare` 50, `dump` 21**
 (unchanged from 7j). Both numbers are the *pre-Phase-6* surface: `scan`'s
 retirement took `--env-matrix`, `--require-complete-analysis` and
 `--build-target` with it, so the live, Click-introspected counts are
-**`compare` 44, `dump` 18** — 47/18 at Phase 7l, then 7n's evidence-role merge took three off `compare`.
+**`compare` 40, `dump` 18** — 47/18 at Phase 7l, then 7n's evidence-role merge took three off `compare`; see the re-derived count table below for how these are counted (the earlier "44"/"41" readings counted `--help-all`).
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
@@ -1819,16 +1819,56 @@ mechanism* first and an option count second:
   3. **Unparseable YAML fails at classification**, ahead of every
      validator, rather than inside the project-config loader. Same exit
      code, same named file.
-- **7q — `aggregate --run-plan` into `--manifest`.** A run plan is a
-  second schema for the same "expected set" input; the projection is
-  validated internally. `--discovered-only` stays **explicit** — it states
-  that the operator has no expected inventory, and inferring that from an
-  empty manifest is how a CI matrix silently goes green with missing jobs.
-  **Net −1.**
-- **7r — `project plan --allow-empty` retired** once a legitimately empty
-  selection produces an *explained skipped plan* rather than needing a
-  bypass switch, and bootstrap validation routes to `project validate`.
-  **Net −1.** Its other four inputs (`--build-output`, `--project`,
+- **7q — `aggregate --run-plan` into `--manifest`. Done.** A run plan was a
+  second schema for the same "expected set" input, and the projection was
+  already validated internally, so the projection stayed and the flag went.
+  `abicheck aggregate reports/ --manifest run-plan.json` does what
+  `--run-plan` did. **Net −1** (`aggregate` 5 → 4).
+
+  The classifier is `workflows/aggregate/expected_input.py`, beside the
+  manifest contract it routes on. A run plan is the shape with a
+  self-describing `schema: abicheck.run-plan/vN` tag; a manifest is the
+  mapping default, as a project config is in 7p. Two consequences worth not
+  rediscovering: (1) an **untagged** plan is still a real input —
+  `RunPlan.to_dict` has always stamped `schema`, but `RunPlan.from_dict`
+  accepts a document without one, so hand-authored and older plans exist and
+  `--run-plan` read them; they are recognized by that shape's own required
+  `checks` list, and a document declaring both `checks` and `targets` with no
+  schema is **rejected** rather than guessed at. (2) A plan *newer* than this
+  build classifies as a run plan on purpose — the version gate is
+  `RunPlan.from_dict`'s and it fails loudly, where classifying it as "not a
+  run plan" would route it to the manifest reader and report a missing
+  `targets` key. The property test is exhaustive over shape × filename with
+  each shape's conventional name among the misleading ones, and a
+  filename-keyed implementation was written and confirmed to fail it.
+
+  `--discovered-only` stayed **explicit**, as ruled: it states that the
+  operator has no expected inventory, and inferring that from an empty
+  manifest is how a CI matrix silently goes green with missing jobs.
+- **7r — `project plan --allow-empty` retired. Done**, with the
+  explained-skipped-plan half landed in the same slice rather than deferred.
+  **Net −1** (`project plan` 7 → 6.)
+
+  The flag existed because `run-plan.json` could not say *why* it was empty:
+  the only available answers were "fail always" or "a human asserts this one
+  is fine", and one flag waved through both a bootstrapping config and a
+  matrix about to gate nothing. So `generate_run_plan` now classifies an
+  empty plan against what `CONFIG` declared and records a `skipped` block
+  (reason, the declared-`checks[]` count it rests on, and one actionable
+  sentence): **no `checks[]` declared** is a complete, valid plan — exit 0,
+  with bootstrap validation routed to `abicheck project validate CONFIG`,
+  where a config's own well-formedness is actually answered; **declared
+  `checks[]` resolving to no cell** stays an error with no bypass at all,
+  which is the capability removed rather than renamed. A plan carrying
+  `skipped` is stamped `abicheck.run-plan/v3` and rejected on a declared
+  pre-v3 schema, for the same reason `gate`'s v2 bump exists: a pre-v3
+  reader sees only `checks: []` and would read a deliberate skip as a plan
+  whose every check failed. `check-project.yml` no longer passes the flag;
+  its `no-checks` job is unchanged and still fails a skipped plan, since
+  calling that workflow before there is anything to check is a caller
+  mistake and that job says so with the more actionable message.
+
+  Its other four inputs (`--build-output`, `--project`,
   `--head-sha`, `--toolchain-bindings`) are ruled keeps here for the
   audit's reason, which this plan adopts as a general rule:
   **auto-detection is a useful default, not proof that an explicit
@@ -1933,36 +1973,59 @@ removal — see that slice for the corrected arithmetic), with
 already gone with `scan` and §4.5's ≤16 target reachable only through one
 further ruling, not through this audit.
 
-**The whole-surface count, verified and re-derived.** 7i/7k only ever
-counted `compare` and `dump`; the audit counts every command, and every one
-of its twelve numbers reproduces exactly by Click introspection on this
-branch (one logical option once, short aliases and `--no-` spellings
-collapsed, `--help`/`--help-all` excluded). The "adopted" column is what
-7m–7r above actually deliver — not the audit's own end state, which is
-listed beside it so the gap is legible rather than averaged away:
+**The whole-surface count, re-derived by Click introspection.** The table
+below is not arithmetic on the previous one: it is what walking
+`abicheck.cli.main`'s command tree reports today, counting each logical
+option once (Click's own parameter identity, so short aliases and `--no-`
+spellings collapse) and excluding `--help`/`--help-all`. The audit's own
+end state stays beside it so the gap is legible rather than averaged away.
+Note that the previous revision's "Today" column read `compare` 41 /
+`dump` 19 against the same code: that is consistent with `--help-all`
+having been counted as an option and `--help` not, which is the drift a
+re-derivation exists to remove.
 
-| Command | Today | After 7m–7r | Audit's end state | The gap, named |
-|---|---|---|---|---|
-| `compare` | 41 (was 47; 7m and 7n both landed) | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
-| `dump` | 19 | **17** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config, `--compression` (ruled a keep, 7k), `--environment` (G42) |
-| `aggregate` | 5 (7m landed) | **4** | 4 | — (7q + 7m's shared export) |
-| `deps tree` | 6 (7m landed) | **6** | 6 | — (7m) |
-| `deps compare` | 7 (7m landed) | **7** | 7 | — (7m) |
-| `project history` | 4 (7m landed) | **4** | 4 | — (7m) |
-| `project plan` | 7 (7m landed) | **6** | 6 | — (7r + 7m) |
-| `project validate` | 3 (7m landed) | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
-| `project validate-build` | 3 | **0** | folded | **done (7p)** |
-| `project validate-use-cases` | 3 | **0** | folded | **done (7p)** |
-| **Native total** | **92** (109 before 7p/7m/7n) | **87** | 68 | **19 options, all of them `compare`'s 15 and `dump`'s 4** || `compat check` / `compat dump` | 75 (22 hidden) / 19 (5 hidden) | frozen | frozen | ADR-068 D7 — excluded from every count |
+| Command | Today (live) | Audit's end state | The gap, named |
+|---|---|---|---|
+| `compare` | **40** | 25 | The five `deferred` rulings + the CONFIG demotions this plan declines or gates (`--dump-manifest`, `--include-system-declarations`, `--abi3`, `--severity-preset`, `--select-required`) + the `--environment` collapse (G42) |
+| `dump` | **18** | 13 | `--dump-manifest`/`--include-system-declarations` to capture config (G34), `--compression` (ruled a keep, 7k), `--environment` (G42) |
+| `aggregate` | **4** | 4 | — (**7q landed**, plus 7m's shared export) |
+| `deps tree` | **6** | 6 | — (7m) |
+| `deps compare` | **7** | 7 | — (7m) |
+| `project history` | **4** | 4 | — (7m) |
+| `project plan` | **6** | 6 | — (**7r landed**, plus 7m) |
+| `project validate` | **3** | 3 | — (7m); **7p landed**, so this row is now one command over all three schemas |
+| **Native total** | **88** | 68 | **20 options, all of them `compare`'s 15 and `dump`'s 5** |
+| `compat check` / `compat dump` | 53 / 14 visible (hidden excluded) | frozen | ADR-068 D7 — excluded from every count |
 
-Read the last column as this phase's actual position: **on six of the ten
-native commands the audit's end state and ours are identical**, and the
-entire 88-vs-68 difference is the contract/capture-config question this
-plan has already gated (Phase 9, G42, P5) or ruled against with a
-measurement. There is no third, unexamined bucket. `--format`/`-o`
-converging on one export request is what moves every command except
-`compare`/`dump`, which is why 7m is sequenced first: it is one mechanism
-that closes eight rows.
+`project validate-build`/`validate-use-cases` are gone from the table
+entirely: 7p folded both, and a row for a command that no longer exists is
+the drift this re-derivation removes.
+
+Read the last column as this phase's actual position: **on six of the eight
+surviving native commands the audit's end state and ours are identical**,
+and the entire 88-vs-68 difference is the contract/capture-config question
+this plan has already gated (Phase 9, G42, P5, G34) or ruled against with a
+measurement. There is no third, unexamined bucket.
+
+**What remains in Phase 7 after 7q/7r.** Nothing executable. Every
+remaining item is gated on a named prerequisite or owned elsewhere:
+
+| Item | Where it is |
+|---|---|
+| `--scope-public-headers` → `--contract public`, `--post-manifest` → a contract overlay | Phase 9, blocked on `public-contract-default.md` Phase 6 |
+| `--instantiation-manifest`, `--use-cases`, `--bundle-facts-library-manifest`, `--bundle-facts-out` | `deferred`/keep rulings with named blockers in `rulings.py` |
+| `--follow-deps`/`--search-path`/`--ld-library-path` → one `--environment` operand | G42 |
+| `--abi3` armed from a declared floor | G26 |
+| `--dump-manifest`, `--include-system-declarations` → capture contract; one capture specification for `dump`/`abicheck-cc`/the Clang plugin | G34 |
+| `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first |
+| `--select-required` merged into an expected inventory | ADR-065 P5 (package component inventories) |
+| `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
+| 7o — `--view`'s internal grammar | open, and a *decision*-count slice rather than an option-count one (net 0) |
+
+The two smaller audit items that were executable landed with this slice:
+`deps`' defaulted root is now stated in the resolved plan and the report
+(see below), and `ABICHECK_CC_DISABLE`'s value-domain defect is fixed over
+the whole class of `ABICHECK_*` booleans.
 
 **Six smaller audit items, ruled here rather than left unrecorded** —
 these were in the audit and absent from the first pass of this section:
@@ -1991,18 +2054,38 @@ these were in the audit and absent from the first pass of this section:
   deferred-by-absence rather than settled. `rulings.py` keeps
   `per_run_operand` until that capture exists (a `deferred` ruling needs a
   blocker that is actually being built).
-- **`deps`: the default `/` root must be visible in the resolved plan.**
-  Adopted, and it is a correctness point rather than a CLI one: an
-  unspecified `--sysroot`/`--old-root`/`--new-root` currently reads in the
-  output like a deliberately chosen deployment environment. No flag
-  changes; the resolved plan and report state that the root was defaulted.
-  Owner: Phase 8's `ReportDocument` projection, which already renders the
-  stack report.
-- **`ABICHECK_CC_DISABLE` treats `"0"` as disable.** A real defect
-  (any non-empty value disables capture), not a CLI-surface item. Fix
-  separately with a regression test over the *class* — truthy/falsey
-  string parsing across every `ABICHECK_*` boolean, not just this one
-  variable — per AGENTS.md's bug-class rule.
+- **`deps`: the default `/` root must be visible in the resolved plan.
+  Done.** A correctness point rather than a CLI one: an unspecified
+  `--sysroot`/`--old-root`/`--new-root` read in the output like a
+  deliberately chosen deployment environment. `StackCheckResult` now
+  carries `baseline_env_defaulted`/`candidate_env_defaulted` and every
+  projection states it through one shared helper in Phase 8's
+  `report/stack.py` — the `--dry-run` plan, the JSON (both keys always
+  emitted, so an absent key can never be read as "chosen"), Markdown and
+  HTML. No flag changes. Two things the implementation forced:
+  defaultedness comes from **Click's own parameter source**, not from
+  comparing the value against `/` — an explicit `--old-root /` is a choice
+  and must not be labelled a fallback — and `deps tree` with no `--sysroot`
+  now reports its root as `/` rather than the empty string, which said
+  neither "host" nor "unspecified".
+- **`ABICHECK_CC_DISABLE` treats `"0"` as disable. Fixed, over the
+  class.** The instance was real (any non-empty value disabled capture),
+  and so was the class: five hand-rolled parsers recognized four different
+  token sets — `{1,true,yes}` vs `{1,true,yes,on}` vs `{0,false,no}` vs
+  `{0,false,no,off}` vs the bare literal `"1"` — with nothing anywhere to
+  notice the drift. `abicheck/env_flags.py` is now one parser plus a
+  registry of which variables are boolean knobs and what each defaults to;
+  unset, empty and unrecognized values all resolve to that default, never
+  its opposite. The regression test sweeps the whole registry × the whole
+  value domain through each variable's *real* reader (including
+  `run_cc_wrapper`'s own public entry point) against a literal oracle table
+  that never calls the parser, with a vacuity guard on the oracle and an
+  AST guard against a re-introduced hand-rolled parser — both
+  mutation-verified, and the second one only works because it resolves
+  module-level constants (a guard keyed on the literal text `ABICHECK_`
+  passes such a mutation unnoticed, since most readers name their variable
+  through a constant). Bug class
+  `config.env_flag_value_domain` in `tests/regressions/manifest.py`.
 - **One capture specification for `dump`, `abicheck-cc` and the Clang
   plugin.** The audit's strongest structural point outside `compare`:
   public roots, library identity and version are configured three times in

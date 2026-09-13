@@ -1813,7 +1813,8 @@ class TestRunPlanGenerateCliToolchainBindings:
 # is not public CLI surface anymore (ADR-054): it was a pure intermediate-
 # format conversion. Its logic is `to_aggregate_manifest()`, unit-tested
 # directly above (TestToAggregateManifest); the CLI-level entry point is now
-# `aggregate --run-plan`, covered in tests/test_aggregate.py::TestAggregateCLI.
+# `aggregate --manifest` on a run-plan, covered in
+# tests/test_aggregate.py::TestAggregateCLI.
 
 
 @pytest.mark.parametrize(
