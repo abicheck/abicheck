@@ -1153,8 +1153,9 @@ class TestDisplayFilteredReports:
         assert result.complete is False
 
     def test_a_count_mismatch_alone_withholds_completeness(self) -> None:
-        """`--report-mode leaf` emits no `show_only_filter` at all, so the
-        summary's own count against the array length is the only signal."""
+        """A report that emits no `show_only_filter` at all leaves the
+        summary's own count against the array length as the only signal
+        (`--view leaf` was the example until 7o retired it)."""
         result = parse_report_findings(
             {"summary": {"total_changes": 3}, "changes": [dict(_SIZE_CHANGED)]}
         )
@@ -1170,11 +1171,12 @@ class TestDisplayFilteredReports:
         result = parse_report_findings({"changes": [dict(_SIZE_CHANGED)]})
         assert result.complete is True
 
-    @pytest.mark.parametrize("mode", ["full", "leaf", "root-cause"])
+    @pytest.mark.parametrize("mode", ["full", "impact", "root-cause"])
     def test_real_reporter_output_round_trips(self, mode: str) -> None:
         """Against the real producer rather than a hand-built dict, in every
-        report mode — including `leaf`, whose filtered output carries no flag
-        to key on."""
+        report mode. ``leaf`` was one of them until plan slice 7o retired it;
+        ``impact`` takes its place so this still sweeps every supported
+        mode rather than shrinking to two."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
         from abicheck.reporter import to_json
 

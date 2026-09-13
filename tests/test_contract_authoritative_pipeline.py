@@ -1051,7 +1051,7 @@ class TestTheReleaseRecommendationDoesNotOverclaim:
         assert rec.state is ReleaseRecommendationState.ACTIONABLE
         assert "No ABI or API changes detected" in rec.rationale
 
-    @pytest.mark.parametrize("report_mode", ["full", "leaf"])
+    @pytest.mark.parametrize("report_mode", ["full", "root-cause"])
     def test_the_severity_table_does_not_claim_an_exit_it_will_not_produce(
         self, report_mode: str
     ) -> None:
@@ -1192,7 +1192,7 @@ class TestEveryReportModeStatesTheSameGateContribution:
 
         return snap(64), snap(128)
 
-    @pytest.mark.parametrize("report_mode", ["full", "leaf"])
+    @pytest.mark.parametrize("report_mode", ["full", "root-cause"])
     def test_a_gating_finding_states_its_real_contribution(
         self, report_mode: str
     ) -> None:
@@ -1206,10 +1206,13 @@ class TestEveryReportModeStatesTheSameGateContribution:
         )
         assert result.verdict is Verdict.BREAKING
         kwargs = {"severity_config": SeverityConfig()}
-        if report_mode == "leaf":
-            kwargs["report_mode"] = "leaf"
+        if report_mode != "full":
+            kwargs["report_mode"] = report_mode
         payload = json.loads(reporter.to_json(result, **kwargs))
-        entries = payload.get("leaf_changes") or payload["changes"]
+        # Was ``leaf_changes or changes`` until plan slice 7o retired that
+        # mode and the key with it; ``root-cause`` keeps every finding in
+        # ``changes`` and groups them under ``root_causes``.
+        entries = payload["changes"]
         type_entries = [e for e in entries if e["kind"].startswith("type_")]
         assert type_entries, entries
         for entry in type_entries:

@@ -110,7 +110,9 @@ _PAIRS = {
 
 
 @pytest.mark.parametrize("pair_name", sorted(_PAIRS))
-@pytest.mark.parametrize("report_mode", ["full", "leaf", "root-cause"])
+# ``leaf`` left this sweep with plan slice 7o; ``impact`` keeps it over
+# every supported mode rather than shrinking it to two.
+@pytest.mark.parametrize("report_mode", ["full", "impact", "root-cause"])
 def test_markdown_report_ends_with_trailing_newline(pair_name, report_mode):
     old, new = _PAIRS[pair_name]()
     result = compare(old, new)
