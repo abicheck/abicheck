@@ -40,6 +40,8 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
+from abicheck.diff_templates import detect_internal_template_leaks
+from abicheck.diff_types_abicc_parity import _diff_var_values
 from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.declarations import Function, Param, Variable, Visibility
@@ -389,6 +391,140 @@ class TestSurfaceEvidenceAsymmetry:
             c.symbol for c in compare(old, new).changes if c.kind in _SURFACE_EXIT_KINDS
         }
         assert reported == set(names)
+
+
+class TestListShapedSurfaceDetectors:
+    """The same invariant for the two detectors that select a *list* off
+    ``AbiSnapshot.functions`` with their own predicate, plus the variable
+    value detector that joins its own filtered maps.
+
+    These reach the surface by a different route than the mangled-keyed
+    ``diff_symbols`` join, so routing that join alone left them reporting
+    the defect unchanged (Codex review, P1): an internal-template
+    instantiation present on both sides read as removed, and a real value
+    change on a surviving variable reported nothing at all. The oracle is
+    the same one this module uses throughout -- a comparison of a library
+    against itself with only the evidence axis varied has no findings, and
+    a real change made on top of it still has its own.
+    """
+
+    @staticmethod
+    def _template_snapshot(stems: list[str], *, evidence: bool) -> AbiSnapshot:
+        """Internal-namespace template instantiations, hidden and unexported.
+
+        Declared names rather than manglings: the detector's stem grouping
+        reads the demangled spelling, and an unmangled name is what a
+        header-only capture of an internal instantiation actually carries.
+        """
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            functions=[
+                Function(
+                    name=stem,
+                    mangled=stem,
+                    return_type="void",
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=_contract(evidence),
+                )
+                for stem in stems
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @given(
+        stems=st.lists(
+            st.from_regex(r"\Adetail::[a-z]{1,6}<(int|double|char)>\Z", fullmatch=True),
+            min_size=1,
+            max_size=5,
+            unique=True,
+        ),
+        evidence_on_old=st.booleans(),
+    )
+    @settings(deadline=None, max_examples=40)
+    def test_internal_template_leak_is_not_manufactured_by_an_evidence_gap(
+        self, stems: list[str], evidence_on_old: bool
+    ) -> None:
+        old = self._template_snapshot(stems, evidence=evidence_on_old)
+        new = self._template_snapshot(stems, evidence=not evidence_on_old)
+        assert detect_internal_template_leaks(old, new) == []
+
+    @given(
+        stems=st.lists(
+            st.from_regex(r"\Adetail::[a-z]{1,6}<(int|double|char)>\Z", fullmatch=True),
+            min_size=2,
+            max_size=5,
+            unique=True,
+        ),
+        evidence_on_old=st.booleans(),
+    )
+    @settings(deadline=None, max_examples=40)
+    def test_a_real_instantiation_removal_still_reports_under_an_evidence_gap(
+        self, stems: list[str], evidence_on_old: bool
+    ) -> None:
+        """The complement, so the fix cannot be "report nothing here": one
+        instantiation genuinely gone is still a leak finding when OLD -- the
+        side that loses it -- is the side holding the contract evidence.
+
+        When OLD is instead the evidence-less side, the removed
+        instantiation is in neither compared surface (OLD's own selector
+        never admitted it, and NEW no longer declares it, so there is
+        nothing to reconcile it against) and nothing reports it. That is the
+        pre-existing narrowing this class does not widen -- the same
+        asymmetry the overload case above records -- and asserting it here
+        keeps the claim honest in both directions rather than only in the
+        one that happens to fire.
+        """
+        old = self._template_snapshot(stems, evidence=evidence_on_old)
+        new = self._template_snapshot(stems[:-1], evidence=not evidence_on_old)
+        reported = [c.kind for c in detect_internal_template_leaks(old, new)]
+        assert reported == (
+            [ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API]
+            if evidence_on_old
+            else []
+        )
+
+    @given(
+        names=_names,
+        evidence_on_old=st.booleans(),
+        old_value=st.integers(min_value=-8, max_value=8),
+    )
+    @settings(deadline=None, max_examples=40)
+    def test_a_real_variable_value_change_survives_an_evidence_gap(
+        self, names: list[str], evidence_on_old: bool, old_value: int
+    ) -> None:
+        """Every promised-but-unexported variable whose captured value moved
+        is reported, even though only one side's run established (b).
+
+        The oracle is the population the test *built* -- every name, with a
+        value chosen to differ -- not the detector's own filtering.
+        """
+        old = _snapshot(names, evidence=evidence_on_old, variables=True)
+        new = _snapshot(names, evidence=not evidence_on_old, variables=True)
+        for i, (v_old, v_new) in enumerate(zip(old.variables, new.variables)):
+            v_old.value = old_value + i
+            v_new.value = old_value + i + 1
+        reported = {
+            c.symbol
+            for c in _diff_var_values(old, new)
+            if c.kind is ChangeKind.VAR_VALUE_CHANGED
+        }
+        assert reported == set(names)
+
+    @given(names=_names, evidence_on_old=st.booleans())
+    @settings(deadline=None, max_examples=40)
+    def test_an_unchanged_variable_value_reports_nothing_under_an_evidence_gap(
+        self, names: list[str], evidence_on_old: bool
+    ) -> None:
+        old = _snapshot(names, evidence=evidence_on_old, variables=True)
+        new = _snapshot(names, evidence=not evidence_on_old, variables=True)
+        for v_old, v_new in zip(old.variables, new.variables):
+            v_old.value = v_new.value = 7
+        assert _diff_var_values(old, new) == []
 
 
 class TestReleaseJobMemoryBudgetIsDepthAware:

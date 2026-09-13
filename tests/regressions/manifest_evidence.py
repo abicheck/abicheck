@@ -73,16 +73,6 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "Two function-surface consumers are deliberately not "
-                    "routed through the reconciled join and can still narrow "
-                    "under the asymmetry: `diff_templates` builds its own "
-                    "list-shaped surface from `in_public_surface` (a "
-                    "different filter, not the ELF-narrowed map, so the "
-                    "reconciled pair is not shape-compatible), and "
-                    "`diff_platform._diff_elf_deleted_fallback` reads only "
-                    "the OLD surface against NEW's full map -- routing it "
-                    "would have pushed that file past its no-growth "
-                    "baseline for an old-side-only narrowing. "
                     "`diff_filtering` is excluded on purpose rather than "
                     "for budget: it is a redundancy filter, and a narrower "
                     "population there keeps findings rather than hiding "

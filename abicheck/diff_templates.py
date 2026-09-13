@@ -49,6 +49,9 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
+from .compare.template_surface import (
+    reconciled_public_functions,
+)
 from .diff_helpers import make_change
 from .model.surface_facts import in_public_surface, is_public_export
 
@@ -436,11 +439,6 @@ def _strip_leading_return_type(sig: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _public_functions(snap: AbiSnapshot) -> list[Function]:
-    """Return the subset of public functions in *snap*."""
-    return [f for f in snap.functions if in_public_surface(f)]
-
-
 def _normalize_mach_o_mangled(mangled: str) -> str:
     """Strip a Mach-O direct-clang mangled name's extra platform leading
     underscore (``__Z...`` -> ``_Z...``).
@@ -687,8 +685,7 @@ def detect_internal_template_leaks(
     The detector is intentionally per-stem rather than per-instantiation
     so a reviewer sees one finding even when 30 instantiations shift.
     """
-    old_funcs = _public_functions(old)
-    new_funcs = _public_functions(new)
+    old_funcs, new_funcs = reconciled_public_functions(old, new)
     # One batched demangle call across both sides -- not two -- so a symbol
     # unchanged between old and new resolves to byte-identical canonical
     # text on both sides regardless of demangle_batch's own dict-ordering.
@@ -1323,7 +1320,7 @@ def demote_lambda_closure_unexported_findings(
     ``changes``.
     """
     from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, Verdict
-    from .diff_symbols import _public_functions
+    from .diff_symbols import _reconciled_function_surfaces
     from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
     from .finding_identity_ctor_dtor import (
@@ -1350,8 +1347,7 @@ def demote_lambda_closure_unexported_findings(
     # own bare-name export fallback exists because castxml/DWARF can
     # under-mangle a name the real ELF table still carries correctly, so both
     # spellings must be checked before ever claiming absence.
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for change in changes:
         if change.kind not in _LAMBDA_CLOSURE_DEMOTABLE_KINDS:

@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from ..model import AbiSnapshot, Function, Variable
 
@@ -61,6 +61,7 @@ __all__ = [
     "RECONCILED_FUNCTIONS",
     "RECONCILED_VARIABLES",
     "cached_reconciliation",
+    "reconcile_declaration_lists",
     "reconcile_surfaces",
     "store_reconciliation",
 ]
@@ -214,3 +215,71 @@ def store_reconciliation(
 ) -> _ReconciledPair[_Decl]:
     old.__dict__[slot] = (new, result)
     return result
+
+
+def reconcile_declaration_lists(
+    old_decls: Sequence[_Decl],
+    new_decls: Sequence[_Decl],
+    *,
+    old_all: Sequence[_Decl],
+    new_all: Sequence[_Decl],
+    key: Callable[[_Decl], str],
+    old_exported: Container[str] = frozenset(),
+    new_exported: Container[str] = frozenset(),
+) -> tuple[list[_Decl], list[_Decl]]:
+    """:func:`reconcile_surfaces` for a caller whose surface is a *list*.
+
+    ``diff_symbols`` keys its surfaces by mangled name, but two sibling
+    detectors -- ``diff_templates``'s internal-template-leak pass and its
+    lambda-closure demotion pass -- select a list straight off
+    ``AbiSnapshot.functions`` with their own predicate. They are per-pair
+    joins all the same (an OLD instantiation absent from NEW is the whole
+    finding), so the same evidence asymmetry manufactures the same false
+    break there, and routing them through a second hand-written copy of the
+    rule is what this module exists to avoid (Codex review, P1).
+
+    *key* is the caller's own match key; declarations sharing one are kept
+    in first-seen order, and the returned lists preserve each input's order
+    with any re-admitted declaration appended.
+    """
+    old_map = _first_by_key(old_decls, key)
+    new_map = _first_by_key(new_decls, key)
+    reconciled_old, reconciled_new = reconcile_surfaces(
+        old_map,
+        new_map,
+        old_all=_first_by_key(old_all, key),
+        new_all=_first_by_key(new_all, key),
+        old_exported=old_exported,
+        new_exported=new_exported,
+    )
+    return (
+        _appended(old_decls, reconciled_old, old_map),
+        _appended(new_decls, reconciled_new, new_map),
+    )
+
+
+def _first_by_key(
+    decls: Sequence[_Decl], key: Callable[[_Decl], str]
+) -> dict[str, _Decl]:
+    """*decls* keyed by *key*, first occurrence winning -- so a duplicate key
+    never silently replaces the declaration the caller's own list order put
+    first."""
+    out: dict[str, _Decl] = {}
+    for decl in decls:
+        out.setdefault(key(decl), decl)
+    return out
+
+
+def _appended(
+    original: Sequence[_Decl],
+    reconciled: Mapping[str, _Decl],
+    before: Mapping[str, _Decl],
+) -> list[_Decl]:
+    """*original*, plus whatever reconciliation re-admitted.
+
+    Deliberately additive in *position* as well as in content: the caller's
+    own ordering decides which of two same-key declarations it already
+    treats as canonical, and reordering that would be a behaviour change no
+    part of this defect calls for.
+    """
+    return list(original) + [decl for k, decl in reconciled.items() if k not in before]
