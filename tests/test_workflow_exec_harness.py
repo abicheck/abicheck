@@ -518,3 +518,58 @@ def test_run_step_contains_no_call_that_creates_the_workspace() -> None:
         "seeds fixtures there, and a fabricated empty one lets a step that "
         f"does not need them return a plausible answer. Found: {creations}"
     )
+
+
+class TestAStepsOwnTemporaryFilesStayTestOwned:
+    """A step's `mktemp` must not land in the shared `/tmp`.
+
+    `run_step` builds its environment from scratch on purpose, and that
+    silently left `TMPDIR` unset, so `mktemp -d` inside a step fell back to
+    `/tmp`. On a runner that prunes `/tmp` mid-job the step then lost its own
+    scratch directory while still using it -- `cd: /tmp/tmp.XjdPkLm7IE: No
+    such file or directory`, observed on main in run 34781323754, *after* the
+    job-level `TMPDIR` fix, which this env reset was discarding.
+
+    Asserted by running a real `mktemp -d` through the harness rather than by
+    reading `step_env`: the claim is about where the step's files actually
+    land, and an assertion on the dict would pass just as well if bash ignored
+    the variable.
+    """
+
+    def test_mktemp_inside_a_step_lands_in_a_test_owned_directory(
+        self, tmp_path: Path
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        result = run_step(
+            {"run": 'echo "scratch=$(mktemp -d)" >> "$GITHUB_OUTPUT"'},
+            workspace=workspace,
+        )
+
+        assert result.returncode == 0, result.stderr
+        (line,) = result.output_lines
+        scratch = Path(line.split("=", 1)[1])
+        assert scratch.is_dir(), scratch
+        assert tmp_path in scratch.parents, (
+            f"{scratch} is outside the test's own tree, so a reaper of the "
+            "shared temp directory can take it while the step is still using it"
+        )
+
+    def test_the_scratch_directory_is_not_inside_the_workspace(
+        self, tmp_path: Path
+    ) -> None:
+        """`StepResult.tree()` must keep seeing only what the step created.
+
+        The scratch directory lives beside the workspace for the same reason
+        the step body script does; putting it inside would add entries to
+        every workspace-tree assertion in the suite.
+        """
+
+        workspace = make_workspace(tmp_path, files={"seed.txt": "seeded"})
+        result = run_step(
+            {"run": 'echo "scratch=$(mktemp -d)" >> "$GITHUB_OUTPUT"'},
+            workspace=workspace,
+        )
+
+        scratch = Path(result.output_lines[0].split("=", 1)[1])
+        assert workspace not in scratch.parents, scratch
+        assert scratch != workspace

@@ -382,12 +382,31 @@ def run_step(
     """
     github_output = workspace / "_github_output"
 
+    # A scratch directory for whatever the step's own `mktemp` creates.
+    #
+    # Beside the workspace rather than inside it, for the same reason the step
+    # body script is: `StepResult.tree()` and the `$RUNNER_TEMP` assertions
+    # must keep seeing only what the step itself created in the workspace.
+    #
+    # It exists because this env is built from scratch, which silently left
+    # `TMPDIR` unset: `mktemp -d` inside a step then fell back to `/tmp`, and
+    # on a runner that prunes `/tmp` mid-job the step lost its own scratch
+    # directory while still using it -- `cd: /tmp/tmp.XjdPkLm7IE: No such file
+    # or directory`, observed on main in run 34781323754 AFTER the job-level
+    # `TMPDIR` fix, which this env reset was discarding. Declaring it here
+    # keeps the from-scratch guarantee (nothing is inherited from the
+    # developer's shell) while making the step's temporary files land
+    # somewhere test-owned.
+    step_tmp = workspace.parent / f"_step_tmp_{workspace.name}"
+    step_tmp.mkdir(parents=True, exist_ok=True)
+
     step_env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(workspace),
         "GITHUB_OUTPUT": str(github_output),
         "GITHUB_WORKSPACE": str(workspace),
         "RUNNER_TEMP": str(workspace / "_runner_temp"),
+        "TMPDIR": str(step_tmp),
     }
     # The step's own declared env, with unresolved ${{ }} expressions left to
     # the caller to substitute — a test that forgets is passing a literal
