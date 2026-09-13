@@ -44,7 +44,6 @@ import itertools
 
 import pytest
 
-from abicheck.buildsource.entity_identity import CanonicalIdentity
 from abicheck.buildsource.graph_reconcile_outcome import (
     _OUTCOME_PROSE,
     OUTCOME_COORDINATES_ONLY,
@@ -55,6 +54,7 @@ from abicheck.buildsource.graph_reconcile_outcome import (
     OUTCOME_RENAMED,
     classify,
 )
+from abicheck.model.entity_identity import CanonicalIdentity
 
 #: Every outcome the classifier can return. Kept as a literal here rather
 #: than derived from the module, so adding a sixth outcome without deciding

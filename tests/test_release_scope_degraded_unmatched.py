@@ -26,9 +26,9 @@ from test_release_scope_completeness import (
     _write_stored_package,
 )
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.model import AbiSnapshot
 from abicheck.model.scope_acquisition import AcquisitionState
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 from abicheck.workflows.release_stored_inventory import (
     StoredDegradedMembers,
     stored_degraded_members,

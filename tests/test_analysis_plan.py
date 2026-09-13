@@ -32,8 +32,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import CompareRequest, DumpRequest, InputSpec
 from abicheck.errors import PlanningError
+from abicheck.service import CompareRequest, DumpRequest, InputSpec
 from abicheck.workflows.plan import (
     AnalysisPlan,
     AnalysisPlanner,

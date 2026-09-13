@@ -113,7 +113,7 @@ def test_a_linker_script_operand_is_live_on_the_typed_api(
         script.write_text(f"INPUT({so.name})\n", encoding="utf-8")
         made.append(so if operand == "binary" else script)
 
-    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.service import CompareRequest, InputSpec
     from abicheck.service_compare_pipeline import run_compare_request
 
     request = CompareRequest(

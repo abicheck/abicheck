@@ -49,8 +49,8 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.name_classification import strip_anonymous_type_location
-from abicheck.qualified_name_segments import renumber_anonymous_closure_identities
 from abicheck.serialization import load_snapshot, snapshot_from_dict
+from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
 from abicheck.storage.snapshot_load_normalization import (
     normalize_anonymous_type_spellings_on_load,
 )

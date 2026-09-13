@@ -18,7 +18,7 @@ PR I).
 
 :func:`compare_stored_bundle_facts_pair` is the driver behind ``compare``'s
 stored/stored operand shape: both OLD_INPUT and NEW_INPUT are already
-persisted :class:`~abicheck.bundle_facts.BundleFacts` documents (each from a
+persisted :class:`~abicheck.model.bundle_facts.BundleFacts` documents (each from a
 prior ``compare --bundle-facts-out``), so this is a pure in-memory diff --
 no binaries read, no header AST parsed on either side.
 
@@ -85,7 +85,7 @@ def compare_stored_bundle_facts_pair(
     codebase uses (never ``checker.compare`` directly). Mirrors
     :func:`~abicheck.bundle_side_input.compare_release_against_bundle_facts`'s
     own final step (a direct call into
-    :func:`~abicheck.bundle_facts.compare_bundle_from_facts`, never
+    :func:`~abicheck.model.bundle_facts.compare_bundle_from_facts`, never
     :func:`~abicheck.bundle_side_input.compare_bundle_sides`/
     :func:`~abicheck.bundle_side_input.resolve_bundle_side`) for the
     identical reason documented there: each stored document is already

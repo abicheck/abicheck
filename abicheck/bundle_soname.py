@@ -13,7 +13,7 @@ keep that file under the AI-readiness file-size hard cap — see
 ``bundle.py``'s own ``_detect_intra_dep_removed``/
 ``_detect_unresolved_intra_dependency`` (soname matching) and
 ``_compute_resolution_graph`` (alias recovery), which are this module's
-only callers, plus :mod:`abicheck.bundle_facts` (G38 Phase 2), which uses
+only callers, plus :mod:`abicheck.model.bundle_facts` (G38 Phase 2), which uses
 ``filesystem_alias_basenames`` directly to capture real on-disk aliases
 while a library's own file still exists, for later metadata-only replay.
 """
@@ -109,7 +109,7 @@ def resolved_basename(path: Path) -> str:
     resolution fails (a broken symlink, a permissions error, ...).
 
     Shared by :func:`filesystem_alias_basenames` (below) and
-    :func:`abicheck.bundle_facts.capture_bundle_facts`'s
+    :func:`abicheck.model.bundle_facts.capture_bundle_facts`'s
     ``library_filenames`` capture: both need "the real, versioned on-disk
     name" for a library that may itself be a dev symlink (``libfoo.so`` ->
     ``libfoo.so.1``) -- a bare ``path.name`` would capture the symlink's
@@ -130,7 +130,7 @@ def filesystem_alias_basenames(path: Path) -> tuple[str, ...]:
     Exposed standalone (rather than only inline in
     ``bundle._compute_resolution_graph``'s own ``probe_filesystem=True``
     branch) so a caller with real files on disk *at capture time* (G38
-    Phase 2's :func:`abicheck.bundle_facts.capture_bundle_facts`) can
+    Phase 2's :func:`abicheck.model.bundle_facts.capture_bundle_facts`) can
     persist the result and replay the identical resolution later, when the
     original binaries may no longer exist or be reachable on the loading
     machine (see ``bundle.build_bundle_snapshot_from_metadata``'s

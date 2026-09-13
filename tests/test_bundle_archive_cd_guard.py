@@ -696,9 +696,9 @@ class TestLooksLikeZipFromTail:
         import struct
         import zlib
 
-        from abicheck.bundle_facts import capture_bundle_facts
         from abicheck.serialization import bundle_facts_to_dict, load_bundle_facts
         from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         facts = capture_bundle_facts({})
         payload = json.dumps(bundle_facts_to_dict(facts), indent=2).encode("utf-8")

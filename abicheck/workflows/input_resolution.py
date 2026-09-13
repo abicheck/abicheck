@@ -221,7 +221,7 @@ def side_is_live(path: Path, *, had_raw_evidence: bool = False) -> bool:
 
 
 def input_spec_is_live(spec: Any) -> bool:
-    """:func:`side_is_live` for a typed :class:`~abicheck.api_types.InputSpec`.
+    """:func:`side_is_live` for a typed :class:`~abicheck.workflows.contracts.InputSpec`.
 
     The typed API's counterpart to the native CLI's own
     ``side_is_live(path, had_raw_evidence=_needs_inline_embed(...))`` call --
@@ -492,7 +492,7 @@ def resolve_input(
             logger. The CLI passes a ``click.echo(..., err=True)`` wrapper.
         lang_explicit: Whether *lang* is a genuinely explicit request rather
             than the request-level default (G31 Phase C follow-up — see
-            :attr:`abicheck.api_types.DumpRequest.lang_explicit`). ``False``
+            :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`). ``False``
             (the default) preserves this function's pre-existing behavior:
             *lang* is honored only when it equals ``"c"``, otherwise the
             header-AST pass auto-detects. ``True`` forces *lang* on the

@@ -173,10 +173,10 @@ class TestResolveDumpRequestUsesTheSharedSelector:
     """
 
     def test_matches_shared_selector_for_device_context(self, tmp_path):
-        from abicheck.api_types import DumpRequest, InputSpec
         from abicheck.dumper import _resolve_effective_ast_backend
         from abicheck.model import AbiSnapshot
         from abicheck.serialization import snapshot_to_json
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import resolve_dump_request
 
         snap_path = tmp_path / "lib.abi.json"

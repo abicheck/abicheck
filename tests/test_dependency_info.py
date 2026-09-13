@@ -27,13 +27,13 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import CompareRequest, InputSpec
 from abicheck.dependency_info import (
     _dependency_source,
     populate_dependency_info,
     populate_pair_dependency_info,
 )
 from abicheck.model import AbiSnapshot
+from abicheck.service import CompareRequest, InputSpec
 
 
 class _FakeGraph:

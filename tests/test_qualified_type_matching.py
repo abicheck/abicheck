@@ -30,9 +30,9 @@ from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.qualified_name_normalization import strip_inline_abi_namespaces
 from abicheck.diff_helpers import build_type_map, lookup_matched_type
 from abicheck.model import AbiSnapshot, EnumType, RecordType, TypeField
-from abicheck.qualified_name_segments import strip_inline_abi_namespaces
 
 
 def _rec(
@@ -308,7 +308,9 @@ def test_only_abi_tag_segments_are_ever_removed(segs: list[str], leaf: str) -> N
     """Whatever is dropped is an ABI tag, and whatever is ordinary is kept in
     its original relative order — an ordinary namespace rename must remain
     visible."""
-    from abicheck.qualified_name_segments import is_inline_abi_namespace_segment
+    from abicheck.compare.qualified_name_normalization import (
+        is_inline_abi_namespace_segment,
+    )
 
     qualified = "::".join([*segs, leaf])
     stripped = strip_inline_abi_namespaces(qualified)

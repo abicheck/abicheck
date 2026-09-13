@@ -32,7 +32,6 @@ from _compat_eval_fixtures import (
     write_pack as _write_pack,
 )
 
-from abicheck.api_types import CompareRequest, InputSpec
 from abicheck.change_registry_types import Verdict
 from abicheck.compatibility_evaluation_frontend import (
     CONTRACT_MODE_FIELD,
@@ -53,6 +52,7 @@ from abicheck.compatibility_evaluation_frontend import (
 )
 from abicheck.contract_relevance_types import SelectorLayer
 from abicheck.policy_file import PolicyFile
+from abicheck.service import CompareRequest, InputSpec
 from abicheck.suppression import SuppressionList
 
 

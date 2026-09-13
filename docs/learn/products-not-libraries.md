@@ -11,7 +11,7 @@ summarizes:
 depends_on:
   - abicheck/bundle.py
   - abicheck/bundle_manifest.py
-  - abicheck/bundle_facts.py
+  - abicheck/model/bundle_facts.py
   - abicheck/cli_aggregate.py
 lifecycle: active
 generated: false

@@ -1153,7 +1153,7 @@ def _append_coverage_suite(root: ET.Element, result: DiffResult) -> int:
     missing" and "never checked" are different states, and a consumer must be
     able to tell them apart.
     """
-    from .contract_coverage_ledger import coverage_failures_for_context
+    from .policy.coverage_ledger import coverage_failures_for_context
 
     ctx = getattr(result, "contract_context", None)
     if ctx is None:

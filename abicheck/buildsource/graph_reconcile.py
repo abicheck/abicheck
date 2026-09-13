@@ -104,11 +104,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .entity_identity import (
+from abicheck.model.entity_identity import (
     IDENTITY_TIER_CANONICAL,
     CanonicalIdentity,
     resolve_identity_for_node,
 )
+
 from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabulary has always been importable from this module
     _OUTCOME_PROSE,
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
@@ -689,8 +690,9 @@ def _public_reachable_ids(graph: SourceGraphSummary) -> frozenset[str]:
     are different questions; only the latter matters for gating a finding's
     verdict impact.
     """
+    from abicheck.model.source_graph_query import is_public_dependency_node
+
     from ..model.source_graph import DEPENDENCY_EDGE_KINDS
-    from .source_graph_query import is_public_dependency_node
 
     adjacency: dict[str, list[str]] = {}
     for e in graph.edges:

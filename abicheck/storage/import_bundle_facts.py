@@ -18,7 +18,7 @@ half of `storage/import_v1.py`'s own promised follow-up ("fold baseline sets
 and `BundleFacts` into sections... coordinating with G38 Phase 2").
 
 **Why a `BundleFacts` document folds naturally onto one variant.** A G38
-`BundleFacts` (`abicheck/bundle_facts.py`) is, at its core, exactly what
+`BundleFacts` (`abicheck/model/bundle_facts.py`) is, at its core, exactly what
 `storage.import_v1.import_legacy_snapshot`'s own docstring already
 anticipated: "a caller importing several libraries into one project calls
 [it] once per library... and merges the resulting manifests' `variant_refs`/
@@ -31,7 +31,7 @@ shared `VariantRef` rather than growing a second per-library import path.
 
 **Why this module takes a document, not a live `BundleFacts`.** `storage/`
 may depend only on `model` (`storage/AGENTS.md`) — it cannot import
-`abicheck.bundle_facts`/`abicheck.bundle_facts_serialization`/
+`abicheck.model.bundle_facts`/`abicheck.storage.bundle_facts_codec`/
 `abicheck.bundle_manifest` (all flat-root modules) to build or interpret a
 live `BundleFacts` object, the identical layering reason `import_v1.py`'s
 own module docstring gives for taking an already-serialized `AbiSnapshot`
@@ -98,17 +98,17 @@ __all__ = [
 #: Self-describing document-type marker, duplicated here rather than
 #: imported (`storage/` may depend only on `model` -- `storage/AGENTS.md`),
 #: the same reason `bundle_facts_validation.BUNDLE_ARCHIVE_ARTIFACT_TYPE`
-#: duplicates its sibling. Must equal `abicheck.bundle_facts
+#: duplicates its sibling. Must equal `abicheck.model.bundle_facts
 #: .BUNDLE_FACTS_ARTIFACT_TYPE`; `tests/unit/storage/test_import_bundle_facts.py` pins it.
 BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
-#: `abicheck.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
+#: `abicheck.model.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
 #: `BUNDLE_FACTS_ARTIFACT_TYPE` is. `export_bundle_facts` applies `bundle_facts_to_dict()`'s
 #: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8).
 _BUNDLE_FACTS_SCHEMA_VERSION = 3
 _BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 
-#: `abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`, duplicated for the
+#: `abicheck.model.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`, duplicated for the
 #: identical reason as `BUNDLE_FACTS_ARTIFACT_TYPE` above.
 _DEFAULT_VARIANT_FINGERPRINT = "default"
 

@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 
-from abicheck.buildsource.entity_identity import (
+from abicheck.buildsource.source_graph import GraphNode
+from abicheck.model.entity_identity import (
     IDENTITY_TIER_CANONICAL,
     IDENTITY_TIER_NORMALIZED,
     IDENTITY_TIER_REDUCED,
@@ -27,7 +28,6 @@ from abicheck.buildsource.entity_identity import (
     resolve_canonical_identity,
     resolve_identity_for_node,
 )
-from abicheck.buildsource.source_graph import GraphNode
 
 
 def test_tier1_usr_wins_over_everything_else() -> None:

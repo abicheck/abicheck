@@ -118,8 +118,7 @@ def _run_cli_compare(old: Path, new: Path) -> int:
 
 
 def _run_typed_api_compare(old: Path, new: Path) -> None:
-    from abicheck.api_types import CompareRequest, InputSpec
-    from abicheck.service import run_compare_request
+    from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

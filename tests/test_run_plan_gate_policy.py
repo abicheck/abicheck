@@ -63,7 +63,7 @@ class TestToAggregateManifest:
     def test_produces_a_manifest_aggregate_itself_accepts(self) -> None:
         """Not just shape-compatible on paper -- feed it straight into
         aggregate.ExpectedTargets, the real reader."""
-        from abicheck.aggregate import ExpectedTargets
+        from abicheck.workflows.aggregate import ExpectedTargets
 
         plan = RunPlan(
             checks=[
@@ -79,7 +79,7 @@ class TestToAggregateManifest:
         `--gate-unexpected-target`) rides inside run-plan.json and projects
         into `--run-plan`'s manifest the same way a hand-authored
         `--manifest`'s own `gate` block does."""
-        from abicheck.aggregate import ExpectedTargets, OnMissingRequired
+        from abicheck.workflows.aggregate import ExpectedTargets, OnMissingRequired
 
         plan = RunPlan(
             checks=[RunPlanCheck(check_id="libfoo@linux#release@headers")],
@@ -132,7 +132,7 @@ class TestToAggregateManifest:
         `RunPlan.from_dict()`/`ExpectedTargets.from_manifest_data()` already
         enforce, instead of only catching the mistake when someone reads
         the bad JSON back."""
-        from abicheck.aggregate import AggregateError
+        from abicheck.workflows.aggregate import AggregateError
 
         plan = RunPlan(checks=[], gate_missing_required="bogus")
         with pytest.raises(AggregateError):
@@ -141,7 +141,7 @@ class TestToAggregateManifest:
     def test_to_aggregate_manifest_rejects_a_bogus_directly_constructed_gate_value(
         self,
     ) -> None:
-        from abicheck.aggregate import AggregateError
+        from abicheck.workflows.aggregate import AggregateError
 
         plan = RunPlan(checks=[], gate_unexpected_target="bogus")
         with pytest.raises(AggregateError):
@@ -162,7 +162,7 @@ class TestToAggregateManifest:
         assert plan.to_dict()["schema"] == RUN_PLAN_SCHEMA
 
     def test_gate_with_declared_v1_schema_is_rejected(self) -> None:
-        from abicheck.aggregate import AggregateError
+        from abicheck.workflows.aggregate import AggregateError
 
         with pytest.raises(AggregateError, match="schema.*v2"):
             RunPlan.from_dict(
@@ -178,13 +178,13 @@ class TestToAggregateManifest:
         # hand-crafted gate-bearing plan omitting `schema` entirely is the
         # same inconsistency as declaring v1 explicitly, since this
         # codebase's own `to_dict()` always stamps v2 whenever gate is set.
-        from abicheck.aggregate import AggregateError
+        from abicheck.workflows.aggregate import AggregateError
 
         with pytest.raises(AggregateError, match="schema.*v2"):
             RunPlan.from_dict({"checks": [], "gate": {"missing_required": "warn"}})
 
     def test_future_schema_major_is_rejected(self) -> None:
-        from abicheck.aggregate import AggregateError
+        from abicheck.workflows.aggregate import AggregateError
 
         with pytest.raises(AggregateError, match="newer than this tool supports"):
             RunPlan.from_dict({"schema": "abicheck.run-plan/v99", "checks": []})
@@ -220,7 +220,7 @@ class TestToAggregateManifest:
         defaults, potentially reversing the requested CI outcome. Mirrors
         `ExpectedTargets.from_manifest_data()`'s own validation for a
         hand-authored manifest's `gate` block."""
-        from abicheck.aggregate import AggregateError
+        from abicheck.workflows.aggregate import AggregateError
 
         with pytest.raises(AggregateError):
             RunPlan.from_dict(

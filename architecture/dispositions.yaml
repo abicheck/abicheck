@@ -2,13 +2,6 @@
   "schema_version": 1,
   "modules": [
     {
-      "path": "abicheck/api_types.py",
-      "disposition": "retain",
-      "supported_reason": "ADR-061 gap B closed the implementation-vs-facade split this record's own `notes` field once flagged as still open: the typed request/response dataclasses for the Tier-2 service layer (ADR-037 D2) physically moved to `workflows.request_inputs`/`workflows.contracts` (`InputSpec` and `OutputSpec`/`CompareRequest`/`DumpRequest`/`CompareResult` respectively, split purely to stay under the 800-line new-file ceiling), plus `model.header_ast_frontends` for the one constant an `extract`-layer caller also needs. This file is now a pure re-export facade (69 lines) preserving every existing `from abicheck.api_types import ...` path; every canonical internal caller now imports the owning module directly. It stays a retained exemption because it is also declared in modules.yaml's public_root_surfaces and ADR-061 D2's own end-state physical layout still names this exact file at root -- not because it holds unmoved business logic anymore.",
-      "owner": "abicheck maintainers",
-      "review_by": "2027-03-01"
-    },
-    {
       "path": "abicheck/build_context.py",
       "disposition": "migrate",
       "target_layer": "extract",
@@ -41,13 +34,6 @@
       "rationale": "frontends (cli_compare_helpers.py, cli_compare_receipt.py) import this module directly today. Trial classification into `policy` measured 9 new frontends -> policy violations. Those call sites need to route through workflows first, the same way the already-classified compatibility_evaluation_* siblings do.",
       "owner": "abicheck maintainers",
       "review_by": "2026-12-15"
-    },
-    {
-      "path": "abicheck/contract_coverage_ledger.py",
-      "disposition": "retain",
-      "supported_reason": "ADR-061 gap B moved ADR-049 Phase 5's unsuppressible coverage ledger to policy/coverage_ledger.py, alongside its sibling policy-classified contract_coverage_exit.py -- the file itself is now a 45-line pure re-export facade. This record's own trial run flagged two frontends call sites (cli_compare_release_pairwise.py:424, cli_scan_baseline.py:949); gap B did NOT route those through the real owner, and could not without first landing a workflows-owned wrapper -- `frontends` may only import model/workflows/report (`frontends -> policy` is forbidden), so `policy.coverage_ledger` is unreachable from either call site directly. Both still import through this facade, which is exactly why it stays retained rather than deleted: it is the frontends -> policy escape hatch for these two callers, not only external compatibility. Adding that workflows wrapper (mirroring gap A's cli_dump_helpers.py -> header_conditionals.py precedent) remains open follow-up work, tracked here rather than left unrecorded.",
-      "owner": "abicheck maintainers",
-      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/contract_evidence.py",
@@ -126,14 +112,6 @@
       "rationale": "frontends imports this module directly across dozens of call sites (cli_compare_receipt.py alone three times, plus cli_compare_release*.py and cli_scan_*.py). Trial classification into `policy` measured 41 new frontends -> policy violations -- by far the largest of any module in this ledger. Needs those call sites routed through workflows first, mirroring gap A's own cli_dump_helpers.py precedent, before this file can move.",
       "owner": "abicheck maintainers",
       "review_by": "2026-12-15"
-    },
-    {
-      "path": "abicheck/qualified_name_segments.py",
-      "disposition": "retain",
-      "supported_reason": "ADR-061 gap B split this module's own two responsibilities into real owners: the qualified-name segmentation/versioned-namespace diffing decisions now live in compare/qualified_name_normalization.py, and the anonymous/lambda-closure ordinal-identity snapshot normalization now lives in storage/closure_identity.py (see each module's own docstring). This file is what remains -- a pure re-export facade over both, so every existing `from abicheck.qualified_name_segments import ...` path keeps working. It is not itself a candidate for a single owning layer: it imports both compare and storage, and classifying it into either would be a real model.may_import-shaped direction violation the same way checker_policy.py's own gap B entry describes.",
-      "owner": "abicheck maintainers",
-      "review_by": "2027-03-01",
-      "notes": "qualified_name_segments_walk.py, the third sibling file this split left behind, is classified into storage directly (modules.yaml's storage.legacy_paths) rather than recorded here, since storage.closure_identity is its only real caller."
     },
     {
       "path": "abicheck/reclassify.py",

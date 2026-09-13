@@ -49,7 +49,7 @@ question one layer up.
 ## Permitted imports
 
 Per ADR-061 D1, `model/` may import **nothing** first-party except the public
-root surfaces (`abicheck.api_types`, `abicheck.errors`) and, transitionally,
+root surfaces (`abicheck.workflows.contracts`, `abicheck.errors`) and, transitionally,
 the flat leaf modules classified `model` in `architecture/modules.yaml`.
 Importing `extract`, `compare`, `policy`, `workflows`, `report` or
 `frontends` is a defect, not a case for an exception list —

@@ -671,7 +671,7 @@ class BundleDiffResult:
     #: through" by checking this field instead of grepping the run's own
     #: stderr. Deliberately plain strings, not a richer per-error type --
     #: see this phase's own plan-doc entry for what a fuller structured
-    #: coverage ledger (mirroring `contract_coverage_ledger.py`) would add
+    #: coverage ledger (mirroring `policy/coverage_ledger.py`) would add
     #: beyond this.
     analysis_errors: list[str] = field(default_factory=list)
     #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of

@@ -159,9 +159,9 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     * the written JSON round-trips and still carries the real L3/L4
       evidence the resolve-time embed produced (not an empty pack).
     """
-    from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.compile_context import CompileContext
+    from abicheck.service import DumpRequest, InputSpec
     from abicheck.service_dump_pipeline import (
         execute_dump_request,
         resolve_dump_request,
@@ -395,11 +395,11 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
     ``helper`` node is present in the final graph, not merely that the
     graph is non-empty.
     """
-    from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
     from abicheck.buildsource.inputs_emit import write_inputs_pack
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.compile_context import CompileContext
+    from abicheck.service import DumpRequest, InputSpec
     from abicheck.service_dump_pipeline import (
         execute_dump_request,
         resolve_dump_request,
@@ -536,9 +536,9 @@ def test_write_snapshot_output_still_raises_for_a_genuinely_unreached_depth(
     evidence" needs the parse itself to never run, not just L3/L4 to be
     empty.
     """
-    from abicheck.api_types import DumpRequest, InputSpec
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.cli_dump_helpers import DumpDepthNotSatisfiedError
+    from abicheck.service import DumpRequest, InputSpec
     from abicheck.service_dump_pipeline import (
         execute_dump_request,
         resolve_dump_request,

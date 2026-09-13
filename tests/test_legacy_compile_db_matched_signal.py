@@ -64,8 +64,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.api_types import InputSpec
 from abicheck.compile_context import CompileContext
+from abicheck.service import InputSpec
 from abicheck.service_compare_evidence import SideEvidence
 from abicheck.workflows.artifact.resolve import _seeded_includes_and_compile_context
 

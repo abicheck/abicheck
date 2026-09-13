@@ -258,7 +258,7 @@ def test_resolve_dump_request_attaches_a_matching_artifact_plan(
     resolved-fact fields resolve_dump_request already computes must also
     land on the general ResolvedArtifactPlan it attaches, verbatim -- not a
     second, independently-derived copy that could drift."""
-    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service import DumpRequest, InputSpec
     from abicheck.service_dump_pipeline import resolve_dump_request
 
     resolved = resolve_dump_request(

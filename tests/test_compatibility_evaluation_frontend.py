@@ -35,7 +35,6 @@ from _compat_eval_fixtures import (
     write_pack as _write_pack,
 )
 
-from abicheck.api_types import CompareRequest, InputSpec
 from abicheck.buildsource.inline import load_build_config
 from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import VALID_BASE_POLICIES
@@ -73,6 +72,7 @@ from abicheck.compatibility_evaluation_wiring import resolve_pack_field_assignme
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.errors import PackManifestError
 from abicheck.policy_file import PolicyFile
+from abicheck.service import CompareRequest, InputSpec
 from abicheck.severity import SeverityLevel, resolve_severity_config
 
 

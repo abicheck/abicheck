@@ -13,19 +13,20 @@ from typing import Any
 
 import pytest
 
-from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
-from abicheck.bundle_facts_store import (
-    read_bundle_facts_package,
-    write_bundle_facts_package,
-)
 from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
+from abicheck.model.bundle_facts import BundleFacts
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
     read_project_manifest,
     write_project_manifest,
 )
+from abicheck.storage.bundle_facts_package import (
+    read_bundle_facts_package,
+    write_bundle_facts_package,
+)
 from abicheck.storage.package import InMemoryObjectStore
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 def _snapshot(name: str) -> AbiSnapshot:

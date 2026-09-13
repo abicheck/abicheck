@@ -34,8 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from abicheck.api_types import InputSpec
 from abicheck.dry_run_estimate import CostEstimate, estimate_scan
+from abicheck.service import InputSpec
 
 
 @dataclass

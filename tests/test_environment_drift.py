@@ -1191,13 +1191,10 @@ class TestLoadEnvMatrix:
         `CompareRequest.env_matrix` carries an already-*resolved*
         `EnvironmentMatrix`, not a path a caller could typo. Round-trips
         through `validate()` cleanly since there is no file to be missing
-        any more. `env_matrix_path` itself is NOT gone (Codex review, fresh
-        evidence: it was the documented, released 0.4.0 field) -- it
-        survives as a backward-compat constructor param `__post_init__`
-        resolves into `env_matrix`; see `test_api_types.py::
-        TestCompareRequestEnvMatrixPathCompat` for that contract."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        any more. The former `env_matrix_path` alternative is retired; see
+        `test_api_types.py::TestCompareRequestEnvMatrix` for that contract."""
         from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.service import CompareRequest, InputSpec
 
         req = CompareRequest(
             old=InputSpec(path=tmp_path / "old.so"),
@@ -1206,9 +1203,6 @@ class TestLoadEnvMatrix:
         )
         assert req.env_matrix is not None
         assert req.env_matrix.runtime_floors == {"GLIBC": "2.28"}
-        # The compat field is consumed/normalized to None even when unset,
-        # never left dangling as a second source of truth.
-        assert req.env_matrix_path is None
         assert req.validation_errors() == []
 
 

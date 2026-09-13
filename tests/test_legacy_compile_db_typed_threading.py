@@ -190,7 +190,7 @@ class TestTypedApiThreadsTheLegacyMatch:
 
     @staticmethod
     def _request(so_path: Path, header: Path, compile_db: Path):
-        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service import DumpRequest, InputSpec
 
         return DumpRequest(
             input=InputSpec(
@@ -281,7 +281,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         (a real `#include`), its own result must win outright -- passing
         `legacy_compile_db_tokens` must not additionally stack a duplicate
         `-D` on top of it."""
-        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import (
             DumpExecutionOptions,
             execute_dump_request,

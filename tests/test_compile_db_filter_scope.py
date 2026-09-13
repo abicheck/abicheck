@@ -489,7 +489,7 @@ class TestTypedApiHonorsTheFilterInTheFold:
 
     @staticmethod
     def _request(so_path: Path, header: Path, compile_db: Path, *, compile_db_filter):
-        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service import DumpRequest, InputSpec
 
         return DumpRequest(
             input=InputSpec(
@@ -559,7 +559,7 @@ def test_input_spec_of_forwards_compile_db_filter() -> None:
     through it (rather than the dataclass directly) raised ``TypeError`` for
     an unrecognized keyword, so the field was reachable only via the
     dataclass constructor despite being advertised on the public type."""
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
 
     spec = InputSpec.of(path="lib.so", compile_db_filter="src/**")
     assert spec.compile_db_filter == "src/**"
@@ -587,8 +587,8 @@ class TestCompareRequestAppliesTheSameScopeGuard:
     """
 
     def test_a_side_with_the_scope_mismatch_is_refused(self, tmp_path: Path) -> None:
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.errors import ValidationError
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import resolve_compare_request
 
         so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
@@ -619,7 +619,7 @@ class TestCompareRequestAppliesTheSameScopeGuard:
         permits regardless of the filter -- so this pins "the guard doesn't
         misfire on a legitimate filtered compare", not "no filter changes
         nothing"."""
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import resolve_compare_request
 
         so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
@@ -706,8 +706,8 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
     def test_dump_request_rejects_a_sources_only_scope_mismatch(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.api_types import DumpRequest, InputSpec
         from abicheck.errors import ValidationError
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import resolve_dump_request
 
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
@@ -729,8 +729,8 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
     def test_compare_request_rejects_a_sources_only_scope_mismatch(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.errors import ValidationError
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import resolve_compare_request
 
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
@@ -755,7 +755,7 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
         `test_unfiltered_still_fails_closed_on_the_real_ambiguity` -- and
         `resolve_dump_request` never reaches the fold at all, only
         `execute_dump_request` does, so it cannot surface here)."""
-        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import resolve_dump_request
 
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
@@ -843,8 +843,8 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
     def test_dump_request_rejects_a_nested_build_info_scope_mismatch(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.api_types import DumpRequest, InputSpec
         from abicheck.errors import ValidationError
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import resolve_dump_request
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
@@ -864,8 +864,8 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
     def test_compare_request_rejects_a_nested_build_info_scope_mismatch(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.errors import ValidationError
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import resolve_compare_request
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
@@ -884,7 +884,7 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
     ) -> None:
         """Positive control: the nested database really is what the fold
         resolves and filters by -- not merely a guard-level assumption."""
-        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import (
             execute_dump_request,
             resolve_dump_request,

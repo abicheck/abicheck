@@ -443,7 +443,7 @@ def dispatch(
         else None,
         config_explicit=config_explicit,
         default=importlib.import_module(
-            "abicheck.bundle_facts"
+            "abicheck.model.bundle_facts"
         ).DEFAULT_MAX_JSON_OBJECT_NODES,
     )
 

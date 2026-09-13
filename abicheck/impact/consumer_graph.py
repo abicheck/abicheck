@@ -347,11 +347,12 @@ def explain_required_symbols(
     # import here would put abicheck.impact and abicheck.internal_leak in one
     # import cycle (root CLAUDE.md's "What NOT to do" — prefer a
     # function-local import over extending IMPORT_CYCLE_ALLOWLIST).
-    from ..buildsource.graph_impact import select_preferred_graph_path
-    from ..buildsource.source_graph_query import (
+    from abicheck.model.source_graph_query import (
         PUBLIC_VISIBILITIES,
         is_consumer_compiled_public_entry,
     )
+
+    from ..buildsource.graph_impact import select_preferred_graph_path
     from ..internal_leak import (
         CALL_GRAPH_TRAVERSAL_POLICY,
         _consumer_compiled_reachability,

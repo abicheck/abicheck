@@ -199,8 +199,8 @@ class TestSharedPrimitiveAcceptsTheHint:
         # `_resolve_side_snapshot_impl` reads the owner's own module global,
         # so a patch on either facade would leave the real seed running.
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck.api_types import InputSpec
         from abicheck.model import AbiSnapshot
+        from abicheck.service import InputSpec
         from abicheck.service_compare_evidence import SideEvidence
         from abicheck.workflows.artifact import execute as sir
 

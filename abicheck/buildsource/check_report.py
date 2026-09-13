@@ -31,7 +31,7 @@ how ``abicheck.buildsource.baseline_set`` backs
   evidence wasn't actually available.
 - :func:`augment_report` — the common path: layer §7's identity/new fields
   onto an already-produced ``compare``/``scan`` JSON report, dual-writing
-  the legacy ``verdict``/``severity`` fields ``abicheck/aggregate.py``
+  the legacy ``verdict``/``severity`` fields ``abicheck/workflows/aggregate/``
   already parses (§7's dual-write requirement) and neutralizing the legacy
   gate for ``gate-mode: advisory`` (§7's third required sub-task) — but
   *not* for ``deferred``, whose whole point is that ``aggregate``'s own
@@ -275,7 +275,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     Only ``advisory`` reports are rewritten this way -- ``deferred`` reports
     keep their real ``severity``/``exit_code`` untouched, since
     ``check-project.yml``'s trailing ``aggregate`` job computes the actual
-    gate from exactly that real value (``abicheck/aggregate.py``'s
+    gate from exactly that real value (``abicheck/workflows/aggregate/``'s
     ``exit_code()`` is a ``max()`` over each report's real gate).
     """
     severity = report.get("severity")
@@ -414,7 +414,7 @@ def _zero_nested_severity_gates(report: dict[str, Any]) -> None:
     reasons that loop documents:
 
     * the path set is **imported** from ``aggregate``
-      (:func:`~abicheck.aggregate.scan_severity_gate_paths`) rather than
+      (:func:`~abicheck.workflows.aggregate.scan_severity_gate_paths`) rather than
       re-derived, so the writer here and the reader there cannot disagree
       about where the block lives; and
     * each container along a path is **rebound to a copy** before anything is
@@ -497,7 +497,7 @@ def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
     what is already persisted. Escalating ``policy_gate_decision``/
     ``real_exit_code`` is not enough on its own: ``gate-mode: deferred`` relies
     on ``check-project.yml``'s trailing aggregate job, and
-    ``abicheck.aggregate.GateInfo.from_report_data`` reads ONLY the persisted
+    ``abicheck.workflows.aggregate.GateInfo.from_report_data`` reads ONLY the persisted
     ``severity.exit_code`` -- it cannot see ``policy_gate_decision`` or
     ``analysis_exit_code`` at all. Without also updating severity here, a
     removed-library gate on a deferred bundle check would still be silently
@@ -708,7 +708,7 @@ def build_operational_error_report(
 ) -> dict[str, Any]:
     """Synthesize a full report envelope for a ``resolve-baseline`` failure.
 
-    ``verdict: "ERROR"`` matches ``abicheck/aggregate.py:_load_report_file``'s
+    ``verdict: "ERROR"`` matches ``abicheck/workflows/aggregate/load.py:_load_report_file``'s
     existing special case (checked *before* it ever reads a ``severity``
     block), so no ``severity`` block is written here at all -- omitting it
     is the ADR-047 §7-documented choice, not an oversight.

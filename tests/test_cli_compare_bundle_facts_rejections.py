@@ -41,10 +41,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.cli import main
 from abicheck.cli_resolve import _resolve_input
 from abicheck.serialization import save_bundle_facts
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 #: A minimal but *classifiable* stand-in OLD_INPUT for these tests: CLI
 #: cleanup phase two, PR I replaced the explicit ``--old-bundle-facts`` flag

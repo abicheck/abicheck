@@ -1981,3 +1981,53 @@ The immediate deliverable after acceptance is Phase 0: establish ownership,
 contracts, scoped guidance, and no-growth enforcement. Splitting another
 large file before those constraints exist is not progress toward this ADR by
 itself.
+
+
+## Amendment (2026-09-13): the delegation-only facades are retired, not preserved
+
+This ADR's Phase 1 acceptance criterion reads "public imports covered by
+contract tests continue to work", and its extraction rule (mirrored in
+`AGENTS.md` and `abicheck/AGENTS.md`) says to "preserve only documented
+public imports through a thin explicit façade". Twelve such facades had
+accumulated under that rule. **They are now deleted outright**, and the
+rule no longer applies to abicheck's own historical Python import paths:
+
+`abicheck.aggregate`, `aggregate_findings`, `aggregate_manifest`,
+`api_types`, `bundle_facts`, `bundle_facts_serialization`,
+`bundle_facts_store`, `contract_coverage_ledger`,
+`qualified_name_segments`, and `buildsource.{entity_identity,
+entity_resolver, source_graph_query}`. Importing any of them now raises
+`ModuleNotFoundError`; import the owning module named in each deletion's
+changelog entry, or — for the typed request/result types — the supported
+`abicheck.service` surface.
+
+**Why the preservation rule is retired rather than applied.** It was
+written to keep a migration from breaking callers *while the migration was
+in flight*, and it did that job. What it did not anticipate is that the
+facades would become permanent: each one is a second name for a thing that
+already has an owner, so every subsequent reader has two places to look,
+every new contributor has two import paths to choose between, and the
+"which do I import?" question has to be answered in a docstring on each
+facade — which is why several of them are longer than the rule's own
+150-line ceiling would suggest is possible for a pure re-export. ADR-043
+already reset the CLI surface on the basis that abicheck is pre-1.0; the
+typed API's historical import paths sit on exactly the same footing. An
+accepted document describing an interface as public is a reason to
+*record* its retirement, not on its own a reason to preserve it forever.
+
+This is compatibility of **abicheck's own Python interfaces**, and it must
+not be confused with the ABI/API compatibility the product analyses for its
+users — which is unchanged, and which this batch validated end to end
+against real compiled binaries across every operand shape.
+
+**What replaces the criterion.** Phase 1's acceptance now reads: semantic
+results and JSON are exactly compatible; internal imports use the new
+owner; no reverse facade import or duplicated decision exists; the relevant
+debt entries shrink or disappear; and every retired import path is named in
+a changelog fragment with its owner. `tests/test_adr061_gap_b_facades.py`
+still holds the remaining facades to their delegation-only contract —
+`checker_policy`, `contract_gating` and `reclassify`, which stay because
+`model`-owned `checker_types.py` imports them and `model` cannot depend on
+`policy`. Those three are a real dependency-direction constraint, not a
+compatibility promise, and they go when `DiffResult`'s policy lookups move
+out of `model`.

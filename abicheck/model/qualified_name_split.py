@@ -30,8 +30,8 @@ segments, and recognizing whether one already-split segment's *spelling*
 matches a versioned (``v1``, ``__1``, ...) or named-toolchain-tag
 (``__cxx11``, ``__ndk1``) inline namespace, are both pure text
 classification with no ``compare``-specific *decision* in them: unlike
-:func:`~abicheck.qualified_name_segments.version_strip_segments`/
-:func:`~abicheck.qualified_name_segments.strip_inline_abi_namespaces`
+:func:`~abicheck.compare.qualified_name_normalization.version_strip_segments`/
+:func:`~abicheck.compare.qualified_name_normalization.strip_inline_abi_namespaces`
 (which decide that two differently-spelled qualified names identify the
 *same* declaration for diffing purposes -- a real compare-layer judgement,
 and rightly left there), :func:`version_suffix` and

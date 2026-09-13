@@ -51,7 +51,7 @@ from abicheck.model.semantic_ir import (
     semantic_ir_conflict_key,
 )
 from abicheck.name_classification import strip_anonymous_type_location
-from abicheck.qualified_name_segments import renumber_anonymous_closure_identities
+from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
 
 
 def _closure(header: str, line: int, col: int) -> str:

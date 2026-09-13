@@ -98,7 +98,7 @@ def _try_header_scoped_dump(
     ``lang_explicit`` (G31 Phase C follow-up): forces *lang* on this pass
     regardless of value when set, matching the sibling force decision
     ``service.run_dump``'s own ``_header_graph_lang`` computes for the same
-    request — see :attr:`abicheck.api_types.DumpRequest.lang_explicit`.
+    request — see :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`.
     ``False`` (the default) is a no-op: identical to the pre-existing
     "force only bare ``'c'``" behavior.
     """

@@ -17,7 +17,7 @@ build/source-evidence fields into the primitives :func:`service.run_compare_requ
 already knows how to drive (a collect mode, a per-side header list, a per-side
 :class:`CompileContext`).
 
-G33 Phase 5 gave :class:`~abicheck.api_types.DumpRequest` the same fields, so
+G33 Phase 5 gave :class:`~abicheck.workflows.contracts.DumpRequest` the same fields, so
 the per-input half of that resolution is shared:
 :func:`resolve_side_evidence` answers for one :class:`InputSpec`, and
 :func:`resolve_compare_request_evidence` / :func:`resolve_dump_request_evidence`
@@ -466,7 +466,7 @@ def resolve_side_evidence(
 
 
 def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
-    """Resolve a :class:`~abicheck.api_types.DumpRequest`'s single input.
+    """Resolve a :class:`~abicheck.workflows.contracts.DumpRequest`'s single input.
 
     No pair-wide compile context: the C++20 dialect override
     (``dry_run_estimate.pair_wide_cxx20_std_override``) exists so two *sides* of a

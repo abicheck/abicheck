@@ -82,6 +82,7 @@ from ..policy.contract_coverage_exit import (
     coverage_exit_for_context,
     fold_coverage_exit,
 )
+from ..policy.coverage_ledger import coverage_failures_for_context
 from ..policy.effective_gate import (
     EffectiveGate,
     GateSeverityState,
@@ -185,6 +186,7 @@ __all__ = [
     "coverage_diagnostic_from_summary",
     "coverage_exit_floor",
     "coverage_exit_for_context",
+    "coverage_failure_count",
     "effective_gate_for_resolved_compare_config",
     "fold_analysis_assurance_exit",
     "fold_coverage_exit",
@@ -291,3 +293,17 @@ def effective_gate_for_resolved_compare_config(
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
     )
+
+
+def coverage_failure_count(result: Any) -> int:
+    """How many contract-coverage failures *result* carries.
+
+    The count is independent of :func:`coverage_exit_floor`'s ``0``/``1``:
+    ``contract.unresolved: warn`` deliberately zeroes the floor while the
+    failures themselves stay real and unsuppressible (ADR-049 -- accepting
+    incomplete assurance, not hiding it). Lives here rather than in each
+    caller so a `frontends`-classified reporter can ask `workflows` for the
+    number it publishes instead of reaching into `policy` for the list and
+    measuring it itself.
+    """
+    return len(coverage_failures_for_context(result.contract_context))
