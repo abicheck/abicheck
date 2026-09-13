@@ -824,8 +824,10 @@ def _asym_snap(*, dwarf=False, headers=False, version="1.0"):
         library="libfoo.so",
         version=version,
         platform="elf",
+        # has_dwarf=True, not a bare DwarfMetadata(): the flag is what says
+        # debug info was collected, and an empty object means the opposite.
         elf=elf,
-        dwarf=DwarfMetadata() if dwarf else None,
+        dwarf=DwarfMetadata(has_dwarf=True) if dwarf else None,
         from_headers=headers,
     )
 

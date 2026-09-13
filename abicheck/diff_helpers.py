@@ -47,7 +47,7 @@ from .fact_provenance import (
     both_known_backed_fact_qualified,
     same_producer_backed_fact_qualified,
 )
-from .model import AbiSnapshot
+from .model import AbiSnapshot, debug_info_present
 from .model.change_catalog.kinds import ChangeKind
 
 # Imported directly from the canonical model-layer location (ADR-061 D9's
@@ -385,12 +385,12 @@ def typedef_side_trusts_qualified(snapshot: AbiSnapshot) -> bool:
 
 def typedef_flat_map_is_dwarf_qualified(snapshot: AbiSnapshot) -> bool:
     """True when *snapshot* doesn't trust ``typedefs_qualified`` yet its flat
-    ``typedefs`` is already qualified-keyed (Codex review, PR #1078,
-    twenty-sixth round): DWARF keys it by the full qualified name. ``dwarf
-    is not None`` alone is not enough (twenty-seventh round): a header-parsed
-    ELF binary can also carry DWARF debug info, setting both together --
-    ``from_headers`` is what actually distinguishes the two."""
-    return snapshot.dwarf is not None and not snapshot.from_headers
+    ``typedefs`` is already qualified-keyed (Codex review, PR #1078, round 26):
+    DWARF keys it by the full qualified name, but alone is not enough (round
+    27): a header-parsed ELF binary can carry DWARF too, setting both --
+    ``from_headers`` distinguishes those. The DWARF half is
+    ``debug_info_present``, not ``is not None``: dumps attach empty metadata."""
+    return debug_info_present(snapshot.dwarf) and not snapshot.from_headers
 
 
 def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:

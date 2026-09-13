@@ -2154,6 +2154,74 @@ looked like the obvious fix and wasn't.
   in this same PR session for adjacent findings in this exact area. Filed
   here per this file's own "known gaps over risky reactive patches"
   convention rather than attempted under continued review pressure.
+- **`advanced_facts_collected` infers "advanced DWARF extraction ran" from
+  its output rather than recording it.** The predicate answers by checking
+  whether any field `dwarf_advanced.diff_advanced_dwarf` consumes is
+  non-empty, plus `target_arch` as a discriminator for a parse that completed
+  but established nothing (`dwarf_advanced` sets it from the ELF header;
+  the presence-only helpers leave it `""`). That is sound for every shape
+  reachable today, and it is mutation-checked per consumed family in
+  `tests/test_debug_evidence_presence.py`. But it is still an inference: the
+  honest signal is a **status**, not a reconstruction from findings.
+
+  The reason it matters is asymmetric. `checker.py` requires the predicate on
+  *both* sides, so any shape the inference gets wrong does not merely mislabel
+  coverage — it disables the `advanced_dwarf` detector wholesale and the run
+  silently misses real drift. That is a false negative, the worse direction,
+  and two such shapes were already found by review during one PR (the three
+  `toolchain` flag sets, then the successful-but-empty parse).
+
+  **The durable fix is an explicit "advanced extraction completed" field on
+  `AdvancedDwarfMetadata`**, set where the parse succeeds and persisted, with
+  the predicate reading it instead of inferring. Not folded into the fix PR
+  because it is a persisted-model change: a new field means a
+  `SCHEMA_VERSION` bump and a decision about how a pre-bump snapshot reads
+  (almost certainly "unknown", resolved conservatively), which this file's own
+  contract says gets its own ADR and migration rather than riding along with a
+  behavior fix. Until then the inference stands, and any new consumer of
+  `AdvancedDwarfMetadata` must be added to `_CONSUMED_ADVANCED_FIELDS` in that
+  test or it will silently disable the detector again.
+
+- **A pre-fix clang-backend baseline compares against a post-fix candidate
+  as a wave of `FUNC_BECAME_INLINE` — no reliability flag guards
+  `Function.is_inline`.** The implicit-inline fix
+  (`extract/headers/clang/inline_semantics.py`) changed what the clang
+  header backend *records* for a `constexpr`/in-class/`= default`
+  declaration, from `False` to the correct `True`. A snapshot dumped with
+  the clang backend before that fix therefore carries a wrong value, and
+  `diff_symbols._check_inline_transitions` compares `is_inline` raw on both
+  sides with no producer or generation gate — so a stored baseline from
+  before the fix, compared against a freshly-dumped candidate, reports
+  `FUNC_BECAME_INLINE` (RISK) for every such declaration. The findings are
+  spurious: nothing about the library changed.
+
+  **Bounded, with a one-step remedy.** castxml is the default header
+  backend and always recorded these as inline, so only a baseline captured
+  under the opt-in `--ast-frontend clang` / `ABICHECK_AST_FRONTEND=clang` is
+  affected, and re-dumping that baseline clears it permanently. The findings
+  are RISK-class, never breaking, so no gate flips from pass to fail.
+
+  **The proper fix is the established one, and it is a schema change.** This
+  codebase already has the mechanism for exactly this situation — a fact
+  whose stored value is wrong in snapshots from an earlier generation:
+  `clang_restrict_facts_reliable`, `clang_va_list_facts_reliable`,
+  `param_kind_facts_reliable` and their siblings
+  (`model/snapshot_reliability.py`), each set `False` at load time for a
+  snapshot below a `_MIN_SCHEMA_VERSION_FOR_*` threshold from the affected
+  producer, and read by the consuming detector, which then declines rather
+  than fabricating a finding. Adding `clang_inline_facts_reliable` the same
+  way is the complete fix. It is **not** folded into the fix PR because it
+  cannot work without bumping `SCHEMA_VERSION` (a pre-fix snapshot is v46,
+  and so is a post-fix one — there is otherwise no way to tell them apart),
+  and this file's own contract is that a schema change gets its own ADR and
+  migration rather than riding along with a behavior fix. It also lands in
+  `policy/analysis_assurance_degraded_facts.py`'s `consulted_when` map,
+  whose every-flag-has-a-key invariant is enforced by a `KeyError` rather
+  than a check, and — if `is_inline` is converted to a `Fact[bool]` at the
+  same time, which is the `param_kind` precedent — in the storage backfill
+  rules too. Recorded here rather than attempted under the same review, per
+  this file's own convention.
+
 - **Linkage-blind removal — attempted twice, reverted twice. The evidence
   keeps proving something adjacent to the invariant.** A symbol vanishing from
   the export table is reported as `func_removed` (and, on the same symbol,
@@ -2162,10 +2230,16 @@ looked like the obvious fix and wasn't.
   *"every consumer already emitted its own copy"*, and both attempts
   established something else:
 
-  1. **`Function.is_inline`** proves the `inline` *specifier*, not that a
-     definition exists. Verified against real clang: `inline int f();` yields
-     `inline=True, has_body=False`, and both AST parsers assign the field
-     straight from the specifier attribute with no body check.
+  1. **`Function.is_inline`** proves the declaration's inline *linkage*, not
+     that a definition exists. Verified against real clang: `inline int f();`
+     yields `inline=True, has_body=False`. This stays true after the
+     implicit-inline fix (`extract/headers/clang/inline_semantics.py`), which
+     widened the field to cover `constexpr`/`consteval`, in-class definitions
+     and in-class `= default` so the two backends agree: those are all still
+     *linkage* facts about the library's own declaration, and none of them
+     says a consumer emitted a copy — which is the shared shape this entry
+     exists to name. Read it as "may have vague linkage", never as "every
+     consumer already has its own definition".
   2. **COMDAT-group membership** proves the *library* used vague linkage, not
      that its *consumers* did. `extern template` is the counterexample, and it
      is ordinary code: a public header carrying `extern template struct

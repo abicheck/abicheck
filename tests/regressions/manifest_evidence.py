@@ -249,6 +249,242 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="evidence.container_presence_read_as_evidence_content",
+        invariant=(
+            "Whether evidence was collected is answered from the evidence's "
+            "own content flag, never from whether a container object was "
+            "attached to hold it. An extractor that ran and found nothing, "
+            "one that was never asked, and one that raised all attach the "
+            "same empty, truthy metadata object, so object presence is a "
+            "fact about the pipeline's shape and carries no information "
+            "about the artifact; reading it as evidence reports a stripped "
+            "binary as fully debug-covered and makes the lower evidence tier "
+            "unreachable on the normal path. The answer is consistent across "
+            "every consumer of the same fact -- coverage row, evidence tier, "
+            "key-shape trust, and detector support gate -- since a detector "
+            "declared supported over empty input reports 'ran, found "
+            "nothing' where the truth is 'never evaluated'. Status, "
+            "confidence and human-readable detail agree with one another, so "
+            "no single corrected field leaves a reader equally misled, and "
+            "no-evidence-in-hand is reported as such rather than as a claim "
+            "about what the artifact contains."
+        ),
+        fixed_by=(1268,),
+        seed_tests=("tests/test_debug_evidence_presence.py",),
+        public_surfaces=("compare --format json: layer_coverage[].status",),
+        axes={
+            "slot": ("dwarf", "dwarf_advanced"),
+            "state": ("absent", "empty", "empty_with_payload_keys", "collected"),
+            "consumer": (
+                "intrinsic_coverage",
+                "surface_graph evidence tier",
+                "typedef key-shape trust",
+                "detector support gate",
+            ),
+            "producer": ("elf-dump", "symbols-only fallback", "btf/ctf", "g++ -g/-g0"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The sweep is exhaustive over the two debug slots, which "
+                    "is where the reported defect lived, but the underlying "
+                    "shape -- a dataclass with no __bool__ standing in for "
+                    "its own content flag -- is not confined to them. There "
+                    "is no repo-wide gate (an AST check in the shape of "
+                    "`fact-detector-misuse`) that would fail a newly "
+                    "introduced `if snap.<metadata>` presence test on some "
+                    "other extractor's slot, so a sibling instance elsewhere "
+                    "is caught by review rather than mechanically."
+                ),
+                reference="abicheck/model/dwarf_facts.py, debug_info_present",
+                canary_test=None,
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.implicit_language_rule_read_off_one_explicit_key",
+        invariant=(
+            "A language-level property is extracted from the language's own "
+            "rule, not from the one syntactic key a particular frontend "
+            "happens to emit for the explicit spelling of it. Where a rule "
+            "has an explicit form and implicit forms (inline: the keyword, "
+            "but also constexpr/consteval, a member defined in its class "
+            "body, and an in-class `= default`), every form yields the same "
+            "answer, and a backend whose serialization omits the implicit "
+            "ones reconstructs them from what it does carry rather than "
+            "reporting the negation. The property therefore agrees across "
+            "backends for the same declaration, which is what keeps a "
+            "baseline captured with one frontend comparable against a "
+            "candidate captured with another, and what makes a declared "
+            "parity claim true. The reconstruction is bounded by the same "
+            "rule in both directions: a member merely declared in its class "
+            "and an out-of-line definition at namespace scope keep the "
+            "negative answer, so removing a false positive never introduces a "
+            "false negative in the consumer -- here an export obligation, "
+            "whose whole purpose is to flag exactly those. A `= delete`d "
+            "function is on the *positive* side, at any scope "
+            "([dcl.fct.def.delete]/4); it was briefly treated as negative, "
+            "which made an inline function becoming `= delete` emit a "
+            "spurious FUNC_LOST_INLINE beside the true FUNC_DELETED. It keeps "
+            "no export obligation for an unrelated reason -- the consumer "
+            "filters `is_deleted` on its own axis -- which is precisely why "
+            "the two must not be conflated."
+        ),
+        fixed_by=(1268,),
+        seed_tests=("tests/test_clang_inline_semantics.py",),
+        public_surfaces=(
+            "compare --format json: changes[].kind == public_not_exported",
+        ),
+        axes={
+            "form": (
+                "explicit inline",
+                "constexpr",
+                "consteval",
+                "in-class definition",
+                "in-class = default",
+                "in-class hidden friend",
+                "unnamed-record member",
+                "function-try-block body",
+                "coroutine body",
+                "= delete (any scope)",
+            ),
+            "negative_form": (
+                "declared-only member",
+                "out-of-line definition",
+                "out-of-line = default",
+                "free function with body",
+                "anonymous namespace",
+            ),
+            "decl_kind": (
+                "FunctionDecl",
+                "CXXMethodDecl",
+                "CXXConstructorDecl",
+                "CXXDestructorDecl",
+                "CXXConversionDecl",
+            ),
+            "scope": ("translation unit", "namespace", "record", "nested record"),
+            "backend": ("clang JSON AST", "castxml"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No reliability flag guards `Function.is_inline` across "
+                    "evidence generations, so a baseline dumped with the "
+                    "clang backend *before* this fix -- which recorded the "
+                    "wrong value -- compares against a post-fix candidate as "
+                    "a wave of spurious FUNC_BECAME_INLINE. Bounded (castxml "
+                    "is the default backend and always recorded these as "
+                    "inline; the findings are RISK-class) and cleared by "
+                    "re-dumping the baseline. The complete fix is a "
+                    "`clang_inline_facts_reliable` flag on the established "
+                    "`*_facts_reliable` pattern, which needs a SCHEMA_VERSION "
+                    "bump to be able to tell the two generations apart at "
+                    "all, hence its own ADR and migration."
+                ),
+                reference=(
+                    "docs/contribute/known-gaps.md, the "
+                    "clang_inline_facts_reliable entry"
+                ),
+                canary_test=None,
+            ),
+            KnownGap(
+                description=(
+                    "Templates are still excluded from the export obligation "
+                    "by `_looks_templated`, a spelling heuristic over the "
+                    "declaration's name rather than a template-ness fact, so "
+                    "an uninstantiated template whose name carries no angle "
+                    "brackets rests on a different, weaker mechanism than "
+                    "the one this class fixed. The cross-backend "
+                    "differential also compares only declarations both "
+                    "frontends key identically: castxml spells ctors/dtors "
+                    "with synthetic keys, so those are excluded from the "
+                    "comparison rather than verified across backends. That "
+                    "has one concrete consequence worth naming: of the four "
+                    "rules the predicate implements, three are caught by the "
+                    "cross-backend oracle on revert, but the in-class "
+                    "`= default` branch is caught only by a hand-written "
+                    "case. Clang synthesizes a real body for a defaulted "
+                    "member it odr-uses, so `_has_body` already covers those; "
+                    "the branch only decides a defaulted member clang leaves "
+                    "bodiless, which is precisely the ctor/dtor family the "
+                    "differential cannot key. A shape was not contrived to "
+                    "close this -- it is recorded instead. Separately, "
+                    "C++20 defaulted comparisons have no cross-backend oracle "
+                    "at all: castxml 0.7.0 cannot parse `operator<=>`, so "
+                    "that shape is asserted against clang alone."
+                ),
+                reference=(
+                    "abicheck/buildsource/cross_source_checks.py, "
+                    "_has_export_obligation"
+                ),
+                canary_test=None,
+            ),
+        ),
+    ),
+    BugClass(
+        id="evidence.operand_shape_silently_unresolved",
+        invariant=(
+            "A member the caller explicitly named resolves to the same "
+            "evidence regardless of the *spelling* of the operand carrying "
+            "it -- a directory-backed ProjectSnapshot package and a loose "
+            "snapshot file (plain, gzip or zstd; flat or sectioned) are two "
+            "spellings of one stored artifact, not two evidence levels. A "
+            "resolver that recognises only some spellings must never reduce "
+            "the rest to 'absent': an operand shape silently dropped for "
+            "being unrecognised is indistinguishable, downstream, from a "
+            "library that genuinely is not there -- and an emptied OLD-side "
+            "graph then scores as a clean pass with every real cross-DSO "
+            "break unreported, which is AGENTS.md's 'absent is not removed' "
+            "read at the operand layer rather than the inventory layer."
+        ),
+        fixed_by=(1269,),
+        seed_tests=("tests/test_bundle_stored_file_members.py",),
+        public_surfaces=(),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Resolution is fixed, but the *disposition* is not: an "
+                    "unresolvable stored member is still skipped with a log "
+                    "line rather than recorded on the comparison scope, so a "
+                    "release whose members all fail to resolve can still "
+                    "report a compatible bundle verdict. Closing that is an "
+                    "ADR-065 scope-record decision (the `unsupported`/"
+                    "`failed` member states), not a resolver change, and the "
+                    "skip-not-raise contract is separately pinned by "
+                    "tests/test_cli_compare_release_evidence_preservation.py."
+                ),
+                reference="abicheck/bundle.py::build_bundle_snapshot_mixed",
+                canary_test=None,
+            ),
+            KnownGap(
+                description=(
+                    "The bundle sniff is not the first gate: "
+                    "`workflows.release_inputs.collect_release_inputs` "
+                    "filters a release directory through "
+                    "`classify.AbiJsonClassifier`, whose own 4096-byte probe "
+                    "rejects a valid uncompressed snapshot padded with more "
+                    "leading JSON whitespace than that -- so such a member is "
+                    "lost upstream of the bundle path and never reaches the "
+                    "sniff at all. Pre-existing and not introduced by the "
+                    "operand-shape fix; closing it means widening a "
+                    "tool-wide input classifier, which governs far more than "
+                    "bundle members. What is enforced instead is the "
+                    "*relationship*: everything discovery accepts, the bundle "
+                    "sniff accepts too "
+                    "(TestDiscoveryAndBundleSniffAgree), so the two cannot "
+                    "drift into the dangerous direction."
+                ),
+                reference="PR #1269 (Codex review)",
+                canary_test="tests/test_bundle_stored_file_members.py",  # TestUpstreamDiscoveryProbeBoundCanary
+            ),
+        ),
+        axes={
+            "operand_shape": ("package_directory", "snapshot_file"),
+            "compression": ("none", "gzip", "zstd", "auto"),
+            "envelope": ("flat", "sectioned"),
+        },
+    ),
+    BugClass(
         id="comparability.incidental_ordering_treated_as_contract",
         invariant=(
             "A comparability refusal must rest on evidence that the two "
@@ -327,68 +563,5 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 canary_test=None,
             ),
         ),
-    ),
-    BugClass(
-        id="evidence.operand_shape_silently_unresolved",
-        invariant=(
-            "A member the caller explicitly named resolves to the same "
-            "evidence regardless of the *spelling* of the operand carrying "
-            "it -- a directory-backed ProjectSnapshot package and a loose "
-            "snapshot file (plain, gzip or zstd; flat or sectioned) are two "
-            "spellings of one stored artifact, not two evidence levels. A "
-            "resolver that recognises only some spellings must never reduce "
-            "the rest to 'absent': an operand shape silently dropped for "
-            "being unrecognised is indistinguishable, downstream, from a "
-            "library that genuinely is not there -- and an emptied OLD-side "
-            "graph then scores as a clean pass with every real cross-DSO "
-            "break unreported, which is AGENTS.md's 'absent is not removed' "
-            "read at the operand layer rather than the inventory layer."
-        ),
-        fixed_by=(1269,),
-        seed_tests=("tests/test_bundle_stored_file_members.py",),
-        public_surfaces=(),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Resolution is fixed, but the *disposition* is not: an "
-                    "unresolvable stored member is still skipped with a log "
-                    "line rather than recorded on the comparison scope, so a "
-                    "release whose members all fail to resolve can still "
-                    "report a compatible bundle verdict. Closing that is an "
-                    "ADR-065 scope-record decision (the `unsupported`/"
-                    "`failed` member states), not a resolver change, and the "
-                    "skip-not-raise contract is separately pinned by "
-                    "tests/test_cli_compare_release_evidence_preservation.py."
-                ),
-                reference="abicheck/bundle.py::build_bundle_snapshot_mixed",
-                canary_test=None,
-            ),
-            KnownGap(
-                description=(
-                    "The bundle sniff is not the first gate: "
-                    "`workflows.release_inputs.collect_release_inputs` "
-                    "filters a release directory through "
-                    "`classify.AbiJsonClassifier`, whose own 4096-byte probe "
-                    "rejects a valid uncompressed snapshot padded with more "
-                    "leading JSON whitespace than that -- so such a member is "
-                    "lost upstream of the bundle path and never reaches the "
-                    "sniff at all. Pre-existing and not introduced by the "
-                    "operand-shape fix; closing it means widening a "
-                    "tool-wide input classifier, which governs far more than "
-                    "bundle members. What is enforced instead is the "
-                    "*relationship*: everything discovery accepts, the bundle "
-                    "sniff accepts too "
-                    "(TestDiscoveryAndBundleSniffAgree), so the two cannot "
-                    "drift into the dangerous direction."
-                ),
-                reference="PR #1269 (Codex review)",
-                canary_test="tests/test_bundle_stored_file_members.py",  # TestUpstreamDiscoveryProbeBoundCanary
-            ),
-        ),
-        axes={
-            "operand_shape": ("package_directory", "snapshot_file"),
-            "compression": ("none", "gzip", "zstd", "auto"),
-            "envelope": ("flat", "sectioned"),
-        },
     ),
 )
