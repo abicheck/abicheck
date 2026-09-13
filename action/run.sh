@@ -1742,6 +1742,23 @@ _is_release_style_operand() {
   # `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other
   # abicheck-importing call here, for the same sys.path reason.
   if [[ "${_PY_BIN_HAS_ABICHECK:-false}" == "true" && -n "${_PY_SAFE_DIR:-}" && -n "${_PY_BIN:-}" ]]; then
+    # Anchor the operand BEFORE the `cd`. `old-library`/`new-library` are
+    # normally relative to the workflow directory, and the probe runs from
+    # `$_PY_SAFE_DIR` -- so a bare `Path(sys.argv[1])` there would stat a
+    # nonexistent path under the temp dir, answer "not a package", and skip
+    # the package-only inputs for an operand `compare` does fan out
+    # (Codex review, PR #1259). `$_PY_SAFE_DIR` exists to keep the
+    # untrusted checkout off `sys.path`, not to relocate the operand.
+    # Which spellings must NOT be prefixed is `_is_path_already_qualified`'s
+    # question, not a second regex's: it covers UNC (`\\server\share`),
+    # root-relative (`\pkg`) and drive-relative (`C:pkg`) forms this call
+    # site would otherwise mangle, and it gates every Windows-only form on
+    # actually running on Windows, so a POSIX file literally named `C:pkg`
+    # still anchors (Codex and CodeRabbit review, PR #1261).
+    local _probe_path="$path"
+    if ! _is_path_already_qualified "$_probe_path"; then
+      _probe_path="$PWD/$_probe_path"
+    fi
     local _probe_rc=0
     # shellcheck disable=SC2016  # the inline script is deliberately unexpanded.
     (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
@@ -1751,7 +1768,7 @@ from pathlib import Path
 from abicheck.package import is_package
 
 raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
-' "$path") || _probe_rc=$?
+' "$_probe_path") || _probe_rc=$?
     [[ "$_probe_rc" -eq 0 ]] && return 0
     [[ "$_probe_rc" -eq 3 ]] && return 1
   fi

@@ -55,6 +55,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _package_fixtures import (
+    _make_conda_v2,
+    _make_tar_mode,
+    _make_wheel,
+    _write_zstd_tar,
+)
 from _workflow_exec import HOSTILE_SCALAR_CORPUS, bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -213,14 +219,23 @@ def _bash_ansi_c_quote(value: str) -> str:
     return "$'" + "".join(out) + "'"
 
 
-def _run_predicate(call: str) -> bool:
+def _run_predicate(call: str, *, abicheck_available: bool = True) -> bool:
     """Source the real helper functions and evaluate a boolean-returning call
     (e.g. an ``_is_release_style_operand "path"`` invocation), returning
-    whether it exited zero (true) or non-zero (false)."""
+    whether it exited zero (true) or non-zero (false).
+
+    *abicheck_available* selects which half of `_is_release_style_operand`
+    answers: the default runs the real probe against the installed abicheck
+    (plan Phase 7n made `is_package()` content-based, and `run.sh` derives
+    from it rather than keeping a copy), while ``False`` forces the
+    suffix/magic fallback that `validate-inputs.sh`'s genuinely pre-install
+    position still uses. Both are real code paths, so both are addressable.
+    """
     require_bash()
     script = (
         _helpers_region()
         + _cli_introspection_prelude()
+        + ("" if abicheck_available else "\n_PY_BIN_HAS_ABICHECK=false\n")
         + f"\nif {call}; then exit 0; else exit 1; fi\n"
     )
     with tempfile.NamedTemporaryFile(
@@ -400,6 +415,36 @@ class TestAddSidedScalarFlag:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+def _real_package(tmp_path: Path, suffix: str) -> Path:
+    """A file at ``libfoo<suffix>`` whose *content* is that format.
+
+    One place, so the sweep above cannot drift into fake fixtures again.
+    """
+    target = tmp_path / f"libfoo{suffix}"
+    if suffix == ".rpm":
+        target.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 64)
+    elif suffix == ".deb":
+        target.write_bytes(b"!<arch>\n" + b"\x00" * 64)
+    elif suffix == ".conda":
+        _make_conda_v2(target, {})
+    elif suffix == ".whl":
+        _make_wheel(target, {"foo/__init__.py": b""})
+    elif suffix == ".tar.zst":
+        _write_zstd_tar(target)
+    else:
+        _make_tar_mode(
+            target,
+            {
+                ".tar": "w",
+                ".tar.gz": "w:gz",
+                ".tgz": "w:gz",
+                ".tar.xz": "w:xz",
+                ".tar.bz2": "w:bz2",
+            }[suffix],
+        )
+    return target
+
+
 class TestIsReleaseStyleOperand:
     """``compare`` mode now skips its --write optimization for
     directory/package operands, since the release fan-out engine rejects
@@ -436,15 +481,39 @@ class TestIsReleaseStyleOperand:
             ".whl",
         ],
     )
-    def test_package_extensions_are_release_style(self, tmp_path, suffix) -> None:
-        f = tmp_path / f"libfoo{suffix}"
-        f.write_text("", encoding="utf-8")
-        assert _run_predicate(f'_is_release_style_operand "{f}"')
+    def test_real_packages_are_release_style(self, tmp_path, suffix) -> None:
+        """Every supported format, with content that really is that format.
 
-    def test_package_extension_matched_case_insensitively(self, tmp_path) -> None:
+        These fixtures were empty files carrying a package suffix, which
+        stopped being release operands when plan Phase 7n made `is_package()`
+        content-based and `run.sh` started deriving from it: a zero-byte
+        `libfoo.rpm` is not a package, and `compare` would not fan it out
+        either. Asserting otherwise pinned the old suffix table, not the
+        behaviour (found by the full suite after PR #1259 merged).
+
+        These operands carry conventional suffixes *and* real content, so
+        either half of the predicate answers yes and this sweep does not
+        distinguish them -- deliberately: its subject is format coverage.
+        Which half answers is pinned in
+        `tests/test_action_release_operand_detection.py`, over
+        nonconventional names, and by the fallback test below.
+        """
+        assert _run_predicate(
+            f'_is_release_style_operand "{_real_package(tmp_path, suffix)}"'
+        )
+
+    def test_the_fallback_matches_an_extension_case_insensitively(
+        self, tmp_path
+    ) -> None:
+        """Lowercasing is a property of the *fallback* table, so this pins it
+        there. With the probe active the suffix is not consulted at all, and
+        an assertion through that path would pass without exercising the
+        `tr '[:upper:]' '[:lower:]'` it claims to test."""
         f = tmp_path / "libfoo.RPM"
-        f.write_text("", encoding="utf-8")
-        assert _run_predicate(f'_is_release_style_operand "{f}"')
+        f.write_bytes(b"")
+        assert _run_predicate(
+            f'_is_release_style_operand "{f}"', abicheck_available=False
+        )
 
     def test_missing_path_is_not_release_style(self) -> None:
         # A nonexistent path isn't a directory and doesn't match a package
