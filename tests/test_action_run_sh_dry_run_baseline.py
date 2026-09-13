@@ -39,6 +39,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -47,11 +48,18 @@ _END_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 
 
 def _baseline_region() -> str:
-    """The baseline auto-fetch block, extracted verbatim from run.sh."""
+    """The baseline auto-fetch block, extracted verbatim from run.sh.
+
+    Prefixed with run.sh's own annotation helpers: every `::error::` in the
+    region now routes through them (they are what stops an input value
+    forging a workflow command), and without the definitions the calls are
+    `command not found` -- which prints nothing to stdout, so the region's
+    real messages silently vanish and the assertions about them fail.
+    """
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start)
-    return text[start:end]
+    return annotation_helpers_source() + "\n" + text[start:end]
 
 
 _FAILING_GH_STUB = "gh() { return 1; }\n"
