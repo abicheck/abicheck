@@ -1160,8 +1160,14 @@ def _snapshot_from_compat_input(
         skip_headers=effective_skip or None,
     )
     descriptor_options = _descriptor_compile_options(desc)
+    # Descriptor flags FIRST, the command line's own `-gcc-options` last.
+    # GCC is last-wins for a repeated order-sensitive flag (`-DNAME=...`,
+    # `-std=...`, `--sysroot`; verified with duplicate `-D`), so appending
+    # the descriptor last let it override the value the user explicitly
+    # asked for -- the opposite of what a descriptor is, which is the
+    # project's recorded default (Codex review).
     combined_gcc_options = " ".join(
-        opt for opt in (gcc_options, descriptor_options) if opt
+        opt for opt in (descriptor_options, gcc_options) if opt
     )
     if not so.exists():
         _compat_fail(

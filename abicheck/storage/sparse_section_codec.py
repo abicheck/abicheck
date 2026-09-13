@@ -467,13 +467,16 @@ class LayoutSection(_SparseSectionMixin):
             "contract",
             "dependency_scope",
             "header_only",
+            "excluded_header_patterns",
         }
     )
     #: `.dwarf_layout_coherence`/`.scope_fallback`/`.dependency_scope` are
     #: `str | None`; `.dwarf_layout_coherence_mismatches` is
     #: `tuple[str, ...]` (a JSON list); `.conditional_fields` is a nested
     #: `dict`; `.contract` is `ExtractionContract | None`; `.header_only`
-    #: (schema v44) is a plain `bool`.
+    #: (schema v44) is a plain `bool`; `.excluded_header_patterns` (schema
+    #: v47) is a `tuple[str, ...]` (a JSON list), same shape as
+    #: `.dwarf_layout_coherence_mismatches`.
     OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {
         "dwarf_layout_coherence": _STR_OR_NONE,
         "dwarf_layout_coherence_mismatches": _LIST,
@@ -482,6 +485,7 @@ class LayoutSection(_SparseSectionMixin):
         "contract": _MAPPING_OR_NONE,
         "dependency_scope": _STR_OR_NONE,
         "header_only": _BOOL,
+        "excluded_header_patterns": _LIST,
     }
 
     extra: Mapping[str, Any] = field(default_factory=dict)

@@ -598,16 +598,51 @@ class TestZeroPairPlanRefusesToInventAComparison:
         assert pairs == []
         assert len(old_only) == 2 and len(new_only) == 2
 
-    def test_a_snapshot_operand_is_not_a_fan_out(self) -> None:
-        """A JSON/Perl dump names no library list, so there is nothing to
-        fan out over -- and that is ``None``, not a zero-pair plan."""
+    def test_a_snapshot_against_one_library_is_not_a_fan_out(self) -> None:
+        """A JSON/Perl dump names no library list, so there is nothing to fan
+        out over -- and that is ``None``, not a zero-pair plan. The ordinary
+        single-library case must stay exactly as it was."""
         from abicheck.compat.cli import _plan_library_pairs
         from abicheck.model import AbiSnapshot
 
         snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        single = self._desc(["libfoo.so"])
+        assert _plan_library_pairs(snap, single) is None
+        assert _plan_library_pairs(single, snap) is None
+
+    def test_a_snapshot_against_many_libraries_is_refused(self) -> None:
+        """One snapshot is one library. Against a descriptor naming several,
+        nothing in the inputs says which entry it corresponds to.
+
+        The old behaviour took ``libs[0]`` and warned about the rest -- a real
+        verdict about whichever library the descriptor listed first, against a
+        snapshot that may be a different library entirely (Codex review). Both
+        operand orders are asserted, because the ambiguity does not depend on
+        which side holds the snapshot.
+        """
+        from abicheck.compat.cli import _plan_library_pairs
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.model import AbiSnapshot
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
         multi = self._desc(["liba.so", "libb.so"])
-        assert _plan_library_pairs(snap, multi) is None
-        assert _plan_library_pairs(multi, snap) is None
+        for args in ((snap, multi), (multi, snap)):
+            with pytest.raises(ScopeMismatchError) as excinfo:
+                _plan_library_pairs(*args)
+            # The entries have to be named: an error that only says
+            # "ambiguous" leaves the caller guessing at what to narrow.
+            assert "liba.so" in str(excinfo.value)
+            assert "libb.so" in str(excinfo.value)
+
+    def test_two_snapshots_are_still_not_a_fan_out(self) -> None:
+        """Neither side carries a ``<libs>`` list, so there is no ambiguity to
+        refuse -- only one library on each side, as before."""
+        from abicheck.compat.cli import _plan_library_pairs
+        from abicheck.model import AbiSnapshot
+
+        a = AbiSnapshot(library="libfoo.so", version="1.0")
+        b = AbiSnapshot(library="libfoo.so", version="2.0")
+        assert _plan_library_pairs(a, b) is None
 
     def test_the_error_names_every_unpaired_library(self) -> None:
         """A user has to be able to see *why* nothing paired; an error that
@@ -1082,3 +1117,50 @@ class TestDescriptorDirectoryExpansionRefusesToSayNothing:
         (d / "notes.md").write_text("hello", encoding="utf-8")
         with pytest.raises(ValidationError):
             expand_descriptor_libs([d])
+
+
+class TestDescriptorOptionsDoNotOverrideTheCommandLine:
+    """A descriptor states the project's default; the command line overrides it.
+
+    GCC is last-wins for a repeated order-sensitive flag, so the order the
+    two are concatenated in *is* the precedence rule. The first version
+    appended the descriptor last and documented the opposite outcome, which
+    made `-gcc-options -DNAME=cli` silently lose to the descriptor's own
+    `<gcc_options>` (Codex review).
+    """
+
+    @staticmethod
+    def _combined(desc_opts: str, cli_opts: str) -> str:
+        # The same one-line expression `_snapshot_from_compat_input` builds.
+        return " ".join(opt for opt in (desc_opts, cli_opts) if opt)
+
+    def test_the_command_lines_value_comes_last(self) -> None:
+        from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.multi_library_run import _descriptor_compile_options
+
+        desc = CompatDescriptor(
+            version="1.0",
+            headers=[],
+            libs=[],
+            defines=["NAME=descriptor"],
+            gcc_options=["-std=c++14"],
+        )
+        combined = self._combined(_descriptor_compile_options(desc), "-DNAME=cli")
+        assert combined.index("-DNAME=descriptor") < combined.index("-DNAME=cli")
+
+    def test_a_descriptor_only_run_still_carries_its_flags(self) -> None:
+        """Negative control: the swap must not drop the descriptor's own
+        options when no CLI options were given."""
+        from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.multi_library_run import _descriptor_compile_options
+
+        desc = CompatDescriptor(
+            version="1.0",
+            headers=[],
+            libs=[],
+            include_paths=[Path("/opt/inc")],
+            defines=["ONLY=1"],
+        )
+        combined = self._combined(_descriptor_compile_options(desc), "")
+        assert "-I/opt/inc" in combined
+        assert "-DONLY=1" in combined

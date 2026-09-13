@@ -20,9 +20,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.extract.header_exclusions import apply_header_exclusions
+from abicheck.extract.header_exclusions import (
+    apply_header_exclusions,
+    apply_header_exclusions_to_inputs,
+)
 from abicheck.serialization import load_snapshot
-from abicheck.workflows.input_resolution import _apply_header_exclusions_to_inputs
 
 
 class TestApplyHeaderExclusions:
@@ -100,10 +102,10 @@ class TestResolveInputExclusionWiring:
         (inc / "b.h").write_text("int b(void);", encoding="utf-8")
 
         # No patterns: the directory entry survives, unexpanded.
-        assert _apply_header_exclusions_to_inputs([inc], ()) == [inc]
+        assert apply_header_exclusions_to_inputs([inc], ()) == [inc]
 
         # With a pattern: expanded, then filtered.
-        got = _apply_header_exclusions_to_inputs([inc], ("b.h",))
+        got = apply_header_exclusions_to_inputs([inc], ("b.h",))
         assert [p.name for p in got] == ["a.h"]
 
     def test_excluding_a_header_changes_the_parse_list_and_so_the_cache_key(
@@ -124,8 +126,8 @@ class TestResolveInputExclusionWiring:
         (inc / "a.h").write_text("int a(void);", encoding="utf-8")
         (inc / "b.h").write_text("int b(void);", encoding="utf-8")
 
-        unfiltered = _apply_header_exclusions_to_inputs([inc], ("nosuch.h",))
-        filtered = _apply_header_exclusions_to_inputs([inc], ("b.h",))
+        unfiltered = apply_header_exclusions_to_inputs([inc], ("nosuch.h",))
+        filtered = apply_header_exclusions_to_inputs([inc], ("b.h",))
         assert unfiltered != filtered
 
         assert _cache_key(unfiltered, [], "g++") != _cache_key(filtered, [], "g++")
@@ -138,7 +140,7 @@ class TestResolveInputExclusionWiring:
         b = tmp_path / "b.h"
         a.write_text("int a(void);", encoding="utf-8")
         b.write_text("int b(void);", encoding="utf-8")
-        assert _apply_header_exclusions_to_inputs([a, b], ("b.h",)) == [a]
+        assert apply_header_exclusions_to_inputs([a, b], ("b.h",)) == [a]
 
 
 class TestExcludeHeaderReachesTheRequest:
@@ -262,3 +264,88 @@ class TestExcludeHeaderEndToEnd:
             "excluding one header must not drop the rest of the parse"
         )
         assert without.exit_code != 0 or not without.output.strip() == ""
+
+
+class TestAnExclusionIsRecordedAsReducedEvidence:
+    """``--exclude-header``'s help promises the omission is "reported as
+    reduced evidence rather than as a removal". Both halves, as tests.
+
+    The *removal* half held by construction and still does: one invocation
+    applies the patterns to both sides, so a symmetrically excluded
+    declaration is absent from both and nothing is manufactured. The
+    *reported* half was promised and unimplemented -- the patterns were
+    applied before extraction and assurance saw the input, so a clean parse
+    of what remained reported full header-aware assurance and a clean verdict
+    over a surface nobody had looked at (Codex review).
+    """
+
+    @staticmethod
+    def _snap(patterns=()):
+        from abicheck.model.snapshot import AbiSnapshot
+
+        return AbiSnapshot(
+            library="libfoo.so", version="1.0", excluded_header_patterns=tuple(patterns)
+        )
+
+    def test_a_symmetric_exclusion_is_disclosed(self) -> None:
+        from abicheck.checker import compare
+        from abicheck.confidence import HEADER_EXCLUSION_WARNING_MARKER
+
+        result = compare(self._snap(("fftw3.h",)), self._snap(("fftw3.h",)))
+        disclosed = [
+            w for w in result.coverage_warnings if HEADER_EXCLUSION_WARNING_MARKER in w
+        ]
+        assert len(disclosed) == 1
+        assert "fftw3.h" in disclosed[0]
+
+    def test_a_run_without_exclusions_says_nothing(self) -> None:
+        """The negative control, and the compatibility claim: every run that
+        does not use the flag must be unchanged, warning for warning."""
+        from abicheck.checker import compare
+        from abicheck.confidence import HEADER_EXCLUSION_WARNING_MARKER
+
+        result = compare(self._snap(), self._snap())
+        assert not [
+            w for w in result.coverage_warnings if HEADER_EXCLUSION_WARNING_MARKER in w
+        ]
+
+    def test_differing_exclusions_are_named_as_an_asymmetry(self) -> None:
+        """Reachable only with a *stored* baseline, since one invocation
+        applies one set of patterns to both sides. There the asymmetry itself
+        can manufacture a finding -- a declaration excluded from OLD alone
+        reads as newly added -- so the warning has to say which side.
+
+        ADR-050 comparability independently refuses such a pair on
+        ``scope_fingerprint`` (the resolved header lists differ), which is the
+        stronger guarantee; this states what a caller that reaches the diff
+        anyway is told.
+        """
+        from abicheck.checker import compare
+        from abicheck.confidence import HEADER_EXCLUSION_WARNING_MARKER
+
+        result = compare(self._snap(), self._snap(("fftw3.h",)))
+        disclosed = [
+            w for w in result.coverage_warnings if HEADER_EXCLUSION_WARNING_MARKER in w
+        ]
+        assert len(disclosed) == 1
+        assert "differ between the two sides" in disclosed[0]
+
+    def test_the_patterns_survive_a_snapshot_round_trip(self) -> None:
+        """Persistence is the half that matters for a *stored* baseline: a
+        snapshot that forgot its own exclusions claims a complete surface, and
+        the comparability check that refuses an asymmetric pair has nothing to
+        refuse on."""
+        from abicheck.serialization import snapshot_from_dict
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        restored = snapshot_from_dict(snapshot_to_dict(self._snap(("a.h", "b.h"))))
+        assert restored.excluded_header_patterns == ("a.h", "b.h")
+
+    def test_a_pre_v47_snapshot_loads_as_no_exclusions(self) -> None:
+        """Which is correct for every such snapshot: the flag did not exist."""
+        from abicheck.serialization import snapshot_from_dict
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        d = snapshot_to_dict(self._snap())
+        d.pop("excluded_header_patterns", None)
+        assert snapshot_from_dict(d).excluded_header_patterns == ()

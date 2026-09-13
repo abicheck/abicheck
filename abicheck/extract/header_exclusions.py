@@ -41,6 +41,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from ..model import AbiSnapshot
+
 
 def apply_header_exclusions(
     headers: Sequence[Path], patterns: Sequence[str]
@@ -83,3 +85,58 @@ def apply_header_exclusions(
             continue
         kept.append(h)
     return kept
+
+
+def apply_header_exclusions_to_inputs(
+    headers: list[Path], exclude_headers: Sequence[str]
+) -> list[Path]:
+    """*headers* with ``--exclude-header`` patterns applied.
+
+    A directory operand is expanded first, because a pattern naming one
+    header cannot otherwise match anything inside a directory entry -- and a
+    header directory is precisely the case ``--exclude-header`` exists for
+    (``extract.header_exclusions.apply_header_exclusions`` explains why).
+
+    Expansion happens **only** when at least one pattern was given, so a run
+    without the flag passes its header list through untouched and behaves
+    byte-for-byte as before, directory entries included. This matters beyond
+    tidiness: the resulting list is hashed into both the AST cache key
+    (``dumper_ast_config._cache_key``) and the whole-snapshot cache key
+    (``snapshot_cache._cache_key``), so unconditionally expanding here would
+    invalidate every warm cache entry in every existing checkout for no
+    behavioural gain. Conversely, that same hashing is what makes the
+    exclusion cache-correct without touching either key: excluding a header
+    changes the list, which changes both keys, so a filtered parse can never
+    reuse an unfiltered entry.
+
+    Provenance is unaffected: ``public_headers``/``public_header_dirs`` are
+    separate parameters that this never touches, so a ``-H`` directory keeps
+    its directory-shaped scope fingerprint (see ``header_utils.
+    split_public_header_inputs`` for why that distinction is load-bearing).
+    """
+    if not exclude_headers:
+        return headers
+    from ..buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+    from ..header_utils import iter_directory_headers
+
+    expanded: list[Path] = []
+    for h in headers:
+        if h.is_dir():
+            expanded.extend(iter_directory_headers(h, PRUNED_HEADER_DIR_SEGMENTS))
+        else:
+            expanded.append(h)
+    return apply_header_exclusions(expanded, exclude_headers)
+
+
+def record_header_exclusions(
+    snapshot: AbiSnapshot, exclude_headers: Sequence[str]
+) -> AbiSnapshot:
+    """*snapshot* carrying the ``--exclude-header`` patterns it was built under.
+
+    Returns it unchanged when there were none, so every run that does not use
+    the flag produces a byte-identical snapshot to before this existed.
+    """
+    if not exclude_headers:
+        return snapshot
+    snapshot.excluded_header_patterns = tuple(exclude_headers)
+    return snapshot

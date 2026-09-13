@@ -2760,7 +2760,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # see that loop's own comment).
         "abicheck/compat/cli.py:329:19:dumper.dump",
         "abicheck/compat/cli.py:1034:16:checker.compare",
-        "abicheck/compat/cli.py:1179:15:dumper.dump",
+        "abicheck/compat/cli.py:1185:15:dumper.dump",
     }
 )
 

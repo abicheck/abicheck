@@ -2860,6 +2860,17 @@
       "owner": "abicheck maintainers",
       "rationale": "New entry, 1108 -> 1367, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
       "review_by": "2026-11-30"
+    },
+    {
+      "path": "abicheck/model/snapshot.py",
+      "baseline_lines": 812,
+      "target": "model (already its owner -- this entry is a ceiling, not a migration)",
+      "rule": "no_growth",
+      "disposition": "accept",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "New entry, 799 -> 812 (PR #1283). This file sat ONE line under the 800-line production maximum on main, so any field addition crosses it, and a dataclass field has no possible owner but its dataclass -- 'move responsibility instead of raising the baseline' has nothing to move here. The addition is `AbiSnapshot.excluded_header_patterns` (schema v47): the `--exclude-header PATTERN` values a snapshot was dumped under. It has to be persisted rather than derived, because a stored baseline dumped with an exclusion and compared later against a full dump of the same library otherwise claims a complete surface it does not have. Everything that is not the field itself was deliberately kept out: the matching rule and the input/snapshot plumbing live in the new `extract/header_exclusions.py`, and the disclosure lives in `confidence.header_exclusion_warnings`. What remains is the field, its default, and nine lines of comment saying why it is persisted and naming the two modules that read it -- cut down from seventeen for exactly this reason. The real fix is to split this dataclass, which is a behaviour-preserving refactor of its own and not part of a review-fix round; until then this is a ceiling that stops the next addition from landing unreviewed.",
+      "review_by": "2026-11-30"
     }
   ],
   "dependency_direction_exceptions": [

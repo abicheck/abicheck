@@ -56,8 +56,12 @@ def _descriptor_compile_options(desc: CompatDescriptor) -> str:
     compile its own headers still failed to compile them, for a reason that
     named neither the descriptor nor the missing flag.
 
-    Appended *after* any ``-gcc-options`` given on the command line, so an
-    explicit CLI flag stays last-wins where the compiler treats it that way.
+    Emitted *before* the command line's own ``-gcc-options`` by the caller,
+    so an explicit CLI flag stays last-wins where the compiler treats it
+    that way -- which for a repeated ``-D``/``-std=``/``--sysroot`` it does.
+    This docstring previously claimed that outcome while the caller
+    concatenated the other way round, so the descriptor silently won
+    (Codex review).
     """
     parts = [f"-I{p}" for p in desc.include_paths]
     parts += [d if d.startswith("-D") else f"-D{d}" for d in desc.defines]
@@ -89,10 +93,62 @@ def _plan_library_pairs(
     if not isinstance(old_d, CompatDescriptor) or not isinstance(
         new_d, CompatDescriptor
     ):
+        # One side is an already-built snapshot, which names exactly one
+        # library and cannot be fanned out. If the *descriptor* side still
+        # names several, the request is ambiguous rather than single-library:
+        # nothing says which of them the snapshot corresponds to. Refusing is
+        # the same answer the zero-pair case gets, and for the same reason --
+        # see `_ambiguous_snapshot_pairing_error`.
+        raise_for = _ambiguous_snapshot_pairing_error(old_d, new_d)
+        if raise_for is not None:
+            raise raise_for
         return None
     if len(old_d.libs) <= 1 and len(new_d.libs) <= 1:
         return None
     return pair_libraries(old_d.libs, new_d.libs)
+
+
+def _ambiguous_snapshot_pairing_error(
+    old_d: CompatDescriptor | AbiSnapshot,
+    new_d: CompatDescriptor | AbiSnapshot,
+) -> ScopeMismatchError | None:
+    """The error for "one snapshot, many libraries", or ``None`` if it fits.
+
+    A stored snapshot is one library's ABI surface. Set against a descriptor
+    naming several, there is no evidence anywhere saying which entry it
+    corresponds to -- filename pairing has nothing to pair *against*, because
+    the snapshot side carries no ``<libs>`` list.
+
+    The previous behaviour was to take ``libs[0]`` and print a warning naming
+    the rest. That is the same shape this PR removed elsewhere: a real
+    verdict about whichever library the descriptor happened to list first,
+    against a snapshot that may be a different library entirely, with the
+    other entries disclosed only as text. A warning is not a disposition
+    (ADR-067), and a verdict drawn from an arbitrary correspondence is worse
+    than no verdict (ADR-065). So this refuses instead, and names the entries
+    so the caller can narrow the descriptor or supply the matching snapshot.
+    """
+    descriptor = (
+        old_d
+        if isinstance(old_d, CompatDescriptor)
+        and not isinstance(new_d, CompatDescriptor)
+        else new_d
+        if isinstance(new_d, CompatDescriptor)
+        and not isinstance(old_d, CompatDescriptor)
+        else None
+    )
+    if descriptor is None or len(descriptor.libs) <= 1:
+        return None
+    side = "old" if descriptor is old_d else "new"
+    return ScopeMismatchError(
+        f"The {side} descriptor names {len(descriptor.libs)} <libs> entries "
+        f"while the other side is a single stored snapshot, so which library "
+        f"the snapshot corresponds to is not determined by anything in the "
+        f"inputs: "
+        + ", ".join(p.name for p in descriptor.libs)
+        + ". Narrow the descriptor to the matching library, or supply a "
+        "descriptor on both sides so the entries can be paired."
+    )
 
 
 def _no_library_pair_error(
