@@ -228,6 +228,20 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
     # `producer_string` is not read by any sub-diff -- it is set on the
     # extraction path -- but it is still proof that advanced extraction ran, so
     # a snapshot carrying only it is "collected" rather than "never evaluated".
+    # `target_arch` is the one non-findings discriminator, and it is what makes
+    # this sound for a *successful but empty* parse: `dwarf_advanced` sets it
+    # from the ELF header immediately after `has_dwarf=True`, while the
+    # presence-only helpers leave it "". So a full parse of a CU with no
+    # DW_AT_producer and no recognized functions or records -- every payload
+    # field below empty -- is still distinguishable from "never parsed", and no
+    # longer silently disables the detector on both sides (Codex review).
+    #
+    # An explicit "advanced extraction completed" status on the dataclass would
+    # be better than inferring it, and is the durable fix; it is a persisted-
+    # model change with its own schema bump, so it is recorded in
+    # docs/contribute/known-gaps.md rather than folded in here.
+    if meta.target_arch:
+        return True
     return bool(
         meta.calling_conventions
         or meta.value_abi_traits

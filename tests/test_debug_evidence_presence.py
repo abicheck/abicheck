@@ -302,6 +302,7 @@ def test_real_library_l1_row_matches_its_actual_debug_info(
 
 @_NEEDS_GPP
 @_NEEDS_CASTXML
+@pytest.mark.integration
 @pytest.mark.parametrize("debug_flag,expect_present", [("-g0", False), ("-g", True)])
 def test_compare_json_layer_coverage_matches_actual_debug_info(
     tmp_path, debug_flag, expect_present
@@ -392,6 +393,11 @@ _CONSUMED_ADVANCED_FIELDS = {
         "toolchain": ToolchainInfo(vector_abi_flags={"simdlen"})
     },
     "_diff_wchar_flags": {"toolchain": ToolchainInfo(wchar_flags={"-fshort-wchar"})},
+    # Not a consumed *finding* but the discriminator for a parse that ran and
+    # established nothing: `dwarf_advanced` sets it from the ELF header, the
+    # presence-only helpers leave it "". Without it such a snapshot reads as
+    # presence-only and disables the detector on both sides.
+    "successful parse, no findings": {"target_arch": "x86_64"},
 }
 
 

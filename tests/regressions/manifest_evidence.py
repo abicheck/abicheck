@@ -317,11 +317,18 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "baseline captured with one frontend comparable against a "
             "candidate captured with another, and what makes a declared "
             "parity claim true. The reconstruction is bounded by the same "
-            "rule in both directions: a member merely declared in its class, "
-            "an out-of-line definition at namespace scope, and a deleted "
-            "member keep the negative answer, so removing a false positive "
-            "never introduces a false negative in the consumer -- here an "
-            "export obligation, whose whole purpose is to flag exactly those."
+            "rule in both directions: a member merely declared in its class "
+            "and an out-of-line definition at namespace scope keep the "
+            "negative answer, so removing a false positive never introduces a "
+            "false negative in the consumer -- here an export obligation, "
+            "whose whole purpose is to flag exactly those. A `= delete`d "
+            "function is on the *positive* side, at any scope "
+            "([dcl.fct.def.delete]/4); it was briefly treated as negative, "
+            "which made an inline function becoming `= delete` emit a "
+            "spurious FUNC_LOST_INLINE beside the true FUNC_DELETED. It keeps "
+            "no export obligation for an unrelated reason -- the consumer "
+            "filters `is_deleted` on its own axis -- which is precisely why "
+            "the two must not be conflated."
         ),
         fixed_by=(1268,),
         seed_tests=("tests/test_clang_inline_semantics.py",),
@@ -335,12 +342,18 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "consteval",
                 "in-class definition",
                 "in-class = default",
+                "in-class hidden friend",
+                "unnamed-record member",
+                "function-try-block body",
+                "coroutine body",
+                "= delete (any scope)",
             ),
             "negative_form": (
                 "declared-only member",
                 "out-of-line definition",
-                "= delete",
+                "out-of-line = default",
                 "free function with body",
+                "anonymous namespace",
             ),
             "decl_kind": (
                 "FunctionDecl",
