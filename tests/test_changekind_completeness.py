@@ -234,6 +234,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VAR_ACCESS_CHANGED,
     ChangeKind.VAR_ACCESS_WIDENED,
     ChangeKind.VAR_ADDED,
+    ChangeKind.VAR_ADDED_ELF_ONLY,
     # tests/test_surface_fact_split.py::
     # TestExportLossIsDetectedForEveryDeclarationKind asserts this kind's
     # finding, its surface_facts stamp, and that it is not reported as a

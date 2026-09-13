@@ -162,3 +162,51 @@ def test_a_pure_elf_only_addition_is_an_addition_everywhere_it_is_known() -> Non
         changes=[Change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "signature")],
     )
     assert _helpers._apply_strict(with_a_real_change).verdict != Verdict.COMPATIBLE
+
+
+#: Kinds whose evidence-tier counterpart deliberately does not exist, with the
+#: reason. An entry here is a recorded decision, not an exemption to be added
+#: when a test is inconvenient.
+_ACCEPTED_MISSING_COUNTERPARTS: dict[str, str] = {
+    # `var_removed_elf_only` has never existed: asserting a *removal* of a
+    # data symbol the headers never declared, from export-table evidence
+    # alone, is the unproven finding `vision.md` forbids. The repository does
+    # accept it for functions (`func_removed_elf_only` predates this branch),
+    # so the asymmetry is real and is recorded rather than resolved here --
+    # adding a removal kind is a product decision, not a review-round fix.
+    "var_added_elf_only": "no var_removed_elf_only kind exists; see known-gaps",
+}
+
+
+def test_an_evidence_tier_kind_has_a_counterpart_or_a_recorded_reason() -> None:
+    """Every `*_added_elf_only` needs its `*_removed_elf_only`, or an entry
+    saying why not.
+
+    The gap this closes is in the sweep above, not in the product: that one
+    compares pairs *both of whose members exist*, so a kind whose counterpart
+    was never created is invisible to it -- which is precisely the state
+    `var_added_elf_only` is in. Batched so one run names every offender.
+    """
+    offenders: list[str] = []
+    names = {k.value for k in ChangeKind}
+    for kind in ChangeKind:
+        for here, there in (("_added", "_removed"), ("_removed", "_added")):
+            if not kind.value.endswith(("_elf_only", "_elf_fallback")):
+                continue
+            if here not in kind.value:
+                continue
+            counterpart = kind.value.replace(here, there)
+            if counterpart in names:
+                continue
+            if kind.value in _ACCEPTED_MISSING_COUNTERPARTS:
+                continue
+            offenders.append(f"{kind.value} has no {counterpart}")
+    assert not offenders, offenders
+
+
+def test_the_accepted_list_names_only_real_kinds() -> None:
+    """A recorded exemption for a kind that no longer exists is dead
+    configuration that outlives its subject -- the same failure the
+    `mypy-override-targets` gate exists for."""
+    names = {k.value for k in ChangeKind}
+    assert not sorted(set(_ACCEPTED_MISSING_COUNTERPARTS) - names)

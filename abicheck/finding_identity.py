@@ -1027,6 +1027,11 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_added_elf_only": "func_addition",
     "var_removed": "var_removal",
     "var_added": "var_addition",
+    # The data counterpart of the `func_added`/`func_added_elf_only` pair
+    # above, for the identical reason: which of the two an exported data
+    # symbol gets depends only on whether a public header declared it, not on
+    # what the release did.
+    "var_added_elf_only": "var_addition",
     "symbol_version_node_removed": "version_def_removal",
     "symbol_version_defined_removed": "version_def_removal",
     "struct_size_changed": "type_size_change",

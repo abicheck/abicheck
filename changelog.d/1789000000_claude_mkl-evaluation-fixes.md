@@ -49,7 +49,8 @@
   `-H`, with the new export reachable only as an `exported_not_public`
   hygiene finding -- a different claim, which drives neither the addition
   count nor the MINOR-bump recommendation. A new `func_added_elf_only`
-  (`COMPATIBLE`, an addition) now reports it, the compatible-addition
+  (`COMPATIBLE`, an addition), and `var_added_elf_only` for an undeclared
+  data export, which is lost the same way, now report it, the compatible-addition
   counterpart of `func_removed_elf_only`. Deliberately one-directional: a
   *removal* asserted from export-table evidence alone, for a symbol the
   headers never promised, is exactly the unproven finding `vision.md`
@@ -109,7 +110,10 @@
   multi-library result names the library it came from (`library`, in JSON and
   Markdown), so a removal is attributable and the same symbol removed from
   two libraries stays two findings; the field is absent from every
-  single-library report, which are unchanged.
+  single-library report, which are unchanged. A descriptor entry that never
+  paired now lowers the merged `confidence` and `analysis_assurance.status`
+  as well as appending a coverage warning, so a machine consumer cannot read
+  a partial release comparison as fully covered.
 - **`dump`/`compare --exclude-header PATTERN`** excludes headers matching an
   fnmatch-style pattern (bare name, full path, or glob) from the parsed
   surface. Without it a header *directory* operand is all-or-nothing: a

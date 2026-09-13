@@ -123,6 +123,7 @@ _ADDED_KINDS: dict[ChangeKind, str] = {
     # it appear or disappear.
     ChangeKind.FUNC_ADDED_ELF_ONLY: ENTITY_KIND_FUNCTION,
     ChangeKind.VAR_ADDED: ENTITY_KIND_VARIABLE,
+    ChangeKind.VAR_ADDED_ELF_ONLY: ENTITY_KIND_VARIABLE,
     ChangeKind.TYPE_ADDED: ENTITY_KIND_TYPE,
 }
 _REMOVED_KINDS: dict[ChangeKind, str] = {

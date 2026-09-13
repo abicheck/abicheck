@@ -29,6 +29,7 @@ def _snap(
     declared: list[str] | None = None,
     elf_only: bool = False,
     with_table: bool = True,
+    data_exports: list[str] | None = None,
 ) -> AbiSnapshot:
     """A snapshot whose export table holds *exports* and whose header-derived
     function map holds *declared* (by default: nothing, the undeclared case).
@@ -45,6 +46,10 @@ def _snap(
             symbols=[
                 ElfSymbol(name=n, visibility="default", sym_type="func")
                 for n in exports
+            ]
+            + [
+                ElfSymbol(name=n, visibility="default", sym_type="object")
+                for n in (data_exports or [])
             ],
         )
         if with_table
@@ -290,3 +295,57 @@ class TestACapturedEmptyTableIsNotMissingEvidence:
         """Vacuity guard: the first assertion above must not be satisfiable
         by a detector that reports on any empty OLD table."""
         assert _diff_undeclared_exports(_snap([]), _snap([])) == []
+
+
+class TestUndeclaredDataExportsAreAdditionsToo:
+    """A data symbol is lost the same way a function is, so it is found the
+    same way.
+
+    An undeclared `STT_OBJECT`/`STT_TLS`/`STT_COMMON` export is absent from
+    the header-derived `variable_map` exactly as an undeclared function is
+    from `function_map`, so `_diff_variables` cannot report `VAR_ADDED` for
+    it either -- the addition disappeared entirely rather than being reported
+    weakly (Codex review). A function-only detector fixes half a defect and
+    leaves the other half looking fixed, which is worse than not having
+    fixed either.
+    """
+
+    def test_a_gained_undeclared_data_export_is_reported(self) -> None:
+        old = _snap([], data_exports=[])
+        new = _snap([], data_exports=["g_table"])
+        changes = _diff_undeclared_exports(old, new)
+        assert [(c.kind, c.symbol) for c in changes] == [
+            (ChangeKind.VAR_ADDED_ELF_ONLY, "g_table")
+        ]
+
+    def test_functions_and_data_are_both_reported_in_one_run(self) -> None:
+        old = _snap([], data_exports=[])
+        new = _snap(["fn"], data_exports=["g_table"])
+        by_kind = {c.kind: c.symbol for c in _diff_undeclared_exports(old, new)}
+        assert by_kind == {
+            ChangeKind.FUNC_ADDED_ELF_ONLY: "fn",
+            ChangeKind.VAR_ADDED_ELF_ONLY: "g_table",
+        }
+
+    def test_a_declared_variable_is_the_ordinary_diffs_business(self) -> None:
+        """The negative control that keeps this from double-reporting: a data
+        symbol the headers declare belongs to `_diff_variables`."""
+        from abicheck.model import Variable
+
+        old = _snap([], data_exports=[])
+        new = _snap([], data_exports=["g_declared"])
+        new.variables = [Variable(name="g_declared", mangled="g_declared", type="int")]
+        new.__dict__.pop("variable_map", None)
+        assert _diff_undeclared_exports(old, new) == []
+
+    def test_a_notype_export_is_reported_once(self) -> None:
+        """`notype` is in both symbol-type sets, so without a guard a single
+        undeclared export of unknown type would be reported twice -- once as
+        a function, once as data."""
+        old = _snap([])
+        new = _snap([])
+        new.elf.symbols.append(
+            ElfSymbol(name="mystery", visibility="default", sym_type="notype")
+        )
+        symbols = [c.symbol for c in _diff_undeclared_exports(old, new)]
+        assert symbols.count("mystery") == 1

@@ -1090,3 +1090,77 @@ class TestMergedFindingsKeepTheirLibrary:
             *merged.out_of_surface_changes,
         ):
             assert finding.library, finding.symbol
+
+
+class TestUncomparedMembersLowerTheStructuredFields:
+    """An incomplete selection is recorded where machines read, not only in prose.
+
+    When some descriptor entries pair and others do not, the run covered less
+    than the descriptor named. Appending text warnings said so to a human
+    while `confidence` stayed HIGH and `analysis_assurance.status` stayed
+    `"complete"` -- so a machine consumer read a partial release comparison
+    as fully covered (Codex review). Text a human might read is not a
+    disposition.
+    """
+
+    @staticmethod
+    def _complete_result():
+        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.checker_types import Confidence
+
+        return _result(
+            "liba.so",
+            confidence=Confidence.HIGH,
+            analysis_assurance=AnalysisAssurance(status="complete"),
+        )
+
+    def test_confidence_and_status_are_both_lowered(self) -> None:
+        from abicheck.checker_types import Confidence
+        from abicheck.compat.multi_library_run import _record_unpaired_libraries
+
+        recorded = _record_unpaired_libraries(
+            self._complete_result(), [Path("libgone.so")], [], quiet=True
+        )
+        assert recorded.confidence == Confidence.MEDIUM
+        assert recorded.analysis_assurance is not None
+        assert recorded.analysis_assurance.status == "partial"
+        assert any("were not compared" in n for n in recorded.analysis_assurance.notes)
+
+    def test_a_fully_paired_run_is_untouched(self) -> None:
+        """The negative control, and the compatibility claim: a descriptor
+        whose entries all paired must be byte-identical to before."""
+        from abicheck.checker_types import Confidence
+        from abicheck.compat.multi_library_run import _record_unpaired_libraries
+
+        original = self._complete_result()
+        recorded = _record_unpaired_libraries(original, [], [], quiet=True)
+        assert recorded is original
+        assert recorded.confidence == Confidence.HIGH
+        assert recorded.analysis_assurance.status == "complete"
+
+    def test_an_already_weaker_reading_is_not_raised(self) -> None:
+        """Monotonic: this only ever removes a claim the run is not entitled
+        to. A member that was never compared says nothing good about the ones
+        that were."""
+        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.checker_types import Confidence
+        from abicheck.compat.multi_library_run import _record_unpaired_libraries
+
+        weak = _result(
+            "liba.so",
+            confidence=Confidence.LOW,
+            analysis_assurance=AnalysisAssurance(status="failed"),
+        )
+        recorded = _record_unpaired_libraries(weak, [Path("x.so")], [], quiet=True)
+        assert recorded.confidence == Confidence.LOW
+        assert recorded.analysis_assurance.status == "failed"
+
+    def test_a_run_with_no_assurance_block_is_not_given_one(self) -> None:
+        """Inventing a block would claim an evaluation that never happened."""
+        from abicheck.compat.multi_library_run import _record_unpaired_libraries
+
+        recorded = _record_unpaired_libraries(
+            _result("liba.so"), [Path("x.so")], [], quiet=True
+        )
+        assert recorded.analysis_assurance is None
+        assert recorded.coverage_warnings

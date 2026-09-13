@@ -29,7 +29,11 @@ from typing import TYPE_CHECKING
 from ..detector_registry import registry
 from ..diff_helpers import make_change
 from ..diff_symbols_renames import _should_filter_transitive_runtime_symbols
-from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+from ..elf_symbol_filter import (
+    FUNCTION_SYMBOL_TYPES,
+    VARIABLE_SYMBOL_TYPES,
+    exported_symbol_names,
+)
 from ..model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
@@ -103,49 +107,80 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
         return []
 
     filter_transitive = _should_filter_transitive_runtime_symbols(new)
-    old_exports = exported_symbol_names(
-        old_elf,
-        FUNCTION_SYMBOL_TYPES,
-        abi_relevant_only=True,
-        filter_transitive_runtime_symbols=filter_transitive,
-    )
-    new_exports = exported_symbol_names(
-        new_elf,
-        FUNCTION_SYMBOL_TYPES,
-        abi_relevant_only=True,
-        filter_transitive_runtime_symbols=filter_transitive,
-    )
-    gained = new_exports - old_exports
-    if not gained:
-        return []
-
-    # Anything either side declares is the ordinary function diff's business:
-    # it is in `function_map` and `FUNC_ADDED` (or a virtual-addition break)
-    # already covers it. Both maps are consulted, not just the new one, so a
-    # symbol that was declared in OLD's headers and dropped from NEW's cannot
-    # arrive here as an "addition" -- that is a declaration change, not a new
-    # export.
-    declared = set(old.function_map) | set(new.function_map)
-    declared_names = {f.name for f in old.function_map.values()} | {
-        f.name for f in new.function_map.values()
-    }
 
     changes: list[Change] = []
-    for mangled in sorted(gained):
-        if mangled in declared or mangled in declared_names:
-            continue
-        f_new = new.function_map.get(mangled)
-        changes.append(
-            make_change(
-                ChangeKind.FUNC_ADDED_ELF_ONLY,
-                symbol=mangled,
-                # `name` is what the kind's description_template renders; the
-                # export table carries only the mangled spelling, so that is
-                # the honest value for both. `new` additionally populates
-                # `Change.new_value`, which the addition renderers read.
-                name=mangled,
-                new=mangled,
-                entity_id=f_new.entity_id if f_new is not None else None,
-            )
+    # Functions and data symbols, the same way. Splitting the loop was the
+    # first shape and it lost the data half outright: an undeclared
+    # STT_OBJECT/STT_TLS/STT_COMMON export is absent from the header-derived
+    # `variable_map` exactly as an undeclared function is from
+    # `function_map`, so `_diff_variables` could not report VAR_ADDED for it
+    # either and the addition disappeared entirely (Codex review). One loop
+    # over both classes is what keeps the next symbol class from being
+    # forgotten the same way.
+    for symbol_types, declaring_maps, kind in (
+        (
+            FUNCTION_SYMBOL_TYPES,
+            (old.function_map, new.function_map),
+            ChangeKind.FUNC_ADDED_ELF_ONLY,
+        ),
+        (
+            VARIABLE_SYMBOL_TYPES,
+            (old.variable_map, new.variable_map),
+            ChangeKind.VAR_ADDED_ELF_ONLY,
+        ),
+    ):
+        old_exports = exported_symbol_names(
+            old_elf,
+            symbol_types,
+            abi_relevant_only=True,
+            filter_transitive_runtime_symbols=filter_transitive,
         )
+        new_exports = exported_symbol_names(
+            new_elf,
+            symbol_types,
+            abi_relevant_only=True,
+            filter_transitive_runtime_symbols=filter_transitive,
+        )
+        gained = new_exports - old_exports
+        if not gained:
+            continue
+
+        # Anything either side declares is the ordinary diff's business: it
+        # is in the matching map and FUNC_ADDED/VAR_ADDED already covers it.
+        # Both sides' maps are consulted, not just the new one, so a symbol
+        # declared in OLD's headers and dropped from NEW's cannot arrive here
+        # as an "addition" -- that is a declaration change, not a new export.
+        old_map, new_map = declaring_maps
+        declared = set(old_map) | set(new_map)
+        declared_names = {d.name for d in old_map.values()} | {
+            d.name for d in new_map.values()
+        }
+        # `notype` is in *both* symbol-type sets (a symbol whose type the
+        # producer never recorded), so without this a single undeclared
+        # `notype` export would be reported twice, once under each kind. The
+        # function tier runs first and keeps it.
+        already_reported = {c.symbol for c in changes}
+
+        for mangled in sorted(gained):
+            if mangled in declared or mangled in declared_names:
+                continue
+            if mangled in already_reported:
+                continue
+            declaration = new_map.get(mangled)
+            changes.append(
+                make_change(
+                    kind,
+                    symbol=mangled,
+                    # `name` is what the kind's description_template renders;
+                    # the export table carries only the mangled spelling, so
+                    # that is the honest value for both. `new` additionally
+                    # populates `Change.new_value`, which the addition
+                    # renderers read.
+                    name=mangled,
+                    new=mangled,
+                    entity_id=(
+                        declaration.entity_id if declaration is not None else None
+                    ),
+                )
+            )
     return changes

@@ -54,7 +54,45 @@ from ..evidence_depth import DEPTH_RANK
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["merge_analysis_assurance"]
+__all__ = ["FIELD_MERGE_POLICY", "merge_analysis_assurance"]
+
+#: How each :class:`AnalysisAssurance` field is combined, so a field added
+#: later cannot be silently reset to its constructor default.
+#:
+#: That is not hypothetical: ``l3_context_status`` was missed when this
+#: module was written -- the axes were enumerated by reading the dataclass,
+#: which is exactly the review that misses one -- so every multi-library
+#: result published ``"not_evaluated"`` for build evidence regardless of what
+#: its members observed (Codex review). ``tests/
+#: test_multi_library_assurance.py`` fails on any field absent from this
+#: table, the same way ``multi_library._FIELD_POLICY`` does for
+#: ``DiffResult``.
+#:
+#: * ``"weakest"``  -- an axis; the merged value is the least reassuring one.
+#: * ``"derived"``  -- computed by :func:`merge_analysis_assurance` itself
+#:   (status, the depth trio, notes, the detector union).
+#: * ``"per_library"`` -- accounting that describes one library and has no
+#:   release-level meaning; deliberately left at its default, which states
+#:   "nothing requested / nothing evaluated" rather than fabricating a zero.
+FIELD_MERGE_POLICY: dict[str, str] = {
+    "schema_version": "derived",
+    "status": "derived",
+    "requested_depth": "derived",
+    "effective_depth": "derived",
+    "depth_satisfied": "derived",
+    "notes": "derived",
+    "layout_unverified_detectors": "derived",
+    "l0_context_status": "weakest",
+    "header_context_status": "weakest",
+    "dwarf_context_status": "weakest",
+    "l3_context_status": "weakest",
+    "fact_set_comparability": "weakest",
+    "graph_completeness": "weakest",
+    "schema_staleness_status": "weakest",
+    "target_accounting": "per_library",
+    "translation_units": "per_library",
+    "export_accounting": "per_library",
+}
 
 #: ``status`` worst-last, so :func:`max` over the index picks the weakest.
 #:
@@ -160,6 +198,9 @@ def merge_analysis_assurance(
         ),
         dwarf_context_status=_weakest(
             [b.dwarf_context_status for b in present], best="clean"
+        ),
+        l3_context_status=_weakest(
+            [b.l3_context_status for b in present], best="clean"
         ),
         fact_set_comparability=_weakest(
             [b.fact_set_comparability for b in present], best="comparable"

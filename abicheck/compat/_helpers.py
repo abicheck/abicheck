@@ -228,6 +228,7 @@ _NEW_SYMBOL_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.FUNC_ADDED,
         ChangeKind.FUNC_ADDED_ELF_ONLY,
         ChangeKind.VAR_ADDED,
+        ChangeKind.VAR_ADDED_ELF_ONLY,
     }
 )
 
@@ -279,6 +280,7 @@ def _apply_strict(result: DiffResult, *, mode: str = "full") -> DiffResult:
             ChangeKind.FUNC_ADDED,
             ChangeKind.FUNC_ADDED_ELF_ONLY,
             ChangeKind.VAR_ADDED,
+            ChangeKind.VAR_ADDED_ELF_ONLY,
             ChangeKind.TYPE_ADDED,
             ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
             ChangeKind.ENUM_MEMBER_ADDED,

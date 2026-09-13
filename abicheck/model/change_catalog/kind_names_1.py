@@ -56,6 +56,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "func_added_elf_only",
         "exported ELF-only function added -> compatible addition",
     ),
+    (
+        "VAR_ADDED_ELF_ONLY",
+        "var_added_elf_only",
+        "exported ELF-only data symbol added -> compatible addition",
+    ),
     ("FUNC_RETURN_CHANGED", "func_return_changed", "return type changed → BREAKING"),
     (
         "FUNC_PARAMS_CHANGED",

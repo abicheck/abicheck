@@ -104,6 +104,10 @@ VALUE_INSENSITIVE = frozenset(
         "type_alignment_changed",
         "type_size_changed",
         "var_added",
+        # The data counterpart of `func_added_elf_only`, and in this bucket
+        # for the identical reason: its identity is the mangled export name
+        # and its `new_value` holds that same name, not a type spelling.
+        "var_added_elf_only",
         "var_removed",
     }
 )

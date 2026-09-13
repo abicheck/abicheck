@@ -50,6 +50,7 @@ ADDED_KINDS: frozenset[str] = frozenset(
         "func_added",
         "func_added_elf_only",
         "var_added",
+        "var_added_elf_only",
         "type_added",
         "func_virtual_added",
         "enum_member_added",

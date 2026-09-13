@@ -32,9 +32,11 @@ the command body keeps only the call sites.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from ..analysis_assurance import AnalysisAssurance
 from ..errors import ScopeMismatchError
+from ..policy.evidence_status import Confidence
 from ._helpers import _do_echo
 from .descriptor import CompatDescriptor
 from .multi_library import pair_libraries
@@ -214,5 +216,53 @@ def _record_unpaired_libraries(
     for w in warnings:
         _do_echo(f"Warning: {w}", quiet)
     return dataclasses.replace(
-        result, coverage_warnings=[*result.coverage_warnings, *warnings]
+        result,
+        coverage_warnings=[*result.coverage_warnings, *warnings],
+        # The same fact in the structured fields, not only in prose. A
+        # machine consumer reads `confidence` and `analysis_assurance.status`
+        # -- leaving those at HIGH/"complete" told it the release was fully
+        # covered while named members had never been compared, which is the
+        # "record before disposing" rule failing in the one channel that is
+        # actually parsed (Codex review). Text a human might read is not a
+        # disposition.
+        confidence=_at_most_medium(result.confidence),
+        analysis_assurance=_assurance_marked_partial(
+            cast("AnalysisAssurance | None", result.analysis_assurance),
+            len(unpaired_old) + len(unpaired_new),
+        ),
+    )
+
+
+def _at_most_medium(confidence: Confidence) -> Confidence:
+    """*confidence* capped at ``MEDIUM``; never raised.
+
+    Monotonic on purpose: an incomplete selection can only lower what the
+    evidence already supported. A member that was never compared says nothing
+    good about the members that were.
+    """
+    return Confidence.MEDIUM if confidence == Confidence.HIGH else confidence
+
+
+def _assurance_marked_partial(
+    assurance: AnalysisAssurance | None, uncompared: int
+) -> AnalysisAssurance | None:
+    """*assurance* reading ``partial``, with a note saying how many members
+    were not compared.
+
+    ``None`` stays ``None``: a run that computed no assurance block is not
+    given one here, since inventing one would claim an evaluation that never
+    happened. A status already weaker than ``complete`` is left alone -- this
+    only ever removes a "complete" claim the run is not entitled to.
+    """
+    if assurance is None or assurance.status != "complete":
+        return assurance
+    return dataclasses.replace(
+        assurance,
+        status="partial",
+        notes=(
+            *assurance.notes,
+            f"{uncompared} library/libraries named by a descriptor were not "
+            f"compared (no counterpart on the other side), so this result "
+            f"covers less than the descriptor selected.",
+        ),
     )

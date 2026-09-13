@@ -434,6 +434,21 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         description_template="New exported symbol not declared in any public header: {name}",
     ),
     _E(
+        "var_added_elf_only",
+        _C,
+        is_addition=True,
+        impact="An exported data symbol (STT_OBJECT/STT_TLS/STT_COMMON) "
+        "appeared in the new binary that no public header declares on either "
+        "side. The data counterpart of func_added_elf_only, and it exists for "
+        "the same reason: a header-aware comparison builds its variable map "
+        "from the header AST, so an undeclared export never entered that map "
+        "and _diff_variables could not report VAR_ADDED for it -- the "
+        "addition disappeared entirely rather than being reported weakly. "
+        "Existing consumers are unaffected, but the evidence is the export "
+        "table alone, so nothing is known about the object's type or size.",
+        description_template="New exported data symbol not declared in any public header: {name}",
+    ),
+    _E(
         "func_removed_elf_only",
         _B,
         impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",

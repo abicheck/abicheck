@@ -207,3 +207,70 @@ class TestAssuranceRollUpOnInputItCannotPlace:
         assert merged.notes.count("shared note") == 1
         assert "no DWARF on either side" in merged.notes
         assert "header parse degraded" in merged.notes
+
+
+class TestEveryAssuranceFieldHasAMergePolicy:
+    """A field added later must not be silently reset to its default.
+
+    ``l3_context_status`` was missed when the merge was written -- the axes
+    were enumerated by reading the dataclass, which is exactly the review
+    that misses one -- so every multi-library result published
+    ``"not_evaluated"`` for build evidence regardless of what its members
+    observed (Codex review). The same failure mode
+    ``multi_library._FIELD_POLICY`` exists to prevent for ``DiffResult``,
+    in a second place.
+    """
+
+    def test_every_field_is_listed(self) -> None:
+        from abicheck.policy.analysis_assurance_merge import FIELD_MERGE_POLICY
+
+        missing = sorted(
+            f.name
+            for f in dataclasses.fields(AnalysisAssurance)
+            if f.name not in FIELD_MERGE_POLICY
+        )
+        assert not missing, (
+            f"AnalysisAssurance fields with no merge policy: {missing}. Add "
+            "each to policy.analysis_assurance_merge.FIELD_MERGE_POLICY -- a "
+            "field absent from it is reset to its constructor default by "
+            "every multi-library merge, silently."
+        )
+
+    def test_no_stale_entries(self) -> None:
+        from abicheck.policy.analysis_assurance_merge import FIELD_MERGE_POLICY
+
+        real = {f.name for f in dataclasses.fields(AnalysisAssurance)}
+        assert not sorted(set(FIELD_MERGE_POLICY) - real)
+
+    def test_every_weakest_field_actually_rolls_up(self) -> None:
+        """The table is not just documentation: each ``"weakest"`` field must
+        really take a non-default member value through the merge.
+
+        Batched, and driven off the table rather than a hand-written list --
+        listing the fields here by hand would reproduce the enumeration
+        mistake this test exists to catch.
+        """
+        from abicheck.policy.analysis_assurance_merge import FIELD_MERGE_POLICY
+
+        offenders: list[str] = []
+        for name, policy in FIELD_MERGE_POLICY.items():
+            if policy != "weakest":
+                continue
+            sentinel = "a_distinctly_worse_value"
+            merged = merge_analysis_assurance(
+                [
+                    AnalysisAssurance(status="complete"),
+                    AnalysisAssurance(status="complete", **{name: sentinel}),
+                ]
+            )
+            assert merged is not None
+            if getattr(merged, name) != sentinel:
+                offenders.append(f"{name}: merged to {getattr(merged, name)!r}")
+        assert not offenders, offenders
+
+    def test_the_weakest_set_is_not_empty(self) -> None:
+        """Vacuity guard: the sweep above passes trivially if the table ever
+        stops marking anything ``"weakest"``."""
+        from abicheck.policy.analysis_assurance_merge import FIELD_MERGE_POLICY
+
+        assert sum(1 for v in FIELD_MERGE_POLICY.values() if v == "weakest") >= 7
