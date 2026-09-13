@@ -803,7 +803,18 @@ class TestCompareOldBundleFacts:
         )
 
         assert code == 64, out
-        assert "collide" in out
+        # Asserted as the option the rejection is attributed to plus the two
+        # destinations it names, not as a particular verb: the wording moved
+        # from "collide" to a nesting explanation when the fan-out grew its
+        # containment check, and a message-text pin failed while the behavior
+        # under test was correct throughout.
+        assert "Invalid value for '-o' / '--output'" in out
+        assert str(colliding_output) in out
+        assert str(output_dir) in out
+        # Nothing was written: the point is that it is rejected *before* any
+        # artifact lands, not that it is reported afterwards.
+        assert not colliding_output.exists()
+        assert not output_dir.exists()
         assert not colliding_output.exists()
 
     def test_output_dir_itself_colliding_with_primary_output_is_rejected(
@@ -840,7 +851,9 @@ class TestCompareOldBundleFacts:
         )
 
         assert code == 64, out
-        assert "collide" in out.lower() or "same path" in out.lower()
+        # Wording-independent, for the same reason as the case above.
+        assert "Invalid value for '-o' / '--output'" in out
+        assert str(same_path) in out
         assert not same_path.exists()
 
     def test_output_dir_that_is_already_an_existing_file_is_rejected(
