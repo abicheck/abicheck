@@ -178,6 +178,25 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md",
             ),
+            KnownGap(
+                description=(
+                    "The mitigation reaches a step's `mktemp` only where "
+                    "`mktemp` reads `TMPDIR`, and macOS's does not: with no "
+                    "template it resolves through "
+                    "`confstr(_CS_DARWIN_USER_TEMP_DIR)` (observed behavior, "
+                    "recorded in `tests/test_action_run_sh_py_safe_path.py`). "
+                    "So on the macOS lanes a step's own `mktemp` still "
+                    "allocates in that per-user directory -- which is not the "
+                    "shared `/tmp` this class is about, and which nothing in "
+                    "the environment can redirect. The tests probe the real "
+                    "`mktemp`'s behavior rather than a platform name and "
+                    "assert the reachable half there; `.github/workflows/"
+                    "ci.yml`'s own job-level `TMPDIR` mitigation has exactly "
+                    "the same limit, and closing it would mean interposing on "
+                    "what a step body executes, not setting a variable."
+                ),
+                reference="PR #1299 (Codex review)",
+            ),
         ),
     ),
 )

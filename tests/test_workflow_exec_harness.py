@@ -47,6 +47,7 @@ import pytest
 import yaml
 from _workflow_exec import (
     REPO_ROOT,
+    StepResult,
     _is_under_windows_system_dir,
     bash_executable,
     have_bash,
@@ -556,10 +557,21 @@ class TestEveryStepGetsAPrivateTmpdir:
         the same path-string-versus-filesystem-identity trap
         `actions/stage-baseline/run.sh` records in its own comments.
 
-        `ambient_real` is the oracle for "the shared system temp": what
-        `mktemp` picks with `TMPDIR` unset, derived rather than spelled,
-        so it is right on every platform and cannot drift from what the
-        harness is escaping.
+        Two facts are probed rather than assumed, because the platform
+        decides both:
+
+        * `ambient_real` -- the shared temp `$TMPDIR` exists to escape:
+          what `mktemp` itself picks with `TMPDIR`/`TEMP`/`TMP` unset,
+          derived rather than spelled, so it is right everywhere.
+        * `mktemp_honors_tmpdir` -- whether `mktemp` reads `TMPDIR` at
+          all. **macOS's does not**: with no template it resolves its
+          own directory through `confstr(_CS_DARWIN_USER_TEMP_DIR)`,
+          observed behavior this repository already records in
+          `tests/test_action_run_sh_py_safe_path.py`. Probed by asking
+          `mktemp -u` (which creates nothing) where it *would* put a file
+          under a `TMPDIR` pointed at a directory known to exist, so the
+          answer comes from the real `mktemp` on the real lane rather
+          than from a platform name.
         """
         return {
             "run": (
@@ -568,17 +580,35 @@ class TestEveryStepGetsAPrivateTmpdir:
                 '_real() { (cd "$1" && pwd -P); }\n'
                 'd="$(mktemp -d)"\n'
                 'f="$(mktemp)"\n'
+                '_ws_real="$(_real "$GITHUB_WORKSPACE")"\n'
+                'case "$( (TMPDIR="$_ws_real" mktemp -u) )" in\n'
+                '  "$_ws_real"/*) _honors=yes ;;\n'
+                "  *) _honors=no ;;\n"
+                "esac\n"
+                '_emit mktemp_honors_tmpdir "$_honors"\n'
                 '_emit tmpdir_real "$(_real "${TMPDIR:-/nonexistent}")"\n'
                 '_emit made_parent_real "$(_real "$(dirname "$d")")"\n'
                 '_emit file_parent_real "$(_real "$(dirname "$f")")"\n'
-                '_emit workspace_real "$(_real "$GITHUB_WORKSPACE")"\n'
+                '_emit workspace_real "$_ws_real"\n'
                 '_emit workspace_parent_real "$(_real "$GITHUB_WORKSPACE/..")"\n'
                 '_emit ambient_real "$( (unset TMPDIR TEMP TMP; '
                 '_real "$(dirname "$(mktemp -u)")") )"\n'
             )
         }
 
+    @staticmethod
+    def _honors_tmpdir(result: StepResult) -> bool:
+        answer = result.outputs["mktemp_honors_tmpdir"]
+        assert answer in {"yes", "no"}, f"unusable capability probe: {answer!r}"
+        return answer == "yes"
+
     def test_tmpdir_is_a_harness_owned_per_step_directory(self, tmp_path: Path) -> None:
+        """The unconditional half: what the harness itself controls.
+
+        `$TMPDIR` is a private, per-step directory this harness allocated
+        beside the workspace, on every platform -- whether or not the
+        platform's `mktemp` then chooses to read it.
+        """
         workspace = make_workspace(tmp_path)
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
@@ -594,10 +624,38 @@ class TestEveryStepGetsAPrivateTmpdir:
         # Outside the workspace, so `tree()` and the `$RUNNER_TEMP`
         # assertions keep seeing only what the step itself created.
         assert PurePosixPath(result.outputs["workspace_real"]) not in tmpdir.parents
+
+    def test_mktemp_lands_in_that_directory_where_mktemp_reads_tmpdir(
+        self, tmp_path: Path
+    ) -> None:
+        """The conditional half, and why it is conditional.
+
+        `TMPDIR` is the only lever an environment has over where a step's
+        `mktemp` allocates, and macOS's `mktemp` does not pull it (see
+        `_tmpdir_probe`). So on a lane whose `mktemp` reads it, the
+        step's temporary files land in the harness's own directory; on
+        one whose `mktemp` does not, they land in that platform's own
+        per-user temp -- which is a different directory from the shared
+        `/tmp` this mitigation exists to escape, and is not something an
+        environment variable can redirect.
+
+        Both branches assert a specific, falsifiable outcome rather than
+        one branch being a silent pass: a lane that read `TMPDIR` but
+        allocated elsewhere fails the first, and a lane that ignored it
+        but did not fall back to its own ambient choice fails the second.
+        """
+        workspace = make_workspace(tmp_path)
+        result = run_step(self._tmpdir_probe(), workspace=workspace)
+
+        assert result.returncode == 0, result.stderr
+        tmpdir = PurePosixPath(result.outputs["tmpdir_real"])
+        ambient = PurePosixPath(result.outputs["ambient_real"])
+        expected = tmpdir if self._honors_tmpdir(result) else ambient
         for name in ("made_parent_real", "file_parent_real"):
-            assert PurePosixPath(result.outputs[name]) == tmpdir, (
-                f"`mktemp` resolved {result.outputs[name]} outside the "
-                "step's own $TMPDIR"
+            assert PurePosixPath(result.outputs[name]) == expected, (
+                f"{name} is {result.outputs[name]}, expected {expected} "
+                f"(mktemp_honors_tmpdir="
+                f"{result.outputs['mktemp_honors_tmpdir']})"
             )
 
     def test_mktemp_does_not_resolve_against_the_shared_system_temp(
@@ -611,11 +669,18 @@ class TestEveryStepGetsAPrivateTmpdir:
         it would still satisfy "it is a directory somebody allocated".
         The oracle is `mktemp`'s own choice with `TMPDIR` unset -- derived
         independently of how `run_step` allocates, and of any literal.
+
+        Scoped to the lanes where `mktemp` reads `TMPDIR`, for the reason
+        the sibling test above records; the gap that leaves is stated in
+        `tests/regressions/manifest_test_harness.py`'s bug-class entry
+        rather than papered over.
         """
         workspace = make_workspace(tmp_path)
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
         assert result.returncode == 0, result.stderr
+        if not self._honors_tmpdir(result):
+            pytest.skip("this platform's mktemp does not read $TMPDIR")
         ambient = PurePosixPath(result.outputs["ambient_real"])
         # Guard the oracle itself: an `ambient_real` that came back empty
         # (or as the step's own $TMPDIR) would make every assertion below
@@ -653,23 +718,35 @@ class TestEveryStepGetsAPrivateTmpdir:
         nested under an input path) to exercise a script's own handling of
         it. The harness default must not outrank either spelling.
 
-        Asserted by filesystem identity -- the directory the caller chose
-        holds what the step allocated -- rather than by comparing the
-        step's reported path against this process's spelling of it.
+        The value that reaches the step is compared in the step's own
+        world (both sides resolved by its shell), and where `mktemp` reads
+        `TMPDIR` the effect is confirmed against the filesystem: the
+        directory the caller chose holds what the step allocated.
         """
         workspace = make_workspace(tmp_path)
         chosen = tmp_path / "chosen_tmp"
         chosen.mkdir()
         step = dict(self._tmpdir_probe())
-        env = None
+        step["run"] += (
+            'case "$(_real "$TMPDIR")" in\n'
+            '  "$(_real "$EXPECTED_TMPDIR")") _emit tmpdir_is_chosen yes ;;\n'
+            "  *) _emit tmpdir_is_chosen no ;;\n"
+            "esac\n"
+        )
+        env = {"EXPECTED_TMPDIR": str(chosen)}
         if source == "step-env":
             step["env"] = {"TMPDIR": str(chosen)}
         else:
-            env = {"TMPDIR": str(chosen)}
+            env["TMPDIR"] = str(chosen)
 
         result = run_step(step, workspace=workspace, env=env)
 
         assert result.returncode == 0, result.stderr
+        assert result.outputs["tmpdir_is_chosen"] == "yes", (
+            "the harness default outranked the caller's own $TMPDIR"
+        )
+        if not self._honors_tmpdir(result):
+            return
         entries = sorted(p.name for p in chosen.iterdir())
         assert len(entries) == 2, (
             f"the step's `mktemp -d` and `mktemp` should both have landed in "
