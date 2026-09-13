@@ -19,17 +19,23 @@
   (`COMPATIBLE_WITH_RISK`), the kind that claims no diff confirmation. The
   shared half of the same bug -- reading an *empty* outward-edge list as
   evidence *against* externality -- is now one tested primitive,
-  `bundle_detector_heuristics.extra_needed_all_system`, which both detectors
-  share while each keeps its own emptiness policy.
+  `workflows.bundle_import_evidence.extra_needed_all_system`, which both
+  detectors share while each keeps its own emptiness policy -- and a *newly
+  introduced* unresolved import is never suppressed by it, because outward
+  `DT_NEEDED` edges say nothing about an import that has no history: only an
+  import OLD already carried unresolved is evidence that something outside
+  the bundle provides it. Without that second question, a vendor-symbol typo
+  in a new library would produce a clean bundle result while failing at load
+  time.
 - **Pre-existing cross-source hygiene debt no longer downgrades the verdict.**
   A hygiene finding stamped `CrossSourceEvolution.PERSISTENT` is present on
   *both* sides, so this release changed nothing about it, but every such
   finding still contributed `COMPATIBLE_WITH_RISK` to the pairwise verdict --
   39,956 `exported_not_public` findings, 39,955 of them persistent,
   downgraded an MKL release whose ground truth is +1 symbol / -0. Persistent
-  findings are now excluded from the verdict at
-  `checker._compute_verdict_for`, the single chokepoint every recompute
-  routes through. Scoped to findings that resolve to
+  findings are now excluded from the verdict at `checker._compute_verdict_for`
+  (via `policy.persistent_hygiene.drop_persistent_hygiene`), the single
+  chokepoint every recompute routes through. Scoped to findings that resolve to
   `COMPATIBLE_WITH_RISK`: a persistent `odr_type_variant` or
   `header_build_context_mismatch` names a real defect in the candidate and
   still drives the verdict, as does any kind a policy deliberately promoted.
@@ -47,7 +53,10 @@
   counterpart of `func_removed_elf_only`. Deliberately one-directional: a
   *removal* asserted from export-table evidence alone, for a symbol the
   headers never promised, is exactly the unproven finding `vision.md`
-  forbids.
+  forbids. The detector is skipped only when the *new* side is headerless,
+  since that is the one shape in which the ordinary function diff already
+  reports the addition; keying it off the old side as well lost the addition
+  in a mixed-evidence comparison, where neither map contains it.
 - **A per-kind rollup keeps one flooding kind from hiding every other
   finding.** A non-gating section contributing more than 25 findings of one
   kind is now summarised -- count plus a few example symbols -- instead of
@@ -67,9 +76,14 @@
   previously reached the header parser as `#include "<dir>"` and the binary
   parser as "Unrecognised binary format"; a descriptor naming **multiple
   libraries** now has them paired across the two sides (by filename, then by
-  version-insensitive stem so a SONAME bump still pairs) and compared,
-  instead of comparing `libs[0]` and warning about the rest -- a library
-  present on only one side is a coverage warning, never a removal, since a
+  version-insensitive stem so a SONAME bump still pairs, on every platform's
+  own convention -- macOS and Windows put the version *before* the
+  extension) and compared, instead of comparing `libs[0]` and warning about
+  the rest. A name that is ambiguous on either side -- the same basename
+  under two directories, which is what an architecture split looks like after
+  a recursive `<libs>` expansion -- is left unpaired rather than matched
+  arbitrarily, so a run never compares one architecture against another. A
+  library present on only one side is a coverage warning, never a removal, since a
   `<libs>` list is a selection and not an inventory; and the narrowing
   elements `<skip_headers>`, `<skip_including>`, `<skip_namespaces>`,
   `<skip_symbols>`, `<skip_types>`, `<skip_constants>` plus the compile
@@ -77,7 +91,11 @@
   `<gcc_options>` are now parsed and applied. Every other descriptor element
   produces a warning naming it rather than being silently dropped: a declared
   rule with no effect, on a run that still reports a confident verdict, is
-  worse than one that is rejected.
+  worse than one that is rejected. A multi-library result's
+  `analysis_assurance` block is a release-wide roll-up to the weakest
+  member's value on each judgement axis, not dropped: dropping it made every
+  reporter omit the block and stopped `--require-complete-analysis` gating on
+  a member whose evidence was partial or failed.
 - **`dump`/`compare --exclude-header PATTERN`** excludes headers matching an
   fnmatch-style pattern (bare name, full path, or glob) from the parsed
   surface. Without it a header *directory* operand is all-or-nothing: a
