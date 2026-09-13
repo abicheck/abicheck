@@ -60,7 +60,12 @@ from abicheck.checker import compare
 from abicheck.cli import main
 from abicheck.diff_helpers import typedef_flat_map_is_dwarf_qualified
 from abicheck.model import AbiSnapshot, debug_info_present
-from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+from abicheck.model.dwarf_facts import (
+    AdvancedDwarfMetadata,
+    DwarfMetadata,
+    ToolchainInfo,
+    advanced_facts_collected,
+)
 from abicheck.model.elf_facts import ElfMetadata
 from abicheck.service import run_dump
 from abicheck.surface_graph import _evidence_tier
@@ -365,3 +370,49 @@ def test_compare_json_layer_coverage_matches_actual_debug_info(
         )
     # L0 stays independent -- the binary is there in both runs.
     assert rows["L0"]["status"] == "present"
+
+
+#: One populated field per family `dwarf_advanced.diff_advanced_dwarf` reads,
+#: named by the sub-diff that consumes it. Enumerated rather than spot-checked
+#: because omitting a family from `advanced_facts_collected` is a **false
+#: negative**: the gate requires it on both sides, so a miss skips the entire
+#: detector and real drift in that family is never reported. The three
+#: `toolchain` flag sets were missed exactly that way in the first revision.
+_CONSUMED_ADVANCED_FIELDS = {
+    "_diff_calling_conventions": {"calling_conventions": {"_Z1fv": "fastcall"}},
+    "_diff_callee_saved_regs": {"callee_saved_regs": {"_Z1fv": frozenset({"rbx"})}},
+    "_diff_value_abi_traits/traits": {"value_abi_traits": {"_Z1fv": "trivial"}},
+    "_diff_value_abi_traits/sizes": {"return_value_sizes": {"_Z1fv": 16}},
+    "_diff_value_abi_traits/sret": {"return_memory_classified": {"_Z1fv"}},
+    "_diff_struct_packing/packed": {"packed_structs": {"S"}},
+    "_diff_struct_packing/names": {"all_struct_names": {"S"}},
+    "_diff_frame_registers": {"frame_registers": {"_Z1fv": "rbp"}},
+    "_diff_toolchain_flags": {"toolchain": ToolchainInfo(abi_flags={"-fshort-enums"})},
+    "_diff_vector_abi_flags": {
+        "toolchain": ToolchainInfo(vector_abi_flags={"simdlen"})
+    },
+    "_diff_wchar_flags": {"toolchain": ToolchainInfo(wchar_flags={"-fshort-wchar"})},
+}
+
+
+@pytest.mark.parametrize("sub_diff", sorted(_CONSUMED_ADVANCED_FIELDS))
+def test_every_field_the_advanced_detector_reads_counts_as_collected(sub_diff):
+    """A snapshot carrying only this field must read as collected.
+
+    Stated per consumed family rather than as one example, because the failure
+    mode is silent: a family left out of the predicate disables the detector
+    wholesale, and no test that only checks a *different* field would notice.
+    """
+    meta = AdvancedDwarfMetadata(has_dwarf=True, **_CONSUMED_ADVANCED_FIELDS[sub_diff])
+    assert advanced_facts_collected(meta) is True
+
+
+def test_presence_only_advanced_metadata_is_not_collected():
+    """The complement, so the predicate cannot be satisfied by returning True.
+
+    This is the shape the presence-only dump paths produce: the flag set from a
+    section lookup, every payload field empty.
+    """
+    assert advanced_facts_collected(AdvancedDwarfMetadata(has_dwarf=True)) is False
+    assert advanced_facts_collected(AdvancedDwarfMetadata()) is False
+    assert advanced_facts_collected(None) is False

@@ -198,8 +198,8 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
     row wants, and not "advanced facts are available", which is what a
     detector consuming those fields needs.
 
-    Answered from the payload the detector actually reads
-    (``dwarf_advanced.diff_advanced_dwarf``), so a presence-only snapshot
+    Answered from the payload the detector actually reads -- every field, see
+    the per-sub-diff list below -- so a presence-only snapshot
     reports its ``advanced_dwarf`` detector as *not evaluated* rather than as
     having run and found nothing. Deliberately conservative in one direction:
     a real parse that genuinely established nothing is indistinguishable from
@@ -208,6 +208,26 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
     """
     if meta is None or not meta.has_dwarf:
         return False
+    # Every field `dwarf_advanced.diff_advanced_dwarf` reads, one per sub-diff:
+    #   _diff_calling_conventions  -> calling_conventions
+    #   _diff_callee_saved_regs    -> callee_saved_regs
+    #   _diff_value_abi_traits     -> value_abi_traits, return_value_sizes,
+    #                                 return_memory_classified
+    #   _diff_struct_packing       -> packed_structs, all_struct_names
+    #   _diff_frame_registers      -> frame_registers
+    #   _diff_toolchain_flags      -> toolchain.abi_flags
+    #   _diff_vector_abi_flags     -> toolchain.vector_abi_flags
+    #   _diff_wchar_flags          -> toolchain.wchar_flags
+    # Omitting any of them turns this guard into a false negative: the whole
+    # detector is skipped on both sides and real drift in the omitted family
+    # goes unreported. The three `toolchain` flag sets were missed in the first
+    # revision for exactly that reason (Codex review), so
+    # `tests/test_debug_evidence_presence.py` now parametrizes over this list
+    # rather than spot-checking one field.
+    #
+    # `producer_string` is not read by any sub-diff -- it is set on the
+    # extraction path -- but it is still proof that advanced extraction ran, so
+    # a snapshot carrying only it is "collected" rather than "never evaluated".
     return bool(
         meta.calling_conventions
         or meta.value_abi_traits
@@ -217,5 +237,8 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
         or meta.all_struct_names
         or meta.frame_registers
         or meta.callee_saved_regs
+        or meta.toolchain.abi_flags
+        or meta.toolchain.vector_abi_flags
+        or meta.toolchain.wchar_flags
         or meta.toolchain.producer_string
     )
