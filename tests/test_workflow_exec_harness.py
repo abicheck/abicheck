@@ -38,6 +38,7 @@ only that one 50 KB step now runs.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import _workflow_exec
@@ -345,11 +346,38 @@ class TestBashResolutionNeverFallsBackToWhatItRejected:
         assert select_real_bash(candidates, system_root=root) == candidates[0]
 
     def test_the_two_public_functions_agree_on_this_machine(self) -> None:
-        """The invariant the defect broke, on whatever platform runs this:
-        `have_bash()` is true exactly when what `bash_executable()` returns is
-        a real bash. Their disagreement was the whole finding."""
-        require_bash()
-        assert have_bash() is (not is_wsl_launcher_stub(bash_executable()))
+        """The invariant the defect broke, on whatever platform runs this.
+
+        Deliberately unguarded, unlike every migrated call site: this test
+        never shells out, so there is no stub to run -- and a bash-less or
+        stub-only machine is precisely the state where the two functions
+        disagreed, so skipping there would retire the assertion exactly where
+        it earns its keep (CodeRabbit review; the guard was inserted here by
+        the migration sweep, not by anyone reading the test).
+
+        Stated over three states rather than two, which is the correction the
+        de-guarding forced (Codex review). `have_bash() is not
+        is_wsl_launcher_stub(bash_executable())` reads as the invariant but is
+        only true on two of the three: on a genuinely bash-less host
+        `have_bash()` is False while `bash_executable()` returns its
+        documented `"bash"` fallback, which is not a stub, so the shorthand
+        claims disagreement where there is none -- it would have turned the
+        skip into a *failure* on exactly the host the paragraph above says
+        this test is for. What the two functions actually promise is: when
+        one reports a bash, the other hands back a real, runnable one; when
+        it does not, the other hands back the fallback and claims nothing."""
+        resolved = bash_executable()
+        if have_bash():
+            assert not is_wsl_launcher_stub(resolved)
+            assert shutil.which(resolved) or Path(resolved).is_file(), (
+                f"have_bash() is True but {resolved!r} is not a runnable bash"
+            )
+        else:
+            assert resolved == "bash", (
+                "with no real bash the resolver must return its documented "
+                f"fallback rather than {resolved!r}, which would read as a "
+                "claim that this machine has one"
+            )
 
 
 class TestRequireBashSkipsRatherThanRunsTheStub:
