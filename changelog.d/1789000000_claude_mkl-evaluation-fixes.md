@@ -279,3 +279,30 @@
   (`model.header_exclusion_record.exclusions_are_symmetric`), and the message
   renders its patterns sorted, for the same reason the comparison ignores
   order.
+- **The header-exclusion matching rule is recorded, not guessed from the
+  pattern** (`AbiSnapshot.excluded_header_matching`, schema v48). Native
+  `--exclude-header` is `fnmatch` and additionally tries `*/<pattern>`, so
+  `include/foo.h` excludes `/pkg/include/foo.h`; a descriptor's
+  `<skip_headers>` is exact basename-or-path membership and keeps it. Two
+  successive attempts to decide comparability from the pattern *text* were
+  falsified -- recording the raw text for both rules, then dropping only
+  metacharacter-bearing patterns, which is wrong for any pattern containing a
+  path separator. Two sides are now comparable only if they narrowed by the
+  same patterns under the same rule. A pre-v48 snapshot loads as `"unknown"`
+  -- not `"glob"`: v47 already recorded a descriptor's exact-matched skips, so
+  assuming fnmatch for a mode-less snapshot would let a baseline holding
+  `include/foo.h` compare clean against a native glob snapshot covering a
+  different set of headers. An unrecorded rule is refused rather than guessed;
+  a mode-less snapshot with no patterns is unaffected. The cost is accepted
+  deliberately: a descriptor and a native run naming a bare `b.h` do achieve
+  the same thing and are refused anyway, because nothing in the patterns alone
+  proves which pairs are equivalent.
+- **"Did this export exist before?" now asks about every symbol type.** The
+  undeclared-export detector answered that question with a hand-listed subset
+  of types three times over -- one class, then the union of two -- and the
+  union omits `other`, the bucket an unrecognised ELF `st_info` type lands in.
+  So an `OTHER` -> `FUNC` rename-in-place still read as a brand-new export and
+  was counted as an addition alongside the symbol-type-change finding that
+  already described it. The set is now derived from `SymbolType` itself
+  (`elf_symbol_filter.ALL_SYMBOL_TYPES`), so a type added to the enum later is
+  covered without another round.

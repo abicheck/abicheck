@@ -686,3 +686,89 @@ class TestTheGateAndTheWarningAgree:
         assert header_exclusion_warnings(one, empty_new) == header_exclusion_warnings(
             two, empty_new
         )
+
+
+class TestAModelessSnapshotIsAmbiguousNotNative:
+    """A v47 snapshot's exclusion rule is unrecorded, not `glob`.
+
+    The v48 field defaulted a mode-less snapshot to `"glob"` on the claim
+    that the native path was the only producer that existed under v47. That
+    was false: v47 already recorded a descriptor's *exact*-matched
+    `<skip_headers>` too. So a baseline holding `include/foo.h` matched
+    exactly would have loaded as a glob and compared clean against a native
+    snapshot that excluded a different set of headers (Codex review).
+
+    Bug class: a default chosen from a belief about who produced the data,
+    where the data itself does not say. The same shape as the two pattern-text
+    rules this field already replaced.
+    """
+
+    @staticmethod
+    def _v47(patterns):
+        """A snapshot as a v47 reader would hand it back: patterns, no rule."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import snapshot_from_dict
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        d = snapshot_to_dict(
+            AbiSnapshot(
+                library="libfoo.so", version="1", excluded_header_patterns=patterns
+            )
+        )
+        d.pop("excluded_header_matching", None)
+        return snapshot_from_dict(d)
+
+    @staticmethod
+    def _v48(patterns, matching):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="2",
+            excluded_header_patterns=patterns,
+            excluded_header_matching=matching,
+        )
+
+    def test_a_modeless_snapshot_loads_as_unknown(self):
+        assert self._v47(("include/foo.h",)).excluded_header_matching == "unknown"
+
+    @pytest.mark.parametrize("known", ["glob", "exact"])
+    def test_unknown_is_refused_against_either_known_rule(self, known):
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(
+                self._v47(("include/foo.h",)),
+                self._v48(("include/foo.h",), known),
+            )
+
+    def test_two_unknowns_are_refused_too(self):
+        """ "Both were probably native" is a guess about how each was
+        produced, which is exactly what recording the rule exists to stop."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(self._v47(("a.h",)), self._v47(("a.h",)))
+
+    def test_a_modeless_snapshot_with_no_patterns_still_compares(self):
+        """The over-refusal control, and the compatibility claim: every
+        snapshot that never used the flag is unaffected, which is almost all
+        of them. There is nothing for a rule to have matched."""
+        from abicheck.comparability import check_contracts_comparable
+
+        assert check_contracts_comparable(self._v47(()), self._v48((), "glob")) is None
+        assert check_contracts_comparable(self._v47(()), self._v47(())) is None
+
+    def test_two_recorded_rules_still_compare(self):
+        """The other control: refusing everything would satisfy the claims
+        above completely."""
+        from abicheck.comparability import check_contracts_comparable
+
+        assert (
+            check_contracts_comparable(
+                self._v48(("a.h",), "glob"), self._v48(("a.h",), "glob")
+            )
+            is None
+        )

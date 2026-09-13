@@ -38,7 +38,10 @@ from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
-from ..model.header_exclusion_record import exclusions_are_symmetric
+from ..model.header_exclusion_record import (
+    GLOB_MATCHING,
+    exclusions_are_symmetric,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -164,7 +167,10 @@ def reject_exclusions_against_a_manifest(
 
 
 def exclusion_asymmetry_reason(
-    old_patterns: Sequence[str], new_patterns: Sequence[str]
+    old_patterns: Sequence[str],
+    new_patterns: Sequence[str],
+    old_matching: str = GLOB_MATCHING,
+    new_matching: str = GLOB_MATCHING,
 ) -> str | None:
     """Why this pair is not comparable, or ``None`` when the two agree.
 
@@ -192,7 +198,7 @@ def exclusion_asymmetry_reason(
     surface identically. Only a genuine difference in what was excluded is
     a difference in what was compared.
     """
-    if exclusions_are_symmetric(old_patterns, new_patterns):
+    if exclusions_are_symmetric(old_patterns, new_patterns, old_matching, new_matching):
         return None
     old_set = frozenset(old_patterns)
     new_set = frozenset(new_patterns)
@@ -208,4 +214,13 @@ def exclusion_asymmetry_reason(
         "difference between the two would be this run's own narrowing rather "
         "than a change in the library. Exclude the same headers on both "
         "sides, or re-dump the baseline under the same exclusions."
+        + (
+            ""
+            if old_matching == new_matching
+            else (
+                f" The two were also matched by different rules "
+                f"(old: {old_matching}; new: {new_matching}), under which the "
+                "same pattern text does not name the same set of headers."
+            )
+        )
     )

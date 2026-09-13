@@ -394,6 +394,15 @@ class TestANameThatAlreadyExistedIsNeverAnAddition:
             ("tls", "func"),
             ("func", "tls"),
             ("ifunc", "object"),
+            # `other` is the bucket an unrecognised `st_info` type lands in.
+            # The first fix widened to the *union of the two class sets*,
+            # which omits it -- so this transition still reported a false
+            # addition one review round later (Codex review). Hence the
+            # exhaustive sweep below rather than a hand-listed set.
+            ("other", "func"),
+            ("other", "object"),
+            ("func", "other"),
+            ("object", "other"),
         ],
     )
     def test_no_addition_for_any_type_transition(self, old_type, new_type):
@@ -403,6 +412,41 @@ class TestANameThatAlreadyExistedIsNeverAnAddition:
         old = self._snapshot(exports=[("shape_shifter", old_type)])
         new = self._snapshot(exports=[("shape_shifter", new_type)])
         assert self._kinds(old, new) == []
+
+    def test_no_transition_between_any_two_types_is_an_addition(self):
+        """Exhaustive over every ordered pair the parser can produce.
+
+        Three successive fixes answered "did this name exist before?" with a
+        hand-listed subset of types -- one class, then the union of two, each
+        closing the instance in front of it. The set is now derived from
+        ``SymbolType``; this sweep is the executable form of that, so a type
+        added to the enum later cannot reintroduce the bug silently.
+        """
+        from abicheck.elf_symbol_filter import ALL_SYMBOL_TYPES
+
+        offenders = []
+        for old_type in sorted(ALL_SYMBOL_TYPES):
+            for new_type in sorted(ALL_SYMBOL_TYPES):
+                kinds = self._kinds(
+                    self._snapshot(exports=[("shape_shifter", old_type)]),
+                    self._snapshot(exports=[("shape_shifter", new_type)]),
+                )
+                if kinds:
+                    offenders.append(f"{old_type} -> {new_type}: {kinds}")
+        assert not offenders, offenders
+
+    def test_the_sweep_is_not_vacuous(self):
+        """The types it sweeps must be the real ones, and more than the two
+        class sets -- otherwise the sweep above could pass by covering
+        nothing new."""
+        from abicheck.elf_symbol_filter import (
+            ALL_SYMBOL_TYPES,
+            FUNCTION_SYMBOL_TYPES,
+            VARIABLE_SYMBOL_TYPES,
+        )
+
+        assert "other" in ALL_SYMBOL_TYPES
+        assert ALL_SYMBOL_TYPES > (FUNCTION_SYMBOL_TYPES | VARIABLE_SYMBOL_TYPES)
 
     def test_a_genuinely_new_name_is_still_reported(self):
         """The negative control: a detector that reported nothing would pass

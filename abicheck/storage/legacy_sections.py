@@ -137,6 +137,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "dependency_scope",
         "header_only",
         "excluded_header_patterns",
+        "excluded_header_matching",
     ),
     "debug": (
         "dwarf",

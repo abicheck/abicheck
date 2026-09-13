@@ -366,12 +366,20 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         assert result.exit_code == 0, result.output
         return load_snapshot(out), result.output
 
-    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
-    def test_a_glob_skip_records_nothing(self, skip, tree):
-        """It excluded nothing under exact matching, so it narrowed nothing
-        and is not part of the achieved scope."""
+    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h", "b.h"])
+    def test_the_matching_rule_is_recorded_with_the_patterns(self, skip, tree):
+        """The fact, not a guess from the text.
+
+        Two earlier attempts decided comparability from the pattern spelling
+        and both were falsified: recording the raw text for both rules, then
+        dropping only metacharacter-bearing patterns. The second is wrong for
+        any pattern with a path separator -- native matching also tries
+        ``*/<pattern>``, so ``include/foo.h`` excludes ``/pkg/include/foo.h``
+        while exact membership keeps it (Codex review).
+        """
         snap, _ = self._dump(tree, skip)
-        assert snap.excluded_header_patterns == ()
+        assert snap.excluded_header_matching == "exact"
+        assert snap.excluded_header_patterns == (skip,)
 
     @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
     def test_a_glob_skip_is_reported_rather_than_silently_ignored(self, skip, tree):
@@ -389,10 +397,56 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         assert snap.excluded_header_patterns == ("b.h",)
         assert "wildcard" not in output
 
-    def test_a_plain_skip_still_compares_equal_to_the_native_spelling(self, tree):
-        """The rule must not over-refuse: a pattern with no metacharacter
-        means the same thing under both matching rules, so a descriptor and a
-        native run naming `b.h` are genuinely comparable."""
+    def test_a_descriptor_and_a_native_run_are_refused_across_rules(self, tree):
+        """Including for a bare name, which is the cost this accepts.
+
+        A descriptor `b.h` and a native `b.h` do achieve the same thing, and
+        are refused anyway -- because nothing in the patterns alone proves
+        which pairs are equivalent, as the `include/foo.h` counterexample
+        shows. Refusing a comparable pair costs a run; accepting an
+        incomparable one manufactures findings.
+        """
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.model import AbiSnapshot
+
+        snap, _ = self._dump(tree, "b.h")
+        native = AbiSnapshot(
+            library="libfoo.so", version="0.9", excluded_header_patterns=("b.h",)
+        )
+        assert native.excluded_header_matching == "glob"
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(native, snap)
+
+    def test_two_descriptor_runs_still_compare(self, tree):
+        """The negative control: refusing everything would satisfy the claim
+        above completely. Same rule, same patterns -- comparable."""
+        from abicheck.comparability import check_contracts_comparable
+
+        snap, _ = self._dump(tree, "b.h")
+        other, _ = self._dump(tree, "b.h")
+        assert check_contracts_comparable(other, snap) is None
+
+    def test_a_relative_path_skip_is_refused_against_the_native_spelling(self, tree):
+        """The counterexample that falsified the previous fix: `include/foo.h`
+        excludes `/pkg/include/foo.h` natively (the `*/<pattern>` branch) and
+        keeps it under exact membership -- with no metacharacter anywhere."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.model import AbiSnapshot
+
+        snap, _ = self._dump(tree, "include/foo.h")
+        native = AbiSnapshot(
+            library="libfoo.so",
+            version="0.9",
+            excluded_header_patterns=("include/foo.h",),
+        )
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(native, snap)
+
+    def test_the_reason_names_the_differing_rules(self, tree):
+        """A bare "scope differs" leaves a user with nothing to act on when
+        the patterns are textually identical."""
         from abicheck.comparability import check_contracts_comparable
         from abicheck.model import AbiSnapshot
 
@@ -400,18 +454,6 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         native = AbiSnapshot(
             library="libfoo.so", version="0.9", excluded_header_patterns=("b.h",)
         )
-        assert check_contracts_comparable(native, snap) is None
-
-    def test_a_glob_no_longer_compares_equal_to_the_native_spelling(self, tree):
-        """The conflation itself, stated end to end through the real gate:
-        native `*.h` excluded every header, the descriptor's excluded none."""
-        from abicheck.comparability import check_contracts_comparable
-        from abicheck.errors import ScopeMismatchError
-        from abicheck.model import AbiSnapshot
-
-        snap, _ = self._dump(tree, "*.h")
-        native = AbiSnapshot(
-            library="libfoo.so", version="0.9", excluded_header_patterns=("*.h",)
-        )
-        with pytest.raises(ScopeMismatchError):
-            check_contracts_comparable(native, snap)
+        mismatch = check_contracts_comparable(native, snap, diagnostic=True)
+        assert "different rules" in mismatch.reason
+        assert "glob" in mismatch.reason and "exact" in mismatch.reason
