@@ -25,7 +25,3 @@
 - `DEFAULT_MAX_JSON_OBJECT_NODES` now lives with the rest of the bundle-facts
   model in `abicheck/model/bundle_facts.py`, so the CLI and Action-config
   layers read it without a `frontends -> storage` dependency.
-- `scripts/catalog_subjects.py` and `scripts/catalog_classification.py` use
-  the shared strict-YAML loader (`abicheck.model.yaml_strict`) instead of
-  keeping their own duplicate-key `SafeLoader` subclasses. Same accepted
-  input, same `ValueError` contract.

@@ -33,13 +33,82 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
-from abicheck.model.yaml_strict import load_strict_yaml  # noqa: E402
-
 CLASSIFICATION_PATH = example_catalog.CATALOG_DIR / "catalog_classification.yaml"
+
+
+class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
+    """`yaml.SafeLoader` with one behavior change: a mapping that repeats a
+    key is a load error instead of the PyYAML default of silently keeping
+    only the last value.
+
+    A hand-edited `catalog_classification.yaml` that accidentally repeats a
+    case (two `case01_symbol_removal:` entries under `scenarios`, most
+    plausibly from a copy-paste) would otherwise reclassify the case with no
+    signal at all -- exactly the silent-misclassification failure mode this
+    whole module exists to close. Mirrors
+    `abicheck/impact/use_cases.py`'s identical `_DuplicateKeyCheckingLoader`
+    (same name, same technique) -- scoped to this loader class alone, not a
+    process-wide `yaml` monkeypatch, so it affects nothing outside this
+    module.
+
+    **Do not replace this with `abicheck.model.yaml_strict.load_strict_yaml`.**
+    The shared primitive is the right owner for every *manifest* format
+    inside the package, but this module must stay importable with the
+    `abicheck` package **not installed**: `scripts/gen_examples_docs.py`
+    imports it, and `.github/workflows/docs-pr.yml`'s `build-docs` job
+    installs only `mkdocs mkdocs-material mkdocs-redirects` before running
+    `gen_examples_docs.py --check`. Attempted and reverted (PR #1279): the
+    dedup passed every local gate -- the dev venv has abicheck installed --
+    and failed `build-docs` with `ModuleNotFoundError: No module named
+    'abicheck'`. `catalog_classification.py` carries the identical
+    constraint. To reproduce the CI condition locally, run the generator
+    with a `sitecustomize` that blocks the `abicheck` import; a plain local
+    run cannot see this.
+    """
+
+
+def _construct_mapping_rejecting_duplicates(
+    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[object, object]:
+    """PyYAML's own `SafeConstructor.construct_mapping` already rejects an
+    unhashable key (e.g. `- {[a, b]: x}`, a YAML sequence used as a mapping
+    key) with a `ConstructorError` -- this override keeps that check, not
+    just the duplicate-key check it adds, or a syntactically valid-but-
+    unhashable-keyed document would raise a bare `TypeError` that escapes
+    `load_classification`'s own `except yaml.YAMLError` handling entirely."""
+    mapping: dict[object, object] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found unhashable key: {key!r}",
+                key_node.start_mark,
+            ) from exc
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key: {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_DuplicateKeyCheckingLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping_rejecting_duplicates,
+)
 
 
 #: Mirrors gen_catalog_taxonomy.py's own docstring enumeration of the values
@@ -63,9 +132,10 @@ def load_classification(
     """Parse `catalog/catalog_classification.yaml` into case_name -> entry."""
     manifest = path or CLASSIFICATION_PATH
     text = manifest.read_text(encoding="utf-8")
-    raw = load_strict_yaml(
-        text, error=lambda msg: ValueError(f"{manifest}: invalid YAML ({msg})")
-    )
+    try:
+        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)  # nosec B506
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{manifest}: invalid YAML ({exc})") from exc
     raw = raw or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{manifest}: top level must be a mapping, got {raw!r}")
