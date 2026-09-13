@@ -643,3 +643,58 @@ class TestDerivedFromRealImports:
         assert not classify.changed_files_are_perf_sensitive(
             ["scripts/gen_cli_reference.py", "scripts/check_fp_rate.py"]
         )
+
+
+class TestTheHeaderGraphGateRequiresAllMetrics:
+    """The PR lane must gate every metric its own summary claims to cover.
+
+    `--require-all-metrics` was omitted on the argument that the base branch
+    writes its report with its own older copy of the script, so a base report
+    could legitimately lack `total_ms`. That reasoning was wrong about this job:
+    the base measurement runs *head's* harness against base's installed package
+    — deliberately, since one harness measuring two products is the only way the
+    numbers are comparable — so the base report always carries all three metrics,
+    and omitting the flag only let a missing or non-gateable metric degrade to a
+    printed note while the job still exited 0.
+    """
+
+    @staticmethod
+    def _workflow_text() -> str:
+        root = _PATH.resolve().parent.parent
+        return (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _gating_job_steps() -> list[dict]:
+        yaml = pytest.importorskip("yaml")
+        root = _PATH.resolve().parent.parent
+        doc = yaml.safe_load(
+            (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+        )
+        return doc["jobs"]["header-graph-regression"]["steps"]
+
+    def test_the_baseline_gated_invocation_requires_all_metrics(self):
+        # Asserted on the step that actually passes `--baseline`: a run with no
+        # baseline is report-only, where the flag would mean nothing.
+        gating = [
+            step
+            for step in self._gating_job_steps()
+            if "--baseline base_header_graph.json" in str(step.get("run", ""))
+        ]
+        assert gating, "the job must gate head against a base measurement"
+        for step in gating:
+            body = step["run"]
+            assert "--require-all-metrics" in body, body
+
+    def test_the_base_measurement_really_uses_heads_harness(self):
+        # The premise the fix rests on. If this ever stops being true, the flag's
+        # justification changes and this test is where that surfaces.
+        text = self._workflow_text()
+        assert "./base_env/bin/python head/scripts/check_header_graph_perf.py" in text
+
+    def test_the_script_supports_the_flag(self):
+        root = _PATH.resolve().parent.parent
+        source = (root / "scripts/check_header_graph_perf.py").read_text(
+            encoding="utf-8"
+        )
+        assert '"--require-all-metrics"' in source
+        assert "args.require_all_metrics and ungated" in source

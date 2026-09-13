@@ -156,7 +156,23 @@ class Step:
     #: unmeasurable.
     ok_exit_codes: tuple[int, ...] = (0,)
     output: Path | None = None
+    #: Further files this one invocation is required to write. `output` alone was
+    #: not enough for the two-formats scenario, whose single `compare` writes both
+    #: a JSON and a Markdown export: only the JSON was cleared and required, so a
+    #: repetition that wrote fresh JSON and silently omitted Markdown left the
+    #: previous repetition's Markdown in place for the validator to accept, and an
+    #: incomplete render's (faster) timing stayed in the median (Codex review).
+    extra_outputs: tuple[Path, ...] = ()
     sample_rss: bool = False
+
+    @property
+    def declared_outputs(self) -> tuple[Path, ...]:
+        """Every file this invocation must produce -- the one list to iterate.
+
+        Exists so a caller cannot handle `output` and forget `extra_outputs`,
+        which is the exact shape of the defect that introduced the second field.
+        """
+        return ((self.output,) if self.output is not None else ()) + self.extra_outputs
 
 
 @dataclass
@@ -687,6 +703,7 @@ def scenario_two_formats(
                 extraction="one_side",
                 ok_exit_codes=(0, 2, 4),
                 output=json_out,
+                extra_outputs=(md_out,),
                 sample_rss=True,
             )
         ]
@@ -1123,22 +1140,25 @@ def _step_failure(
         problems = _check_extraction(run, step.extraction, one_side=one_side)
         if problems:
             return [f"step {step.name}: {p}" for p in problems]
-    if step.output is not None:
-        # REQUIRED, not merely size-checked-if-present. A step that declares an
-        # output and exits with an allowed code but renders nothing is not a
-        # measurement, and the previous shape let it pass silently -- worse,
-        # combined with repetitions reusing one path, final validation would then
-        # read the *previous* repetition's report and credit this run's (faster,
-        # incomplete) timing (Codex review). `execute()` unlinks the path before
-        # every invocation, so "exists" here means this run wrote it.
-        if not step.output.exists():
+    for declared in step.declared_outputs:
+        # REQUIRED, not merely size-checked-if-present, and EVERY declared export
+        # rather than just the first. A step that declares an output and exits
+        # with an allowed code but renders nothing is not a measurement, and the
+        # previous shape let it pass silently -- worse, combined with repetitions
+        # reusing one path, validation would then read the *previous*
+        # repetition's file and credit this run's (faster, incomplete) timing.
+        # `execute()` unlinks every declared path before each invocation, so
+        # "exists" here means this run wrote it.
+        if not declared.exists():
             return [
                 f"step {step.name} exited {run.exit_code} but wrote no output at "
-                f"{step.output.name} -- the run did not render what it was asked for"
+                f"{declared.name} -- the run did not render what it was asked for"
             ]
-        size = step.output.stat().st_size
+        size = declared.stat().st_size
         if size > MAX_OUTPUT_BYTES:
-            return [f"step {step.name} wrote {size} bytes, over the cap"]
+            return [
+                f"step {step.name} wrote {size} bytes to {declared.name}, over the cap"
+            ]
     return None
 
 
@@ -1154,6 +1174,7 @@ def _run_measured_steps(
     timeout: float,
     one_side: int | None,
     check_extraction: bool,
+    validate_repetition: Callable[[int], list[str]] | None = None,
 ) -> list[str] | None:
     """Run every measured step *repeat* times, collecting samples into *runs*.
 
@@ -1161,8 +1182,17 @@ def _run_measured_steps(
     first invalid one -- at which point the scenario is abandoned rather than
     reported with a partial sample set, since a median over some-of-the-repeats
     is not the figure the receipt claims.
+
+    *validate_repetition* runs the scenario's own semantic validation at the end
+    of EVERY repetition, against the outputs that repetition just wrote. Running
+    it once after the loop (the previous shape) inspected only the final report,
+    so an earlier repetition that emitted degraded L2 evidence or wrong findings
+    while still writing a file and exiting with an allowed code kept its faster
+    timing in the median as long as the last repetition happened to be correct
+    (Codex review). The repetition loop is the outer one precisely so this is
+    possible: each pass writes its own outputs before the next begins.
     """
-    for _repetition in range(repeat):
+    for repetition in range(repeat):
         for index, step in enumerate(measured):
             if (
                 scenario.cache_mode == "invalidation_control"
@@ -1182,6 +1212,10 @@ def _run_measured_steps(
             )
             if failure is not None:
                 return failure
+        if validate_repetition is not None:
+            problems = validate_repetition(repetition)
+            if problems:
+                return [f"repetition {repetition}: {p}" for p in problems]
     return None
 
 
@@ -1289,8 +1323,8 @@ class _StepExecutor:
             # measurement this flag exists to enable -- the flag's whole purpose
             # is to run the lane without the spy, and it could not.
             self.spy.reset()
-        if step.output is not None:
-            step.output.unlink(missing_ok=True)
+        for declared in step.declared_outputs:
+            declared.unlink(missing_ok=True)
         run = run_measured(
             step.argv,
             cwd=self.work,
@@ -1426,11 +1460,21 @@ def run_scenario(
             timeout=timeout,
             one_side=one_side if keep_spy else None,
             check_extraction=keep_spy,
+            # Validated per repetition, against the outputs that repetition just
+            # wrote: validating once at the end inspects only the final report,
+            # so an earlier degraded repetition kept its faster timing in the
+            # median whenever the last one happened to be correct.
+            validate_repetition=lambda _index: scenario.validate(work, runs),
         )
         if abort is not None:
             result["status"] = "failed"
             result["validation_problems"] += abort
             return result
+        # Re-run once for the receipt. Every repetition has already been
+        # validated above (an invalid one aborts the scenario), so this cannot
+        # disagree; it is what records `validation`/`validation_problems` and the
+        # per-step rows, and it keeps the receipt's "validated" claim produced by
+        # the same function a reader can point at.
         _validate_and_record(
             result,
             scenario=scenario,

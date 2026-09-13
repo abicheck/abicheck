@@ -328,6 +328,31 @@ That turns three otherwise-unfalsifiable claims into measurements:
 The last one matters because on a small fixture a second run served by *nothing*
 is indistinguishable from a warm one by wall time alone.
 
+Three rules about *which* runs those measurements cover, each of which started
+as a defect where one favourable observation certified a batch:
+
+- a `forbidden` contract is a zero over **every** invocation kind, not only the
+  extraction bucket. "No compiler ran" is the claim, so an include pass or a
+  version probe falsifies it exactly as a parse does.
+- a live contract additionally requires the include-graph pass to have run, at
+  least once per live side. Header-AST extraction is not the whole of the
+  measured L2 work, and a run that stops doing the `clang -M` pass is *faster*
+  while still resolving depth `headers` and still finding the deliberate break.
+- every cold/warm repetition is checked individually, paired by index, and the
+  reported cache service is the **worst** repetition. Reducing each batch with
+  `min()` let one warm repetition certify a scenario whose others re-extracted in
+  full, so the gated median could describe an uncached run under a receipt
+  claiming a served cache.
+
+The same "every repetition, not the lucky one" rule governs correctness: the
+scenario's semantic validation runs at the end of **each** repetition, against
+the outputs that repetition just wrote, and every file an invocation is declared
+to produce is deleted beforehand and required afterwards. Validating once at the
+end inspected only the final report, so an earlier repetition that emitted
+degraded evidence while still writing a file and exiting with an allowed code
+kept its faster timing in the median whenever the last repetition happened to be
+correct.
+
 ### Cache states are three things, not two
 
 The harness separates, and never conflates:

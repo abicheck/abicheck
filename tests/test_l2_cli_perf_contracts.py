@@ -760,3 +760,207 @@ class TestLiveRunsMustRunTheIncludeGraphPass:
             )
             == []
         )
+
+
+class TestEveryDeclaredExportIsClearedAndRequired:
+    """One invocation writing two files must have both checked, not just the first.
+
+    The two-formats scenario's single `compare` writes a JSON *and* a Markdown
+    export. With only the JSON declared, a repetition that wrote fresh JSON and
+    silently omitted Markdown left the previous repetition's Markdown in place for
+    the validator to accept, and the incomplete render's faster timing stayed in
+    the median.
+    """
+
+    def test_declared_outputs_covers_both_fields(self, tmp_path):
+        step = harness.Step(
+            "s",
+            ["true"],
+            output=tmp_path / "a.json",
+            extra_outputs=(tmp_path / "b.md",),
+        )
+        assert step.declared_outputs == (tmp_path / "a.json", tmp_path / "b.md")
+
+    def test_declared_outputs_is_empty_when_nothing_is_declared(self):
+        assert harness.Step("s", ["true"]).declared_outputs == ()
+
+    def test_a_missing_extra_output_fails(self, tmp_path):
+        json_out = tmp_path / "a.json"
+        json_out.write_text("{}", encoding="utf-8")
+        run = _run({"header_extraction": 0})
+        run.exit_code = 0
+        problems = harness._step_failure(
+            harness.Step(
+                "s",
+                ["true"],
+                output=json_out,
+                extra_outputs=(tmp_path / "absent.md",),
+            ),
+            run,
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+        )
+        assert problems and "absent.md" in problems[0]
+
+    def test_the_executor_clears_every_declared_export(self, tmp_path):
+        stale_json = tmp_path / "a.json"
+        stale_md = tmp_path / "b.md"
+        for path in (stale_json, stale_md):
+            path.write_text("from a previous repetition", encoding="utf-8")
+        executor = harness._StepExecutor(
+            work=tmp_path,
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            timeout=30,
+            rss_interval=0.05,
+            spy=None,
+        )
+        executor(
+            harness.Step(
+                "noop",
+                [sys.executable, "-c", ""],
+                output=stale_json,
+                extra_outputs=(stale_md,),
+            ),
+            timed=False,
+        )
+        assert not stale_json.exists()
+        assert not stale_md.exists(), "the extra export survived the run"
+
+    def test_the_two_formats_scenario_declares_both_of_its_exports(self):
+        # The real scenario, not a constructed Step: the defect was in what that
+        # scenario declared, so asserting on a hand-built Step would miss it.
+        spec = fixtures.FixtureSpec(
+            shape="simple",
+            headers=1,
+            libraries=1,
+            change="break",
+            distinct_contexts=False,
+        )
+        steps = harness.scenario_two_formats(spec).steps(
+            fixtures.BuiltFixture(
+                spec=spec, old=[_stub_library()], new=[_stub_library()]
+            ),
+            Path("/tmp/l2-two-formats-decl"),
+        )
+        timed = [s for s in steps if s.scope == "full_cli"]
+        assert timed, "the scenario must have a measured step"
+        for step in timed:
+            names = {p.name for p in step.declared_outputs}
+            assert names == {"fmt.json", "fmt.md"}, names
+
+
+class TestEveryRepetitionIsValidated:
+    """Validating once after the loop inspects only the final repetition's output.
+
+    An earlier repetition that emitted degraded evidence or wrong findings while
+    still writing a file and exiting with an allowed code kept its faster timing
+    in the median whenever the last repetition happened to be correct. The
+    repetition loop is the outer one precisely so per-repetition validation is
+    possible: each pass writes its outputs before the next begins.
+    """
+
+    def _steps(self) -> list[object]:
+        return [harness.Step("s", [sys.executable, "-c", ""], ok_exit_codes=(0,))]
+
+    def _execute(self, step, *, timed: bool):
+        run = _run({"header_extraction": 0})
+        run.exit_code = 0
+        return run
+
+    def _scenario(self) -> object:
+        spec = fixtures.FixtureSpec(
+            shape="simple",
+            headers=1,
+            libraries=1,
+            change="break",
+            distinct_contexts=False,
+        )
+        return harness.Scenario(
+            id="x",
+            description="",
+            spec=spec,
+            prepare=None,
+            steps=lambda f, w: self._steps(),
+            validate=lambda w, r: [],
+        )
+
+    def test_validation_runs_once_per_repetition(self, tmp_path):
+        seen: list[int] = []
+        abort = harness._run_measured_steps(
+            self._steps(),
+            execute=self._execute,
+            repeat=3,
+            runs={},
+            scenario=self._scenario(),
+            fixture=None,
+            cache_root=tmp_path,
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+            validate_repetition=lambda index: seen.append(index) or [],
+        )
+        assert abort is None
+        assert seen == [0, 1, 2], seen
+
+    @pytest.mark.parametrize("bad", [0, 1, 2])
+    def test_a_degraded_repetition_aborts_even_if_a_later_one_is_fine(
+        self, tmp_path, bad
+    ):
+        # Every position, including the last-but-one and the first — the defect
+        # was that only the final repetition's output was ever inspected.
+        def validate(index: int) -> list[str]:
+            return (
+                ["effective_depth='binary', expected 'headers'"] if index == bad else []
+            )
+
+        abort = harness._run_measured_steps(
+            self._steps(),
+            execute=self._execute,
+            repeat=3,
+            runs={},
+            scenario=self._scenario(),
+            fixture=None,
+            cache_root=tmp_path,
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+            validate_repetition=validate,
+        )
+        assert abort is not None
+        assert f"repetition {bad}:" in abort[0], abort
+
+    def test_the_failing_repetition_is_named(self, tmp_path):
+        abort = harness._run_measured_steps(
+            self._steps(),
+            execute=self._execute,
+            repeat=2,
+            runs={},
+            scenario=self._scenario(),
+            fixture=None,
+            cache_root=tmp_path,
+            timeout=10,
+            one_side=None,
+            check_extraction=False,
+            validate_repetition=lambda index: ["bad evidence"] if index == 1 else [],
+        )
+        assert abort == ["repetition 1: bad evidence"], abort
+
+    def test_no_callback_keeps_the_previous_behaviour(self, tmp_path):
+        # The parameter is optional, so a caller that does not validate per
+        # repetition still runs (every existing unit test drives it this way).
+        assert (
+            harness._run_measured_steps(
+                self._steps(),
+                execute=self._execute,
+                repeat=2,
+                runs={},
+                scenario=self._scenario(),
+                fixture=None,
+                cache_root=tmp_path,
+                timeout=10,
+                one_side=None,
+                check_extraction=False,
+            )
+            is None
+        )

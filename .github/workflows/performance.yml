@@ -573,6 +573,7 @@ jobs:
               --regress-tolerance 0.3 --regress-min-delta-ms 10 \
               --regress-min-delta-ms-dump 30 \
               --regress-min-delta-ms-total 40 \
+              --require-all-metrics \
               | tee header_graph_regression.txt
             # All three metrics (dump_ms/attach_ms/total_ms) are gated
             # independently. The absolute floors differ per metric because the
@@ -581,13 +582,19 @@ jobs:
             # for the ~100ms+ dump and total windows, where it would reduce the
             # gate to the relative tolerance alone.
             #
-            # --require-all-metrics is deliberately NOT passed here: the base
-            # branch is measured with the BASE branch's own copy of this script,
-            # so across the commit that introduced total_ms the base report
-            # legitimately carries no such field. That point is reported as
-            # ungated (and dump_ms still gates via its baseline_ms alias) rather
-            # than hard-failing a PR for a baseline it could not have written.
-            # Once total_ms is on main, every base report carries it.
+            # --require-all-metrics IS passed. An earlier version of this comment
+            # argued the opposite -- that the base branch writes its report with
+            # its own older copy of this script, so across the commit introducing
+            # total_ms the base report could legitimately lack that field. That
+            # reasoning was simply wrong about this job: the base measurement a
+            # few steps above runs `head/scripts/check_header_graph_perf.py`
+            # (head's harness) against base's *installed package*, deliberately,
+            # because one harness measuring two products is the only way the two
+            # numbers are comparable. So the base report is always written by
+            # head's script and always carries all three metrics, and omitting
+            # the flag only meant a missing or non-gateable metric degraded to a
+            # printed note while the job still exited 0 -- a gate that does not
+            # gate everything its own summary claims to cover (Codex review).
           else
             echo "No base measurement available (base predates this gate's feature, or a cross-checkout castxml-policy mismatch) -- report-only." \
               | tee header_graph_regression.txt
