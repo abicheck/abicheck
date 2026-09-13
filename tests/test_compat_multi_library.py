@@ -981,3 +981,104 @@ class TestAssuranceIsRolledUpNotDropped:
         )
         assert merged is not None
         assert any("not aggregated" in n for n in merged.notes)
+
+
+class TestAssuranceRollUpOnInputItCannotPlace:
+    """Unknown input must not be read as good input.
+
+    Both ladders in the roll-up rank an unrecognised value **worst**, which
+    is the same discipline ``multi_library._WORST_SCALES`` records: a status
+    or depth this build cannot place is not evidence of a good one. Both
+    fallbacks were reachable and untested -- and an untested fail-closed
+    branch is the one most likely to be "simplified" into a fail-open one.
+    """
+
+    def test_an_unrecognised_status_outranks_every_known_one(self) -> None:
+        merged = merge_analysis_assurance(
+            [
+                AnalysisAssurance(status="complete"),
+                AnalysisAssurance(status="failed"),
+                # Not in the vocabulary: a future build's value reaching an
+                # older one, or a hand-built block.
+                AnalysisAssurance(status="something_new"),  # type: ignore[arg-type]
+            ]
+        )
+        assert merged is not None
+        assert merged.status == "something_new"
+
+    def test_an_unrankable_depth_wins_over_every_ranked_one(self) -> None:
+        merged = merge_analysis_assurance(
+            [
+                AnalysisAssurance(status="complete", effective_depth="source"),
+                AnalysisAssurance(status="complete", effective_depth="binary"),
+                AnalysisAssurance(status="complete", effective_depth="not_a_depth"),
+            ]
+        )
+        assert merged is not None
+        assert merged.effective_depth == "not_a_depth"
+
+    def test_member_notes_are_carried_and_deduplicated(self) -> None:
+        """A member's own explanation of *why* it is not complete is the part
+        a reader needs; dropping it would leave a weakened status with no
+        stated reason."""
+        merged = merge_analysis_assurance(
+            [
+                AnalysisAssurance(
+                    status="partial", notes=("no DWARF on either side", "shared note")
+                ),
+                AnalysisAssurance(
+                    status="partial", notes=("shared note", "header parse degraded")
+                ),
+            ]
+        )
+        assert merged is not None
+        assert merged.notes.count("shared note") == 1
+        assert "no DWARF on either side" in merged.notes
+        assert "header parse degraded" in merged.notes
+
+
+class TestDescriptorDirectoryExpansionRefusesToSayNothing:
+    """An expansion that finds nothing is an error, never an empty surface.
+
+    ``vision.md``'s "weaker evidence narrows conclusions": a ``<headers>``
+    directory naming no parseable header, or a ``<libs>`` directory holding
+    no library, must say so. Returning an empty list would let the run
+    continue and report a confident verdict over a surface nobody supplied --
+    which is the failure mode this whole capability was added to fix, in a
+    new place.
+    """
+
+    def test_a_headers_directory_with_no_headers_raises(self, tmp_path) -> None:
+        from abicheck.compat.descriptor_expansion import expand_descriptor_headers
+        from abicheck.errors import ValidationError
+
+        empty = tmp_path / "include"
+        empty.mkdir()
+        (empty / "README.txt").write_text("not a header", encoding="utf-8")
+        with pytest.raises(ValidationError, match="no supported header files"):
+            expand_descriptor_headers([empty])
+
+    def test_a_headers_directory_with_one_header_does_not(self, tmp_path) -> None:
+        """The negative control: an implementation that raised unconditionally
+        would satisfy the claim above completely."""
+        from abicheck.compat.descriptor_expansion import expand_descriptor_headers
+
+        d = tmp_path / "include"
+        d.mkdir()
+        (d / "api.h").write_text("int f(void);\n", encoding="utf-8")
+        assert [p.name for p in expand_descriptor_headers([d])] == ["api.h"]
+
+    def test_a_non_binary_file_is_not_taken_for_a_library(self, tmp_path) -> None:
+        """Format detection runs before the name rule, so a text file named
+        ``libfoo.so`` is still not a library."""
+        from abicheck.compat.descriptor_expansion import expand_descriptor_libs
+        from abicheck.errors import ValidationError
+
+        d = tmp_path / "lib"
+        d.mkdir()
+        (d / "libfoo.so").write_text(
+            "#!/bin/sh\necho not a library\n", encoding="utf-8"
+        )
+        (d / "notes.md").write_text("hello", encoding="utf-8")
+        with pytest.raises(ValidationError):
+            expand_descriptor_libs([d])

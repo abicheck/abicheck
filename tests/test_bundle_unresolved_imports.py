@@ -568,3 +568,74 @@ class TestZeroDtNeededBundleEndToEnd:
         # 0 == compatible under the legacy verdict scheme; 4 was the reported
         # false ABI break.
         assert result.exit_code == 0, result.output
+
+
+class TestAuditModeSkipsWhatItCannotJudge:
+    """Two branches the audit detector takes before it can decide anything.
+
+    Both were reachable and untested. Each is a *skip*, and an untested skip
+    is the dangerous kind: if either stopped firing, the detector would go on
+    to judge an import on evidence it does not have, and the finding it
+    invented would look exactly like a real one.
+    """
+
+    def _detect(self, snapshot: BundleSnapshot, system_providers=None):
+        from abicheck.bundle import _detect_unresolved_intra_dependency
+
+        return _detect_unresolved_intra_dependency(snapshot, system_providers or set())
+
+    def test_a_consumer_with_no_parsed_metadata_is_skipped(self) -> None:
+        """The resolution graph can name a consumer whose own metadata never
+        parsed. Nothing is known about its outward edges, so nothing can be
+        concluded about its imports -- least of all that they are unresolved.
+        """
+        snap = _snapshot(
+            {"libconsumer.so": _meta(soname="libconsumer.so.1", imports=["mystery_op"])}
+        )
+        # The consumer stays in the resolution graph; only its parsed
+        # metadata goes away, which is the state this branch exists for.
+        del snap.metadata["libconsumer.so"]
+        assert self._detect(snap) == []
+
+        # Negative control: with metadata present the same bundle *does*
+        # report, so the skip above is the branch under test and not an
+        # accidentally inert fixture.
+        intact = _snapshot(
+            {"libconsumer.so": _meta(soname="libconsumer.so.1", imports=["mystery_op"])}
+        )
+        assert [f.symbol for f in self._detect(intact)] == ["mystery_op"]
+
+    def test_a_versioned_import_a_provider_outside_the_bundle_satisfies(self) -> None:
+        """``_import_is_external`` resolves a versioned import to its verneed
+        provider. When that provider is not in the bundle, the import is
+        external by observation -- not an unresolved intra-dependency."""
+        snap = _snapshot(
+            {
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=["libthirdparty.so.4"],
+                    imports=["tp_entry"],
+                    import_versions={"tp_entry": "TP_4.0"},
+                    import_version_sonames={"tp_entry": "libthirdparty.so.4"},
+                    versions_required={"libthirdparty.so.4": ["TP_4.0"]},
+                ),
+            }
+        )
+        assert self._detect(snap) == []
+
+        # The same import with its provider *inside* the bundle is a real
+        # finding, so the branch is doing the discriminating work.
+        with_sibling = _snapshot(
+            {
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=["libsibling.so.1"],
+                    imports=["tp_entry"],
+                    import_versions={"tp_entry": "TP_4.0"},
+                    import_version_sonames={"tp_entry": "libsibling.so.1"},
+                    versions_required={"libsibling.so.1": ["TP_4.0"]},
+                ),
+                "libsibling.so.1": _meta(soname="libsibling.so.1"),
+            }
+        )
+        assert [f.symbol for f in self._detect(with_sibling)] == ["tp_entry"]
