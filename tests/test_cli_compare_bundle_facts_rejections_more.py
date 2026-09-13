@@ -410,8 +410,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
         config_path = tmp_path / ".abicheck.yml"
         config_path.write_text(
-            'bundle:\n  system_providers: ["libvendor.so.1"]\n'
-            '  cohorts: ["libfoo_"]\n',
+            'bundle:\n  system_providers: ["libvendor.so.1"]\n  cohorts: ["libfoo_"]\n',
             encoding="utf-8",
         )
 

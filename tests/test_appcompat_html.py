@@ -1,4 +1,5 @@
 """Tests for appcompat HTML report generator."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -101,9 +102,7 @@ def test_html_preserves_mangled_identity_for_missing_symbols() -> None:
     indistinguishable rows with the exact linker names gone entirely;
     each mangled name must survive as an <abbr> tooltip, mirroring
     html_report._symbol_cell's own contract."""
-    out = appcompat_to_html(
-        _appcompat_result(missing=["_ZN3FooC1Ev", "_ZN3FooC2Ev"])
-    )
+    out = appcompat_to_html(_appcompat_result(missing=["_ZN3FooC1Ev", "_ZN3FooC2Ev"]))
     assert out.count("Foo::Foo()") == 2
     assert '<abbr title="_ZN3FooC1Ev">Foo::Foo()</abbr>' in out
     assert '<abbr title="_ZN3FooC2Ev">Foo::Foo()</abbr>' in out
@@ -140,9 +139,15 @@ def test_html_shows_no_relevant_changes() -> None:
         V = "func_added"
 
     change = SimpleNamespace(
-        kind=K.V, symbol="new_func", description="added",
-        old_value=None, new_value=None, source_location=None,
-        affected_symbols=None, caused_by_type=None, caused_count=0,
+        kind=K.V,
+        symbol="new_func",
+        description="added",
+        old_value=None,
+        new_value=None,
+        source_location=None,
+        affected_symbols=None,
+        caused_by_type=None,
+        caused_count=0,
         demangled_symbol="new_func",
     )
     out = appcompat_to_html(_appcompat_result(irrelevant=[change]))
@@ -157,7 +162,9 @@ def test_html_confidence_absent_without_metadata() -> None:
 
 
 def test_html_shows_missing_versions() -> None:
-    out = appcompat_to_html(_appcompat_result(missing_versions=["GLIBC_2.34", "GLIBC_2.38"]))
+    out = appcompat_to_html(
+        _appcompat_result(missing_versions=["GLIBC_2.34", "GLIBC_2.38"])
+    )
     assert "Missing Symbol Versions" in out
     assert "GLIBC_2.34" in out
     assert "GLIBC_2.38" in out
@@ -170,14 +177,23 @@ def test_html_shows_breaking_for_app() -> None:
         V = "func_removed"
 
     change = SimpleNamespace(
-        kind=K.V, symbol="removed_func", description="Public function removed",
-        old_value="removed_func", new_value=None, source_location=None,
-        affected_symbols=None, caused_by_type=None, caused_count=0,
+        kind=K.V,
+        symbol="removed_func",
+        description="Public function removed",
+        old_value="removed_func",
+        new_value=None,
+        source_location=None,
+        affected_symbols=None,
+        caused_by_type=None,
+        caused_count=0,
         demangled_symbol="removed_func",
     )
-    out = appcompat_to_html(_appcompat_result(
-        verdict=Verdict.BREAKING, breaking=[change],
-    ))
+    out = appcompat_to_html(
+        _appcompat_result(
+            verdict=Verdict.BREAKING,
+            breaking=[change],
+        )
+    )
     assert "Relevant Changes" in out
     assert "removed_func" in out
 
@@ -197,9 +213,15 @@ def test_html_irrelevant_table_carries_the_unattributed_evidence_caveat() -> Non
         V = "func_removed"
 
     change = SimpleNamespace(
-        kind=K.V, symbol="removed_func", description="Public function removed",
-        old_value="removed_func", new_value=None, source_location=None,
-        affected_symbols=None, caused_by_type=None, caused_count=0,
+        kind=K.V,
+        symbol="removed_func",
+        description="Public function removed",
+        old_value="removed_func",
+        new_value=None,
+        source_location=None,
+        affected_symbols=None,
+        caused_by_type=None,
+        caused_count=0,
         demangled_symbol="removed_func",
     )
     irrelevant_r = _appcompat_result(irrelevant=[change])
@@ -224,9 +246,15 @@ def test_html_relevant_table_keeps_consumer_proven_impact_text() -> None:
         V = "func_removed"
 
     change = SimpleNamespace(
-        kind=K.V, symbol="removed_func", description="Public function removed",
-        old_value="removed_func", new_value=None, source_location=None,
-        affected_symbols=None, caused_by_type=None, caused_count=0,
+        kind=K.V,
+        symbol="removed_func",
+        description="Public function removed",
+        old_value="removed_func",
+        new_value=None,
+        source_location=None,
+        affected_symbols=None,
+        caused_by_type=None,
+        caused_count=0,
         demangled_symbol="removed_func",
     )
     r = _appcompat_result(verdict=Verdict.BREAKING, breaking=[change])
@@ -336,9 +364,7 @@ def test_missing_symbols_prewarm_accepts_macho_prefix(monkeypatch) -> None:
 def test_demangle_false_keeps_missing_symbols_raw() -> None:
     """Codex review, fresh evidence: appcompat_to_html() had no equivalent
     to the CLI's --no-demangle -- it always demangled unconditionally."""
-    out = appcompat_to_html(
-        _appcompat_result(missing=["_ZN3FooC1Ev"]), demangle=False
-    )
+    out = appcompat_to_html(_appcompat_result(missing=["_ZN3FooC1Ev"]), demangle=False)
     assert "_ZN3FooC1Ev" in out
     assert "Foo::Foo()" not in out
 

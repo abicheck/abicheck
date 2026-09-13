@@ -28,6 +28,7 @@ convert "removed + added" pairs into "likely renamed" changes.
 Trust boundary: callers are responsible for validating paths.  This module
 opens files as given and does not sanitize or restrict path traversal.
 """
+
 from __future__ import annotations
 
 import bisect
@@ -51,6 +52,7 @@ log = logging.getLogger(__name__)
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class FunctionFingerprint:
     """Fingerprint for a single exported function symbol.
@@ -62,6 +64,7 @@ class FunctionFingerprint:
             or empty string if the code region could not be read.
         section_index: ELF section index the symbol resides in.
     """
+
     name: str
     size: int
     code_hash: str
@@ -74,6 +77,7 @@ class SectionSummary:
 
     Used for quick triage: if .text didn't change, ABI probably didn't either.
     """
+
     name: str
     size: int
     content_hash: str  # SHA-256 of raw section bytes
@@ -89,6 +93,7 @@ class BinarySummary:
     Provides a coarse "binary changed significantly" vs "binary barely changed"
     signal for triage before running full diff.
     """
+
     sections: dict[str, SectionSummary] = field(default_factory=dict)
 
     @property
@@ -134,6 +139,7 @@ class RenameCandidate:
         old_fingerprint: Full fingerprint from old binary.
         new_fingerprint: Full fingerprint from new binary.
     """
+
     old_name: str
     new_name: str
     confidence: float
@@ -161,10 +167,18 @@ _SIZE_TOLERANCE_RATIO = 0.05  # 5%
 _FUZZY_MAX_PAIRS = 2_000_000
 
 # Sections to include in BinarySummary for ABI-relevant triage.
-_ABI_SECTIONS = frozenset({
-    ".text", ".rodata", ".data", ".bss", ".data.rel.ro",
-    ".init_array", ".fini_array", ".dynamic",
-})
+_ABI_SECTIONS = frozenset(
+    {
+        ".text",
+        ".rodata",
+        ".data",
+        ".bss",
+        ".data.rel.ro",
+        ".init_array",
+        ".fini_array",
+        ".dynamic",
+    }
+)
 
 # Maximum section size (bytes) to read into memory for hashing.
 # Prevents OOM from crafted ELF files with enormous sh_size values.
@@ -174,6 +188,7 @@ _MAX_SECTION_SIZE = 256 * 1024 * 1024  # 256 MiB
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def compute_function_fingerprints(
     binary_path: str | Path,
@@ -192,7 +207,9 @@ def compute_function_fingerprints(
             # Verify regular file after open to avoid TOCTOU (symlink/FIFO).
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
-                log.warning("compute_function_fingerprints: not a regular file: %s", binary_path)
+                log.warning(
+                    "compute_function_fingerprints: not a regular file: %s", binary_path
+                )
                 return {}
             magic = f.read(4)
             if magic != b"\x7fELF":
@@ -215,7 +232,9 @@ def compute_section_summary(binary_path: str | Path) -> BinarySummary:
             # Verify regular file after open to avoid TOCTOU (symlink/FIFO).
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
-                log.warning("compute_section_summary: not a regular file: %s", binary_path)
+                log.warning(
+                    "compute_section_summary: not a regular file: %s", binary_path
+                )
                 return BinarySummary()
             magic = f.read(4)
             if magic != b"\x7fELF":
@@ -268,11 +287,13 @@ def match_renamed_functions(
 
     # Filter out tiny symbols (stubs/trampolines produce false matches)
     old_candidates = {
-        name: fp for name, fp in old_fps.items()
+        name: fp
+        for name, fp in old_fps.items()
         if name in old_only and fp.size >= _MIN_SYMBOL_SIZE
     }
     new_candidates = {
-        name: fp for name, fp in new_fps.items()
+        name: fp
+        for name, fp in new_fps.items()
         if name in new_only and fp.size >= _MIN_SYMBOL_SIZE
     }
 
@@ -289,13 +310,17 @@ def match_renamed_functions(
     # removal/addition as a rename and hide an ABI break. The predicate cost is
     # bounded by the size-bucket short-circuit in _match_size, so it stays cheap
     # for the spread-out symbol sizes real libraries have.
-    candidates += _match_size(old_candidates, new_by_size, used_new, matched_old, name_filter)
+    candidates += _match_size(
+        old_candidates, new_by_size, used_new, matched_old, name_filter
+    )
     # Pass 3 (fuzzy) is the only O(removed×added) pass and is a low-confidence
     # heuristic, so skip it entirely when the candidate sets are large enough
     # that a *unique* fuzzy match could not be meaningful anyway. Skipping fuzzy
     # only forgoes speculative rename matches — it never hides a break.
     if len(old_candidates) * len(new_candidates) <= _FUZZY_MAX_PAIRS:
-        candidates += _match_fuzzy(old_candidates, new_by_size, used_new, matched_old, name_filter)
+        candidates += _match_fuzzy(
+            old_candidates, new_by_size, used_new, matched_old, name_filter
+        )
 
     # Sort by confidence descending
     candidates.sort(key=lambda c: (-c.confidence, c.old_name))
@@ -329,19 +354,22 @@ def _match_exact(
         if not old_fp.code_hash:
             continue
         exact_matches = [
-            (n, fp) for n, fp in new_by_hash.get(old_fp.code_hash, [])
+            (n, fp)
+            for n, fp in new_by_hash.get(old_fp.code_hash, [])
             if n not in used_new and fp.size == old_fp.size
         ]
         # Only match when unambiguous (one candidate), mirroring passes 2/3
         if len(exact_matches) == 1:
             new_name, new_fp = exact_matches[0]
-            out.append(RenameCandidate(
-                old_name=old_name,
-                new_name=new_name,
-                confidence=1.0,
-                old_fingerprint=old_fp,
-                new_fingerprint=new_fp,
-            ))
+            out.append(
+                RenameCandidate(
+                    old_name=old_name,
+                    new_name=new_name,
+                    confidence=1.0,
+                    old_fingerprint=old_fp,
+                    new_fingerprint=new_fp,
+                )
+            )
             used_new.add(new_name)
     return out
 
@@ -382,13 +410,15 @@ def _match_size(
         new_name, new_fp = size_matches[0]
         # 0.8 when either side lacks a code hash (size match only); conflicting
         # code hashes were already excluded from size_matches above.
-        out.append(RenameCandidate(
-            old_name=old_name,
-            new_name=new_name,
-            confidence=0.8,
-            old_fingerprint=old_fp,
-            new_fingerprint=new_fp,
-        ))
+        out.append(
+            RenameCandidate(
+                old_name=old_name,
+                new_name=new_name,
+                confidence=0.8,
+                old_fingerprint=old_fp,
+                new_fingerprint=new_fp,
+            )
+        )
         used_new.add(new_name)
         matched_old.add(old_name)
     return out
@@ -425,7 +455,11 @@ def _fuzzy_partners(
             if new_name in used_new or new_fp.size == 0:
                 continue
             # If both have code hashes but they differ, skip
-            if old_fp.code_hash and new_fp.code_hash and old_fp.code_hash != new_fp.code_hash:
+            if (
+                old_fp.code_hash
+                and new_fp.code_hash
+                and old_fp.code_hash != new_fp.code_hash
+            ):
                 continue
             if abs(size - new_fp.size) / max(size, new_fp.size) > _SIZE_TOLERANCE_RATIO:
                 continue
@@ -456,16 +490,20 @@ def _match_fuzzy(
     for old_name, old_fp in sorted(old_candidates.items()):
         if old_name in matched_old or old_fp.size == 0:
             continue
-        fuzzy_matches = _fuzzy_partners(old_fp, new_by_size, sorted_sizes, used_new, name_filter)
+        fuzzy_matches = _fuzzy_partners(
+            old_fp, new_by_size, sorted_sizes, used_new, name_filter
+        )
         if len(fuzzy_matches) == 1:
             new_name, new_fp = fuzzy_matches[0]
-            out.append(RenameCandidate(
-                old_name=old_name,
-                new_name=new_name,
-                confidence=0.5,
-                old_fingerprint=old_fp,
-                new_fingerprint=new_fp,
-            ))
+            out.append(
+                RenameCandidate(
+                    old_name=old_name,
+                    new_name=new_name,
+                    confidence=0.5,
+                    old_fingerprint=old_fp,
+                    new_fingerprint=new_fp,
+                )
+            )
             used_new.add(new_name)
             matched_old.add(old_name)
     return out
@@ -475,8 +513,10 @@ def _match_fuzzy(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _extract_fingerprints(
-    f: IO[bytes], binary_path: Path,
+    f: IO[bytes],
+    binary_path: Path,
 ) -> dict[str, FunctionFingerprint]:
     """Extract fingerprints from an open ELF file."""
     elf = ELFFile(f)
@@ -555,7 +595,10 @@ def _compute_code_hash(
                 log.warning(
                     "_compute_code_hash: section %s (index %d) too large "
                     "(%d bytes > %d limit), skipping",
-                    section.name, shndx, section.header.sh_size, _MAX_SECTION_SIZE,
+                    section.name,
+                    shndx,
+                    section.header.sh_size,
+                    _MAX_SECTION_SIZE,
                 )
                 return ""
             sec_data = section.data()
@@ -574,7 +617,7 @@ def _compute_code_hash(
         if offset < 0 or offset + sym_size > len(sec_data):
             return ""
 
-        code_bytes = sec_data[offset:offset + sym_size]
+        code_bytes = sec_data[offset : offset + sym_size]
         return hashlib.sha256(code_bytes).hexdigest()
 
     except (IndexError, KeyError, ValueError, OSError) as exc:
@@ -600,7 +643,9 @@ def _extract_section_summary(f: IO[bytes]) -> BinarySummary:
             log.warning(
                 "compute_section_summary: section %s too large "
                 "(%d bytes > %d limit), skipping",
-                name, size, _MAX_SECTION_SIZE,
+                name,
+                size,
+                _MAX_SECTION_SIZE,
             )
             continue
         else:

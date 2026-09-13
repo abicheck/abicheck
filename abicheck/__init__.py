@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """abicheck — ABI compatibility checker."""
+
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 try:

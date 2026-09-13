@@ -54,7 +54,9 @@ if TYPE_CHECKING:
     from ....workflows.bundle_compare_operand import BundleCompareRequest
 
 
-def resolve_bundle_compare_dispatch(old_input: Path, new_input: Path) -> BundleCompareRequest:
+def resolve_bundle_compare_dispatch(
+    old_input: Path, new_input: Path
+) -> BundleCompareRequest:
     """Classify *old_input*/*new_input* for ``compare``'s bundle-facts
     routing. Returns the
     :class:`~abicheck.workflows.bundle_compare_operand.BundleCompareRequest`

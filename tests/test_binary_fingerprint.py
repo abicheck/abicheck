@@ -366,7 +366,9 @@ class TestMatchRenamedFunctions:
 
         assert match_renamed_functions(old, new, name_filter=never) == []
 
-    def test_name_filter_kept_over_fuzzy_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_name_filter_kept_over_fuzzy_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Above the fuzzy-pass pair cap the *size* pass still applies the name
         filter, so a same-size pair with unrelated names is not a false rename
         (the cap only skips the speculative fuzzy pass, never hides a break)."""

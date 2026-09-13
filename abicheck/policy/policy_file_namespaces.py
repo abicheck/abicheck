@@ -38,6 +38,7 @@ __all__ = [
     "parse_internal_namespaces",
 ]
 
+
 class _NamespaceConventions(Protocol):
     """The two ``PolicyFile`` fields these derivations read.
 
@@ -66,7 +67,9 @@ def internal_namespaces(policy_file: _NamespaceConventions | None) -> tuple[str,
     return tuple(policy_file.internal_namespaces)
 
 
-def experimental_namespaces(policy_file: _NamespaceConventions | None) -> tuple[str, ...]:
+def experimental_namespaces(
+    policy_file: _NamespaceConventions | None,
+) -> tuple[str, ...]:
     """The policy file's experimental-namespace segments, or an empty tuple.
 
     The counterpart of :func:`internal_namespaces` for the unrelated

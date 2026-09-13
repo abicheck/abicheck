@@ -30,13 +30,9 @@ from pathlib import Path
 import pytest
 
 _GATE_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "scripts"
-    / "check_docs_review_triggers.py"
+    Path(__file__).resolve().parent.parent / "scripts" / "check_docs_review_triggers.py"
 )
-_spec = importlib.util.spec_from_file_location(
-    "check_docs_review_triggers", _GATE_PATH
-)
+_spec = importlib.util.spec_from_file_location("check_docs_review_triggers", _GATE_PATH)
 assert _spec and _spec.loader
 rt = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rt)
@@ -73,7 +69,7 @@ def test_find_triggers_flags_page_on_dependency_change(
     )
     triggers = rt.find_triggers(["abicheck/model.py", "tests/test_model.py"])
     assert len(triggers) == 1
-    (key, hits), = triggers.items()
+    ((key, hits),) = triggers.items()
     assert key.endswith("page.md")
     assert hits == ["abicheck/model.py"]
 
@@ -88,7 +84,7 @@ def test_find_triggers_matches_directory_prefix(
     )
     triggers = rt.find_triggers(["abicheck/buildsource/inline.py"])
     assert len(triggers) == 1
-    (key, hits), = triggers.items()
+    ((key, hits),) = triggers.items()
     assert key.endswith("page.md")
     assert hits == ["abicheck/buildsource/inline.py"]
 
@@ -140,7 +136,9 @@ def test_render_summary_empty() -> None:
 
 
 def test_render_summary_lists_pages_and_hits() -> None:
-    summary = rt.render_summary({"docs/learn/verdicts.md": ["abicheck/checker_policy.py"]})
+    summary = rt.render_summary(
+        {"docs/learn/verdicts.md": ["abicheck/checker_policy.py"]}
+    )
     assert "docs/learn/verdicts.md" in summary
     assert "abicheck/checker_policy.py" in summary
 

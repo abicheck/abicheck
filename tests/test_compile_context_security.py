@@ -125,15 +125,11 @@ def test_merge_compile_config_explicit_override_distrusts_a_resolved_path(
     from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
     cfg = tmp_path / "auto-discovered.yml"
-    cfg.write_text(
-        "compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8"
-    )
+    cfg.write_text("compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8")
     # Simulates the vulnerable call shape: `build_config` is already a
     # resolved, non-None path, but it was never bound via an explicit
     # --config -- config_explicit=False must still gate it as untrusted.
-    merged, _ = _merge_compile_config(
-        CompileContext(), (), cfg, config_explicit=False
-    )
+    merged, _ = _merge_compile_config(CompileContext(), (), cfg, config_explicit=False)
     assert merged.gcc_path is None
     assert merged.gcc_prefix is None
 
@@ -141,9 +137,7 @@ def test_merge_compile_config_explicit_override_distrusts_a_resolved_path(
     # explicit --config can say config_explicit=True even when it didn't
     # pass the raw CLI value either -- trust follows the flag, not the
     # parameter's own None-ness.
-    trusted, _ = _merge_compile_config(
-        CompileContext(), (), cfg, config_explicit=True
-    )
+    trusted, _ = _merge_compile_config(CompileContext(), (), cfg, config_explicit=True)
     assert trusted.gcc_path == "/tmp/evil-compiler"
 
 
@@ -182,9 +176,7 @@ def test_resolve_compile_context_end_to_end_distrusts_a_resolved_autodiscovered_
     from abicheck.cli_options import compile_context_options, resolve_compile_context
 
     cfg = tmp_path / "auto-discovered.yml"
-    cfg.write_text(
-        "compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8"
-    )
+    cfg.write_text("compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8")
 
     @click.command()
     @compile_context_options()
@@ -276,9 +268,7 @@ def test_compile_options_benign_flags_still_accepted(tmp_path) -> None:
     """A normal compile.options list (no plugin-loading tokens) is unaffected."""
     from abicheck.buildsource.build_config import BuildConfig
 
-    bc = BuildConfig.from_dict(
-        {"compile": {"options": ["-march=armv8-a", "-DFOO=1"]}}
-    )
+    bc = BuildConfig.from_dict({"compile": {"options": ["-march=armv8-a", "-DFOO=1"]}})
     assert bc.compile_options == ["-march=armv8-a", "-DFOO=1"]
 
 
@@ -302,7 +292,9 @@ class TestBundleFactsDispatchCompileConfigEnvToggles:
         )
 
         monkeypatch.setattr(
-            cli_options, "resolve_compile_context", lambda ctx, **kw: (CompileContext(), ())
+            cli_options,
+            "resolve_compile_context",
+            lambda ctx, **kw: (CompileContext(), ()),
         )
 
         cli_ctx = click.Context(click.Command("compare"))
@@ -312,9 +304,13 @@ class TestBundleFactsDispatchCompileConfigEnvToggles:
         cli_ctx.close()  # runs call_on_close -> restores the prior (unset) value
         assert os.environ.get("ABICHECK_ALLOW_AST_FALLBACK") is None
 
-    def test_allow_unsupported_castxml_toggle_applied(self, tmp_path, monkeypatch) -> None:
+    def test_allow_unsupported_castxml_toggle_applied(
+        self, tmp_path, monkeypatch
+    ) -> None:
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("compile:\n  allow_unsupported_castxml: true\n", encoding="utf-8")
+        cfg.write_text(
+            "compile:\n  allow_unsupported_castxml: true\n", encoding="utf-8"
+        )
         monkeypatch.delenv("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", raising=False)
 
         from abicheck import cli_options
@@ -323,7 +319,9 @@ class TestBundleFactsDispatchCompileConfigEnvToggles:
         )
 
         monkeypatch.setattr(
-            cli_options, "resolve_compile_context", lambda ctx, **kw: (CompileContext(), ())
+            cli_options,
+            "resolve_compile_context",
+            lambda ctx, **kw: (CompileContext(), ()),
         )
 
         cli_ctx = click.Context(click.Command("compare"))
@@ -344,9 +342,13 @@ class TestBundleFactsDispatchCompileConfigEnvToggles:
         )
 
         monkeypatch.setattr(
-            cli_options, "resolve_compile_context", lambda ctx, **kw: (CompileContext(), ())
+            cli_options,
+            "resolve_compile_context",
+            lambda ctx, **kw: (CompileContext(), ()),
         )
-        monkeypatch.setattr(cli_helpers_compare, "discover_project_config", lambda: None)
+        monkeypatch.setattr(
+            cli_helpers_compare, "discover_project_config", lambda: None
+        )
 
         cli_ctx = click.Context(click.Command("compare"))
         kwargs: dict = {"config": None}

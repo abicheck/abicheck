@@ -31,11 +31,13 @@ def test_advanced_dwarf_detector_requires_both_sides() -> None:
 def test_advanced_dwarf_detector_enabled_when_both_have_metadata() -> None:
     """Detector is enabled when both snapshots have dwarf_advanced."""
     old = AbiSnapshot(
-        library="libx.so", version="1.0",
+        library="libx.so",
+        version="1.0",
         dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
     )
     new = AbiSnapshot(
-        library="libx.so", version="2.0",
+        library="libx.so",
+        version="2.0",
         dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
     )
     result = compare(old, new)
@@ -47,14 +49,16 @@ def test_advanced_dwarf_detector_enabled_when_both_have_metadata() -> None:
 def test_advanced_dwarf_detector_finds_calling_convention_change() -> None:
     """Detector reports CALLING_CONVENTION_CHANGED when CC differs."""
     old = AbiSnapshot(
-        library="libx.so", version="1.0",
+        library="libx.so",
+        version="1.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             calling_conventions={"_Z3foov": "normal"},
         ),
     )
     new = AbiSnapshot(
-        library="libx.so", version="2.0",
+        library="libx.so",
+        version="2.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             calling_conventions={"_Z3foov": "stdcall"},
@@ -67,7 +71,8 @@ def test_advanced_dwarf_detector_finds_calling_convention_change() -> None:
 def test_advanced_dwarf_detector_finds_packing_change() -> None:
     """Detector reports STRUCT_PACKING_CHANGED when packing status changes."""
     old = AbiSnapshot(
-        library="libx.so", version="1.0",
+        library="libx.so",
+        version="1.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             packed_structs=set(),
@@ -75,7 +80,8 @@ def test_advanced_dwarf_detector_finds_packing_change() -> None:
         ),
     )
     new = AbiSnapshot(
-        library="libx.so", version="2.0",
+        library="libx.so",
+        version="2.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             packed_structs={"MyStruct"},

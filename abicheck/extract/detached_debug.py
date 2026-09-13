@@ -55,7 +55,8 @@ def _elf_section_names(path: Path) -> frozenset[str] | None:
         with open(path, "rb") as f:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
             return frozenset(
-                s.name for s in elf.iter_sections()  # type: ignore[no-untyped-call]
+                s.name
+                for s in elf.iter_sections()  # type: ignore[no-untyped-call]
             )
     except (OSError, ValueError, KeyError, ELFError) as exc:
         _logger.debug("Cannot read ELF sections from %s: %s", path, exc)
@@ -131,7 +132,9 @@ class DetachedDebugFileResolver:
     """
 
     @staticmethod
-    def _build_id_conflict(binary_path: Path, debug_path: Path, build_id: str | None) -> bool:
+    def _build_id_conflict(
+        binary_path: Path, debug_path: Path, build_id: str | None
+    ) -> bool:
         if not _is_valid_build_id(build_id):
             return False
         debug_build_id = extract_build_id(debug_path)
@@ -141,7 +144,10 @@ class DetachedDebugFileResolver:
             return False
         _logger.warning(
             "Ignoring %s: its build-id (%s) does not match %s (%s)",
-            debug_path, debug_build_id, binary_path.name, build_id,
+            debug_path,
+            debug_build_id,
+            binary_path.name,
+            build_id,
         )
         return True
 

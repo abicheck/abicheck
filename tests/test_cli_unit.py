@@ -3,6 +3,7 @@
 Covers compare_cmd output formats, exit codes, suppression handling,
 and compat_check_cmd descriptor parsing/error paths.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,20 +18,38 @@ from abicheck.serialization import snapshot_to_json
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
-def _write_snapshots(tmp_path: Path, old_snap: AbiSnapshot | None = None,
-                     new_snap: AbiSnapshot | None = None) -> tuple[Path, Path]:
+
+def _write_snapshots(
+    tmp_path: Path,
+    old_snap: AbiSnapshot | None = None,
+    new_snap: AbiSnapshot | None = None,
+) -> tuple[Path, Path]:
     """Write old/new snapshots to JSON files and return their paths."""
     if old_snap is None:
         old_snap = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
-                                visibility=Visibility.PUBLIC)],
+            library="libtest.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
     if new_snap is None:
         new_snap = AbiSnapshot(
-            library="libtest.so", version="2.0",
-            functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
-                                visibility=Visibility.PUBLIC)],
+            library="libtest.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
@@ -42,25 +61,40 @@ def _write_snapshots(tmp_path: Path, old_snap: AbiSnapshot | None = None,
 def _breaking_snapshots(tmp_path: Path) -> tuple[Path, Path]:
     """Snapshots where a function is removed → BREAKING."""
     old = AbiSnapshot(
-        library="libtest.so", version="1.0",
+        library="libtest.so",
+        version="1.0",
         functions=[
-            Function(name="foo", mangled="_Z3foov", return_type="int",
-                     visibility=Visibility.PUBLIC),
-            Function(name="bar", mangled="_Z3barv", return_type="void",
-                     visibility=Visibility.PUBLIC),
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+            Function(
+                name="bar",
+                mangled="_Z3barv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
         ],
     )
     new = AbiSnapshot(
-        library="libtest.so", version="2.0",
+        library="libtest.so",
+        version="2.0",
         functions=[
-            Function(name="foo", mangled="_Z3foov", return_type="int",
-                     visibility=Visibility.PUBLIC),
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
         ],
     )
     return _write_snapshots(tmp_path, old, new)
 
 
 # ── compare markdown ────────────────────────────────────────────────────
+
 
 class TestCompareMarkdown:
     def test_no_change_exit_0(self, tmp_path):
@@ -80,7 +114,9 @@ class TestCompareMarkdown:
         old_p, new_p = _write_snapshots(tmp_path)
         out = tmp_path / "report.md"
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", f"markdown={out}"])
+        result = runner.invoke(
+            main, ["compare", str(old_p), str(new_p), "-o", f"markdown={out}"]
+        )
         assert result.exit_code == 0
         assert out.exists()
         assert "Report written to" in result.output
@@ -88,11 +124,14 @@ class TestCompareMarkdown:
 
 # ── compare JSON ────────────────────────────────────────────────────────
 
+
 class TestCompareJson:
     def test_json_output(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
+        result = runner.invoke(
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
+        )
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert "verdict" in parsed
@@ -100,18 +139,22 @@ class TestCompareJson:
 
 # ── compare SARIF ───────────────────────────────────────────────────────
 
+
 class TestCompareSarif:
     def test_sarif_output(self, tmp_path):
         old_p, new_p = _breaking_snapshots(tmp_path)
         out = tmp_path / "results.sarif"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            f"sarif={out}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"sarif={out}",
+            ],
+        )
         assert result.exit_code == 4
         content = json.loads(out.read_text(encoding="utf-8"))
         assert content.get("$schema") or "runs" in content
@@ -123,15 +166,18 @@ class TestCompareSarif:
         old_p, new_p = _breaking_snapshots(tmp_path)
         out = tmp_path / "results.sarif"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            f"sarif={out}",
-            "--view",
-            "root-cause",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"sarif={out}",
+                "--view",
+                "root-cause",
+            ],
+        )
         assert result.exit_code == 4
         content = json.loads(out.read_text(encoding="utf-8"))
         results = content["runs"][0]["results"]
@@ -143,18 +189,22 @@ class TestCompareSarif:
 
 # ── compare HTML ────────────────────────────────────────────────────────
 
+
 class TestCompareHtml:
     def test_html_output_to_file(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         out = tmp_path / "report.html"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            f"html={out}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"html={out}",
+            ],
+        )
         assert result.exit_code == 0
         assert out.exists()
         assert "<html" in out.read_text(encoding="utf-8").lower()
@@ -162,18 +212,22 @@ class TestCompareHtml:
     def test_html_output_to_stdout(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            "html=-",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "html=-",
+            ],
+        )
         assert result.exit_code == 0
         assert "<html" in result.output.lower()
 
 
 # ── _resolve_demangle (shared by the primary and --write renders) ────────
+
 
 class TestResolveDemangle:
     def test_defaults_on_for_markdown_review_and_html(self):
@@ -209,14 +263,26 @@ class TestResolveDemangle:
 # resolved to "off" even when --old-sources/--new-sources/--build-info were
 # explicitly given, so those inputs were silently ignored.
 
+
 class TestResolveCompareCollectMode:
-    def _call(self, depth=None, source_method=None, old_sources=None,
-              new_sources=None, old_build_info=None, new_build_info=None):
+    def _call(
+        self,
+        depth=None,
+        source_method=None,
+        old_sources=None,
+        new_sources=None,
+        old_build_info=None,
+        new_build_info=None,
+    ):
         from abicheck.cli_compare_helpers import _resolve_compare_collect_mode
 
         return _resolve_compare_collect_mode(
-            depth, source_method, old_sources, new_sources,
-            old_build_info, new_build_info,
+            depth,
+            source_method,
+            old_sources,
+            new_sources,
+            old_build_info,
+            new_build_info,
         )
 
     def test_no_depth_no_inputs_is_off(self):
@@ -240,7 +306,8 @@ class TestResolveCompareCollectMode:
 
     def test_sources_takes_precedence_over_build_info_when_both_given(self, tmp_path):
         mode, _ = self._call(
-            old_sources=tmp_path / "src", old_build_info=tmp_path / "build",
+            old_sources=tmp_path / "src",
+            old_build_info=tmp_path / "build",
         )
         assert mode == "source-target"
 
@@ -273,20 +340,24 @@ class TestResolveCompareCollectMode:
 
 # ── compare --write FORMAT=PATH ─────────────────────────────────────────
 
+
 class TestCompareWrite:
     def test_writes_second_format_from_same_run(self, tmp_path):
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            "markdown=-",
-            "-o",
-            f"json={secondary_out}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "-o",
+                f"json={secondary_out}",
+            ],
+        )
         assert result.exit_code == 4
         assert "# ABI Report" in result.output
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
@@ -301,17 +372,20 @@ class TestCompareWrite:
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            "markdown=-",
-            "-o",
-            f"json={secondary_out}",
-            "--view",
-            "show=added",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "-o",
+                f"json={secondary_out}",
+                "--view",
+                "show=added",
+            ],
+        )
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
         assert parsed["show_only_filter"] == "added"
@@ -324,17 +398,20 @@ class TestCompareWrite:
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            "markdown=-",
-            "-o",
-            f"json={secondary_out}",
-            "--view",
-            "leaf",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "markdown=-",
+                "-o",
+                f"json={secondary_out}",
+                "--view",
+                "leaf",
+            ],
+        )
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
         assert "leaf_changes" in parsed
@@ -348,15 +425,18 @@ class TestCompareWrite:
         old_p, new_p = _breaking_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.md"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            "json=-",
-            "-o",
-            f"markdown={secondary_out}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "json=-",
+                "-o",
+                f"markdown={secondary_out}",
+            ],
+        )
         assert result.exit_code == 4
         secondary_text = secondary_out.read_text(encoding="utf-8")
         assert "_Z3barv" not in secondary_text
@@ -388,7 +468,9 @@ class TestCompareWrite:
             (reporter_mod, "assess_change"),
             (sarif_mod, "assess_change"),
         ]
-        originals = [(mod, name, getattr(mod, name)) for mod, name in monkeypatch_targets]
+        originals = [
+            (mod, name, getattr(mod, name)) for mod, name in monkeypatch_targets
+        ]
         for mod, name in monkeypatch_targets:
             setattr(mod, name, _counting)
         try:
@@ -396,15 +478,18 @@ class TestCompareWrite:
             primary_out = tmp_path / "primary.json"
             secondary_out = tmp_path / "secondary.sarif"
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                f"json={primary_out}",
-                "-o",
-                f"sarif={secondary_out}",
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "-o",
+                    f"json={primary_out}",
+                    "-o",
+                    f"sarif={secondary_out}",
+                ],
+            )
         finally:
             for mod, name, orig_fn in originals:
                 setattr(mod, name, orig_fn)
@@ -430,13 +515,16 @@ class TestCompareWrite:
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
         for operand in ("json", "=out.json", "json=", "out.json"):
-            result = runner.invoke(main, [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                operand,
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "-o",
+                    operand,
+                ],
+            )
             assert result.exit_code == 64, operand
             assert "FORMAT=DESTINATION" in result.output, operand
 
@@ -459,28 +547,34 @@ class TestCompareWrite:
         destination = tmp_path / "adir"
         destination.mkdir()
         primary = tmp_path / "primary.md"
-        result = CliRunner().invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            f"markdown={primary}",
-            "-o",
-            f"json={destination}",
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"markdown={primary}",
+                "-o",
+                f"json={destination}",
+            ],
+        )
         assert result.exit_code == 64, result.output
         assert "per-component export" in result.output
         assert not primary.exists(), "the comparison ran before rejecting"
 
     def test_write_rejects_an_unrenderable_format(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
-        result = CliRunner().invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            "text=out.txt",
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                "text=out.txt",
+            ],
+        )
         assert result.exit_code == 64
         assert "not a renderable format here" in result.output
 
@@ -492,15 +586,18 @@ class TestCompareWrite:
         old_p, new_p = _write_snapshots(tmp_path)
         same_path = tmp_path / "report"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "-o",
-            f"markdown={same_path}",
-            "-o",
-            f"json={same_path}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-o",
+                f"markdown={same_path}",
+                "-o",
+                f"json={same_path}",
+            ],
+        )
         assert result.exit_code == 64
         assert "both export to" in result.output
 
@@ -512,20 +609,24 @@ class TestCompareWrite:
         old_p, new_p = _write_snapshots(tmp_path)
         secondary_out = tmp_path / "secondary.json"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old_p),
-            str(new_p),
-            "--dry-run",
-            "-o",
-            f"json={secondary_out}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--dry-run",
+                "-o",
+                f"json={secondary_out}",
+            ],
+        )
         assert result.exit_code == 64
         assert "--dry-run writes no report" in result.output
         assert not secondary_out.exists()
 
 
 # ── compare with suppression ────────────────────────────────────────────
+
 
 class TestCompareSuppression:
     def test_suppression_file_applied(self, tmp_path):
@@ -536,9 +637,16 @@ class TestCompareSuppression:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--suppress", str(sup),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(sup),
+            ],
+        )
         # After suppression, the removed function is suppressed → NO_CHANGE
         assert result.exit_code == 0
 
@@ -547,13 +655,21 @@ class TestCompareSuppression:
         sup = tmp_path / "bad.yaml"
         sup.write_text("not: valid: suppression: format", encoding="utf-8")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--suppress", str(sup),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(sup),
+            ],
+        )
         assert result.exit_code != 0
 
 
 # ── compare suppression warning ─────────────────────────────────────────
+
 
 class TestCompareSuppressionWarning:
     def test_all_changes_suppressed_warns(self, tmp_path):
@@ -565,14 +681,22 @@ class TestCompareSuppressionWarning:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--suppress", str(sup),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(sup),
+            ],
+        )
         assert result.exit_code == 0
         assert "suppressed" in result.output.lower()
 
 
 # ── compat descriptor errors ────────────────────────────────────────────
+
 
 class TestCompatErrors:
     def test_invalid_descriptor_exits_6(self, tmp_path):
@@ -581,9 +705,19 @@ class TestCompatErrors:
         old.write_text("<invalid>", encoding="utf-8")
         new.write_text("<invalid>", encoding="utf-8")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+            ],
+        )
         assert result.exit_code == 6
 
     def test_missing_library_exits_4(self, tmp_path):
@@ -599,18 +733,30 @@ class TestCompatErrors:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+            ],
+        )
         assert result.exit_code == 4
 
 
 # ── --version ───────────────────────────────────────────────────────────
 
+
 class TestVersionFlag:
     def test_version_flag_prints_semver(self):
         """abicheck --version prints a semver-shaped string."""
         import re
+
         runner = CliRunner()
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
@@ -623,13 +769,23 @@ class TestVersionFlag:
 
 # ── compat help output ──────────────────────────────────────────────────
 
+
 class TestCompatHelp:
     def test_compat_help_lists_flags(self):
         runner = CliRunner()
         result = runner.invoke(main, ["compat", "check", "--help"])
         assert result.exit_code == 0
-        for flag in ["-lib", "-old", "-new", "-s", "-source", "-stdout",
-                     "-skip-symbols", "-v1", "-v2"]:
+        for flag in [
+            "-lib",
+            "-old",
+            "-new",
+            "-s",
+            "-source",
+            "-stdout",
+            "-skip-symbols",
+            "-v1",
+            "-v2",
+        ]:
             assert flag in result.output, f"{flag} not in help output"
 
 
@@ -650,29 +806,63 @@ class TestCompatClassifiedErrorPaths:
         bad.write_text("([\n", encoding="utf-8")
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump", lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-            "-skip-symbols", str(bad),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+                "-skip-symbols",
+                str(bad),
+            ],
+        )
         assert result.exit_code == 6
-        assert "pattern" in result.output.lower() or "skip-symbols" in result.output.lower()
+        assert (
+            "pattern" in result.output.lower()
+            or "skip-symbols" in result.output.lower()
+        )
 
     def test_skip_internal_invalid_regex_exits_6(self, tmp_path, monkeypatch):
         old, new = self._write_minimal_descriptors(tmp_path)
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump", lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-            "-skip-internal-symbols", "([",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+                "-skip-internal-symbols",
+                "([",
+            ],
+        )
         assert result.exit_code == 6
-        assert "pattern" in result.output.lower() or "skip-internal" in result.output.lower()
+        assert (
+            "pattern" in result.output.lower()
+            or "skip-internal" in result.output.lower()
+        )
 
     def test_suppression_load_error_exits_6(self, tmp_path, monkeypatch):
         old, new = self._write_minimal_descriptors(tmp_path)
@@ -680,51 +870,104 @@ class TestCompatClassifiedErrorPaths:
         sup.write_text("- this is a list not a dict\n", encoding="utf-8")
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump", lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-            "--suppress", str(sup),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+                "--suppress",
+                str(sup),
+            ],
+        )
         assert result.exit_code == 6
-        assert "suppression" in result.output.lower() or "mapping" in result.output.lower()
+        assert (
+            "suppression" in result.output.lower() or "mapping" in result.output.lower()
+        )
 
     def test_skip_symbols_missing_file_exits_4(self, tmp_path, monkeypatch):
         old, new = self._write_minimal_descriptors(tmp_path)
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump", lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         missing = tmp_path / "missing_skip.txt"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-            "-skip-symbols", str(missing),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+                "-skip-symbols",
+                str(missing),
+            ],
+        )
         assert result.exit_code == 4
-        assert "no such file" in result.output.lower() or "skip-symbols" in result.output.lower()
+        assert (
+            "no such file" in result.output.lower()
+            or "skip-symbols" in result.output.lower()
+        )
 
     def test_symbols_list_missing_file_exits_4(self, tmp_path, monkeypatch):
         old, new = self._write_minimal_descriptors(tmp_path)
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump", lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         missing = tmp_path / "missing_symbols_list.txt"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-            "-symbols-list", str(missing),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+                "-symbols-list",
+                str(missing),
+            ],
+        )
         assert result.exit_code == 4
-        assert "no such file" in result.output.lower() or "symbols-list" in result.output.lower()
+        assert (
+            "no such file" in result.output.lower()
+            or "symbols-list" in result.output.lower()
+        )
 
     def test_report_write_error_exits_7(self, tmp_path, monkeypatch):
         old, new = self._write_minimal_descriptors(tmp_path)
 
         snaps = [self._snap("1.0"), self._snap("2.0")]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump", lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         def _raise_write(*_a, **_k):
             raise OSError("write failed")
@@ -732,10 +975,23 @@ class TestCompatClassifiedErrorPaths:
         monkeypatch.setattr("abicheck.compat.cli.write_html_report", _raise_write)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "libtest", "-old", str(old), "-new", str(new),
-            "-report-path", str(tmp_path / "r.html"), "-report-format", "html",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old),
+                "-new",
+                str(new),
+                "-report-path",
+                str(tmp_path / "r.html"),
+                "-report-format",
+                "html",
+            ],
+        )
         assert result.exit_code == 7
         assert "write" in result.output.lower() or "report" in result.output.lower()
 
@@ -746,8 +1002,14 @@ class TestNoFailOnAdditionsFlag:
     def test_fail_on_additions_flag_rejected(self, tmp_path: Path) -> None:
         """--fail-on-additions should no longer be recognized by the CLI."""
         snap = {
-            "library": "libtest.so", "version": "1.0", "platform": "elf",
-            "functions": [], "variables": [], "types": [], "enums": [], "typedefs": {},
+            "library": "libtest.so",
+            "version": "1.0",
+            "platform": "elf",
+            "functions": [],
+            "variables": [],
+            "types": [],
+            "enums": [],
+            "typedefs": {},
         }
         p = tmp_path / "snap.json"
         p.write_text(json.dumps(snap), encoding="utf-8")
@@ -758,6 +1020,7 @@ class TestNoFailOnAdditionsFlag:
         # usage-error code (outside the compare result space {0,1,2,4}) so it is
         # not mistaken for a "2 = source break" verdict.
         from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR
+
         assert result.exit_code == _EXIT_USAGE_ERROR
 
 
@@ -779,4 +1042,3 @@ def test_main_installs_sigterm_cleanup(monkeypatch) -> None:
     # actually exercises `main()`'s body first.
     CliRunner().invoke(main, ["dump", "--help"])
     assert calls == [True]
-

@@ -2,6 +2,7 @@
 
 All tests build AbiSnapshot objects directly (no castxml required).
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -25,6 +26,7 @@ def _snap(**kwargs: object) -> AbiSnapshot:
 # Enum tests
 # ---------------------------------------------------------------------------
 
+
 def test_enum_member_removed() -> None:
     old = _snap(enums=[EnumType("Status", [EnumMember("OK", 0), EnumMember("FOO", 2)])])
     new = _snap(enums=[EnumType("Status", [EnumMember("OK", 0)])])
@@ -35,8 +37,22 @@ def test_enum_member_removed() -> None:
 
 def test_enum_member_value_changed() -> None:
     # ERROR is not the last member here (LAST is)
-    old = _snap(enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("ERROR", 1), EnumMember("LAST", 2)])])
-    new = _snap(enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("ERROR", 99), EnumMember("LAST", 2)])])
+    old = _snap(
+        enums=[
+            EnumType(
+                "Err",
+                [EnumMember("OK", 0), EnumMember("ERROR", 1), EnumMember("LAST", 2)],
+            )
+        ]
+    )
+    new = _snap(
+        enums=[
+            EnumType(
+                "Err",
+                [EnumMember("OK", 0), EnumMember("ERROR", 99), EnumMember("LAST", 2)],
+            )
+        ]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in kinds
@@ -54,7 +70,9 @@ def test_enum_last_member_changed() -> None:
 
 def test_enum_member_added() -> None:
     old = _snap(enums=[EnumType("Color", [EnumMember("RED", 0)])])
-    new = _snap(enums=[EnumType("Color", [EnumMember("RED", 0), EnumMember("BLUE", 1)])])
+    new = _snap(
+        enums=[EnumType("Color", [EnumMember("RED", 0), EnumMember("BLUE", 1)])]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.ENUM_MEMBER_ADDED in kinds
@@ -70,7 +88,11 @@ def test_enum_additions_plus_last_change_are_risk_not_breaking() -> None:
         elf=ElfMetadata(needed=["libc.so.6"]),
     )
     new = _snap(
-        enums=[EnumType("Tag", [EnumMember("A", 0), EnumMember("B", 1), EnumMember("LAST", 11)])],
+        enums=[
+            EnumType(
+                "Tag", [EnumMember("A", 0), EnumMember("B", 1), EnumMember("LAST", 11)]
+            )
+        ],
         elf=ElfMetadata(needed=["libc.so.6", "libsvml.so"]),
     )
     result = compare(old, new)
@@ -83,8 +105,12 @@ def test_enum_additions_plus_last_change_are_risk_not_breaking() -> None:
 
 def test_enum_named_sentinel_not_max_value_is_risk() -> None:
     """Named sentinel (*_last/*_max/*_count) should downgrade even if not max value."""
-    old = _snap(enums=[EnumType("Err", [EnumMember("LAST", 1), EnumMember("OTHER", 99)])])
-    new = _snap(enums=[EnumType("Err", [EnumMember("LAST", 2), EnumMember("OTHER", 99)])])
+    old = _snap(
+        enums=[EnumType("Err", [EnumMember("LAST", 1), EnumMember("OTHER", 99)])]
+    )
+    new = _snap(
+        enums=[EnumType("Err", [EnumMember("LAST", 2), EnumMember("OTHER", 99)])]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED in kinds
@@ -94,6 +120,7 @@ def test_enum_named_sentinel_not_max_value_is_risk() -> None:
 # ---------------------------------------------------------------------------
 # Method qualifier tests
 # ---------------------------------------------------------------------------
+
 
 def _func(name: str, mangled: str, **kwargs: object) -> Function:
     defaults: dict[str, object] = dict(return_type="void")
@@ -133,8 +160,26 @@ def test_method_volatile_changed() -> None:
 
 def test_pure_virtual_added() -> None:
     """Non-virtual function that gets pure_virtual=True → FUNC_PURE_VIRTUAL_ADDED."""
-    old = _snap(functions=[_func("process", "_ZN9Processor7processEv", is_virtual=False, is_pure_virtual=False)])
-    new = _snap(functions=[_func("process", "_ZN9Processor7processEv", is_virtual=False, is_pure_virtual=True)])
+    old = _snap(
+        functions=[
+            _func(
+                "process",
+                "_ZN9Processor7processEv",
+                is_virtual=False,
+                is_pure_virtual=False,
+            )
+        ]
+    )
+    new = _snap(
+        functions=[
+            _func(
+                "process",
+                "_ZN9Processor7processEv",
+                is_virtual=False,
+                is_pure_virtual=True,
+            )
+        ]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.FUNC_PURE_VIRTUAL_ADDED in kinds
@@ -142,8 +187,26 @@ def test_pure_virtual_added() -> None:
 
 def test_virtual_became_pure() -> None:
     """Virtual function that becomes pure virtual → FUNC_VIRTUAL_BECAME_PURE."""
-    old = _snap(functions=[_func("process", "_ZN9Processor7processEv", is_virtual=True, is_pure_virtual=False)])
-    new = _snap(functions=[_func("process", "_ZN9Processor7processEv", is_virtual=True, is_pure_virtual=True)])
+    old = _snap(
+        functions=[
+            _func(
+                "process",
+                "_ZN9Processor7processEv",
+                is_virtual=True,
+                is_pure_virtual=False,
+            )
+        ]
+    )
+    new = _snap(
+        functions=[
+            _func(
+                "process",
+                "_ZN9Processor7processEv",
+                is_virtual=True,
+                is_pure_virtual=True,
+            )
+        ]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.FUNC_VIRTUAL_BECAME_PURE in kinds
@@ -153,12 +216,15 @@ def test_virtual_became_pure() -> None:
 # Union tests
 # ---------------------------------------------------------------------------
 
+
 def _union(name: str, fields: list[TypeField]) -> RecordType:
     return RecordType(name=name, kind="union", fields=fields, is_union=True)
 
 
 def test_union_field_removed() -> None:
-    old = _snap(types=[_union("Data", [TypeField("i", "int"), TypeField("f", "float")])])
+    old = _snap(
+        types=[_union("Data", [TypeField("i", "int"), TypeField("f", "float")])]
+    )
     new = _snap(types=[_union("Data", [TypeField("i", "int")])])
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
@@ -167,7 +233,9 @@ def test_union_field_removed() -> None:
 
 def test_union_field_added() -> None:
     old = _snap(types=[_union("Data", [TypeField("i", "int")])])
-    new = _snap(types=[_union("Data", [TypeField("i", "int"), TypeField("f", "float")])])
+    new = _snap(
+        types=[_union("Data", [TypeField("i", "int"), TypeField("f", "float")])]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.UNION_FIELD_ADDED in kinds
@@ -186,6 +254,7 @@ def test_union_field_type_changed() -> None:
 # Typedef tests
 # ---------------------------------------------------------------------------
 
+
 def test_typedef_base_changed() -> None:
     old = _snap(typedefs={"MyInt": "int"})
     new = _snap(typedefs={"MyInt": "long"})
@@ -198,9 +267,11 @@ def test_typedef_base_changed() -> None:
 # Bitfield tests
 # ---------------------------------------------------------------------------
 
+
 def _struct_with_bitfield(name: str, field_name: str, bits: int | None) -> RecordType:
     f = TypeField(
-        name=field_name, type="int",
+        name=field_name,
+        type="int",
         is_bitfield=bits is not None,
         bitfield_bits=bits,
     )
@@ -219,9 +290,11 @@ def test_bitfield_changed() -> None:
 # Verdict checks (all sprint1 changes are BREAKING)
 # ---------------------------------------------------------------------------
 
+
 def test_sprint1_breaking_subset() -> None:
     """Sprint1 binary-breaking subset remains in BREAKING bucket."""
     from abicheck.checker import _BREAKING_KINDS
+
     sprint1_kinds = {
         ChangeKind.ENUM_MEMBER_REMOVED,
         ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
@@ -241,8 +314,20 @@ def test_sprint1_breaking_subset() -> None:
 
 def test_regular_enum_member_value_change_remains_breaking() -> None:
     """Non-sentinel enum member value change stays BREAKING."""
-    old = _snap(enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("E", 1), EnumMember("LAST", 2)])])
-    new = _snap(enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("E", 99), EnumMember("LAST", 2)])])
+    old = _snap(
+        enums=[
+            EnumType(
+                "Err", [EnumMember("OK", 0), EnumMember("E", 1), EnumMember("LAST", 2)]
+            )
+        ]
+    )
+    new = _snap(
+        enums=[
+            EnumType(
+                "Err", [EnumMember("OK", 0), EnumMember("E", 99), EnumMember("LAST", 2)]
+            )
+        ]
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in kinds

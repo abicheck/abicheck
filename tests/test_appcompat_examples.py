@@ -23,6 +23,7 @@ these run in the default lane and self-skip when ``cc`` is absent,
 mirroring the gcc-only bundle E2E tests in test_bundle.py. GNU ld's
 ``-Wl,-soname`` makes them Linux-only.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -57,7 +58,10 @@ def _cc() -> str:
 
 
 def _build_case(
-    case: str, tmp_path: Path, *, app_source: str | None = None,
+    case: str,
+    tmp_path: Path,
+    *,
+    app_source: str | None = None,
 ) -> tuple[Path, Path, Path]:
     """Compile ``case``'s v1/v2 into shared libs and build its app vs v1.
 
@@ -71,13 +75,30 @@ def _build_case(
     lib_v2 = tmp_path / "libcase.so.2"
     # Most cases use the flat v1.c/v2.c convention; some use the old/+new/
     # subdirectory convention with a shared basename (case19+).
-    v1_src = case_dir / "v1.c" if (case_dir / "v1.c").exists() else case_dir / "old" / "lib.c"
-    v2_src = case_dir / "v2.c" if (case_dir / "v2.c").exists() else case_dir / "new" / "lib.c"
+    v1_src = (
+        case_dir / "v1.c"
+        if (case_dir / "v1.c").exists()
+        else case_dir / "old" / "lib.c"
+    )
+    v2_src = (
+        case_dir / "v2.c"
+        if (case_dir / "v2.c").exists()
+        else case_dir / "new" / "lib.c"
+    )
     for src, out in ((v1_src, lib_v1), (v2_src, lib_v2)):
         res = subprocess.run(
-            [cc, "-shared", "-fPIC", "-g", str(src), "-o", str(out),
-             "-Wl,-soname,libcase.so.1"],
-            capture_output=True, text=True,
+            [
+                cc,
+                "-shared",
+                "-fPIC",
+                "-g",
+                str(src),
+                "-o",
+                str(out),
+                "-Wl,-soname,libcase.so.1",
+            ],
+            capture_output=True,
+            text=True,
         )
         if res.returncode != 0:
             pytest.fail(f"cc failed building {out.name}: {res.stderr}")
@@ -89,9 +110,18 @@ def _build_case(
         app_src.write_text(app_source, encoding="utf-8")
     app = tmp_path / "app"
     res = subprocess.run(
-        [cc, "-g", str(app_src), f"-I{case_dir}", str(lib_v1),
-         "-o", str(app), f"-Wl,-rpath,{tmp_path}"],
-        capture_output=True, text=True,
+        [
+            cc,
+            "-g",
+            str(app_src),
+            f"-I{case_dir}",
+            str(lib_v1),
+            "-o",
+            str(app),
+            f"-Wl,-rpath,{tmp_path}",
+        ],
+        capture_output=True,
+        text=True,
     )
     if res.returncode != 0:
         pytest.fail(f"cc failed building app for {case}: {res.stderr}")
@@ -112,12 +142,11 @@ def test_appcompat_compatible_when_app_skips_removed_symbol(
 ) -> None:
     # Same library break (helper() removed) but this app only calls
     # compute() → application-centric filtering keeps it COMPATIBLE.
-    app_source = (
-        '#include "v1.h"\n'
-        "int main(void){ return compute(5) == 10 ? 0 : 1; }\n"
-    )
+    app_source = '#include "v1.h"\nint main(void){ return compute(5) == 10 ? 0 : 1; }\n'
     app, v1, v2 = _build_case(
-        "case01_symbol_removal", tmp_path, app_source=app_source,
+        "case01_symbol_removal",
+        tmp_path,
+        app_source=app_source,
     )
     result = check_appcompat(app, v1, v2, lang="c")
     assert result.verdict in (Verdict.COMPATIBLE, Verdict.NO_CHANGE)

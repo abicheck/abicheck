@@ -187,7 +187,9 @@ class TestNodeIsPublic:
         # -- the actual scenario the `resolved or attrs` fallback protects,
         # since a fully-processed node always has attrs synced to resolved.
         node = GraphNode(
-            id="decl://pub", kind="source_decl", label="pub",
+            id="decl://pub",
+            kind="source_decl",
+            label="pub",
             attrs={"visibility": "public_header"},
         )
         assert node.resolved == {}
@@ -195,7 +197,9 @@ class TestNodeIsPublic:
 
     def test_prefers_resolved_over_attrs_when_both_present(self) -> None:
         node = GraphNode(
-            id="decl://pub", kind="source_decl", label="pub",
+            id="decl://pub",
+            kind="source_decl",
+            label="pub",
             attrs={"visibility": "source"},
             resolved={"visibility": "public_header"},
         )
@@ -207,7 +211,10 @@ class TestSelectPreferredGraphPath:
 
     def _node(self, node_id: str, label: str, visibility: str) -> GraphNode:
         return GraphNode(
-            id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+            id=node_id,
+            kind="source_decl",
+            label=label,
+            attrs={"visibility": visibility},
         )
 
     def test_empty_paths_returns_empty(self) -> None:
@@ -311,13 +318,22 @@ class TestSelectPreferredGraphPath:
             ],
         )
         short = GraphEdge(
-            src="decl://pub", dst="decl://mid", kind="DECL_CALLS_DECL", confidence="high"
+            src="decl://pub",
+            dst="decl://mid",
+            kind="DECL_CALLS_DECL",
+            confidence="high",
         )
         long_first = GraphEdge(
-            src="decl://pub", dst="decl://mid", kind="DECL_CALLS_DECL", confidence="high"
+            src="decl://pub",
+            dst="decl://mid",
+            kind="DECL_CALLS_DECL",
+            confidence="high",
         )
         long_second = GraphEdge(
-            src="decl://mid", dst="decl://leaf", kind="DECL_CALLS_DECL", confidence="high"
+            src="decl://mid",
+            dst="decl://leaf",
+            kind="DECL_CALLS_DECL",
+            confidence="high",
         )
         SourceGraphSummary(edges=[short, long_first, long_second])
         chosen = select_preferred_graph_path(g, [[long_first, long_second], [short]])
@@ -370,9 +386,7 @@ class TestAttachImpactMetadataAlternatives:
                 ),
             ],
         )
-        primary = [
-            GraphEdge(src="decl://pub", dst="decl://t0", kind="DECL_CALLS_DECL")
-        ]
+        primary = [GraphEdge(src="decl://pub", dst="decl://t0", kind="DECL_CALLS_DECL")]
         alts = [
             [GraphEdge(src="decl://pub", dst=f"decl://t{i}", kind="DECL_CALLS_DECL")]
             for i in range(1, 5)
@@ -443,7 +457,9 @@ class TestPathOccurrenceId:
         )
         assert change.impact_occurrence_id is None
 
-    def test_attach_impact_metadata_sets_id_when_edge_has_occurrence_attrs(self) -> None:
+    def test_attach_impact_metadata_sets_id_when_edge_has_occurrence_attrs(
+        self,
+    ) -> None:
         edge = GraphEdge(
             src="decl://pub",
             dst="decl://helper",

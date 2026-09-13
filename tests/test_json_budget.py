@@ -39,7 +39,7 @@ def test_accepts_a_payload_within_both_budgets():
 
 
 def test_counts_object_nodes():
-    raw = ('[' + ",".join(["{}"] * 10) + ']').encode()
+    raw = ("[" + ",".join(["{}"] * 10) + "]").encode()
     with pytest.raises(JsonContainerBudgetExceeded):
         check_json_container_budget(raw, max_container_nodes=5)
 
@@ -47,7 +47,7 @@ def test_counts_object_nodes():
 def test_counts_array_nodes_too():
     """The regression this budget exists to close: an object_pairs_hook
     alone never observes an array node at all."""
-    raw = ('[' + ",".join(["[]"] * 10) + ']').encode()
+    raw = ("[" + ",".join(["[]"] * 10) + "]").encode()
     with pytest.raises(JsonContainerBudgetExceeded):
         check_json_container_budget(raw, max_container_nodes=5)
 
@@ -73,7 +73,9 @@ def test_counts_number_and_literal_scalars_too():
     """The same gap as above, for the other JSON scalar shapes (numbers,
     ``true``/``false``/``null``) -- none of which are containers, and
     none of which the pre-fix scan counted either."""
-    raw = ("[" + ",".join(["1", "2.5", "-3e10", "true", "false", "null"]) + "]").encode()
+    raw = (
+        "[" + ",".join(["1", "2.5", "-3e10", "true", "false", "null"]) + "]"
+    ).encode()
     # 1 array + 6 scalars = 7 real tokens.
     with pytest.raises(JsonContainerBudgetExceeded):
         check_json_container_budget(raw, max_container_nodes=6)
@@ -123,7 +125,9 @@ def test_nesting_depth_exceeding_budget_raises_the_depth_error_not_the_count_err
     depth = 200
     raw = (("[" * depth) + ("]" * depth)).encode()
     with pytest.raises(JsonNestingTooDeepError):
-        check_json_container_budget(raw, max_container_nodes=1_000_000, max_nesting_depth=100)
+        check_json_container_budget(
+            raw, max_container_nodes=1_000_000, max_nesting_depth=100
+        )
 
 
 def test_depth_regression_python_314_json_loads_no_longer_raises_recursionerror():

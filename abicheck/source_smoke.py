@@ -163,20 +163,45 @@ def run_source_smoke(
         if mode == "syntax":
             if is_msvc:
                 cmd = [
-                    compiler, f"/std:{spec.standard}", *msvc_cxx_flags,
-                    f"/I{case_dir}", "/Zs", str(src),
+                    compiler,
+                    f"/std:{spec.standard}",
+                    *msvc_cxx_flags,
+                    f"/I{case_dir}",
+                    "/Zs",
+                    str(src),
                 ]
             else:
-                cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), "-fsyntax-only", str(src)]
+                cmd = [
+                    compiler,
+                    f"-std={spec.standard}",
+                    "-I",
+                    str(case_dir),
+                    "-fsyntax-only",
+                    str(src),
+                ]
         elif mode in {"link", "run"}:
             lib_source = case_dir / (side.lib_source or f"{label}.cpp")
             if is_msvc:
                 cmd = [
-                    compiler, f"/std:{spec.standard}", *msvc_cxx_flags, f"/I{case_dir}",
-                    str(lib_source), str(src), f"/Fe:{exe}",
+                    compiler,
+                    f"/std:{spec.standard}",
+                    *msvc_cxx_flags,
+                    f"/I{case_dir}",
+                    str(lib_source),
+                    str(src),
+                    f"/Fe:{exe}",
                 ]
             else:
-                cmd = [compiler, f"-std={spec.standard}", "-I", str(case_dir), str(lib_source), str(src), "-o", str(exe)]
+                cmd = [
+                    compiler,
+                    f"-std={spec.standard}",
+                    "-I",
+                    str(case_dir),
+                    str(lib_source),
+                    str(src),
+                    "-o",
+                    str(exe),
+                ]
         else:
             raise ValueError(f"unsupported source_smoke mode: {mode}")
 
@@ -187,13 +212,20 @@ def run_source_smoke(
             # instead of the shared process CWD, where parallel (-n auto)
             # workers running this smoke check concurrently could collide.
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout, cwd=str(work_dir),
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(work_dir),
             )
             compiled = proc.returncode == 0
             detail = _process_error_detail(proc)
             if compiled and mode == "run":
                 run_proc = subprocess.run(
-                    [str(exe)], capture_output=True, text=True, timeout=timeout,
+                    [str(exe)],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
                     cwd=str(work_dir),
                 )
                 compiled = run_proc.returncode == 0
@@ -206,6 +238,10 @@ def run_source_smoke(
         if compiled != want_success:
             expected_word = "compile/link" if want_success else "fail"
             got_word = "compiled/linked" if compiled else "failed"
-            failures.append(f"{label}: expected {expected_word}, got {got_word}: {' | '.join(detail)}")
+            failures.append(
+                f"{label}: expected {expected_word}, got {got_word}: {' | '.join(detail)}"
+            )
 
-    return SourceSmokeResult(ok=not failures, proof=spec.proof, failures=tuple(failures))
+    return SourceSmokeResult(
+        ok=not failures, proof=spec.proof, failures=tuple(failures)
+    )

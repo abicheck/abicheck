@@ -139,15 +139,11 @@ class TestDetectDuplicateProviders:
         # actually resolve ambiguously against them.
         liba = _meta(soname="liba.so.1")
         liba.symbols.append(
-            ElfSymbol(
-                name="foo", visibility="default", version="V1", is_default=False
-            )
+            ElfSymbol(name="foo", visibility="default", version="V1", is_default=False)
         )
         libb = _meta(soname="libb.so.1")
         libb.symbols.append(
-            ElfSymbol(
-                name="foo", visibility="default", version="V1", is_default=False
-            )
+            ElfSymbol(name="foo", visibility="default", version="V1", is_default=False)
         )
         new = _snapshot({"liba.so": liba, "libb.so": libb})
         assert self._detect(new) == []
@@ -200,9 +196,7 @@ class TestDetectManifestOwnership:
         # zero bundle findings, exit 0, while `ld` failed to resolve `foo`.
         provider = _meta(soname="liba.so.1")
         provider.symbols.append(
-            ElfSymbol(
-                name="foo", visibility="default", version="V1", is_default=False
-            )
+            ElfSymbol(name="foo", visibility="default", version="V1", is_default=False)
         )
         new = _snapshot({"liba.so": provider})
         manifest = InstantiationManifest(entries=(ManifestEntry(symbol="foo"),))
@@ -254,9 +248,7 @@ class TestDetectManifestOwnership:
         new = _snapshot(
             {"libcore.so": _meta(soname="libcore.so.1", exports=["shared_util"])}
         )
-        manifest = InstantiationManifest(
-            entries=(ManifestEntry(symbol="shared_util"),)
-        )
+        manifest = InstantiationManifest(entries=(ManifestEntry(symbol="shared_util"),))
         assert self._detect(new, manifest) == []
 
     def test_expected_provider_matches_via_filename_alias(self) -> None:
@@ -402,6 +394,7 @@ class TestMatchEntryDeadlineCheckpoint:
         [(target, kind, matched, providers)] = _match_entry(entry, new)
         assert (target, kind, matched) == ("foo", "symbol", ["foo"])
         assert [p.library for p in providers] == ["liba.so"]
+
 
 class TestIndexScanDeadlineCheckpoint:
     """Codex review, PR H, second round: `_match_entry`'s own per-target

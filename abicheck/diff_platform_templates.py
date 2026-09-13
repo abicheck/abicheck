@@ -18,6 +18,7 @@ Split from ``diff_platform.py`` to keep that module under the AI-readiness
 file-size soft cap. Re-exported from ``diff_platform`` for back-compat with
 ``abicheck.checker`` and the test suite.
 """
+
 from __future__ import annotations
 
 from .checker_types import Change
@@ -146,13 +147,15 @@ def _diff_template_inner_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
             and old_ret_args != new_ret_args
             and _template_outer(f_old.return_type) == _template_outer(f_new.return_type)
         ):
-            changes.append(make_change(
-                ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
-                symbol=mangled,
-                name=f_old.name,
-                old=f_old.return_type,
-                new=f_new.return_type,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
+                    symbol=mangled,
+                    name=f_old.name,
+                    old=f_old.return_type,
+                    new=f_new.return_type,
+                )
+            )
 
         # --- Param template inner change ---
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
@@ -165,13 +168,15 @@ def _diff_template_inner_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
                 and _template_outer(p_old.type) == _template_outer(p_new.type)
             ):
                 param_label = p_old.name or str(i)
-                changes.append(make_change(
-                    ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    detail=param_label,
-                    old=p_old.type,
-                    new=p_new.type,
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+                        symbol=mangled,
+                        name=f_old.name,
+                        detail=param_label,
+                        old=p_old.type,
+                        new=p_new.type,
+                    )
+                )
 
     return changes

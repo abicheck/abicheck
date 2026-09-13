@@ -566,7 +566,9 @@ def _embed_inline_source_side(
 @main.command("compare")
 @cli_help.compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
-@click.argument("new_input", type=click.Path(exists=True, path_type=Path), required=False)
+@click.argument(
+    "new_input", type=click.Path(exists=True, path_type=Path), required=False
+)
 @click.option(
     "--no-baseline",
     "no_baseline",
@@ -616,31 +618,35 @@ def _embed_inline_source_side(
     supports_directory=True,
     directory_formats=["json"],
     help_extra=" 'review' emits a compact GitHub-facing digest (verdict + "
-               "counts + release recommendation + manual-review banner) "
-               "suitable for a job summary or PR comment; 'oneline' emits a "
-               "single human-readable summary line -- the 'just tell me' "
-               "flow. A directory/package (release) comparison renders "
-               "json/markdown/junit/oneline only. Every export is rendered "
-               "from the one completed comparison -- asking for more "
-               "artifacts never re-runs the analysis and never changes the "
-               "verdict or the exit code.",
+    "counts + release recommendation + manual-review banner) "
+    "suitable for a job summary or PR comment; 'oneline' emits a "
+    "single human-readable summary line -- the 'just tell me' "
+    "flow. A directory/package (release) comparison renders "
+    "json/markdown/junit/oneline only. Every export is rendered "
+    "from the one completed comparison -- asking for more "
+    "artifacts never re-runs the analysis and never changes the "
+    "verdict or the exit code.",
 )
 @click.option(
-    "--view", "view", multiple=True, callback=_validate_view, expose_value=True,
+    "--view",
+    "view",
+    multiple=True,
+    callback=_validate_view,
+    expose_value=True,
     metavar="TOKEN",
     help="Repeatable rendering selector (ADR-068 D4): never changes the "
-         "verdict, findings, or exit code. TOKEN: "
-         "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
-         "'show=<tokens>' (severity/element/action filter, same vocabulary "
-         "as the old --show-only, repeatable to OR groups together); "
-         "'demangle'/'no-demangle' (C++ demangling, default ON for "
-         "markdown/review/html); 'patterns' (explain pattern-verdict "
-         "modulation, which always runs where evidence exists); 'filtered' "
-         "(echo the scope/disposition ledger of findings excluded from the "
-         "verdict, always computed and always in -o json=...); "
-         "'suppressions' (echo the --suppress rule audit, likewise always "
-         "computed -- a no-op without --suppress, never an error). Example: "
-         "--view leaf --view demangle --view show=breaking,functions.",
+    "verdict, findings, or exit code. TOKEN: "
+    "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
+    "'show=<tokens>' (severity/element/action filter, same vocabulary "
+    "as the old --show-only, repeatable to OR groups together); "
+    "'demangle'/'no-demangle' (C++ demangling, default ON for "
+    "markdown/review/html); 'patterns' (explain pattern-verdict "
+    "modulation, which always runs where evidence exists); 'filtered' "
+    "(echo the scope/disposition ledger of findings excluded from the "
+    "verdict, always computed and always in -o json=...); "
+    "'suppressions' (echo the --suppress rule audit, likewise always "
+    "computed -- a no-op without --suppress, never an error). Example: "
+    "--view leaf --view demangle --view show=breaking,functions.",
 )
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
@@ -661,30 +667,50 @@ def _embed_inline_source_side(
 # gate.severity.<category>) -- no gate/severity policy configured means the
 # compatibility verdict decides 0/2/4; one in effect means the resolved
 # GateDecision decides 0/1/2/4.
-@click.option("--config", "config", type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
-                   "nearest .abicheck.yml found from the current directory upward. "
-                   "Supplies stable project settings (severity map, scope/FP "
-                   "tuning, suppression policy); CLI flags override it.")
-@click.option("--follow-deps", is_flag=True, default=False,
-              help="Resolve transitive dependencies for both old and new, compute symbol "
-                   "bindings, and include a dependency-change section in the report. ELF only.")
+@click.option(
+    "--config",
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
+    "nearest .abicheck.yml found from the current directory upward. "
+    "Supplies stable project settings (severity map, scope/FP "
+    "tuning, suppression policy); CLI flags override it.",
+)
+@click.option(
+    "--follow-deps",
+    is_flag=True,
+    default=False,
+    help="Resolve transitive dependencies for both old and new, compute symbol "
+    "bindings, and include a dependency-change section in the report. ELF only.",
+)
 @include_dependencies_option
-@click.option("--search-path", "search_paths", multiple=True,
-              type=click.Path(exists=True, path_type=Path),
-              help="Additional directory to search for shared libraries (with --follow-deps).")
-@click.option("--ld-library-path", "ld_library_path", default="",
-              help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
+@click.option(
+    "--search-path",
+    "search_paths",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Additional directory to search for shared libraries (with --follow-deps).",
+)
+@click.option(
+    "--ld-library-path",
+    "ld_library_path",
+    default="",
+    help="Simulated LD_LIBRARY_PATH (with --follow-deps).",
+)
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 # ADR-068 D4 / Phase 5: --show-filtered is gone; the ledger it echoed has
 # been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
-@click.option("--post-manifest", "post_manifest_path",
-              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
-              help="Scope the comparison to a POST Python export manifest's committed ABI "
-                   "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
-                   "private __pp_* kernel churn and other non-committed exports are demoted "
-                   "to the filtered ledger (see --view filtered).")
+@click.option(
+    "--post-manifest",
+    "post_manifest_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Scope the comparison to a POST Python export manifest's committed ABI "
+    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
+    "private __pp_* kernel churn and other non-committed exports are demoted "
+    "to the filtered ledger (see --view filtered).",
+)
 # one-comparison-product.md Phase 7n: --probe-matrix is gone. A probe-matrix
 # snapshot is build evidence, so it is one of --build-info's operands now,
 # recognised from the document's own schema/required-key contract rather
@@ -710,39 +736,56 @@ def _embed_inline_source_side(
 # one, so an opt-in switch could only mean "leave a known false positive in
 # because you forgot a flag". Forced on at the Tier-2 chokepoint
 # (workflows/compare_policy.compare_snapshots): CLI, API and Action alike.
-@click.option("--budget", "budget", default=None,
-              help="ADR-068 §3 #19: a wall-clock guard on this run's deadline-aware "
-                   "stages, so a CI job fails clearly (exit 5) instead of running "
-                   "unbounded. A duration like 15m/900s/1h; unset means no budget.")
-@click.option("--dry-run", "dry_run", is_flag=True, default=False,
-              help="Resolve and validate the invocation -- classify inputs, resolve "
-                   "depth/scope, show tool/config resolution -- and print a report "
-                   "without running the diff. Writes nothing; incompatible with "
-                   "-o/--output.")
-@click.option("--diagnostic-comparison", "diagnostic_comparison", is_flag=True, default=False,
-              help="ADR-050 D2's sanctioned escape hatch: when OLD and NEW were "
-                   "extracted under a genuinely incomparable profile/scope "
-                   "(ExtractionContract mismatch), downgrade the default hard "
-                   "failure (exit 16, no verdict) into a tentative diff instead, "
-                   "stamped assurance: \"none\" everywhere in the report so a "
-                   "reader knows not to trust it the way an ordinary comparable "
-                   "diff is trusted. Not needed, and does nothing, on a "
-                   "comparable pair.")
+@click.option(
+    "--budget",
+    "budget",
+    default=None,
+    help="ADR-068 §3 #19: a wall-clock guard on this run's deadline-aware "
+    "stages, so a CI job fails clearly (exit 5) instead of running "
+    "unbounded. A duration like 15m/900s/1h; unset means no budget.",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Resolve and validate the invocation -- classify inputs, resolve "
+    "depth/scope, show tool/config resolution -- and print a report "
+    "without running the diff. Writes nothing; incompatible with "
+    "-o/--output.",
+)
+@click.option(
+    "--diagnostic-comparison",
+    "diagnostic_comparison",
+    is_flag=True,
+    default=False,
+    help="ADR-050 D2's sanctioned escape hatch: when OLD and NEW were "
+    "extracted under a genuinely incomparable profile/scope "
+    "(ExtractionContract mismatch), downgrade the default hard "
+    "failure (exit 16, no verdict) into a tentative diff instead, "
+    'stamped assurance: "none" everywhere in the report so a '
+    "reader knows not to trust it the way an ordinary comparable "
+    "diff is trusted. Not needed, and does nothing, on a "
+    "comparable pair.",
+)
 @contract_options  # ADR-049: --contract (--audit-suppressions is gone -- `--view suppressions`)
 @pack_option  # ADR-049 D8: --pack
-@click.option("--use-cases", "use_cases_manifest",
-              type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help="An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 "
-                   "amendment) whose declared use cases this comparison's own "
-                   "findings are attributed to: for each use case, which changes "
-                   "its resolved entrypoints can be shown to reach. Needs a "
-                   "source graph on at least one side (dump --sources/"
-                   "--build-info, or the always-on header-only graph). Read-only "
-                   "-- an unattributed finding is an absence of proof, not proof "
-                   "the finding is harmless, so this never moves a verdict or an "
-                   "exit code. Validate a manifest on its own with "
-                   "`abicheck project validate`.")
+@click.option(
+    "--use-cases",
+    "use_cases_manifest",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 "
+    "amendment) whose declared use cases this comparison's own "
+    "findings are attributed to: for each use case, which changes "
+    "its resolved entrypoints can be shown to reach. Needs a "
+    "source graph on at least one side (dump --sources/"
+    "--build-info, or the always-on header-only graph). Read-only "
+    "-- an unattributed finding is an absence of proof, not proof "
+    "the finding is harmless, so this never moves a verdict or an "
+    "exit code. Validate a manifest on its own with "
+    "`abicheck project validate`.",
+)
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -854,8 +897,11 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # Phase 7n: --debug-info's detached-file transport is DWARF-only; a named
     # PDB/DWP is refused here rather than resolved and then ignored.
     reject_unsupported_detached_debug(
-        [*kwargs.get("debug_roots", ()), *kwargs.get("debug_roots_old", ()),
-         *kwargs.get("debug_roots_new", ())]
+        [
+            *kwargs.get("debug_roots", ()),
+            *kwargs.get("debug_roots_old", ()),
+            *kwargs.get("debug_roots_new", ()),
+        ]
     )
 
     # ADR-068 D4/Phase 5: resolve --view (frontends.cli.options.view) into
@@ -885,7 +931,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # here rather than as a branch inside cli_compare_helpers.run_compare).
     from .compare_bundle_operand_dispatch import resolve_bundle_compare_dispatch
 
-    _bundle_operands = resolve_bundle_compare_dispatch(kwargs["old_input"], kwargs["new_input"])
+    _bundle_operands = resolve_bundle_compare_dispatch(
+        kwargs["old_input"], kwargs["new_input"]
+    )
     if _bundle_operands.old_is_stored:
         from .compare_bundle_facts import (
             dispatch as dispatch_bundle_facts,
@@ -893,10 +941,17 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         )
 
         # Read before resolve_dispatch_compile_context below mutates kwargs["config"] -- see resolve_stored_bundle_lang.
-        _cfg_explicit = ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
-        _compile_context = resolve_dispatch_compile_context(ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored)
+        _cfg_explicit = (
+            ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
+        )
+        _compile_context = resolve_dispatch_compile_context(
+            ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored
+        )
         kwargs["lang"], kwargs["lang_explicit"] = resolve_stored_bundle_lang(
-            kwargs, config_explicit=_cfg_explicit, new_is_stored=_bundle_operands.new_is_stored, lang_default=LANG_DEFAULT,
+            kwargs,
+            config_explicit=_cfg_explicit,
+            new_is_stored=_bundle_operands.new_is_stored,
+            lang_default=LANG_DEFAULT,
         )
         dispatch_bundle_facts(
             compile_context=_compile_context,

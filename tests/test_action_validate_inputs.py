@@ -732,12 +732,12 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
                 var: value,
             }
         )
-        assert result.returncode == 0, f"{var}={value}: " + result.stdout + result.stderr
+        assert result.returncode == 0, (
+            f"{var}={value}: " + result.stdout + result.stderr
+        )
         assert "does not support lang/ast-frontend" not in result.stdout
 
-    def test_directory_operand_with_gcc_path_is_accepted(
-        self, tmp_path: Path
-    ) -> None:
+    def test_directory_operand_with_gcc_path_is_accepted(self, tmp_path: Path) -> None:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
         result = _run_validate(

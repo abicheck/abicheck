@@ -644,7 +644,9 @@ class TestShowOnlyCliHintIsReRunnable:
         )
         assert result.exit_code == 4, result.output
         hint_line = next(
-            line for line in result.output.splitlines() if line.startswith("> Filtered by:")
+            line
+            for line in result.output.splitlines()
+            if line.startswith("> Filtered by:")
         )
         # No internal transport separator ever reaches rendered text.
         assert ";" not in hint_line
@@ -841,7 +843,13 @@ class TestAuditSuppressionsNoOpWithoutSuppress:
 #    through. A renderer that dropped, reordered or re-severitied a finding
 #    identically in all 6048 renderings would still fail against it.
 _FORMATS: tuple[str, ...] = (
-    "json", "markdown", "sarif", "html", "junit", "review", "oneline",
+    "json",
+    "markdown",
+    "sarif",
+    "html",
+    "junit",
+    "review",
+    "oneline",
 )
 _REPORT_MODES: tuple[str, ...] = ("full", "leaf", "impact", "root-cause")
 _DEMANGLE: tuple[str | None, ...] = (None, "demangle", "no-demangle")
@@ -860,9 +868,9 @@ def _permutations() -> list[tuple[Any, ...]]:
             _FORMATS,
             _REPORT_MODES,
             _DEMANGLE,
-            (False, True),   # --view patterns
-            (False, True),   # --view filtered
-            (False, True),   # --view suppressions
+            (False, True),  # --view patterns
+            (False, True),  # --view filtered
+            (False, True),  # --view suppressions
             _SHOW,
             _EXTRA_WRITES,
         )
@@ -945,7 +953,9 @@ def _run_permutation(
         mode,
     ]
     for token, enabled in (
-        ("patterns", patterns), ("filtered", filtered), ("suppressions", suppressions),
+        ("patterns", patterns),
+        ("filtered", filtered),
+        ("suppressions", suppressions),
     ):
         if enabled:
             args += ["--view", token]
@@ -961,7 +971,10 @@ def _run_permutation(
 
 
 def _assert_agrees_with_oracle(
-    case: tuple[Any, ...], facts: dict[str, Any], oracle: dict[str, Any], payload_path: Path
+    case: tuple[Any, ...],
+    facts: dict[str, Any],
+    oracle: dict[str, Any],
+    payload_path: Path,
 ) -> None:
     """Check one permutation's canonical facts against the engine oracle.
 
@@ -988,9 +1001,9 @@ def _assert_agrees_with_oracle(
         # carry their own shapes, so the disclosure is required where it is
         # defined rather than asserted everywhere by coincidence.
         assert payload["show_only_filter"] == show.removeprefix("show="), case
-        assert (
-            payload["filtered_summary"]["total_changes"] == facts["changes_count"]
-        ), case
+        assert payload["filtered_summary"]["total_changes"] == facts["changes_count"], (
+            case
+        )
     for unfilterable in (
         "verdict",
         "suppressed_count",
@@ -1018,7 +1031,9 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
             len(_FORMATS)
             * len(_REPORT_MODES)
             * len(_DEMANGLE)
-            * 2 * 2 * 2
+            * 2
+            * 2
+            * 2
             * len(_SHOW)
             * len(_EXTRA_WRITES)
         )
@@ -1043,9 +1058,7 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         out_dir.mkdir(exist_ok=True)
         for case in rng.sample(_permutations(), 150):
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
-            _assert_agrees_with_oracle(
-                case, facts, oracle, out_dir / "canonical.json"
-            )
+            _assert_agrees_with_oracle(case, facts, oracle, out_dir / "canonical.json")
             assert exit_code == 4, case
 
     @pytest.mark.slow
@@ -1061,7 +1074,5 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         out_dir.mkdir(exist_ok=True)
         for case in _permutations():
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
-            _assert_agrees_with_oracle(
-                case, facts, oracle, out_dir / "canonical.json"
-            )
+            _assert_agrees_with_oracle(case, facts, oracle, out_dir / "canonical.json")
             assert exit_code == 4, case

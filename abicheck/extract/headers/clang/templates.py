@@ -299,9 +299,12 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name and (
-            qualname := ("::".join((*scope, name)) if scope else name)
-        ) not in ambiguous:
+        if (
+            kind == "ClassTemplateDecl"
+            and name
+            and (qualname := ("::".join((*scope, name)) if scope else name))
+            not in ambiguous
+        ):
             _register_template_param_metadata(
                 idx, ambiguous, node_ids, qualname, node, _template_param_kinds(node)
             )
@@ -410,9 +413,12 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name and (
-            qualname := ("::".join((*scope, name)) if scope else name)
-        ) not in ambiguous:
+        if (
+            kind == "ClassTemplateDecl"
+            and name
+            and (qualname := ("::".join((*scope, name)) if scope else name))
+            not in ambiguous
+        ):
             this_names = _template_param_names(node)
             defaults = _template_param_defaults(node)
             tracked_names = tracked_names_by_qualname.get(qualname)
@@ -480,9 +486,12 @@ def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | No
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name and (
-            qualname := ("::".join((*scope, name)) if scope else name)
-        ) not in ambiguous:
+        if (
+            kind == "ClassTemplateDecl"
+            and name
+            and (qualname := ("::".join((*scope, name)) if scope else name))
+            not in ambiguous
+        ):
             _register_template_param_metadata(
                 idx, ambiguous, node_ids, qualname, node, _template_param_names(node)
             )
@@ -718,9 +727,7 @@ def build_specialization_index(
         param_names_by_qualname = _index_template_param_names(root)
     idx: dict[str, dict[str, Any]] = {}
 
-    def walk(
-        node: Any, scope: tuple[str, ...], lookup_scope: tuple[str, ...]
-    ) -> None:
+    def walk(node: Any, scope: tuple[str, ...], lookup_scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")

@@ -29,6 +29,7 @@ These tests reproduce the exact "which namespace does 'Impl' resolve to"
 ambiguity for each of those four call sites now that they route through
 ``diff_helpers.build_type_map``/``lookup_matched_type``.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
@@ -47,8 +48,11 @@ from abicheck.model import (
 
 def _snap(version="1.0", functions=None, types=None):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=[], types=types or [],
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=[],
+        types=types or [],
     )
 
 
@@ -63,23 +67,43 @@ class TestAccessLevelsAmbiguitySafe:
         new side forces a naive last-write-wins bare-name dict to compare
         the wrong pair.
         """
-        ns1_old = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class",
-                             fields=[TypeField("a", "int", 0, access=AccessLevel.PUBLIC)])
-        ns2_old = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class",
-                             fields=[TypeField("b", "int", 0, access=AccessLevel.PUBLIC)])
-        ns1_new = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class",
-                             fields=[TypeField("a", "int", 0, access=AccessLevel.PUBLIC)])
-        ns2_new = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class",
-                             fields=[TypeField("b", "int", 0, access=AccessLevel.PRIVATE)])
+        ns1_old = RecordType(
+            name="Impl",
+            qualified_name="ns1::Impl",
+            kind="class",
+            fields=[TypeField("a", "int", 0, access=AccessLevel.PUBLIC)],
+        )
+        ns2_old = RecordType(
+            name="Impl",
+            qualified_name="ns2::Impl",
+            kind="class",
+            fields=[TypeField("b", "int", 0, access=AccessLevel.PUBLIC)],
+        )
+        ns1_new = RecordType(
+            name="Impl",
+            qualified_name="ns1::Impl",
+            kind="class",
+            fields=[TypeField("a", "int", 0, access=AccessLevel.PUBLIC)],
+        )
+        ns2_new = RecordType(
+            name="Impl",
+            qualified_name="ns2::Impl",
+            kind="class",
+            fields=[TypeField("b", "int", 0, access=AccessLevel.PRIVATE)],
+        )
 
         r = compare(
             _snap(types=[ns1_old, ns2_old]),
             _snap(types=[ns2_new, ns1_new]),  # reversed order
         )
 
-        access_changes = [c for c in r.changes if c.kind == ChangeKind.FIELD_ACCESS_CHANGED]
+        access_changes = [
+            c for c in r.changes if c.kind == ChangeKind.FIELD_ACCESS_CHANGED
+        ]
         assert len(access_changes) == 1
-        assert access_changes[0].description.count("b") >= 1 or "b" in (access_changes[0].detail or "")
+        assert access_changes[0].description.count("b") >= 1 or "b" in (
+            access_changes[0].detail or ""
+        )
 
 
 class TestAnonFieldsAmbiguitySafe:
@@ -92,14 +116,27 @@ class TestAnonFieldsAmbiguitySafe:
         the pre-fix diff_symbols.py, which reports zero ANON_FIELD_CHANGED
         findings here.
         """
-        ns1_old = RecordType(name="Impl", qualified_name="ns1::Impl", kind="struct",
-                             fields=[TypeField("__anon0", "union", 0)])
-        ns2_old = RecordType(name="Impl", qualified_name="ns2::Impl", kind="struct",
-                             fields=[TypeField("__anon0", "union", 0)])
-        ns1_new = RecordType(name="Impl", qualified_name="ns1::Impl", kind="struct",
-                             fields=[TypeField("__anon0", "union", 0)])
-        ns2_new = RecordType(name="Impl", qualified_name="ns2::Impl", kind="struct",
-                             fields=[])  # ns2::Impl's anon field genuinely removed
+        ns1_old = RecordType(
+            name="Impl",
+            qualified_name="ns1::Impl",
+            kind="struct",
+            fields=[TypeField("__anon0", "union", 0)],
+        )
+        ns2_old = RecordType(
+            name="Impl",
+            qualified_name="ns2::Impl",
+            kind="struct",
+            fields=[TypeField("__anon0", "union", 0)],
+        )
+        ns1_new = RecordType(
+            name="Impl",
+            qualified_name="ns1::Impl",
+            kind="struct",
+            fields=[TypeField("__anon0", "union", 0)],
+        )
+        ns2_new = RecordType(
+            name="Impl", qualified_name="ns2::Impl", kind="struct", fields=[]
+        )  # ns2::Impl's anon field genuinely removed
 
         r = compare(
             _snap(types=[ns1_old, ns2_old]),
@@ -113,9 +150,12 @@ class TestAnonFieldsAmbiguitySafe:
 class TestCtorOverloadAmbiguityIsAmbiguitySafe:
     def _ctor(self, mangled, ns, cls, param_type, default=None):
         return Function(
-            name=cls, mangled=mangled, return_type="void",
+            name=cls,
+            mangled=mangled,
+            return_type="void",
             params=[Param(name="x", type=param_type, default=default)],
-            visibility=Visibility.PUBLIC, is_explicit=False,
+            visibility=Visibility.PUBLIC,
+            is_explicit=False,
         )
 
     def test_second_converting_ctor_not_attributed_to_other_namespace(self):
@@ -142,7 +182,9 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
             _snap(functions=new_funcs, types=[ns2, ns1]),  # reversed type order
         )
 
-        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        risk = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
         assert len(risk) == 1
         assert "ns1::Impl" in risk[0].description
         assert "ns2" not in risk[0].description
@@ -178,7 +220,9 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
         follow-up second round), silently dropping its constructors.
         """
         old_widget = RecordType(name="Widget", qualified_name=None, kind="class")
-        new_widget = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        new_widget = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
 
         old_funcs = [self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int")]
         new_funcs = [
@@ -191,14 +235,18 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
             _snap(functions=new_funcs, types=[new_widget]),
         )
 
-        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        risk = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
         assert len(risk) == 1
         assert "ns::Widget" in risk[0].description
 
     def test_legacy_snapshot_on_new_side_still_flags_risk(self):
         """Same schema-evolution mix, reversed: legacy (unqualified) new
         side, fresh (qualified) old side."""
-        old_widget = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        old_widget = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
         new_widget = RecordType(name="Widget", qualified_name=None, kind="class")
 
         old_funcs = [self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int")]
@@ -212,7 +260,9 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
             _snap(functions=new_funcs, types=[new_widget]),
         )
 
-        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        risk = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
         assert len(risk) == 1
 
     def test_synthetic_ctor_key_still_flags_risk(self):
@@ -225,15 +275,22 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
         two fully fresh (non-legacy) snapshots (Codex review, PR #608
         follow-up, third round).
         """
-        widget_old = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
-        widget_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        widget_old = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
+        widget_new = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
 
         def synth_ctor(param_type):
             key = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget({param_type})"
             return Function(
-                name="Widget", mangled=key, return_type="void",
+                name="Widget",
+                mangled=key,
+                return_type="void",
                 params=[Param(name="x", type=param_type)],
-                visibility=Visibility.PUBLIC, is_explicit=False,
+                visibility=Visibility.PUBLIC,
+                is_explicit=False,
             )
 
         old_funcs = [synth_ctor("int")]
@@ -244,7 +301,9 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
             _snap(functions=new_funcs, types=[widget_new]),
         )
 
-        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        risk = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
         assert len(risk) == 1
 
     def test_doubly_legacy_snapshot_still_flags_risk(self):
@@ -272,7 +331,9 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
             _snap(functions=new_funcs, types=[new_widget]),
         )
 
-        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        risk = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
         assert len(risk) == 1
 
     def test_legacy_vs_fresh_synthetic_key_format_no_false_risk(self):
@@ -283,15 +344,22 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
         just because old and new spell the class's ctor key differently
         (Codex review, PR #608 follow-up, fifth round).
         """
-        widget_old = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
-        widget_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        widget_old = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
+        widget_new = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
 
         def ctor(scope, param_type):
             key = f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_type})"
             return Function(
-                name="Widget", mangled=key, return_type="void",
+                name="Widget",
+                mangled=key,
+                return_type="void",
                 params=[Param(name="x", type=param_type)],
-                visibility=Visibility.PUBLIC, is_explicit=False,
+                visibility=Visibility.PUBLIC,
+                is_explicit=False,
             )
 
         old_funcs = [ctor("Widget", "int"), ctor("Widget", "char const *")]
@@ -307,15 +375,22 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
     def test_legacy_vs_fresh_synthetic_key_format_genuine_addition_still_flags(self):
         """Same legacy/fresh key-format mix, but the new side genuinely
         gains a 3rd converting ctor -- must still be reported."""
-        widget_old = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
-        widget_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        widget_old = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
+        widget_new = RecordType(
+            name="Widget", qualified_name="ns::Widget", kind="class"
+        )
 
         def ctor(scope, param_type):
             key = f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_type})"
             return Function(
-                name="Widget", mangled=key, return_type="void",
+                name="Widget",
+                mangled=key,
+                return_type="void",
                 params=[Param(name="x", type=param_type)],
-                visibility=Visibility.PUBLIC, is_explicit=False,
+                visibility=Visibility.PUBLIC,
+                is_explicit=False,
             )
 
         old_funcs = [ctor("Widget", "int"), ctor("Widget", "char const *")]
@@ -330,7 +405,9 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
             _snap(functions=new_funcs, types=[widget_new]),
         )
 
-        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        risk = [
+            c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK
+        ]
         assert len(risk) == 1
         assert "double" in risk[0].description
 
@@ -354,21 +431,33 @@ class TestVirtualMethodOwnerResolutionAmbiguitySafe:
         (what diff_symbols.py built before this fix) resolves 'ns2::Impl'
         to ns1's RecordType whenever ns1 was inserted last.
         """
-        ns1 = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class", size_bits=64)
-        ns2 = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class", size_bits=32)
-        naive = {t.name: t for t in [ns2, ns1]}  # ns1 inserted last -> wins the bare slot
+        ns1 = RecordType(
+            name="Impl", qualified_name="ns1::Impl", kind="class", size_bits=64
+        )
+        ns2 = RecordType(
+            name="Impl", qualified_name="ns2::Impl", kind="class", size_bits=32
+        )
+        naive = {
+            t.name: t for t in [ns2, ns1]
+        }  # ns1 inserted last -> wins the bare slot
 
         from abicheck.diff_cxx_rules import _resolve_owner_type
+
         resolved = _resolve_owner_type(
             "ns2::Impl", naive, known_owners={"ns1::Impl", "ns2::Impl"}
         )
         assert resolved is ns1  # the historical bug: wrong class returned
 
     def test_type_map_resolves_the_correct_owner_regardless_of_order(self):
-        ns1 = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class", size_bits=64)
-        ns2 = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class", size_bits=32)
+        ns1 = RecordType(
+            name="Impl", qualified_name="ns1::Impl", kind="class", size_bits=64
+        )
+        ns2 = RecordType(
+            name="Impl", qualified_name="ns2::Impl", kind="class", size_bits=32
+        )
 
         from abicheck.diff_cxx_rules import _resolve_owner_type
+
         for ordering in ([ns1, ns2], [ns2, ns1]):
             types = build_type_map(ordering)
             resolved = _resolve_owner_type(

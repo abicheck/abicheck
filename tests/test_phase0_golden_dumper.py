@@ -65,7 +65,9 @@ def test_dumper_golden_fixture(fixture_path: Path) -> None:
     compiler = fixture.get("compiler", "c++")
 
     if not so_path.exists():
-        pytest.skip(f"pre-built artifact missing: {so_path}  (build with cmake in catalog/cases/)")
+        pytest.skip(
+            f"pre-built artifact missing: {so_path}  (build with cmake in catalog/cases/)"
+        )
     if not header.exists():
         pytest.skip(f"header/source missing: {header}")
 

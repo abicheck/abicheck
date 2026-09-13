@@ -87,7 +87,9 @@ class TestNamespaceSegmentSplitting:
     def test_unmatched_bracket_is_literal_not_a_class(self) -> None:
         assert _bracket_class_end("foo[bar", 3) == -1
 
-    def test_negated_class_with_immediate_closing_bracket_as_literal_member(self) -> None:
+    def test_negated_class_with_immediate_closing_bracket_as_literal_member(
+        self,
+    ) -> None:
         # "[!]" immediately followed by "]" -- the "]" right after the
         # negation is a literal class member, not the closer.
         assert _bracket_class_end("[!]abc]", 0) == 6

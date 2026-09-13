@@ -1252,7 +1252,11 @@ def link_source_abi(
     surface.roots["exported_symbols"] = sorted(exported)
     surface.roots["forced_public"] = sorted(forced)
 
-    state = _LinkState(export_index=_build_export_index(exported), exact_index=_build_exact_index(exported), ctor_dtor_owner_index=ctor_export_match.build_ctor_dtor_owner_index(exported))
+    state = _LinkState(
+        export_index=_build_export_index(exported),
+        exact_index=_build_exact_index(exported),
+        ctor_dtor_owner_index=ctor_export_match.build_ctor_dtor_owner_index(exported),
+    )
     source_edges = _fold_tu_source_edges(tus)
     for tu in tus:
         for header in tu.public_header_roots:
@@ -1278,8 +1282,13 @@ def link_source_abi(
         state.matched_symbols,
         exported,
     )
-    surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
-        surface.reachable_declarations, state.decl_to_symbol, exported, state.ctor_dtor_owner_index
+    surface.reachable_declarations = (
+        ctor_export_match.drop_unmatched_generated_declarations(
+            surface.reachable_declarations,
+            state.decl_to_symbol,
+            exported,
+            state.ctor_dtor_owner_index,
+        )
     )
     surface.mappings["source_decl_to_binary_symbol"] = dict(
         sorted(state.decl_to_symbol.items())
@@ -1403,21 +1412,31 @@ def relink_surface_exports(
     dropped candidate -- the one caller only ever relinks an empty-exports one."""
     exported = set(exported_symbols)
     surface.roots["exported_symbols"] = sorted(exported)
-    export_index, exact_index = _build_export_index(exported), _build_exact_index(exported)
+    export_index, exact_index = (
+        _build_export_index(exported),
+        _build_exact_index(exported),
+    )
     ctor_dtor_owner_index = ctor_export_match.build_ctor_dtor_owner_index(exported)
     # A source-only relink (the parallel-baseline `merge` flow) links against an empty export set first, so
     # `_route_declaration`'s own compiler_generated miss-drop never fires there. Recompute the mapping for
     # every declaration (kept unconditionally here -- see rematch_declarations' own docstring for why).
     kept, mapping, matched, identity_to_qname = ctor_export_match.rematch_declarations(
-        surface.reachable_declarations, exported, export_index, exact_index, ctor_dtor_owner_index, _match_export
+        surface.reachable_declarations,
+        exported,
+        export_index,
+        exact_index,
+        ctor_dtor_owner_index,
+        _match_export,
     )
     surface.reachable_declarations = kept
     # Second-tier demangled-identity rematch (ABI-tag / substitution drift), then a
     # third: drop a still-unmatched compiler_generated candidate now that it has had
     # its chance at both prior tiers (Codex review, PR #930).
     _demangled_rematch(surface.reachable_declarations, mapping, matched, exported)
-    surface.reachable_declarations = ctor_export_match.drop_unmatched_generated_declarations(
-        surface.reachable_declarations, mapping, exported, ctor_dtor_owner_index
+    surface.reachable_declarations = (
+        ctor_export_match.drop_unmatched_generated_declarations(
+            surface.reachable_declarations, mapping, exported, ctor_dtor_owner_index
+        )
     )
     surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
 
@@ -1538,7 +1557,9 @@ class _LinkState:
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)
     exact_index: dict[str, str] = field(default_factory=dict)
-    ctor_dtor_owner_index: dict[str, str] = field(default_factory=dict)  # ctor_export_match
+    ctor_dtor_owner_index: dict[str, str] = field(
+        default_factory=dict
+    )  # ctor_export_match
 
 
 def _route_entity(
@@ -1600,7 +1621,9 @@ def _route_type(
         )
     else:
         state.type_by_name[key] = entity.type_hash
-    surface.mappings["source_type_to_debug_type"][entity.qualified_name] = entity.type_hash
+    surface.mappings["source_type_to_debug_type"][entity.qualified_name] = (
+        entity.type_hash
+    )
 
 
 def _route_declaration(
@@ -1621,7 +1644,9 @@ def _route_declaration(
     second-tier pass has had its own chance to rescue it -- not here (PR
     #930, Codex review) -- so it is always appended below, matched or not."""
     export_sym = entity.mangled_name or entity.qualified_name
-    primary, variants = _match_export(export_sym, exported, state.export_index, state.exact_index)
+    primary, variants = _match_export(
+        export_sym, exported, state.export_index, state.exact_index
+    )
     surface.reachable_declarations.append(entity)
     key = entity.identity()
     if not key:

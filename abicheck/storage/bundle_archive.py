@@ -212,7 +212,9 @@ def open_regular_file_for_format_sniff(
         # real decodable stream). `read_past_...` returns raw bytes (some
         # callers need them unstripped); `skip_...` strips them here.
         if starts_with_skippable_frame_magic(prefix):
-            prefix = skip_leading_skippable_frames(read_past_leading_skippable_frames(fp, prefix))
+            prefix = skip_leading_skippable_frames(
+                read_past_leading_skippable_frames(fp, prefix)
+            )
     except OSError as exc:
         # A failure reading the peek must not leak the fd or propagate a
         # raw OSError -- this module's error contract is SnapshotError.
@@ -298,7 +300,9 @@ class BundleArchiveWriter:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._target = (
-            Path(os.path.realpath(self._path)) if self._path.is_symlink() else self._path
+            Path(os.path.realpath(self._path))
+            if self._path.is_symlink()
+            else self._path
         )
         try:
             existing_stat = self._target.stat()
@@ -337,7 +341,9 @@ class BundleArchiveWriter:
         self._tmp_file = os.fdopen(tmp_fd, "wb")
         # A file object, not a path: ZipFile won't close a fileobj it
         # didn't itself open, so close()/_abort() own closing it.
-        self._zf = zipfile.ZipFile(self._tmp_file, mode="w", compression=zipfile.ZIP_STORED)
+        self._zf = zipfile.ZipFile(
+            self._tmp_file, mode="w", compression=zipfile.ZIP_STORED
+        )
         self._written_hashes: set[str] = set()
         self._manifest_written = False
         #: The published archive's size/sha256, from the still-private
@@ -576,13 +582,20 @@ class BundleArchiveReader:
                 )
             fp.seek(0)
             self._zf = zipfile.ZipFile(fp, mode="r")
-        except (zipfile.BadZipFile, OSError, NotImplementedError, UnicodeDecodeError) as exc:
+        except (
+            zipfile.BadZipFile,
+            OSError,
+            NotImplementedError,
+            UnicodeDecodeError,
+        ) as exc:
             # Every deliberate failure raises SnapshotError -- a truncated/
             # hand-assembled archive must not surface a raw zipfile
             # traceback (NotImplementedError: unsupported extract_version;
             # UnicodeDecodeError: an invalid UTF-8-flagged filename).
             fp.close()
-            raise SnapshotError(f"{self._path}: not a valid bundle archive: {exc}") from exc
+            raise SnapshotError(
+                f"{self._path}: not a valid bundle archive: {exc}"
+            ) from exc
         except BaseException:
             # SnapshotError from the preflight, or anything else -- fp
             # must not leak even on a rejection this doesn't translate.
@@ -700,7 +713,9 @@ class BundleArchiveReader:
                 "amplification attack)"
             ) from None
         except JsonNestingTooDeepError:
-            raise SnapshotError(f"{self._path}: manifest.json is too deeply nested to parse") from None
+            raise SnapshotError(
+                f"{self._path}: manifest.json is too deeply nested to parse"
+            ) from None
         try:
             value = json.loads(raw)
         except (UnicodeDecodeError, ValueError) as exc:
@@ -736,7 +751,9 @@ class BundleArchiveReader:
         (independent of *max_decoded_bytes* -- see its own docstring)."""
         member = _blob_member_name(content_hash_hex)
         try:
-            compressed = self._read_stored_member(member, max_bytes=DEFAULT_MAX_STORED_BLOB_BYTES)
+            compressed = self._read_stored_member(
+                member, max_bytes=DEFAULT_MAX_STORED_BLOB_BYTES
+            )
         except KeyError as exc:
             raise SnapshotError(
                 f"{self._path}: manifest references blob {content_hash_hex!r} "
@@ -765,8 +782,7 @@ class BundleArchiveReader:
             # Third-party exception type -- translated so a corrupted or
             # non-zstd payload still surfaces as this module's error type.
             raise SnapshotError(
-                f"{self._path}: blob {content_hash_hex!r} failed to "
-                f"decompress: {exc}"
+                f"{self._path}: blob {content_hash_hex!r} failed to decompress: {exc}"
             ) from exc
         # A frame truncated at just the right point can decompress above
         # with no error, silently yielding fewer bytes than intended --
@@ -774,7 +790,10 @@ class BundleArchiveReader:
         # a member after a truncated payload's own hash, defeating the
         # content-hash check below alone).
         validate_zstd_frame_completeness(
-            zstandard, decompressor, compressed, source=f"{self._path}: blob {content_hash_hex!r}"
+            zstandard,
+            decompressor,
+            compressed,
+            source=f"{self._path}: blob {content_hash_hex!r}",
         )
         decoded = out.getvalue()
         actual_hash = content_hash(decoded)

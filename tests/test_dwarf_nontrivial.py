@@ -1,4 +1,5 @@
 """Unit tests for _is_nontrivial_aggregate — full Itanium ABI triviality check."""
+
 from __future__ import annotations
 
 from abicheck.dwarf_advanced import _is_nontrivial_aggregate
@@ -6,6 +7,7 @@ from abicheck.dwarf_advanced import _is_nontrivial_aggregate
 # ---------------------------------------------------------------------------
 # Minimal DWARF DIE stubs (mirrors _Die / _Attr in test_phase3_dwarf_helpers)
 # ---------------------------------------------------------------------------
+
 
 class _Attr:
     def __init__(self, value: object, form: str = "DW_FORM_ref4") -> None:
@@ -33,7 +35,9 @@ class _Die:
 class _CU:
     """Minimal CU stub with a get_DIE_from_refaddr lookup table."""
 
-    def __init__(self, die_map: dict[int, _Die] | None = None, cu_offset: int = 0) -> None:
+    def __init__(
+        self, die_map: dict[int, _Die] | None = None, cu_offset: int = 0
+    ) -> None:
         self._die_map: dict[int, _Die] = die_map or {}
         self.cu_offset = cu_offset
 
@@ -51,7 +55,9 @@ class TestNontrivialAggregate:
 
     # 1. Simple struct with no dtor → False (trivial)
     def test_simple_struct_no_dtor(self) -> None:
-        struct_die = _Die("DW_TAG_structure_type", {"DW_AT_name": _Attr("Point")}, offset=1)
+        struct_die = _Die(
+            "DW_TAG_structure_type", {"DW_AT_name": _Attr("Point")}, offset=1
+        )
         assert _is_nontrivial_aggregate(struct_die) is False
 
     # 2. User-defined dtor → True (non-trivial)
@@ -143,7 +149,9 @@ class TestNontrivialAggregate:
 
     # 8. Cache is populated and reused
     def test_cache_is_populated(self) -> None:
-        struct_die = _Die("DW_TAG_structure_type", {"DW_AT_name": _Attr("Cached")}, offset=100)
+        struct_die = _Die(
+            "DW_TAG_structure_type", {"DW_AT_name": _Attr("Cached")}, offset=100
+        )
         cache: dict[int, bool] = {}
         result1 = _is_nontrivial_aggregate(struct_die, cache=cache)
         assert 100 in cache
@@ -251,7 +259,11 @@ class TestNontrivialAggregate:
     # 13. Member type is a primitive → trivial (no false positive)
     def test_primitive_member_does_not_cause_false_positive(self) -> None:
         """struct Data { int x; } — int member should not trigger non-triviality."""
-        int_type = _Die("DW_TAG_base_type", {"DW_AT_name": _Attr("int"), "DW_AT_byte_size": _Attr(4)}, offset=400)
+        int_type = _Die(
+            "DW_TAG_base_type",
+            {"DW_AT_name": _Attr("int"), "DW_AT_byte_size": _Attr(4)},
+            offset=400,
+        )
         member = _Die(
             "DW_TAG_member",
             {"DW_AT_name": _Attr("x"), "DW_AT_type": _Attr(400, "DW_FORM_ref_addr")},
@@ -306,6 +318,7 @@ class TestDwarfTypeCacheReuse:
 
         class _CountingDie(_Die):
             """Die that counts how many times iter_children is called."""
+
             def iter_children(self):  # noqa: ANN201
                 call_count[0] += 1
                 return iter(self._children)

@@ -227,7 +227,10 @@ def _additions_review_dict(result: DiffResult) -> dict[str, object] | None:
 
 
 def compute_disposition_audit(
-    result: DiffResult, severity_config: object | None = None, *, today: date | None = None
+    result: DiffResult,
+    severity_config: object | None = None,
+    *,
+    today: date | None = None,
 ) -> DispositionAudit:
     """Resolve *result*'s audit facts. Decides nothing; reads the ledger.
 

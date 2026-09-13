@@ -163,9 +163,7 @@ class TestOnlyTheAssertionProves:
         _write_stored_package(new, _LIBS, inventory_complete=asserted)
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("gate:\n  fail_on_removed_library: true\n")
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         scope = doc["comparison_scope"]
         assert isinstance(scope, dict)
         assert scope["new_inventory"]["completeness"] == (

@@ -397,7 +397,9 @@ class BuildConfig:
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
-        "build": frozenset({"system", "query", "compile_db", "compile_db_filter", "targets"}),
+        "build": frozenset(
+            {"system", "query", "compile_db", "compile_db_filter", "targets"}
+        ),
         "sources": frozenset({"public_headers", "exclude", "graph"}),
         "severity": frozenset(
             {
@@ -671,7 +673,9 @@ class BuildConfig:
                 _SUPPORT_PROMISE_POLICIES,
                 "release.support_promise",
             ),
-            resource_limits_max_bundle_facts_decode_nodes=_opt_int(resource_limits, "max_bundle_facts_decode_nodes"),
+            resource_limits_max_bundle_facts_decode_nodes=_opt_int(
+                resource_limits, "max_bundle_facts_decode_nodes"
+            ),
             assurance_require_complete=_opt_bool(assurance, "require_complete"),
             version=(
                 version_raw
@@ -862,10 +866,23 @@ class BuildConfig:
             ("python", self._python_block()),
             ("gate", self._gate_block()),
             ("release", self._release_block()),
-            ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
-            ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
+            (
+                "resource_limits",
+                {}
+                if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None
+                else {"max_bundle_facts_decode_nodes": n},
+            ),
+            (
+                "policy",
+                {"overrides": dict(self.policy_overrides)}
+                if self.policy_overrides
+                else {},
+            ),
             ("assurance", self._assurance_block()),
-            ("deployment", EnvironmentMatrix.dump_or_empty(self.deployment)),  # keys on is-not-None: empty != absent
+            (
+                "deployment",
+                EnvironmentMatrix.dump_or_empty(self.deployment),
+            ),  # keys on is-not-None: empty != absent
         ):
             if (self.deployment is not None) if key == "deployment" else block:
                 out[key] = block

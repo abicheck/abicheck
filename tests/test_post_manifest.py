@@ -1,6 +1,7 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the POST Python export-manifest adapter (``abicheck.post_manifest``)."""
+
 from __future__ import annotations
 
 import json
@@ -33,7 +34,9 @@ def _manifest_dict(exports: list[dict], post_abi: int = 1) -> dict:
     return {"post_abi": post_abi, "exports": exports}
 
 
-def _gammaln_export(return_dtype: str = "Float64", params: list[str] | None = None) -> dict:
+def _gammaln_export(
+    return_dtype: str = "Float64", params: list[str] | None = None
+) -> dict:
     return {
         "name": "gammaln",
         "c_symbol": "pp_gammaln",
@@ -89,8 +92,12 @@ def test_export_requires_signature_fields(missing: str) -> None:
     # Every export's signature is its ABI, so a missing params or return_dtype
     # must fail — normalizing it to []/"" would let a real signature change
     # vanish from the diff/version gate.
-    export = {"name": "f", "c_symbol": "pp_f", "params": ["Float64"],
-              "return_dtype": "Float64"}
+    export = {
+        "name": "f",
+        "c_symbol": "pp_f",
+        "params": ["Float64"],
+        "return_dtype": "Float64",
+    }
     del export[missing]
     with pytest.raises(ValueError, match=f"missing required '{missing}'"):
         PostExport.from_dict(export)
@@ -110,14 +117,16 @@ def test_non_string_return_dtype_is_rejected(bad_return: object) -> None:
     # "" is the documented void spelling, but a present null/false/0 would coerce
     # to the same empty descriptor and hide a real return-dtype change.
     with pytest.raises(ValueError, match="'return_dtype' must be a string"):
-        PostExport.from_dict({"name": "f", "c_symbol": "pp_f", "params": [],
-                              "return_dtype": bad_return})
+        PostExport.from_dict(
+            {"name": "f", "c_symbol": "pp_f", "params": [], "return_dtype": bad_return}
+        )
 
 
 def test_void_return_dtype_empty_string_is_accepted() -> None:
     # The documented void spelling — an explicit empty string — is valid.
-    exp = PostExport.from_dict({"name": "f", "c_symbol": "pp_f", "params": [],
-                                "return_dtype": ""})
+    exp = PostExport.from_dict(
+        {"name": "f", "c_symbol": "pp_f", "params": [], "return_dtype": ""}
+    )
     assert exp.return_dtype == ""
 
 
@@ -126,10 +135,24 @@ def test_parse_duplicate_c_symbol_raises() -> None:
     # keeps only the last, so a stale duplicate with the old signature after a
     # changed one would let the diff/version-gate see no break.
     with pytest.raises(ValueError, match="duplicate c_symbol"):
-        parse_manifest(_manifest_dict([
-            {"name": "f", "c_symbol": "pp_f", "params": ["Float64"], "return_dtype": "Float64"},
-            {"name": "f", "c_symbol": "pp_f", "params": ["Int64"], "return_dtype": "Int64"},
-        ]))
+        parse_manifest(
+            _manifest_dict(
+                [
+                    {
+                        "name": "f",
+                        "c_symbol": "pp_f",
+                        "params": ["Float64"],
+                        "return_dtype": "Float64",
+                    },
+                    {
+                        "name": "f",
+                        "c_symbol": "pp_f",
+                        "params": ["Int64"],
+                        "return_dtype": "Int64",
+                    },
+                ]
+            )
+        )
 
 
 @pytest.mark.parametrize("post_abi", ["not-a-number", "5", 1.9, True, False, None])
@@ -143,25 +166,51 @@ def test_parse_non_integer_post_abi_raises(post_abi: object) -> None:
 
 def test_parse_tolerates_unknown_fields_and_object_params() -> None:
     # v0.x draft may add fields; params may be objects with a "dtype" key.
-    m = parse_manifest(_manifest_dict([{
-        "name": "add", "c_symbol": "pp_add", "future_field": {"x": 1},
-        "params": [{"name": "a", "dtype": "Int64"}, {"name": "b", "dtype": "Int64"}],
-        "return_dtype": "Int64",
-    }]))
+    m = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "add",
+                    "c_symbol": "pp_add",
+                    "future_field": {"x": 1},
+                    "params": [
+                        {"name": "a", "dtype": "Int64"},
+                        {"name": "b", "dtype": "Int64"},
+                    ],
+                    "return_dtype": "Int64",
+                }
+            ]
+        )
+    )
     assert m.exports[0].params == ["Int64", "Int64"]
 
 
 def test_param_object_array_flag_is_part_of_signature() -> None:
     # Codex P1: a scalar Float64 and an array Float64 have different ABI shapes.
-    scalar = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"name": "x", "dtype": "Float64"}], "return_dtype": "Float64",
-    }]))
-    array = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"name": "x", "dtype": "Float64", "is_array": True}],
-        "return_dtype": "Float64",
-    }]))
+    scalar = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [{"name": "x", "dtype": "Float64"}],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    array = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [{"name": "x", "dtype": "Float64", "is_array": True}],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
     # Same dtype, differing array flag -> distinct descriptors -> breaking diff.
     assert scalar.exports[0].params != array.exports[0].params
     diff = diff_manifests(scalar, array)
@@ -172,16 +221,37 @@ def test_param_object_array_flag_is_part_of_signature() -> None:
 def test_param_false_flags_normalize_to_bare_dtype() -> None:
     # Codex P2: explicit scalar defaults (is_array: false) must NOT differ from
     # the bare dtype form — normalizing a manifest is not a breaking change.
-    bare = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": ["Float64"], "return_dtype": "Float64",
-    }]))
-    explicit = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"name": "x", "dtype": "Float64", "is_array": False,
-                    "is_core_dim": False}],
-        "return_dtype": "Float64",
-    }]))
+    bare = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    explicit = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [
+                        {
+                            "name": "x",
+                            "dtype": "Float64",
+                            "is_array": False,
+                            "is_core_dim": False,
+                        }
+                    ],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
     assert bare.exports[0].params == explicit.exports[0].params
     assert not diff_manifests(bare, explicit).is_breaking
 
@@ -190,29 +260,62 @@ def test_param_unknown_metadata_is_not_part_of_signature() -> None:
     # Only known ABI-shape flags distinguish the descriptor; unknown/non-ABI
     # metadata (doc, units, draft-schema fields) must not create a false
     # breaking signature diff — the module promises tolerance of unknown keys.
-    bare = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": ["Float64"], "return_dtype": "Float64",
-    }]))
-    annotated = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"dtype": "Float64", "doc": "the input", "units": "radians"}],
-        "return_dtype": "Float64",
-    }]))
+    bare = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    annotated = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [
+                        {"dtype": "Float64", "doc": "the input", "units": "radians"}
+                    ],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
     assert bare.exports[0].params == annotated.exports[0].params
     assert not diff_manifests(bare, annotated).is_breaking
 
 
 def test_param_true_array_flag_is_part_of_signature() -> None:
     # The positive control: a *true* ABI-shape flag must still distinguish.
-    scalar = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": ["Float64"], "return_dtype": "Float64",
-    }]))
-    array = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"dtype": "Float64", "is_array": True}], "return_dtype": "Float64",
-    }]))
+    scalar = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    array = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [{"dtype": "Float64", "is_array": True}],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
     assert diff_manifests(scalar, array).is_breaking
 
 
@@ -226,19 +329,37 @@ def test_non_object_export_entry_is_rejected() -> None:
 
 def test_param_name_is_not_part_of_signature() -> None:
     # Renaming a parameter (name only) is not an ABI change.
-    a = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"name": "x", "dtype": "Float64"}], "return_dtype": "Float64",
-    }]))
-    b = parse_manifest(_manifest_dict([{
-        "name": "f", "c_symbol": "pp_f",
-        "params": [{"name": "y", "dtype": "Float64"}], "return_dtype": "Float64",
-    }]))
+    a = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [{"name": "x", "dtype": "Float64"}],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    b = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "f",
+                    "c_symbol": "pp_f",
+                    "params": [{"name": "y", "dtype": "Float64"}],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
     assert not diff_manifests(a, b).is_breaking
 
 
 def test_c_symbol_defaults_from_name() -> None:
-    m = parse_manifest(_manifest_dict([{"name": "foo", "params": [], "return_dtype": "Int64"}]))
+    m = parse_manifest(
+        _manifest_dict([{"name": "foo", "params": [], "return_dtype": "Int64"}])
+    )
     assert m.exports[0].c_symbol == "pp_foo"
 
 
@@ -331,11 +452,14 @@ def test_validate_ignores_kernel_symbols_as_undeclared() -> None:
     assert result.undeclared == []
 
 
-@pytest.mark.parametrize("bad_param", [
-    {"name": "x"},                       # dtype missing entirely
-    {"name": "x", "dtype": ""},          # dtype empty
-    {"name": "x", "type": "Float64"},    # dtype misspelled
-])
+@pytest.mark.parametrize(
+    "bad_param",
+    [
+        {"name": "x"},  # dtype missing entirely
+        {"name": "x", "dtype": ""},  # dtype empty
+        {"name": "x", "type": "Float64"},  # dtype misspelled
+    ],
+)
 def test_param_object_without_dtype_is_rejected(bad_param: dict) -> None:
     # A param object without a real dtype must fail parsing — normalizing it to
     # an empty descriptor would let diff_manifests compare two different real
@@ -350,8 +474,15 @@ def test_malformed_ufunc_facet_is_rejected(bad_ufunc: object) -> None:
     # — dropping it would remove the promised loop symbol from the committed
     # surface and let a bad manifest pass validation without checking it.
     with pytest.raises(ValueError, match="'ufunc' must be an object"):
-        PostExport.from_dict({"name": "f", "c_symbol": "pp_f", "params": [],
-                              "return_dtype": "Float64", "ufunc": bad_ufunc})
+        PostExport.from_dict(
+            {
+                "name": "f",
+                "c_symbol": "pp_f",
+                "params": [],
+                "return_dtype": "Float64",
+                "ufunc": bad_ufunc,
+            }
+        )
 
 
 def test_absent_or_null_ufunc_is_no_facet() -> None:
@@ -385,55 +516,102 @@ def test_ufunc_facet_without_loop_symbol_is_rejected(ufunc: dict) -> None:
     # the loop symbol is the committed ABI surface, and dropping it would let
     # validation PASS without ever checking the promised loop.
     with pytest.raises(ValueError, match="missing required 'loop_symbol'"):
-        PostExport.from_dict({"name": "f", "c_symbol": "pp_f", "params": [],
-                              "return_dtype": "Float64", "ufunc": ufunc})
+        PostExport.from_dict(
+            {
+                "name": "f",
+                "c_symbol": "pp_f",
+                "params": [],
+                "return_dtype": "Float64",
+                "ufunc": ufunc,
+            }
+        )
 
 
 def test_object_symbol_does_not_satisfy_callable_promise() -> None:
     # A promised pp_foo exported only as a data OBJECT (not FUNC/IFUNC) does not
     # satisfy clients compiled to call pp_foo(...), so validation must fail.
-    m = parse_manifest(_manifest_dict([{"name": "foo", "c_symbol": "pp_foo",
-                                        "params": ["Float64"], "return_dtype": "Float64"}]))
-    as_object = ElfMetadata(soname="libmylib.so.1", symbols=[
-        ElfSymbol(name="pp_foo", sym_type=SymbolType.OBJECT),
-    ])
+    m = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "foo",
+                    "c_symbol": "pp_foo",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    as_object = ElfMetadata(
+        soname="libmylib.so.1",
+        symbols=[
+            ElfSymbol(name="pp_foo", sym_type=SymbolType.OBJECT),
+        ],
+    )
     result = validate_manifest_against_binary(m, as_object)
     assert result.missing == ["pp_foo"]
     assert not result.passed
     # The same name exported as a FUNC does satisfy it.
-    as_func = ElfMetadata(soname="libmylib.so.1", symbols=[
-        ElfSymbol(name="pp_foo", sym_type=SymbolType.FUNC),
-    ])
+    as_func = ElfMetadata(
+        soname="libmylib.so.1",
+        symbols=[
+            ElfSymbol(name="pp_foo", sym_type=SymbolType.FUNC),
+        ],
+    )
     assert validate_manifest_against_binary(m, as_func).passed
 
 
-@pytest.mark.parametrize("bad_param", [None, False, 0, 1.5, {"dtype": 0}, {"dtype": None}])
+@pytest.mark.parametrize(
+    "bad_param", [None, False, 0, 1.5, {"dtype": 0}, {"dtype": None}]
+)
 def test_non_string_param_dtype_is_rejected(bad_param: object) -> None:
     # A param is a dtype string or an object with a string dtype; a non-string
     # scalar or object dtype would coerce to a bogus descriptor and hide a real
     # dtype change, so it must fail parsing (like return_dtype).
-    with pytest.raises(ValueError, match="dtype must be a string|'dtype' must be a string"):
-        PostExport.from_dict({"name": "f", "c_symbol": "pp_f", "params": [bad_param],
-                              "return_dtype": "Float64"})
+    with pytest.raises(
+        ValueError, match="dtype must be a string|'dtype' must be a string"
+    ):
+        PostExport.from_dict(
+            {
+                "name": "f",
+                "c_symbol": "pp_f",
+                "params": [bad_param],
+                "return_dtype": "Float64",
+            }
+        )
 
 
 def test_empty_bare_param_dtype_is_rejected() -> None:
     # A bare "" dtype normalizes to the same empty descriptor as another empty
     # dtype, hiding a change. A no-arg export is params: [], not params: [""].
     with pytest.raises(ValueError, match="non-empty string"):
-        PostExport.from_dict({"name": "f", "c_symbol": "pp_f", "params": [""],
-                              "return_dtype": "Float64"})
+        PostExport.from_dict(
+            {"name": "f", "c_symbol": "pp_f", "params": [""], "return_dtype": "Float64"}
+        )
 
 
 def test_notype_wrapper_symbol_satisfies_manifest() -> None:
     # An asm/linker-defined POST wrapper exported as STT_NOTYPE is still a
     # callable entry point (dumper.py treats NOTYPE as function-like), so it must
     # satisfy the promise rather than be reported missing.
-    m = parse_manifest(_manifest_dict([{"name": "foo", "c_symbol": "pp_foo",
-                                        "params": ["Float64"], "return_dtype": "Float64"}]))
-    as_notype = ElfMetadata(soname="libmylib.so.1", symbols=[
-        ElfSymbol(name="pp_foo", sym_type=SymbolType.NOTYPE),
-    ])
+    m = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "foo",
+                    "c_symbol": "pp_foo",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    as_notype = ElfMetadata(
+        soname="libmylib.so.1",
+        symbols=[
+            ElfSymbol(name="pp_foo", sym_type=SymbolType.NOTYPE),
+        ],
+    )
     assert validate_manifest_against_binary(m, as_notype).passed
 
 
@@ -441,26 +619,52 @@ def test_non_default_version_alias_does_not_satisfy_manifest() -> None:
     # A promised symbol exported only as a NON-default version alias
     # (pp_foo@POST_1, is_default=False) does not satisfy an unversioned consumer
     # link, so validation must report it missing — not pass silently.
-    m = parse_manifest(_manifest_dict([{"name": "foo", "c_symbol": "pp_foo",
-                                        "params": ["Float64"], "return_dtype": "Float64"}]))
-    non_default = ElfMetadata(soname="libmylib.so.1", symbols=[
-        ElfSymbol(name="pp_foo", sym_type=SymbolType.FUNC,
-                  version="POST_1", is_default=False),
-    ])
+    m = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "foo",
+                    "c_symbol": "pp_foo",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ]
+        )
+    )
+    non_default = ElfMetadata(
+        soname="libmylib.so.1",
+        symbols=[
+            ElfSymbol(
+                name="pp_foo",
+                sym_type=SymbolType.FUNC,
+                version="POST_1",
+                is_default=False,
+            ),
+        ],
+    )
     result = validate_manifest_against_binary(m, non_default)
     assert result.missing == ["pp_foo"]
     assert not result.passed
     # The default-versioned form (pp_foo@@POST_1) DOES satisfy it.
-    default_versioned = ElfMetadata(soname="libmylib.so.1", symbols=[
-        ElfSymbol(name="pp_foo", sym_type=SymbolType.FUNC,
-                  version="POST_1", is_default=True),
-    ])
+    default_versioned = ElfMetadata(
+        soname="libmylib.so.1",
+        symbols=[
+            ElfSymbol(
+                name="pp_foo",
+                sym_type=SymbolType.FUNC,
+                version="POST_1",
+                is_default=True,
+            ),
+        ],
+    )
     assert validate_manifest_against_binary(m, default_versioned).passed
 
 
 def test_format_validation_report_pass_and_fail() -> None:
     m = parse_manifest(_manifest_dict([_gammaln_export()]))
-    ok = validate_manifest_against_binary(m, _elf(["pp_gammaln", "pp_gammaln_ufunc_loop"]))
+    ok = validate_manifest_against_binary(
+        m, _elf(["pp_gammaln", "pp_gammaln_ufunc_loop"])
+    )
     assert "Result: PASS" in format_validation_report(ok)
     bad = validate_manifest_against_binary(m, _elf([]))
     report = format_validation_report(bad)
@@ -570,9 +774,20 @@ def test_gate_passes_when_breaking_change_covered_by_bump() -> None:
 
 def test_gate_report_no_breaking_changes_message() -> None:
     old = parse_manifest(_manifest_dict([_gammaln_export()], post_abi=1))
-    new = parse_manifest(_manifest_dict([_gammaln_export(), {
-        "name": "extra", "c_symbol": "pp_extra", "params": [], "return_dtype": "Int64",
-    }], post_abi=1))
+    new = parse_manifest(
+        _manifest_dict(
+            [
+                _gammaln_export(),
+                {
+                    "name": "extra",
+                    "c_symbol": "pp_extra",
+                    "params": [],
+                    "return_dtype": "Int64",
+                },
+            ],
+            post_abi=1,
+        )
+    )
     result = check_version_gate(old, new)
     assert result.passed
     assert "no breaking changes" in format_gate_report(result, "a", "b").lower()
@@ -618,13 +833,16 @@ def test_diff_ufunc_loop_symbol_dropped_is_breaking() -> None:
 def test_validate_against_symbols_core_pass_and_fail() -> None:
     m = parse_manifest(_manifest_dict([_gammaln_export()]))
     ok = validate_manifest_against_symbols(
-        m, {"pp_gammaln", "pp_gammaln_ufunc_loop"}, library="mylib.dll")
+        m, {"pp_gammaln", "pp_gammaln_ufunc_loop"}, library="mylib.dll"
+    )
     assert ok.passed and ok.library == "mylib.dll"
     bad = validate_manifest_against_symbols(m, set(), library="")
     assert not bad.passed and bad.library == "UNKNOWN"
 
 
-def test_exported_names_for_binary_dispatches_per_format(monkeypatch, tmp_path: Path) -> None:
+def test_exported_names_for_binary_dispatches_per_format(
+    monkeypatch, tmp_path: Path
+) -> None:
     from abicheck import post_manifest as pm
     from abicheck.macho_metadata import MachoExport, MachoMetadata
     from abicheck.pe_metadata import PeExport, PeMetadata
@@ -640,8 +858,10 @@ def test_exported_names_for_binary_dispatches_per_format(monkeypatch, tmp_path: 
 
     # PE branch
     monkeypatch.setattr("abicheck.binary_utils.detect_binary_format", lambda p: "pe")
-    monkeypatch.setattr("abicheck.pe_metadata.parse_pe_metadata",
-                        lambda p: PeMetadata(exports=[PeExport(name="pp_pe")]))
+    monkeypatch.setattr(
+        "abicheck.pe_metadata.parse_pe_metadata",
+        lambda p: PeMetadata(exports=[PeExport(name="pp_pe")]),
+    )
     names, _ = pm._exported_names_for_binary(dummy)
     assert names == {"pp_pe"}
 
@@ -650,21 +870,28 @@ def test_exported_names_for_binary_dispatches_per_format(monkeypatch, tmp_path: 
     monkeypatch.setattr("abicheck.binary_utils.detect_binary_format", lambda p: "macho")
     monkeypatch.setattr(
         "abicheck.macho_metadata.parse_macho_metadata",
-        lambda p: MachoMetadata(exports=[MachoExport(name="pp_macho"),
-                                         MachoExport(name="pp_data", is_data=True)],
-                                install_name="libx.dylib"),
+        lambda p: MachoMetadata(
+            exports=[
+                MachoExport(name="pp_macho"),
+                MachoExport(name="pp_data", is_data=True),
+            ],
+            install_name="libx.dylib",
+        ),
     )
     names, label = pm._exported_names_for_binary(dummy)
     assert names == {"pp_macho"} and label == "libx.dylib"
 
 
-def test_exported_names_for_binary_unknown_format_raises(monkeypatch, tmp_path: Path) -> None:
+def test_exported_names_for_binary_unknown_format_raises(
+    monkeypatch, tmp_path: Path
+) -> None:
     from abicheck import post_manifest as pm
 
     dummy = tmp_path / "lib.bin"
     dummy.write_text("x", encoding="utf-8")
-    monkeypatch.setattr("abicheck.binary_utils.normalize_binary_input",
-                        lambda p: (p, "wasm"))
+    monkeypatch.setattr(
+        "abicheck.binary_utils.normalize_binary_input", lambda p: (p, "wasm")
+    )
     with pytest.raises(ValueError, match="ELF/PE/Mach-O"):
         pm._exported_names_for_binary(dummy)
 
@@ -694,10 +921,13 @@ def test_exported_names_for_binary_elf_branch(monkeypatch, tmp_path: Path) -> No
 
     dummy = tmp_path / "lib.so"
     dummy.write_text("x", encoding="utf-8")
-    monkeypatch.setattr("abicheck.binary_utils.normalize_binary_input",
-                        lambda p: (p, "elf"))
-    monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata",
-                        lambda p: ElfMetadata(soname="libz.so.1", symbols=[]))
+    monkeypatch.setattr(
+        "abicheck.binary_utils.normalize_binary_input", lambda p: (p, "elf")
+    )
+    monkeypatch.setattr(
+        "abicheck.elf_metadata.parse_elf_metadata",
+        lambda p: ElfMetadata(soname="libz.so.1", symbols=[]),
+    )
     monkeypatch.setattr(pm, "_exported_symbol_names", lambda meta: {"pp_z"})
     names, label = pm._exported_names_for_binary(dummy)
     assert names == {"pp_z"} and label == "libz.so.1"
@@ -708,22 +938,45 @@ def test_validate_from_binary_end_to_end(monkeypatch, tmp_path: Path) -> None:
     from abicheck.post_manifest import validate_from_binary
 
     manifest = tmp_path / "m.json"
-    manifest.write_text(json.dumps(_manifest_dict([_gammaln_export()])), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(_manifest_dict([_gammaln_export()])), encoding="utf-8"
+    )
     dummy = tmp_path / "lib.so"
     dummy.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(pm, "_exported_names_for_binary",
-                        lambda p: ({"pp_gammaln", "pp_gammaln_ufunc_loop"}, "libx.so"))
+    monkeypatch.setattr(
+        pm,
+        "_exported_names_for_binary",
+        lambda p: ({"pp_gammaln", "pp_gammaln_ufunc_loop"}, "libx.so"),
+    )
     result = validate_from_binary(manifest, dummy)
     assert result.passed and result.library == "libx.so"
 
 
 def test_fmt_sig_void_return() -> None:
-    m = parse_manifest(_manifest_dict([
-        {"name": "sink", "c_symbol": "pp_sink", "params": ["Int64"], "return_dtype": ""},
-    ]))
-    m2 = parse_manifest(_manifest_dict([
-        {"name": "sink", "c_symbol": "pp_sink", "params": [], "return_dtype": ""},
-    ]))
+    m = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "sink",
+                    "c_symbol": "pp_sink",
+                    "params": ["Int64"],
+                    "return_dtype": "",
+                },
+            ]
+        )
+    )
+    m2 = parse_manifest(
+        _manifest_dict(
+            [
+                {
+                    "name": "sink",
+                    "c_symbol": "pp_sink",
+                    "params": [],
+                    "return_dtype": "",
+                },
+            ]
+        )
+    )
     report = format_diff_report(diff_manifests(m, m2), "a", "b")
     assert "void" in report
 

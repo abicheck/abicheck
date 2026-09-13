@@ -18,6 +18,7 @@ The pure byte/string parsers are tested directly; the ELF wrapper is exercised
 with a faked ``ELFFile`` (success path) and real pyelftools (failure paths), so
 no compiled fixture is needed on the fast lane.
 """
+
 from __future__ import annotations
 
 import click
@@ -41,12 +42,15 @@ def test_parse_gcc_command_line_splits_on_nul():
     assert parse_gcc_command_line(data) == ["gcc -std=c++20 -c a.cpp", "clang -c b.c"]
 
 
-@pytest.mark.parametrize("producer,cid,ver,lang", [
-    ("GNU C++17 13.2.0 -std=c++17 -O2", "GNU", "13.2.0", "CXX"),
-    ("GNU C11 12.3.0", "GNU", "12.3.0", "C"),
-    ("clang version 17.0.6 (…)", "Clang", "17.0.6", ""),
-    ("Intel(R) oneAPI 2024.1", "Intel", "2024.1", ""),
-])
+@pytest.mark.parametrize(
+    "producer,cid,ver,lang",
+    [
+        ("GNU C++17 13.2.0 -std=c++17 -O2", "GNU", "13.2.0", "CXX"),
+        ("GNU C11 12.3.0", "GNU", "12.3.0", "C"),
+        ("clang version 17.0.6 (…)", "Clang", "17.0.6", ""),
+        ("Intel(R) oneAPI 2024.1", "Intel", "2024.1", ""),
+    ],
+)
 def test_parse_producer_variants(producer, cid, ver, lang):
     tc = parse_producer(producer)
     assert tc is not None
@@ -120,14 +124,18 @@ def test_extract_compiler_record_success(tmp_path, monkeypatch):
     binpath = tmp_path / "libfoo.so"
     binpath.write_bytes(b"\x7fELF placeholder")
     fake = _FakeELF(
-        section=_FakeSection(b"gcc -std=c++20 -D_GLIBCXX_USE_CXX11_ABI=0 -c src/a.cpp\x00"),
+        section=_FakeSection(
+            b"gcc -std=c++20 -D_GLIBCXX_USE_CXX11_ABI=0 -c src/a.cpp\x00"
+        ),
         dwarf=_FakeDwarf([_FakeCU(_FakeDIE(b"GNU C++17 13.2.0"))]),
     )
     monkeypatch.setattr(cr, "ELFFile", lambda _fh: fake)
     ev = extract_compiler_record(binpath)
 
     assert [t.compiler_id for t in ev.toolchains] == ["GNU"]
-    assert [(c.source, c.standard) for c in ev.compile_units] == [("src/a.cpp", "c++20")]
+    assert [(c.source, c.standard) for c in ev.compile_units] == [
+        ("src/a.cpp", "c++20")
+    ]
     opts = {(o.key, o.value) for o in ev.build_options}
     assert ("std:CXX", "c++20") in opts
     assert ("define:_GLIBCXX_USE_CXX11_ABI", "0") in opts
@@ -139,8 +147,12 @@ def test_extract_compiler_record_switches_only_record(tmp_path, monkeypatch):
     # options must still be recovered even though no compile unit is emitted.
     binpath = tmp_path / "switches.so"
     binpath.write_bytes(b"\x7fELF")
-    section = _FakeSection(b"GNU C11 13.3.0 -std=c11 -D_GLIBCXX_USE_CXX11_ABI=0 -O2\x00")
-    monkeypatch.setattr(cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None))
+    section = _FakeSection(
+        b"GNU C11 13.3.0 -std=c11 -D_GLIBCXX_USE_CXX11_ABI=0 -O2\x00"
+    )
+    monkeypatch.setattr(
+        cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None)
+    )
     ev = extract_compiler_record(binpath)
     assert not ev.compile_units  # no source → no unit
     opts = {(o.key, o.value) for o in ev.build_options}
@@ -157,13 +169,17 @@ def test_extract_compiler_record_no_section_no_dwarf(tmp_path, monkeypatch):
     assert not ev.toolchains and not ev.compile_units
 
 
-def test_extract_compiler_record_skips_malformed_and_sourceless_commands(tmp_path, monkeypatch):
+def test_extract_compiler_record_skips_malformed_and_sourceless_commands(
+    tmp_path, monkeypatch
+):
     binpath = tmp_path / "x.so"
     binpath.write_bytes(b"\x7fELF")
     # 1st entry: unbalanced quote (shlex error → skipped); 2nd: no source (skipped);
     # 3rd: a real compile that must be kept.
     section = _FakeSection(b'gcc -c "oops\x00gcc -v\x00gcc -std=c17 -c ok.c\x00')
-    monkeypatch.setattr(cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None))
+    monkeypatch.setattr(
+        cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None)
+    )
     ev = extract_compiler_record(binpath)
     assert [c.source for c in ev.compile_units] == ["ok.c"]
 
@@ -241,8 +257,12 @@ def test_collect_evidence_preserves_option_only_compiler_record(tmp_path, monkey
     # This evidence must still count as "collected" rather than be dropped.
     binpath = tmp_path / "switches.so"
     binpath.write_bytes(b"\x7fELF")
-    section = _FakeSection(b"GNU C11 13.3.0 -std=c11 -D_GLIBCXX_USE_CXX11_ABI=0 -O2\x00")
-    monkeypatch.setattr(cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None))
+    section = _FakeSection(
+        b"GNU C11 13.3.0 -std=c11 -D_GLIBCXX_USE_CXX11_ABI=0 -O2\x00"
+    )
+    monkeypatch.setattr(
+        cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None)
+    )
 
     merged, extractors = _run_compiler_record_adapter(binary=binpath)
     has_build = bool(

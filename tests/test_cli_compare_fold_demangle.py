@@ -72,13 +72,16 @@ class TestScopedCompatFoldDemangle:
         assert f"missing entrypoint: `{_DEMANGLED}`" in result.output
         assert f"missing entrypoint: `{_MANGLED}`" not in result.output
 
-    def test_missing_entrypoint_stays_mangled_with_no_demangle(
-        self, tmp_path
-    ) -> None:
+    def test_missing_entrypoint_stays_mangled_with_no_demangle(self, tmp_path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         result = _invoke(
-            "compare", str(old_p), str(new_p),
-            "--required-symbol", _MANGLED, "--view", "no-demangle",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--required-symbol",
+            _MANGLED,
+            "--view",
+            "no-demangle",
         )
         assert f"missing entrypoint: `{_MANGLED}`" in result.output
         assert f"missing entrypoint: `{_DEMANGLED}`" not in result.output
@@ -108,9 +111,7 @@ class TestSuppressionAuditFoldDemangle:
     demangle to the identical display string, which would make two
     different rules indistinguishable in the report (Codex review)."""
 
-    def test_high_risk_match_tail_demangled_but_label_stays_raw(
-        self, tmp_path
-    ) -> None:
+    def test_high_risk_match_tail_demangled_but_label_stays_raw(self, tmp_path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         suppress = tmp_path / "suppress.yml"
         suppress.write_text(
@@ -119,8 +120,13 @@ class TestSuppressionAuditFoldDemangle:
             encoding="utf-8",
         )
         result = _invoke(
-            "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--view", "suppressions",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--suppress",
+            str(suppress),
+            "--view",
+            "suppressions",
         )
         assert "## Suppression Audit" in result.output
         # The label's own selector echo is never demangled.
@@ -141,8 +147,15 @@ class TestSuppressionAuditFoldDemangle:
             encoding="utf-8",
         )
         result = _invoke(
-            "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--view", "suppressions", "--view", "no-demangle",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--suppress",
+            str(suppress),
+            "--view",
+            "suppressions",
+            "--view",
+            "no-demangle",
         )
         assert f"suppressed func_removed: {_MANGLED}" in result.output
         assert f"suppressed func_removed: {_DEMANGLED}" not in result.output
@@ -178,8 +191,13 @@ class TestSuppressionAuditFoldDemangle:
             encoding="utf-8",
         )
         result = _invoke(
-            "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--view", "suppressions",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--suppress",
+            str(suppress),
+            "--view",
+            "suppressions",
         )
         assert f"`intentional removal (symbol={ctor1})`" in result.output
         assert f"`intentional removal (symbol={ctor2})`" in result.output

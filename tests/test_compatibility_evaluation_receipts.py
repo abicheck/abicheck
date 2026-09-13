@@ -109,7 +109,9 @@ class TestReplayProvenance:
     def test_a_caller_supplied_digest_is_used_verbatim(self, tmp_path):
         pf = _policy_file(tmp_path, "base_policy: sdk_vendor\n")
         cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(policy_file=pf, policy_file_sha256="ab" * 32)
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=pf, policy_file_sha256="ab" * 32
+            )
         )
         assert cfg.provenance[POLICY_BASE_FIELD].sha256 == "ab" * 32
 
@@ -295,7 +297,10 @@ class TestProjectConfigOverridesContributeToTheReceipt:
 
     def test_no_project_config_is_unaffected(self):
         cfg = _resolve(explicit=ExplicitCompatibilityInputs())
-        assert cfg.provenance[POLICY_OVERRIDES_FIELD].layer is SelectorLayer.BUILT_IN_DEFAULT
+        assert (
+            cfg.provenance[POLICY_OVERRIDES_FIELD].layer
+            is SelectorLayer.BUILT_IN_DEFAULT
+        )
 
 
 class TestPathInputsAreNotSilentlyIgnored:
@@ -304,9 +309,7 @@ class TestPathInputsAreNotSilentlyIgnored:
     def test_public_symbols_list_alone_resolves_a_real_explicit_scope(self, tmp_path):
         listed = tmp_path / "symbols.txt"
         listed.write_text("# comment\n\nfrom_file\n")
-        cfg = _resolve(
-            explicit=compare_cli_inputs({"public_symbols_list": listed})
-        )
+        cfg = _resolve(explicit=compare_cli_inputs({"public_symbols_list": listed}))
         assert cfg.surface.explicit_scope is not None
         assert cfg.surface.explicit_scope.items == ("from_file",)
 
@@ -473,9 +476,7 @@ class TestProjectConfigProvenanceNamesItsSource:
         ]
 
     def test_the_cli_flag_still_records_its_own_spelling(self):
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(scope_public_headers=False)
-        )
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(scope_public_headers=False))
         prov = cfg.provenance[CONTRACT_MODE_FIELD]
         assert prov.layer is SelectorLayer.LEGACY_ALIAS
         assert prov.path is None
@@ -528,9 +529,7 @@ class TestOverridesReceiptNamesEachContributingPack:
         first = self._pack(tmp_path, "a", "soname_changed: break\n")
         second = self._pack(tmp_path, "b", "func_added: warn\n")
         cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                pack_paths=(str(first), str(second))
-            )
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(first), str(second)))
         )
         entries = [
             (e.option, e.path)
@@ -546,9 +545,7 @@ class TestOverridesReceiptNamesEachContributingPack:
         first = self._pack(tmp_path, "a", "soname_changed: break\n")
         second = self._pack(tmp_path, "b", "func_added: warn\n")
         cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                pack_paths=(str(first), str(second))
-            )
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(first), str(second)))
         )
         hops = cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by
         assert [(e.path, e.identity.id) for e in hops] == [
@@ -613,9 +610,7 @@ class TestOverridesReceiptNamesEachContributingPack:
         first = self._pack(tmp_path, "a", "soname_changed: break\n")
         second = self._pack(tmp_path, "b", "func_added: warn\n")
         prov = _resolve(
-            explicit=ExplicitCompatibilityInputs(
-                pack_paths=(str(first), str(second))
-            )
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(first), str(second)))
         ).provenance[POLICY_OVERRIDES_FIELD]
         # No one manifest supplied the whole value, so none is named as *the*
         # source -- every contributor is in selected_by instead.
@@ -643,8 +638,7 @@ class TestSelectedButEmptySources:
         cfg = _resolve()
         assert cfg.surface.explicit_scope is None
         assert (
-            cfg.provenance[EXPLICIT_SCOPE_FIELD].layer
-            is SelectorLayer.BUILT_IN_DEFAULT
+            cfg.provenance[EXPLICIT_SCOPE_FIELD].layer is SelectorLayer.BUILT_IN_DEFAULT
         )
 
 
@@ -697,9 +691,7 @@ class TestProjectDerivedFieldsNameTheirConfigDigest:
         path = tmp_path / "symbols.txt"
         path.write_text("foo\n")
         listed = PublicSymbolsList.from_file(path)
-        cfg = _resolve(
-            explicit=ExplicitCompatibilityInputs(public_symbols_list=listed)
-        )
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(public_symbols_list=listed))
         assert [
             (e.option, e.sha256)
             for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
@@ -852,9 +844,9 @@ class TestReceiptNamesTheStatingFrontEnd:
             contract_evaluation=True,
             force_public_symbols=frozenset({"sym"}),
         )
-        assert [
-            e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by
-        ] == ["contract_mode"]
+        assert [e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by] == [
+            "contract_mode"
+        ]
         assert [e.option for e in cfg.provenance[POLICY_BASE_FIELD].selected_by] == [
             "policy_file_path"
         ]
@@ -865,9 +857,9 @@ class TestReceiptNamesTheStatingFrontEnd:
         assert [
             e.option for e in cfg.provenance[INTERNAL_NAMESPACES_FIELD].selected_by
         ] == ["policy_file_path"]
-        assert [
-            e.option for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
-        ] == ["force_public_symbols"]
+        assert [e.option for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by] == [
+            "force_public_symbols"
+        ]
 
     def test_api_suppression_names_the_request_field(self, tmp_path):
         suppress = tmp_path / "s.yml"
@@ -875,9 +867,9 @@ class TestReceiptNamesTheStatingFrontEnd:
             "version: 1\nsuppressions:\n  - symbol: foo\n    reason: ok\n"
         )
         cfg = self._api(tmp_path, suppress=suppress)
-        assert [
-            e.option for e in cfg.provenance[SUPPRESSIONS_FIELD].selected_by
-        ] == ["suppress"]
+        assert [e.option for e in cfg.provenance[SUPPRESSIONS_FIELD].selected_by] == [
+            "suppress"
+        ]
 
     def test_the_cli_still_names_its_own_flags(self, tmp_path):
         policy = tmp_path / "policy.yml"
@@ -888,9 +880,9 @@ class TestReceiptNamesTheStatingFrontEnd:
                 explicit_parameters={"scope_public_headers"},
             )
         )
-        assert [
-            e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by
-        ] == ["--no-scope-public-headers"]
+        assert [e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by] == [
+            "--no-scope-public-headers"
+        ]
         assert [e.option for e in cfg.provenance[POLICY_BASE_FIELD].selected_by] == [
             "--policy"
         ]

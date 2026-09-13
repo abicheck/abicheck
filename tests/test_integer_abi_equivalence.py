@@ -30,62 +30,71 @@ from abicheck.diff_symbols import _abi_equivalent_scalar, _canonical_int_spellin
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 
 
-@pytest.mark.parametrize("spelling,expected", [
-    # Specifier-order / redundant-int variants fold to one canonical form.
-    ("unsigned long int", "unsigned long"),
-    ("long unsigned int", "unsigned long"),
-    ("int long unsigned", "unsigned long"),
-    ("signed long int", "long"),
-    ("long long unsigned int", "unsigned long long"),
-    ("signed long long int", "long long"),
-    ("unsigned short int", "unsigned short"),
-    ("signed int", "int"),
-    ("unsigned", "unsigned int"),
-    # char keeps its three distinct forms; bare ``char`` sign is impl-defined.
-    ("signed char", "signed char"),
-    ("unsigned char", "unsigned char"),
-    ("char", "char"),
-    # Non-specifier spellings (typedefs, fixed-width) pass through untouched.
-    ("size_t", "size_t"),
-    ("uint32_t", "uint32_t"),
-    ("", ""),
-])
+@pytest.mark.parametrize(
+    "spelling,expected",
+    [
+        # Specifier-order / redundant-int variants fold to one canonical form.
+        ("unsigned long int", "unsigned long"),
+        ("long unsigned int", "unsigned long"),
+        ("int long unsigned", "unsigned long"),
+        ("signed long int", "long"),
+        ("long long unsigned int", "unsigned long long"),
+        ("signed long long int", "long long"),
+        ("unsigned short int", "unsigned short"),
+        ("signed int", "int"),
+        ("unsigned", "unsigned int"),
+        # char keeps its three distinct forms; bare ``char`` sign is impl-defined.
+        ("signed char", "signed char"),
+        ("unsigned char", "unsigned char"),
+        ("char", "char"),
+        # Non-specifier spellings (typedefs, fixed-width) pass through untouched.
+        ("size_t", "size_t"),
+        ("uint32_t", "uint32_t"),
+        ("", ""),
+    ],
+)
 def test_canonical_int_spelling(spelling: str, expected: str) -> None:
     assert _canonical_int_spelling(spelling) == expected
 
 
-@pytest.mark.parametrize("a,b", [
-    # Pointer-width spellings co-vary on any non-LLP64 target (long == size).
-    ("unsigned long", "size_t"),
-    ("long unsigned int", "size_t"),
-    ("size_t", "uintptr_t"),
-    ("long", "ptrdiff_t"),
-    ("ssize_t", "ptrdiff_t"),
-    ("long", "long int"),
-    # Fixed-width spellings, data-model independent.
-    ("int", "int32_t"),
-    ("unsigned int", "uint32_t"),
-    ("long long", "int64_t"),
-    ("unsigned long long", "uint64_t"),
-])
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        # Pointer-width spellings co-vary on any non-LLP64 target (long == size).
+        ("unsigned long", "size_t"),
+        ("long unsigned int", "size_t"),
+        ("size_t", "uintptr_t"),
+        ("long", "ptrdiff_t"),
+        ("ssize_t", "ptrdiff_t"),
+        ("long", "long int"),
+        # Fixed-width spellings, data-model independent.
+        ("int", "int32_t"),
+        ("unsigned int", "uint32_t"),
+        ("long long", "int64_t"),
+        ("unsigned long long", "uint64_t"),
+    ],
+)
 def test_nonllp64_equivalent(a: str, b: str) -> None:
     assert _abi_equivalent_scalar(a, b, is_llp64=False)
 
 
-@pytest.mark.parametrize("a,b", [
-    ("int", "long"),                  # 32 vs pointer-width
-    ("int", "size_t"),                # 32 vs pointer-width
-    ("long", "unsigned long"),        # signedness differs
-    ("size_t", "ssize_t"),            # signedness differs
-    # Data-model-dependent vs fixed width: equal only on LP64, a real width
-    # change on ILP32 — and the snapshot does not record bitness, so these are
-    # conservatively reported rather than suppressed.
-    ("long", "long long"),
-    ("long", "int64_t"),
-    ("unsigned long", "uint64_t"),
-    ("long*", "long long*"),          # pointers are not bare scalars
-    ("int", "float"),                 # float not modelled
-])
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("int", "long"),  # 32 vs pointer-width
+        ("int", "size_t"),  # 32 vs pointer-width
+        ("long", "unsigned long"),  # signedness differs
+        ("size_t", "ssize_t"),  # signedness differs
+        # Data-model-dependent vs fixed width: equal only on LP64, a real width
+        # change on ILP32 — and the snapshot does not record bitness, so these are
+        # conservatively reported rather than suppressed.
+        ("long", "long long"),
+        ("long", "int64_t"),
+        ("unsigned long", "uint64_t"),
+        ("long*", "long long*"),  # pointers are not bare scalars
+        ("int", "float"),  # float not modelled
+    ],
+)
 def test_nonllp64_not_equivalent(a: str, b: str) -> None:
     assert not _abi_equivalent_scalar(a, b, is_llp64=False)
 
@@ -113,36 +122,45 @@ def test_pointer_width_typedefs_equivalent_to_each_other() -> None:
     assert _abi_equivalent_scalar("size_t", "uintptr_t", is_llp64=True)
 
 
-@pytest.mark.parametrize("a,b", [
-    # Legal specifier-order / redundant-``int`` variants are the same type:
-    # different toolchains spell them differently and it is not an ABI change.
-    ("size_t", "unsigned long int"),       # vs GCC's "long unsigned int"
-    ("unsigned long", "unsigned long int"),
-    ("uint16_t", "unsigned short int"),
-    ("uint64_t", "unsigned long long int"),
-    ("int64_t", "signed long long int"),
-    ("ptrdiff_t", "signed long int"),
-    ("size_t", "int long unsigned"),       # arbitrary specifier order
-])
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        # Legal specifier-order / redundant-``int`` variants are the same type:
+        # different toolchains spell them differently and it is not an ABI change.
+        ("size_t", "unsigned long int"),  # vs GCC's "long unsigned int"
+        ("unsigned long", "unsigned long int"),
+        ("uint16_t", "unsigned short int"),
+        ("uint64_t", "unsigned long long int"),
+        ("int64_t", "signed long long int"),
+        ("ptrdiff_t", "signed long int"),
+        ("size_t", "int long unsigned"),  # arbitrary specifier order
+    ],
+)
 def test_specifier_order_variants_equivalent_nonllp64(a: str, b: str) -> None:
     assert _abi_equivalent_scalar(a, b, is_llp64=False)
 
 
 def test_specifier_order_variants_still_distinguish_real_changes() -> None:
     # Normalization must not collapse genuinely different widths/signs.
-    assert not _abi_equivalent_scalar("unsigned long int", "unsigned int", is_llp64=False)
+    assert not _abi_equivalent_scalar(
+        "unsigned long int", "unsigned int", is_llp64=False
+    )
     assert not _abi_equivalent_scalar("unsigned long int", "long int", is_llp64=False)
-    assert not _abi_equivalent_scalar("unsigned short int", "unsigned long long int", is_llp64=False)
+    assert not _abi_equivalent_scalar(
+        "unsigned short int", "unsigned long long int", is_llp64=False
+    )
 
 
 def _fn(ret: str) -> Function:
-    return Function(name="f", mangled="f", return_type=ret,
-                    params=[], visibility=Visibility.PUBLIC)
+    return Function(
+        name="f", mangled="f", return_type=ret, params=[], visibility=Visibility.PUBLIC
+    )
 
 
 def _snap(ver: str, ret: str, platform: str = "elf") -> AbiSnapshot:
-    return AbiSnapshot(library="lib.so", version=ver, platform=platform,
-                       functions=[_fn(ret)])
+    return AbiSnapshot(
+        library="lib.so", version=ver, platform=platform, functions=[_fn(ret)]
+    )
 
 
 def test_return_unsigned_long_to_size_t_compatible() -> None:
@@ -167,13 +185,19 @@ def test_return_long_to_long_long_reported_unknown_bitness() -> None:
 
 
 def _fn_param(ptype: str) -> Function:
-    return Function(name="g", mangled="g", return_type="void",
-                    params=[Param(name="a", type=ptype)], visibility=Visibility.PUBLIC)
+    return Function(
+        name="g",
+        mangled="g",
+        return_type="void",
+        params=[Param(name="a", type=ptype)],
+        visibility=Visibility.PUBLIC,
+    )
 
 
 def _snap_param(ver: str, ptype: str, platform: str = "elf") -> AbiSnapshot:
-    return AbiSnapshot(library="l", version=ver, platform=platform,
-                       functions=[_fn_param(ptype)])
+    return AbiSnapshot(
+        library="l", version=ver, platform=platform, functions=[_fn_param(ptype)]
+    )
 
 
 def test_param_size_t_to_unsigned_long_compatible() -> None:
@@ -188,14 +212,19 @@ def test_param_int_to_long_still_breaking() -> None:
 
 # ── End-to-end LLP64 (platform="pe") — is_llp64 derived from snapshot ─────────
 
+
 def test_llp64_return_long_to_long_long_breaking() -> None:
-    r = compare(_snap("1", "long", platform="pe"), _snap("2", "long long", platform="pe"))
+    r = compare(
+        _snap("1", "long", platform="pe"), _snap("2", "long long", platform="pe")
+    )
     assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
 
 
 def test_llp64_return_unsigned_long_to_size_t_breaking() -> None:
     # On LLP64 unsigned long is 32-bit but size_t is 64-bit → a real change.
-    r = compare(_snap("1", "unsigned long", platform="pe"), _snap("2", "size_t", platform="pe"))
+    r = compare(
+        _snap("1", "unsigned long", platform="pe"), _snap("2", "size_t", platform="pe")
+    )
     assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
 
 

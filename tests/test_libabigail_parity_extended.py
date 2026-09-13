@@ -9,6 +9,7 @@ P2 gaps from tool-comparison-gap-analysis.md:
 
 All tests build AbiSnapshot objects directly (no castxml/abidiff required).
 """
+
 from __future__ import annotations
 
 import json
@@ -34,6 +35,7 @@ from abicheck.suppression import SuppressionList
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _snap(**kwargs: object) -> AbiSnapshot:
     defaults: dict[str, object] = dict(library="lib.so", version="1.0")
@@ -82,13 +84,17 @@ class TestSnapshotRoundtripComparison:
 
     def test_breaking_verdict_preserved(self) -> None:
         """BREAKING verdict survives JSON roundtrip of both snapshots."""
-        old = _snap(functions=[
-            _func("foo", "_foo"),
-            _func("bar", "_bar"),
-        ])
-        new = _snap(functions=[
-            _func("foo", "_foo"),
-        ])
+        old = _snap(
+            functions=[
+                _func("foo", "_foo"),
+                _func("bar", "_bar"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("foo", "_foo"),
+            ]
+        )
         # Direct comparison
         direct = compare(old, new)
         assert direct.verdict == Verdict.BREAKING
@@ -103,10 +109,12 @@ class TestSnapshotRoundtripComparison:
     def test_compatible_verdict_preserved(self) -> None:
         """COMPATIBLE verdict survives JSON roundtrip."""
         old = _snap(functions=[_func("foo", "_foo")])
-        new = _snap(functions=[
-            _func("foo", "_foo"),
-            _func("bar", "_bar"),
-        ])
+        new = _snap(
+            functions=[
+                _func("foo", "_foo"),
+                _func("bar", "_bar"),
+            ]
+        )
         direct = compare(old, new)
         assert direct.verdict == Verdict.COMPATIBLE
 
@@ -127,13 +135,31 @@ class TestSnapshotRoundtripComparison:
 
     def test_type_changes_preserved_through_roundtrip(self) -> None:
         """Struct size change detected identically after roundtrip."""
-        old = _snap(types=[RecordType(name="S", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=32,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=32),
+                    ],
+                )
+            ]
+        )
         direct = compare(old, new)
         rt_result = compare(_roundtrip(old), _roundtrip(new))
         assert rt_result.verdict == direct.verdict
@@ -141,12 +167,28 @@ class TestSnapshotRoundtripComparison:
 
     def test_enum_changes_preserved_through_roundtrip(self) -> None:
         """Enum member value change survives roundtrip."""
-        old = _snap(enums=[EnumType(name="Color", members=[
-            EnumMember("RED", 0), EnumMember("GREEN", 1),
-        ])])
-        new = _snap(enums=[EnumType(name="Color", members=[
-            EnumMember("RED", 0), EnumMember("GREEN", 10),
-        ])])
+        old = _snap(
+            enums=[
+                EnumType(
+                    name="Color",
+                    members=[
+                        EnumMember("RED", 0),
+                        EnumMember("GREEN", 1),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            enums=[
+                EnumType(
+                    name="Color",
+                    members=[
+                        EnumMember("RED", 0),
+                        EnumMember("GREEN", 10),
+                    ],
+                )
+            ]
+        )
         direct = compare(old, new)
         rt_result = compare(_roundtrip(old), _roundtrip(new))
         assert rt_result.verdict == direct.verdict
@@ -154,12 +196,28 @@ class TestSnapshotRoundtripComparison:
 
     def test_api_break_preserved_through_roundtrip(self) -> None:
         """API_BREAK verdict (field renamed) survives roundtrip."""
-        old = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="count", type="int", offset_bits=0),
-        ])])
-        new = _snap(types=[RecordType(name="S", kind="struct", fields=[
-            TypeField(name="total", type="int", offset_bits=0),
-        ])])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="count", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="total", type="int", offset_bits=0),
+                    ],
+                )
+            ]
+        )
         direct = compare(old, new)
         rt_result = compare(_roundtrip(old), _roundtrip(new))
         assert rt_result.verdict == direct.verdict
@@ -168,18 +226,36 @@ class TestSnapshotRoundtripComparison:
         """Complex snapshot with all field types survives double roundtrip."""
         old = _snap(
             functions=[
-                _func("compute", "_Z7computei", return_type="int",
-                       params=[Param(name="x", type="int")],
-                       is_virtual=True, vtable_index=0),
+                _func(
+                    "compute",
+                    "_Z7computei",
+                    return_type="int",
+                    params=[Param(name="x", type="int")],
+                    is_virtual=True,
+                    vtable_index=0,
+                ),
             ],
             variables=[_var("g_val", "_g_val", "int", is_const=True, value="42")],
-            types=[RecordType(name="Point", kind="struct", size_bits=64, fields=[
-                TypeField(name="x", type="int", offset_bits=0),
-                TypeField(name="y", type="int", offset_bits=32),
-            ])],
-            enums=[EnumType(name="Status", members=[
-                EnumMember("OK", 0), EnumMember("FAIL", 1),
-            ])],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=32),
+                    ],
+                )
+            ],
+            enums=[
+                EnumType(
+                    name="Status",
+                    members=[
+                        EnumMember("OK", 0),
+                        EnumMember("FAIL", 1),
+                    ],
+                )
+            ],
             constants={"MAX": "1024"},
         )
         # Double roundtrip
@@ -205,13 +281,16 @@ class TestSuppressionParity:
 
     def test_suppress_by_exact_symbol(self, tmp_path: Path) -> None:
         """Suppress a specific symbol by name (like [suppress_function] name = foo)."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - symbol: "_ZN3Foo3barEv"
                 change_kind: "func_removed"
                 reason: "intentional removal"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
         old = _snap(functions=[_func("Foo::bar", "_ZN3Foo3barEv")])
@@ -224,43 +303,57 @@ class TestSuppressionParity:
 
     def test_suppress_by_symbol_regex(self, tmp_path: Path) -> None:
         """Suppress by symbol regex (like [suppress_function] name_regexp = .*detail.*)."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - symbol_pattern: ".*detail.*"
                 reason: "internal implementation detail"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
-        old = _snap(functions=[
-            _func("ns::detail::helper", "_ZN2ns6detail6helperEv"),
-            _func("ns::public_api", "_ZN2ns10public_apiEv"),
-        ])
-        new = _snap(functions=[
-            _func("ns::public_api", "_ZN2ns10public_apiEv"),
-        ])
+        old = _snap(
+            functions=[
+                _func("ns::detail::helper", "_ZN2ns6detail6helperEv"),
+                _func("ns::public_api", "_ZN2ns10public_apiEv"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("ns::public_api", "_ZN2ns10public_apiEv"),
+            ]
+        )
         result = compare(old, new, suppression=sl)
         # detail::helper removal should be suppressed
         assert not any(c.kind == ChangeKind.FUNC_REMOVED for c in result.changes)
 
     def test_suppress_by_type_pattern(self, tmp_path: Path) -> None:
         """Suppress by type name regex (like [suppress_type] name_regexp = .*Internal.*)."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - type_pattern: ".*Internal.*"
                 reason: "internal types"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
-        old = _snap(types=[
-            RecordType(name="InternalState", kind="struct", size_bits=32),
-            RecordType(name="PublicAPI", kind="struct", size_bits=32),
-        ])
-        new = _snap(types=[
-            RecordType(name="InternalState", kind="struct", size_bits=64),
-            RecordType(name="PublicAPI", kind="struct", size_bits=64),
-        ])
+        old = _snap(
+            types=[
+                RecordType(name="InternalState", kind="struct", size_bits=32),
+                RecordType(name="PublicAPI", kind="struct", size_bits=32),
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(name="InternalState", kind="struct", size_bits=64),
+                RecordType(name="PublicAPI", kind="struct", size_bits=64),
+            ]
+        )
         result = compare(old, new, suppression=sl)
         # InternalState change should be suppressed, PublicAPI should not
         active_symbols = {c.symbol for c in result.changes}
@@ -270,13 +363,16 @@ class TestSuppressionParity:
 
     def test_suppress_by_change_kind(self, tmp_path: Path) -> None:
         """Suppress all changes of a specific kind (like libabigail's category filtering)."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - symbol_pattern: ".*"
                 change_kind: "type_size_changed"
                 reason: "known size changes in this release"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
         old = _snap(types=[RecordType(name="S", kind="struct", size_bits=32)])
@@ -289,24 +385,32 @@ class TestSuppressionParity:
 
         Uses fnmatch-style glob pattern.
         """
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - source_location: "*/internal/*"
                 reason: "internal headers"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
-        old = _snap(functions=[
-            _func("internal_fn", "_internal_fn",
-                   source_location="src/internal/helper.h:10"),
-            _func("public_fn", "_public_fn",
-                   source_location="include/public.h:20"),
-        ])
-        new = _snap(functions=[
-            _func("public_fn", "_public_fn",
-                   source_location="include/public.h:20"),
-        ])
+        old = _snap(
+            functions=[
+                _func(
+                    "internal_fn",
+                    "_internal_fn",
+                    source_location="src/internal/helper.h:10",
+                ),
+                _func("public_fn", "_public_fn", source_location="include/public.h:20"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("public_fn", "_public_fn", source_location="include/public.h:20"),
+            ]
+        )
         result = compare(old, new, suppression=sl)
         # internal_fn removal should be suppressed
         active_symbols = {c.symbol for c in result.changes}
@@ -314,14 +418,17 @@ class TestSuppressionParity:
 
     def test_suppress_with_expiry(self, tmp_path: Path) -> None:
         """Suppression with expiry date (not in libabigail — abicheck extension)."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - symbol: "_removed_fn"
                 change_kind: "func_removed"
                 reason: "temporary workaround"
                 expires: "2099-12-31"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
         old = _snap(functions=[_func("removed_fn", "_removed_fn")])
@@ -332,7 +439,9 @@ class TestSuppressionParity:
 
     def test_multiple_suppressions_combined(self, tmp_path: Path) -> None:
         """Multiple suppression rules applied together."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - symbol_pattern: ".*detail.*"
@@ -340,17 +449,22 @@ class TestSuppressionParity:
               - symbol_pattern: ".*deprecated.*"
                 change_kind: "func_removed"
                 reason: "deprecated API removal"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
-        old = _snap(functions=[
-            _func("detail::impl", "_detail_impl"),
-            _func("deprecated_api", "_deprecated_api"),
-            _func("stable_api", "_stable_api"),
-        ])
-        new = _snap(functions=[
-            _func("stable_api", "_stable_api"),
-        ])
+        old = _snap(
+            functions=[
+                _func("detail::impl", "_detail_impl"),
+                _func("deprecated_api", "_deprecated_api"),
+                _func("stable_api", "_stable_api"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("stable_api", "_stable_api"),
+            ]
+        )
         result = compare(old, new, suppression=sl)
         # detail and deprecated should be suppressed
         active_symbols = {c.symbol for c in result.changes}
@@ -359,20 +473,28 @@ class TestSuppressionParity:
 
     def test_unsuppressed_changes_still_detected(self, tmp_path: Path) -> None:
         """Suppressions don't affect unmatched changes."""
-        yaml_path = _write_yaml(tmp_path, """
+        yaml_path = _write_yaml(
+            tmp_path,
+            """
             version: 1
             suppressions:
               - symbol: "_foo"
                 change_kind: "func_removed"
                 reason: "known"
-        """)
+        """,
+        )
         sl = SuppressionList.load(yaml_path)
 
-        old = _snap(functions=[
-            _func("foo", "_foo"),
-            _func("bar", "_bar"),
-        ])
+        old = _snap(
+            functions=[
+                _func("foo", "_foo"),
+                _func("bar", "_bar"),
+            ]
+        )
         new = _snap(functions=[])
         result = compare(old, new, suppression=sl)
         # _bar removal should NOT be suppressed
-        assert any(c.symbol == "_bar" and c.kind == ChangeKind.FUNC_REMOVED for c in result.changes)
+        assert any(
+            c.symbol == "_bar" and c.kind == ChangeKind.FUNC_REMOVED
+            for c in result.changes
+        )

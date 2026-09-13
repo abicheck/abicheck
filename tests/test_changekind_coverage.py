@@ -8,6 +8,7 @@ Covers the 10 ChangeKinds that had no explicit ``assert c.kind ==`` check:
 
 All fixtures are original C++ ABI scenarios authored for this project.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -24,6 +25,7 @@ from abicheck.model import (
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _snap(
     version: str = "1.0",
@@ -64,7 +66,9 @@ def _pub_func(
 
 
 def _pub_var(name: str, mangled: str, type_: str) -> Variable:
-    return Variable(name=name, mangled=mangled, type=type_, visibility=Visibility.PUBLIC)
+    return Variable(
+        name=name, mangled=mangled, type=type_, visibility=Visibility.PUBLIC
+    )
 
 
 def _minimal_adv() -> AdvancedDwarfMetadata:
@@ -84,6 +88,7 @@ def _minimal_adv() -> AdvancedDwarfMetadata:
 
 
 # ── FUNC_VIRTUAL_REMOVED ─────────────────────────────────────────────────────
+
 
 class TestFuncVirtualRemoved:
     def test_virtual_removed_is_breaking(self) -> None:
@@ -110,6 +115,7 @@ class TestFuncVirtualRemoved:
 
 
 # ── VAR_TYPE_CHANGED ─────────────────────────────────────────────────────────
+
 
 class TestVarTypeChanged:
     def test_var_type_changed_is_breaking(self) -> None:
@@ -138,6 +144,7 @@ class TestVarTypeChanged:
 
 # ── VAR_ADDED ────────────────────────────────────────────────────────────────
 
+
 class TestVarAdded:
     def test_var_added_is_compatible(self) -> None:
         old_v = _pub_var("g_count", "_ZN3lib7g_countE", "int")
@@ -157,8 +164,10 @@ class TestVarAdded:
     def test_hidden_var_added_not_reported(self) -> None:
         """Hidden (non-public) variable addition must not appear in changes."""
         hidden_v = Variable(
-            name="g_internal", mangled="_ZN3lib10g_internalE",
-            type="int", visibility=Visibility.HIDDEN,
+            name="g_internal",
+            mangled="_ZN3lib10g_internalE",
+            type="int",
+            visibility=Visibility.HIDDEN,
         )
         r = compare(_snap(), _snap("1.1", variables=[hidden_v]))
         assert not any(c.kind == ChangeKind.VAR_ADDED for c in r.changes)
@@ -170,6 +179,7 @@ class TestVarAdded:
 
 
 # ── TYPE_REMOVED ─────────────────────────────────────────────────────────────
+
 
 class TestTypeRemoved:
     def test_type_removed_is_breaking(self) -> None:
@@ -188,6 +198,7 @@ class TestTypeRemoved:
 
 
 # ── TYPE_ADDED ───────────────────────────────────────────────────────────────
+
 
 class TestTypeAdded:
     def test_type_added_is_compatible(self) -> None:
@@ -217,12 +228,17 @@ class TestTypeAdded:
 
 # ── TYPE_ALIGNMENT_CHANGED ───────────────────────────────────────────────────
 
+
 class TestTypeAlignmentChanged:
     def test_alignment_increased_is_breaking(self) -> None:
         """Increasing alignment is BREAKING: callers that stack-allocate the
         type may not satisfy the new stricter requirement."""
-        old_t = RecordType(name="Buffer", kind="struct", size_bits=512, alignment_bits=64)
-        new_t = RecordType(name="Buffer", kind="struct", size_bits=512, alignment_bits=512)
+        old_t = RecordType(
+            name="Buffer", kind="struct", size_bits=512, alignment_bits=64
+        )
+        new_t = RecordType(
+            name="Buffer", kind="struct", size_bits=512, alignment_bits=512
+        )
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
         assert r.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_ALIGNMENT_CHANGED for c in r.changes)
@@ -230,8 +246,12 @@ class TestTypeAlignmentChanged:
     def test_alignment_decreased_is_breaking(self) -> None:
         """Decreasing alignment is also BREAKING: dependent code may rely on
         over-aligned guarantees (SIMD loads, atomic ops, etc.)."""
-        old_t = RecordType(name="SIMDVec", kind="struct", size_bits=256, alignment_bits=256)
-        new_t = RecordType(name="SIMDVec", kind="struct", size_bits=256, alignment_bits=64)
+        old_t = RecordType(
+            name="SIMDVec", kind="struct", size_bits=256, alignment_bits=256
+        )
+        new_t = RecordType(
+            name="SIMDVec", kind="struct", size_bits=256, alignment_bits=64
+        )
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
         assert r.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_ALIGNMENT_CHANGED for c in r.changes)
@@ -240,7 +260,9 @@ class TestTypeAlignmentChanged:
         old_t = RecordType(name="Vec", kind="struct", alignment_bits=32)
         new_t = RecordType(name="Vec", kind="struct", alignment_bits=128)
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
-        change = next(c for c in r.changes if c.kind == ChangeKind.TYPE_ALIGNMENT_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.TYPE_ALIGNMENT_CHANGED
+        )
         assert change.old_value == "32"
         assert change.new_value == "128"
 
@@ -254,6 +276,7 @@ class TestTypeAlignmentChanged:
 
 
 # ── TYPE_FIELD_TYPE_CHANGED ──────────────────────────────────────────────────
+
 
 class TestTypeFieldTypeChanged:
     def test_field_type_changed_is_breaking(self) -> None:
@@ -285,19 +308,23 @@ class TestTypeFieldTypeChanged:
             fields=[TypeField("flags", "uint32_t", offset_bits=0)],
         )
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
-        change = next(c for c in r.changes if c.kind == ChangeKind.TYPE_FIELD_TYPE_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.TYPE_FIELD_TYPE_CHANGED
+        )
         assert change.old_value == "uint8_t"
         assert change.new_value == "uint32_t"
         assert change.symbol == "Header"
 
     def test_field_type_unchanged_not_reported(self) -> None:
-        t = RecordType(name="Rect", kind="struct",
-                       fields=[TypeField("x", "int", offset_bits=0)])
+        t = RecordType(
+            name="Rect", kind="struct", fields=[TypeField("x", "int", offset_bits=0)]
+        )
         r = compare(_snap(types=[t]), _snap("1.1", types=[t]))
         assert not any(c.kind == ChangeKind.TYPE_FIELD_TYPE_CHANGED for c in r.changes)
 
 
 # ── TYPE_FIELD_ADDED ─────────────────────────────────────────────────────────
+
 
 class TestTypeFieldAdded:
     def test_field_added_to_polymorphic_is_breaking(self) -> None:
@@ -326,7 +353,9 @@ class TestTypeFieldAdded:
             "Expected BREAKING TYPE_FIELD_ADDED for polymorphic class"
         )
         # Must NOT emit the compatible variant
-        assert not any(c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes)
+        assert not any(
+            c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes
+        )
 
     def test_field_added_to_virtual_base_class_is_breaking(self) -> None:
         """Adding a field to a class with virtual bases → TYPE_FIELD_ADDED (BREAKING)."""
@@ -348,7 +377,9 @@ class TestTypeFieldAdded:
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
         assert r.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_FIELD_ADDED for c in r.changes)
-        assert not any(c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes)
+        assert not any(
+            c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes
+        )
 
     def test_field_added_to_plain_struct_is_compatible(self) -> None:
         """Appending a field to a standard-layout non-polymorphic struct
@@ -373,6 +404,7 @@ class TestTypeFieldAdded:
 
 
 # ── TYPEDEF_REMOVED ──────────────────────────────────────────────────────────
+
 
 class TestTypedefRemoved:
     def test_typedef_removed_is_breaking(self) -> None:
@@ -414,6 +446,7 @@ class TestTypedefRemoved:
 
 # ── TYPE_VISIBILITY_CHANGED ──────────────────────────────────────────────────
 
+
 class TestTypeVisibilityChanged:
     """TYPE_VISIBILITY_CHANGED is emitted via diff_advanced_dwarf.
 
@@ -433,13 +466,15 @@ class TestTypeVisibilityChanged:
             old: AdvancedDwarfMetadata,
             new: AdvancedDwarfMetadata,
         ) -> list[tuple[str, str, str, str | None, str | None]]:
-            return [(
-                "type_visibility_changed",
-                "MyClass",
-                "Type visibility changed: MyClass (default → hidden)",
-                "default",
-                "hidden",
-            )]
+            return [
+                (
+                    "type_visibility_changed",
+                    "MyClass",
+                    "Type visibility changed: MyClass (default → hidden)",
+                    "default",
+                    "hidden",
+                )
+            ]
 
         monkeypatch.setattr(checker_mod, "diff_advanced_dwarf", fake_diff)
 
@@ -459,19 +494,23 @@ class TestTypeVisibilityChanged:
             old: AdvancedDwarfMetadata,
             new: AdvancedDwarfMetadata,
         ) -> list[tuple[str, str, str, str | None, str | None]]:
-            return [(
-                "type_visibility_changed",
-                "AbstractBase",
-                "Type visibility changed: AbstractBase",
-                "default",
-                "hidden",
-            )]
+            return [
+                (
+                    "type_visibility_changed",
+                    "AbstractBase",
+                    "Type visibility changed: AbstractBase",
+                    "default",
+                    "hidden",
+                )
+            ]
 
         monkeypatch.setattr(checker_mod, "diff_advanced_dwarf", fake_diff)
 
         adv = _minimal_adv()
         r = compare(_snap(dwarf_advanced=adv), _snap("2.0", dwarf_advanced=adv))
-        change = next(c for c in r.changes if c.kind == ChangeKind.TYPE_VISIBILITY_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.TYPE_VISIBILITY_CHANGED
+        )
         assert change.symbol == "AbstractBase"
         assert change.old_value == "default"
         assert change.new_value == "hidden"

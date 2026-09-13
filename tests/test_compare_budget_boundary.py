@@ -30,7 +30,9 @@ def _make_snapshot(version: str = "1.0") -> AbiSnapshot:
         version=version,
         functions=[
             Function(
-                name="foo", mangled="_Z3foov", return_type="int",
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
                 visibility=Visibility.PUBLIC,
             ),
         ],

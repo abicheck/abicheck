@@ -1,4 +1,5 @@
 """Coverage tests for abicheck/__init__.py — PackageNotFoundError fallback."""
+
 from __future__ import annotations
 
 import importlib

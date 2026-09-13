@@ -8,6 +8,7 @@ Covers:
 - PolicyFile.validate_overrides() (H1)
 - Confidence enum (H2)
 """
+
 from __future__ import annotations
 
 import copy
@@ -54,7 +55,10 @@ class TestCanonicalizeTypeName:
 
     def test_east_const_multi_word(self):
         """const unsigned long long should move const after full base type."""
-        assert canonicalize_type_name("const unsigned long long") == "unsigned long long const"
+        assert (
+            canonicalize_type_name("const unsigned long long")
+            == "unsigned long long const"
+        )
 
     def test_east_const_volatile(self):
         """const volatile int should move const after the full base."""
@@ -65,7 +69,9 @@ class TestCanonicalizeTypeName:
 
     def test_template_type_preserved(self):
         """Template types with angle brackets should not be reordered."""
-        assert canonicalize_type_name("const std::vector<int>") == "const std::vector<int>"
+        assert (
+            canonicalize_type_name("const std::vector<int>") == "const std::vector<int>"
+        )
 
     def test_already_east_const(self):
         assert canonicalize_type_name("int const") == "int const"
@@ -116,49 +122,73 @@ class TestParamTypeCanonicalization:
     def test_struct_prefix_in_param_no_false_positive(self):
         """'struct stat *' vs 'stat *' should NOT trigger FUNC_PARAMS_CHANGED."""
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[Function(
-                name="do_stat", mangled="_Z7do_statP4stat",
-                return_type="int",
-                params=[Param(name="s", type="struct stat *", kind=ParamKind.POINTER)],
-                visibility=Visibility.PUBLIC,
-            )],
+            library="libtest.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="do_stat",
+                    mangled="_Z7do_statP4stat",
+                    return_type="int",
+                    params=[
+                        Param(name="s", type="struct stat *", kind=ParamKind.POINTER)
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         new = AbiSnapshot(
-            library="libtest.so", version="2.0",
-            functions=[Function(
-                name="do_stat", mangled="_Z7do_statP4stat",
-                return_type="int",
-                params=[Param(name="s", type="stat *", kind=ParamKind.POINTER)],
-                visibility=Visibility.PUBLIC,
-            )],
+            library="libtest.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="do_stat",
+                    mangled="_Z7do_statP4stat",
+                    return_type="int",
+                    params=[Param(name="s", type="stat *", kind=ParamKind.POINTER)],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         result = compare(old, new)
-        param_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED]
-        assert len(param_changes) == 0, "struct prefix difference should not be a param change"
+        param_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        ]
+        assert len(param_changes) == 0, (
+            "struct prefix difference should not be a param change"
+        )
 
     def test_const_reorder_in_param_no_false_positive(self):
         """'const int' vs 'int const' in params should NOT trigger FUNC_PARAMS_CHANGED."""
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[Function(
-                name="get", mangled="_Z3geti",
-                return_type="void",
-                params=[Param(name="x", type="const int", kind=ParamKind.VALUE)],
-                visibility=Visibility.PUBLIC,
-            )],
+            library="libtest.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="get",
+                    mangled="_Z3geti",
+                    return_type="void",
+                    params=[Param(name="x", type="const int", kind=ParamKind.VALUE)],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         new = AbiSnapshot(
-            library="libtest.so", version="2.0",
-            functions=[Function(
-                name="get", mangled="_Z3geti",
-                return_type="void",
-                params=[Param(name="x", type="int const", kind=ParamKind.VALUE)],
-                visibility=Visibility.PUBLIC,
-            )],
+            library="libtest.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="get",
+                    mangled="_Z3geti",
+                    return_type="void",
+                    params=[Param(name="x", type="int const", kind=ParamKind.VALUE)],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         result = compare(old, new)
-        param_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED]
+        param_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        ]
         assert len(param_changes) == 0
 
 
@@ -184,11 +214,16 @@ class TestConfidenceComputation:
         """When old is empty but new has functions, has_headers should be True."""
         old = AbiSnapshot(library="lib.so", version="1.0")
         new = AbiSnapshot(
-            library="lib.so", version="2.0",
-            functions=[Function(
-                name="foo", mangled="_Z3foov",
-                return_type="void", visibility=Visibility.PUBLIC,
-            )],
+            library="lib.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         result = compare(old, new)
         assert "header" in result.evidence_tiers
@@ -196,11 +231,16 @@ class TestConfidenceComputation:
     def test_variables_only_detected_as_headers(self):
         """Snapshots with only variables should still be detected as having header data."""
         old = AbiSnapshot(
-            library="lib.so", version="1.0",
-            variables=[Variable(
-                name="ver", mangled="_Z3verv", type="int",
-                visibility=Visibility.PUBLIC,
-            )],
+            library="lib.so",
+            version="1.0",
+            variables=[
+                Variable(
+                    name="ver",
+                    mangled="_Z3verv",
+                    type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         new = copy.deepcopy(old)
         new.version = "2.0"
@@ -217,9 +257,11 @@ class TestSuppressionAudit:
     def test_audit_stale_rules(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+            ]
+        )
         # No changes match the suppression
         audit = slist.audit([])
         assert len(audit.stale_rules) == 1
@@ -228,9 +270,11 @@ class TestSuppressionAudit:
     def test_audit_matching_rule_not_stale(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+            ]
+        )
         change = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol="_Z3foov",
@@ -245,9 +289,11 @@ class TestSuppressionAudit:
         from abicheck.suppression import Suppression, SuppressionList
 
         past = date.today() - timedelta(days=10)
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="expired", expires=past),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="expired", expires=past),
+            ]
+        )
         audit = slist.audit([])
         assert len(audit.expired_rules) == 1
         assert audit.has_issues
@@ -256,18 +302,22 @@ class TestSuppressionAudit:
         from abicheck.suppression import Suppression, SuppressionList
 
         soon = date.today() + timedelta(days=5)
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="expiring", expires=soon),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="expiring", expires=soon),
+            ]
+        )
         audit = slist.audit([], near_expiry_days=30)
         assert len(audit.near_expiry_rules) == 1
 
     def test_audit_no_issues(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+            ]
+        )
         change = Change(
             kind=ChangeKind.FUNC_ADDED,
             symbol="_Z3foov",
@@ -282,9 +332,11 @@ class TestSuppressionAudit:
     def test_audit_summary_output(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+            ]
+        )
         audit = slist.audit([])
         summary = audit.summary()
         assert "stale" in summary.lower() or "matched nothing" in summary.lower()
@@ -292,9 +344,11 @@ class TestSuppressionAudit:
     def test_audit_summary_no_issues(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+            ]
+        )
         change = Change(
             kind=ChangeKind.FUNC_ADDED,
             symbol="_Z3foov",
@@ -307,9 +361,11 @@ class TestSuppressionAudit:
     def test_audit_summary_high_risk(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+            ]
+        )
         change = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol="_Z3foov",
@@ -323,9 +379,11 @@ class TestSuppressionAudit:
         from abicheck.suppression import Suppression, SuppressionList
 
         past = date.today() - timedelta(days=10)
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="old", expires=past),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="old", expires=past),
+            ]
+        )
         audit = slist.audit([])
         summary = audit.summary()
         assert "expired" in summary.lower()
@@ -334,9 +392,11 @@ class TestSuppressionAudit:
         from abicheck.suppression import Suppression, SuppressionList
 
         soon = date.today() + timedelta(days=5)
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="soon", expires=soon),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="soon", expires=soon),
+            ]
+        )
         audit = slist.audit([], near_expiry_days=30)
         summary = audit.summary()
         assert "expiring soon" in summary.lower()
@@ -344,10 +404,12 @@ class TestSuppressionAudit:
     def test_audit_match_counts(self):
         from abicheck.suppression import Suppression, SuppressionList
 
-        slist = SuppressionList([
-            Suppression(symbol="_Z3foov", reason="test"),
-            Suppression(symbol="_Z3barv", reason="test2"),
-        ])
+        slist = SuppressionList(
+            [
+                Suppression(symbol="_Z3foov", reason="test"),
+                Suppression(symbol="_Z3barv", reason="test2"),
+            ]
+        )
         c1 = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3foov", description="added")
         c2 = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3foov", description="added2")
         audit = slist.audit([c1, c2])
@@ -373,7 +435,9 @@ class TestPolicyFileValidateOverrides:
         assert "HIGH RISK" in warnings[0]
 
     def test_critical_kind_to_risk_warns(self):
-        pf = PolicyFile(overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.COMPATIBLE_WITH_RISK})
+        pf = PolicyFile(
+            overrides={ChangeKind.TYPE_SIZE_CHANGED: Verdict.COMPATIBLE_WITH_RISK}
+        )
         warnings = pf.validate_overrides()
         assert len(warnings) == 1
         assert "RISK" in warnings[0]
@@ -396,16 +460,18 @@ class TestPolicyFileValidateOverrides:
         assert len(warnings) == 0
 
     def test_multiple_overrides_multiple_warnings(self):
-        pf = PolicyFile(overrides={
-            ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE,
-            ChangeKind.VAR_REMOVED: Verdict.COMPATIBLE,
-            # SONAME_CHANGED is already COMPATIBLE_WITH_RISK ("risk") under
-            # strict_abi, so downgrading it all the way to COMPATIBLE
-            # ("ignore") is the real downgrade here -- merely restating the
-            # base policy's own 'risk' verdict must not warn (see
-            # test_soname_changed_restating_base_risk_does_not_warn below).
-            ChangeKind.SONAME_CHANGED: Verdict.COMPATIBLE,
-        })
+        pf = PolicyFile(
+            overrides={
+                ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE,
+                ChangeKind.VAR_REMOVED: Verdict.COMPATIBLE,
+                # SONAME_CHANGED is already COMPATIBLE_WITH_RISK ("risk") under
+                # strict_abi, so downgrading it all the way to COMPATIBLE
+                # ("ignore") is the real downgrade here -- merely restating the
+                # base policy's own 'risk' verdict must not warn (see
+                # test_soname_changed_restating_base_risk_does_not_warn below).
+                ChangeKind.SONAME_CHANGED: Verdict.COMPATIBLE,
+            }
+        )
         warnings = pf.validate_overrides()
         assert len(warnings) == 3
 
@@ -467,22 +533,36 @@ class TestUnionFieldCanonicalization:
     def test_union_field_struct_prefix_no_false_positive(self):
         """'struct X' vs 'X' in union field types should NOT trigger UNION_FIELD_TYPE_CHANGED."""
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            types=[RecordType(
-                name="MyUnion", kind="union", is_union=True,
-                fields=[TypeField(name="data", type="struct Inner")],
-            )],
+            library="libtest.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="MyUnion",
+                    kind="union",
+                    is_union=True,
+                    fields=[TypeField(name="data", type="struct Inner")],
+                )
+            ],
         )
         new = AbiSnapshot(
-            library="libtest.so", version="2.0",
-            types=[RecordType(
-                name="MyUnion", kind="union", is_union=True,
-                fields=[TypeField(name="data", type="Inner")],
-            )],
+            library="libtest.so",
+            version="2.0",
+            types=[
+                RecordType(
+                    name="MyUnion",
+                    kind="union",
+                    is_union=True,
+                    fields=[TypeField(name="data", type="Inner")],
+                )
+            ],
         )
         result = compare(old, new)
-        union_changes = [c for c in result.changes if c.kind == ChangeKind.UNION_FIELD_TYPE_CHANGED]
-        assert len(union_changes) == 0, "struct prefix difference should not be a union field type change"
+        union_changes = [
+            c for c in result.changes if c.kind == ChangeKind.UNION_FIELD_TYPE_CHANGED
+        ]
+        assert len(union_changes) == 0, (
+            "struct prefix difference should not be a union field type change"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -497,8 +577,12 @@ class TestRenderOutputValidation:
         from abicheck.checker import DiffResult, Verdict
 
         return DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[], verdict=Verdict.NO_CHANGE, policy="strict_abi",
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[],
+            verdict=Verdict.NO_CHANGE,
+            policy="strict_abi",
         )
 
     def _make_snap(self) -> AbiSnapshot:
@@ -558,7 +642,8 @@ class TestServiceImportPaths:
 
             _ = service.sniff_text_format
             deprecation_warnings = [
-                x for x in w
+                x
+                for x in w
                 if issubclass(x.category, DeprecationWarning)
                 and "abicc_dump_import" in str(x.message)
             ]

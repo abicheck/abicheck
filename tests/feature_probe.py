@@ -30,6 +30,7 @@ The probe actually compiles a tiny snippet with the platform's native
 compiler, so it is correct across gcc/clang/MSVC and all platforms rather than
 hard-coding version numbers.
 """
+
 from __future__ import annotations
 
 import os
@@ -44,14 +45,19 @@ from pathlib import Path
 # succeeds if ANY of the std-flag attempts compiles the snippet to an object.
 _FEATURE_PROBES: dict[str, tuple[bool, str, tuple[str, ...]]] = {
     # C23 bit-precise integers — GCC 14+, Clang 16+.
-    "_BitInt": (False, "_BitInt(64) probe_bitint_global;\n",
-                ("-std=c23", "-std=c2x", "")),
+    "_BitInt": (
+        False,
+        "_BitInt(64) probe_bitint_global;\n",
+        ("-std=c23", "-std=c2x", ""),
+    ),
     # C++20 char8_t — GCC 9+, Clang 9+ (only relevant where it must compile).
-    "char8_t": (True, "char8_t probe_char8_global;\n",
-                ("-std=c++20", "-std=c++2a", "")),
+    "char8_t": (
+        True,
+        "char8_t probe_char8_global;\n",
+        ("-std=c++20", "-std=c++2a", ""),
+    ),
     # C11 atomics.
-    "_Atomic": (False, "_Atomic int probe_atomic_global;\n",
-                ("-std=c11", "")),
+    "_Atomic": (False, "_Atomic int probe_atomic_global;\n", ("-std=c11", "")),
 }
 
 

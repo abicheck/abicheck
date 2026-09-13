@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """G23 Phase D1 — Linux kernel kABI (``Module.symvers``) diff detector."""
+
 from __future__ import annotations
 
 from .checker_types import Change
@@ -56,9 +57,7 @@ def _diff_kabi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             make_change(ChangeKind.KABI_SYMBOL_REMOVED, symbol=sym, name=sym)
         )
     for sym in sorted(new_e.keys() - old_e.keys()):
-        changes.append(
-            make_change(ChangeKind.KABI_SYMBOL_ADDED, symbol=sym, name=sym)
-        )
+        changes.append(make_change(ChangeKind.KABI_SYMBOL_ADDED, symbol=sym, name=sym))
 
     for sym in sorted(old_e.keys() & new_e.keys()):
         o, n = old_e[sym], new_e[sym]

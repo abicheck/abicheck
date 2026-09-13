@@ -6,6 +6,7 @@ pyelftools parse round-trip: compile → parse_elf_metadata → assert fields.
 Requires: gcc on Linux (produces ELF output).  On macOS/Windows gcc produces
 Mach-O/PE binaries, so these tests are Linux-only.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -30,9 +31,16 @@ pytestmark = pytest.mark.skipif(
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
-def _compile_so(src: str, name: str, tmp: Path, extra_flags: list[str] | None = None) -> Path:
+
+def _compile_so(
+    src: str, name: str, tmp: Path, extra_flags: list[str] | None = None
+) -> Path:
     """Compile C source to a shared library; skip test if gcc unavailable."""
-    gcc = ["gcc"] + (extra_flags or []) + ["-shared", "-fPIC", "-o", str(tmp / name), "-x", "c", "-"]
+    gcc = (
+        ["gcc"]
+        + (extra_flags or [])
+        + ["-shared", "-fPIC", "-o", str(tmp / name), "-x", "c", "-"]
+    )
     result = subprocess.run(gcc, input=src.encode(), capture_output=True)
     if result.returncode != 0:
         pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
@@ -40,6 +48,7 @@ def _compile_so(src: str, name: str, tmp: Path, extra_flags: list[str] | None = 
 
 
 # ── tests ──────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.integration
 def test_parse_basic_so_symbols() -> None:
@@ -73,8 +82,9 @@ def test_parse_so_with_soname() -> None:
     """Library compiled with -soname → SONAME captured."""
     src = "int fn(void) { return 0; }"
     with tempfile.TemporaryDirectory() as td:
-        so = _compile_so(src, "libsoname.so", Path(td),
-                         extra_flags=["-Wl,-soname,libsoname.so.1"])
+        so = _compile_so(
+            src, "libsoname.so", Path(td), extra_flags=["-Wl,-soname,libsoname.so.1"]
+        )
         meta = parse_elf_metadata(so)
 
     assert meta.soname == "libsoname.so.1", f"Expected soname, got: {meta.soname!r}"
@@ -105,7 +115,9 @@ def test_parse_so_with_needed() -> None:
 
     # libc.so.6 (or similar) should appear in needed
     assert len(meta.needed) > 0, "Expected at least one DT_NEEDED entry"
-    assert any("libc" in n for n in meta.needed), f"Expected libc in needed: {meta.needed}"
+    assert any("libc" in n for n in meta.needed), (
+        f"Expected libc in needed: {meta.needed}"
+    )
 
 
 @pytest.mark.integration
@@ -145,6 +157,7 @@ def test_parse_non_elf_file_returns_empty(tmp_path: Path) -> None:
 
 # ── security-hardening surface (G12) ────────────────────────────────────────
 
+
 @pytest.mark.integration
 def test_parse_hardened_so_captures_relro_and_canary() -> None:
     """A hardened .so reports full RELRO + BIND_NOW + stack canary."""
@@ -154,9 +167,10 @@ def test_parse_hardened_so_captures_relro_and_canary() -> None:
     """
     with tempfile.TemporaryDirectory() as td:
         so = _compile_so(
-            src, "libhardened.so", Path(td),
-            extra_flags=["-O2", "-fstack-protector-all",
-                         "-Wl,-z,relro,-z,now"],
+            src,
+            "libhardened.so",
+            Path(td),
+            extra_flags=["-O2", "-fstack-protector-all", "-Wl,-z,relro,-z,now"],
         )
         meta = parse_elf_metadata(so)
     assert meta.relro == "full"
@@ -173,9 +187,10 @@ def test_parse_unhardened_so_drops_relro_and_canary() -> None:
     """
     with tempfile.TemporaryDirectory() as td:
         so = _compile_so(
-            src, "libplain.so", Path(td),
-            extra_flags=["-O0", "-fno-stack-protector",
-                         "-Wl,-z,norelro,-z,lazy"],
+            src,
+            "libplain.so",
+            Path(td),
+            extra_flags=["-O0", "-fno-stack-protector", "-Wl,-z,norelro,-z,lazy"],
         )
         meta = parse_elf_metadata(so)
     assert meta.relro == "none"
@@ -194,7 +209,9 @@ def test_parse_cet_gnu_property_and_identity() -> None:
     src = "int cet_fn(int x) { return x * 2; }\n"
     with tempfile.TemporaryDirectory() as td:
         so = _compile_so(
-            src, "libcet.so", Path(td),
+            src,
+            "libcet.so",
+            Path(td),
             extra_flags=["-fcf-protection=full"],
         )
         meta = parse_elf_metadata(so)
@@ -217,8 +234,17 @@ def test_gnu_unique_symbol_binding() -> None:
     int use_counter() { return Counter::value(); }
     """
     with tempfile.TemporaryDirectory() as td:
-        gpp = ["g++", "-fgnu-unique", "-shared", "-fPIC",
-               "-o", str(Path(td) / "libuniq.so"), "-x", "c++", "-"]
+        gpp = [
+            "g++",
+            "-fgnu-unique",
+            "-shared",
+            "-fPIC",
+            "-o",
+            str(Path(td) / "libuniq.so"),
+            "-x",
+            "c++",
+            "-",
+        ]
         result = subprocess.run(gpp, input=src.encode(), capture_output=True)
         if result.returncode != 0:
             pytest.skip(f"g++ failed: {result.stderr.decode()[:200]}")
@@ -240,7 +266,9 @@ def test_hidden_tls_sets_tls_participation() -> None:
     """
     with tempfile.TemporaryDirectory() as td:
         so = _compile_so(
-            src, "libtls.so", Path(td),
+            src,
+            "libtls.so",
+            Path(td),
             extra_flags=["-ftls-model=initial-exec"],
         )
         meta = parse_elf_metadata(so)
@@ -260,7 +288,9 @@ def test_gnu_property_from_stripped_segment() -> None:
 
     src = "int cet_fn(int x) { return x * 3; }\n"
     with tempfile.TemporaryDirectory() as td:
-        so = _compile_so(src, "libcet.so", Path(td), extra_flags=["-fcf-protection=full"])
+        so = _compile_so(
+            src, "libcet.so", Path(td), extra_flags=["-fcf-protection=full"]
+        )
         if not parse_elf_metadata(so).gnu_properties:
             pytest.skip("toolchain did not emit CET .note.gnu.property")
         # Zero the ELF64 section-header table pointers to remove all sections.

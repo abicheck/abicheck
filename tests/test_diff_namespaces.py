@@ -12,6 +12,7 @@ These tests build synthetic ``AbiSnapshot`` objects — no C/C++ compiler,
 libabigail, abi-compliance-checker, or castxml needed. They are part of
 the default fast test suite.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -46,8 +47,9 @@ from abicheck.model import (
 # ---------------------------------------------------------------------------
 
 
-def _snap(funcs: list[Function] | None = None,
-          types: list[RecordType] | None = None) -> AbiSnapshot:
+def _snap(
+    funcs: list[Function] | None = None, types: list[RecordType] | None = None
+) -> AbiSnapshot:
     return AbiSnapshot(
         library="libtest.so",
         version="0",
@@ -56,8 +58,9 @@ def _snap(funcs: list[Function] | None = None,
     )
 
 
-def _fn(name: str, mangled: str | None = None,
-        visibility: Visibility = Visibility.PUBLIC) -> Function:
+def _fn(
+    name: str, mangled: str | None = None, visibility: Visibility = Visibility.PUBLIC
+) -> Function:
     return Function(
         name=name,
         mangled=mangled if mangled is not None else f"_Z{name}",
@@ -101,7 +104,9 @@ class TestSegments:
 
     def test_strips_template_args(self) -> None:
         assert _segments("ns::experimental::sort<int>") == [
-            "ns", "experimental", "sort",
+            "ns",
+            "experimental",
+            "sort",
         ]
 
     def test_nested_templates(self) -> None:
@@ -140,7 +145,8 @@ class TestStripExperimental:
 
     def test_custom_namespaces(self) -> None:
         stripped, matched = _strip_experimental(
-            "ns::wip::sort", experimental_namespaces=("wip",),
+            "ns::wip::sort",
+            experimental_namespaces=("wip",),
         )
         assert stripped == "ns::sort"
         assert matched == "wip"
@@ -186,7 +192,9 @@ class TestOriginByName:
 
 class TestStableKeysCompatible:
     def test_bare_leaf_is_compatible_with_any_qualified_form(self) -> None:
-        assert _stable_keys_compatible("check_ranges", "oneapi::dal::detail::check_ranges")
+        assert _stable_keys_compatible(
+            "check_ranges", "oneapi::dal::detail::check_ranges"
+        )
         assert _stable_keys_compatible("ns::check_ranges", "check_ranges")
 
     def test_identical_keys_are_compatible(self) -> None:
@@ -209,10 +217,12 @@ class TestStableKeysCompatible:
 class TestExperimentalGraduated:
     def test_function_graduated_with_alias_kept(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::sort")])
-        new = _snap(funcs=[
-            _fn("ns::experimental::sort"),
-            _fn("ns::sort"),
-        ])
+        new = _snap(
+            funcs=[
+                _fn("ns::experimental::sort"),
+                _fn("ns::sort"),
+            ]
+        )
         changes = detect_experimental_namespace_changes(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -223,10 +233,12 @@ class TestExperimentalGraduated:
 
     def test_type_graduated_with_alias_kept(self) -> None:
         old = _snap(types=[_rec("ns::experimental::queue")])
-        new = _snap(types=[
-            _rec("ns::experimental::queue"),
-            _rec("ns::queue"),
-        ])
+        new = _snap(
+            types=[
+                _rec("ns::experimental::queue"),
+                _rec("ns::queue"),
+            ]
+        )
         changes = detect_experimental_namespace_changes(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -240,10 +252,12 @@ class TestExperimentalGraduated:
         public signal for the type-sourced path, unlike the default
         ScopeOrigin.UNKNOWN case above."""
         old = _snap(types=[_rec_public("ns::experimental::queue")])
-        new = _snap(types=[
-            _rec_public("ns::experimental::queue"),
-            _rec_public("ns::queue"),
-        ])
+        new = _snap(
+            types=[
+                _rec_public("ns::experimental::queue"),
+                _rec_public("ns::queue"),
+            ]
+        )
         changes = detect_experimental_namespace_changes(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -254,15 +268,15 @@ class TestExperimentalGraduated:
     def test_no_graduation_when_stable_existed_before(self) -> None:
         # Stable name already existed in old → not a graduation event
         # (just deletion of a redundant alias, which is a separate signal).
-        old = _snap(funcs=[
-            _fn("ns::experimental::sort"),
-            _fn("ns::sort"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("ns::experimental::sort"),
+                _fn("ns::sort"),
+            ]
+        )
         new = _snap(funcs=[_fn("ns::sort")])
         changes = detect_experimental_namespace_changes(old, new)
-        assert not any(
-            c.kind == ChangeKind.EXPERIMENTAL_GRADUATED for c in changes
-        )
+        assert not any(c.kind == ChangeKind.EXPERIMENTAL_GRADUATED for c in changes)
 
     def test_no_graduation_when_experimental_alias_dropped(self) -> None:
         # Promotion that ALSO drops the experimental alias is not
@@ -273,9 +287,7 @@ class TestExperimentalGraduated:
         # We expect EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT to NOT fire
         # because a stable twin exists; we also don't fire GRADUATED
         # because the experimental alias is gone.
-        assert not any(
-            c.kind == ChangeKind.EXPERIMENTAL_GRADUATED for c in changes
-        )
+        assert not any(c.kind == ChangeKind.EXPERIMENTAL_GRADUATED for c in changes)
         assert not any(
             c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
             for c in changes
@@ -324,9 +336,11 @@ class TestExperimentalRemovedWithoutReplacement:
         orig = dm.demangle_batch
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
-            old = _snap(funcs=[
-                _fn("ns::experimental::sort", mangled="_ZN2ns4sortE"),
-            ])
+            old = _snap(
+                funcs=[
+                    _fn("ns::experimental::sort", mangled="_ZN2ns4sortE"),
+                ]
+            )
             # Genuine removal: the alias is dropped and its mangled symbol
             # is gone from `new` entirely (no stable twin either).
             new = _snap(funcs=[])
@@ -349,14 +363,18 @@ class TestExperimentalRemovedWithoutReplacement:
         # alias itself is deleted, and source that named the alias no
         # longer compiles even though the symbol lives on elsewhere. The
         # suppression must be scoped to the *same leaf*, not any leaf.
-        old = _snap(funcs=[
-            _fn("ns::experimental::sort", mangled="_ZSAME"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("ns::experimental::sort", mangled="_ZSAME"),
+            ]
+        )
         # The mangled symbol survives, but only under an entirely different
         # leaf ("relabelled") -- not a re-qualified spelling of "sort".
-        new = _snap(funcs=[
-            _fn("ns::detail::relabelled", mangled="_ZSAME"),
-        ])
+        new = _snap(
+            funcs=[
+                _fn("ns::detail::relabelled", mangled="_ZSAME"),
+            ]
+        )
         changes = detect_experimental_namespace_changes(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
@@ -373,12 +391,16 @@ class TestExperimentalRemovedWithoutReplacement:
         # `detail::sort` (different full path, same leaf, same mangled
         # symbol by construction) survives; the alias itself no longer
         # compiles for any caller that named it, so this must still fire.
-        old = _snap(funcs=[
-            _fn("api::experimental::sort", mangled="_ZSAME2"),
-        ])
-        new = _snap(funcs=[
-            _fn("detail::sort", mangled="_ZSAME2"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("api::experimental::sort", mangled="_ZSAME2"),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("detail::sort", mangled="_ZSAME2"),
+            ]
+        )
         changes = detect_experimental_namespace_changes(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
@@ -405,9 +427,11 @@ class TestExperimentalRemovedWithoutReplacement:
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
             old = _snap(funcs=[_fn("check_ranges", mangled="_Zex1")])
-            new = _snap(funcs=[
-                _fn("experimental::check_ranges", mangled="_Zex1"),
-            ])
+            new = _snap(
+                funcs=[
+                    _fn("experimental::check_ranges", mangled="_Zex1"),
+                ]
+            )
             changes = detect_experimental_namespace_changes(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -433,10 +457,12 @@ class TestExperimentalRemovedWithoutReplacement:
         orig = dm.demangle_batch
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
-            old = _snap(funcs=[
-                _fn("ns::experimental::foo", mangled="_ZM1"),
-                _fn("ns::experimental::foo", mangled="_ZM2"),
-            ])
+            old = _snap(
+                funcs=[
+                    _fn("ns::experimental::foo", mangled="_ZM1"),
+                    _fn("ns::experimental::foo", mangled="_ZM2"),
+                ]
+            )
             # M1 is genuinely removed. M2 survives, but re-qualified as a
             # bare name that demangles to a full signature -- landing in a
             # *different* bucket key than OLD's own (no "()" there), which
@@ -508,7 +534,9 @@ class TestExperimentalRemovedWithoutReplacement:
         old = _snap(funcs=[_fn("ns::wip::bar")])
         new = _snap(funcs=[])
         changes = detect_experimental_namespace_changes(
-            old, new, experimental_namespaces=("wip",),
+            old,
+            new,
+            experimental_namespaces=("wip",),
         )
         assert any(
             c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
@@ -532,14 +560,17 @@ class TestExperimentalRemovedWithoutReplacement:
         # When a header-AST producer surfaces both as separate
         # declarations, removing the entity must read as ONE
         # EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT, not one per spelling.
-        old = _snap(funcs=[
-            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
-            _fn("preview::spmd::communicator", mangled="_ZSame"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+                _fn("preview::spmd::communicator", mangled="_ZSame"),
+            ]
+        )
         new = _snap(funcs=[])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -555,14 +586,17 @@ class TestExperimentalRemovedWithoutReplacement:
         still report the removal, not be silently absorbed just because
         they share a leaf name.
         """
-        old = _snap(funcs=[
-            _fn("preview::v1::bar", mangled="_ZOne"),
-            _fn("preview::bar", mangled="_ZTwo"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::v1::bar", mangled="_ZOne"),
+                _fn("preview::bar", mangled="_ZTwo"),
+            ]
+        )
         new = _snap(funcs=[_fn("preview::bar", mangled="_ZTwo")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -576,15 +610,19 @@ class TestExperimentalRemovedWithoutReplacement:
         must still resolve to the SAME index key, or one looks removed
         relative to the other's spelling.
         """
-        old = _snap(funcs=[
-            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
-            _fn("preview::spmd::communicator", mangled="_ZSame"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+                _fn("preview::spmd::communicator", mangled="_ZSame"),
+            ]
+        )
         # Reversed declaration order relative to `old`, otherwise identical.
-        new = _snap(funcs=[
-            _fn("preview::spmd::communicator", mangled="_ZSame"),
-            _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
-        ])
+        new = _snap(
+            funcs=[
+                _fn("preview::spmd::communicator", mangled="_ZSame"),
+                _fn("preview::spmd::v1::communicator", mangled="_ZSame"),
+            ]
+        )
         changes = detect_experimental_namespace_changes(old, new)
         assert not any(
             c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
@@ -610,14 +648,18 @@ class TestExperimentalRemovedWithoutReplacement:
         isn't something this tool controls (unstable AST/DWARF traversal
         order between two extractions of nominally the same library).
         """
-        old_forward = _snap(funcs=[
-            _fn("ns::experimental::foo", mangled="_ZA"),
-            _fn("experimental::ns::foo", mangled="_ZB"),
-        ])
-        old_reversed = _snap(funcs=[
-            _fn("experimental::ns::foo", mangled="_ZB"),
-            _fn("ns::experimental::foo", mangled="_ZA"),
-        ])
+        old_forward = _snap(
+            funcs=[
+                _fn("ns::experimental::foo", mangled="_ZA"),
+                _fn("experimental::ns::foo", mangled="_ZB"),
+            ]
+        )
+        old_reversed = _snap(
+            funcs=[
+                _fn("experimental::ns::foo", mangled="_ZB"),
+                _fn("ns::experimental::foo", mangled="_ZA"),
+            ]
+        )
         new = _snap(funcs=[])
         forward_symbols = {
             c.symbol
@@ -659,9 +701,11 @@ class TestExperimentalRemovedWithoutReplacement:
             # drop the enclosing namespace from a declared name. The mangled
             # symbol -- what a consumer actually links against -- is
             # unchanged.
-            new = _snap(funcs=[
-                _fn("experimental::check_ranges", mangled="_Zex1"),
-            ])
+            new = _snap(
+                funcs=[
+                    _fn("experimental::check_ranges", mangled="_Zex1"),
+                ]
+            )
             changes = detect_experimental_namespace_changes(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -685,14 +729,17 @@ class TestExperimentalRemovedWithoutReplacement:
         (``ns::v2::T``, itself version-shaped) and the same mangled name;
         removing the function must read as ONE finding.
         """
-        old = _snap(funcs=[
-            _fn("preview::v1::foo(ns::v2::T)", mangled="_ZSame"),
-            _fn("preview::foo(ns::v2::T)", mangled="_ZSame"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::v1::foo(ns::v2::T)", mangled="_ZSame"),
+                _fn("preview::foo(ns::v2::T)", mangled="_ZSame"),
+            ]
+        )
         new = _snap(funcs=[])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -720,15 +767,18 @@ class TestExperimentalRemovedWithoutReplacement:
         qualify as layer-2 merge evidence, so A's alias spelling must still
         surface its own removal.
         """
-        old = _snap(funcs=[
-            _fn("preview::v1::foo", mangled="_ZFooA"),
-            _fn("preview::v1::foo", mangled="_ZFooB"),
-            _fn("preview::foo", mangled="_ZFooA"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::v1::foo", mangled="_ZFooA"),
+                _fn("preview::v1::foo", mangled="_ZFooB"),
+                _fn("preview::foo", mangled="_ZFooA"),
+            ]
+        )
         new = _snap(funcs=[_fn("preview::v1::foo", mangled="_ZFooB")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -749,14 +799,17 @@ class TestExperimentalRemovedWithoutReplacement:
         not a real mangled name). This must NOT read as a genuine alias:
         removing the versioned spelling must still be reported.
         """
-        old = _snap(funcs=[
-            _fn("preview::v1::foo", mangled="foo"),
-            _fn("preview::foo", mangled="foo"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::v1::foo", mangled="foo"),
+                _fn("preview::foo", mangled="foo"),
+            ]
+        )
         new = _snap(funcs=[_fn("preview::foo", mangled="foo")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -781,10 +834,12 @@ class TestExperimentalRemovedWithoutReplacement:
         cost of the mangled-identity merge this whole module exists to
         provide, not a newly-introduced regression.
         """
-        old = _snap(funcs=[
-            _fn("preview::v1::foo", mangled="_ZSameReexport"),
-            _fn("preview::foo", mangled="_ZSameReexport"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("preview::v1::foo", mangled="_ZSameReexport"),
+                _fn("preview::foo", mangled="_ZSameReexport"),
+            ]
+        )
         new = _snap(funcs=[_fn("preview::foo", mangled="_ZSameReexport")])
         changes = detect_experimental_namespace_changes(old, new)
         assert not any(
@@ -806,16 +861,21 @@ class TestExperimentalRemovedWithoutReplacement:
         merged into one, even though (unlike the unrelated-declaration
         tests below) they really are the same entity here.
         """
-        old = _snap(types=[
-            _rec_at("detail::v1::cpu_feature_map", "spmd.h:10"),
-            _rec_at("detail::cpu_feature_map", "spmd.h:10"),
-        ])
+        old = _snap(
+            types=[
+                _rec_at("detail::v1::cpu_feature_map", "spmd.h:10"),
+                _rec_at("detail::cpu_feature_map", "spmd.h:10"),
+            ]
+        )
         new = _snap(types=[])
         changes = detect_experimental_namespace_changes(
-            old, new, experimental_namespaces=("detail",),
+            old,
+            new,
+            experimental_namespaces=("detail",),
         )
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 2
@@ -828,14 +888,17 @@ class TestExperimentalRemovedWithoutReplacement:
         naturally never merged -- removing one while the other survives
         must still report the removal.
         """
-        old = _snap(types=[
-            _rec("preview::v1::bar"),
-            _rec("preview::bar"),
-        ])
+        old = _snap(
+            types=[
+                _rec("preview::v1::bar"),
+                _rec("preview::bar"),
+            ]
+        )
         new = _snap(types=[_rec("preview::bar")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -852,14 +915,17 @@ class TestExperimentalRemovedWithoutReplacement:
         identity always `None` now, this can't happen -- included as a
         regression pin for the specific counterexample.
         """
-        old = _snap(types=[
-            _rec_at("preview::v1::bar", "shared.h"),
-            _rec_at("preview::bar", "shared.h"),
-        ])
+        old = _snap(
+            types=[
+                _rec_at("preview::v1::bar", "shared.h"),
+                _rec_at("preview::bar", "shared.h"),
+            ]
+        )
         new = _snap(types=[_rec_at("preview::bar", "shared.h")])
         changes = detect_experimental_namespace_changes(old, new)
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -925,10 +991,12 @@ class TestExperimentalRemovedWithoutReplacement:
         orig = dm.demangle_batch
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
-            old = _snap(funcs=[
-                _fn("", mangled="_ZN2ns13experimental1fEi"),
-                _fn("", mangled="_ZN2ns13experimental1fEd"),
-            ])
+            old = _snap(
+                funcs=[
+                    _fn("", mangled="_ZN2ns13experimental1fEi"),
+                    _fn("", mangled="_ZN2ns13experimental1fEd"),
+                ]
+            )
             # Only the int overload disappears; the double overload survives
             # unchanged (still in experimental::, no stable replacement).
             new = _snap(funcs=[_fn("", mangled="_ZN2ns13experimental1fEd")])
@@ -937,7 +1005,8 @@ class TestExperimentalRemovedWithoutReplacement:
             dm.demangle_batch = orig  # type: ignore[assignment]
 
         removed = [
-            c for c in changes
+            c
+            for c in changes
             if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         ]
         assert len(removed) == 1
@@ -952,7 +1021,8 @@ class TestExperimentalRemovedWithoutReplacement:
 class TestLooksLikeStdReexport:
     def test_classic_reexport(self) -> None:
         assert _looks_like_std_reexport(
-            "lib::execution::par", "std::execution::par",
+            "lib::execution::par",
+            "std::execution::par",
         )
 
     def test_same_name_in_std_is_not_reexport(self) -> None:
@@ -960,7 +1030,8 @@ class TestLooksLikeStdReexport:
         # not a re-export. We only report when a library namespace
         # aliases a std:: entity.
         assert not _looks_like_std_reexport(
-            "std::execution::par", "std::execution::par",
+            "std::execution::par",
+            "std::execution::par",
         )
 
     def test_underlying_not_in_std_is_rejected(self) -> None:
@@ -1000,6 +1071,7 @@ class TestStdReexportRemoved:
         # inside the function; we patch the source module so the lazy
         # import resolves to our fake.
         import abicheck.demangle as dm
+
         orig = dm.demangle_batch
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
@@ -1028,13 +1100,18 @@ class TestStdReexportRemoved:
         orig = dm.demangle_batch
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
-            old = _snap(funcs=[
-                _fn("lib::execution::par", mangled="_ZN3lib3parE"),
-            ])
-            new = _snap(funcs=[
-                _fn("lib::execution::par", mangled="_ZN3lib3parE"),
-            ])
+            old = _snap(
+                funcs=[
+                    _fn("lib::execution::par", mangled="_ZN3lib3parE"),
+                ]
+            )
+            new = _snap(
+                funcs=[
+                    _fn("lib::execution::par", mangled="_ZN3lib3parE"),
+                ]
+            )
             from abicheck.diff_namespaces import detect_std_reexport_removed
+
             changes = detect_std_reexport_removed(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -1056,6 +1133,7 @@ class TestStdReexportRemoved:
             old = _snap(funcs=[_fn("lib::par", mangled="_ZN3lib3parE")])
             new = _snap(funcs=[])
             from abicheck.diff_namespaces import detect_std_reexport_removed
+
             changes = detect_std_reexport_removed(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -1072,14 +1150,18 @@ class TestCombinedEntryPoint:
     def test_returns_findings_from_all_subdetectors(self) -> None:
         # Two findings expected: one EXPERIMENTAL_GRADUATED, one
         # EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT.
-        old = _snap(funcs=[
-            _fn("ns::experimental::a"),
-            _fn("ns::experimental::b"),
-        ])
-        new = _snap(funcs=[
-            _fn("ns::experimental::a"),
-            _fn("ns::a"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("ns::experimental::a"),
+                _fn("ns::experimental::b"),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("ns::experimental::a"),
+                _fn("ns::a"),
+            ]
+        )
         changes = detect_namespace_patterns(old, new)
         kinds = sorted(c.kind for c in changes)
         assert ChangeKind.EXPERIMENTAL_GRADUATED in kinds
@@ -1098,6 +1180,7 @@ class TestCombinedEntryPoint:
 class TestPipelineIntegration:
     def test_default_pipeline_includes_namespace_step(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
+
         assert "detect_namespace_patterns" in DEFAULT_PIPELINE.step_names
 
     def test_findings_appear_via_compare(self) -> None:
@@ -1112,7 +1195,8 @@ class TestPipelineIntegration:
         # Some compare() signatures return a single object; pull
         # changes off whichever shape we got.
         changes = getattr(result, "changes", None) or getattr(
-            result[1] if isinstance(result, tuple) else result, "changes",
+            result[1] if isinstance(result, tuple) else result,
+            "changes",
         )
         kinds = [c.kind for c in changes]
         assert ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT in kinds
@@ -1138,18 +1222,21 @@ def test_segments_parametrized(qname: str, expected_segments: list[str]) -> None
 
 
 class TestVersionSuffix:
-    @pytest.mark.parametrize("seg, expected", [
-        ("_V1", 1),
-        ("_V12", 12),
-        ("__v2", 2),
-        ("v3", 3),
-        ("__1", 1),
-        ("V0", 0),
-        ("v", None),
-        ("plain", None),
-        ("VNotANum", None),
-        ("", None),
-    ])
+    @pytest.mark.parametrize(
+        "seg, expected",
+        [
+            ("_V1", 1),
+            ("_V12", 12),
+            ("__v2", 2),
+            ("v3", 3),
+            ("__1", 1),
+            ("V0", 0),
+            ("v", None),
+            ("plain", None),
+            ("VNotANum", None),
+            ("", None),
+        ],
+    )
     def test_suffix(self, seg: str, expected: int | None) -> None:
         assert _version_suffix(seg) == expected
 
@@ -1312,7 +1399,9 @@ def _build_paired_items(
     old_items: list[_IndexItem] = []
     new_items: list[_IndexItem] = []
     for i, (side, stripped, leaf, identity) in enumerate(placements):
-        item = _IndexItem(qname=f"q{i}", stripped=stripped, leaf=leaf, identity=identity)
+        item = _IndexItem(
+            qname=f"q{i}", stripped=stripped, leaf=leaf, identity=identity
+        )
         (old_items if side == "old" else new_items).append(item)
     return old_items, new_items
 
@@ -1447,7 +1536,9 @@ class TestPairedStableIndicesProperties:
         rng.shuffle(shuffled_new)
         old_out2, new_out2 = _paired_stable_indices(shuffled_old, shuffled_new)
 
-        def _normalize(d: dict[tuple[str, str], list[str]]) -> set[tuple[tuple[str, str], frozenset]]:
+        def _normalize(
+            d: dict[tuple[str, str], list[str]],
+        ) -> set[tuple[tuple[str, str], frozenset]]:
             return {(k, frozenset(v)) for k, v in d.items()}
 
         assert _normalize(old_out1) == _normalize(old_out2)
@@ -1500,7 +1591,9 @@ class TestPairedStableIndicesProperties:
         old_out1, new_out1 = _paired_stable_indices(list(old_items), list(new_items))
         old_out2, new_out2 = _paired_stable_indices(list(old_items), list(new_items))
 
-        def _normalize(d: dict[tuple[str, str], list[str]]) -> set[tuple[tuple[str, str], tuple[str, ...]]]:
+        def _normalize(
+            d: dict[tuple[str, str], list[str]],
+        ) -> set[tuple[tuple[str, str], tuple[str, ...]]]:
             return {(k, tuple(sorted(v))) for k, v in d.items()}
 
         assert _normalize(old_out1) == _normalize(old_out2)

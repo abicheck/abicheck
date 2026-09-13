@@ -37,6 +37,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import pickle
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -147,3 +149,137 @@ def test_members_pickle_by_qualified_reference():
 
     restored = pickle.loads(pickle.dumps(ChangeKind.FUNC_REMOVED))
     assert restored is ChangeKind.FUNC_REMOVED
+
+
+STUB_RELPATH = "abicheck/model/change_catalog/kinds.pyi"
+
+
+def _ruff(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "ruff", *args],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_the_formatter_leaves_the_generated_stub_alone_on_an_explicit_path():
+    """`ruff format` must skip the stub however it is invoked.
+
+    `ruff.toml` excludes `kinds.pyi` from formatting because
+    `gen_changekind_stub.py --check` is its formatting authority and fails on
+    any byte it would not itself write. But ruff normally ignores `exclude`
+    for a path named on the command line, and `pre-commit` invokes its hooks
+    with exactly that -- the changed files as arguments. So the exclusion held
+    for `verify.py`'s directory-walking `fmt-check` and was silently bypassed
+    by the `ruff-format` hook, which would reformat a regenerated stub and
+    leave `--check` rejecting it, with no way through the normal hook
+    workflow (Codex review on PR #1271).
+
+    This asserts the *mechanism* by running the two invocation shapes, not
+    the presence of `force-exclude` in `ruff.toml` -- asserting config text
+    is the failure mode `AGENTS.md` records from #705 -> #758, and it would
+    not have caught this bug at all, since the original `exclude` line was
+    present and correct while the hook ignored it.
+    """
+    if shutil.which(sys.executable) is None:  # pragma: no cover - defensive
+        return
+    for argv in (
+        [STUB_RELPATH],  # how pre-commit invokes it
+        ["abicheck/"],  # how verify.py invokes it
+    ):
+        proc = _ruff("format", "--check", *argv)
+        assert proc.returncode == 0, (
+            f"`ruff format --check {' '.join(argv)}` wants to rewrite a "
+            f"generated file; `gen_changekind_stub.py --check` would then "
+            f"reject the result:\n{proc.stdout}\n{proc.stderr}"
+        )
+
+
+def test_linting_still_reaches_the_generated_stub(tmp_path):
+    """The exclusion is formatting-only -- it must not silently drop lint.
+
+    The negative half of the test above: `force-exclude` applies to every
+    exclusion ruff knows about, so it would be easy to widen the stub's
+    format-only exemption into a lint exemption without noticing. A stub that
+    nothing lints is how an unused import or an undefined name reaches mypy's
+    view of `ChangeKind`.
+
+    Proving that needs a lint violation in the stub, and the first version of
+    this test wrote one into the repository's own file and restored it in a
+    `finally`. That is a real flake, not a tidiness point: the unit lanes run
+    `-n auto --dist worksteal`, so `test_kinds_pyi_is_in_sync` can read the
+    file on another worker inside that window and report the generated stub as
+    stale (Codex review on PR #1271; confirmed by running the reader against
+    the mutation window, which exits 1). The sandbox below copies the real
+    `ruff.toml` and the real stub to the same relative path under `tmp_path`,
+    so the configuration under test is still the repository's -- a widened
+    `[lint] exclude` is copied in with it -- while nothing shared is written.
+    """
+    (tmp_path / "ruff.toml").write_text(
+        (REPO_DIR / "ruff.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    sandbox_stub = tmp_path / STUB_RELPATH
+    sandbox_stub.parent.mkdir(parents=True, exist_ok=True)
+    sandbox_stub.write_text(
+        (REPO_DIR / STUB_RELPATH).read_text(encoding="utf-8") + "\nimport os\n",
+        encoding="utf-8",
+    )
+
+    for argv in ([STUB_RELPATH], ["abicheck/"]):
+        proc = subprocess.run(
+            [sys.executable, "-m", "ruff", "check", *argv],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0, (
+            f"`ruff check {' '.join(argv)}` did not flag an unused import in "
+            f"the generated stub -- lint no longer reaches it:\n{proc.stdout}"
+        )
+        assert "F401" in proc.stdout, (
+            f"`ruff check {' '.join(argv)}` failed for some reason other than "
+            f"the injected unused import:\n{proc.stdout}\n{proc.stderr}"
+        )
+
+
+def test_the_lint_sandbox_reflects_the_real_config(tmp_path):
+    """Guard on the test above: its sandbox must not be trivially clean.
+
+    A sandbox that lints nothing -- a bad copy, a missed `mkdir`, a ruff that
+    cannot find its config -- would make the assertions above unreachable
+    rather than satisfied. So: the same sandbox WITHOUT the injected import
+    must come back clean, which fails if the sandbox is reporting some
+    unrelated pre-existing error, and passes only if lint really ran there.
+    """
+    (tmp_path / "ruff.toml").write_text(
+        (REPO_DIR / "ruff.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    sandbox_stub = tmp_path / STUB_RELPATH
+    sandbox_stub.parent.mkdir(parents=True, exist_ok=True)
+    sandbox_stub.write_text(
+        (REPO_DIR / STUB_RELPATH).read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", STUB_RELPATH],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, (
+        f"the unmutated sandbox stub is not lint-clean, so the sibling test's "
+        f"assertions could pass for the wrong reason:\n{proc.stdout}"
+    )
+
+
+def test_the_stub_is_not_modified_by_this_module(tmp_path):
+    """No test here may write to the repository's shared generated stub.
+
+    States the invariant behind the sandbox rather than trusting it: under
+    `-n auto --dist worksteal` any write to a shared source file races every
+    other worker, and a `finally` that restores it does not close the window.
+    """
+    before = (REPO_DIR / STUB_RELPATH).read_bytes()
+    test_linting_still_reaches_the_generated_stub(tmp_path)
+    assert (REPO_DIR / STUB_RELPATH).read_bytes() == before

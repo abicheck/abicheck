@@ -60,8 +60,11 @@ def _snap(version: str, *, functions=None, types=None) -> AbiSnapshot:
 
 def _fn(name: str, mangled: str, ret: str = "void", params=None) -> Function:
     return Function(
-        name=name, mangled=mangled, return_type=ret,
-        params=params or [], visibility=Visibility.PUBLIC,
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=params or [],
+        visibility=Visibility.PUBLIC,
     )
 
 
@@ -88,38 +91,44 @@ def _kinds(result) -> set[ChangeKind]:
 # ── the predicate ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    ("char *", "const char *"),
-    ("const char *", "char *"),
-    ("wl_display *", "const wl_display *"),
-    ("int *", "int * const"),
-    ("void*", "const void*"),
-    ("int *", "volatile int *"),
-    ("Foo &", "const Foo &"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        ("char *", "const char *"),
+        ("const char *", "char *"),
+        ("wl_display *", "const wl_display *"),
+        ("int *", "int * const"),
+        ("void*", "const void*"),
+        ("int *", "volatile int *"),
+        ("Foo &", "const Foo &"),
+    ],
+)
 def test_pointer_cv_only_difference_is_detected(old_t, new_t):
     assert cv_qualifiers_only_differ(old_t, new_t) is True
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    # By-value top-level const is a source-level contract change, handled by the
-    # field_qualifiers detector — must NOT be neutralised here.
-    ("int", "const int"),
-    ("volatile int", "int"),
-    # Nested ``*``/``&`` inside a template argument or function-parameter list is
-    # NOT a top-level pointer/reference: the type is passed/stored by value, so a
-    # top-level const change on it must remain reported (reviewer edge case).
-    ("Box<int *>", "const Box<int *>"),
-    ("std::function<void(const int&)>", "std::function<void(int&)>"),
-    ("std::array<char *, 4>", "const std::array<char *, 4>"),
-    # Genuine type substitutions remain real differences.
-    ("int *", "long *"),
-    ("char *", "char **"),
-    ("Foo *", "Bar *"),
-    # Identical spellings are not a "difference".
-    ("Foo *", "Foo *"),
-    ("const char *", "const char *"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        # By-value top-level const is a source-level contract change, handled by the
+        # field_qualifiers detector — must NOT be neutralised here.
+        ("int", "const int"),
+        ("volatile int", "int"),
+        # Nested ``*``/``&`` inside a template argument or function-parameter list is
+        # NOT a top-level pointer/reference: the type is passed/stored by value, so a
+        # top-level const change on it must remain reported (reviewer edge case).
+        ("Box<int *>", "const Box<int *>"),
+        ("std::function<void(const int&)>", "std::function<void(int&)>"),
+        ("std::array<char *, 4>", "const std::array<char *, 4>"),
+        # Genuine type substitutions remain real differences.
+        ("int *", "long *"),
+        ("char *", "char **"),
+        ("Foo *", "Bar *"),
+        # Identical spellings are not a "difference".
+        ("Foo *", "Foo *"),
+        ("const char *", "const char *"),
+    ],
+)
 def test_non_cv_only_difference_is_not_neutralised(old_t, new_t):
     assert cv_qualifiers_only_differ(old_t, new_t) is False
 
@@ -133,14 +142,26 @@ def test_top_level_reference_const_is_neutralised():
 
 
 def test_param_pointee_const_added_is_not_breaking():
-    old = _snap("1", functions=[
-        _fn("wl_display_flush", "wl_display_flush",
-            params=[Param(name="d", type="wl_display *")]),
-    ])
-    new = _snap("2", functions=[
-        _fn("wl_display_flush", "wl_display_flush",
-            params=[Param(name="d", type="const wl_display *")]),
-    ])
+    old = _snap(
+        "1",
+        functions=[
+            _fn(
+                "wl_display_flush",
+                "wl_display_flush",
+                params=[Param(name="d", type="wl_display *")],
+            ),
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[
+            _fn(
+                "wl_display_flush",
+                "wl_display_flush",
+                params=[Param(name="d", type="const wl_display *")],
+            ),
+        ],
+    )
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)
     assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
@@ -148,12 +169,18 @@ def test_param_pointee_const_added_is_not_breaking():
 
 def test_param_real_pointee_change_still_breaking():
     # Negative control: a genuine pointee-type change is still a break.
-    old = _snap("1", functions=[
-        _fn("f", "f", params=[Param(name="p", type="int *")]),
-    ])
-    new = _snap("2", functions=[
-        _fn("f", "f", params=[Param(name="p", type="long *")]),
-    ])
+    old = _snap(
+        "1",
+        functions=[
+            _fn("f", "f", params=[Param(name="p", type="int *")]),
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[
+            _fn("f", "f", params=[Param(name="p", type="long *")]),
+        ],
+    )
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
     assert r.verdict == Verdict.BREAKING
@@ -181,34 +208,58 @@ def test_return_real_change_still_breaking():
 
 
 def test_type_field_pointee_const_change_is_not_breaking():
-    old = _snap("1",
-                functions=[_fn("api", "api", ret="Conf *")],
-                types=[_rec("Conf", [TypeField(name="model", type="char *", offset_bits=0)])])
-    new = _snap("2",
-                functions=[_fn("api", "api", ret="Conf *")],
-                types=[_rec("Conf", [TypeField(name="model", type="const char *", offset_bits=0)])])
+    old = _snap(
+        "1",
+        functions=[_fn("api", "api", ret="Conf *")],
+        types=[_rec("Conf", [TypeField(name="model", type="char *", offset_bits=0)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", "api", ret="Conf *")],
+        types=[
+            _rec("Conf", [TypeField(name="model", type="const char *", offset_bits=0)])
+        ],
+    )
     r = compare(old, new)
     assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in _kinds(r)
 
 
 def test_type_field_real_change_still_breaking():
-    old = _snap("1",
-                functions=[_fn("api", "api", ret="Conf *")],
-                types=[_rec("Conf", [TypeField(name="n", type="int", offset_bits=0)])])
-    new = _snap("2",
-                functions=[_fn("api", "api", ret="Conf *")],
-                types=[_rec("Conf", [TypeField(name="n", type="float", offset_bits=0)])])
+    old = _snap(
+        "1",
+        functions=[_fn("api", "api", ret="Conf *")],
+        types=[_rec("Conf", [TypeField(name="n", type="int", offset_bits=0)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", "api", ret="Conf *")],
+        types=[_rec("Conf", [TypeField(name="n", type="float", offset_bits=0)])],
+    )
     r = compare(old, new)
     assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in _kinds(r)
 
 
 def test_union_field_pointee_const_change_is_not_breaking():
-    old = _snap("1",
-                functions=[_fn("api", "api", ret="U *")],
-                types=[_rec("U", [TypeField(name="p", type="char *", offset_bits=0)], is_union=True)])
-    new = _snap("2",
-                functions=[_fn("api", "api", ret="U *")],
-                types=[_rec("U", [TypeField(name="p", type="const char *", offset_bits=0)], is_union=True)])
+    old = _snap(
+        "1",
+        functions=[_fn("api", "api", ret="U *")],
+        types=[
+            _rec(
+                "U", [TypeField(name="p", type="char *", offset_bits=0)], is_union=True
+            )
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", "api", ret="U *")],
+        types=[
+            _rec(
+                "U",
+                [TypeField(name="p", type="const char *", offset_bits=0)],
+                is_union=True,
+            )
+        ],
+    )
     r = compare(old, new)
     assert ChangeKind.UNION_FIELD_TYPE_CHANGED not in _kinds(r)
 
@@ -218,37 +269,65 @@ def test_union_field_pointee_const_change_is_not_breaking():
 
 def test_dwarf_struct_field_pointee_const_change_is_not_breaking():
     # ISSUE-30/35/65: libuv uv_cpu_info_s::model char* -> const char*.
-    old_s = StructLayout(name="uv_cpu_info_s", byte_size=24, fields=[
-        FieldInfo(name="model", type_name="char *", byte_offset=0, byte_size=8),
-    ])
-    new_s = StructLayout(name="uv_cpu_info_s", byte_size=24, fields=[
-        FieldInfo(name="model", type_name="const char *", byte_offset=0, byte_size=8),
-    ])
-    r = compare(_dwarf_snap("1", {"uv_cpu_info_s": old_s}),
-                _dwarf_snap("2", {"uv_cpu_info_s": new_s}))
+    old_s = StructLayout(
+        name="uv_cpu_info_s",
+        byte_size=24,
+        fields=[
+            FieldInfo(name="model", type_name="char *", byte_offset=0, byte_size=8),
+        ],
+    )
+    new_s = StructLayout(
+        name="uv_cpu_info_s",
+        byte_size=24,
+        fields=[
+            FieldInfo(
+                name="model", type_name="const char *", byte_offset=0, byte_size=8
+            ),
+        ],
+    )
+    r = compare(
+        _dwarf_snap("1", {"uv_cpu_info_s": old_s}),
+        _dwarf_snap("2", {"uv_cpu_info_s": new_s}),
+    )
     assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED not in _kinds(r)
 
 
 def test_dwarf_struct_field_const_with_size_change_still_breaking():
     # A const change that *also* changes the field size is still reported
     # (the size component is a genuine layout break).
-    old_s = StructLayout(name="S", byte_size=8, fields=[
-        FieldInfo(name="v", type_name="int", byte_offset=0, byte_size=4),
-    ])
-    new_s = StructLayout(name="S", byte_size=8, fields=[
-        FieldInfo(name="v", type_name="const long *", byte_offset=0, byte_size=8),
-    ])
+    old_s = StructLayout(
+        name="S",
+        byte_size=8,
+        fields=[
+            FieldInfo(name="v", type_name="int", byte_offset=0, byte_size=4),
+        ],
+    )
+    new_s = StructLayout(
+        name="S",
+        byte_size=8,
+        fields=[
+            FieldInfo(name="v", type_name="const long *", byte_offset=0, byte_size=8),
+        ],
+    )
     r = compare(_dwarf_snap("1", {"S": old_s}), _dwarf_snap("2", {"S": new_s}))
     assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in _kinds(r)
 
 
 def test_dwarf_struct_field_real_pointee_change_still_breaking():
-    old_s = StructLayout(name="S", byte_size=8, fields=[
-        FieldInfo(name="p", type_name="int *", byte_offset=0, byte_size=8),
-    ])
-    new_s = StructLayout(name="S", byte_size=8, fields=[
-        FieldInfo(name="p", type_name="float *", byte_offset=0, byte_size=8),
-    ])
+    old_s = StructLayout(
+        name="S",
+        byte_size=8,
+        fields=[
+            FieldInfo(name="p", type_name="int *", byte_offset=0, byte_size=8),
+        ],
+    )
+    new_s = StructLayout(
+        name="S",
+        byte_size=8,
+        fields=[
+            FieldInfo(name="p", type_name="float *", byte_offset=0, byte_size=8),
+        ],
+    )
     r = compare(_dwarf_snap("1", {"S": old_s}), _dwarf_snap("2", {"S": new_s}))
     assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in _kinds(r)
 
@@ -261,12 +340,18 @@ def test_top_level_field_const_is_not_neutralised():
     # a reported field-type change — neutralising it would silently drop the
     # case30_field_qualifiers source-break escalation. Indirection (``*``/``&``)
     # is what makes a const change binary-neutral; a by-value field has none.
-    old = _snap("1",
-                functions=[_fn("api", "api", ret="Sensor *")],
-                types=[_rec("Sensor", [TypeField(name="rate", type="int", offset_bits=0)])])
-    new = _snap("2",
-                functions=[_fn("api", "api", ret="Sensor *")],
-                types=[_rec("Sensor", [TypeField(name="rate", type="const int", offset_bits=0)])])
+    old = _snap(
+        "1",
+        functions=[_fn("api", "api", ret="Sensor *")],
+        types=[_rec("Sensor", [TypeField(name="rate", type="int", offset_bits=0)])],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", "api", ret="Sensor *")],
+        types=[
+            _rec("Sensor", [TypeField(name="rate", type="const int", offset_bits=0)])
+        ],
+    )
     r = compare(old, new)
     assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in _kinds(r)
 
@@ -280,26 +365,34 @@ def test_top_level_field_const_is_not_neutralised():
 # be neutralised (Codex review, PR #582).
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    ("int", "volatile int"),
-    ("int", "const int"),
-    ("volatile int", "int"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        ("int", "volatile int"),
+        ("int", "const int"),
+        ("volatile int", "int"),
+    ],
+)
 def test_func_signature_cv_only_differ_detects_by_value_change(old_t, new_t):
     assert func_signature_cv_only_differ(old_t, new_t) is True
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    ("int", "long"),
-    ("Foo", "Foo"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        ("int", "long"),
+        ("Foo", "Foo"),
+    ],
+)
 def test_func_signature_cv_only_differ_rejects_non_cv_or_identical(old_t, new_t):
     assert func_signature_cv_only_differ(old_t, new_t) is False
 
 
 def test_param_by_value_volatile_added_is_not_breaking():
     old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="int")])])
-    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="volatile int")])])
+    new = _snap(
+        "2", functions=[_fn("f", "f", params=[Param(name="x", type="volatile int")])]
+    )
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)
     assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
@@ -307,7 +400,9 @@ def test_param_by_value_volatile_added_is_not_breaking():
 
 def test_param_by_value_const_added_is_not_breaking():
     old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="int")])])
-    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="const int")])])
+    new = _snap(
+        "2", functions=[_fn("f", "f", params=[Param(name="x", type="const int")])]
+    )
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)
 
@@ -329,12 +424,15 @@ def test_param_by_value_real_type_change_still_breaking():
     assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    ("Box<const int>", "Box<int>"),
-    ("Box< const int >", "Box< int >"),
-    ("Box<int, const int>", "Box<int, int>"),
-    ("std::function<void(const int)>", "std::function<void(int)>"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        ("Box<const int>", "Box<int>"),
+        ("Box< const int >", "Box< int >"),
+        ("Box<int, const int>", "Box<int, int>"),
+        ("std::function<void(const int)>", "std::function<void(int)>"),
+    ],
+)
 def test_nested_template_cv_qualifier_is_not_neutralised(old_t, new_t):
     """Regression guard (Codex/CodeRabbit review, PR #582):
     ``_strip_cv_qualifiers`` used to strip const/volatile tokens at ANY
@@ -354,23 +452,31 @@ def test_nested_template_cv_change_still_reported_as_param_change():
     instantiation to a different one (only distinguished by a nested cv
     qualifier) must still report FUNC_PARAMS_CHANGED, not be silently
     neutralised as cv-only churn."""
-    old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, int>")])])
-    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, const int>")])])
+    old = _snap(
+        "1", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, int>")])]
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, const int>")])],
+    )
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    ("void (*)(int)", "void (*)(const int)"),
-    ("void (*)(int, int)", "void (*)(int, const int)"),
-    ("void (*)(int* const)", "void (*)(int*)"),
-    ("void (*)(int* volatile)", "void (*)(int*)"),
-    ("void (*)(void (*)(int))", "void (*)(void (*)(const int))"),
-    ("void (*)(int*, int)", "void (*)(int*, const int)"),
-    ("void (*)(int, int*)", "void (*)(const int, int*)"),
-    ("void (*)(int*, int*)", "void (*)(int* const, int*)"),
-    ("void (*)(int (*)[3])", "void (*)(int (* const)[3])"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        ("void (*)(int)", "void (*)(const int)"),
+        ("void (*)(int, int)", "void (*)(int, const int)"),
+        ("void (*)(int* const)", "void (*)(int*)"),
+        ("void (*)(int* volatile)", "void (*)(int*)"),
+        ("void (*)(void (*)(int))", "void (*)(void (*)(const int))"),
+        ("void (*)(int*, int)", "void (*)(int*, const int)"),
+        ("void (*)(int, int*)", "void (*)(const int, int*)"),
+        ("void (*)(int*, int*)", "void (*)(int* const, int*)"),
+        ("void (*)(int (*)[3])", "void (*)(int (* const)[3])"),
+    ],
+)
 def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     """Regression guard (Codex review, PR #582): the fix for nested TEMPLATE
     cv (``Box<const int>``, above) over-corrected by also blocking stripping
@@ -395,20 +501,23 @@ def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     assert func_signature_cv_only_differ(old_t, new_t) is True
 
 
-@pytest.mark.parametrize("old_t, new_t", [
-    ("void (*)(int*)", "void (*)(long*)"),
-    ("void (*)(int*)", "void (*)(const int*)"),
-    ("void (*)(void (*)(int*))", "void (*)(void (*)(const int*))"),
-    ("void (*)(int*, int*)", "void (*)(int*, const int*)"),
-    ("void (*)(int[3])", "void (*)(const int[3])"),
-    ("void (*)(int[3], int)", "void (*)(const int[3], int)"),
-    ("void (*)(int (*)[3])", "void (*)(const int (*)[3])"),
-    ("void (*)(int (*)())", "void (*)(const int (*)())"),
-    ("void (C::*)(int)", "void (C::*)(int) const"),
-    ("void (C::*)(int)", "void (C::*)(int) volatile"),
-    ("void (C::*)(int)", "void (C::*)(int) const volatile"),
-    ("void (*)(void (C::*)())", "void (*)(void (C::*)() const)"),
-])
+@pytest.mark.parametrize(
+    "old_t, new_t",
+    [
+        ("void (*)(int*)", "void (*)(long*)"),
+        ("void (*)(int*)", "void (*)(const int*)"),
+        ("void (*)(void (*)(int*))", "void (*)(void (*)(const int*))"),
+        ("void (*)(int*, int*)", "void (*)(int*, const int*)"),
+        ("void (*)(int[3])", "void (*)(const int[3])"),
+        ("void (*)(int[3], int)", "void (*)(const int[3], int)"),
+        ("void (*)(int (*)[3])", "void (*)(const int (*)[3])"),
+        ("void (*)(int (*)())", "void (*)(const int (*)())"),
+        ("void (C::*)(int)", "void (C::*)(int) const"),
+        ("void (C::*)(int)", "void (C::*)(int) volatile"),
+        ("void (C::*)(int)", "void (C::*)(int) const volatile"),
+        ("void (*)(void (C::*)())", "void (*)(void (C::*)() const)"),
+    ],
+)
 def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):
     """Negative control (Codex review, PR #589): a callback parameter's
     POINTEE cv IS a genuinely different type (confirmed against real
@@ -455,7 +564,10 @@ def test_callback_cv_change_still_reported_as_param_change():
         "1", functions=[_fn("f", "f", params=[Param(name="cb", type="void (*)(int)")])]
     )
     neutral_new = _snap(
-        "2", functions=[_fn("f", "f", params=[Param(name="cb", type="void (*)(const int)")])]
+        "2",
+        functions=[
+            _fn("f", "f", params=[Param(name="cb", type="void (*)(const int)")])
+        ],
     )
     r = compare(neutral_old, neutral_new)
     assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)

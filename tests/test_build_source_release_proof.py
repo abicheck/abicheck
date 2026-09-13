@@ -16,7 +16,9 @@ _GATE_PATH = (
     / "scripts"
     / "check_build_source_release_proof.py"
 )
-_spec = importlib.util.spec_from_file_location("check_build_source_release_proof", _GATE_PATH)
+_spec = importlib.util.spec_from_file_location(
+    "check_build_source_release_proof", _GATE_PATH
+)
 assert _spec and _spec.loader
 proof_gate = importlib.util.module_from_spec(_spec)
 sys.modules["check_build_source_release_proof"] = proof_gate
@@ -29,7 +31,7 @@ def _passing_artifact() -> dict[str, object]:
         "results": [
             {"case_id": case_id, "status": "PASS"}
             for case_id in sorted(proof_gate.EXPECTED_CASE_IDS)
-        ]
+        ],
     }
 
 

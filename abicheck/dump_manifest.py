@@ -148,7 +148,9 @@ def _reject_unknown_fields(
         )
 
 
-def _require_str(data: dict[str, Any], key: str, *, context: str, default: str | None = None) -> str:
+def _require_str(
+    data: dict[str, Any], key: str, *, context: str, default: str | None = None
+) -> str:
     if key not in data:
         if default is not None:
             return default
@@ -161,7 +163,9 @@ def _require_str(data: dict[str, Any], key: str, *, context: str, default: str |
     return value
 
 
-def _optional_bool(data: dict[str, Any], key: str, *, context: str, default: bool) -> bool:
+def _optional_bool(
+    data: dict[str, Any], key: str, *, context: str, default: bool
+) -> bool:
     if key not in data:
         return default
     value = data[key]
@@ -174,7 +178,9 @@ def _optional_bool(data: dict[str, Any], key: str, *, context: str, default: boo
 
 def _resolve_path(raw: str, *, base_dir: Path, context: str) -> Path:
     if not isinstance(raw, str) or not raw:
-        raise ManifestValidationError(f"{context}: expected a non-empty path string, got {raw!r}")
+        raise ManifestValidationError(
+            f"{context}: expected a non-empty path string, got {raw!r}"
+        )
     p = Path(raw)
     return p if p.is_absolute() else (base_dir / p)
 
@@ -221,13 +227,17 @@ def _parse_includes(
     raw: Any, *, base_dir: Path, context: str
 ) -> tuple[IncludeEntry, ...]:
     if not isinstance(raw, list):
-        raise ManifestValidationError(f"{context}: 'includes' must be a list, got {raw!r}")
+        raise ManifestValidationError(
+            f"{context}: 'includes' must be a list, got {raw!r}"
+        )
     entries: list[IncludeEntry] = []
     for idx, item in enumerate(raw):
         item_ctx = f"{context}.includes[{idx}]"
         if isinstance(item, str):
             entries.append(
-                IncludeEntry(path=_resolve_path(item, base_dir=base_dir, context=item_ctx))
+                IncludeEntry(
+                    path=_resolve_path(item, base_dir=base_dir, context=item_ctx)
+                )
             )
         elif isinstance(item, dict):
             _reject_unknown_fields(item, _INCLUDE_MAPPING_FIELDS, context=item_ctx)
@@ -274,7 +284,11 @@ def _parse_tu(raw: Any, *, base_dir: Path, index: int) -> TranslationUnit:
     name = _require_str(raw, "name", context=context)
     context = f"translation_units[{index}] ({name!r})"
     forced_includes = (
-        _parse_path_list(raw["forced_includes"], base_dir=base_dir, context=f"{context}.forced_includes")
+        _parse_path_list(
+            raw["forced_includes"],
+            base_dir=base_dir,
+            context=f"{context}.forced_includes",
+        )
         if "forced_includes" in raw
         else ()
     )
@@ -284,7 +298,9 @@ def _parse_tu(raw: Any, *, base_dir: Path, index: int) -> TranslationUnit:
         else ()
     )
     required = _optional_bool(raw, "required", context=context, default=True)
-    contributes_to_abi = _optional_bool(raw, "contributes_to_abi", context=context, default=True)
+    contributes_to_abi = _optional_bool(
+        raw, "contributes_to_abi", context=context, default=True
+    )
     if contributes_to_abi and not required:
         raise ManifestValidationError(
             f"{context}: 'contributes_to_abi: true' requires 'required: true' "
@@ -300,7 +316,9 @@ def _parse_tu(raw: Any, *, base_dir: Path, index: int) -> TranslationUnit:
     )
 
 
-def parse_manifest(text: str, *, base_dir: Path, source: str = "<manifest>") -> DumpManifest:
+def parse_manifest(
+    text: str, *, base_dir: Path, source: str = "<manifest>"
+) -> DumpManifest:
     """Parse and validate a manifest document already read into *text*.
 
     *base_dir* is the directory every relative path in the document
@@ -321,35 +339,52 @@ def parse_manifest(text: str, *, base_dir: Path, source: str = "<manifest>") -> 
     target_raw = data.get("target")
     if target_raw is not None and not isinstance(target_raw, str):
         raise ManifestValidationError(f"{source}: 'target' must be a string or null")
-    frontend_context = _require_str(data, "frontend_context", context=source, default="host")
+    frontend_context = _require_str(
+        data, "frontend_context", context=source, default="host"
+    )
     if frontend_context not in _SUPPORTED_FRONTEND_CONTEXTS:
         raise ManifestValidationError(
             f"{source}: frontend_context {frontend_context!r} is not supported "
             f"-- only {sorted(_SUPPORTED_FRONTEND_CONTEXTS)!r} are accepted"
         )
     public_header_paths = (
-        _parse_path_list(data["public_header_paths"], base_dir=base_dir, context=f"{source}.public_header_paths")
+        _parse_path_list(
+            data["public_header_paths"],
+            base_dir=base_dir,
+            context=f"{source}.public_header_paths",
+        )
         if "public_header_paths" in data
         else ()
     )
     public_header_dirs = (
-        _parse_path_list(data["public_header_dirs"], base_dir=base_dir, context=f"{source}.public_header_dirs")
+        _parse_path_list(
+            data["public_header_dirs"],
+            base_dir=base_dir,
+            context=f"{source}.public_header_dirs",
+        )
         if "public_header_dirs" in data
         else ()
     )
     if "roots" not in data:
         raise ManifestValidationError(f"{source}: missing required field 'roots'")
-    roots = _parse_path_list(data["roots"], base_dir=base_dir, context=f"{source}.roots")
+    roots = _parse_path_list(
+        data["roots"], base_dir=base_dir, context=f"{source}.roots"
+    )
     if not roots:
         raise ManifestValidationError(f"{source}: 'roots' must be non-empty")
 
     if "translation_units" not in data:
-        raise ManifestValidationError(f"{source}: missing required field 'translation_units'")
+        raise ManifestValidationError(
+            f"{source}: missing required field 'translation_units'"
+        )
     tus_raw = data["translation_units"]
     if not isinstance(tus_raw, list) or not tus_raw:
-        raise ManifestValidationError(f"{source}: 'translation_units' must be a non-empty list")
+        raise ManifestValidationError(
+            f"{source}: 'translation_units' must be a non-empty list"
+        )
     tus = tuple(
-        _parse_tu(item, base_dir=base_dir, index=idx) for idx, item in enumerate(tus_raw)
+        _parse_tu(item, base_dir=base_dir, index=idx)
+        for idx, item in enumerate(tus_raw)
     )
     seen_names: set[str] = set()
     for tu in tus:

@@ -996,7 +996,9 @@ def compile_db_from_build_info(
     if build_info is None or not headers:
         return None
     if build_info.is_file():
-        return build_info if sniff_build_info_format(build_info) == "compile_db" else None
+        return (
+            build_info if sniff_build_info_format(build_info) == "compile_db" else None
+        )
     db = build_info / "compile_commands.json"
     # Sniffed for the same reason: a build directory holding a non-array
     # compile_commands.json is the identical mis-route one level down.

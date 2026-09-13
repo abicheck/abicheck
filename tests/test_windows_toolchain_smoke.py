@@ -3,6 +3,7 @@
 Pure unit tests that document and lock expected PE/Windows behavior in the
 core diff engine without requiring a real compiler toolchain.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare

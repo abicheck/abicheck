@@ -1026,9 +1026,13 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
 
         params = {
-            "contract_mode": None, "scope_public_headers": True,
-            "policy": "strict_abi", "policy_file_path": None, "suppress": None,
-            "require_justification": False, "severity_preset": None,
+            "contract_mode": None,
+            "scope_public_headers": True,
+            "policy": "strict_abi",
+            "policy_file_path": None,
+            "suppress": None,
+            "require_justification": False,
+            "severity_preset": None,
             "pack_paths": (),
         }
         application = resolve_release_pack_application(
@@ -1039,11 +1043,21 @@ class TestOnlyAppliedFieldsAreAccepted:
 
         from_ctx = resolve_release_pack_application_from_ctx(
             ctx=click.Context(click.Command("noop")),
-            contract_mode=None, scope_public_headers=True, policy="strict_abi",
-            policy_file_path=None, suppress=None, require_justification=False,
-            severity_preset=None, pack_paths=(), contract_evaluation=False,
-            project_cfg=None, project_path=None, project_sha256=None,
-            policy_option=None, policy_path=None, policy_sha256=None,
+            contract_mode=None,
+            scope_public_headers=True,
+            policy="strict_abi",
+            policy_file_path=None,
+            suppress=None,
+            require_justification=False,
+            severity_preset=None,
+            pack_paths=(),
+            contract_evaluation=False,
+            project_cfg=None,
+            project_path=None,
+            project_sha256=None,
+            policy_option=None,
+            policy_path=None,
+            policy_sha256=None,
         )
         assert from_ctx is not None and from_ctx.is_empty()
         assert from_ctx.resolved_config is not None

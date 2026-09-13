@@ -46,6 +46,7 @@ the same base type DIE (e.g. `int`) appears in hundreds of struct members.
 - DWARF 4+: DW_AT_data_bit_offset = bit offset from LSB of the container
   Both attributes are read; DW_AT_data_bit_offset takes priority when present.
 """
+
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
@@ -94,14 +95,17 @@ log = logging.getLogger(__name__)
 # Deduplicate unknown DWARF-tag warnings per process to avoid log flooding
 _SEEN_UNKNOWN_DWARF_TAGS: set[str] = set()
 
-_SKIP_TAGS: frozenset[str] = BASE_PRUNE_TAGS | frozenset({
-    "DW_TAG_subprogram",
-})
+_SKIP_TAGS: frozenset[str] = BASE_PRUNE_TAGS | frozenset(
+    {
+        "DW_TAG_subprogram",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
     """Extract DWARF type layout metadata from *so_path*.
@@ -124,6 +128,7 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
 # ---------------------------------------------------------------------------
 # Internal implementation
 # ---------------------------------------------------------------------------
+
 
 def _parse(f: Any, so_path: Path) -> DwarfMetadata:
     meta = DwarfMetadata()
@@ -234,7 +239,9 @@ def _process_typedef(
 
     if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
         if not target_name and typedef_name not in meta.structs:
-            _process_struct_named(target, meta, CU, type_cache, override_name=typedef_name)
+            _process_struct_named(
+                target, meta, CU, type_cache, override_name=typedef_name
+            )
     elif tag == "DW_TAG_enumeration_type":
         if not target_name and typedef_name not in meta.enums:
             _process_enum_named(target, meta, CU, override_name=typedef_name)
@@ -243,6 +250,7 @@ def _process_typedef(
 # ---------------------------------------------------------------------------
 # Struct / class / union
 # ---------------------------------------------------------------------------
+
 
 def _process_struct(
     die: Any,
@@ -308,7 +316,9 @@ def _process_struct_named(
         if existing.byte_size != layout.byte_size:
             log.debug(
                 "ODR size mismatch for %s: %d vs %d bytes (keeping first)",
-                name, existing.byte_size, layout.byte_size,
+                name,
+                existing.byte_size,
+                layout.byte_size,
             )
     else:
         meta.structs[name] = layout
@@ -332,7 +342,11 @@ def _expand_anonymous_member(
         target = _resolve_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
         return []
-    if target.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+    if target.tag not in (
+        "DW_TAG_structure_type",
+        "DW_TAG_class_type",
+        "DW_TAG_union_type",
+    ):
         return []
 
     fields: list[FieldInfo] = []
@@ -343,14 +357,16 @@ def _expand_anonymous_member(
         if fi is None:
             continue
         # Adjust offset: anonymous member byte_offset + inner field offset
-        fields.append(FieldInfo(
-            name=fi.name,
-            type_name=fi.type_name,
-            byte_offset=byte_offset + fi.byte_offset,
-            byte_size=fi.byte_size,
-            bit_offset=fi.bit_offset,
-            bit_size=fi.bit_size,
-        ))
+        fields.append(
+            FieldInfo(
+                name=fi.name,
+                type_name=fi.type_name,
+                byte_offset=byte_offset + fi.byte_offset,
+                byte_size=fi.byte_size,
+                bit_offset=fi.bit_offset,
+                bit_size=fi.bit_size,
+            )
+        )
     return fields
 
 
@@ -379,7 +395,7 @@ def _process_member(
         if "DW_AT_data_bit_offset" in die.attributes:
             bit_offset = _attr_int(die, "DW_AT_data_bit_offset")  # DWARF 4+
         else:
-            bit_offset = _attr_int(die, "DW_AT_bit_offset")       # DWARF 2/3
+            bit_offset = _attr_int(die, "DW_AT_bit_offset")  # DWARF 2/3
     else:
         bit_offset = 0
 
@@ -399,6 +415,7 @@ def _process_member(
 # ---------------------------------------------------------------------------
 # Enum
 # ---------------------------------------------------------------------------
+
 
 def _process_enum(
     die: Any,
@@ -452,6 +469,7 @@ def _process_enum_named(
 # Type resolution helpers (with memoisation)
 # ---------------------------------------------------------------------------
 
+
 def _resolve_type(
     die: Any,
     CU: Any,
@@ -500,7 +518,10 @@ def _compute_type_info(
     tag = die.tag
 
     if tag == "DW_TAG_base_type":
-        return (_attr_str(die, "DW_AT_name") or "base", _attr_int(die, "DW_AT_byte_size"))
+        return (
+            _attr_str(die, "DW_AT_name") or "base",
+            _attr_int(die, "DW_AT_byte_size"),
+        )
 
     if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
         return _compute_record_type_info(die, tag)
@@ -510,11 +531,15 @@ def _compute_type_info(
         return (f"enum {name}", _attr_int(die, "DW_AT_byte_size"))
 
     if tag == "DW_TAG_pointer_type":
-        return _compute_pointer_like_info(die, CU, depth, cache, suffix=" *", fallback="void *")
+        return _compute_pointer_like_info(
+            die, CU, depth, cache, suffix=" *", fallback="void *"
+        )
 
     if tag in ("DW_TAG_reference_type", "DW_TAG_rvalue_reference_type"):
         suffix = " &&" if tag == "DW_TAG_rvalue_reference_type" else " &"
-        return _compute_pointer_like_info(die, CU, depth, cache, suffix=suffix, fallback=f"?{suffix}")
+        return _compute_pointer_like_info(
+            die, CU, depth, cache, suffix=suffix, fallback=f"?{suffix}"
+        )
 
     if tag in ("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type"):
         qualifier = tag.split("_")[2].lower()

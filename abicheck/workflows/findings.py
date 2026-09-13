@@ -82,22 +82,25 @@ def matrix_snapshot_to_json(matrix: MatrixSnapshot) -> str:
     included) to an indented JSON string."""
     from .evidence_transport import PROBE_MATRIX_SCHEMA
 
-    return json.dumps({
-        # Self-describing from plan Phase 7n on: `--build-info` now carries
-        # probe observations *and* compile context, and routes on the
-        # document rather than on a filename. A snapshot written before this
-        # tag existed stays classifiable through its required-key contract
-        # (`evidence_transport.is_probe_matrix_document`), and
-        # `matrix_snapshot_from_dict` ignores the key, so both directions of
-        # the round trip are unaffected.
-        "schema": PROBE_MATRIX_SCHEMA,
-        "library": matrix.library,
-        "version": matrix.version,
-        "spec_name": matrix.spec_name,
-        "cxx_stds": matrix.cxx_stds,
-        "defaults": matrix.defaults,
-        "results": [probe_result_to_dict(r) for r in matrix.results],
-    }, indent=2)
+    return json.dumps(
+        {
+            # Self-describing from plan Phase 7n on: `--build-info` now carries
+            # probe observations *and* compile context, and routes on the
+            # document rather than on a filename. A snapshot written before this
+            # tag existed stays classifiable through its required-key contract
+            # (`evidence_transport.is_probe_matrix_document`), and
+            # `matrix_snapshot_from_dict` ignores the key, so both directions of
+            # the round trip are unaffected.
+            "schema": PROBE_MATRIX_SCHEMA,
+            "library": matrix.library,
+            "version": matrix.version,
+            "spec_name": matrix.spec_name,
+            "cxx_stds": matrix.cxx_stds,
+            "defaults": matrix.defaults,
+            "results": [probe_result_to_dict(r) for r in matrix.results],
+        },
+        indent=2,
+    )
 
 
 def matrix_snapshot_from_dict(data: dict[str, Any]) -> MatrixSnapshot:

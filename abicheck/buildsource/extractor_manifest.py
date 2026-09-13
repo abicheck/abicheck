@@ -40,6 +40,7 @@ The pure halves — manifest parsing and command-template rendering — are
 unit-testable without any external binary; only :meth:`ExternalCliExtractor._run`
 shells out.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -89,10 +90,17 @@ _PHASES = ("discover", "collect", "normalize", "validate")
 
 #: Placeholders a command template may reference. Anything else is rejected so a
 #: typo (``{normalised_dir}``) fails loudly instead of being passed through raw.
-_KNOWN_PLACEHOLDERS = frozenset({
-    "raw_dir", "normalized_dir", "build_dir", "source_root",
-    "compile_db", "cache_dir", "binary",
-})
+_KNOWN_PLACEHOLDERS = frozenset(
+    {
+        "raw_dir",
+        "normalized_dir",
+        "build_dir",
+        "source_root",
+        "compile_db",
+        "cache_dir",
+        "binary",
+    }
+)
 
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
@@ -105,8 +113,8 @@ class ManifestError(ExtractorError):
 class ManifestOutput:
     """One normalized artifact the extractor promises to produce (D3 ``outputs``)."""
 
-    kind: str        # e.g. "build_evidence"
-    path: str        # relative to the pack root, e.g. "build/build_evidence.json"
+    kind: str  # e.g. "build_evidence"
+    path: str  # relative to the pack root, e.g. "build/build_evidence.json"
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "path": self.path}
@@ -174,7 +182,9 @@ def load_extractor_manifest(path: Path | str) -> ExtractorManifest:
         not isinstance(version_command, list)
         or not all(isinstance(t, str) for t in version_command)
     ):
-        raise ManifestError(f"extractor manifest {p}: 'version_command' must be a list of strings")
+        raise ManifestError(
+            f"extractor manifest {p}: 'version_command' must be a list of strings"
+        )
 
     outputs_raw = raw.get("outputs") or {}
     outputs = _parse_outputs(outputs_raw, p)
@@ -335,7 +345,9 @@ def _parse_outputs(outputs_raw: Any, p: Path) -> list[ManifestOutput]:
     elif isinstance(outputs_raw, list):
         rows = list(outputs_raw)
     else:
-        raise ManifestError(f"extractor manifest {p}: 'outputs' must be a list or mapping")
+        raise ManifestError(
+            f"extractor manifest {p}: 'outputs' must be a list or mapping"
+        )
     out: list[ManifestOutput] = []
     for row in rows:
         if not isinstance(row, dict) or "kind" not in row or "path" not in row:
@@ -413,6 +425,7 @@ def render_command(template: list[str], substitutions: dict[str, str]) -> list[s
     """
     out: list[str] = []
     for token in template:
+
         def _sub(match: re.Match[str]) -> str:
             key = match.group(1)
             if key not in substitutions:
@@ -420,6 +433,7 @@ def render_command(template: list[str], substitutions: dict[str, str]) -> list[s
                     f"command references {{{key}}} but no value was supplied for this run"
                 )
             return substitutions[key]
+
         out.append(_PLACEHOLDER_RE.sub(_sub, token))
     return out
 
@@ -456,7 +470,9 @@ class ExternalCliExtractor:
 
     # -- helpers ------------------------------------------------------------
 
-    def _substitutions(self, context: CollectionContext, pack_root: Path) -> dict[str, str]:
+    def _substitutions(
+        self, context: CollectionContext, pack_root: Path
+    ) -> dict[str, str]:
         """Build the placeholder map from the context + pack layout (D6).
 
         Every path is rendered *absolute* (resolved against the invoking cwd at
@@ -465,6 +481,7 @@ class ExternalCliExtractor:
         ``build`` would otherwise resolve to ``build/build`` from inside that cwd;
         absolute paths keep argv values stable regardless of the subprocess cwd.
         """
+
         def ap(p: Path) -> str:
             return os.path.abspath(str(p))
 
@@ -489,7 +506,9 @@ class ExternalCliExtractor:
         for action in self.manifest.required_actions():
             context.require(action, extractor=self.manifest.name)
 
-    def _run(self, argv: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self, argv: list[str], *, cwd: Path | None = None
+    ) -> subprocess.CompletedProcess[str]:
         """Run *argv* with no shell and a sanitized environment.
 
         Centralizes the single place this module touches the host. ``shell`` is
@@ -541,7 +560,9 @@ class ExternalCliExtractor:
         self._enforce_actions(context)
         template = self.manifest.commands.get("collect")
         if template is None:
-            return CollectionResult(status="skipped", diagnostics=["no 'collect' command"])
+            return CollectionResult(
+                status="skipped", diagnostics=["no 'collect' command"]
+            )
         raw_dir = output_dir / "raw" / self.manifest.name
         raw_dir.mkdir(parents=True, exist_ok=True)
         argv = render_command(template, self._substitutions(context, output_dir))
@@ -564,11 +585,16 @@ class ExternalCliExtractor:
             return CollectionResult(status="failed", diagnostics=diagnostics)
         artifacts = [
             RawArtifact(kind="raw", path=p, content_hash="sha256:" + _file_sha256(p))
-            for p in sorted(raw_dir.rglob("*")) if p.is_file()
+            for p in sorted(raw_dir.rglob("*"))
+            if p.is_file()
         ]
-        return CollectionResult(raw_artifacts=artifacts, status="ok", diagnostics=diagnostics)
+        return CollectionResult(
+            raw_artifacts=artifacts, status="ok", diagnostics=diagnostics
+        )
 
-    def normalize(self, raw_artifacts: list[RawArtifact], output_dir: Path) -> NormalizationResult:
+    def normalize(
+        self, raw_artifacts: list[RawArtifact], output_dir: Path
+    ) -> NormalizationResult:
         """Run the manifest ``normalize`` command (if any) and map outputs (D2/D8)."""
         template = self.manifest.commands.get("normalize")
         diagnostics: list[str] = []
@@ -596,7 +622,11 @@ class ExternalCliExtractor:
                     status="failed",
                     diagnostics=[f"normalize could not run {argv[0]!r}: {exc}"],
                 )
-            mode = self.context.collection_mode if self.context else CollectionMode.PERMISSIVE
+            mode = (
+                self.context.collection_mode
+                if self.context
+                else CollectionMode.PERMISSIVE
+            )
             if proc.returncode != 0:
                 diagnostics.append(
                     f"normalize exited {proc.returncode}: {_stderr_excerpt(proc.stderr, mode)}"
@@ -609,7 +639,10 @@ class ExternalCliExtractor:
             by_kind[out.kind] = path
             paths.append(path)
         return NormalizationResult(
-            normalized_paths=paths, by_kind=by_kind, status="ok", diagnostics=diagnostics
+            normalized_paths=paths,
+            by_kind=by_kind,
+            status="ok",
+            diagnostics=diagnostics,
         )
 
     def validate(self, normalized_artifacts: list[Path]) -> ValidationResult:
@@ -726,15 +759,22 @@ def run_external_extractor(
     discovery = extractor.discover(context)
     if not discovery.can_run:
         record = ExtractorRecord(
-            name=manifest.name, version=manifest.version, status="skipped",
-            capabilities=capabilities, inputs=inputs,
+            name=manifest.name,
+            version=manifest.version,
+            status="skipped",
+            capabilities=capabilities,
+            inputs=inputs,
             command_hash=extractor.command_hash(context, pack_root),
             command=extractor.ledger_command(context, pack_root),
-            started_at=started.isoformat(), detail=discovery.reason,
+            started_at=started.isoformat(),
+            detail=discovery.reason,
         )
         return _finish(
             NormalizationResult(status="skipped", diagnostics=[discovery.reason]),
-            record, started, "skipped", [discovery.reason],
+            record,
+            started,
+            "skipped",
+            [discovery.reason],
         )
 
     # The run permits this extractor's actions, so probing its version (D10) is
@@ -774,15 +814,25 @@ def run_external_extractor(
         collected = extractor.collect(context, pack_root)
         diagnostics.extend(collected.diagnostics)
         if collected.status == "failed":
-            return _finish(NormalizationResult(status="failed", diagnostics=diagnostics),
-                           record, started, "failed", diagnostics)
+            return _finish(
+                NormalizationResult(status="failed", diagnostics=diagnostics),
+                record,
+                started,
+                "failed",
+                diagnostics,
+            )
 
         normalized = extractor.normalize(collected.raw_artifacts, pack_root)
         diagnostics.extend(normalized.diagnostics)
     except ManifestError as exc:
         diagnostics.append(str(exc))
-        return _finish(NormalizationResult(status="failed", diagnostics=diagnostics),
-                       record, started, "failed", diagnostics)
+        return _finish(
+            NormalizationResult(status="failed", diagnostics=diagnostics),
+            record,
+            started,
+            "failed",
+            diagnostics,
+        )
     if normalized.status == "failed":
         return _finish(normalized, record, started, "failed", diagnostics)
 
@@ -791,7 +841,9 @@ def run_external_extractor(
         diagnostics.extend(validation.errors)
         return _finish(normalized, record, started, "failed", diagnostics)
 
-    record.artifacts = [str(p.relative_to(pack_root)) for p in normalized.normalized_paths]
+    record.artifacts = [
+        str(p.relative_to(pack_root)) for p in normalized.normalized_paths
+    ]
     return _finish(normalized, record, started, "ok", diagnostics)
 
 

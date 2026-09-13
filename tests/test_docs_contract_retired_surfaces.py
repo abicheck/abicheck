@@ -361,8 +361,7 @@ def test_a_config_key_in_extra_args_is_flagged(
     monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
     _page(
         tmp_path,
-        "# Page\n\n```yaml\n"
-        "extra-args: 'suppression.strict: true'\n```\n",
+        "# Page\n\n```yaml\nextra-args: 'suppression.strict: true'\n```\n",
     )
     f = dc.Findings()
     dc._check_config_keys_as_cli_operands(f)
@@ -464,8 +463,7 @@ def test_retired_surfaces_scans_the_scenario_catalog(
     scenarios = tmp_path / "tests" / "scenarios"
     scenarios.mkdir(parents=True)
     (scenarios / "gating.yaml").write_text(
-        "- id: SC-X\n  flow:\n"
-        "    - abicheck dump lib.so --source-abi-cache /tmp/c\n",
+        "- id: SC-X\n  flow:\n    - abicheck dump lib.so --source-abi-cache /tmp/c\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(dc, "SCENARIOS", scenarios)

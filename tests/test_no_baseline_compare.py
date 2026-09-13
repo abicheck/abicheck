@@ -321,7 +321,9 @@ class TestNoBaselineReportEnvMatrixDigest:
         assert doc.env_matrix_source_sha256 is not None
 
         report = no_baseline_json_report(result)
-        assert report["env_matrix_source_sha256"] == result.diff.env_matrix_source_sha256
+        assert (
+            report["env_matrix_source_sha256"] == result.diff.env_matrix_source_sha256
+        )
 
     def test_json_report_digest_matches_two_sided_compare_report(self) -> None:
         """Same field name/value a two-sided ``compare`` JSON report would
@@ -460,17 +462,21 @@ class TestNoBaselineRejectsViewTokens:
     @pytest.mark.parametrize(
         "view_token",
         [
-            "leaf", "root-cause", "impact", "show=breaking", "demangle", "patterns",
+            "leaf",
+            "root-cause",
+            "impact",
+            "show=breaking",
+            "demangle",
+            "patterns",
             # Codex review, PR #1180, fresh evidence: these two were added
             # to --view in the same PR and missed this rejection entirely --
             # a no-baseline audit has no scope/disposition ledger and no
             # suppression audit either.
-            "filtered", "suppressions",
+            "filtered",
+            "suppressions",
         ],
     )
-    def test_any_view_token_is_rejected(
-        self, tmp_path: Path, view_token: str
-    ) -> None:
+    def test_any_view_token_is_rejected(self, tmp_path: Path, view_token: str) -> None:
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -481,9 +487,7 @@ class TestNoBaselineRejectsViewTokens:
             ["compare", "--no-baseline", str(path), "--view", view_token],
         )
         assert result.exit_code == 64, result.output
-        assert "--view is not available together with --no-baseline" in (
-            result.output
-        )
+        assert "--view is not available together with --no-baseline" in (result.output)
 
     def test_no_view_flag_still_succeeds(self, tmp_path: Path) -> None:
         from click.testing import CliRunner

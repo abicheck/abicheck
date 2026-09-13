@@ -22,6 +22,7 @@ free. Invalidation **prefers false misses over false hits** (ADR-033 D5): the ke
 folds the compile-DB content hash, the adapter hint, and ``BUILD_EVIDENCE_VERSION``,
 so any input or schema change misses; a corrupt/partial entry also misses.
 """
+
 from __future__ import annotations
 
 import hashlib

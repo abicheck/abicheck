@@ -93,7 +93,10 @@ translation_units:
     assert manifest.target == "x86_64-linux-gnu"
     assert manifest.public_header_paths == (tmp_path / "include" / "foo.h",)
     assert manifest.public_header_dirs == (tmp_path / "include",)
-    assert manifest.roots == (tmp_path / "include" / "foo.h", tmp_path / "include" / "bar.h")
+    assert manifest.roots == (
+        tmp_path / "include" / "foo.h",
+        tmp_path / "include" / "bar.h",
+    )
     assert len(manifest.translation_units) == 2
     main_tu, extra_tu = manifest.translation_units
     assert main_tu.includes == (
@@ -206,7 +209,9 @@ translation_units:
     forced_includes:
       - foo.h
 """
-    with pytest.raises(ManifestValidationError, match="duplicate translation unit name 'main'"):
+    with pytest.raises(
+        ManifestValidationError, match="duplicate translation unit name 'main'"
+    ):
         parse_manifest(text, base_dir=tmp_path)
 
 
@@ -221,7 +226,9 @@ translation_units:
     required: false
     contributes_to_abi: true
 """
-    with pytest.raises(ManifestValidationError, match="contributes_to_abi.*requires.*required"):
+    with pytest.raises(
+        ManifestValidationError, match="contributes_to_abi.*requires.*required"
+    ):
         parse_manifest(text, base_dir=tmp_path)
 
 
@@ -295,7 +302,9 @@ def test_invalid_yaml_syntax_rejected(tmp_path):
 
 
 def test_tu_missing_name_rejected(tmp_path):
-    text = "roots:\n  - foo.h\ntranslation_units:\n  - forced_includes:\n      - foo.h\n"
+    text = (
+        "roots:\n  - foo.h\ntranslation_units:\n  - forced_includes:\n      - foo.h\n"
+    )
     with pytest.raises(ManifestValidationError, match="missing required field 'name'"):
         parse_manifest(text, base_dir=tmp_path)
 
@@ -327,5 +336,7 @@ def test_single_tu_manifest_synthesizes_legacy_equivalent(tmp_path):
 
 def test_target_must_be_string_or_null(tmp_path):
     text = _MINIMAL + "target: 123\n"
-    with pytest.raises(ManifestValidationError, match="'target' must be a string or null"):
+    with pytest.raises(
+        ManifestValidationError, match="'target' must be a string or null"
+    ):
         parse_manifest(text, base_dir=tmp_path)

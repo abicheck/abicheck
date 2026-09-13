@@ -5,6 +5,7 @@ Validates that:
 2. Multiple concurrent comparisons on shared snapshots don't corrupt state
 3. No global state mutation between calls
 """
+
 from __future__ import annotations
 
 import copy
@@ -20,29 +21,40 @@ from abicheck.model import (
 )
 
 
-def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, typedefs=None):
+def _snap(
+    version="1.0", functions=None, variables=None, types=None, enums=None, typedefs=None
+):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=variables or [],
-        types=types or [], enums=enums or [],
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=variables or [],
+        types=types or [],
+        enums=enums or [],
         typedefs=typedefs or {},
     )
 
 
 def _pub_func(name, mangled, ret="void", **kwargs):
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    visibility=Visibility.PUBLIC, **kwargs)
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        visibility=Visibility.PUBLIC,
+        **kwargs,
+    )
 
 
 def _pub_var(name, mangled, type_):
-    return Variable(name=name, mangled=mangled, type=type_,
-                    visibility=Visibility.PUBLIC)
+    return Variable(
+        name=name, mangled=mangled, type=type_, visibility=Visibility.PUBLIC
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Concurrent Independent Comparisons
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestConcurrentIndependent:
     """Multiple independent compare() calls in parallel."""
@@ -67,13 +79,16 @@ class TestConcurrentIndependent:
 
     def test_10_parallel_breaking_comparisons(self):
         """10 concurrent BREAKING comparisons all detect correctly."""
+
         def run_compare(idx):
             f = _pub_func(f"func{idx}", f"_Z4func{idx}v")
             old = _snap(functions=[f])
             new = _snap(functions=[])
             r = compare(old, new)
-            return idx, r.verdict, any(
-                c.kind == ChangeKind.FUNC_REMOVED for c in r.changes
+            return (
+                idx,
+                r.verdict,
+                any(c.kind == ChangeKind.FUNC_REMOVED for c in r.changes),
             )
 
         with ThreadPoolExecutor(max_workers=10) as pool:
@@ -88,6 +103,7 @@ class TestConcurrentIndependent:
 # ═══════════════════════════════════════════════════════════════════════════
 # Concurrent with Shared Snapshots
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestConcurrentSharedSnapshots:
     """Multiple threads reading the same snapshots concurrently."""
@@ -124,6 +140,7 @@ class TestConcurrentSharedSnapshots:
 # ═══════════════════════════════════════════════════════════════════════════
 # Mixed Concurrent: Different Kinds of Changes
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestConcurrentMixed:
     """Different types of changes processed concurrently."""
@@ -183,14 +200,13 @@ class TestConcurrentMixed:
                 f"{desc}: expected {exp_verdict}, got {verdict}"
             )
             if exp_kind is not None:
-                assert exp_kind in kinds, (
-                    f"{desc}: expected {exp_kind} in {kinds}"
-                )
+                assert exp_kind in kinds, f"{desc}: expected {exp_kind} in {kinds}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # No Global State Leakage
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestNoGlobalStateLeak:
     """Verify no global state mutation between compare() calls."""

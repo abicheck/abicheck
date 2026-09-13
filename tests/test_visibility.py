@@ -11,13 +11,16 @@ Detection mechanism:
 - Visibility.HIDDEN is in the model
 - Hidden functions changing between snapshots should produce zero changes
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.model import AbiSnapshot, Function, Visibility
 
 
-def _func(name: str, mangled: str, vis: Visibility = Visibility.PUBLIC, **kwargs: object) -> Function:
+def _func(
+    name: str, mangled: str, vis: Visibility = Visibility.PUBLIC, **kwargs: object
+) -> Function:
     defaults: dict[str, object] = dict(return_type="void")
     defaults.update(kwargs)
     return Function(name=name, mangled=mangled, visibility=vis, **defaults)  # type: ignore[arg-type]
@@ -46,9 +49,7 @@ class TestHiddenVisibilityModel:
         """Visibility.HIDDEN survives serialization roundtrip."""
         from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 
-        snap = _snap(functions=[
-            _func("hidden_fn", "_Zhidden", vis=Visibility.HIDDEN)
-        ])
+        snap = _snap(functions=[_func("hidden_fn", "_Zhidden", vis=Visibility.HIDDEN)])
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["visibility"] == "hidden"
         snap2 = snapshot_from_dict(d)
@@ -60,14 +61,18 @@ class TestHiddenFunctionNotReported:
 
     def test_hidden_function_removed_no_change(self) -> None:
         """Removing a HIDDEN function → no ABI change emitted."""
-        old = _snap(functions=[
-            _func("public_api", "_Zpub"),
-            _func("hidden_impl", "_Zhidden", vis=Visibility.HIDDEN),
-        ])
-        new = _snap(functions=[
-            _func("public_api", "_Zpub"),
-            # hidden_impl removed — no ABI impact
-        ])
+        old = _snap(
+            functions=[
+                _func("public_api", "_Zpub"),
+                _func("hidden_impl", "_Zhidden", vis=Visibility.HIDDEN),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("public_api", "_Zpub"),
+                # hidden_impl removed — no ABI impact
+            ]
+        )
         result = compare(old, new)
         # No FUNC_REMOVED for hidden function
         func_removed = [c for c in result.changes if c.kind == ChangeKind.FUNC_REMOVED]
@@ -79,10 +84,12 @@ class TestHiddenFunctionNotReported:
     def test_hidden_function_added_no_change(self) -> None:
         """Adding a HIDDEN function → no ABI change emitted."""
         old = _snap(functions=[_func("pub", "_Zpub")])
-        new = _snap(functions=[
-            _func("pub", "_Zpub"),
-            _func("new_hidden", "_Znhidden", vis=Visibility.HIDDEN),
-        ])
+        new = _snap(
+            functions=[
+                _func("pub", "_Zpub"),
+                _func("new_hidden", "_Znhidden", vis=Visibility.HIDDEN),
+            ]
+        )
         result = compare(old, new)
         func_added = [c for c in result.changes if c.kind == ChangeKind.FUNC_ADDED]
         hidden_added = [c for c in func_added if "hidden" in c.symbol.lower()]
@@ -92,29 +99,41 @@ class TestHiddenFunctionNotReported:
 
     def test_hidden_function_signature_change_no_abi_change(self) -> None:
         """Changing a HIDDEN function's signature → no ABI change."""
-        old = _snap(functions=[
-            _func("pub", "_Zpub"),
-            _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN, return_type="void"),
-        ])
-        new = _snap(functions=[
-            _func("pub", "_Zpub"),
-            _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN, return_type="int"),
-        ])
+        old = _snap(
+            functions=[
+                _func("pub", "_Zpub"),
+                _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN, return_type="void"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("pub", "_Zpub"),
+                _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN, return_type="int"),
+            ]
+        )
         result = compare(old, new)
         # hidden_fn changed return type — but it's HIDDEN, so no ABI change
-        hidden_changes = [c for c in result.changes if "hfn" in c.symbol or "hidden" in c.symbol.lower()]
+        hidden_changes = [
+            c
+            for c in result.changes
+            if "hfn" in c.symbol or "hidden" in c.symbol.lower()
+        ]
         assert not hidden_changes
 
     def test_public_function_change_still_detected(self) -> None:
         """PUBLIC function change is still detected alongside hidden functions."""
-        old = _snap(functions=[
-            _func("pub_api", "_Zpub", return_type="void"),
-            _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN),
-        ])
-        new = _snap(functions=[
-            _func("pub_api", "_Zpub", return_type="int"),  # return type changed
-            _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN),
-        ])
+        old = _snap(
+            functions=[
+                _func("pub_api", "_Zpub", return_type="void"),
+                _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("pub_api", "_Zpub", return_type="int"),  # return type changed
+                _func("hidden_fn", "_Zhfn", vis=Visibility.HIDDEN),
+            ]
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.FUNC_RETURN_CHANGED in kinds
@@ -132,17 +151,30 @@ class TestHiddenFunctionNotReported:
 
     def test_hidden_only_snapshot_no_changes(self) -> None:
         """Two snapshots with only hidden functions → no ABI changes."""
-        old = _snap(functions=[
-            _func("h1", "_Zh1", vis=Visibility.HIDDEN),
-            _func("h2", "_Zh2", vis=Visibility.HIDDEN),
-        ])
-        new = _snap(functions=[
-            _func("h1", "_Zh1", vis=Visibility.HIDDEN),
-            _func("h2_renamed", "_Zh2", vis=Visibility.HIDDEN),  # name change, same mangled
-        ])
+        old = _snap(
+            functions=[
+                _func("h1", "_Zh1", vis=Visibility.HIDDEN),
+                _func("h2", "_Zh2", vis=Visibility.HIDDEN),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("h1", "_Zh1", vis=Visibility.HIDDEN),
+                _func(
+                    "h2_renamed", "_Zh2", vis=Visibility.HIDDEN
+                ),  # name change, same mangled
+            ]
+        )
         result = compare(old, new)
         # Hidden-only library: no public ABI surface
-        func_breaks = [c for c in result.changes
-                       if c.kind in (ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_RETURN_CHANGED,
-                                     ChangeKind.FUNC_PARAMS_CHANGED)]
+        func_breaks = [
+            c
+            for c in result.changes
+            if c.kind
+            in (
+                ChangeKind.FUNC_REMOVED,
+                ChangeKind.FUNC_RETURN_CHANGED,
+                ChangeKind.FUNC_PARAMS_CHANGED,
+            )
+        ]
         assert not func_breaks

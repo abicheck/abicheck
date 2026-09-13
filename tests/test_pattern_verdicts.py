@@ -262,12 +262,15 @@ def test_lost_opaqueness_withheld_broad_rule_gets_diagnostic() -> None:
     why via SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK."""
     old = _opaque_snapshot(opaque=True, size=None)
     new = _opaque_snapshot(opaque=False, size=128)
-    suppression = SuppressionList([
-        Suppression(namespace="Ctx", reason="pretend private churn")
-    ])
+    suppression = SuppressionList(
+        [Suppression(namespace="Ctx", reason="pretend private churn")]
+    )
     result = checker.compare(
-        old, new, suppression=suppression,
-        scope_to_public_surface=False, pattern_verdicts=True,
+        old,
+        new,
+        suppression=suppression,
+        scope_to_public_surface=False,
+        pattern_verdicts=True,
     )
     assert ChangeKind.OPAQUE_INVARIANT_BROKEN in {c.kind for c in result.changes}
     assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in {

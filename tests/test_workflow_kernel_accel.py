@@ -83,9 +83,13 @@ class _BtfBlob:
         self._offsets[s] = off
         return off
 
-    def _add(self, name: str, kind: int, vlen: int, size: int, extra: bytes = b"") -> int:
+    def _add(
+        self, name: str, kind: int, vlen: int, size: int, extra: bytes = b""
+    ) -> int:
         info = (kind << 24) | (vlen & 0xFFFF)
-        self._types.append(struct.pack("<III", self._str(name) if name else 0, info, size) + extra)
+        self._types.append(
+            struct.pack("<III", self._str(name) if name else 0, info, size) + extra
+        )
         return len(self._types)
 
     def build_struct(self, struct_name: str, n_fields: int) -> bytes:
@@ -98,15 +102,24 @@ class _BtfBlob:
         type_data = b"".join(self._types)
         str_data = bytes(self._strings)
         header = struct.pack(
-            "<HBBIIIII", BTF_MAGIC, BTF_VERSION, 0, 24,
-            0, len(type_data), len(type_data), len(str_data),
+            "<HBBIIIII",
+            BTF_MAGIC,
+            BTF_VERSION,
+            0,
+            24,
+            0,
+            len(type_data),
+            len(type_data),
+            len(str_data),
         )
         return header + type_data + str_data
 
 
 def _btf_snapshot(version: str, struct_name: str, n_fields: int) -> AbiSnapshot:
     meta = parse_btf_from_bytes(_BtfBlob().build_struct(struct_name, n_fields))
-    return AbiSnapshot(library="vmlinux", version=version, dwarf=meta.to_dwarf_metadata())
+    return AbiSnapshot(
+        library="vmlinux", version=version, dwarf=meta.to_dwarf_metadata()
+    )
 
 
 # ── Scenario: kernel struct layout change via BTF ─────────────────────────────
@@ -167,6 +180,7 @@ def test_sycl_entrypoint_drop_is_breaking_and_reaches_reports() -> None:
     # The finding reaches the standard report path (JSON + Markdown), not just
     # the diff_sycl unit detector.
     import json as _json
+
     payload = _json.loads(to_json(result))
     assert payload["verdict"] == "BREAKING"
     assert "piDevicesGet" in to_markdown(result)
@@ -187,7 +201,7 @@ def _ur_snapshot(version: str, entry_points: list[str]) -> AbiSnapshot:
     plugin = SyclPluginInfo(
         name="level_zero",
         library="libur_adapter_level_zero.so",
-        interface_type="ur",          # Unified Runtime, not PI
+        interface_type="ur",  # Unified Runtime, not PI
         pi_version="0.10",
         entry_points=entry_points,
         backend_type="level_zero",
@@ -244,9 +258,14 @@ class _CtfBlob:
         self._offsets[s] = off
         return off
 
-    def _add(self, name: str, kind: int, vlen: int, size_or_type: int, extra: bytes = b"") -> None:
+    def _add(
+        self, name: str, kind: int, vlen: int, size_or_type: int, extra: bytes = b""
+    ) -> None:
         info = (kind << 24) | (vlen & 0xFFFF)
-        self._types.append(struct.pack("<III", self._str(name) if name else 0, info, size_or_type) + extra)
+        self._types.append(
+            struct.pack("<III", self._str(name) if name else 0, info, size_or_type)
+            + extra
+        )
 
     def build_struct(self, struct_name: str, n_fields: int) -> bytes:
         self._add("int", CTF_K_INTEGER, 0, 4, extra=struct.pack("<I", 32))
@@ -257,13 +276,17 @@ class _CtfBlob:
         type_data = b"".join(self._types)
         str_data = bytes(self._strings)
         header = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, 0)
-        header += struct.pack("<IIIIIIII", 0, 0, 0, 0, 0, 0, len(type_data), len(str_data))
+        header += struct.pack(
+            "<IIIIIIII", 0, 0, 0, 0, 0, 0, len(type_data), len(str_data)
+        )
         return header + type_data + str_data
 
 
 def _ctf_snapshot(version: str, struct_name: str, n_fields: int) -> AbiSnapshot:
     meta = parse_ctf_from_bytes(_CtfBlob().build_struct(struct_name, n_fields))
-    return AbiSnapshot(library="vmlinux", version=version, dwarf=meta.to_dwarf_metadata())
+    return AbiSnapshot(
+        library="vmlinux", version=version, dwarf=meta.to_dwarf_metadata()
+    )
 
 
 def test_ctf_struct_gains_field_is_breaking_through_compare() -> None:
@@ -288,7 +311,9 @@ def test_committed_btf_example_matches_ground_truth() -> None:
 
     def _snap(blob: str) -> AbiSnapshot:
         meta = parse_btf_from_bytes((case / blob).read_bytes())
-        return AbiSnapshot(library="vmlinux", version=blob, dwarf=meta.to_dwarf_metadata())
+        return AbiSnapshot(
+            library="vmlinux", version=blob, dwarf=meta.to_dwarf_metadata()
+        )
 
     result = compare(_snap("v1.btf"), _snap("v2.btf"))
     assert result.verdict.value == entry["expected"]
@@ -300,6 +325,7 @@ def test_committed_btf_example_matches_ground_truth() -> None:
 def test_resolve_input_ingests_raw_btf_blob() -> None:
     """resolve_input() detects a bare BTF blob by magic and parses it (no ELF)."""
     from abicheck.service import resolve_input
+
     case = example_catalog.case_dir("case121_kernel_btf_struct_field_added")
     snap = resolve_input(case / "v1.btf")
     assert snap.dwarf is not None and snap.dwarf.has_dwarf
@@ -311,6 +337,7 @@ def test_resolve_input_ingests_raw_ctf_blob() -> None:
     import tempfile
 
     from abicheck.service import resolve_input
+
     with tempfile.TemporaryDirectory() as td:
         blob = Path(td) / "types.ctf"
         blob.write_bytes(_CtfBlob().build_struct("task_state", n_fields=2))
@@ -365,6 +392,7 @@ def test_resolve_input_rejects_truncated_btf_blob() -> None:
 
     from abicheck.errors import ValidationError
     from abicheck.service import resolve_input
+
     # BTF magic (little-endian 0xEB9F) + version, then a truncated/garbage body.
     bad = struct.pack("<HBB", BTF_MAGIC, BTF_VERSION, 0) + b"\x00\x00\x00"
     with tempfile.TemporaryDirectory() as td:
@@ -384,6 +412,7 @@ def test_resolve_input_rejects_header_only_btf_blob() -> None:
 
     from abicheck.errors import ValidationError
     from abicheck.service import resolve_input
+
     # 24-byte BTF header with type_off/len=0 and a 1-byte string table — a valid
     # header but no type records.
     header = struct.pack("<HBBIIIII", BTF_MAGIC, BTF_VERSION, 0, 24, 0, 0, 0, 1)
@@ -402,6 +431,7 @@ def test_resolve_input_non_typeinfo_file_is_not_misdetected() -> None:
 
     from abicheck.errors import ValidationError
     from abicheck.service import resolve_input
+
     with tempfile.TemporaryDirectory() as td:
         f = Path(td) / "notes.txt"
         f.write_text("just some text, not a type-info blob\n")

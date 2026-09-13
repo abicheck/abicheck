@@ -1,4 +1,5 @@
 """Tests for package extraction layer (ADR-006)."""
+
 from __future__ import annotations
 
 import io
@@ -310,16 +311,12 @@ class TestValidateSymlinkTarget:
         # Create the directory so resolve works
         (tmp_path / "usr" / "lib").mkdir(parents=True)
         (tmp_path / "usr" / "lib" / "libfoo.so.1").touch()
-        _validate_symlink_target(
-            "usr/lib/libfoo.so", "libfoo.so.1", tmp_path
-        )
+        _validate_symlink_target("usr/lib/libfoo.so", "libfoo.so.1", tmp_path)
 
     def test_escaping_symlink_rejected(self, tmp_path: Path) -> None:
         (tmp_path / "usr" / "lib").mkdir(parents=True)
         with pytest.raises(ExtractionSecurityError, match="symlink target"):
-            _validate_symlink_target(
-                "usr/lib/evil", "../../../../etc/passwd", tmp_path
-            )
+            _validate_symlink_target("usr/lib/evil", "../../../../etc/passwd", tmp_path)
 
     def test_duplicate_member_validated_against_own_parent_not_stale_target(
         self, tmp_path: Path
@@ -454,10 +451,13 @@ class TestDetectExtractor:
 class TestTarExtractor:
     def test_basic_extraction(self, tmp_path: Path) -> None:
         archive = tmp_path / "test.tar.gz"
-        _make_tar(archive, {
-            "usr/lib/libfoo.so": b"\x7fELF fake",
-            "usr/lib/libbar.so": b"\x7fELF fake",
-        })
+        _make_tar(
+            archive,
+            {
+                "usr/lib/libfoo.so": b"\x7fELF fake",
+                "usr/lib/libbar.so": b"\x7fELF fake",
+            },
+        )
         out = tmp_path / "output"
         out.mkdir()
         ext = TarExtractor()
@@ -494,6 +494,7 @@ class TestTarExtractor:
     def test_path_traversal_rejected(self, tmp_path: Path) -> None:
         archive = tmp_path / "evil.tar.gz"
         import io
+
         with tarfile.open(archive, "w:gz") as tf:
             info = tarfile.TarInfo(name="../../../etc/passwd")
             info.size = 4
@@ -507,6 +508,7 @@ class TestTarExtractor:
     def test_absolute_path_rejected(self, tmp_path: Path) -> None:
         archive = tmp_path / "evil.tar.gz"
         import io
+
         with tarfile.open(archive, "w:gz") as tf:
             info = tarfile.TarInfo(name="/etc/passwd")
             info.size = 4
@@ -605,17 +607,23 @@ class TestIsElfSharedObject:
         _make_minimal_elf_dso_with_interp(f)
         assert _is_elf_shared_object(f) is False
 
-    def test_pie_name_containing_so_without_boundary_is_rejected(self, tmp_path: Path) -> None:
+    def test_pie_name_containing_so_without_boundary_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         f = tmp_path / "app.solver"
         _make_minimal_elf_dso_with_interp(f)
         assert _is_elf_shared_object(f) is False
 
-    def test_pie_name_with_non_versioned_so_suffix_is_rejected(self, tmp_path: Path) -> None:
+    def test_pie_name_with_non_versioned_so_suffix_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         f = tmp_path / "app.so.tmp"
         _make_minimal_elf_dso_with_interp(f)
         assert _is_elf_shared_object(f) is False
 
-    def test_pie_name_with_partial_version_so_suffix_is_rejected(self, tmp_path: Path) -> None:
+    def test_pie_name_with_partial_version_so_suffix_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         for name in ("app.so.1.tmp", "app.so.1a"):
             f = tmp_path / name
             _make_minimal_elf_dso_with_interp(f)
@@ -716,7 +724,9 @@ class TestIsElfSharedObject:
         _make_malformed_elf_dso_with_missing_phdr(f)
         assert _is_elf_shared_object(f) is False
 
-    def test_invalid_program_header_entry_size_is_rejected(self, tmp_path: Path) -> None:
+    def test_invalid_program_header_entry_size_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         f = tmp_path / "libbad.so"
         _make_malformed_elf_dso_with_invalid_phentsize(f)
         assert _is_elf_shared_object(f) is False
@@ -854,11 +864,15 @@ class TestCompareReleaseTarPackages:
     """Integration tests using tar archives (no rpm2cpio/ar needed)."""
 
     def _make_snapshot_tar(
-        self, tmp_path: Path, name: str, snapshot_json: str,
+        self,
+        tmp_path: Path,
+        name: str,
+        snapshot_json: str,
     ) -> Path:
         """Create a tar.gz containing a JSON snapshot in usr/lib/."""
         archive = tmp_path / name
         import io
+
         with tarfile.open(archive, "w:gz") as tf:
             data = snapshot_json.encode()
             info = tarfile.TarInfo(name="libfoo.so.json")
@@ -875,25 +889,45 @@ class TestCompareReleaseTarPackages:
         from abicheck.serialization import snapshot_to_json
 
         snap_old = AbiSnapshot(
-            library="libfoo.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         snap_new = AbiSnapshot(
-            library="libfoo.so", version="2.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
 
         old_tar = self._make_snapshot_tar(
-            tmp_path, "old.tar.gz", snapshot_to_json(snap_old),
+            tmp_path,
+            "old.tar.gz",
+            snapshot_to_json(snap_old),
         )
         new_tar = self._make_snapshot_tar(
-            tmp_path, "new.tar.gz", snapshot_to_json(snap_new),
+            tmp_path,
+            "new.tar.gz",
+            snapshot_to_json(snap_new),
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_tar), str(new_tar), "-o", "json=-"])
+        result = runner.invoke(
+            main, ["compare", str(old_tar), str(new_tar), "-o", "json=-"]
+        )
         # Should succeed — NO_CHANGE since snapshots are identical
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
@@ -908,16 +942,27 @@ class TestCompareReleaseTarPackages:
         from abicheck.serialization import snapshot_to_json
 
         snap = AbiSnapshot(
-            library="libfoo.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         tar = self._make_snapshot_tar(
-            tmp_path, "pkg.tar.gz", snapshot_to_json(snap),
+            tmp_path,
+            "pkg.tar.gz",
+            snapshot_to_json(snap),
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(tar), str(tar), "-o", "json=-", "--keep-extracted"])
+        result = runner.invoke(
+            main, ["compare", str(tar), str(tar), "-o", "json=-", "--keep-extracted"]
+        )
         assert result.exit_code == 64, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -932,9 +977,16 @@ class TestCompareReleaseDirectoryPassthrough:
         from abicheck.serialization import snapshot_to_json
 
         snap = AbiSnapshot(
-            library="libfoo.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
 
         old_dir = tmp_path / "old"
@@ -945,7 +997,9 @@ class TestCompareReleaseDirectoryPassthrough:
         (new_dir / "libfoo.so.json").write_text(snapshot_to_json(snap))
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"])
+        result = runner.invoke(
+            main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"]
+        )
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -966,11 +1020,14 @@ class TestWheelExtractor:
 
     def test_extract_whl(self, tmp_path: Path) -> None:
         whl = tmp_path / "test.whl"
-        _make_wheel(whl, {
-            "mylib/core.so": b"\x7fELF fake",
-            "mylib/__init__.py": b"import core",
-            "mylib-1.0.dist-info/METADATA": b"Name: mylib",
-        })
+        _make_wheel(
+            whl,
+            {
+                "mylib/core.so": b"\x7fELF fake",
+                "mylib/__init__.py": b"import core",
+                "mylib-1.0.dist-info/METADATA": b"Name: mylib",
+            },
+        )
         out = tmp_path / "output"
         out.mkdir()
         result = WheelExtractor().extract(whl, out)
@@ -1040,10 +1097,14 @@ class TestParseManylinuxGlibcFloor:
                 id="no_manylinux_tag_macosx",
             ),
             pytest.param(
-                "pkg-1.0-py3-none-any.whl", None, id="no_manylinux_tag_any",
+                "pkg-1.0-py3-none-any.whl",
+                None,
+                id="no_manylinux_tag_any",
             ),
             pytest.param(
-                "manylinux_2_27", "2.27", id="bare_tag_without_arch_suffix",
+                "manylinux_2_27",
+                "2.27",
+                id="bare_tag_without_arch_suffix",
             ),
             # A distribution named "manylinux_2_17_helper" makes no
             # manylinux promise at all — only its platform-tag segment (the
@@ -1062,9 +1123,7 @@ class TestParseManylinuxGlibcFloor:
             ),
         ],
     )
-    def test_parse_manylinux_glibc_floor(
-        self, name: str, expected: str | None
-    ) -> None:
+    def test_parse_manylinux_glibc_floor(self, name: str, expected: str | None) -> None:
         assert parse_manylinux_glibc_floor(name) == expected
 
 
@@ -1097,7 +1156,9 @@ class TestParseMusllinuxFloor:
                 id="no_musllinux_tag_manylinux",
             ),
             pytest.param(
-                "pkg-1.0-py3-none-any.whl", None, id="no_musllinux_tag_any",
+                "pkg-1.0-py3-none-any.whl",
+                None,
+                id="no_musllinux_tag_any",
             ),
             pytest.param(
                 "pkg-1.0-cp311-cp311-musllinux_bogus_x86_64.whl",
@@ -1185,7 +1246,9 @@ class TestParseMacosDeploymentTargetFloor:
                 id="no_macos_tag_manylinux",
             ),
             pytest.param(
-                "pkg-1.0-py3-none-any.whl", None, id="no_macos_tag_any",
+                "pkg-1.0-py3-none-any.whl",
+                None,
+                id="no_macos_tag_any",
             ),
             pytest.param(
                 "pkg-1.0-cp311-cp311-macosx_11_arm64.whl",
@@ -1337,9 +1400,7 @@ class TestParseNumpyRequirementFromMetadata:
         # optional extra, just conditional on the interpreter version. A
         # blanket "any marker at all" skip previously discarded this real
         # requirement (Codex review).
-        text = (
-            'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23; python_version >= "3.9"\n'
-        )
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23; python_version >= "3.9"\n'
         assert parse_numpy_requirement_from_metadata(text) == ">=1.23"
 
     def test_platform_gated_numpy_is_a_real_requirement(self) -> None:
@@ -1612,9 +1673,7 @@ class TestParseWheelNumpyRequirement:
                 'Requires-Dist: numpy>=2; python_version >= "3.12"\n',
             )
         assert (
-            parse_wheel_numpy_requirement(
-                whl, environment={"python_version": "3.12"}
-            )
+            parse_wheel_numpy_requirement(whl, environment={"python_version": "3.12"})
             == ">=2"
         )
 
@@ -1750,10 +1809,7 @@ class TestParseWheelNumpyRequirement:
         # macosx x86_64/arm64 tags) must NOT derive a platform_machine at
         # all -- checking one arch's slice of it must not silently pick up
         # the OTHER arch's marker evaluation.
-        whl = (
-            tmp_path
-            / "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl"
-        )
+        whl = tmp_path / "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl"
         with zipfile.ZipFile(whl, "w") as zf:
             zf.writestr(
                 "pkg-1.0.dist-info/METADATA",
@@ -1770,9 +1826,7 @@ class TestParseWheelNumpyRequirement:
 class TestPythonVersionFromWheelFilename:
     def test_cp_tag(self) -> None:
         assert (
-            _python_version_from_wheel_filename(
-                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
-            )
+            _python_version_from_wheel_filename("pkg-1.0-cp311-cp311-linux_x86_64.whl")
             == "3.11"
         )
 
@@ -1799,9 +1853,7 @@ class TestPythonVersionFromWheelFilename:
         )
 
     def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
-        assert (
-            _python_version_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
-        )
+        assert _python_version_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _python_version_from_wheel_filename("pkg-1.0.tar.gz") is None
@@ -1868,8 +1920,7 @@ class TestPythonFullVersionFromWheelFilename:
 
     def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
         assert (
-            _python_full_version_from_wheel_filename("pkg-1.0-py3-none-any.whl")
-            is None
+            _python_full_version_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
         )
 
     def test_non_wheel_filename_returns_none(self) -> None:
@@ -1949,8 +2000,7 @@ class TestImplementationNameFromWheelFilename:
 
     def test_generic_py_tag_makes_no_implementation_promise(self) -> None:
         assert (
-            _implementation_name_from_wheel_filename("pkg-1.0-py3-none-any.whl")
-            is None
+            _implementation_name_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
         )
 
     def test_non_wheel_filename_returns_none(self) -> None:
@@ -2014,9 +2064,7 @@ class TestPlatformSystemFromWheelFilename:
 
     def test_plain_linux_tag(self) -> None:
         assert (
-            _platform_system_from_wheel_filename(
-                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
-            )
+            _platform_system_from_wheel_filename("pkg-1.0-cp311-cp311-linux_x86_64.whl")
             == "Linux"
         )
 
@@ -2030,16 +2078,12 @@ class TestPlatformSystemFromWheelFilename:
 
     def test_win_tag(self) -> None:
         assert (
-            _platform_system_from_wheel_filename(
-                "pkg-1.0-cp311-cp311-win_amd64.whl"
-            )
+            _platform_system_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl")
             == "Windows"
         )
 
     def test_any_tag_returns_none(self) -> None:
-        assert (
-            _platform_system_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
-        )
+        assert _platform_system_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _platform_system_from_wheel_filename("pkg-1.0.tar.gz") is None
@@ -2097,9 +2141,7 @@ class TestOsNameFromWheelFilename:
         )
 
     def test_win_tag(self) -> None:
-        assert (
-            _os_name_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl") == "nt"
-        )
+        assert _os_name_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl") == "nt"
 
     def test_any_tag_returns_none(self) -> None:
         assert _os_name_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
@@ -2195,9 +2237,7 @@ class TestPlatformMachineFromWheelFilename:
         )
 
     def test_any_tag_returns_none(self) -> None:
-        assert (
-            _platform_machine_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
-        )
+        assert _platform_machine_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _platform_machine_from_wheel_filename("pkg-1.0.tar.gz") is None
@@ -2316,9 +2356,16 @@ class TestCompareReleaseWheelPackages:
         from abicheck.serialization import snapshot_to_json
 
         snap = AbiSnapshot(
-            library="libfoo.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
 
         old_whl = tmp_path / "old.whl"
@@ -2327,7 +2374,9 @@ class TestCompareReleaseWheelPackages:
         _make_wheel(new_whl, {"libfoo.so.json": snapshot_to_json(snap).encode()})
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_whl), str(new_whl), "-o", "json=-"])
+        result = runner.invoke(
+            main, ["compare", str(old_whl), str(new_whl), "-o", "json=-"]
+        )
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
 
@@ -2579,7 +2628,9 @@ class TestTarExtractorSymlinks:
         out.mkdir()
         TarExtractor().extract(archive, out)
         assert (out / "lib/libfoo.so.1.0").read_bytes() == b"data"
-        assert (out / "lib/libfoo.so").resolve() == (out / "lib/libfoo.so.1.0").resolve()
+        assert (out / "lib/libfoo.so").resolve() == (
+            out / "lib/libfoo.so.1.0"
+        ).resolve()
 
     def test_pre_312_path_duplicate_symlink_member_escape_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2668,9 +2719,7 @@ class TestTarExtractorSymlinks:
         TarExtractor().extract(archive, out)
         assert (out / "a/safe").exists()
 
-    def test_hardlink_naming_a_regular_file_is_unaffected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_hardlink_naming_a_regular_file_is_unaffected(self, tmp_path: Path) -> None:
         # A hard link naming an ordinary regular file (not a symlink) has
         # nothing to relocate -- must not be rejected by this check.
         archive = tmp_path / "regular.tar"
@@ -3137,9 +3186,7 @@ class TestRejectOversizedDeclaredContent:
             def __iter__(self):  # type: ignore[no-untyped-def]
                 for i in range(self._total):
                     if self.yielded > 3 + 1:
-                        raise AssertionError(
-                            "iterated well past the member-count cap"
-                        )
+                        raise AssertionError("iterated well past the member-count cap")
                     self.yielded += 1
                     yield _FakeMember(f"m{i}.bin", 0)
 
@@ -3237,9 +3284,7 @@ class TestRejectHardlinkFallbackAmplification:
     (Codex)."""
 
     @staticmethod
-    def _write_archive(
-        tmp_path: Path, *, real_size: int, hardlink_count: int
-    ) -> Path:
+    def _write_archive(tmp_path: Path, *, real_size: int, hardlink_count: int) -> Path:
         archive = tmp_path / "hardlinks.tar"
         with tarfile.open(archive, "w") as tf:
             info = tarfile.TarInfo(name="real.bin")
@@ -3614,7 +3659,9 @@ class TestResolveDebugInfo:
         _make_minimal_elf_so(binary)
 
         debug_dir = tmp_path / "debug"
-        bid_file = debug_dir / "usr" / "lib" / "debug" / ".build-id" / "ab" / "cdef1234.debug"
+        bid_file = (
+            debug_dir / "usr" / "lib" / "debug" / ".build-id" / "ab" / "cdef1234.debug"
+        )
         bid_file.parent.mkdir(parents=True)
         bid_file.write_bytes(b"debug data")
 
@@ -3630,7 +3677,10 @@ class TestReadBuildId:
         """_read_build_id returns None when elftools is not available."""
         binary = tmp_path / "libfoo.so"
         _make_minimal_elf_so(binary)
-        with mock.patch.dict("sys.modules", {"elftools": None, "elftools.elf": None, "elftools.elf.elffile": None}):
+        with mock.patch.dict(
+            "sys.modules",
+            {"elftools": None, "elftools.elf": None, "elftools.elf.elffile": None},
+        ):
             result = _read_build_id(binary)
         assert result is None
 
@@ -3708,8 +3758,12 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run) as mock_run:
-                with mock.patch("abicheck.package.TarExtractor._safe_extract_zst_tar") as extract_zst:
+            with mock.patch(
+                "abicheck.package.subprocess.run", side_effect=fake_run
+            ) as mock_run:
+                with mock.patch(
+                    "abicheck.package.TarExtractor._safe_extract_zst_tar"
+                ) as extract_zst:
                     DebExtractor().extract(f, out)
 
         mock_run.assert_called_once()
@@ -3779,7 +3833,9 @@ class TestDebExtractorExtended:
         assert result.symbols_file.name == "symbols"
         assert result.symbols_file.read_text() == symbols_text
 
-    def test_extract_no_control_tar_leaves_symbols_file_none(self, tmp_path: Path) -> None:
+    def test_extract_no_control_tar_leaves_symbols_file_none(
+        self, tmp_path: Path
+    ) -> None:
         """A .deb with no control.tar.* member (malformed, but data.tar.*
         alone is enough to raise SnapshotError only when data.tar.* itself
         is missing) leaves symbols_file None rather than raising."""
@@ -3801,7 +3857,8 @@ class TestDebExtractorExtended:
         assert result.symbols_file is None
 
     def test_extract_control_tar_without_symbols_leaves_symbols_file_none(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """A control.tar.* present but with no ./symbols member (the common
         case -- most packages aren't built with dpkg-gensymbols) leaves
@@ -3829,7 +3886,8 @@ class TestDebExtractorExtended:
         assert result.symbols_file is None
 
     def test_extract_data_tar_planted_deb_control_symbols_is_not_trusted(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Codex review: data.tar.*'s own payload can contain a member
         literally named .deb_control/symbols (crafted or coincidental); if
@@ -3866,7 +3924,8 @@ class TestDebExtractorExtended:
         assert not (out / ".deb_control" / "symbols").exists()
 
     def test_extract_data_tar_planted_deb_control_as_plain_file_is_removed(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Same collision as above, but data.tar.* plants .deb_control itself
         as a plain file (not a directory) -- control_dir.mkdir() would raise
@@ -3900,7 +3959,8 @@ class TestDebExtractorExtended:
         assert result.symbols_file.read_text() == symbols_text
 
     def test_control_tar_planted_shared_object_is_not_discovered(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Codex review: control.tar.* (package metadata -- control,
         md5sums, the symbols contract) is extracted into target_dir/.deb_control/,
@@ -3942,7 +4002,9 @@ class TestDebExtractorExtended:
         assert "libgenuine.so" in result_names
 
     def test_extract_relative_deb_path_passes_absolute_path_to_ar(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """DebExtractor changes cwd for ar, so relative input paths must be resolved."""
         f = tmp_path / "test.deb"
@@ -3972,7 +4034,9 @@ class TestDebExtractorExtended:
         assert TarExtractor().detect(f)
         assert is_package(f)
 
-    def test_safe_extract_zst_tar_uses_private_staging_dir(self, tmp_path: Path) -> None:
+    def test_safe_extract_zst_tar_uses_private_staging_dir(
+        self, tmp_path: Path
+    ) -> None:
         """Decompression must not clobber a sibling .tar next to user input."""
         cache = tmp_path / "cache"
         target = tmp_path / "target"
@@ -3997,7 +4061,9 @@ class TestDebExtractorExtended:
         mock_dctx.stream_reader.return_value = FakeReader()
 
         with mock.patch.dict(sys.modules, {"zstandard": mock_zstd}):
-            with mock.patch("abicheck.package.TarExtractor._safe_extract") as safe_extract:
+            with mock.patch(
+                "abicheck.package.TarExtractor._safe_extract"
+            ) as safe_extract:
                 TarExtractor._safe_extract_zst_tar(zst_path, target)
 
         tar_path = safe_extract.call_args.args[0]
@@ -4009,7 +4075,8 @@ class TestDebExtractorExtended:
         assert sibling_tar.read_text() == "do not touch"
 
     def test_safe_extract_zst_tar_cli_fallback_writes_to_staging_dir(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """The zstd CLI fallback must also avoid writing next to the input."""
         cache = tmp_path / "cache"
@@ -4041,11 +4108,15 @@ class TestDebExtractorExtended:
         proc.poll.return_value = 0
 
         with mock.patch("builtins.__import__", side_effect=fake_import):
-            with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/zstd"):
+            with mock.patch(
+                "abicheck.package.shutil.which", return_value="/usr/bin/zstd"
+            ):
                 with mock.patch(
                     "abicheck.package.subprocess.Popen", return_value=proc
                 ) as popen_zstd:
-                    with mock.patch("abicheck.package.TarExtractor._safe_extract") as safe_extract:
+                    with mock.patch(
+                        "abicheck.package.TarExtractor._safe_extract"
+                    ) as safe_extract:
                         TarExtractor._safe_extract_zst_tar(zst_path, target)
 
         cmd = popen_zstd.call_args.args[0]
@@ -4117,9 +4188,16 @@ class TestCompareReleaseDsoOnly:
         from abicheck.serialization import snapshot_to_json
 
         snap = AbiSnapshot(
-            library="libfoo.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
 
         old_dir = tmp_path / "old"
@@ -4132,7 +4210,18 @@ class TestCompareReleaseDsoOnly:
         cfg.write_text("release:\n  dso_only: true\n")
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_dir), str(new_dir), "-o", "json=-", "--config", str(cfg)])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "-o",
+                "json=-",
+                "--config",
+                str(cfg),
+            ],
+        )
         # Flag accepted (no usage error); zero pairs is exit 1 `no_comparison_completed` (ADR-065 D7)
         assert result.exit_code == 1, f"Exit {result.exit_code}: {result.output}"
         assert '"reasons": [\n      "no_comparison_completed"\n    ]' in result.stdout
@@ -4151,9 +4240,16 @@ class TestExtractedTempDirsAlwaysCleanedUp:
         from abicheck.serialization import snapshot_to_json
 
         snap = AbiSnapshot(
-            library="libfoo.so", version="1.0",
-            functions=[Function(name="foo", mangled="_Z3foov",
-                                return_type="int", visibility=Visibility.PUBLIC)],
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
 
         archive = tmp_path / "pkg.tar.gz"
@@ -4164,7 +4260,9 @@ class TestExtractedTempDirsAlwaysCleanedUp:
             tf.addfile(info, io.BytesIO(data))
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(archive), str(archive), "-o", "json=-"])
+        result = runner.invoke(
+            main, ["compare", str(archive), str(archive), "-o", "json=-"]
+        )
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
         assert "Extracted files kept in:" not in result.output
 
@@ -4194,7 +4292,9 @@ class TestRpmPostValidate:
         lib_dir.mkdir(parents=True)
         evil = lib_dir / "evil.so"
         evil.symlink_to("/etc/passwd")
-        with pytest.raises(ExtractionSecurityError, match="escapes extraction root|symlink target"):
+        with pytest.raises(
+            ExtractionSecurityError, match="escapes extraction root|symlink target"
+        ):
             RpmExtractor._post_validate(tmp_path)
 
 
@@ -4330,7 +4430,9 @@ class TestRpmPostValidateDirectories:
         external_dir.mkdir(exist_ok=True)
         evil_dir = lib_dir / "evil_dir"
         evil_dir.symlink_to(external_dir)
-        with pytest.raises(ExtractionSecurityError, match="escapes extraction root|symlink target"):
+        with pytest.raises(
+            ExtractionSecurityError, match="escapes extraction root|symlink target"
+        ):
             RpmExtractor._post_validate(tmp_path)
 
     def test_nested_directory_safe(self, tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ per-DLL imported-function drift, file-version downgrade, subsystem-version
 floor, and the LF_ONEMETHOD → AdvancedDwarfMetadata.calling_conventions
 bridge. All tests use synthetic metadata — no real binaries required.
 """
+
 from __future__ import annotations
 
 import struct
@@ -75,13 +76,16 @@ _CFG = 0x4000
 
 # ── DllCharacteristics hardening ─────────────────────────────────────────────
 
+
 class TestPeHardening:
     def test_weakened(self):
         old = _pe(dll_characteristics=_NX | _ASLR | _CFG)
         new = _pe(dll_characteristics=_NX)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.PE_HARDENING_WEAKENED in _kinds(r)
-        change = next(c for c in r.changes if c.kind == ChangeKind.PE_HARDENING_WEAKENED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.PE_HARDENING_WEAKENED
+        )
         assert "DYNAMIC_BASE" in change.description
         assert "GUARD_CF" in change.description
 
@@ -110,6 +114,7 @@ class TestPeHardening:
 
 # ── Delay-load imports ───────────────────────────────────────────────────────
 
+
 class TestDelayImports:
     def test_added(self):
         old = _pe(delay_imports={})
@@ -136,13 +141,16 @@ class TestDelayImports:
 
 # ── Per-DLL imported functions ───────────────────────────────────────────────
 
+
 class TestPeImportFunctions:
     def test_added_function(self):
         old = _pe(imports={"KERNEL32.dll": ["CreateFileW"]})
         new = _pe(imports={"KERNEL32.dll": ["CreateFileW", "VirtualAlloc2"]})
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_ADDED in _kinds(r)
-        change = next(c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED
+        )
         assert "KERNEL32.dll" in change.description
 
     def test_removed_function(self):
@@ -178,13 +186,16 @@ class TestPeImportFunctions:
     def test_new_dll_functions_not_itemized(self):
         # A wholly-new DLL is NEEDED_ADDED; its functions are not itemized.
         old = _pe(imports={"KERNEL32.dll": ["CreateFileW"]})
-        new = _pe(imports={"KERNEL32.dll": ["CreateFileW"], "USER32.dll": ["MessageBoxW"]})
+        new = _pe(
+            imports={"KERNEL32.dll": ["CreateFileW"], "USER32.dll": ["MessageBoxW"]}
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.NEEDED_ADDED in _kinds(r)
         assert ChangeKind.IMPORTED_SYMBOL_ADDED not in _kinds(r)
 
 
 # ── Version drift ────────────────────────────────────────────────────────────
+
 
 class TestPeVersions:
     def test_file_version_downgraded(self):
@@ -218,9 +229,12 @@ class TestPeVersions:
 
 # ── PDB → calling-convention bridge ─────────────────────────────────────────
 
+
 def _mfunction_record(ti: int, calling_convention: int) -> TpiRecord:
     # rvtype, classtype, thistype, calltype, funcattr, parmcount, arglist, thisadjust
-    payload = struct.pack("<IIIBBHIi", 0x74, 0x1000, 0x1001, calling_convention, 0, 0, 0, 0)
+    payload = struct.pack(
+        "<IIIBBHIi", 0x74, 0x1000, 0x1001, calling_convention, 0, 0, 0, 0
+    )
     return TpiRecord(type_index=ti, leaf=LF_MFUNCTION, data=payload)
 
 

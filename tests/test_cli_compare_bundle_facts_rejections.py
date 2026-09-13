@@ -126,7 +126,12 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--dry-run", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--dry-run",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -139,7 +144,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--contract", "public", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--contract",
+            "public",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -152,7 +163,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
 
         assert code == 1
@@ -197,7 +212,7 @@ class TestCompareOldBundleFactsEarlyRejections:
                             "typedefs": [],
                             "build_mode": [],
                         }
-                    }
+                    },
                 }
             )
         )
@@ -238,7 +253,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
 
         assert code == 1
@@ -275,7 +294,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         monkeypatch.setattr(compare_bundle_facts, "dispatch", _fake_dispatch)
 
         code, _out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--config", str(cfg), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
         )
 
         assert code == 0
@@ -299,7 +324,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         monkeypatch.setattr(compare_bundle_facts, "dispatch", _fake_dispatch)
 
         code, _out = _invoke(
-            "compare", str(facts_path), str(new_dir), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
 
         assert code == 0
@@ -405,7 +434,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         pack_path.write_text("id: x\nversion: 1\nkind: policy\nassignments: {}\n")
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--pack", str(pack_path), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--pack",
+            str(pack_path),
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -490,7 +525,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--depth", "build", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--depth",
+            "build",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -503,7 +544,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--depth", "source", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--depth",
+            "source",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -519,7 +566,12 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--no-bundle-analysis", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--no-bundle-analysis",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -641,7 +693,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         out_path = tmp_path / "nonexistent_dir" / "out.json"
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "-o", f"json={out_path}",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "-o",
+            f"json={out_path}",
         )
 
         assert code == 0, out
@@ -663,7 +719,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         before = set(Path(tempfile.gettempdir()).iterdir())
 
         code, out = _invoke(
-            "compare", str(facts_path), str(malformed_archive), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(malformed_archive),
+            "-o",
+            "json=-",
         )
 
         assert code != 0, out
@@ -785,13 +845,21 @@ class TestCompareOldBundleFactsEarlyRejections:
         app_path.write_bytes(b"")
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--used-by", str(app_path), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--used-by",
+            str(app_path),
+            "-o",
+            "json=-",
         )
 
         assert code == 64
         assert "--used-by" in out
 
-    def test_assurance_require_complete_config_is_accepted(self, tmp_path: Path) -> None:
+    def test_assurance_require_complete_config_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
         # ADR-071 D8: this driver used to reject assurance.require_complete:
         # true (it had no channel for it). It has one now -- it folds every
         # member's own AnalysisAssurance off result.per_library through the
@@ -812,13 +880,21 @@ class TestCompareOldBundleFactsEarlyRejections:
         cfg_path.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--config", str(cfg_path), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg_path),
+            "-o",
+            "json=-",
         )
 
         assert "assurance.require_complete is not supported" not in out
         assert "no single analysis_assurance" not in out
 
-    def test_require_complete_analysis_flag_no_longer_exists(self, tmp_path: Path) -> None:
+    def test_require_complete_analysis_flag_no_longer_exists(
+        self, tmp_path: Path
+    ) -> None:
         # Old CLI spelling gone outright -- no alias, no deprecation window.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
@@ -864,7 +940,9 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--debug-root" in out
 
-    def test_no_surface_metrics_flag_is_needed_or_rejected(self, tmp_path: Path) -> None:
+    def test_no_surface_metrics_flag_is_needed_or_rejected(
+        self, tmp_path: Path
+    ) -> None:
         # CodeRabbit/Codex review on PR #1154: compare_release_against_
         # bundle_facts() now forwards surface_metrics=True unconditionally
         # to every per-library service.compare_snapshots() call, the same
@@ -891,7 +969,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         # pins is that its *absence* is not a rejection on this operand
         # shape, which is what the no-op assertion was really protecting.
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
 
         assert code != 64, out
@@ -935,7 +1017,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         monkeypatch.chdir(tmp_path)
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -1077,7 +1163,12 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--follow-deps", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--follow-deps",
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -1093,7 +1184,13 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir.mkdir()
 
         code, out = _invoke(
-            "compare", str(facts_path), str(new_dir), "--view", "show=breaking", "-o", "json=-",
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--view",
+            "show=breaking",
+            "-o",
+            "json=-",
         )
 
         assert code == 64

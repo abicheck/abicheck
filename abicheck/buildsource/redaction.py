@@ -20,6 +20,7 @@ mandatory before any command line or path is persisted in an evidence pack
 (ADR-028 "Negative/risks"). This is a *minimal* policy for the ADR-029 MVP;
 ADR-032 specifies the full capability/redaction model.
 """
+
 from __future__ import annotations
 
 import os
@@ -95,7 +96,11 @@ class RedactionPolicy:
                 key, _, _ = body.partition("=")
                 if _SECRET_DEFINE_RE.search(key):
                     return value[:2] + key + "=" + _REDACTED
-        if self.redact_secrets and "=" in value and _is_secret_flag(value.partition("=")[0]):
+        if (
+            self.redact_secrets
+            and "=" in value
+            and _is_secret_flag(value.partition("=")[0])
+        ):
             # --token=VALUE / --api-key=VALUE — redact a credential option's value.
             flag, _, _ = value.partition("=")
             return flag + "=" + _REDACTED

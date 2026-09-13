@@ -6,6 +6,7 @@ Covers:
 - SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED in RISK_KINDS (not BREAKING)
 - Integration: leaked-dependency symbols produce COMPATIBLE_WITH_RISK verdict
 """
+
 from __future__ import annotations
 
 import pytest
@@ -29,6 +30,7 @@ from abicheck.elf_metadata import (
 # ---------------------------------------------------------------------------
 # Tests for _guess_symbol_origin
 # ---------------------------------------------------------------------------
+
 
 class TestGuessSymbolOrigin:
     """Test heuristic origin detection for symbol names."""
@@ -67,22 +69,22 @@ class TestGuessSymbolOrigin:
     @pytest.mark.parametrize(
         "symbol",
         [
-            "_ZTIi",     # typeinfo for int
-            "_ZTSi",     # typeinfo-name for int
-            "_ZTIPi",    # typeinfo for int*
-            "_ZTSPi",    # typeinfo-name for int*
-            "_ZTIPKi",   # typeinfo for int const*
-            "_ZTSPKi",   # typeinfo-name for int const*
-            "_ZTIDu",    # typeinfo for char8_t
-            "_ZTSDu",    # typeinfo-name for char8_t
-            "_ZTIDh",    # typeinfo for half
-            "_ZTIDf",    # typeinfo for decimal32
-            "_ZTIDF32_",      # typeinfo for _Float32
-            "_ZTIPDF16_",     # typeinfo for _Float16*
-            "_ZTIPKDF128_",   # typeinfo for _Float128 const*
-            "_ZTIDF16b",      # typeinfo for std::bfloat16_t
-            "_ZTIPDF32x",     # typeinfo for _Float32x*
-            "_ZTIPKDF64x",    # typeinfo for _Float64x const*
+            "_ZTIi",  # typeinfo for int
+            "_ZTSi",  # typeinfo-name for int
+            "_ZTIPi",  # typeinfo for int*
+            "_ZTSPi",  # typeinfo-name for int*
+            "_ZTIPKi",  # typeinfo for int const*
+            "_ZTSPKi",  # typeinfo-name for int const*
+            "_ZTIDu",  # typeinfo for char8_t
+            "_ZTSDu",  # typeinfo-name for char8_t
+            "_ZTIDh",  # typeinfo for half
+            "_ZTIDf",  # typeinfo for decimal32
+            "_ZTIDF32_",  # typeinfo for _Float32
+            "_ZTIPDF16_",  # typeinfo for _Float16*
+            "_ZTIPKDF128_",  # typeinfo for _Float128 const*
+            "_ZTIDF16b",  # typeinfo for std::bfloat16_t
+            "_ZTIPDF32x",  # typeinfo for _Float32x*
+            "_ZTIPKDF64x",  # typeinfo for _Float64x const*
         ],
     )
     def test_cxx_fundamental_rtti_returns_libstdcxx(self, symbol):
@@ -103,12 +105,16 @@ class TestGuessSymbolOrigin:
 
     def test_native_project_typeinfo_returns_none(self):
         """Project-owned RTTI symbols must not be attributed to libstdc++."""
-        result = _guess_symbol_origin("_ZTIN11flatbuffers13FileNameSaverE", ["libstdc++.so.6"])
+        result = _guess_symbol_origin(
+            "_ZTIN11flatbuffers13FileNameSaverE", ["libstdc++.so.6"]
+        )
         assert result is None
 
     def test_native_project_typeinfo_name_returns_none(self):
         """Project-owned typeinfo-name symbols must not be attributed to libstdc++."""
-        result = _guess_symbol_origin("_ZTSN11flatbuffers13FileNameSaverE", ["libstdc++.so.6"])
+        result = _guess_symbol_origin(
+            "_ZTSN11flatbuffers13FileNameSaverE", ["libstdc++.so.6"]
+        )
         assert result is None
 
     @pytest.mark.parametrize(
@@ -203,6 +209,7 @@ class TestGuessSymbolOrigin:
 # Tests for ElfSymbol.origin_lib field
 # ---------------------------------------------------------------------------
 
+
 class TestElfSymbolOriginLib:
     """Test that ElfSymbol.origin_lib is populated correctly."""
 
@@ -224,6 +231,7 @@ class TestElfSymbolOriginLib:
     def test_elf_symbol_dataclass_fields(self):
         """ElfSymbol dataclass has all expected fields including origin_lib."""
         import dataclasses
+
         field_names = {f.name for f in dataclasses.fields(ElfSymbol)}
         assert "origin_lib" in field_names
 
@@ -231,6 +239,7 @@ class TestElfSymbolOriginLib:
 # ---------------------------------------------------------------------------
 # Tests for SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED in RISK_KINDS
 # ---------------------------------------------------------------------------
+
 
 class TestSymbolLeakedFromDependencyPolicy:
     """Test policy classification of SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED."""
@@ -303,12 +312,14 @@ class TestSymbolLeakedFromDependencyPolicy:
 # Integration: _diff_leaked_dependency_symbols detector
 # ---------------------------------------------------------------------------
 
+
 class TestDiffLeakedDependencySymbols:
     """Test that the detector in checker.py emits the correct Changes."""
 
     def _make_elf_meta(self, symbols: list[ElfSymbol]) -> object:
         """Build a minimal ElfMetadata-like object with a symbol_map."""
         from abicheck.elf_metadata import ElfMetadata
+
         meta = ElfMetadata()
         meta.symbols = symbols
         return meta
@@ -317,12 +328,14 @@ class TestDiffLeakedDependencySymbols:
         """A symbol with origin_lib removed from new ELF → Change emitted."""
         from abicheck.checker import _diff_leaked_dependency_symbols
 
-        old_elf = self._make_elf_meta([
-            ElfSymbol(
-                name="_ZNSt6thread8_M_startEv",
-                origin_lib="libstdc++.so.6",
-            )
-        ])
+        old_elf = self._make_elf_meta(
+            [
+                ElfSymbol(
+                    name="_ZNSt6thread8_M_startEv",
+                    origin_lib="libstdc++.so.6",
+                )
+            ]
+        )
         new_elf = self._make_elf_meta([])  # symbol removed
 
         changes = _diff_leaked_dependency_symbols(old_elf, new_elf)
@@ -335,9 +348,9 @@ class TestDiffLeakedDependencySymbols:
         """A removed symbol with origin_lib=None → no LEAKED change emitted."""
         from abicheck.checker import _diff_leaked_dependency_symbols
 
-        old_elf = self._make_elf_meta([
-            ElfSymbol(name="my_native_func", origin_lib=None)
-        ])
+        old_elf = self._make_elf_meta(
+            [ElfSymbol(name="my_native_func", origin_lib=None)]
+        )
         new_elf = self._make_elf_meta([])
 
         changes = _diff_leaked_dependency_symbols(old_elf, new_elf)
@@ -348,12 +361,14 @@ class TestDiffLeakedDependencySymbols:
         from abicheck.checker import _diff_leaked_dependency_symbols
 
         old_elf = self._make_elf_meta([])
-        new_elf = self._make_elf_meta([
-            ElfSymbol(
-                name="_ZGVnN4v_sin",
-                origin_lib="libmvec.so.1",
-            )
-        ])
+        new_elf = self._make_elf_meta(
+            [
+                ElfSymbol(
+                    name="_ZGVnN4v_sin",
+                    origin_lib="libmvec.so.1",
+                )
+            ]
+        )
 
         changes = _diff_leaked_dependency_symbols(old_elf, new_elf)
         assert len(changes) == 1
@@ -368,20 +383,24 @@ class TestDiffLeakedDependencySymbols:
         """
         from abicheck.checker import _diff_leaked_dependency_symbols
 
-        old_elf = self._make_elf_meta([
-            ElfSymbol(
-                name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
-                sym_type=SymbolType.FUNC,
-                origin_lib="libstdc++.so.6",
-            )
-        ])
-        new_elf = self._make_elf_meta([
-            ElfSymbol(
-                name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
-                sym_type=SymbolType.OBJECT,  # type changed
-                origin_lib="libstdc++.so.6",
-            )
-        ])
+        old_elf = self._make_elf_meta(
+            [
+                ElfSymbol(
+                    name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
+                    sym_type=SymbolType.FUNC,
+                    origin_lib="libstdc++.so.6",
+                )
+            ]
+        )
+        new_elf = self._make_elf_meta(
+            [
+                ElfSymbol(
+                    name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
+                    sym_type=SymbolType.OBJECT,  # type changed
+                    origin_lib="libstdc++.so.6",
+                )
+            ]
+        )
 
         # C2 fix: changed (not added/removed) symbols must NOT emit here
         changes = _diff_leaked_dependency_symbols(old_elf, new_elf)
@@ -411,6 +430,7 @@ class TestDiffLeakedDependencySymbols:
 # New tests: C1 post-parse fixup ordering
 # ---------------------------------------------------------------------------
 
+
 class TestPostParseFixup:
     """C1: post-parse origin fixup runs after .dynamic is parsed."""
 
@@ -430,6 +450,7 @@ class TestPostParseFixup:
 
         # Re-run the fixup (simulates what _parse() now does after sections are read)
         from abicheck.elf_metadata import _guess_symbol_origin
+
         _GENERIC_FALLBACKS = frozenset({"libstdc++.so.6", "libgcc_s.so.1", "libc.so.6"})
         for s in meta.symbols:
             if s.origin_lib is None or s.origin_lib in _GENERIC_FALLBACKS:
@@ -464,6 +485,7 @@ class TestPostParseFixup:
 # New tests: updated attributions M1/M2/M3/M4
 # ---------------------------------------------------------------------------
 
+
 class TestUpdatedAttributions:
     """Test corrected symbol attributions: M1/M2/M3/M4."""
 
@@ -478,7 +500,9 @@ class TestUpdatedAttributions:
         """M1: Various __svml_ variants."""
         for name in ("__svml_sin4", "__svml_exp4_mask", "__svml_log4"):
             result = _guess_symbol_origin(name, [])
-            assert result == "<intel-compiler-rt>", f"Expected <intel-compiler-rt> for {name}"
+            assert result == "<intel-compiler-rt>", (
+                f"Expected <intel-compiler-rt> for {name}"
+            )
 
     def test_ix86_to_libgcc_static(self):
         """M1: ix86_* → libgcc.a (static), not libgcc_s.so.1."""
@@ -569,7 +593,9 @@ class TestUpdatedAttributions:
 
     def test_ZNSt3__1_does_not_pick_libstdcxx(self):
         """M4: _ZNSt3__1* must NOT resolve to libstdc++.so.6 even if it's in needed."""
-        result = _guess_symbol_origin("_ZNSt3__112basic_stringIcEC1Ev", ["libstdc++.so.6"])
+        result = _guess_symbol_origin(
+            "_ZNSt3__112basic_stringIcEC1Ev", ["libstdc++.so.6"]
+        )
         # libstdc++ doesn't match "c++" without "stdc++" exclusion, but the
         # fallback is still libc++.so.1 (not libstdc++) for __1 namespace
         assert result == "libc++.so.1"
@@ -584,11 +610,13 @@ class TestUpdatedAttributions:
 # C2: no double annotation integration test
 # ---------------------------------------------------------------------------
 
+
 class TestNoDoubleAnnotation:
     """C2: a changed leaked symbol must produce only ONE Change record total."""
 
     def _make_elf_meta(self, symbols):
         from abicheck.elf_metadata import ElfMetadata
+
         meta = ElfMetadata()
         meta.symbols = symbols
         return meta
@@ -600,24 +628,28 @@ class TestNoDoubleAnnotation:
             _diff_leaked_dependency_symbols,
         )
 
-        old_elf = self._make_elf_meta([
-            ElfSymbol(
-                name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
-                sym_type=SymbolType.FUNC,
-                binding=SymbolBinding.GLOBAL,
-                size=0,
-                origin_lib="libstdc++.so.6",
-            )
-        ])
-        new_elf = self._make_elf_meta([
-            ElfSymbol(
-                name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
-                sym_type=SymbolType.OBJECT,  # type changed
-                binding=SymbolBinding.GLOBAL,
-                size=0,
-                origin_lib="libstdc++.so.6",
-            )
-        ])
+        old_elf = self._make_elf_meta(
+            [
+                ElfSymbol(
+                    name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
+                    sym_type=SymbolType.FUNC,
+                    binding=SymbolBinding.GLOBAL,
+                    size=0,
+                    origin_lib="libstdc++.so.6",
+                )
+            ]
+        )
+        new_elf = self._make_elf_meta(
+            [
+                ElfSymbol(
+                    name="_ZNSt6locale5_Impl16_M_check_same_nameEPKc",
+                    sym_type=SymbolType.OBJECT,  # type changed
+                    binding=SymbolBinding.GLOBAL,
+                    size=0,
+                    origin_lib="libstdc++.so.6",
+                )
+            ]
+        )
 
         changes_meta = _diff_elf_symbol_metadata(old_elf, new_elf)
         changes_leaked = _diff_leaked_dependency_symbols(old_elf, new_elf)
@@ -631,9 +663,9 @@ class TestNoDoubleAnnotation:
         # Combined: exactly the records from meta, no duplicates
         total = changes_meta + changes_leaked
         symbols_in_changes = [c.symbol for c in total]
-        assert symbols_in_changes.count("_ZNSt6locale5_Impl16_M_check_same_nameEPKc") == 1, (
-            "Symbol must appear in exactly one Change record, not duplicated"
-        )
+        assert (
+            symbols_in_changes.count("_ZNSt6locale5_Impl16_M_check_same_nameEPKc") == 1
+        ), "Symbol must appear in exactly one Change record, not duplicated"
 
 
 class TestEdgeCoverage:
@@ -642,21 +674,27 @@ class TestEdgeCoverage:
     def test_guess_symbol_origin_libcxx_fallback_no_needed(self):
         """_ZNSt3__1 with empty needed_libs → fallback to libc++.so.1"""
         from abicheck.elf_metadata import _guess_symbol_origin
+
         result = _guess_symbol_origin("_ZNSt3__1string8nposE", [])
         assert result == "libc++.so.1"
 
     def test_guess_symbol_origin_libcxx_in_needed(self):
         """_ZNSt3__1 with libc++ in needed_libs → returns that lib"""
         from abicheck.elf_metadata import _guess_symbol_origin
-        result = _guess_symbol_origin("_ZNKSt3__16vectorIiNS_9allocatorIiEEE4sizeEv", ["libc++.so.1"])
+
+        result = _guess_symbol_origin(
+            "_ZNKSt3__16vectorIiNS_9allocatorIiEEE4sizeEv", ["libc++.so.1"]
+        )
         assert result == "libc++.so.1"
 
     def test_parse_elf_metadata_non_regular_file(self, tmp_path):
         """parse_elf_metadata returns empty ElfMetadata for non-regular files (e.g. dir)."""
         from abicheck.elf_metadata import parse_elf_metadata
+
         # Use a directory — not a regular file
         result = parse_elf_metadata(tmp_path)
         assert result is not None
         # Should return empty metadata gracefully
         from abicheck.elf_metadata import ElfMetadata
+
         assert isinstance(result, ElfMetadata)

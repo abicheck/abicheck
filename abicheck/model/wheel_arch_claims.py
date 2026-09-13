@@ -35,6 +35,7 @@ time that its own per-claim dicts' keys union to exactly this set, so a new
 architecture token added to only one of those dicts fails immediately rather
 than silently narrowing what a strict config's validation accepts.
 """
+
 from __future__ import annotations
 
 #: Every wheel-tag architecture claim `diff_wheel_deployment.py` can check

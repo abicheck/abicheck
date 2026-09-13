@@ -25,6 +25,7 @@ crucially, fall within ``mutmut``'s test runner. That makes these the assertions
 mutation testing measures: a surviving mutant in a detector means an edit it
 should have caught went unverified here.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -47,8 +48,12 @@ _NON_BREAKING = {Verdict.NO_CHANGE, Verdict.COMPATIBLE, Verdict.COMPATIBLE_WITH_
 # struct that must remain unflagged by any mutation.
 _CONTEXT = {
     "functions": [
-        Function(name=f"{CTX_PREFIX}keep", mangled=f"_Z{CTX_PREFIX}keepv",
-                 return_type="int", visibility=Visibility.PUBLIC),
+        Function(
+            name=f"{CTX_PREFIX}keep",
+            mangled=f"_Z{CTX_PREFIX}keepv",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        ),
     ],
     "types": [RecordType(name=f"{CTX_PREFIX}Keep", kind="struct", size_bits=64)],
 }

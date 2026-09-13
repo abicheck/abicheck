@@ -6,6 +6,7 @@ ELF symbol ordering, or debug info, but the public ABI should be identical.
 
 Requires: gcc, g++, clang, clang++, castxml (all available in CI).
 """
+
 from __future__ import annotations
 
 import shutil
@@ -117,7 +118,10 @@ def _run_compile_or_skip(cmd: list[str], *, label: str = "Compilation") -> None:
     """
     try:
         r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=_COMPILE_TIMEOUT_S,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_COMPILE_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
         pytest.skip(
@@ -132,8 +136,16 @@ def _compile_so(src: str, out: Path, compiler: str, lang: str) -> None:
     ext = ".c" if lang == "c" else ".cpp"
     src_file = out.with_suffix(ext)
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
-    cmd = [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-           "-o", str(out), str(src_file)]
+    cmd = [
+        compiler,
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
+    ]
     if lang == "cpp":
         cmd.insert(1, "-std=c++17")
     elif lang == "c" and compiler in ("g++", "clang++"):
@@ -143,8 +155,9 @@ def _compile_so(src: str, out: Path, compiler: str, lang: str) -> None:
     _run_compile_or_skip(cmd, label=f"Compilation ({compiler})")
 
 
-def _dump_and_compare(gcc_so: Path, clang_so: Path, hdr: str | None,
-                      lang: str, tmp_path: Path):
+def _dump_and_compare(
+    gcc_so: Path, clang_so: Path, hdr: str | None, lang: str, tmp_path: Path
+):
     """Dump both .so files and compare."""
     from abicheck.checker import compare
     from abicheck.dumper import dump
@@ -159,7 +172,9 @@ def _dump_and_compare(gcc_so: Path, clang_so: Path, hdr: str | None,
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         snap_gcc = dump(gcc_so, headers=headers, version="gcc", compiler=compiler_name)
-        snap_clang = dump(clang_so, headers=headers, version="clang", compiler=compiler_name)
+        snap_clang = dump(
+            clang_so, headers=headers, version="clang", compiler=compiler_name
+        )
 
     return compare(snap_gcc, snap_clang)
 
@@ -253,8 +268,17 @@ class TestOptimizationLevelFP:
         for so, opt in [(o0_so, "-O0"), (o2_so, "-O2")]:
             src_file = so.with_suffix(".c")
             src_file.write_text(textwrap.dedent(C_SRC).strip(), encoding="utf-8")
-            cmd = ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-                   opt, "-o", str(so), str(src_file)]
+            cmd = [
+                "gcc",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-fvisibility=default",
+                opt,
+                "-o",
+                str(so),
+                str(src_file),
+            ]
             _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, C_HDR, "c", tmp_path)
@@ -278,8 +302,18 @@ class TestOptimizationLevelFP:
         for so, opt in [(o0_so, "-O0"), (o2_so, "-O2")]:
             src_file = so.with_suffix(".cpp")
             src_file.write_text(textwrap.dedent(CPP_SRC).strip(), encoding="utf-8")
-            cmd = ["g++", "-shared", "-fPIC", "-g", "-fvisibility=default",
-                   "-std=c++17", opt, "-o", str(so), str(src_file)]
+            cmd = [
+                "g++",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-fvisibility=default",
+                "-std=c++17",
+                opt,
+                "-o",
+                str(so),
+                str(src_file),
+            ]
             _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, CPP_HDR, "cpp", tmp_path)
@@ -302,14 +336,26 @@ class TestStrippedVsUnstrippedFP:
 
         src_file = debug_so.with_suffix(".c")
         src_file.write_text(textwrap.dedent(C_SRC).strip(), encoding="utf-8")
-        cmd = ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-               "-o", str(debug_so), str(src_file)]
+        cmd = [
+            "gcc",
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-fvisibility=default",
+            "-o",
+            str(debug_so),
+            str(src_file),
+        ]
         _run_compile_or_skip(cmd)
 
         # Copy and strip
         shutil.copy2(debug_so, stripped_so)
-        r = subprocess.run(["strip", "--strip-debug", str(stripped_so)],
-                           capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            ["strip", "--strip-debug", str(stripped_so)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         if r.returncode != 0:
             pytest.skip(f"strip failed: {r.stderr[:200]}")
 
@@ -323,7 +369,9 @@ class TestStrippedVsUnstrippedFP:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             snap_debug = dump(debug_so, headers=[h], version="debug", compiler="cc")
-            snap_stripped = dump(stripped_so, headers=[h], version="stripped", compiler="cc")
+            snap_stripped = dump(
+                stripped_so, headers=[h], version="stripped", compiler="cc"
+            )
 
         result = compare(snap_debug, snap_stripped)
 

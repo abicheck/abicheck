@@ -23,6 +23,7 @@ same "parse the real file, don't hand-copy it" discipline as
 ``test_action_run_sh_helpers.py``) so a future edit to the real logic is
 exercised here too, not a stale copy.
 """
+
 from __future__ import annotations
 
 import os
@@ -62,7 +63,11 @@ def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
     """
     require_bash()
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(_summary_fence_region())
         script_path = f.name
@@ -74,7 +79,10 @@ def _run(fmt: str, output: str, effective_fmt: str | None = None) -> str:
     try:
         result = subprocess.run(
             [bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)

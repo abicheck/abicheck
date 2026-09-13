@@ -55,7 +55,9 @@ class TestNotComparableExitCode:
     def test_scope_mismatch_exits_16(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
 
         def _raise(*_a, **_kw):
             raise ScopeMismatchError(
@@ -73,7 +75,9 @@ class TestNotComparableExitCode:
     def test_profile_mismatch_exits_16(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile_fingerprint mismatch: dep.h changed")
@@ -114,7 +118,9 @@ class TestNotComparableExitCode:
     def test_json_format_emits_verdict_null_with_reason(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
 
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
@@ -137,7 +143,9 @@ class TestNotComparableExitCode:
     def test_sarif_format_emits_failed_invocation(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
 
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
@@ -155,12 +163,17 @@ class TestNotComparableExitCode:
         assert run["invocations"][0]["executionSuccessful"] is False
         assert run["invocations"][0]["exitCode"] == 16
         assert run["results"] == []
-        assert "scope drift" in run["invocations"][0]["toolExecutionNotifications"][0]["message"]["text"]
+        assert (
+            "scope drift"
+            in run["invocations"][0]["toolExecutionNotifications"][0]["message"]["text"]
+        )
 
     def test_junit_format_emits_errored_testcase(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("dep.h changed")
@@ -187,7 +200,9 @@ class TestNotComparableExitCode:
         this same function, per the G32 plan's own acceptance criteria)."""
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
 
         captured: dict[str, object] = {}
 
@@ -245,8 +260,11 @@ class TestNotComparableExitCode:
         monkeypatch.setattr(
             "abicheck.service.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
-                old_version="1", new_version="1", library="libfoo.so.1",
-                verdict=Verdict.NO_CHANGE, assurance="none",
+                old_version="1",
+                new_version="1",
+                library="libfoo.so.1",
+                verdict=Verdict.NO_CHANGE,
+                assurance="none",
             ),
         )
         monkeypatch.setattr(
@@ -256,9 +274,13 @@ class TestNotComparableExitCode:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--include", f"old:support={old_src}",
-                "--include", f"new:support={new_src}",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--include",
+                f"old:support={old_src}",
+                "--include",
+                f"new:support={new_src}",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -290,7 +312,8 @@ class TestNotComparableExitCode:
             return old_p, None, None
 
         monkeypatch.setattr(
-            "abicheck.frontends.cli.commands.compare._embed_inline_source_side", _fake_embed
+            "abicheck.frontends.cli.commands.compare._embed_inline_source_side",
+            _fake_embed,
         )
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
         monkeypatch.setattr(
@@ -300,8 +323,11 @@ class TestNotComparableExitCode:
         monkeypatch.setattr(
             "abicheck.service.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
-                old_version="1", new_version="1", library="libfoo.so.1",
-                verdict=Verdict.NO_CHANGE, assurance="none",
+                old_version="1",
+                new_version="1",
+                library="libfoo.so.1",
+                verdict=Verdict.NO_CHANGE,
+                assurance="none",
             ),
         )
         monkeypatch.setattr(
@@ -311,9 +337,13 @@ class TestNotComparableExitCode:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--sources", f"old={old_sources}",
-                "--include", f"old:support={old_src}",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--sources",
+                f"old={old_sources}",
+                "--include",
+                f"old:support={old_src}",
             ],
         )
         assert result.exit_code == 0, result.output

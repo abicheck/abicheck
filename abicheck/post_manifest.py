@@ -30,6 +30,7 @@ This module turns that manifest into something abicheck can *enforce*:
 
 Parsing is tolerant of unknown/extra fields so it survives the v0.x draft spec.
 """
+
 from __future__ import annotations
 
 import json
@@ -65,6 +66,7 @@ _CALLABLE_SYM_TYPE_NAMES = frozenset({"FUNC", "IFUNC", "NOTYPE"})
 # ---------------------------------------------------------------------------
 # Model
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class PostUfunc:
@@ -192,9 +194,7 @@ class PostExport:
         # reach the type check, not silently become a no-arg export.
         raw_params = data["params"]
         if not isinstance(raw_params, list):
-            raise ValueError(
-                f"export {name or c_symbol!r}: 'params' must be an array"
-            )
+            raise ValueError(f"export {name or c_symbol!r}: 'params' must be an array")
         params = [_param_descriptor(p) for p in raw_params]
         if "return_dtype" not in data:
             raise ValueError(
@@ -221,9 +221,7 @@ class PostExport:
         elif isinstance(ufunc_raw, dict):
             ufunc = PostUfunc.from_dict(ufunc_raw)
         else:
-            raise ValueError(
-                f"export {name or c_symbol!r}: 'ufunc' must be an object"
-            )
+            raise ValueError(f"export {name or c_symbol!r}: 'ufunc' must be an object")
         alias_of = data.get("alias_of")
         return cls(
             name=name,
@@ -290,9 +288,7 @@ def parse_manifest(data: dict[str, Any]) -> PostManifest:
     seen_c_symbols: set[str] = set()
     for i, e in enumerate(raw_exports):
         if not isinstance(e, dict):
-            raise ValueError(
-                f"exports[{i}] must be an object, got {type(e).__name__}"
-            )
+            raise ValueError(f"exports[{i}] must be an object, got {type(e).__name__}")
         exp = PostExport.from_dict(e)
         # A c_symbol is the committed contract name; duplicates are internally
         # invalid. `export_by_c_symbol()` keeps only the last, so a stale
@@ -414,7 +410,9 @@ def contract_scope_allowlist(
     return public_c_symbols(manifest) | old_syms
 
 
-def removed_contract_symbols(old_snapshot: Any = None, new_snapshot: Any = None) -> set[str]:
+def removed_contract_symbols(
+    old_snapshot: Any = None, new_snapshot: Any = None
+) -> set[str]:
     """Committed-namespace (``pp_*``) callable exports present in *old* but not *new*.
 
     The removed-wrapper recovery set: unioned into a manifest scope allowlist so a
@@ -423,14 +421,19 @@ def removed_contract_symbols(old_snapshot: Any = None, new_snapshot: Any = None)
     the *same* recovery the CLI does when a caller supplies a raw
     ``public_surface_allowlist`` built from the new manifest.
     """
-    old_syms = _snapshot_contract_symbols(old_snapshot) if old_snapshot is not None else set()
-    new_syms = _snapshot_contract_symbols(new_snapshot) if new_snapshot is not None else set()
+    old_syms = (
+        _snapshot_contract_symbols(old_snapshot) if old_snapshot is not None else set()
+    )
+    new_syms = (
+        _snapshot_contract_symbols(new_snapshot) if new_snapshot is not None else set()
+    )
     return old_syms - new_syms
 
 
 # ---------------------------------------------------------------------------
 # Manifest ↔ binary consistency
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ManifestValidationResult:
@@ -561,7 +564,9 @@ def _exported_names_for_binary(so_path: Path) -> tuple[set[str], str]:
     )
 
 
-def validate_from_binary(manifest_path: Path, so_path: Path) -> ManifestValidationResult:
+def validate_from_binary(
+    manifest_path: Path, so_path: Path
+) -> ManifestValidationResult:
     """Convenience wrapper: load manifest + binary metadata, then validate.
 
     Supports ELF, PE/COFF, and Mach-O shared libraries. Raises :class:`ValueError`
@@ -607,6 +612,7 @@ def format_validation_report(result: ManifestValidationResult) -> str:
 # Manifest ↔ manifest ABI diff (compiler-independent)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ExportChange:
     """A per-export change between two manifests."""
@@ -618,7 +624,12 @@ class ExportChange:
 
     @property
     def is_breaking(self) -> bool:
-        return self.kind in ("removed", "signature", "ufunc_signature", "ufunc_loop_symbol")
+        return self.kind in (
+            "removed",
+            "signature",
+            "ufunc_signature",
+            "ufunc_loop_symbol",
+        )
 
 
 @dataclass
@@ -654,51 +665,69 @@ def diff_manifests(old: PostManifest, new: PostManifest) -> ManifestDiff:
 
     for c_symbol in sorted(old_map.keys() - new_map.keys()):
         exp = old_map[c_symbol]
-        diff.changes.append(ExportChange(exp.name, c_symbol, "removed",
-                                         "export dropped from ABI surface"))
+        diff.changes.append(
+            ExportChange(
+                exp.name, c_symbol, "removed", "export dropped from ABI surface"
+            )
+        )
 
     for c_symbol in sorted(new_map.keys() - old_map.keys()):
         exp = new_map[c_symbol]
-        diff.changes.append(ExportChange(exp.name, c_symbol, "added",
-                                         "new export"))
+        diff.changes.append(ExportChange(exp.name, c_symbol, "added", "new export"))
 
     for c_symbol in sorted(old_map.keys() & new_map.keys()):
         oe, ne = old_map[c_symbol], new_map[c_symbol]
         if oe.signature_tuple() != ne.signature_tuple():
-            diff.changes.append(ExportChange(
-                ne.name, c_symbol, "signature",
-                f"{_fmt_sig(oe)}  ==>  {_fmt_sig(ne)}",
-            ))
+            diff.changes.append(
+                ExportChange(
+                    ne.name,
+                    c_symbol,
+                    "signature",
+                    f"{_fmt_sig(oe)}  ==>  {_fmt_sig(ne)}",
+                )
+            )
         # ufunc changes are only breaking when the export *already had* a ufunc
         # facet. Adding one to a previously-scalar export is a compatible
         # addition — old clients could not have linked to a loop symbol that did
         # not exist (analogous to an added export). Removing or altering an
         # existing facet is breaking.
         if oe.ufunc is None and ne.ufunc is not None:
-            diff.changes.append(ExportChange(
-                ne.name, c_symbol, "ufunc_added",
-                f"ufunc facet added with loop symbol "
-                f"{ne.ufunc.loop_symbol or '(none)'}",
-            ))
+            diff.changes.append(
+                ExportChange(
+                    ne.name,
+                    c_symbol,
+                    "ufunc_added",
+                    f"ufunc facet added with loop symbol "
+                    f"{ne.ufunc.loop_symbol or '(none)'}",
+                )
+            )
         if oe.ufunc is not None:
             old_sig = oe.ufunc.signature
             new_sig = ne.ufunc.signature if ne.ufunc else ""
             if old_sig != new_sig:
-                diff.changes.append(ExportChange(
-                    ne.name, c_symbol, "ufunc_signature",
-                    f"ufunc layout {old_sig!r} -> {new_sig!r}",
-                ))
+                diff.changes.append(
+                    ExportChange(
+                        ne.name,
+                        c_symbol,
+                        "ufunc_signature",
+                        f"ufunc layout {old_sig!r} -> {new_sig!r}",
+                    )
+                )
             # A renamed or dropped loop symbol breaks clients linked to the old
             # `pp_*_loop` export even when the layout signature is unchanged —
             # the loop symbol is part of the committed surface.
             old_loop_sym = oe.ufunc.loop_symbol
             new_loop_sym = ne.ufunc.loop_symbol if ne.ufunc else ""
             if old_loop_sym != new_loop_sym:
-                diff.changes.append(ExportChange(
-                    ne.name, c_symbol, "ufunc_loop_symbol",
-                    f"ufunc loop symbol {old_loop_sym or '(none)'} -> "
-                    f"{new_loop_sym or '(none)'}",
-                ))
+                diff.changes.append(
+                    ExportChange(
+                        ne.name,
+                        c_symbol,
+                        "ufunc_loop_symbol",
+                        f"ufunc loop symbol {old_loop_sym or '(none)'} -> "
+                        f"{new_loop_sym or '(none)'}",
+                    )
+                )
     return diff
 
 
@@ -708,23 +737,30 @@ def _fmt_sig(exp: PostExport) -> str:
 
 def format_diff_report(diff: ManifestDiff, old_label: str, new_label: str) -> str:
     """Human-readable manifest diff report."""
-    lines = [f"POST manifest diff: {old_label} (post_abi={diff.old_abi}) "
-             f"-> {new_label} (post_abi={diff.new_abi})"]
+    lines = [
+        f"POST manifest diff: {old_label} (post_abi={diff.old_abi}) "
+        f"-> {new_label} (post_abi={diff.new_abi})"
+    ]
     if not diff.changes:
         lines.append("  (no export changes)")
         return "\n".join(lines) + "\n"
     for change in diff.changes:
         marker = "BREAK" if change.is_breaking else "ok   "
-        lines.append(f"  [{marker}] {change.kind:<16} {change.c_symbol}: {change.detail}")
+        lines.append(
+            f"  [{marker}] {change.kind:<16} {change.c_symbol}: {change.detail}"
+        )
     n_break = len(diff.breaking_changes)
-    lines.append(f"  {n_break} breaking change{'s' if n_break != 1 else ''}, "
-                 f"{len(diff.changes) - n_break} compatible")
+    lines.append(
+        f"  {n_break} breaking change{'s' if n_break != 1 else ''}, "
+        f"{len(diff.changes) - n_break} compatible"
+    )
     return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
 # Version-bump gate — enforces POST's own stability promise
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class VersionGateResult:
@@ -751,7 +787,9 @@ def check_version_gate(old: PostManifest, new: PostManifest) -> VersionGateResul
     return VersionGateResult(diff=diff_manifests(old, new))
 
 
-def format_gate_report(result: VersionGateResult, old_label: str, new_label: str) -> str:
+def format_gate_report(
+    result: VersionGateResult, old_label: str, new_label: str
+) -> str:
     """Human-readable version-gate report."""
     diff = result.diff
     lines = [format_diff_report(diff, old_label, new_label).rstrip("\n")]

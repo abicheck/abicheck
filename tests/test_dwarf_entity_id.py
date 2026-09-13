@@ -304,7 +304,16 @@ class TestDwarfEntityIdUnlabelledMethodDefaultAccess:
         )
         so_path = tmp_path / "libwidget_entity.so"
         result = subprocess.run(
-            [_GPP, "-shared", "-fPIC", "-g", "-std=c++17", "-o", str(so_path), str(cpp)],
+            [
+                _GPP,
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-std=c++17",
+                "-o",
+                str(so_path),
+                str(cpp),
+            ],
             capture_output=True,
             text=True,
             timeout=30,

@@ -42,6 +42,7 @@ Usage in checker::
         changes, detector_results = registry.run_all(old, new)
         # ... post-processing
 """
+
 from __future__ import annotations
 
 import importlib
@@ -192,6 +193,7 @@ class DetectorRegistry:
         Returns:
             The original function, unmodified.
         """
+
         def decorator(fn: DetectorFn) -> DetectorFn:
             if name in self._names:
                 raise ValueError(f"Duplicate detector name: {name!r}")
@@ -206,6 +208,7 @@ class DetectorRegistry:
             self._counter += 1
             self._detectors.append(entry)
             return fn
+
         return decorator
 
     def run_all(

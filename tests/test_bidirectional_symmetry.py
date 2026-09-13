@@ -5,6 +5,7 @@ ChangeKind pairs: e.g. FUNC_REMOVED ↔ FUNC_ADDED, TYPE_SIZE_CHANGED in both
 directions, etc. This catches asymmetric detector bugs where a change is detected
 in one direction but missed in the reverse.
 """
+
 from __future__ import annotations
 
 import copy
@@ -25,26 +26,45 @@ from abicheck.model import (
 )
 
 
-def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, typedefs=None, elf=None, constants=None):
+def _snap(
+    version="1.0",
+    functions=None,
+    variables=None,
+    types=None,
+    enums=None,
+    typedefs=None,
+    elf=None,
+    constants=None,
+):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=variables or [],
-        types=types or [], enums=enums or [],
-        typedefs=typedefs or {}, elf=elf,
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=variables or [],
+        types=types or [],
+        enums=enums or [],
+        typedefs=typedefs or {},
+        elf=elf,
         constants=constants or {},
         from_headers=True,
     )
 
 
 def _pub_func(name, mangled, ret="void", params=None, **kwargs):
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    params=params or [], visibility=Visibility.PUBLIC, **kwargs)
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=params or [],
+        visibility=Visibility.PUBLIC,
+        **kwargs,
+    )
 
 
 def _pub_var(name, mangled, type_, **kwargs):
-    return Variable(name=name, mangled=mangled, type=type_,
-                    visibility=Visibility.PUBLIC, **kwargs)
+    return Variable(
+        name=name, mangled=mangled, type=type_, visibility=Visibility.PUBLIC, **kwargs
+    )
 
 
 def _kinds(result):
@@ -53,6 +73,7 @@ def _kinds(result):
 
 
 # ── Symmetric pairs: removal ↔ addition ────────────────────────────────────
+
 
 class TestFunctionSymmetry:
     """func_removed(v1→v2) ↔ func_added(v2→v1) and vice versa."""
@@ -129,12 +150,21 @@ class TestEnumSymmetry:
     """enum_member_removed ↔ enum_member_added."""
 
     def test_enum_member_removed_vs_added(self):
-        old_enum = EnumType(name="Color", members=[
-            EnumMember("RED", 0), EnumMember("GREEN", 1), EnumMember("BLUE", 2),
-        ])
-        new_enum = EnumType(name="Color", members=[
-            EnumMember("RED", 0), EnumMember("GREEN", 1),
-        ])
+        old_enum = EnumType(
+            name="Color",
+            members=[
+                EnumMember("RED", 0),
+                EnumMember("GREEN", 1),
+                EnumMember("BLUE", 2),
+            ],
+        )
+        new_enum = EnumType(
+            name="Color",
+            members=[
+                EnumMember("RED", 0),
+                EnumMember("GREEN", 1),
+            ],
+        )
 
         fwd = compare(_snap(enums=[old_enum]), _snap(enums=[new_enum]))
         rev = compare(_snap(enums=[new_enum]), _snap(enums=[old_enum]))
@@ -143,12 +173,21 @@ class TestEnumSymmetry:
         assert ChangeKind.ENUM_MEMBER_ADDED in _kinds(rev)
 
     def test_enum_member_added_vs_removed(self):
-        old_enum = EnumType(name="Color", members=[
-            EnumMember("RED", 0), EnumMember("GREEN", 1),
-        ])
-        new_enum = EnumType(name="Color", members=[
-            EnumMember("RED", 0), EnumMember("GREEN", 1), EnumMember("BLUE", 2),
-        ])
+        old_enum = EnumType(
+            name="Color",
+            members=[
+                EnumMember("RED", 0),
+                EnumMember("GREEN", 1),
+            ],
+        )
+        new_enum = EnumType(
+            name="Color",
+            members=[
+                EnumMember("RED", 0),
+                EnumMember("GREEN", 1),
+                EnumMember("BLUE", 2),
+            ],
+        )
 
         fwd = compare(_snap(enums=[old_enum]), _snap(enums=[new_enum]))
         rev = compare(_snap(enums=[new_enum]), _snap(enums=[old_enum]))
@@ -174,6 +213,7 @@ class TestTypedefSymmetry:
 
 # ── Symmetric mutation changes (both directions should detect) ──────────────
 
+
 class TestReturnTypeSymmetry:
     """Return type changes should be detected in both directions."""
 
@@ -192,10 +232,8 @@ class TestParamTypeSymmetry:
     """Parameter type changes should be detected in both directions."""
 
     def test_param_type_changed_both_directions(self):
-        f_v1 = _pub_func("send", "_Z4sendi",
-                          params=[Param(name="x", type="int")])
-        f_v2 = _pub_func("send", "_Z4sendi",
-                          params=[Param(name="x", type="long")])
+        f_v1 = _pub_func("send", "_Z4sendi", params=[Param(name="x", type="int")])
+        f_v2 = _pub_func("send", "_Z4sendi", params=[Param(name="x", type="long")])
 
         fwd = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         rev = compare(_snap(functions=[f_v2]), _snap(functions=[f_v1]))
@@ -208,11 +246,22 @@ class TestTypeSizeSymmetry:
     """Type size changes should be detected in both directions."""
 
     def test_type_size_changed_both_directions(self):
-        t_v1 = RecordType(name="Config", kind="struct", size_bits=64,
-                          fields=[TypeField("x", "int", 0), TypeField("y", "int", 32)])
-        t_v2 = RecordType(name="Config", kind="struct", size_bits=128,
-                          fields=[TypeField("x", "int", 0), TypeField("y", "int", 32),
-                                  TypeField("z", "long", 64)])
+        t_v1 = RecordType(
+            name="Config",
+            kind="struct",
+            size_bits=64,
+            fields=[TypeField("x", "int", 0), TypeField("y", "int", 32)],
+        )
+        t_v2 = RecordType(
+            name="Config",
+            kind="struct",
+            size_bits=128,
+            fields=[
+                TypeField("x", "int", 0),
+                TypeField("y", "int", 32),
+                TypeField("z", "long", 64),
+            ],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -225,12 +274,20 @@ class TestEnumValueSymmetry:
     """Enum value changes detected in both directions."""
 
     def test_enum_value_changed_both_directions(self):
-        e_v1 = EnumType(name="Status", members=[
-            EnumMember("OK", 0), EnumMember("ERR", 1),
-        ])
-        e_v2 = EnumType(name="Status", members=[
-            EnumMember("OK", 0), EnumMember("ERR", 42),
-        ])
+        e_v1 = EnumType(
+            name="Status",
+            members=[
+                EnumMember("OK", 0),
+                EnumMember("ERR", 1),
+            ],
+        )
+        e_v2 = EnumType(
+            name="Status",
+            members=[
+                EnumMember("OK", 0),
+                EnumMember("ERR", 42),
+            ],
+        )
 
         fwd = compare(_snap(enums=[e_v1]), _snap(enums=[e_v2]))
         rev = compare(_snap(enums=[e_v2]), _snap(enums=[e_v1]))
@@ -257,10 +314,18 @@ class TestFieldOffsetSymmetry:
     """Field offset changes detected in both directions."""
 
     def test_field_offset_changed_both_directions(self):
-        t_v1 = RecordType(name="Data", kind="struct", size_bits=64,
-                          fields=[TypeField("a", "int", 0), TypeField("b", "int", 32)])
-        t_v2 = RecordType(name="Data", kind="struct", size_bits=64,
-                          fields=[TypeField("a", "int", 0), TypeField("b", "int", 48)])
+        t_v1 = RecordType(
+            name="Data",
+            kind="struct",
+            size_bits=64,
+            fields=[TypeField("a", "int", 0), TypeField("b", "int", 32)],
+        )
+        t_v2 = RecordType(
+            name="Data",
+            kind="struct",
+            size_bits=64,
+            fields=[TypeField("a", "int", 0), TypeField("b", "int", 48)],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -273,10 +338,15 @@ class TestFieldTypeSymmetry:
     """Field type changes detected in both directions."""
 
     def test_field_type_changed_both_directions(self):
-        t_v1 = RecordType(name="Cfg", kind="struct", size_bits=64,
-                          fields=[TypeField("val", "int", 0)])
-        t_v2 = RecordType(name="Cfg", kind="struct", size_bits=64,
-                          fields=[TypeField("val", "long", 0)])
+        t_v1 = RecordType(
+            name="Cfg", kind="struct", size_bits=64, fields=[TypeField("val", "int", 0)]
+        )
+        t_v2 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=64,
+            fields=[TypeField("val", "long", 0)],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -303,10 +373,18 @@ class TestVtableSymmetry:
     """Vtable changes detected in both directions."""
 
     def test_vtable_changed_both_directions(self):
-        t_v1 = RecordType(name="Base", kind="class", size_bits=64,
-                          vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"])
-        t_v2 = RecordType(name="Base", kind="class", size_bits=64,
-                          vtable=["_ZN4Base3barEv", "_ZN4Base3fooEv"])
+        t_v1 = RecordType(
+            name="Base",
+            kind="class",
+            size_bits=64,
+            vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
+        )
+        t_v2 = RecordType(
+            name="Base",
+            kind="class",
+            size_bits=64,
+            vtable=["_ZN4Base3barEv", "_ZN4Base3fooEv"],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -319,10 +397,8 @@ class TestBaseClassSymmetry:
     """Base class changes detected in both directions."""
 
     def test_base_changed_both_directions(self):
-        t_v1 = RecordType(name="Derived", kind="class", size_bits=64,
-                          bases=["BaseA"])
-        t_v2 = RecordType(name="Derived", kind="class", size_bits=64,
-                          bases=["BaseB"])
+        t_v1 = RecordType(name="Derived", kind="class", size_bits=64, bases=["BaseA"])
+        t_v2 = RecordType(name="Derived", kind="class", size_bits=64, bases=["BaseB"])
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -332,6 +408,7 @@ class TestBaseClassSymmetry:
 
 
 # ── ELF metadata symmetry ──────────────────────────────────────────────────
+
 
 class TestElfNeededSymmetry:
     """needed_added ↔ needed_removed."""
@@ -363,6 +440,7 @@ class TestElfSonameSymmetry:
 
 # ── Virtual function symmetry ──────────────────────────────────────────────
 
+
 class TestVirtualFuncSymmetry:
     """Virtual function add/remove produce symmetric results."""
 
@@ -378,6 +456,7 @@ class TestVirtualFuncSymmetry:
 
 
 # ── Noexcept symmetry ─────────────────────────────────────────────────────
+
 
 class TestNoexceptSymmetry:
     """noexcept add/remove produce symmetric results."""
@@ -395,14 +474,25 @@ class TestNoexceptSymmetry:
 
 # ── Union field symmetry ──────────────────────────────────────────────────
 
+
 class TestUnionFieldSymmetry:
     """Union field add ↔ remove."""
 
     def test_union_field_added_vs_removed(self):
-        u_v1 = RecordType(name="Data", kind="union", size_bits=32, is_union=True,
-                          fields=[TypeField("i", "int", 0)])
-        u_v2 = RecordType(name="Data", kind="union", size_bits=64, is_union=True,
-                          fields=[TypeField("i", "int", 0), TypeField("d", "double", 0)])
+        u_v1 = RecordType(
+            name="Data",
+            kind="union",
+            size_bits=32,
+            is_union=True,
+            fields=[TypeField("i", "int", 0)],
+        )
+        u_v2 = RecordType(
+            name="Data",
+            kind="union",
+            size_bits=64,
+            is_union=True,
+            fields=[TypeField("i", "int", 0), TypeField("d", "double", 0)],
+        )
 
         fwd = compare(_snap(types=[u_v1]), _snap(types=[u_v2]))
         rev = compare(_snap(types=[u_v2]), _snap(types=[u_v1]))
@@ -412,6 +502,7 @@ class TestUnionFieldSymmetry:
 
 
 # ── Constant symmetry ─────────────────────────────────────────────────────
+
 
 class TestConstantSymmetry:
     """constant_added ↔ constant_removed."""
@@ -429,14 +520,23 @@ class TestConstantSymmetry:
 
 # ── Field qualifier symmetry ──────────────────────────────────────────────
 
+
 class TestFieldQualifierSymmetry:
     """field_became_const ↔ field_lost_const."""
 
     def test_const_qualifier_symmetry(self):
-        t_v1 = RecordType(name="Cfg", kind="struct", size_bits=32,
-                          fields=[TypeField("val", "int", 0, is_const=False)])
-        t_v2 = RecordType(name="Cfg", kind="struct", size_bits=32,
-                          fields=[TypeField("val", "int", 0, is_const=True)])
+        t_v1 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, is_const=False)],
+        )
+        t_v2 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, is_const=True)],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -445,10 +545,18 @@ class TestFieldQualifierSymmetry:
         assert ChangeKind.FIELD_LOST_CONST in _kinds(rev)
 
     def test_volatile_qualifier_symmetry(self):
-        t_v1 = RecordType(name="Cfg", kind="struct", size_bits=32,
-                          fields=[TypeField("val", "int", 0, is_volatile=False)])
-        t_v2 = RecordType(name="Cfg", kind="struct", size_bits=32,
-                          fields=[TypeField("val", "int", 0, is_volatile=True)])
+        t_v1 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, is_volatile=False)],
+        )
+        t_v2 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, is_volatile=True)],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -457,10 +565,18 @@ class TestFieldQualifierSymmetry:
         assert ChangeKind.FIELD_LOST_VOLATILE in _kinds(rev)
 
     def test_mutable_qualifier_symmetry(self):
-        t_v1 = RecordType(name="Cfg", kind="struct", size_bits=32,
-                          fields=[TypeField("val", "int", 0, is_mutable=False)])
-        t_v2 = RecordType(name="Cfg", kind="struct", size_bits=32,
-                          fields=[TypeField("val", "int", 0, is_mutable=True)])
+        t_v1 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, is_mutable=False)],
+        )
+        t_v2 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, is_mutable=True)],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         rev = compare(_snap(types=[t_v2]), _snap(types=[t_v1]))
@@ -470,6 +586,7 @@ class TestFieldQualifierSymmetry:
 
 
 # ── Access level symmetry ─────────────────────────────────────────────────
+
 
 class TestAccessLevelSymmetry:
     """Access level changes are detected in both directions."""
@@ -493,26 +610,43 @@ class TestAccessLevelSymmetry:
 
     def test_field_access_narrowed(self):
         """Narrowing field access (public → private) is detected."""
-        t_v1 = RecordType(name="Cls", kind="class", size_bits=32,
-                          fields=[TypeField("val", "int", 0, access=AccessLevel.PUBLIC)])
-        t_v2 = RecordType(name="Cls", kind="class", size_bits=32,
-                          fields=[TypeField("val", "int", 0, access=AccessLevel.PRIVATE)])
+        t_v1 = RecordType(
+            name="Cls",
+            kind="class",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, access=AccessLevel.PUBLIC)],
+        )
+        t_v2 = RecordType(
+            name="Cls",
+            kind="class",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, access=AccessLevel.PRIVATE)],
+        )
 
         fwd = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         assert ChangeKind.FIELD_ACCESS_CHANGED in _kinds(fwd)
 
     def test_field_access_widened_not_breaking(self):
         """Widening field access (private → public) is not a break."""
-        t_v1 = RecordType(name="Cls", kind="class", size_bits=32,
-                          fields=[TypeField("val", "int", 0, access=AccessLevel.PRIVATE)])
-        t_v2 = RecordType(name="Cls", kind="class", size_bits=32,
-                          fields=[TypeField("val", "int", 0, access=AccessLevel.PUBLIC)])
+        t_v1 = RecordType(
+            name="Cls",
+            kind="class",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, access=AccessLevel.PRIVATE)],
+        )
+        t_v2 = RecordType(
+            name="Cls",
+            kind="class",
+            size_bits=32,
+            fields=[TypeField("val", "int", 0, access=AccessLevel.PUBLIC)],
+        )
 
         rev = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
         assert not rev.breaking
 
 
 # ── Var const symmetry ────────────────────────────────────────────────────
+
 
 class TestVarConstSymmetry:
     """var_became_const ↔ var_lost_const."""
@@ -529,6 +663,7 @@ class TestVarConstSymmetry:
 
 
 # ── Multi-change symmetry ────────────────────────────────────────────────
+
 
 class TestMultiChangeSymmetry:
     """Multiple simultaneous changes should all be symmetric."""

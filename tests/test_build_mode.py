@@ -5,6 +5,7 @@ swarm-review dropdead requirement: normalization must be stable across
 real-world ``DW_AT_producer`` / ELF ``.comment`` strings from every
 shipped compiler version, so this file pins ALL of them with fixtures.
 """
+
 from __future__ import annotations
 
 from abicheck.build_mode import (
@@ -124,11 +125,11 @@ class TestCxxStandard:
     def test_dwarf_tags(self) -> None:
         # Spot-check the main mappings.
         assert detect_cxx_standard(0x02) == CxxStandard.CXX98
-        assert detect_cxx_standard(0x1a) == CxxStandard.CXX11
+        assert detect_cxx_standard(0x1A) == CxxStandard.CXX11
         assert detect_cxx_standard(0x21) == CxxStandard.CXX14_OR_LATER
-        assert detect_cxx_standard(0x2a) == CxxStandard.CXX17
-        assert detect_cxx_standard(0x2b) == CxxStandard.CXX20
-        assert detect_cxx_standard(0x2e) == CxxStandard.CXX23
+        assert detect_cxx_standard(0x2A) == CxxStandard.CXX17
+        assert detect_cxx_standard(0x2B) == CxxStandard.CXX20
+        assert detect_cxx_standard(0x2E) == CxxStandard.CXX23
 
     def test_cpp03_maps_to_pre_cxx11_bucket(self) -> None:
         """Regression for the Codex P2 finding: DW_LANG_C_plus_plus_03
@@ -140,7 +141,7 @@ class TestCxxStandard:
 
     def test_unknown_tag(self) -> None:
         assert detect_cxx_standard(None) == CxxStandard.UNKNOWN
-        assert detect_cxx_standard(0xffff) == CxxStandard.UNKNOWN
+        assert detect_cxx_standard(0xFFFF) == CxxStandard.UNKNOWN
 
 
 # ── stdlib + dual-ABI inference ────────────────────────────────────────
@@ -152,7 +153,7 @@ class TestStdlibDetection:
         syms = [
             "_ZNSt7__cxx115ctypeIcE13_M_widen_initEv",
             "_ZNKSs5emptyEv",
-            "_ZN3foo3barB5cxx11Ev",   # the marker
+            "_ZN3foo3barB5cxx11Ev",  # the marker
         ]
         stdlib, abi, libcpp_v = detect_stdlib_and_abi(syms)
         assert stdlib == StdlibFamily.LIBSTDCXX
@@ -196,7 +197,7 @@ class TestBuildModeFromSignals:
         bm = build_mode_from_signals(
             raw_producer="GNU C++17 11.4.0 -mtune=generic",
             raw_comment="GCC: (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0",
-            dwarf_language=0x2a,   # DW_LANG_C_plus_plus_17
+            dwarf_language=0x2A,  # DW_LANG_C_plus_plus_17
             mangled_symbols=[
                 "_ZNSt7__cxx115ctypeIcE13_M_widen_initEv",
                 "_Z3fooi",
@@ -227,12 +228,12 @@ class TestBuildModeFromSignals:
         """
         a = build_mode_from_signals(
             raw_producer="GCC: (Ubuntu 11.4.0) 11.4.0",
-            dwarf_language=0x2a,
+            dwarf_language=0x2A,
             mangled_symbols=["_ZNSt7__cxx115ctypeIcE_xyz"],
         )
         b = build_mode_from_signals(
             raw_producer="GCC: (Ubuntu 13.2.0-23ubuntu4) 13.2.0",
-            dwarf_language=0x2a,
+            dwarf_language=0x2A,
             mangled_symbols=["_ZNSt7__cxx115ctypeIcE_xyz"],
         )
         # Same normalized fields → equal even with different provenance.

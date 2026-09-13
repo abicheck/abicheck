@@ -120,7 +120,9 @@ class TestRecordNestedInKnownRecordProperties:
         an arbitrary depth."""
         qname = "::".join(segments)
         immediate_parent = "::".join(segments[:-1])
-        all_but_immediate = {"::".join(segments[:k]) for k in range(1, len(segments) - 1)}
+        all_but_immediate = {
+            "::".join(segments[:k]) for k in range(1, len(segments) - 1)
+        }
         assert immediate_parent not in all_but_immediate
         assert _record_nested_in_known_record(qname, all_but_immediate) is False
         # Registering the immediate parent too now flips it to nested.
@@ -150,15 +152,15 @@ class TestExactIdentitiesRejectsAliasCollisions:
         # own bare leaf happens to spell the SAME string as the namespace
         # `api` that `api::Thing` is genuinely declared in.
         unrelated = _rec("api", origin=ScopeOrigin.UNKNOWN, qualified_name="other::api")
-        record_identities = _record_exact_identities(
-            _FakeSnapshot(types=[unrelated])
-        )
+        record_identities = _record_exact_identities(_FakeSnapshot(types=[unrelated]))
         # The exact-identity set holds `other::api` -- never the bare `api`
         # alias that would have collided with the namespace-scoped type.
         assert record_identities == {"other::api"}
         assert _record_nested_in_known_record("api::Thing", record_identities) is False
 
-    def test_a_record_truly_nested_in_a_same_named_owner_is_still_detected(self) -> None:
+    def test_a_record_truly_nested_in_a_same_named_owner_is_still_detected(
+        self,
+    ) -> None:
         # The positive case must still work: when `api` really IS a known
         # record's own exact identity (not merely an alias of some other
         # record), nesting is still correctly detected.
@@ -217,7 +219,9 @@ class TestUnrelatedRecordAliasDoesNotHideANamespacedTypeEndToEnd:
             ],
         )
         surf = compute_public_surface(snap)
-        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="api::Thing", description="")
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="api::Thing", description=""
+        )
         assert classify_change_surface(c, surf, surf) == (True, None)
 
 

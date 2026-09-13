@@ -344,7 +344,9 @@ def _reject_escaping_filename(name: str) -> None:
         )
 
 
-def _normalize_compacted_filename(output_filename: str, compress: bool) -> tuple[str, bool]:
+def _normalize_compacted_filename(
+    output_filename: str, compress: bool
+) -> tuple[str, bool]:
     """``(filename, compress)`` with a scan-discoverable extension.
 
     Compression is inferred from a caller-supplied ``.gz`` name too, same as

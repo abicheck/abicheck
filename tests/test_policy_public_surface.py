@@ -221,9 +221,7 @@ class TestGraphNodeCollisionDoesNotBlurReachability:
             visibility=Visibility.HIDDEN,
         )
         secret = RecordType(name="Secret", kind="struct")
-        snap = _snapshot(
-            functions=[public_overload, hidden_overload], types=[secret]
-        )
+        snap = _snapshot(functions=[public_overload, hidden_overload], types=[secret])
         surf = resolve_public_surface(snap)
         assert "Secret" not in surf.public_types
 

@@ -1550,8 +1550,6 @@ class TestDirectlyReferencedDependencyRetention:
         assert [t.name for t in scoped.types] == ["Own"]
 
 
-
-
 class TestRawCandidateSpellings:
     """`_raw_candidate_spellings` must emit single-tag elaborated forms only.
 

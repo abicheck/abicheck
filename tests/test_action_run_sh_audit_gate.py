@@ -218,9 +218,7 @@ class TestAuditOnlyScanRiskFindingDoesNotGate:
     one explicitly supplied (the axis is active but the RISK classification
     itself is what keeps it from gating)."""
 
-    def test_risk_finding_does_not_gate_without_a_preset(
-        self, tmp_path: Path
-    ) -> None:
+    def test_risk_finding_does_not_gate_without_a_preset(self, tmp_path: Path) -> None:
         outputs = _run_action(
             tmp_path,
             {"INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE))},

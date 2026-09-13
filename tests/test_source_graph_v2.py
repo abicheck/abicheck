@@ -186,12 +186,18 @@ class TestEvidencePreservingMerge:
             kind="source_decl",
             facts=[
                 GraphFact(producer="producer-b", confidence=CONF_HIGH, attrs={"x": 1}),
-                GraphFact(producer="producer-c", confidence=CONF_REDUCED, attrs={"y": 2}),
+                GraphFact(
+                    producer="producer-c", confidence=CONF_REDUCED, attrs={"y": 2}
+                ),
             ],
         )
         g.add_node(incoming)
         (n,) = g.nodes
-        assert {f.producer for f in n.facts} == {"producer-a", "producer-b", "producer-c"}
+        assert {f.producer for f in n.facts} == {
+            "producer-a",
+            "producer-b",
+            "producer-c",
+        }
         assert n.resolved == {"is_virtual": True, "x": 1, "y": 2}
 
 
@@ -244,12 +250,18 @@ class TestEdgeMerge:
             kind="DECL_CALLS_DECL",
             facts=[
                 GraphFact(producer="producer-b", confidence=CONF_HIGH, attrs={"y": 2}),
-                GraphFact(producer="producer-c", confidence=CONF_REDUCED, attrs={"z": 3}),
+                GraphFact(
+                    producer="producer-c", confidence=CONF_REDUCED, attrs={"z": 3}
+                ),
             ],
         )
         g.add_edge(incoming)
         (e,) = g.edges
-        assert {f.producer for f in e.facts} == {"producer-a", "producer-b", "producer-c"}
+        assert {f.producer for f in e.facts} == {
+            "producer-a",
+            "producer-b",
+            "producer-c",
+        }
         assert e.resolved == {"x": 1, "y": 2, "z": 3}
 
     def test_add_edge_dedups_true_duplicates_on_relation_key(self) -> None:
@@ -321,7 +333,9 @@ class TestEdgeMerge:
                 kind="DECL_HAS_TYPE",
                 facts=[
                     GraphFact(
-                        producer="type_graph", confidence=CONF_HIGH, attrs={"role": "param"}
+                        producer="type_graph",
+                        confidence=CONF_HIGH,
+                        attrs={"role": "param"},
                     )
                 ],
             )
@@ -333,7 +347,9 @@ class TestEdgeMerge:
                 kind="DECL_HAS_TYPE",
                 facts=[
                     GraphFact(
-                        producer="type_graph", confidence=CONF_HIGH, attrs={"role": "param"}
+                        producer="type_graph",
+                        confidence=CONF_HIGH,
+                        attrs={"role": "param"},
                     )
                 ],
             )
@@ -615,7 +631,12 @@ class TestRelationKey:
             )
         )
         (edge,) = g.edges
-        assert edge.relation_key() == ("decl://a", "type://T", "DECL_HAS_TYPE", "return")
+        assert edge.relation_key() == (
+            "decl://a",
+            "type://T",
+            "DECL_HAS_TYPE",
+            "return",
+        )
         assert edge.resolved["resolution"] == "exact"
 
     def test_edge_relation_key_function_matches_method(self) -> None:

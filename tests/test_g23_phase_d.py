@@ -15,6 +15,7 @@
 
 """G23 Phase D — ecosystem detectors: unnamed types (D3), long double (D2),
 Module.symvers kABI (D1)."""
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -33,8 +34,13 @@ def _sym(name: str) -> ElfSymbol:
 
 def _elf_snap(*names: str) -> AbiSnapshot:
     return AbiSnapshot(
-        library="l.so.1", version="1", functions=[], variables=[], types=[],
-        enums=[], typedefs={},
+        library="l.so.1",
+        version="1",
+        functions=[],
+        variables=[],
+        types=[],
+        enums=[],
+        typedefs={},
         elf=ElfMetadata(symbols=[_sym(n) for n in names], machine="EM_X86_64"),
         elf_only_mode=True,
     )
@@ -45,8 +51,13 @@ def _ld_dwarf_snap(*names: str, ld_size: int) -> AbiSnapshot:
     from abicheck.dwarf_metadata import DwarfMetadata
 
     return AbiSnapshot(
-        library="l.so.1", version="1", functions=[], variables=[], types=[],
-        enums=[], typedefs={},
+        library="l.so.1",
+        version="1",
+        functions=[],
+        variables=[],
+        types=[],
+        enums=[],
+        typedefs={},
         elf=ElfMetadata(symbols=[_sym(n) for n in names], machine="EM_X86_64"),
         dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
         elf_only_mode=True,
@@ -55,8 +66,14 @@ def _ld_dwarf_snap(*names: str, ld_size: int) -> AbiSnapshot:
 
 def _kabi_snap(entries_text: str) -> AbiSnapshot:
     return AbiSnapshot(
-        library="Module.symvers", version="1", functions=[], variables=[],
-        types=[], enums=[], typedefs={}, kabi=parse_symvers(entries_text),
+        library="Module.symvers",
+        version="1",
+        functions=[],
+        variables=[],
+        types=[],
+        enums=[],
+        typedefs={},
+        kabi=parse_symvers(entries_text),
     )
 
 
@@ -65,6 +82,7 @@ def _kinds(r) -> set[ChangeKind]:
 
 
 # ── D3: unnamed-type leakage ────────────────────────────────────────────────
+
 
 class TestUnnamedTypeLeak:
     def test_newly_leaked_lambda_is_risk(self):
@@ -186,6 +204,7 @@ class TestUnnamedTypeLeak:
 
 # ── D2: long-double ABI transition ──────────────────────────────────────────
 
+
 class TestLongDoubleAbi:
     def test_long_double_to_float128_is_breaking(self):
         # _Z4areae = area(long double), _Z4areag = area(__float128)
@@ -234,15 +253,15 @@ class TestLongDoubleAbi:
     def test_non_ld_removal_alongside_transition(self):
         # A plain (non-LD) removal coexists with a real LD transition: the
         # non-LD symbol is skipped, the LD pair is still collapsed to one finding.
-        old = _elf_snap("_Z3fooi", "_Z4areae")   # foo(int) + area(long double)
-        new = _elf_snap("_Z4areag")              # area(__float128)
+        old = _elf_snap("_Z3fooi", "_Z4areae")  # foo(int) + area(long double)
+        new = _elf_snap("_Z4areag")  # area(__float128)
         ks = _kinds(compare(old, new))
         assert ChangeKind.LONG_DOUBLE_ABI_CHANGED in ks
 
     def test_ld_removal_without_matching_signature(self):
         # Two LD symbols with different function names do not pair.
-        old = _elf_snap("_Z4areae")   # area(long double)
-        new = _elf_snap("_Z3fooe")    # foo(long double) — different function
+        old = _elf_snap("_Z4areae")  # area(long double)
+        new = _elf_snap("_Z3fooe")  # foo(long double) — different function
         assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in _kinds(compare(old, new))
 
     def test_return_only_ld_width_change_flagged(self):
@@ -254,11 +273,19 @@ class TestLongDoubleAbi:
 
         def _snap(ld_size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="l.so.1", version="1",
-                functions=[Function(name="f()", mangled="_Z1fv", return_type="long double")],
-                variables=[], types=[], enums=[], typedefs={},
+                library="l.so.1",
+                version="1",
+                functions=[
+                    Function(name="f()", mangled="_Z1fv", return_type="long double")
+                ],
+                variables=[],
+                types=[],
+                enums=[],
+                typedefs={},
                 elf=ElfMetadata(symbols=[_sym("_Z1fv")], machine="EM_X86_64"),
-                dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
+                dwarf=DwarfMetadata(
+                    has_dwarf=True, base_types={"long double": ld_size}
+                ),
             )
 
         r = compare(_snap(16), _snap(8))
@@ -275,16 +302,24 @@ class TestLongDoubleAbi:
 
         def _snap(ld_size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="l.so.1", version="1",
+                library="l.so.1",
+                version="1",
                 functions=[
                     Function(
-                        name="f", mangled="f", return_type="long double",
+                        name="f",
+                        mangled="f",
+                        return_type="long double",
                         params=[Param(name="x", type="long double")],
                     )
                 ],
-                variables=[], types=[], enums=[], typedefs={},
+                variables=[],
+                types=[],
+                enums=[],
+                typedefs={},
                 elf=ElfMetadata(symbols=[_sym("f")], machine="EM_X86_64"),
-                dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
+                dwarf=DwarfMetadata(
+                    has_dwarf=True, base_types={"long double": ld_size}
+                ),
             )
 
         r = compare(_snap(16), _snap(8))
@@ -298,14 +333,22 @@ class TestLongDoubleAbi:
 
         def _snap(ld_size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="l.so.1", version="1",
+                library="l.so.1",
+                version="1",
                 functions=[Function(name="f()", mangled="_Z1fv", return_type="double")],
-                variables=[], types=[], enums=[], typedefs={},
+                variables=[],
+                types=[],
+                enums=[],
+                typedefs={},
                 elf=ElfMetadata(symbols=[_sym("_Z1fv")], machine="EM_X86_64"),
-                dwarf=DwarfMetadata(has_dwarf=True, base_types={"long double": ld_size}),
+                dwarf=DwarfMetadata(
+                    has_dwarf=True, base_types={"long double": ld_size}
+                ),
             )
 
-        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in _kinds(compare(_snap(16), _snap(8)))
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in _kinds(
+            compare(_snap(16), _snap(8))
+        )
 
     def test_exported_empty_without_elf(self):
         from abicheck.diff_long_double import _exported
@@ -314,6 +357,7 @@ class TestLongDoubleAbi:
 
 
 # ── D1: Module.symvers kABI ─────────────────────────────────────────────────
+
 
 class TestSymversParser:
     def test_five_field_with_namespace(self):
@@ -342,10 +386,10 @@ class TestSymversParser:
 
     def test_malformed_and_blank_lines_skipped(self):
         text = (
-            "\n"                                      # blank → skipped
-            "0x1\tsym\tvmlinux\n"                     # <4 fields → skipped
-            "0x2\t\tvmlinux\tEXPORT_SYMBOL\t\n"       # empty symbol → skipped
-            "0x3\tgood\tvmlinux\tEXPORT_SYMBOL\t\n"   # valid
+            "\n"  # blank → skipped
+            "0x1\tsym\tvmlinux\n"  # <4 fields → skipped
+            "0x2\t\tvmlinux\tEXPORT_SYMBOL\t\n"  # empty symbol → skipped
+            "0x3\tgood\tvmlinux\tEXPORT_SYMBOL\t\n"  # valid
         )
         meta = parse_symvers(text)
         assert set(meta.entries) == {"good"}

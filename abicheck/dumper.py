@@ -331,12 +331,23 @@ def _clang_header_dump(
 
     def _make_key(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> str:
         return _cache_key(
-            headers, extra_includes, clang_bin,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
-            lang=lang, backend="clang", system_includes=sysinc,
-            extra_hash_dirs=extra_hash_dirs, frontend_identity=frontend_identity,
-            compiler_identity=compiler_identity, force_cpp=fcpp, force_cpp20=fcpp20,
+            headers,
+            extra_includes,
+            clang_bin,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            backend="clang",
+            system_includes=sysinc,
+            extra_hash_dirs=extra_hash_dirs,
+            frontend_identity=frontend_identity,
+            compiler_identity=compiler_identity,
+            force_cpp=fcpp,
+            force_cpp20=fcpp20,
             frontend_context=frontend_context,
         )
 
@@ -344,7 +355,8 @@ def _clang_header_dump(
     # toolchain change to either invalidates the cached AST. Equal when already
     # in C++ mode — pass once so existing C++ cache keys are stable.
     key = _make_key(
-        force_cpp, force_cpp20,
+        force_cpp,
+        force_cpp20,
         system_includes if force_cpp else (*system_includes, *cpp_system_includes),
     )
     resolved_kind = frontend_context if dpcpp_multi_context else None
@@ -439,8 +451,14 @@ def _clang_header_dump(
             )
         # Write under the mode that ACTUALLY produced `result`, not the
         # stale pre-retry `key`/`cached` (see this function's own docstring).
-        write_key = key if cur_fcpp == force_cpp else _make_key(cur_fcpp, cur_fcpp20, cur_sysinc)
-        write_cached = cached if cur_fcpp == force_cpp else _cache_path(write_key, backend="clang")
+        write_key = (
+            key
+            if cur_fcpp == force_cpp
+            else _make_key(cur_fcpp, cur_fcpp20, cur_sysinc)
+        )
+        write_cached = (
+            cached if cur_fcpp == force_cpp else _cache_path(write_key, backend="clang")
+        )
         root = _parse_clang_ast_result(
             result,
             write_cached,
@@ -448,7 +466,9 @@ def _clang_header_dump(
             cache_write=identities_stable,
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
-            header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(str(h) for h in headers),
+            header_roots=pruning_header_roots
+            if pruning_header_roots is not None
+            else tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
             # Kept under the ORIGINAL `key`, not `write_key` (Codex review, P1):
@@ -621,7 +641,9 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
-            pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
+            pruning_header_roots=pruning_header_roots
+            if pruning_header_roots is not None
+            else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
         # Probe-failure fallback (Codex/CodeRabbit review, fresh evidence): explicit `--target=`; a bare
@@ -633,19 +655,31 @@ def _header_ast_parser(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
-        _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
+        _bare_reprobe_args = _forwarded_driver_mode_token(
+            gcc_options, gcc_option_tokens
+        )
+
         def _bare_reprobe() -> str | None:
             # Deferred (Codex review, fresh evidence): eagerly evaluating this would
             # start a second compiler subprocess (its own 10s timeout) on every call.
-            return _configured_target_triple(None, _bare_reprobe_args, clang_bin) if _target_known else None
+            return (
+                _configured_target_triple(None, _bare_reprobe_args, clang_bin)
+                if _target_known
+                else None
+            )
 
         _guess_ok = (
             _target_known
             and _is_default_clang_bin(clang_bin, compiler)
             and not _clang_bin_is_explicitly_configured(gcc_path, gcc_prefix)
         )
-        target_triple = _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin) or (
-            (_explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True) or _bare_reprobe())
+        target_triple = _configured_target_triple(
+            gcc_options, gcc_option_tokens, clang_bin
+        ) or (
+            (
+                _explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True)
+                or _bare_reprobe()
+            )
             if is_cl_mode
             else _explicit_target_triple(gcc_options, gcc_option_tokens)
             or _bare_reprobe()
@@ -1561,7 +1595,9 @@ def _dump_elf(
                 dwarf_only_types,
                 profile_hint,
                 # Presence-only probe never parsed structs/enums (Codex review, PR #1026).
-                None if (symbols_only or debug_presence_only) else resolved_debug_format,
+                None
+                if (symbols_only or debug_presence_only)
+                else resolved_debug_format,
             )
         # Built here (session open): "auto" can fall back to clang (G16), so
         # ast_result.is_clang is the only reliable signal (Codex review).
@@ -1660,7 +1696,14 @@ def _dump_elf(
         language_profile=profile_hint,
         dwarf_layout_coherence=_dwarf_layout_coherence,
         dwarf_layout_coherence_mismatches=_dwarf_layout_coherence_mismatches,
-        **_ast_compile_provenance(list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot, ast_toolchain=ast_result.ast_toolchain, lang=lang),
+        **_ast_compile_provenance(
+            list(ast_result.provenance_headers),
+            gcc_options,
+            gcc_option_tokens,
+            sysroot,
+            ast_toolchain=ast_result.ast_toolchain,
+            lang=lang,
+        ),
     )
     _populate_elf_visibility(snapshot)
     return closure_identity.renumber_anonymous_closure_identities(snapshot)
@@ -1798,37 +1841,46 @@ def _dump_macho(
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return closure_identity.renumber_anonymous_closure_identities(AbiSnapshot(
-        library=dylib_path.name,
-        version=version,
-        source_path=str(dylib_path.resolve()),
-        source_mtime=_dylib_mtime,
-        source_mtime_epoch=_dylib_mtime_epoch,
-        source_size=_safe_size(dylib_path),
-        functions=list(_ast.functions),
-        variables=list(_ast.variables),
-        types=list(_ast.types),
-        enums=list(_ast.enums),
-        typedefs=_ast.typedefs,
-        typedefs_qualified=_ast.typedefs_qualified,
-        constants=_ast.constants,
-        typedef_entity_ids=_ast.typedef_entity_ids,
-        constant_entity_ids=_ast.constant_entity_ids,
-        semantic_ir=_ast.semantic_ir,
-        macho=macho_meta,
-        # Reached only when headers were supplied and castxml ran (the no-header
-        # branch returns earlier): this surface is header-parsed.
-        from_headers=True,
-        ast_producer=_ast_producer,
-        ast_toolchain=_parser_ast_toolchain(parser),
-        ast_fallback_reason=_parser_ast_fallback_reason(parser),
-        ast_toolchain_supported=_parser_ast_supported(parser),
-        ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
-        frontend_context_kind=_parser_frontend_context_kind(parser),
-        platform="macho",
-        language_profile=profile_hint,
-        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
-    ))
+    return closure_identity.renumber_anonymous_closure_identities(
+        AbiSnapshot(
+            library=dylib_path.name,
+            version=version,
+            source_path=str(dylib_path.resolve()),
+            source_mtime=_dylib_mtime,
+            source_mtime_epoch=_dylib_mtime_epoch,
+            source_size=_safe_size(dylib_path),
+            functions=list(_ast.functions),
+            variables=list(_ast.variables),
+            types=list(_ast.types),
+            enums=list(_ast.enums),
+            typedefs=_ast.typedefs,
+            typedefs_qualified=_ast.typedefs_qualified,
+            constants=_ast.constants,
+            typedef_entity_ids=_ast.typedef_entity_ids,
+            constant_entity_ids=_ast.constant_entity_ids,
+            semantic_ir=_ast.semantic_ir,
+            macho=macho_meta,
+            # Reached only when headers were supplied and castxml ran (the no-header
+            # branch returns earlier): this surface is header-parsed.
+            from_headers=True,
+            ast_producer=_ast_producer,
+            ast_toolchain=_parser_ast_toolchain(parser),
+            ast_fallback_reason=_parser_ast_fallback_reason(parser),
+            ast_toolchain_supported=_parser_ast_supported(parser),
+            ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
+            frontend_context_kind=_parser_frontend_context_kind(parser),
+            platform="macho",
+            language_profile=profile_hint,
+            **_ast_compile_provenance(
+                headers,
+                gcc_options,
+                gcc_option_tokens,
+                sysroot,
+                ast_toolchain=_parser_ast_toolchain(parser),
+                lang=lang,
+            ),
+        )
+    )
 
 
 def _dump_pe(
@@ -1926,37 +1978,46 @@ def _dump_pe(
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return closure_identity.renumber_anonymous_closure_identities(AbiSnapshot(
-        library=dll_path.name,
-        version=version,
-        source_path=str(dll_path.resolve()),
-        source_mtime=_dll_mtime,
-        source_mtime_epoch=_dll_mtime_epoch,
-        source_size=_safe_size(dll_path),
-        functions=list(_ast.functions),
-        variables=list(_ast.variables),
-        types=list(_ast.types),
-        enums=list(_ast.enums),
-        typedefs=_ast.typedefs,
-        typedefs_qualified=_ast.typedefs_qualified,
-        constants=_ast.constants,
-        typedef_entity_ids=_ast.typedef_entity_ids,
-        constant_entity_ids=_ast.constant_entity_ids,
-        semantic_ir=_ast.semantic_ir,
-        pe=pe_meta,
-        # Reached only when headers were supplied and castxml ran (the no-header
-        # branch returns earlier): this surface is header-parsed.
-        from_headers=True,
-        ast_producer=_ast_producer,
-        ast_toolchain=_parser_ast_toolchain(parser),
-        ast_fallback_reason=_parser_ast_fallback_reason(parser),
-        ast_toolchain_supported=_parser_ast_supported(parser),
-        ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
-        frontend_context_kind=_parser_frontend_context_kind(parser),
-        platform="pe",
-        language_profile=profile_hint,
-        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot, ast_toolchain=_parser_ast_toolchain(parser), lang=lang),
-    ))
+    return closure_identity.renumber_anonymous_closure_identities(
+        AbiSnapshot(
+            library=dll_path.name,
+            version=version,
+            source_path=str(dll_path.resolve()),
+            source_mtime=_dll_mtime,
+            source_mtime_epoch=_dll_mtime_epoch,
+            source_size=_safe_size(dll_path),
+            functions=list(_ast.functions),
+            variables=list(_ast.variables),
+            types=list(_ast.types),
+            enums=list(_ast.enums),
+            typedefs=_ast.typedefs,
+            typedefs_qualified=_ast.typedefs_qualified,
+            constants=_ast.constants,
+            typedef_entity_ids=_ast.typedef_entity_ids,
+            constant_entity_ids=_ast.constant_entity_ids,
+            semantic_ir=_ast.semantic_ir,
+            pe=pe_meta,
+            # Reached only when headers were supplied and castxml ran (the no-header
+            # branch returns earlier): this surface is header-parsed.
+            from_headers=True,
+            ast_producer=_ast_producer,
+            ast_toolchain=_parser_ast_toolchain(parser),
+            ast_fallback_reason=_parser_ast_fallback_reason(parser),
+            ast_toolchain_supported=_parser_ast_supported(parser),
+            ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
+            frontend_context_kind=_parser_frontend_context_kind(parser),
+            platform="pe",
+            language_profile=profile_hint,
+            **_ast_compile_provenance(
+                headers,
+                gcc_options,
+                gcc_option_tokens,
+                sysroot,
+                ast_toolchain=_parser_ast_toolchain(parser),
+                lang=lang,
+            ),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

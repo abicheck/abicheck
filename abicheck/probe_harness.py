@@ -82,6 +82,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class ProbeConfiguration:
     """A (compiler, flags, defines) tuple."""
+
     id: str
     compiler: str
     flags: tuple[str, ...] = ()
@@ -102,6 +103,7 @@ class ProbeConfiguration:
 @dataclass(frozen=True)
 class Probe:
     """One consumer TU snippet."""
+
     name: str
     headers: tuple[str, ...]
     body: str
@@ -125,6 +127,7 @@ class Probe:
 @dataclass(frozen=True)
 class ProbeSpec:
     """A parsed probe-harness YAML manifest."""
+
     name: str
     configurations: tuple[ProbeConfiguration, ...]
     probes: tuple[Probe, ...]
@@ -134,6 +137,7 @@ class ProbeSpec:
 @dataclass
 class ProbeResult:
     """Outcome of compiling one (configuration × probe) pair."""
+
     configuration_id: str
     probe_id: str
     object_path: str | None = None
@@ -145,6 +149,7 @@ class ProbeResult:
 class MatrixSnapshot:
     """A version-stamped set of ProbeResults — the matrix-aware analogue
     of ``AbiSnapshot``."""
+
     library: str
     version: str
     spec_name: str
@@ -226,8 +231,7 @@ def _validate_compiler_name(value: Any) -> str:
         raise ValueError("probe spec compiler must be a non-empty string")
     if Path(value).name != value:
         raise ValueError(
-            "probe spec compiler must be a compiler executable name on PATH, "
-            "not a path"
+            "probe spec compiler must be a compiler executable name on PATH, not a path"
         )
     if not _SAFE_COMPILER_RE.fullmatch(value):
         raise ValueError(
@@ -267,16 +271,18 @@ def _parse_cxx_std(flags: list[str]) -> int | None:
     for f in flags:
         if f.startswith(_CXX_STD_FLAG):
             try:
-                return int(f[len(_CXX_STD_FLAG):])
+                return int(f[len(_CXX_STD_FLAG) :])
             except ValueError:
                 return None
     return None
+
 
 def load_probe_spec(path: str | Path) -> ProbeSpec:
     """Parse a YAML probe manifest. Accepts JSON too (a YAML subset)."""
     text = Path(path).read_text(encoding="utf-8")
     try:
         import yaml
+
         data = yaml.safe_load(text)
     except ImportError:
         # Fallback: PyYAML isn't required as a runtime dep for abicheck,
@@ -302,24 +308,28 @@ def parse_probe_spec(data: dict[str, Any]) -> ProbeSpec:
     for c in data["configurations"]:
         raw_flags = _validate_string_sequence("flags", c.get("flags", []))
         flags = tuple(_validate_flag(f) for f in raw_flags)
-        configs.append(ProbeConfiguration(
-            id=_validate_manifest_id("configuration id", c["id"]),
-            compiler=_validate_compiler_name(c["compiler"]),
-            flags=flags,
-            defines=dict(c.get("defines", {})),
-            include_dirs=_validate_string_sequence(
-                "include_dirs", c.get("include_dirs", [])
-            ),
-            cxx_std=_parse_cxx_std(list(flags)),
-        ))
+        configs.append(
+            ProbeConfiguration(
+                id=_validate_manifest_id("configuration id", c["id"]),
+                compiler=_validate_compiler_name(c["compiler"]),
+                flags=flags,
+                defines=dict(c.get("defines", {})),
+                include_dirs=_validate_string_sequence(
+                    "include_dirs", c.get("include_dirs", [])
+                ),
+                cxx_std=_parse_cxx_std(list(flags)),
+            )
+        )
 
     probes: list[Probe] = []
     for p in data["probes"]:
-        probes.append(Probe(
-            name=_validate_manifest_id("probe name", p["name"]),
-            headers=_validate_string_sequence("headers", p.get("headers", [])),
-            body=p["body"],
-        ))
+        probes.append(
+            Probe(
+                name=_validate_manifest_id("probe name", p["name"]),
+                headers=_validate_string_sequence("headers", p.get("headers", [])),
+                body=p["body"],
+            )
+        )
 
     return ProbeSpec(
         name=data["name"],
@@ -346,7 +356,8 @@ def _compile_probe(
 
     cmd = cfg.as_command_args() + [
         "-c",
-        "-o", str(obj_path),
+        "-o",
+        str(obj_path),
         str(src_path),
     ]
 
@@ -355,7 +366,11 @@ def _compile_probe(
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=60, check=False,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return None, "compilation timed out (60s)"
@@ -377,6 +392,7 @@ def _snapshot_object_file(obj_path: Path) -> AbiSnapshot:
     """
     # Lazy import — keeps unit tests that don't compile fast.
     from .dumper import dump
+
     return dump(obj_path, headers=[], dwarf_only=True)
 
 
@@ -425,13 +441,15 @@ def run_probe_matrix(
                         # Dumper raises one of these on malformed objects;
                         # everything else propagates.
                         err = f"dumper failed on {obj_path.name}: {e}"
-                results.append(ProbeResult(
-                    configuration_id=cfg.id,
-                    probe_id=probe.name,
-                    object_path=str(obj_path) if obj_path else None,
-                    snapshot=snap,
-                    error=err,
-                ))
+                results.append(
+                    ProbeResult(
+                        configuration_id=cfg.id,
+                        probe_id=probe.name,
+                        object_path=str(obj_path) if obj_path else None,
+                        snapshot=snap,
+                        error=err,
+                    )
+                )
     finally:
         # Don't tear down a user-supplied dir; ours is throwaway but
         # may be useful for debug, so leave it on disk and rely on the

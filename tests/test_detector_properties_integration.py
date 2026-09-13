@@ -24,6 +24,7 @@ invariants on snapshots that came out of the real pipeline.
 Requires gcc + castxml; Linux-only (gcc emits ELF there). Marked ``integration``
 so the default fast lane skips it.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -58,9 +59,19 @@ def _build(src: str, hdr: str, tmp: Path, stem: str):
     hdr_file.write_text(textwrap.dedent(hdr).strip(), encoding="utf-8")
     so = tmp / f"lib{stem}.so"
     r = subprocess.run(
-        ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-         "-o", str(so), str(src_file)],
-        capture_output=True, text=True, timeout=30,
+        [
+            "gcc",
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-fvisibility=default",
+            "-o",
+            str(so),
+            str(src_file),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if r.returncode != 0:
         pytest.skip(f"gcc failed: {r.stderr[:200]}")

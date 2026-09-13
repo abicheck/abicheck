@@ -330,8 +330,8 @@ def test_relink_surface_exports_rebuilds_mapping() -> None:
     relink_surface_exports(surf, ["_Z3foov"])  # only foo is exported
     mapping = surf.mappings["source_decl_to_binary_symbol"]
     vals = set(mapping.values())
-    assert "_Z3foov" in vals          # foo matched its export
-    assert "" in vals                 # bar did not (not exported)
+    assert "_Z3foov" in vals  # foo matched its export
+    assert "" in vals  # bar did not (not exported)
     assert surf.roots["exported_symbols"] == ["_Z3foov"]
     # decls_without_symbol must be recomputed: foo now maps, only bar remains —
     # no contradictory "foo maps to _Z3foov but is also unmatched" state.
@@ -382,7 +382,8 @@ def test_provenance_inert_for_unmangled_ctor_only_class() -> None:
         roots={"exported_symbols": ["_ZN3FooC1Ev", "_ZN3FooD1Ev"]},
         reachable_declarations=[
             _ent("Foo::Foo", "constructor", mangled="") for _ in range(3)
-        ] + [_ent("Foo::~Foo", "destructor", mangled="") for _ in range(3)],
+        ]
+        + [_ent("Foo::~Foo", "destructor", mangled="") for _ in range(3)],
     )
     kinds = [c.kind for c in diff_source_abi(_surface(), new)]
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds

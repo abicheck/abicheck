@@ -23,6 +23,7 @@ Exit codes:
     1  one or more unexpected failures
     2  environment error (tools missing, etc.)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,7 +46,9 @@ REPO_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-EXAMPLES_DIR = example_catalog.CASES_DIR  # monkeypatch seam: test_validate_examples_unit.py
+EXAMPLES_DIR = (
+    example_catalog.CASES_DIR
+)  # monkeypatch seam: test_validate_examples_unit.py
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 ARTIFACT_VARIANTS = (
     "debug-headers",
@@ -113,7 +116,9 @@ SHARED_LIB_SUFFIX = _shared_lib_suffix()
 PREFERRED_FAMILY: str | None = None
 
 
-def _find_compiler(is_cpp: bool = False, preferred_family: str | None = None) -> str | None:
+def _find_compiler(
+    is_cpp: bool = False, preferred_family: str | None = None
+) -> str | None:
     """Find a C/C++ compiler available on this platform.
 
     *preferred_family* ("gcc" | "clang" | "msvc") reorders the candidate list to
@@ -145,7 +150,11 @@ def _find_compiler(is_cpp: bool = False, preferred_family: str | None = None) ->
         }.get(sys.platform, ["gcc", "clang"])
 
     if preferred_family == "clang":
-        pref = ["clang++-18", "clang++", "g++", "cl"] if is_cpp else ["clang-18", "clang", "gcc", "cl"]
+        pref = (
+            ["clang++-18", "clang++", "g++", "cl"]
+            if is_cpp
+            else ["clang-18", "clang", "gcc", "cl"]
+        )
         candidates = [c for c in pref if c in set(candidates) or c.startswith("clang")]
     elif preferred_family == "gcc":
         pref = ["g++", "clang++", "cl"] if is_cpp else ["gcc", "clang", "cl"]
@@ -215,7 +224,7 @@ def _build_info_applies(entry: dict, variant: str) -> bool:
 # ---------------------------------------------------------------------------
 class CaseResult(NamedTuple):
     name: str
-    status: str          # PASS | FAIL | XFAIL | SKIP | ERROR
+    status: str  # PASS | FAIL | XFAIL | SKIP | ERROR
     expected: str | None
     got: str | None
     message: str
@@ -329,7 +338,9 @@ def _find_sources(
     return None
 
 
-def _compile(src: Path, out: Path, *, variant: str = DEFAULT_ARTIFACT_VARIANT) -> str | None:
+def _compile(
+    src: Path, out: Path, *, variant: str = DEFAULT_ARTIFACT_VARIANT
+) -> str | None:
     """Compile src → shared lib. Returns error string on failure, None on success."""
     is_cpp = src.suffix == ".cpp"
     compiler = _find_compiler(is_cpp)
@@ -343,12 +354,29 @@ def _compile(src: Path, out: Path, *, variant: str = DEFAULT_ARTIFACT_VARIANT) -
         args.insert(2, "/O2" if stock_variant else "/Zi")
     elif sys.platform == "darwin":
         opt_flags = ["-O2"] if stock_variant else ["-g", "-Og"]
-        args = [compiler, "-dynamiclib", *opt_flags, "-fvisibility=default",
-                "-install_name", "@rpath/lib.dylib",
-                "-o", str(out), str(src)]
+        args = [
+            compiler,
+            "-dynamiclib",
+            *opt_flags,
+            "-fvisibility=default",
+            "-install_name",
+            "@rpath/lib.dylib",
+            "-o",
+            str(out),
+            str(src),
+        ]
     else:
         opt_flags = ["-O2"] if stock_variant else ["-g", "-Og"]
-        args = [compiler, "-shared", "-fPIC", *opt_flags, "-fvisibility=default", "-o", str(out), str(src)]
+        args = [
+            compiler,
+            "-shared",
+            "-fPIC",
+            *opt_flags,
+            "-fvisibility=default",
+            "-o",
+            str(out),
+            str(src),
+        ]
 
     r = subprocess.run(args, capture_output=True, text=True, timeout=30)
     return None if r.returncode == 0 else r.stderr[:600]
@@ -408,10 +436,16 @@ def _build_with_cmake(
 
     case_name = case_dir.name
     case_out = build_dir / case_name
-    build_type = "Release" if variant in {"release-headers", "build-source"} else "Debug"
+    build_type = (
+        "Release" if variant in {"release-headers", "build-source"} else "Debug"
+    )
 
     configure_cmd = [
-        cmake, "-S", str(example_catalog.CATALOG_DIR), "-B", str(build_dir),
+        cmake,
+        "-S",
+        str(example_catalog.CATALOG_DIR),
+        "-B",
+        str(build_dir),
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     ]
@@ -446,8 +480,14 @@ def _build_with_cmake(
     v1_target = f"{case_name}_v1"
     v2_target = f"{case_name}_v2"
     build_cmd = [
-        cmake, "--build", str(build_dir), "--target", v1_target, v2_target,
-        "--config", build_type,
+        cmake,
+        "--build",
+        str(build_dir),
+        "--target",
+        v1_target,
+        v2_target,
+        "--config",
+        build_type,
     ]
     r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
@@ -463,9 +503,13 @@ def _build_with_cmake(
             # CMake/Ninja/this-MSVC-toolset limitation, not an abicheck
             # defect — skip cleanly rather than hard-ERROR every case that
             # happens to hit it.
-            return None, None, (
-                f"SKIP:CMake WINDOWS_EXPORT_ALL_SYMBOLS/Ninja exports.def "
-                f"generation defect: {detail[:200]}"
+            return (
+                None,
+                None,
+                (
+                    f"SKIP:CMake WINDOWS_EXPORT_ALL_SYMBOLS/Ninja exports.def "
+                    f"generation defect: {detail[:200]}"
+                ),
             )
         return None, None, f"cmake build failed: {detail}"
 
@@ -511,10 +555,20 @@ def _build_libs(
 
     if has_cmake_file and not has_cmake:
         cmake_text = (case_dir / "CMakeLists.txt").read_text()
-        _special = ("FORCE_INCLUDE", "LINK_OPTIONS", "COMPILE_OPTIONS",
-                     "fvisibility", "version-script", "soname")
+        _special = (
+            "FORCE_INCLUDE",
+            "LINK_OPTIONS",
+            "COMPILE_OPTIONS",
+            "fvisibility",
+            "version-script",
+            "soname",
+        )
         if any(tok in cmake_text for tok in _special):
-            return None, None, "SKIP:requires cmake (CMakeLists.txt has special build flags)"
+            return (
+                None,
+                None,
+                "SKIP:requires cmake (CMakeLists.txt has special build flags)",
+            )
 
     # Direct compilation (no CMakeLists.txt, or cmake absent but no special flags)
     v1_so = tmp / f"libv1{SHARED_LIB_SUFFIX}"
@@ -539,12 +593,13 @@ def _strip_debug_info(*libs: Path) -> str | None:
         return "SKIP:strip tool not found"
     if sys.platform == "win32":
         return (
-            "SKIP:Windows PE/PDB require a different strip tool/flags "
-            "(not implemented)"
+            "SKIP:Windows PE/PDB require a different strip tool/flags (not implemented)"
         )
     flags = ["-S"] if sys.platform == "darwin" else ["-g"]
     for lib in libs:
-        r = subprocess.run([strip, *flags, str(lib)], capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [strip, *flags, str(lib)], capture_output=True, text=True, timeout=30
+        )
         if r.returncode != 0:
             return f"strip failed for {lib.name}: {r.stderr[:200]}"
     return None
@@ -637,14 +692,37 @@ def _build_compare_cmd(
     counterparts when the respective build-source paths are provided, and
     always sets the scoping flag explicitly so verdicts are deterministic.
     """
-    cmd = [sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "-o", "json=-"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "abicheck.cli",
+        "compare",
+        str(snap1),
+        str(snap2),
+        "-o",
+        "json=-",
+    ]
     if old_build_source is not None:
-        cmd += ["--build-info", "old=" + str(old_build_source), "--sources", "old=" + str(old_build_source)]
+        cmd += [
+            "--build-info",
+            "old=" + str(old_build_source),
+            "--sources",
+            "old=" + str(old_build_source),
+        ]
     if new_build_source is not None:
-        cmd += ["--build-info", "new=" + str(new_build_source), "--sources", "new=" + str(new_build_source)]
+        cmd += [
+            "--build-info",
+            "new=" + str(new_build_source),
+            "--sources",
+            "new=" + str(new_build_source),
+        ]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in, so be explicit either way.
-    cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
+    cmd.append(
+        "--scope-public-headers"
+        if scope_public_headers
+        else "--no-scope-public-headers"
+    )
     # ADR-068 D4/Phase 5: pattern verdicts are unconditional now, not a CLI
     # flag; *pattern_verdicts* is kept only for call-site documentation of
     # which ground_truth.json cases need the idiom evidence -- inert here.
@@ -666,7 +744,9 @@ def _run_compare_and_parse(
         data = json.loads(rc.stdout)
     except json.JSONDecodeError:
         return None, (), f"invalid JSON from compare: {rc.stdout[:200]}"
-    kinds = tuple(c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict))
+    kinds = tuple(
+        c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict)
+    )
     return data.get("verdict", "UNKNOWN"), kinds, None
 
 
@@ -687,14 +767,27 @@ def _build_compare_direct_cmd(
     not the dump/compare work itself, dominates wall time for small examples —
     this removes two of those three process starts per case.
     """
-    cmd = [sys.executable, "-m", "abicheck.cli", "compare", str(v1_so), str(v2_so), "-o", "json=-"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "abicheck.cli",
+        "compare",
+        str(v1_so),
+        str(v2_so),
+        "-o",
+        "json=-",
+    ]
     if v1_hdr and v1_hdr.exists():
         cmd += ["-H", "old=" + str(v1_hdr)]
     if v2_hdr and v2_hdr.exists():
         cmd += ["-H", "new=" + str(v2_hdr)]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in, so be explicit either way.
-    cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
+    cmd.append(
+        "--scope-public-headers"
+        if scope_public_headers
+        else "--no-scope-public-headers"
+    )
     # ADR-068 D4/Phase 5: see _build_compare_cmd's identical note.
     del pattern_verdicts
     return cmd
@@ -739,7 +832,10 @@ def _dump_and_compare(
         and not sources
     ):
         compare_cmd = _build_compare_direct_cmd(
-            v1_so, v2_so, v1_hdr, v2_hdr,
+            v1_so,
+            v2_so,
+            v1_hdr,
+            v2_hdr,
             scope_public_headers=scope_public_headers,
             pattern_verdicts=pattern_verdicts,
         )
@@ -793,11 +889,17 @@ def _write_compile_db(
 ) -> None:
     """Write a minimal compile_commands.json for source-evidence validation."""
     args = [compiler, "-I", str(case_dir), "-c", str(src)]
-    db_path.write_text(json.dumps([{
-        "directory": str(case_dir),
-        "file": str(src),
-        "arguments": args,
-    }]))
+    db_path.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(case_dir),
+                    "file": str(src),
+                    "arguments": args,
+                }
+            ]
+        )
+    )
 
 
 def _write_source_compile_db(
@@ -831,10 +933,7 @@ def _write_source_compile_db(
                 resolved = path.resolve()
             except OSError:
                 return False
-            return (
-                resolved.name == src.name
-                and resolved.parent == case_resolved
-            )
+            return resolved.name == src.name and resolved.parent == case_resolved
 
         def same_side_target(entry: dict) -> bool:
             args = [str(a) for a in entry.get("arguments", [])]
@@ -842,20 +941,11 @@ def _write_source_compile_db(
             needle = f"{case_dir.name}_{target_suffix}"
             return needle in " ".join([*args, command])
 
-        selected = [
-            e for e in entries
-            if same_side_target(e)
-        ]
+        selected = [e for e in entries if same_side_target(e)]
         if not selected:
-            selected = [
-                e for e in entries
-                if same_source(e)
-            ]
+            selected = [e for e in entries if same_source(e)]
         if not selected:
-            selected = [
-                e for e in entries
-                if same_case_source(e)
-            ]
+            selected = [e for e in entries if same_case_source(e)]
         if selected:
             out.write_text(json.dumps(selected, indent=2))
             return out
@@ -958,7 +1048,11 @@ def _collect_build_source_evidence(
         except Exception as exc:  # noqa: BLE001 - report as a case failure, not a crash
             return None, None, f"collect {side} failed: {exc}"
         if pack is None:
-            return None, None, f"collect {side} failed: no build/source evidence collected"
+            return (
+                None,
+                None,
+                f"collect {side} failed: no build/source evidence collected",
+            )
         pack.root = out_dir
         pack_io.write(pack)
         results.append(out_dir)
@@ -1041,7 +1135,9 @@ def _evaluate_verdict(
         return CaseResult(name, "PASS", expected_raw, got, "")
     if known_gap and (not known_gap_observed or got in known_gap_observed):
         return CaseResult(name, "XFAIL", expected_raw, got, known_gap)
-    return CaseResult(name, "FAIL", expected_raw, got, f"expected={expected!r} got={got!r}")
+    return CaseResult(
+        name, "FAIL", expected_raw, got, f"expected={expected!r} got={got!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1055,69 +1151,110 @@ def _check_case_preconditions(
     expected_raw = entry.get("expected")
 
     if entry.get("skip", False):
-        return CaseResult(name, "SKIP", expected_raw, None, entry.get("reason", "skip=true"))
+        return CaseResult(
+            name, "SKIP", expected_raw, None, entry.get("reason", "skip=true")
+        )
 
     # G20 single-release audit / cross-source cases (ADR-035) have no v1/v2
     # compilable pair by design — they ship a committed snapshot.abi.json and are
     # validated compiler-free by tests/test_g20_catalog.py via run_crosschecks.
     if entry.get("mode") == "audit":
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "G20 audit/cross-source case — validated by tests/test_g20_catalog.py")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "G20 audit/cross-source case — validated by tests/test_g20_catalog.py",
+        )
 
     # G23 Python-extension cases ship a `.pyi` type-stub pair (v1.pyi/v2.pyi),
     # not a compilable C/C++ source pair — the Python-level API surface is
     # recovered statically, so this compile-and-diff path cannot build them.
     # They are validated compiler-free by tests/test_python_api_examples.py.
     if entry.get("stub_pair"):
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "Python-extension .pyi-pair case — validated by "
-                          "tests/test_python_api_examples.py")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "Python-extension .pyi-pair case — validated by "
+            "tests/test_python_api_examples.py",
+        )
 
     # ADR-039 build-context reconciliation cases ship a guard-annotated fixture
     # pair (no compilable v1/v2 sources — castxml does not yet emit the guard
     # registry) and are validated compiler-free by tests/test_diff_reconcile.py.
     if entry.get("mode") == "reconcile":
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "build-context reconciliation fixture — validated by "
-                          "tests/test_diff_reconcile.py")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "build-context reconciliation fixture — validated by "
+            "tests/test_diff_reconcile.py",
+        )
 
     # L3/L4/L5 build/source-only cases (152-162) ship a hand-built evidence-model
     # fixture pair (old.json/new.json) instead of a compilable v1/v2 source pair;
     # they are validated compiler-free by tests/test_l3l4l5_examples.py.
     if "old.json" in (entry.get("fixtures") or []):
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "L3/L4/L5 build/source-only case — validated by "
-                          "tests/test_l3l4l5_examples.py")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "L3/L4/L5 build/source-only case — validated by "
+            "tests/test_l3l4l5_examples.py",
+        )
 
     # kABI (Linux kernel Module.symvers) cases ship a v1.symvers/v2.symvers
     # manifest pair instead of a compilable v1/v2 source pair — no kernel build,
     # no compiler. Validated compiler-free by tests/test_kabi_examples.py.
     if set(entry.get("fixtures") or []) == {"v1.symvers", "v2.symvers"}:
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "kABI Module.symvers fixture pair — validated by "
-                          "tests/test_kabi_examples.py")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "kABI Module.symvers fixture pair — validated by "
+            "tests/test_kabi_examples.py",
+        )
 
     # Environment-drift cases ship a committed AbiSnapshot pair
     # (old.abi.json/new.abi.json) — producing e.g. a glibc verneed-floor raise
     # for real would need two different sysroots, not two sources. Validated
     # compiler-free by tests/test_environment_drift.py.
     if entry.get("mode") == "snapshot-pair":
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "snapshot-pair case — validated by "
-                          "tests/test_environment_drift.py")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "snapshot-pair case — validated by tests/test_environment_drift.py",
+        )
 
     # Bundle cases (ADR-023) are multi-library and use a different layout
     # (per-side dirs under examples/<case>/{old,new}/<libname>.cpp).
     # The v1/v2-pair compile path in this script can't build them; they
     # have their own integration tests in tests/test_bundle.py.
     if entry.get("category") == "bundle" or entry.get("bundle") is True:
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          "bundle case — exercised by tests/test_bundle.py (ADR-023)")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            "bundle case — exercised by tests/test_bundle.py (ADR-023)",
+        )
 
     platforms = entry.get("platforms", ["linux", "macos", "windows"])
     if CURRENT_PLATFORM not in platforms:
-        return CaseResult(name, "SKIP", expected_raw, None,
-                          f"not supported on {CURRENT_PLATFORM} (requires {platforms})")
+        return CaseResult(
+            name,
+            "SKIP",
+            expected_raw,
+            None,
+            f"not supported on {CURRENT_PLATFORM} (requires {platforms})",
+        )
 
     architectures = entry.get("architectures")
     if architectures and CURRENT_ARCHITECTURE not in architectures:
@@ -1134,14 +1271,23 @@ def _check_case_preconditions(
     feature = entry.get("requires_feature")
     if feature is not None:
         from feature_probe import compiler_supports
+
         if not compiler_supports(feature):
-            return CaseResult(name, "SKIP", expected_raw, None,
-                              f"compiler lacks required feature {feature!r}")
+            return CaseResult(
+                name,
+                "SKIP",
+                expected_raw,
+                None,
+                f"compiler lacks required feature {feature!r}",
+            )
     return None
 
 
 def _resolve_case_sources(
-    name: str, expected_raw: str | None, *, case_dir: Callable[[str], Path] = example_catalog.case_dir,
+    name: str,
+    expected_raw: str | None,
+    *,
+    case_dir: Callable[[str], Path] = example_catalog.case_dir,
 ) -> tuple[Path, tuple[Path, Path, Path | None, Path | None]] | CaseResult:
     """Resolve the case directory and source files. Returns (case_dir,
     sources_tuple) on success, or a CaseResult on error."""
@@ -1151,8 +1297,13 @@ def _resolve_case_sources(
 
     sources = _find_sources(resolved)
     if sources is None:
-        return CaseResult(name, "ERROR", expected_raw, None,
-                          "no recognised source layout (harness error — fix example or mark skip in ground_truth.json)")
+        return CaseResult(
+            name,
+            "ERROR",
+            expected_raw,
+            None,
+            "no recognised source layout (harness error — fix example or mark skip in ground_truth.json)",
+        )
     return resolved, sources
 
 
@@ -1165,7 +1316,6 @@ def _handle_build_error(
     if build_err.startswith("SKIP:"):
         return CaseResult(name, "SKIP", expected_raw, None, build_err[5:])
     return CaseResult(name, "ERROR", expected_raw, None, build_err)
-
 
 
 def _run_source_smoke(
@@ -1199,7 +1349,9 @@ def _run_source_smoke(
     spec = SourceSmokeSpec.from_dict(smoke)
     compiler = _find_compiler(spec.standard.startswith("c++"))
     if compiler is None:
-        return CaseResult(name, "SKIP", expected_raw, None, "no compiler for source smoke")
+        return CaseResult(
+            name, "SKIP", expected_raw, None, "no compiler for source smoke"
+        )
 
     allow_run = os.environ.get("ABICHECK_TRUSTED_SOURCE_SMOKE_RUN") == "1"
     if not allow_run and (
@@ -1331,7 +1483,11 @@ def run_case(
 
     # Dump + compare
     got, got_kinds, dc_err = _dump_and_compare(
-        tmp, v1_so, v2_so, v1_hdr, v2_hdr,
+        tmp,
+        v1_so,
+        v2_so,
+        v1_hdr,
+        v2_hdr,
         scope_public_headers=bool(entry.get("scope_public_headers", False)),
         old_build_source=old_build_source,
         new_build_source=new_build_source,
@@ -1365,10 +1521,16 @@ def run_case(
         build_info=build_info_present,
     )
     result = _evaluate_verdict(
-        name, expected_raw, got, known_gap, known_gap_observed,
+        name,
+        expected_raw,
+        got,
+        known_gap,
+        known_gap_observed,
     )._replace(variant=variant, source_layers=source_layers)
     if smoke_proof:
-        combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
+        combined = (
+            smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
+        )
         result = result._replace(message=combined)
     kinds_strict, kinds_detail = _kinds_strict_signal(
         entry, result, got_kinds, known_gap
@@ -1497,8 +1659,13 @@ def _run_all_cases(
                 res = res._replace(seconds=round(time.perf_counter() - started, 3))
                 results.append(res)
                 if not json_out:
-                    icon = {"PASS": "\u2705", "FAIL": "\u274c", "XFAIL": "\u26a0\ufe0f ",
-                            "SKIP": "\u23ed\ufe0f ", "ERROR": "\U0001f4a5"}.get(res.status, "?")
+                    icon = {
+                        "PASS": "\u2705",
+                        "FAIL": "\u274c",
+                        "XFAIL": "\u26a0\ufe0f ",
+                        "SKIP": "\u23ed\ufe0f ",
+                        "ERROR": "\U0001f4a5",
+                    }.get(res.status, "?")
                     msg = f"  {res.message}" if res.message else ""
                     print(f"{icon} {res.name:<42}  {res.status} [{res.variant}]{msg}")
                 if fail_fast and res.status == "FAIL":
@@ -1570,29 +1737,41 @@ def _print_summary(
     counts = _summary_counts(results)
 
     if json_out:
-        print(json.dumps(json_payload or {
-            "schema_version": JSON_SCHEMA_VERSION,
-            "summary": counts,
-            "results": [_result_to_json(r) for r in results],
-        }, indent=2))
+        print(
+            json.dumps(
+                json_payload
+                or {
+                    "schema_version": JSON_SCHEMA_VERSION,
+                    "summary": counts,
+                    "results": [_result_to_json(r) for r in results],
+                },
+                indent=2,
+            )
+        )
     else:
         total = len(results)
-        sep = '\u2500' * 60
+        sep = "\u2500" * 60
         print(f"\n{sep}")
-        print(f"Total: {total}  " +
-              "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        print(
+            f"Total: {total}  "
+            + "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+        )
 
     failures = counts.get("FAIL", 0) + counts.get("ERROR", 0)
     if failures:
         for r in results:
             if r.status in ("FAIL", "ERROR"):
-                print(f"FAIL: {r.name}  expected={r.expected!r} got={r.got!r}  {r.message}",
-                      file=sys.stderr)
+                print(
+                    f"FAIL: {r.name}  expected={r.expected!r} got={r.got!r}  {r.message}",
+                    file=sys.stderr,
+                )
     if counts.get("KINDS_MISMATCH"):
         for r in results:
             if r.kinds_strict == "mismatch":
-                print(f"KINDS_MISMATCH: {r.name} [{r.status}]  {r.kinds_strict_detail}",
-                      file=sys.stderr)
+                print(
+                    f"KINDS_MISMATCH: {r.name} [{r.status}]  {r.kinds_strict_detail}",
+                    file=sys.stderr,
+                )
     return 1 if failures else 0
 
 
@@ -1605,16 +1784,24 @@ def _selected_variants(raw: str) -> tuple[str, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for validating example cases."""
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("filters", nargs="*",
-                    help="Name substrings to filter cases (default: all)")
-    ap.add_argument("--fail-fast", action="store_true",
-                    help="Stop after first FAIL")
-    ap.add_argument("--json", action="store_true", dest="json_out",
-                    help="Machine-readable JSON output")
-    ap.add_argument("--category", metavar="CAT",
-                    help="Filter by category: breaking, compatible, bad_practice, api_break")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "filters", nargs="*", help="Name substrings to filter cases (default: all)"
+    )
+    ap.add_argument("--fail-fast", action="store_true", help="Stop after first FAIL")
+    ap.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_out",
+        help="Machine-readable JSON output",
+    )
+    ap.add_argument(
+        "--category",
+        metavar="CAT",
+        help="Filter by category: breaking, compatible, bad_practice, api_break",
+    )
     ap.add_argument(
         "--artifact-variant",
         choices=(*ARTIFACT_VARIANTS, "all"),
@@ -1669,9 +1856,13 @@ def main(argv: list[str] | None = None) -> int:
         names = [n for n in names if verdicts[n].get("category") == args.category]
 
     variants = _selected_variants(args.artifact_variant)
-    results = _run_all_cases(names, verdicts,
-                             fail_fast=args.fail_fast, json_out=args.json_out,
-                             variants=variants)
+    results = _run_all_cases(
+        names,
+        verdicts,
+        fail_fast=args.fail_fast,
+        json_out=args.json_out,
+        variants=variants,
+    )
     payload = _json_payload(
         results,
         names=names,

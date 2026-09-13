@@ -190,8 +190,8 @@ jobs:
         run: pip install mkdocs mkdocs-material pymdown-extensions mkdocs-redirects
       # lint / typecheck / docs-build routed through scripts/verify.py — see
       # the ai-readiness job's comment above (CLAUDE.md "M0-3").
-      - name: Lint, type check, docs build (strict)
-        run: python scripts/verify.py --profile pr --only lint,typecheck,docs-build
+      - name: Lint, format check, type check, docs build (strict)
+        run: python scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build
 
   unit-tests:
     runs-on: ${{ matrix.os }}

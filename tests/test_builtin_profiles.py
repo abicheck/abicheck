@@ -99,5 +99,11 @@ def test_rust_c_ffi_keeps_exported_symbol_renames_strict() -> None:
 
     assert ChangeKind.SYMBOL_RENAMED_BATCH not in pf.overrides
     assert ChangeKind.FUNC_LIKELY_RENAMED not in pf.overrides
-    assert pf.compute_verdict([_change(ChangeKind.SYMBOL_RENAMED_BATCH)]) == Verdict.BREAKING
-    assert pf.compute_verdict([_change(ChangeKind.FUNC_LIKELY_RENAMED)]) == Verdict.BREAKING
+    assert (
+        pf.compute_verdict([_change(ChangeKind.SYMBOL_RENAMED_BATCH)])
+        == Verdict.BREAKING
+    )
+    assert (
+        pf.compute_verdict([_change(ChangeKind.FUNC_LIKELY_RENAMED)])
+        == Verdict.BREAKING
+    )

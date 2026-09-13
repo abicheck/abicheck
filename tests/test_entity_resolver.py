@@ -196,7 +196,9 @@ class TestSourceGraphSummaryEntityResolution:
         # The graph is fully usable via its existing v1 ids -- resolve_entities()
         # still works on demand, same as any other summary.
         restored.resolve_entities()
-        assert restored.entity_resolver.canonical_id_for("decl://foo") == "usr:c:@F@foo#"
+        assert (
+            restored.entity_resolver.canonical_id_for("decl://foo") == "usr:c:@F@foo#"
+        )
 
     def test_hand_edited_null_entity_resolver_loads(self) -> None:
         """CodeRabbit review: a hand-edited pack with an explicit

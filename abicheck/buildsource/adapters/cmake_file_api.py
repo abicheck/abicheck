@@ -25,6 +25,7 @@ The reply directory is produced when a *query* file exists before configure
 queries or run CMake by default; if the reply is absent, ``collect`` returns
 empty evidence with a diagnostic.
 """
+
 from __future__ import annotations
 
 import json
@@ -118,7 +119,9 @@ class CMakeFileApiAdapter:
 
     # -- toolchains ---------------------------------------------------------
 
-    def _collect_toolchains(self, ref: dict[str, Any] | None, ev: BuildEvidence) -> None:
+    def _collect_toolchains(
+        self, ref: dict[str, Any] | None, ev: BuildEvidence
+    ) -> None:
         obj = self._ref(ref.get("jsonFile", "")) if ref else None
         if obj is None:
             return
@@ -134,7 +137,9 @@ class CMakeFileApiAdapter:
                     language=lang,
                     implicit_include_dirs=[
                         self.redaction.path(str(d.get("path", "")))
-                        for d in compiler.get("implicit", {}).get("includeDirectories", [])
+                        for d in compiler.get("implicit", {}).get(
+                            "includeDirectories", []
+                        )
                     ],
                     target_triple=str(compiler.get("target", "")),
                 )
