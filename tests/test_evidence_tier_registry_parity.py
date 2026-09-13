@@ -79,7 +79,7 @@ def test_the_pair_sets_are_not_empty() -> None:
 def test_operation_classification_ignores_the_evidence_tier(
     added: ChangeKind, removed: ChangeKind
 ) -> None:
-    from abicheck.report.change_operation import operation_for_kind
+    from abicheck.reporter_markdown import operation_for_kind
 
     assert operation_for_kind(added.value) == "added"
     assert operation_for_kind(removed.value) == "removed"

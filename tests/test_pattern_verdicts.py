@@ -748,8 +748,6 @@ def test_cli_explain_patterns(tmp_path) -> None:
             "compare",
             str(op),
             str(np),
-            "--view",
-            "patterns",
             "-o",
             f"json={out}",
         ],
@@ -765,19 +763,28 @@ def test_cli_explain_patterns(tmp_path) -> None:
     assert "handle-token-changed" in combined
 
 
-def test_cli_no_modulations_message(tmp_path) -> None:
+def test_cli_no_modulations_is_quiet(tmp_path) -> None:
+    """Plan slice 7o: the ledger is unconditional, but a run with nothing
+    to disclose stays quiet.
+
+    The retired ``--view patterns`` printed "No pattern-aware modulations
+    applied." on demand. Now that no token gates the ledger, printing that
+    line on every run would be a banner rather than accounting -- so the
+    empty case prints nothing at all, and the run is byte-identical to
+    before this slice."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    # Identical snapshots → no changes, no modulations → the "none" branch.
+    # Identical snapshots → no changes, no modulations.
     snap = _handle_snapshot("struct Foo *")
     p = tmp_path / "s.abi.json"
     _save(snap, p)
-    res = CliRunner().invoke(main, ["compare", str(p), str(p), "--view", "patterns"])
+    res = CliRunner().invoke(main, ["compare", str(p), str(p)])
     assert res.exit_code == 0, res.output
     combined = res.output + (res.stderr if res.stderr_bytes else "")
-    assert "No pattern-aware modulations applied." in combined
+    assert "Pattern-aware modulations" not in combined
+    assert "No pattern-aware modulations applied." not in combined
 
 
 # ---------------------------------------------------------------------------
@@ -846,17 +853,22 @@ def test_cross_output_completeness_for_demoted_finding() -> None:
     size_results = [r for r in results if r["ruleId"] == "type_size_changed"]
     assert size_results and all(r["level"] == "note" for r in size_results)
 
-    # 5b. Leaf-mode JSON keeps the modulation audit trail (Codex P2): the
-    # demoted root type change carries effective_verdict/modulation_reason and
-    # the top-level pattern_modulations ledger is present.
-    leaf = json.loads(to_json(result, report_mode="leaf"))
-    leaf_entry = next(
-        c for c in leaf["leaf_changes"] if c["kind"] == "type_size_changed"
+    # 5b. Root-cause-mode JSON keeps the modulation audit trail (Codex P2):
+    # the demoted root type change carries effective_verdict/
+    # modulation_reason and the top-level pattern_modulations ledger is
+    # present. (Asserted under `leaf` until plan slice 7o retired that mode
+    # against `root-cause` on a 129-pair measurement.)
+    grouped = json.loads(to_json(result, report_mode="root-cause"))
+    grouped_entry = next(
+        f
+        for g in grouped["root_causes"]
+        for f in g["findings"]
+        if f["kind"] == "type_size_changed"
     )
-    assert leaf_entry["severity"] == "compatible"
-    assert leaf_entry["effective_verdict"] == "COMPATIBLE"
-    assert leaf_entry["modulation_reason"] == "opaque-by-construction"
-    assert "pattern_modulations" in leaf
+    assert grouped_entry["severity"] == "compatible"
+    assert grouped_entry["effective_verdict"] == "COMPATIBLE"
+    assert grouped_entry["modulation_reason"] == "opaque-by-construction"
+    assert "pattern_modulations" in grouped
 
     # 5c. Element filter (--show-only) must not drop ADR-027 kinds that don't
     # match the prefix table (Codex P2). A type-level invariant break is kept

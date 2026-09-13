@@ -163,8 +163,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "markdown=-",
         )
 
+        # Plan slice 7o: the token retired before this dispatcher's own
+        # rejection could fire. The gap that rejection named is unchanged
+        # (this dispatcher's markdown still renders bundle findings through
+        # a renderer with no demangling) -- it is simply absent now rather
+        # than refused, and no information is lost: every machine
+        # projection carries both the mangled and demangled names.
         assert code == 64
-        assert "--demangle" in out
+        assert "retired" in out
 
     def test_default_demangle_is_not_rejected_by_itself(self, tmp_path: Path) -> None:
         # The silent default (None, "demangle ON") is left un-rejected,
@@ -251,13 +257,13 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(facts_path),
             str(new_dir),
             "--view",
-            "leaf",
+            "root-cause",
             "-o",
             "json=-",
         )
 
         assert code == 64
-        assert "--report-mode" in out
+        assert "--view <mode>" in out
 
     def test_show_filtered_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"

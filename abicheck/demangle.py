@@ -496,7 +496,20 @@ def base_name(symbol: str) -> str:
 # captured and replaced as one span -- matching only its ``_Z...`` suffix
 # left the extra leading underscore glued onto the demangled text (Codex
 # review, fresh evidence: ``__ZN3Foo3barEv`` rendered as ``_Foo::bar()``).
-_MANGLED_TOKEN_RE = re.compile(r"_{1,2}Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*")
+# The leading `(?<!...)` is a *left* token boundary, and it is load-bearing
+# rather than defensive: without it the scan happily starts mid-identifier, so
+# a legitimate C or assembler export that merely contains a mangled-looking
+# suffix -- `my_Z3foov` -- matched `_Z3foov` inside itself and rendered as
+# `myfoo() [_Z3foov]`, with the real symbol `my_Z3foov` appearing nowhere in
+# the output and unrecoverable from it (Codex review, PR #1284; reproduced
+# directly). This slice retires `--view no-demangle` and makes every human
+# format demangle, which is what turned a latent corruption into an
+# unavoidable one and makes it this PR's to fix. The right edge needs no such
+# guard: `[A-Za-z0-9_$]+` is greedy, so a trailing run is swallowed into the
+# token and simply fails to demangle, leaving the text untouched.
+_MANGLED_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_$.])_{1,2}Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*"
+)
 
 
 def extract_mangled_tokens(text: str) -> set[str]:
@@ -565,13 +578,24 @@ def prewarm_demangle_from_json_value(value: object) -> None:
         demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
 
-def demangle_text(text: str) -> str:
+def demangle_text(text: str, *, escape_table_pipes: bool = False) -> str:
     """Demangle every Itanium-mangled symbol token embedded in *text*.
 
     Tokens that are not valid C++ mangled names, or that cannot be demangled
     because no demangler is available, are left unchanged. Intended for
     human-facing report output only — machine formats (JSON/SARIF/JUnit) keep
-    the raw mangled symbols so downstream tooling can match on them.
+    the raw mangled symbols so downstream tooling can match on them (and,
+    since plan slice 7o, carry the demangled name too, in a separate
+    ``demangled_symbol`` field).
+
+    **Every successfully demangled token keeps its exact mangled spelling**,
+    appended in brackets: ``_ZN3Foo3barEi`` renders as
+    ``Foo::bar(int) [_ZN3Foo3barEi]``. That is what let slice 7o retire the
+    ``--view demangle``/``no-demangle`` decision entirely: the only reason
+    to ask for the mangled form was that demangling *replaced* it, leaving
+    nothing to paste into ``nm``/``objdump``, a suppression rule's selector,
+    or a bug report. Both names are now always present, so human output
+    demangles automatically for every human format and nothing is lost.
 
     Resolves a Mach-O ``__Z...`` token (``accept_macho_prefix=True``) since
     this function has no other, correctness-critical caller to put at risk
@@ -585,7 +609,34 @@ def demangle_text(text: str) -> str:
 
     def _repl(m: re.Match[str]) -> str:
         tok = m.group(0)
+        # Idempotence: this function annotates as `name [tok]`, so a token
+        # already sitting inside those brackets has been annotated already and
+        # must be left alone. Without this a second pass produced
+        # `bar() [bar() [_Z3barv]]` -- which is exactly what happened when a
+        # renderer's own `demangle` default was flipped while the CLI still
+        # demangled at its own boundary (Codex review, PR #1284). Cheap, and
+        # it makes the double application harmless rather than merely
+        # unlikely.
+        start, end = m.start(), m.end()
+        if (
+            start > 0
+            and text[start - 1] == "["
+            and end < len(text)
+            and text[end] == "]"
+        ):
+            return tok
         demangled = mapping.get(tok)
-        return demangled if demangled and demangled != tok else tok
+        if not demangled or demangled == tok:
+            return tok
+        if escape_table_pipes:
+            # A demangled name can *contain* a pipe -- `_ZN3FooorERKS_` is
+            # `Foo::operator|(Foo const&)` -- and this substitution runs over
+            # an already-rendered document, so a caller that escaped its cells
+            # beforehand cannot have escaped a delimiter this pass introduces
+            # (CodeRabbit review, PR #1284). Escaping here is the only point
+            # that can: GFM renders `\|` as a literal pipe, so a bullet or
+            # paragraph reads identically while a table row keeps its columns.
+            demangled = demangled.replace("|", "\\|")
+        return f"{demangled} [{tok}]"
 
     return _MANGLED_TOKEN_RE.sub(_repl, text)

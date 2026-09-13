@@ -32,8 +32,10 @@ from .model.change_catalog.registry import (
     _VERDICT_BLIND_POLICIES as _VERDICT_BLIND_POLICIES,
     TEMPLATE_VOCAB as TEMPLATE_VOCAB,
     VALID_BASE_POLICIES as VALID_BASE_POLICIES,
+    ChangeEntity as ChangeEntity,
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
+    ChangeOperation as ChangeOperation,
     Verdict as Verdict,
     _validate_entry as _validate_entry,
 )

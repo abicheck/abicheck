@@ -198,8 +198,8 @@ scenarios:
     narrative: >
       A pull request legitimately expands the bundle's surface. CI must not block the
       merge on additions alone, but it must clearly separate public additions
-      from internal-only growth (using public-header scoping plus the
-      --view filtered ledger) and communicate the release impact to reviewers via
+      from internal-only growth (using public-header scoping, whose exclusion
+      ledger every run discloses) and communicate the release impact to reviewers via
       a job summary / PR comment rather than raw JSON.
     flow:
       - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=abi.json

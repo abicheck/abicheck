@@ -140,7 +140,7 @@ Beyond the core `compare`/`dump` flow:
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
 - [Output Formats](output-formats.md) — `--view show=...` filtering,
-  `-o oneline=...`'s one-line summary, `--view leaf|impact`,
+  `-o oneline=...`'s one-line summary, `--view impact|root-cause`,
   redundancy filtering, SARIF/JUnit output, evidence-tier confidence, JSON
   schema.
 - `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
@@ -179,9 +179,9 @@ A project that wants `ci-gate`'s behavior on every run states depth, view,
 and severity in `.abicheck.yml` instead of retyping a preset.
 
 > `--view show=...` filtering, `scope.show_redundant: true`, `-o oneline=...`'s
-> one-line summary format, and `--view leaf|impact` are covered in full
+> one-line summary format, and `--view impact|root-cause` are covered in full
 > on [Output Formats](output-formats.md). `--view show=...`/`show_redundant`/
-> `--view leaf|impact|root-cause` are display-only and do not affect the verdict or exit
+> `--view impact|root-cause` are display-only and do not affect the verdict or exit
 > code.
 
 ### 3) Mixed mode: snapshot baseline vs live build

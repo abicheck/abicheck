@@ -61,7 +61,10 @@ def emit_github_step_summary(
 
     from .reporter import to_markdown
 
-    md = to_markdown(diff_result, severity_config=severity_config)
+    # `demangle=True` for the same reason as `compat/cli.py`: a human-facing
+    # summary that does not pass through `service_render`'s own demangle
+    # boundary (Codex review, PR #1284).
+    md = to_markdown(diff_result, severity_config=severity_config, demangle=True)
     with open(summary_path, "a", encoding="utf-8") as f:
         f.write(md)
         f.write("\n")

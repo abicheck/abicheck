@@ -103,11 +103,40 @@ class RenderOptions:
     show_only: str | None = None
     report_mode: str = "full"
     show_impact: bool = False
-    demangle: bool = False
+    #: Tri-state, and the default is deliberately ``None``: demangling is a
+    #: property of the *format* a projection targets (human formats
+    #: demangle, machine formats carry both names in their own field), and
+    #: one envelope is projected into several formats. ``None`` means
+    #: "resolve it per projection"; an explicit ``True``/``False`` is a
+    #: caller overriding that for every format it renders. Storing a
+    #: resolved bool here instead is what made ``render_output`` and
+    #: ``render_envelope`` disagree byte-for-byte on the same evaluation
+    #: (plan slice 7o, caught by `TestRendererOrderIndependence`).
+    demangle: bool | None = None
     follow_deps: bool = False
     show_recommendation: bool = True
     require_complete_analysis: bool = False
     contract_evaluation: bool = False
+
+    def __post_init__(self) -> None:
+        """Fold ``report_mode="impact"`` into ``("full", show_impact=True)``.
+
+        ``impact`` is sugar for a full report with the Impact Summary
+        section on, and this is the *only* point that covers both readers of
+        these options: ``build_report_envelope`` bakes the shared document
+        before any projection runs, so folding at render time is already too
+        late -- measured, the JSON projection still rendered
+        ``report_mode="impact"`` identically to ``full`` when the fold sat in
+        ``render_envelope`` (Codex review, PR #1284).
+
+        Translation only, deliberately not validation: a retired or unknown
+        mode is still rejected by the public rendering boundaries
+        (``report_modes.reject_unsupported_report_mode``), so *where* that
+        error surfaces does not move to dataclass construction.
+        """
+        if self.report_mode == "impact":
+            object.__setattr__(self, "report_mode", "full")
+            object.__setattr__(self, "show_impact", True)
 
 
 @dataclass(frozen=True, slots=True)

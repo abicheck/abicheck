@@ -66,6 +66,7 @@ def _diff_bit_int(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             make_change(
                 ChangeKind.BIT_INT_WIDTH_CHANGED,
                 symbol=ch.symbol,
+                entity_discriminator=ch.owner,
                 name=f"{ch.slot} of '{ch.symbol}'",
                 detail=detail,
                 old=ch.old_type,

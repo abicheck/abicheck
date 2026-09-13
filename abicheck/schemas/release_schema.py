@@ -104,4 +104,45 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       (ADR-064 stage 1b already wrote it, always ``0`` on a release); it
 #:       can now be nonzero. A pre-1.3 consumer reads nothing differently;
 #:       one that wants the block feature-detects the key or requires >= 1.3.
-RELEASE_SCHEMA_VERSION = "1.3"
+#: - ``1.4`` adds the two ADR-067 disposition ledgers to each ``libraries[]``
+#:       entry: ``suppression`` (``file_provided``/``suppressed_count``/
+#:       ``suppressed_changes[]``, each naming the rule that hid it) and
+#:       ``surface_scope`` (``out_of_surface_count``/``out_of_surface_
+#:       changes[]``, each naming its exclusion reason). Both are the
+#:       *identical* blocks a single-pair ``compare`` report already carries,
+#:       produced by the same two builders (``reporter.disposition_ledger_
+#:       blocks``), so a consumer reads one shape at either cardinality.
+#:       Before this, a release that suppressed or scoped out its entire
+#:       breaking set emitted only counts and echoed the detail to stderr, so
+#:       the report artifact itself could not say what had been disposed of
+#:       or by which rule (Codex review, PR #1284). Present ONLY when the
+#:       setting was in effect -- ``surface_scope`` when scoping ran,
+#:       ``suppression`` when a suppression document was supplied or
+#:       something was actually suppressed -- the same "present only when
+#:       active" convention 1.3's own blocks follow, which keeps every
+#:       release document produced without them byte-identical. A pre-1.4
+#:       consumer reads nothing differently.
+#: - ``1.5`` adds the remaining two ADR-067 dispositions to each
+#:       ``libraries[]`` entry, so the release carries the same four a
+#:       single-pair ``compare`` report does rather than two of them:
+#:       ``build_context_reconciled`` (``count``/``changes[]``, each naming
+#:       its ADR-039 reconciliation reason) and ``pattern_modulations`` (the
+#:       ADR-027 ledger, each entry naming the ``rule_id`` that reclassified
+#:       the finding and why). Both are the *identical* blocks the scalar
+#:       report already carries, from the same builders
+#:       (``reporter.disposition_ledger_blocks``), so a consumer reads one
+#:       shape at either cardinality. Before this, a release whose entire
+#:       breaking set was cleared by reconciliation, or demoted by a pattern
+#:       rule, rendered a passing artifact naming neither the findings nor
+#:       the reasons -- reconciliation is the sharper case, because it needs
+#:       no settings at all (no suppression document, no
+#:       ``--scope-public-headers``), so the section was absent rather than
+#:       merely incomplete (Codex review, PR #1284). Both follow the same
+#:       "present only when active" convention as 1.3 and 1.4:
+#:       ``build_context_reconciled`` only when reconciliation cleared
+#:       something, ``pattern_modulations`` only when a rule fired (ADR-027
+#:       is opt-in and off by default), so every release document produced
+#:       without them is byte-identical. A pre-1.5 consumer reads nothing
+#:       differently; one that wants either block feature-detects the key or
+#:       requires >= 1.5.
+RELEASE_SCHEMA_VERSION = "1.5"

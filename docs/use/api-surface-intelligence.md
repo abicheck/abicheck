@@ -103,12 +103,13 @@ Every modulation is disclosed:
   edges_matched}`), and the demoted finding stays in `changes` with its
   `effective_verdict` / `modulation_reason` recorded — re-categorised in place,
   never dropped;
-- `--view patterns` prints the idiom evidence behind each modulation.
+- The idiom evidence behind each modulation is always printed (plan slice 7o:
+  disclosure is unconditional, ADR-067).
 
 Modulation itself is unconditional (ADR-068 D4): it runs automatically
 wherever idiom evidence exists, and there is no flag to disable it — the
 former `--pattern-verdicts`/`--no-pattern-verdicts` pair (and, later,
-`--explain-patterns` merging into `--view patterns`) are both gone.
+`--explain-patterns`, whose disclosure is now unconditional) are both gone.
 
 Demotion is gated to the `header_aware` evidence tier (idioms need the AST), a
 demotion never overrides a frozen-namespace break, and a break-demotion is

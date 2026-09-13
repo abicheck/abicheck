@@ -131,14 +131,20 @@ class TestFieldDefaultsToNone:
         immediately after `evolution`, `candidate_side_enrichment` (ADR-068
         D3 / plan §6 Phase 2d) immediately after `cross_source_evolution`,
         `demangled_symbol` (Codex review, item 8) immediately after
-        `candidate_side_enrichment`, and `surface_facts` (the three split
-        surface facts -- see `model/surface_facts.py`) is the newest field,
-        appended immediately after `demangled_symbol`, and `library` (the
-        per-finding library a multi-library `compat check` merge stamps --
-        see `compat/multi_library._attribute_findings_to_their_library`) is
-        the newest field, appended immediately after `surface_facts` -- all
-        nine must stay keyword-only, and `library` must stay last until some
-        still-newer field is appended after it in turn."""
+        `candidate_side_enrichment`, `surface_facts` (the three split
+        surface facts -- see `model/surface_facts.py`) immediately after
+        `demangled_symbol`, then `entity_discriminator` (plan slice 7o's
+        per-finding entity for a polymorphic `ChangeKind`), and finally
+        `library` (the per-finding library a multi-library `compat check`
+        merge stamps -- see
+        `compat/multi_library._attribute_findings_to_their_library`), which
+        is the newest -- all ten must stay keyword-only, and `library` must
+        stay last until some still-newer field is appended after it in turn.
+
+        The last two arrived on separate branches that merged here, which is
+        exactly the case this test exists to catch: each branch's own copy
+        asserted *its* field was last, and only the merged declaration order
+        settles it."""
         import dataclasses
 
         by_name = {f.name: f for f in dataclasses.fields(Change)}
@@ -150,15 +156,27 @@ class TestFieldDefaultsToNone:
         assert by_name["candidate_side_enrichment"].kw_only is True
         assert by_name["demangled_symbol"].kw_only is True
         assert by_name["surface_facts"].kw_only is True
+        assert by_name["entity_discriminator"].kw_only is True
         assert by_name["library"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
         assert all_names[-1] == "library", (
             "library must be the last-declared field on Change"
         )
-        assert all_names.index("library") == all_names.index("surface_facts") + 1
         assert (
             all_names.index("surface_facts") == all_names.index("demangled_symbol") + 1
         ), "surface_facts must be appended immediately after demangled_symbol"
+        # The merged tail: two branches each appended one field, and each
+        # branch's own copy of this test asserted its field sat immediately
+        # after `surface_facts`. Both survived the merge and contradicted one
+        # another, which is the failure this chain is supposed to surface --
+        # so it is stated once, in the declared order.
+        assert (
+            all_names.index("entity_discriminator")
+            == all_names.index("surface_facts") + 1
+        ), "entity_discriminator must be appended immediately after surface_facts"
+        assert (
+            all_names.index("library") == all_names.index("entity_discriminator") + 1
+        ), "library must be appended immediately after entity_discriminator"
         assert (
             all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
         ), "entity_id must be appended immediately after evidence_provenance"

@@ -83,6 +83,124 @@ def _release_md_coverage_warnings(
     return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
 
 
+def _release_md_pattern_modulations(
+    library_results: list[dict[str, object]],
+) -> list[str]:
+    """Which rule reclassified which finding, per library, in the artifact.
+
+    ADR-027 pattern modulation is a *reclassification*, which ADR-067 names
+    as a disposition — so a release whose breaking findings a rule demoted
+    may not render a compatible Markdown report that names neither the rule
+    nor the reason. The release fan-out carried this only as a private
+    ``_pattern_modulations_text`` key that its caller pops and writes to
+    stderr, so the requested artifact had nothing (Codex review, PR #1284);
+    a terminal log is not a report, and retiring ``--view patterns`` removed
+    the last way to ask for one.
+
+    Reuses the scalar path's row renderer rather than re-spelling the table,
+    so the two documents cannot disagree about a modulation's columns; only
+    the per-library heading is added here. Absent unless a rule fired, which
+    is every run with ADR-027's opt-in ``--pattern-verdicts`` off — i.e. the
+    default — so no existing release report changes.
+    """
+    from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
+
+    out: list[str] = []
+    for lib in library_results:
+        # The renderer takes the modulation *list*, not the mapping holding
+        # it -- passing `lib` iterates the dict's keys, which are strings,
+        # and silently renders nothing (caught by verifying this path against
+        # a real `PatternModulation` rather than trusting the call).
+        rows = render_pattern_modulations_from_mapping(
+            lib.get("pattern_modulations"), include_heading=False
+        )
+        if rows:
+            out += ["", f"### `{lib['library']}`", *rows]
+    return ["", "## 🎚️ Pattern-Modulated Findings", *out] if out else []
+
+
+def _release_md_disposed_findings(
+    library_results: list[dict[str, object]],
+) -> list[str]:
+    """What a rule or scoping decision disposed of, per library, by name.
+
+    ADR-067's record-before-disposing rule applies to the artifact a user
+    *requested*, not only to the terminal: a release that suppressed or
+    scoped out its entire breaking set could otherwise render a passing
+    Markdown report naming neither the findings nor the rules that hid them,
+    with the detail only ever reaching a transient stderr echo (Codex review,
+    PR #1284 -- raised twice, the second time observing that the structured
+    blocks this slice added reached JSON and had no Markdown consumer).
+
+    Reads the same per-library blocks the release JSON carries
+    (``suppression``/``surface_scope``/``build_context_reconciled``, built by
+    ``reporter.disposition_ledger_blocks``), so the two formats cannot
+    disagree about what was disposed. Absent when nothing was, which keeps
+    every release report produced without those settings unchanged. The
+    aggregate ``disposition_audit`` section still renders below; it carries
+    the *counts* and rule provenance, and this carries the findings those
+    counts stand for.
+    """
+    # Two independent ways a cell can break this table, so both are handled:
+    # a *raw* pipe in a free-form suppression reason or a symbol, escaped here
+    # by `md_cell`; and a pipe that does not exist yet at this point because
+    # the whole-document demangle pass introduces it later
+    # (`Foo::operator|`), handled by that pass's own `escape_table_pipes`
+    # (CodeRabbit review, PR #1284). Escaping here alone cannot cover the
+    # second, which is the subtlety worth naming.
+    from .markdown_text import md_cell
+
+    rows: list[str] = []
+    for lib in library_results:
+        name = lib["library"]
+        suppression = cast("dict[str, object]", lib.get("suppression") or {})
+        for entry in cast(
+            "list[dict[str, object]]", suppression.get("suppressed_changes") or []
+        ):
+            rule = cast("dict[str, object]", entry.get("rule") or {})
+            why = rule.get("reason") or rule.get("id") or "suppressed"
+            rows.append(
+                f"| `{md_cell(name)}` | suppressed | `{md_cell(entry.get('kind', '?'))}` "
+                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+            )
+        scope = cast("dict[str, object]", lib.get("surface_scope") or {})
+        for entry in cast(
+            "list[dict[str, object]]", scope.get("out_of_surface_changes") or []
+        ):
+            why = entry.get("reason") or "outside the public surface"
+            rows.append(
+                f"| `{md_cell(name)}` | scoped out | `{md_cell(entry.get('kind', '?'))}` "
+                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+            )
+        # The third disposition, and the one this section shipped without:
+        # a release can clear its entire breaking set through ADR-039
+        # build-context reconciliation, with no suppression document and no
+        # public-surface scoping in play at all, so neither loop above sees
+        # anything (Codex review, PR #1284).
+        reconciled = cast(
+            "dict[str, object]", lib.get("build_context_reconciled") or {}
+        )
+        for entry in cast("list[dict[str, object]]", reconciled.get("changes") or []):
+            why = entry.get("reason") or "reconciled against build context"
+            rows.append(
+                f"| `{md_cell(name)}` | reconciled | `{md_cell(entry.get('kind', '?'))}` "
+                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+            )
+    if not rows:
+        return []
+    return [
+        "",
+        "## 🔕 Disposed Findings",
+        "",
+        "Detected, then disposed of by a rule or by scoping. Listed because a "
+        "passing release may not hide them.",
+        "",
+        "| Library | Disposition | Kind | Symbol | Rule / reason |",
+        "|---|---|---|---|---|",
+        *rows,
+    ]
+
+
 def _release_md_evidence_contract(
     library_results: list[dict[str, object]],
 ) -> list[str]:

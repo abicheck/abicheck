@@ -47,6 +47,14 @@ class TypeSlotChange:
     slot: str  # human description, e.g. "return type", "parameter 'n'", "field 'buf'"
     old_type: str
     new_type: str
+    #: Which kind of entity owns this slot -- a `ChangeEntity` value. Stated
+    #: by the branch that yielded it, which knows structurally whether it
+    #: walked functions or record fields; deliberately not re-derived from
+    #: `slot`'s human text. Detectors over this iterator emit one kind for
+    #: both owners, so without it a `_Atomic` change on a function parameter
+    #: was declared a *type* finding and `--view show=functions` dropped it
+    #: (Codex review, PR #1284).
+    owner: str = "type"
 
 
 def _spelling_differ(a: object, b: object) -> bool:
@@ -58,11 +66,19 @@ def _spelling_differ(a: object, b: object) -> bool:
 def _emit_function_slot_changes(of: Function, nf: Function) -> Iterator[TypeSlotChange]:
     """Yield changed return-type / parameter-type slots for a matched pair."""
     if _spelling_differ(of.return_type, nf.return_type):
-        yield TypeSlotChange(of.name, "return type", of.return_type, nf.return_type)
+        yield TypeSlotChange(
+            of.name, "return type", of.return_type, nf.return_type, owner="function"
+        )
     for op, npm in zip(of.params, nf.params):
         if _spelling_differ(op.type, npm.type):
             pname = op.name or npm.name or "?"
-            yield TypeSlotChange(of.name, f"parameter '{pname}'", op.type, npm.type)
+            yield TypeSlotChange(
+                of.name,
+                f"parameter '{pname}'",
+                op.type,
+                npm.type,
+                owner="function",
+            )
 
 
 def _pair_leftover_functions_by_name(
@@ -138,7 +154,11 @@ def _match_record_fields(
             nfield = new_fields.get(ofield.name)
             if nfield is not None and _spelling_differ(ofield.type, nfield.type):
                 yield TypeSlotChange(
-                    name, f"field '{ofield.name}'", ofield.type, nfield.type
+                    name,
+                    f"field '{ofield.name}'",
+                    ofield.type,
+                    nfield.type,
+                    owner="type",
                 )
 
 

@@ -1429,7 +1429,7 @@ def _generate_compat_report(
         # `compat check` exit code for the same run (Codex review).
         path.write_text(to_json(r, include_exit_decision=False), encoding="utf-8")
     else:
-        path.write_text(to_markdown(r), encoding="utf-8")
+        path.write_text(to_markdown(r, demangle=True), encoding="utf-8")
 
 
 def _write_all_reports(

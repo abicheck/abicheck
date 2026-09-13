@@ -409,19 +409,19 @@ class TestOperationForKind:
     semantically an addition/removal but spelled differently."""
 
     def test_ordinary_added_removed_modified(self):
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("func_added") == "added"
         assert operation_for_kind("func_removed") == "removed"
         assert operation_for_kind("func_params_changed") == "modified"
 
     def test_non_suffix_addition_kind(self):
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("symbol_version_required_added_compat") == "added"
 
     def test_non_suffix_removal_kinds(self):
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert (
             operation_for_kind("experimental_removed_without_replacement") == "removed"
@@ -433,7 +433,7 @@ class TestOperationForKind:
         """A '_lost_*'/'_introduced' kind describes a property gained/lost on
         an entity that still exists — that's "modified", not "added"/
         "removed" (which name the entity itself appearing/disappearing)."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("field_lost_const") == "modified"
         assert operation_for_kind("func_lost_inline") == "modified"
@@ -448,7 +448,7 @@ class TestOperationForKind:
         already-existing entity ("Function became virtual: {name}", "noexcept
         specifier added: {name}", ...) and none is in ADDITION_KINDS
         (Codex review, PR #557)."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("func_noexcept_added") == "modified"
         assert operation_for_kind("func_virtual_added") == "modified"
@@ -461,7 +461,7 @@ class TestOperationForKind:
         existing layout — the safe append-at-end case has its own dedicated
         addition kind, `type_field_added_compatible`, which is unaffected
         (Codex review, PR #557)."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("type_field_added") == "modified"
         assert operation_for_kind("type_field_added_compatible") == "added"
@@ -473,7 +473,7 @@ class TestOperationForKind:
         grows/relayouts the vtable, breaking derived classes compiled
         against the old layout — not a compatible added API surface
         (Codex review, PR #557)."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("virtual_method_added") == "modified"
 
@@ -484,7 +484,7 @@ class TestOperationForKind:
         contract attribute all describe an already-existing callable/
         template's signature or contract changing — not a new one
         appearing. None is in ADDITION_KINDS."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("ctor_explicit_added") == "modified"
         assert operation_for_kind("mandatory_template_param_added") == "modified"
@@ -495,7 +495,7 @@ class TestOperationForKind:
         """The removed-side counterpart: these end in plain "_removed" (so
         the suffix rule alone reports "removed"), but each names a trait
         *lost by* an entity that still exists (Codex review, PR #557)."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("func_noexcept_removed") == "modified"
         assert operation_for_kind("func_variadic_removed") == "modified"
@@ -509,7 +509,7 @@ class TestOperationForKind:
         `python_api_default_removed` (an existing parameter losing its
         default value) are the same trait-lost-by-a-persisting-entity
         pattern as the kinds above."""
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         assert operation_for_kind("func_virtual_removed") == "modified"
         assert operation_for_kind("param_default_value_removed") == "modified"
@@ -525,7 +525,7 @@ class TestOperationForKind:
         of aborting the whole sweep at the first miss."""
         import re
 
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         trait_change_exceptions = {"python_abi3_dropped"}
         synonym = re.compile(
@@ -557,7 +557,7 @@ class TestOperationForKind:
         dedicated detector the diff is just a func_added" — Codex review
         on #557)."""
         from abicheck.checker_policy import ADDITION_KINDS
-        from abicheck.report.change_operation import operation_for_kind
+        from abicheck.reporter_markdown import operation_for_kind
 
         misses = [
             k.value for k in ADDITION_KINDS if operation_for_kind(k.value) != "added"
@@ -626,9 +626,20 @@ class TestStatMode:
 # ---------------------------------------------------------------------------
 
 
-class TestLeafMode:
-    def test_leaf_markdown(self):
-        result = _make_result(
+class TestLeafModeRetired:
+    """Plan slice 7o: ``leaf`` retired against ``root-cause``, on a
+    measurement (129 real library pairs; identical finding sets in all 93
+    with findings, and an empty leaf headline section in 40 of them).
+
+    What the retired mode's own tests asserted -- the root type grouped
+    with its affected-interface list, and the non-type findings alongside
+    it -- is asserted here against the mode that replaced it, so the old
+    user task is proven to still have a supported answer rather than just
+    proven to error.
+    """
+
+    def _result(self):
+        return _make_result(
             changes=[
                 Change(
                     ChangeKind.TYPE_SIZE_CHANGED,
@@ -639,50 +650,23 @@ class TestLeafMode:
                 Change(ChangeKind.FUNC_REMOVED, "old_api", "function removed: old_api"),
             ],
         )
-        text = to_markdown(result, report_mode="leaf")
-        assert "leaf-change view" in text
+
+    def test_root_cause_markdown_carries_what_leaf_carried(self):
+        text = to_markdown(self._result(), report_mode="root-cause")
         assert "Config" in text
-        assert "config_init" in text
-        assert "Non-Type Changes" in text
         assert "old_api" in text
 
-    def test_leaf_json(self):
-        result = _make_result(
-            changes=[
-                Change(
-                    ChangeKind.TYPE_SIZE_CHANGED,
-                    "Config",
-                    "size changed",
-                    affected_symbols=["f1", "f2"],
-                ),
-                Change(ChangeKind.FUNC_REMOVED, "old_api", "removed"),
-            ],
-        )
-        text = to_json(result, report_mode="leaf")
-        d = json.loads(text)
-        assert "leaf_changes" in d
-        assert "non_type_changes" in d
-        assert len(d["leaf_changes"]) == 1
-        assert d["leaf_changes"][0]["symbol"] == "Config"
-        assert d["leaf_changes"][0]["affected_count"] == 2
-        assert len(d["non_type_changes"]) == 1
+    def test_root_cause_json_carries_every_finding(self):
+        d = json.loads(to_json(self._result(), report_mode="root-cause"))
+        assert "leaf_changes" not in d
+        assert "non_type_changes" not in d
+        symbols = {f["symbol"] for g in d["root_causes"] for f in g["findings"]}
+        assert symbols == {"Config", "old_api"}
 
-    def test_leaf_markdown_carries_severity_summary(self):
-        """report_mode="leaf" returned before the severity summary section
-        was ever built, so it silently had no severity info even when a
-        caller passed severity_config through to_markdown."""
-        from abicheck.severity import PRESET_DEFAULT
+    def test_leaf_is_not_a_report_mode_any_more(self):
+        from abicheck.frontends.cli.options.view import REPORT_MODES
 
-        result = _make_result(
-            changes=[Change(ChangeKind.FUNC_ADDED, "new_api", "new function: new_api")],
-        )
-        text = to_markdown(result, report_mode="leaf", severity_config=PRESET_DEFAULT)
-        assert "Severity Configuration" in text
-
-
-# ---------------------------------------------------------------------------
-# Show-impact tests
-# ---------------------------------------------------------------------------
+        assert "leaf" not in REPORT_MODES
 
 
 class TestShowImpact:
@@ -757,8 +741,12 @@ class TestShowOnlyInReporters:
         assert len(lines) == 1
         assert "causes non-zero exit" in lines[0]
 
-    def test_leaf_severity_summary_exit_impact_ignores_show_only_filter(self):
-        """Same fix as above, for the report_mode="leaf" summary table."""
+    def test_root_cause_severity_summary_exit_impact_ignores_show_only_filter(self):
+        """Same fix as above, for the ``report_mode="root-cause"`` summary
+        table. Was written against ``leaf``, which plan slice 7o retired; the
+        claim is unchanged because that table is built the same way there
+        (``build_root_cause_document`` -> ``compute_severity_summary`` with
+        ``all_changes=list(result.changes)``)."""
         from abicheck.severity import PRESET_DEFAULT
 
         result = _make_result(
@@ -769,7 +757,7 @@ class TestShowOnlyInReporters:
         )
         text = to_markdown(
             result,
-            report_mode="leaf",
+            report_mode="root-cause",
             show_only="compatible",
             severity_config=PRESET_DEFAULT,
         )

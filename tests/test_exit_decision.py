@@ -1178,12 +1178,13 @@ class TestIncludeExitDecisionFlag:
         assert report["verdict"] == "BREAKING"
         assert "changes" in report
 
-    def test_include_exit_decision_false_also_applies_to_leaf_and_root_cause(
+    def test_include_exit_decision_false_also_applies_to_alternate_modes(
         self,
     ) -> None:
+        """``leaf`` was the other mode here until plan slice 7o retired it."""
         old, new = _breaking_pair()
         result = compare(old, new)
-        for mode in ("leaf", "root-cause"):
+        for mode in ("impact", "root-cause"):
             report = json.loads(
                 to_json(result, report_mode=mode, include_exit_decision=False)
             )
