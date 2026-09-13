@@ -15,6 +15,7 @@
 """Round-trip, edge-case, and adapter-path coverage for the BuildSourcePack
 modules (ADR-028 / ADR-029). Complements test_build_source_pack.py and
 test_evidence_cli.py."""
+
 from __future__ import annotations
 
 import json
@@ -58,19 +59,56 @@ def test_build_evidence_full_roundtrip():
         source_root="repo://root",
         build_root="build://root",
         generators=[Generator(kind="cmake", version="3.28", generator="Ninja")],
-        toolchains=[Toolchain(id="t", compiler_id="GNU", version="14", language="CXX",
-                              implicit_include_dirs=["/usr/include"], target_triple="x86_64-linux-gnu")],
-        targets=[Target(id="target://foo", name="foo", kind=TargetKind.SHARED_LIBRARY,
-                        build_system="cmake", source_files=["a.cpp"], public_headers=["a.h"],
-                        outputs=["libfoo.so"], dependencies=["target://bar"],
-                        visibility="public", confidence=Confidence.HIGH)],
-        compile_units=[CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20",
-                                   defines={"FOO": "1"}, include_paths=["inc"],
-                                   abi_relevant_flags=["-std=c++20"])],
-        link_units=[LinkUnit(id="link://foo", target_id="target://foo", output="libfoo.so",
-                             version_script="exports.map", soname="libfoo.so.1")],
+        toolchains=[
+            Toolchain(
+                id="t",
+                compiler_id="GNU",
+                version="14",
+                language="CXX",
+                implicit_include_dirs=["/usr/include"],
+                target_triple="x86_64-linux-gnu",
+            )
+        ],
+        targets=[
+            Target(
+                id="target://foo",
+                name="foo",
+                kind=TargetKind.SHARED_LIBRARY,
+                build_system="cmake",
+                source_files=["a.cpp"],
+                public_headers=["a.h"],
+                outputs=["libfoo.so"],
+                dependencies=["target://bar"],
+                visibility="public",
+                confidence=Confidence.HIGH,
+            )
+        ],
+        compile_units=[
+            CompileUnit(
+                id="cu://a",
+                source="a.cpp",
+                language="CXX",
+                standard="c++20",
+                defines={"FOO": "1"},
+                include_paths=["inc"],
+                abi_relevant_flags=["-std=c++20"],
+            )
+        ],
+        link_units=[
+            LinkUnit(
+                id="link://foo",
+                target_id="target://foo",
+                output="libfoo.so",
+                version_script="exports.map",
+                soname="libfoo.so.1",
+            )
+        ],
         generated_files=["gen.h"],
-        build_options=[BuildOption(key="std:CXX", value="c++20", abi_relevant=True, raw="-std=c++20")],
+        build_options=[
+            BuildOption(
+                key="std:CXX", value="c++20", abi_relevant=True, raw="-std=c++20"
+            )
+        ],
         diagnostics=["note"],
         raw_artifacts=["raw/x"],
     )
@@ -88,8 +126,12 @@ def test_target_kind_and_confidence_unknown_fallback():
 
 
 def test_build_evidence_merge_combines_options_and_dedups_generated():
-    a = BuildEvidence(generated_files=["g1"], build_options=[BuildOption("std:C", "c11")])
-    b = BuildEvidence(generated_files=["g1", "g2"], build_options=[BuildOption("std:CXX", "c++20")])
+    a = BuildEvidence(
+        generated_files=["g1"], build_options=[BuildOption("std:C", "c11")]
+    )
+    b = BuildEvidence(
+        generated_files=["g1", "g2"], build_options=[BuildOption("std:CXX", "c++20")]
+    )
     a.merge(b)
     assert a.generated_files == ["g1", "g2"]
     assert {o.key for o in a.build_options} == {"std:C", "std:CXX"}
@@ -97,10 +139,25 @@ def test_build_evidence_merge_combines_options_and_dedups_generated():
 
 def test_derive_build_options_dedups_across_units():
     units = [
-        CompileUnit(id="1", language="CXX", standard="c++20", abi_relevant_flags=["-fvisibility=hidden"]),
-        CompileUnit(id="2", language="CXX", standard="c++20", abi_relevant_flags=["-fvisibility=hidden"]),
-        CompileUnit(id="3", language="CXX", standard="c++20", target_triple="x86_64-linux-gnu",
-                    sysroot="/sdk"),
+        CompileUnit(
+            id="1",
+            language="CXX",
+            standard="c++20",
+            abi_relevant_flags=["-fvisibility=hidden"],
+        ),
+        CompileUnit(
+            id="2",
+            language="CXX",
+            standard="c++20",
+            abi_relevant_flags=["-fvisibility=hidden"],
+        ),
+        CompileUnit(
+            id="3",
+            language="CXX",
+            standard="c++20",
+            target_triple="x86_64-linux-gnu",
+            sysroot="/sdk",
+        ),
     ]
     opts = derive_build_options(units)
     keys = {o.key for o in opts}
@@ -114,9 +171,12 @@ def test_derive_build_options_dedups_across_units():
 
 def test_evidence_entity_roundtrip():
     e = BuildSourceEntity(
-        entity_id="sha256:1", kind="function",
-        names={"mangled": "_Z3foov"}, locations=[{"path": "a.h", "line": 1}],
-        binary_refs=["elf:symbol:_Z3foov"], build_refs=["target://foo"],
+        entity_id="sha256:1",
+        kind="function",
+        names={"mangled": "_Z3foov"},
+        locations=[{"path": "a.h", "line": 1}],
+        binary_refs=["elf:symbol:_Z3foov"],
+        build_refs=["target://foo"],
         confidence=LayerConfidence.HIGH,
     )
     e2 = BuildSourceEntity.from_dict(e.to_dict())
@@ -124,28 +184,42 @@ def test_evidence_entity_roundtrip():
 
 
 def test_extractor_record_roundtrip():
-    r = ExtractorRecord(name="ninja", version="1.12", status="partial",
-                        inputs=["build/"], artifacts=["raw/x"], detail="fallback")
+    r = ExtractorRecord(
+        name="ninja",
+        version="1.12",
+        status="partial",
+        inputs=["build/"],
+        artifacts=["raw/x"],
+        detail="fallback",
+    )
     assert ExtractorRecord.from_dict(r.to_dict()).to_dict() == r.to_dict()
 
 
 def test_layer_coverage_present_and_roundtrip():
-    c = LayerCoverage(layer="L3_build", status=CoverageStatus.PARTIAL,
-                      confidence=LayerConfidence.REDUCED, detail="changed only")
+    c = LayerCoverage(
+        layer="L3_build",
+        status=CoverageStatus.PARTIAL,
+        confidence=LayerConfidence.REDUCED,
+        detail="changed only",
+    )
     assert c.present is True
     c2 = LayerCoverage.from_dict(c.to_dict())
     assert c2.status is CoverageStatus.PARTIAL and c2.present
 
 
 def test_layer_coverage_invalid_enums_fall_back():
-    c = LayerCoverage.from_dict({"layer": "L3_build", "status": "bogus", "confidence": "weird"})
+    c = LayerCoverage.from_dict(
+        {"layer": "L3_build", "status": "bogus", "confidence": "weird"}
+    )
     assert c.status is CoverageStatus.NOT_COLLECTED
     assert c.confidence is LayerConfidence.UNKNOWN
     assert c.present is False
 
 
 def test_manifest_coverage_for_lookup():
-    m = BuildSourceManifest(coverage=[LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT)])
+    m = BuildSourceManifest(
+        coverage=[LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT)]
+    )
     assert m.coverage_for(DataLayer.L3_BUILD) is not None
     assert m.coverage_for(DataLayer.L4_SOURCE_ABI) is None
     assert m.coverage_for("L3_build") is not None
@@ -157,7 +231,9 @@ def test_manifest_coverage_for_lookup():
 def test_pack_load_with_build_evidence(tmp_path):
     pack = BuildSourcePack.empty(tmp_path / "p")
     pack.build_evidence = BuildEvidence(
-        compile_units=[CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")],
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")
+        ],
         build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)],
     )
     pack_io.write(pack)
@@ -174,7 +250,9 @@ def test_pack_rewrite_removes_stale_build_evidence(tmp_path):
     root = tmp_path / "p"
     first = BuildSourcePack.empty(root)
     first.build_evidence = BuildEvidence(
-        compile_units=[CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")],
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")
+        ],
     )
     pack_io.write(first)
     assert (root / "build" / "build_evidence.json").is_file()
@@ -189,8 +267,13 @@ def test_pack_rewrite_removes_stale_build_evidence(tmp_path):
 
 def test_pack_to_ref_coverage_summary(tmp_path):
     pack = BuildSourcePack.empty(tmp_path / "p")
-    pack.manifest.coverage = [LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT,
-                                            confidence=LayerConfidence.HIGH)]
+    pack.manifest.coverage = [
+        LayerCoverage(
+            layer="L3_build",
+            status=CoverageStatus.PRESENT,
+            confidence=LayerConfidence.HIGH,
+        )
+    ]
     pack_io.write(pack)
     ref = pack_io.to_ref(pack)
     assert ref.coverage_summary["L3_build"]["status"] == "present"
@@ -209,17 +292,30 @@ def test_cmake_no_index(tmp_path):
 def test_cmake_header_extension_fallback_without_filesets(tmp_path):
     reply = tmp_path / "build" / ".cmake" / "api" / "v1" / "reply"
     reply.mkdir(parents=True)
-    (reply / "codemodel-v2-x.json").write_text(json.dumps({
-        "configurations": [{"targets": [{"jsonFile": "t.json"}]}],
-    }))
-    (reply / "t.json").write_text(json.dumps({
-        "name": "foo", "type": "STATIC_LIBRARY",
-        "sources": [{"path": "a.cpp"}, {"path": "a.h"}],
-    }))
-    (reply / "index-x.json").write_text(json.dumps({
-        "cmake": {"version": {"string": "3.28"}},
-        "objects": [{"kind": "codemodel", "jsonFile": "codemodel-v2-x.json"}],
-    }))
+    (reply / "codemodel-v2-x.json").write_text(
+        json.dumps(
+            {
+                "configurations": [{"targets": [{"jsonFile": "t.json"}]}],
+            }
+        )
+    )
+    (reply / "t.json").write_text(
+        json.dumps(
+            {
+                "name": "foo",
+                "type": "STATIC_LIBRARY",
+                "sources": [{"path": "a.cpp"}, {"path": "a.h"}],
+            }
+        )
+    )
+    (reply / "index-x.json").write_text(
+        json.dumps(
+            {
+                "cmake": {"version": {"string": "3.28"}},
+                "objects": [{"kind": "codemodel", "jsonFile": "codemodel-v2-x.json"}],
+            }
+        )
+    )
     ev = CMakeFileApiAdapter(tmp_path / "build").collect()
     t = ev.targets[0]
     assert t.kind is TargetKind.STATIC_LIBRARY
@@ -232,11 +328,17 @@ def test_cmake_header_extension_fallback_without_filesets(tmp_path):
 
 
 def test_ninja_command_string_and_bad_entries(tmp_path):
-    compdb = json.dumps([
-        {"directory": str(tmp_path), "file": "a.cpp", "command": "c++ -std=c++17 -c a.cpp"},
-        "not-a-dict",
-        {"directory": str(tmp_path)},  # no file
-    ])
+    compdb = json.dumps(
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "command": "c++ -std=c++17 -c a.cpp",
+            },
+            "not-a-dict",
+            {"directory": str(tmp_path)},  # no file
+        ]
+    )
     ev = NinjaAdapter(compdb=compdb).collect()
     assert len(ev.compile_units) == 1
     assert ev.compile_units[0].standard == "c++17"
@@ -253,8 +355,15 @@ def test_ninja_non_array_diagnostic():
 
 
 def test_ninja_precaptured_graph_diagnostic(tmp_path):
-    compdb = json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                          "arguments": ["c++", "-c", "a.cpp"]}])
+    compdb = json.dumps(
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "arguments": ["c++", "-c", "a.cpp"],
+            }
+        ]
+    )
     ev = NinjaAdapter(compdb=compdb, graph="digraph { a -> b }").collect()
     assert any("dependency graph captured" in d for d in ev.diagnostics)
 
@@ -265,7 +374,9 @@ def test_ninja_live_query_disabled_diagnostic(tmp_path):
 
 
 def test_ninja_executable_missing_diagnostic(tmp_path, monkeypatch):
-    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: None)
+    monkeypatch.setattr(
+        "abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: None
+    )
     ev = NinjaAdapter(build_dir=tmp_path, allow_query=True).collect()
     assert any("executable not found" in d for d in ev.diagnostics)
 
@@ -274,14 +385,23 @@ def test_ninja_query_invokes_subprocess(tmp_path, monkeypatch):
     """Drive the live-query path with a stubbed ninja that returns a compdb."""
     import subprocess as _sp
 
-    compdb = json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                          "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}])
+    compdb = json.dumps(
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+            }
+        ]
+    )
 
     def fake_run(cmd, **kwargs):
         out = compdb if "compdb" in cmd else "digraph {}"
         return _sp.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
-    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: "/usr/bin/ninja")
+    monkeypatch.setattr(
+        "abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: "/usr/bin/ninja"
+    )
     monkeypatch.setattr("abicheck.buildsource.adapters.ninja.subprocess.run", fake_run)
     ev = NinjaAdapter(build_dir=tmp_path).collect()
     assert len(ev.compile_units) == 1
@@ -294,7 +414,9 @@ def test_ninja_query_nonzero_exit_diagnostic(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         return _sp.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
-    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: "/usr/bin/ninja")
+    monkeypatch.setattr(
+        "abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: "/usr/bin/ninja"
+    )
     monkeypatch.setattr("abicheck.buildsource.adapters.ninja.subprocess.run", fake_run)
     ev = NinjaAdapter(build_dir=tmp_path).collect()
     assert any("exited 1" in d for d in ev.diagnostics)
@@ -312,8 +434,11 @@ def test_diff_option_added_and_removed():
 
 
 def test_diff_no_change_when_equal():
-    ev = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
+    ev = BuildEvidence(
+        build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)]
+    )
     import copy
+
     assert diff_build_evidence(ev, copy.deepcopy(ev)) == []
 
 
@@ -323,27 +448,51 @@ def test_derive_build_options_captures_msvc_std_flag():
     `_extract_flags` only fills cu.standard from GCC `-std=`, so without this the
     /std: change would be invisible on Windows/MSVC builds.
     """
-    old = derive_build_options([CompileUnit(
-        id="1", language="CXX", standard="", abi_relevant_flags=["/std:c++17"],
-    )])
-    new = derive_build_options([CompileUnit(
-        id="1", language="CXX", standard="", abi_relevant_flags=["/std:c++20"],
-    )])
+    old = derive_build_options(
+        [
+            CompileUnit(
+                id="1",
+                language="CXX",
+                standard="",
+                abi_relevant_flags=["/std:c++17"],
+            )
+        ]
+    )
+    new = derive_build_options(
+        [
+            CompileUnit(
+                id="1",
+                language="CXX",
+                standard="",
+                abi_relevant_flags=["/std:c++20"],
+            )
+        ]
+    )
     assert {(o.key, o.value) for o in old} == {("std:CXX", "c++17")}
     assert {(o.key, o.value) for o in new} == {("std:CXX", "c++20")}
-    changes = diff_build_evidence(BuildEvidence(build_options=old), BuildEvidence(build_options=new))
+    changes = diff_build_evidence(
+        BuildEvidence(build_options=old), BuildEvidence(build_options=new)
+    )
     assert any(
         c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
-        and c.old_value == "c++17" and c.new_value == "c++20"
+        and c.old_value == "c++17"
+        and c.new_value == "c++20"
         for c in changes
     )
 
 
 def test_derive_build_options_gcc_std_no_double_emit():
     """GCC -std= is captured once via the structured field, not duplicated."""
-    opts = derive_build_options([CompileUnit(
-        id="1", language="CXX", standard="c++20", abi_relevant_flags=["-std=c++20"],
-    )])
+    opts = derive_build_options(
+        [
+            CompileUnit(
+                id="1",
+                language="CXX",
+                standard="c++20",
+                abi_relevant_flags=["-std=c++20"],
+            )
+        ]
+    )
     assert sum(o.key == "std:CXX" for o in opts) == 1
 
 
@@ -354,15 +503,32 @@ def test_derive_build_options_skips_structurally_captured_flags():
     options; the raw flag (split or combined spelling) must not also appear, or
     an identical build looks changed.
     """
-    split = derive_build_options([CompileUnit(
-        id="1", language="CXX", sysroot="/sdk", target_triple="x86_64-linux-gnu",
-        abi_relevant_flags=["--sysroot", "-target"],
-    )])
-    combined = derive_build_options([CompileUnit(
-        id="1", language="CXX", sysroot="/sdk", target_triple="x86_64-linux-gnu",
-        abi_relevant_flags=["--sysroot=/sdk", "--target=x86_64-linux-gnu"],
-    )])
-    assert {(o.key, o.value) for o in split} == {("sysroot", "/sdk"), ("target", "x86_64-linux-gnu")}
+    split = derive_build_options(
+        [
+            CompileUnit(
+                id="1",
+                language="CXX",
+                sysroot="/sdk",
+                target_triple="x86_64-linux-gnu",
+                abi_relevant_flags=["--sysroot", "-target"],
+            )
+        ]
+    )
+    combined = derive_build_options(
+        [
+            CompileUnit(
+                id="1",
+                language="CXX",
+                sysroot="/sdk",
+                target_triple="x86_64-linux-gnu",
+                abi_relevant_flags=["--sysroot=/sdk", "--target=x86_64-linux-gnu"],
+            )
+        ]
+    )
+    assert {(o.key, o.value) for o in split} == {
+        ("sysroot", "/sdk"),
+        ("target", "x86_64-linux-gnu"),
+    }
     assert {(o.key, o.value) for o in split} == {(o.key, o.value) for o in combined}
     old = BuildEvidence(build_options=split)
     new = BuildEvidence(build_options=combined)
@@ -371,11 +537,15 @@ def test_derive_build_options_skips_structurally_captured_flags():
 
 def test_diff_preserves_multiple_values_for_same_key():
     """Codex P2: a removed variant of a multi-config option is not masked."""
-    old = BuildEvidence(build_options=[
-        BuildOption("std:CXX", "c++17", abi_relevant=True),
-        BuildOption("std:CXX", "c++20", abi_relevant=True),
-    ])
-    new = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
+    old = BuildEvidence(
+        build_options=[
+            BuildOption("std:CXX", "c++17", abi_relevant=True),
+            BuildOption("std:CXX", "c++20", abi_relevant=True),
+        ]
+    )
+    new = BuildEvidence(
+        build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)]
+    )
     changes = diff_build_evidence(old, new)
     assert len(changes) == 1
     c = changes[0]
@@ -386,14 +556,18 @@ def test_diff_preserves_multiple_values_for_same_key():
 
 def test_diff_multi_value_order_independent():
     """Same value sets in different unit order produce no finding."""
-    a = BuildEvidence(build_options=[
-        BuildOption("std:CXX", "c++17", abi_relevant=True),
-        BuildOption("std:CXX", "c++20", abi_relevant=True),
-    ])
-    b = BuildEvidence(build_options=[
-        BuildOption("std:CXX", "c++20", abi_relevant=True),
-        BuildOption("std:CXX", "c++17", abi_relevant=True),
-    ])
+    a = BuildEvidence(
+        build_options=[
+            BuildOption("std:CXX", "c++17", abi_relevant=True),
+            BuildOption("std:CXX", "c++20", abi_relevant=True),
+        ]
+    )
+    b = BuildEvidence(
+        build_options=[
+            BuildOption("std:CXX", "c++20", abi_relevant=True),
+            BuildOption("std:CXX", "c++17", abi_relevant=True),
+        ]
+    )
     assert diff_build_evidence(a, b) == []
 
 
@@ -436,7 +610,9 @@ def _write_pack_from_compile_db(path, cdb):
     tests still exercise a real on-disk pack."""
     merged, extractors = _run_default_adapters(compile_db=cdb)
     pack = BuildSourcePack.empty(path)
-    pack.build_evidence = merged if merged.compile_units or merged.build_options else None
+    pack.build_evidence = (
+        merged if merged.compile_units or merged.build_options else None
+    )
     pack.manifest.extractors = extractors
     pack_io.write(pack)
     return pack
@@ -461,14 +637,24 @@ def test_collect_evidence_failed_compile_db_records_extractor(tmp_path):
     bad = tmp_path / "missing.json"
     _merged, extractors = _run_default_adapters(compile_db=bad)
     # The adapter failure is recorded as a diagnostic/extractor status, not a crash.
-    assert any(e.name == "compile_commands" and e.status == "failed"
-               for e in extractors)
+    assert any(
+        e.name == "compile_commands" and e.status == "failed" for e in extractors
+    )
 
 
 def test_collect_evidence_ninja_compdb(tmp_path):
     compdb = tmp_path / "compdb.json"
-    compdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                                   "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    compdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "a.cpp",
+                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+                }
+            ]
+        )
+    )
     merged, _extractors = _run_default_adapters(ninja_compdb=compdb)
     assert merged.compile_units or merged.build_options
     assert any(o.key == "std:CXX" for o in merged.build_options)
@@ -481,27 +667,41 @@ def test_compare_drift_fires_without_compile_db_context(tmp_path):
     from abicheck.serialization import save_snapshot
 
     new_cdb = tmp_path / "cc.json"
-    new_cdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    new_cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "a.cpp",
+                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+                }
+            ]
+        )
+    )
     ev_new = tmp_path / "new.evidence"
     runner = CliRunner()
     _write_pack_from_compile_db(ev_new, new_cdb)
 
     for v in ("old", "new"):
-        save_snapshot(AbiSnapshot(library="libfoo.so", version=v, from_headers=True),
-                      tmp_path / f"{v}.json")
+        save_snapshot(
+            AbiSnapshot(library="libfoo.so", version=v, from_headers=True),
+            tmp_path / f"{v}.json",
+        )
 
-    result = runner.invoke(main, [
-        "compare",
-        str(tmp_path / "old.json"),
-        str(tmp_path / "new.json"),
-        "-H",
-        str(tmp_path),
-        "--build-info",
-        "new=" + str(ev_new),
-        "-o",
-        "json=-",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "old.json"),
+            str(tmp_path / "new.json"),
+            "-H",
+            str(tmp_path),
+            "--build-info",
+            "new=" + str(ev_new),
+            "-o",
+            "json=-",
+        ],
+    )
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" in result.stdout
 
@@ -512,29 +712,47 @@ def test_compare_drift_suppressed_when_dumped_with_build_context(tmp_path):
     from abicheck.serialization import save_snapshot
 
     new_cdb = tmp_path / "cc.json"
-    new_cdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    new_cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "a.cpp",
+                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+                }
+            ]
+        )
+    )
     ev_new = tmp_path / "new.evidence"
     runner = CliRunner()
     _write_pack_from_compile_db(ev_new, new_cdb)
 
     # New side was dumped WITH the build's compile DB → no drift.
-    save_snapshot(AbiSnapshot(library="libfoo.so", version="old", from_headers=True),
-                  tmp_path / "old.json")
     save_snapshot(
-        AbiSnapshot(library="libfoo.so", version="new", from_headers=True,
-                    parsed_with_build_context=True),
+        AbiSnapshot(library="libfoo.so", version="old", from_headers=True),
+        tmp_path / "old.json",
+    )
+    save_snapshot(
+        AbiSnapshot(
+            library="libfoo.so",
+            version="new",
+            from_headers=True,
+            parsed_with_build_context=True,
+        ),
         tmp_path / "new.json",
     )
-    result = runner.invoke(main, [
-        "compare",
-        str(tmp_path / "old.json"),
-        str(tmp_path / "new.json"),
-        "--build-info",
-        "new=" + str(ev_new),
-        "-o",
-        "json=-",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "old.json"),
+            str(tmp_path / "new.json"),
+            "--build-info",
+            "new=" + str(ev_new),
+            "-o",
+            "json=-",
+        ],
+    )
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" not in result.stdout
 
@@ -545,26 +763,40 @@ def test_compare_binary_only_skips_header_drift(tmp_path):
     from abicheck.serialization import save_snapshot
 
     new_cdb = tmp_path / "cc.json"
-    new_cdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    new_cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "a.cpp",
+                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+                }
+            ]
+        )
+    )
     ev_new = tmp_path / "new.evidence"
     runner = CliRunner()
     _write_pack_from_compile_db(ev_new, new_cdb)
 
     # Binary-only snapshots: from_headers is False, so there is no L2 AST.
     for v in ("old", "new"):
-        save_snapshot(AbiSnapshot(library="libfoo.so", version=v, from_headers=False),
-                      tmp_path / f"{v}.json")
+        save_snapshot(
+            AbiSnapshot(library="libfoo.so", version=v, from_headers=False),
+            tmp_path / f"{v}.json",
+        )
 
-    result = runner.invoke(main, [
-        "compare",
-        str(tmp_path / "old.json"),
-        str(tmp_path / "new.json"),
-        "--build-info",
-        "new=" + str(ev_new),
-        "-o",
-        "json=-",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "old.json"),
+            str(tmp_path / "new.json"),
+            "--build-info",
+            "new=" + str(ev_new),
+            "-o",
+            "json=-",
+        ],
+    )
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" not in result.stdout
 
@@ -579,12 +811,23 @@ def _asym_snap(*, dwarf=False, headers=False, version="1.0"):
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
     from abicheck.model import AbiSnapshot
 
-    elf = ElfMetadata(symbols=[ElfSymbol(
-        name="api", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC,
-    )])
+    elf = ElfMetadata(
+        symbols=[
+            ElfSymbol(
+                name="api",
+                binding=SymbolBinding.GLOBAL,
+                sym_type=SymbolType.FUNC,
+            )
+        ]
+    )
     return AbiSnapshot(
-        library="libfoo.so", version=version, platform="elf",
-        elf=elf, dwarf=DwarfMetadata() if dwarf else None,
+        library="libfoo.so",
+        version=version,
+        platform="elf",
+        # has_dwarf=True, not a bare DwarfMetadata(): the flag is what says
+        # debug info was collected, and an empty object means the opposite.
+        elf=elf,
+        dwarf=DwarfMetadata(has_dwarf=True) if dwarf else None,
         from_headers=headers,
     )
 
@@ -605,9 +848,12 @@ def _pack_with(tmp_path, name, *, build=False, source_abi=False):
             build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)],
         )
     if source_abi:
-        pack.manifest.coverage = [LayerCoverage(
-            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT,
-        )]
+        pack.manifest.coverage = [
+            LayerCoverage(
+                layer=DataLayer.L4_SOURCE_ABI.value,
+                status=CoverageStatus.PRESENT,
+            )
+        ]
     return pack
 
 
@@ -674,27 +920,43 @@ def test_compare_cli_reports_coverage_asymmetry(tmp_path):
     from abicheck.serialization import save_snapshot
 
     base_cdb = tmp_path / "cc.json"
-    base_cdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
-                                     "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    base_cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "a.cpp",
+                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"],
+                }
+            ]
+        )
+    )
     ev_base = tmp_path / "base.evidence"
     runner = CliRunner()
     _write_pack_from_compile_db(ev_base, base_cdb)
 
     # Base and target both header-aware; only the base carries build evidence.
-    save_snapshot(AbiSnapshot(library="libfoo.so", version="old", from_headers=True),
-                  tmp_path / "old.json")
-    save_snapshot(AbiSnapshot(library="libfoo.so", version="new", from_headers=True),
-                  tmp_path / "new.json")
+    save_snapshot(
+        AbiSnapshot(library="libfoo.so", version="old", from_headers=True),
+        tmp_path / "old.json",
+    )
+    save_snapshot(
+        AbiSnapshot(library="libfoo.so", version="new", from_headers=True),
+        tmp_path / "new.json",
+    )
 
-    result = runner.invoke(main, [
-        "compare",
-        str(tmp_path / "old.json"),
-        str(tmp_path / "new.json"),
-        "--build-info",
-        "old=" + str(ev_base),
-        "-o",
-        "json=-",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "old.json"),
+            str(tmp_path / "new.json"),
+            "--build-info",
+            "old=" + str(ev_base),
+            "-o",
+            "json=-",
+        ],
+    )
     assert result.exit_code in (0, 2, 4), result.output
     assert "layer_coverage_asymmetric" in result.stdout
     assert "L3 build context" in result.stdout

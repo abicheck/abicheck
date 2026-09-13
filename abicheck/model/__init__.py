@@ -53,7 +53,10 @@ from ..name_classification import (
 )
 from .availability import FactStatus as FactStatus
 from .declarations import Function as Function, Param as Param, Variable as Variable
-from .dwarf_facts import debug_info_present as debug_info_present
+from .dwarf_facts import (
+    advanced_facts_collected as advanced_facts_collected,
+    debug_info_present as debug_info_present,
+)
 from .elf_facts import SymbolBinding as SymbolBinding
 from .entities import (
     EnumMember as EnumMember,
@@ -113,6 +116,7 @@ __all__ = [
     "AccessLevel",
     "COMPILER_INTERNAL_TYPES",
     "DependencyInfo",
+    "advanced_facts_collected",
     "debug_info_present",
     "ElfVisibility",
     "EnumMember",

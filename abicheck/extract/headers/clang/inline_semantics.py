@@ -29,6 +29,9 @@ shape                            what clang's JSON carries instead
 member defined in the class      nothing -- only a ``CompoundStmt`` in
 body (``int get() const {…}``)   ``inner``, and a record enclosing scope
 ``= default`` in the class body  ``"explicitlyDefaulted": "default"``
+hidden friend defined in the     nothing either, and it is not even a
+class (``friend bool             member node: clang emits a plain
+operator==(…) { … }``)           ``FunctionDecl`` under a ``FriendDecl``
 ===============================  ===========================================
 
 Measured against clang 18.1.3 (``-std=c++20``); the castxml backend
@@ -101,20 +104,33 @@ def _has_compound_body(node: dict[str, Any]) -> bool:
     )
 
 
-def is_effectively_inline(node: dict[str, Any], scope_path: ScopePath) -> bool:
+def is_effectively_inline(
+    node: dict[str, Any], scope_path: ScopePath, *, in_friend: bool = False
+) -> bool:
     """Whether *node* has inline linkage, explicitly or implicitly.
 
     *scope_path* is the declaration's own enclosing scope path, which is what
     :func:`encloses_class_scope` reads to tell an in-class definition from an
-    out-of-line one.
+    out-of-line one. *in_friend* is the parser's own ``_Decl.in_friend`` --
+    True when the declaration was reached through a ``friend`` declaration.
 
-    The three implicit rules, in the order the language states them:
+    The implicit rules, in the order the language states them:
 
     * ``constexpr`` (and therefore ``consteval``) functions are implicitly
       inline -- clang spells both with ``"constexpr": true``.
-    * A member function *defined* inside its class body is implicitly inline.
+    * A function *defined* inside a class body is implicitly inline. That
+      covers ordinary members and, equally, a **hidden friend** defined in
+      the class (``friend bool operator==(const W&, const W&) { … }``) -- the
+      canonical spelling of a comparison operator, and not a member node at
+      all: clang emits it as a plain ``FunctionDecl`` under a ``FriendDecl``,
+      so matching on member node kinds alone misses every one of them. Both
+      backends agree it is inline (checked against castxml 0.7.0).
     * A member ``= default``\\ ed inside its class body is such a definition,
       even though clang attaches no ``CompoundStmt`` to it.
+
+    A friend merely *declared* in the class and defined out of line
+    (``friend void f(const W&);``) keeps the negative answer, which is why
+    *in_friend* alone is not the test -- the body is.
 
     ``= delete``\\ d members are deliberately **not** matched: clang spells
     them ``"explicitlyDeleted": true`` (not ``explicitlyDefaulted``), a
@@ -125,6 +141,8 @@ def is_effectively_inline(node: dict[str, Any], scope_path: ScopePath) -> bool:
         return True
     if node.get("constexpr"):
         return True
-    if node.get("kind") not in _MEMBER_KINDS or not encloses_class_scope(scope_path):
+    if not encloses_class_scope(scope_path):
+        return False
+    if node.get("kind") not in _MEMBER_KINDS and not in_friend:
         return False
     return _has_compound_body(node) or node.get("explicitlyDefaulted") == "default"

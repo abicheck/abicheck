@@ -161,6 +161,33 @@ def test_out_of_line_definition_is_not_implicitly_inline(kind):
     assert is_effectively_inline(_node(kind, body=True), _NAMESPACE) is False
 
 
+@pytest.mark.parametrize("scope", [_RECORD, _NESTED])
+def test_hidden_friend_defined_in_class_is_implicitly_inline(scope):
+    """A `FunctionDecl`, not a member node -- the shape node-kind matching missed.
+
+    `friend bool operator==(const W&, const W&) { ... }` is the canonical
+    spelling of a comparison operator. Clang emits it as a plain
+    `FunctionDecl` under a `FriendDecl` with a record-ending scope path, so
+    gating on member node kinds alone left every hidden friend non-inline and
+    owing an export it can never have.
+    """
+    node = _node("FunctionDecl", body=True)
+    assert is_effectively_inline(node, scope, in_friend=True) is True
+    # Without the friend context it is an ordinary free function: not inline.
+    assert is_effectively_inline(node, scope) is False
+
+
+def test_friend_declared_in_class_but_defined_out_of_line_keeps_its_obligation():
+    """`in_friend` alone is not the test -- the body is.
+
+    `friend void f(const W&);` names a function defined elsewhere, which does
+    owe an exported symbol.
+    """
+    assert (
+        is_effectively_inline(_node("FunctionDecl"), _RECORD, in_friend=True) is False
+    )
+
+
 def test_free_function_with_a_body_is_not_implicitly_inline():
     """A non-inline definition in a header is an ODR bug in the user's code,
     not something to silently reclassify as vague linkage."""
@@ -207,8 +234,9 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
         (None, True),
         (False, True),
         (None, "default", "deleted"),
+        (False, True),
     )
-    for kind, scope, inline, constexpr, body, defaulted in domain:
+    for kind, scope, inline, constexpr, body, defaulted, in_friend in domain:
         attrs: dict[str, object] = {"body": body}
         if inline:
             attrs["inline"] = True
@@ -217,10 +245,10 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
         if defaulted:
             attrs["explicitlyDefaulted"] = defaulted
         node = _node(kind, **attrs)
-        got = is_effectively_inline(node, scope)
+        got = is_effectively_inline(node, scope, in_friend=in_friend)
         seen.add(got)
         reversed_node = dict(reversed(list(node.items())))
-        assert is_effectively_inline(reversed_node, scope) is got
+        assert is_effectively_inline(reversed_node, scope, in_friend=in_friend) is got
     assert seen == {True, False}
 
 
@@ -241,6 +269,8 @@ public:
   void declared_only() const;
   static int counter() { return 0; }
   operator bool() const { return v_; }
+  friend bool operator==(const W& a, const W& b) { return a.v_ == b.v_; }
+  friend bool operator!=(const W& a, const W& b);
 private:
   bool v_;
 };

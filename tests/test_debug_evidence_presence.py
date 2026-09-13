@@ -32,6 +32,13 @@ info collected". Four sites read the container that way; each is enumerated
 below against its own real consumer, so a regression at any one of them fails
 here rather than only at whichever site the next report happens to come from.
 
+The fourth site needed a narrower question still (Codex review).
+``AdvancedDwarfMetadata.has_dwarf`` is itself overloaded: the presence-only
+paths set it from a section lookup and parse no payload, so even the corrected
+"has debug info" reading declared the ``advanced_dwarf`` detector supported
+over empty dicts. ``advanced_facts_collected`` answers from the payload that
+detector actually reads.
+
 The oracle is deliberately not ``debug_info_present`` itself: expectations are
 derived from the ``has_dwarf`` attributes directly, and the end-to-end cases
 are anchored to a real ``g++`` build whose debug info is settled by ``-g`` vs
@@ -65,10 +72,22 @@ _DWARF_STATES: dict[str, tuple[DwarfMetadata | None, bool]] = {
     "empty_with_payload_keys": (DwarfMetadata(structs={}, enums={}), False),
     "collected": (DwarfMetadata(has_dwarf=True), True),
 }
-_ADVANCED_STATES: dict[str, tuple[AdvancedDwarfMetadata | None, bool]] = {
-    "absent": (None, False),
-    "empty": (AdvancedDwarfMetadata(), False),
-    "collected": (AdvancedDwarfMetadata(has_dwarf=True), True),
+# ``AdvancedDwarfMetadata.has_dwarf`` is overloaded, so the advanced slot needs
+# a third state the dwarf slot does not: the presence-only paths (``--depth
+# binary``, ``symbols_only``) set the flag from a section lookup and parse no
+# payload at all. The second element is "the binary has debug info" (what the
+# L1 row asks); the third is "advanced facts were collected" (what a detector
+# consuming those fields needs), and ``presence_only`` is exactly the case
+# where the two answers differ.
+_ADVANCED_STATES: dict[str, tuple[AdvancedDwarfMetadata | None, bool, bool]] = {
+    "absent": (None, False, False),
+    "empty": (AdvancedDwarfMetadata(), False, False),
+    "presence_only": (AdvancedDwarfMetadata(has_dwarf=True), True, False),
+    "collected": (
+        AdvancedDwarfMetadata(has_dwarf=True, packed_structs={"S"}),
+        True,
+        True,
+    ),
 }
 
 
@@ -102,7 +121,7 @@ def test_empty_metadata_is_truthy_which_is_why_this_class_exists():
 def test_predicate_answers_content_not_presence(dwarf_name, advanced_name):
     """Exhaustive over the whole slot domain, not just the reported shape."""
     dwarf, dwarf_is_evidence = _DWARF_STATES[dwarf_name]
-    advanced, advanced_is_evidence = _ADVANCED_STATES[advanced_name]
+    advanced, advanced_is_evidence, _ = _ADVANCED_STATES[advanced_name]
 
     assert debug_info_present(dwarf) is dwarf_is_evidence
     assert debug_info_present(advanced) is advanced_is_evidence
@@ -123,9 +142,12 @@ def test_oracle_is_not_vacuous():
     the sweep above if the oracle had collapsed the same way.
     """
     expected = {e for _, e in _DWARF_STATES.values()} | {
-        e for _, e in _ADVANCED_STATES.values()
+        e for _, e, _c in _ADVANCED_STATES.values()
     }
     assert expected == {True, False}
+    # The advanced slot's two questions must genuinely disagree somewhere, or
+    # `presence_only` would not be testing anything.
+    assert any(e and not c for _m, e, c in _ADVANCED_STATES.values())
 
 
 @pytest.mark.parametrize("advanced_name", sorted(_ADVANCED_STATES))
@@ -138,7 +160,7 @@ def test_l1_coverage_row_tracks_collected_evidence(dwarf_name, advanced_name):
     corrected only ``status`` would leave a reader just as misled.
     """
     dwarf, dwarf_is_evidence = _DWARF_STATES[dwarf_name]
-    advanced, advanced_is_evidence = _ADVANCED_STATES[advanced_name]
+    advanced, advanced_is_evidence, _ = _ADVANCED_STATES[advanced_name]
     has_evidence = dwarf_is_evidence or advanced_is_evidence
 
     rows = {row.layer: row for row in intrinsic_coverage(_snapshot(dwarf, advanced))}
@@ -197,8 +219,15 @@ def test_advanced_dwarf_detector_support_tracks_collected_evidence(advanced_name
     It produced no changes either way, so only the *reported* support status
     was wrong -- which is exactly the failure this class is about, and exactly
     the kind a findings-only assertion would miss.
+
+    ``presence_only`` is the case the coarser ``has_dwarf`` check still got
+    wrong after the first three sites were fixed (Codex review): a
+    ``--depth binary`` scan of a binary that *does* carry DWARF sets the
+    advanced flag from a section lookup while parsing none of the fields this
+    detector reads, so the flag said "supported" over empty dicts. The gate
+    asks about collected payload instead.
     """
-    advanced, advanced_is_evidence = _ADVANCED_STATES[advanced_name]
+    advanced, _evidence, facts_collected = _ADVANCED_STATES[advanced_name]
     snap = _snapshot(DwarfMetadata(), advanced)
     result = compare(snap, snap)
 
@@ -207,9 +236,9 @@ def test_advanced_dwarf_detector_support_tracks_collected_evidence(advanced_name
     )
     # ``not_evaluated`` is the field that separates "ran, found nothing" from
     # "never ran" -- the exact distinction the presence check was collapsing.
-    assert entry.not_evaluated is not advanced_is_evidence
+    assert entry.not_evaluated is not facts_collected
     assert entry.changes_count == 0
-    if not advanced_is_evidence:
+    if not facts_collected:
         # A declined detector must carry the gate's reason, not a silent zero.
         assert entry.coverage_gap
 

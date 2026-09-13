@@ -184,3 +184,38 @@ def debug_info_present(*metadata: DwarfMetadata | AdvancedDwarfMetadata | None) 
     artifact is stripped.
     """
     return any(meta is not None and meta.has_dwarf for meta in metadata)
+
+
+def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
+    """Whether *meta* carries advanced DWARF facts that were actually parsed.
+
+    A strictly narrower question than :func:`debug_info_present`, because
+    ``AdvancedDwarfMetadata.has_dwarf`` is overloaded: on the presence-only
+    paths (``--depth binary``, ``symbols_only``) ``dwarf_presence`` sets it
+    from a **section lookup** and deliberately parses none of the payload --
+    that is the whole point of those paths, and several tests pin it. So the
+    flag answers "the binary has debug info", which is what the L1 coverage
+    row wants, and not "advanced facts are available", which is what a
+    detector consuming those fields needs.
+
+    Answered from the payload the detector actually reads
+    (``dwarf_advanced.diff_advanced_dwarf``), so a presence-only snapshot
+    reports its ``advanced_dwarf`` detector as *not evaluated* rather than as
+    having run and found nothing. Deliberately conservative in one direction:
+    a real parse that genuinely established nothing is indistinguishable from
+    one that never ran, and this answers ``False`` for both -- understating
+    assurance, never overstating it.
+    """
+    if meta is None or not meta.has_dwarf:
+        return False
+    return bool(
+        meta.calling_conventions
+        or meta.value_abi_traits
+        or meta.return_value_sizes
+        or meta.return_memory_classified
+        or meta.packed_structs
+        or meta.all_struct_names
+        or meta.frame_registers
+        or meta.callee_saved_regs
+        or meta.toolchain.producer_string
+    )
