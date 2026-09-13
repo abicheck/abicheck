@@ -59,8 +59,9 @@
   `reporter.to_json`, `report.to_markdown`, `sarif.to_sarif` and
   `junit_report.to_junit_xml` shared none of `render_output`'s check, so a
   caller passing `report_mode="leaf"` to any of them silently received a
-  *full* report instead of an error. One owner now
-  (`report/report_modes.py`).
+  *full* report instead of an error — as did `service_render.render_envelope`,
+  whose mode arrives on the envelope rather than as an argument. One owner
+  now (`report/report_modes.py`), consulted by all five.
 
 ### Removed
 

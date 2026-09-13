@@ -533,6 +533,54 @@ class TestDeepCopyPreservesEveryDeclaredField:
         assert entry.entity_from_field is not None
         assert copy.deepcopy(entry).entity_from_field == entry.entity_from_field
 
+    def test_unpickling_fills_every_field_in_both_state_shapes(self):
+        """`__setstate__`'s trailing-default fill has to cover the legacy
+        *dict* state too, not only the positional tuple.
+
+        It was nested inside the tuple branch, so a pre-slots pickle's own
+        ``__dict__`` left every field added since it was written simply
+        *unset* — and `entity_for`/`operation_for`/`entity_from_field_for`
+        then raised `AttributeError` on the restored entry instead of
+        reading a default (CodeRabbit review, PR #1284). Same shape as the
+        `__deepcopy__` bug above, and stated the same way: over every
+        field, so the next added one cannot repeat it.
+        """
+        import dataclasses
+
+        from abicheck.change_registry_types import Verdict
+        from abicheck.model.change_catalog.registry import ChangeKindMeta
+
+        minimal_dict = {
+            "kind": "x",
+            "default_verdict": Verdict.BREAKING,
+            "impact": "i",
+        }
+        minimal_tuple = ["x", Verdict.BREAKING, "i"]
+        for state in (minimal_dict, minimal_tuple):
+            entry = ChangeKindMeta.__new__(ChangeKindMeta)
+            entry.__setstate__(state)
+            unset = [
+                f.name for f in dataclasses.fields(entry) if not hasattr(entry, f.name)
+            ]
+            assert not unset, (type(state).__name__, unset)
+
+    def test_a_legacy_entry_answers_the_accessors_rather_than_raising(self):
+        """The consequence the fill exists for, asserted through the public
+        accessors rather than through `hasattr`."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.model.change_catalog.registry import (
+            ChangeKindMeta,
+            ChangeKindRegistry,
+        )
+
+        entry = ChangeKindMeta.__new__(ChangeKindMeta)
+        entry.__setstate__({"kind": "x", "default_verdict": Verdict.BREAKING})
+        registry = ChangeKindRegistry.__new__(ChangeKindRegistry)
+        object.__setattr__(registry, "_entries", {"x": entry})
+        assert registry.entity_for("x") is None
+        assert registry.operation_for("x") is None
+        assert registry.entity_from_field_for("x") is None
+
     def test_the_immutability_guarantee_still_holds(self):
         """The reason `__deepcopy__` exists at all (PR #882) is unchanged by
         rebuilding it from `fields()`."""

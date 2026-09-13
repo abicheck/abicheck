@@ -250,6 +250,13 @@ def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
         ValidationError: For unrecognised output format.
     """
     _reject_unsupported_format(fmt)
+    # The envelope carries its own `report_mode`, and nothing validated it:
+    # `build_report_envelope` and a directly-constructed `ReportEnvelope`
+    # both accept any string, so an envelope holding a retired or unknown
+    # mode rendered (HTML in particular ignores the field entirely) instead
+    # of raising. Every *other* public rendering entry point checks; this
+    # one is one of them (CodeRabbit review, PR #1284).
+    _reject_unsupported_report_mode(envelope.options.report_mode)
     # Demangling is a property of the format being projected, not of the
     # envelope -- one envelope is rendered into several formats, and a
     # single stored bool cannot be right for a human format and a machine

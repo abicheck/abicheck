@@ -351,13 +351,21 @@ class ChangeKindMeta:
             # `_validate_entry` is what refuses such an entry when it
             # actually reaches a registry.
             values = dict(zip(field_names, state, strict=False))
-            for field_def in fields(self):
-                if field_def.name in values:
-                    continue
-                if field_def.default is not MISSING:
-                    values[field_def.name] = field_def.default
-                elif field_def.default_factory is not MISSING:  # type: ignore[misc]
-                    values[field_def.name] = field_def.default_factory()  # type: ignore[misc]
+        # Applied to *both* state shapes, not just the tuple one. A legacy
+        # pre-slots pickle's own ``__dict__`` is equally missing every field
+        # added since it was written, and leaving those slots unset made
+        # `entity_for`/`operation_for`/`entity_from_field_for` raise
+        # AttributeError on the restored entry rather than reading a
+        # default (CodeRabbit review, PR #1284) -- the same shape as
+        # `__deepcopy__`'s own hand-written field list, and fixed the same
+        # way: derive from `fields(self)` so no field can be forgotten.
+        for field_def in fields(self):
+            if field_def.name in values:
+                continue
+            if field_def.default is not MISSING:
+                values[field_def.name] = field_def.default
+            elif field_def.default_factory is not MISSING:  # type: ignore[misc]
+                values[field_def.name] = field_def.default_factory()  # type: ignore[misc]
         overrides = values.get("policy_overrides")
         if not isinstance(overrides, _ImmutableDict):
             values["policy_overrides"] = _ImmutableDict(overrides or {})
