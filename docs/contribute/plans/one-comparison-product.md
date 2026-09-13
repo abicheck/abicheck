@@ -1825,6 +1825,37 @@ mechanism* first and an option count second:
      dimensions the prefix table could not express; the five existing
      tokens keep their exact spellings (`elf` stays the alias for
      `ChangeEntity.BINARY`) so the old invocation is unchanged.
+     Two consequences of *declaring* the dimensions surfaced only in review
+     and are the reason this is worth stating as a rule rather than a
+     seeding pass. **An attribute transition is a modification.**
+     `ChangeOperation`'s docstring already said a trait gained by a
+     persisting entity is not an addition (`func_noexcept_added`), but the
+     seeding applied that inconsistently: every `[[deprecated]]` kind, the
+     `override`-specifier pair and `field_default_initializer_removed` each
+     named a declaration present on *both* sides while claiming `added`/
+     `removed`, so `--view show=added` listed functions that were merely
+     annotated. All thirteen are now `modified`. The boundary is the
+     interesting half, and is asserted so a later sweep cannot widen the
+     rule: `func_export_added`/`var_export_added` stay `added`, because a
+     symbol genuinely appears in the export table — a new thing becomes
+     bindable, rather than an existing one being annotated. **And a kind
+     can be polymorphic.** `diff_namespaces` emits both
+     `experimental_graduated` and
+     `experimental_removed_without_replacement` for functions *and* types,
+     so no single declared `entity` is right for every finding — declaring
+     them `TYPE` excluded a graduated function from `--view
+     show=functions`. The fix keeps the one-registration property rather
+     than reintroducing a reporter-side table: `ChangeKindMeta.
+     entity_from_field` names the *finding's own* attribute that states the
+     concrete entity (here `detail`, the same word the kind's
+     `description_template` already interpolates), with the declared
+     `entity` as the fallback when a finding states none — an unresolvable
+     dimension would drop the finding from every element filter, which is
+     worse than a coarse one. Splitting the two kinds into function/type
+     variants was the alternative and costs two `ChangeKind` values, two
+     catalog entries and a detector branch to express what one declarative
+     field does.
+
      Per-finding `operation` values may move in JSON for a kind the suffix
      rule classified wrongly, and each finding now carries `entity` beside
      it — report schema **5.0**, a MAJOR bump because the `leaf` removal
@@ -1869,8 +1900,16 @@ mechanism* first and an option count second:
   `run_compare` is reached), and the `demangle`/`explain_patterns`/
   `show_filtered`/`audit_suppressions` parameters are removed from the CLI
   layer rather than left as dead internal knobs — `demangle` survives only
-  as a *resolved per-format* value (`_resolve_demangle(fmt)`, now a
-  one-argument function over `HUMAN_FORMATS`). Verdict, gate, exit code,
+  as a *resolved per-format* value
+  (`service_render.resolve_demangle_for_format(fmt)`, a one-argument
+  function over `HUMAN_FORMATS`). That resolution is owned engine-side, not
+  by the CLI, which is what makes the typed API's `render_output` demangle
+  automatically too — and `HUMAN_FORMATS` must list every *alias* of a human
+  projector, not just its primary spelling: `md` was omitted at first, so
+  the identical Markdown projection demangled under one of its two
+  documented names and not the other (Codex review, PR #1284; the test
+  derives the alias groups from the projector table itself rather than
+  restating them). Verdict, gate, exit code,
   coverage contribution and assurance are asserted separately from the
   display change.
 

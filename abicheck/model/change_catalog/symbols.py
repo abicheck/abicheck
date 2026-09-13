@@ -310,7 +310,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         '"not a break" for source compatibility.',
         description_template="Function marked deprecated: {name} ({detail})",
         entity=_ENT.FUNCTION,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_deprecated_removed",
@@ -319,7 +319,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "warning stops, with no effect on the function's ABI.",
         description_template="Function no longer marked deprecated: {name}",
         entity=_ENT.FUNCTION,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_exception_spec_changed",
@@ -441,7 +441,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "signature and ABI are unchanged.",
         description_template="Method gained `override` specifier: {name}",
         entity=_ENT.FUNCTION,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_override_specifier_removed",
@@ -454,7 +454,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "does not prove a break.",
         description_template="Method lost `override` specifier: {name}",
         entity=_ENT.FUNCTION,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_params_changed",
@@ -1131,7 +1131,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "has this turn a previously clean build into a failing one.",
         description_template="Variable marked deprecated: {name} ({detail})",
         entity=_ENT.VARIABLE,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_deprecated_removed",
@@ -1140,7 +1140,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "warning stops, with no effect on the variable's ABI.",
         description_template="Variable no longer marked deprecated: {name}",
         entity=_ENT.VARIABLE,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_lost_const",

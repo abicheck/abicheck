@@ -184,7 +184,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "has this turn a previously clean build into a failing one.",
         description_template="Enum marked deprecated: {name} ({detail})",
         entity=_ENT.ENUM,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_deprecated_removed",
@@ -193,7 +193,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "compiler warning stops, with no effect on the enum's ABI.",
         description_template="Enum no longer marked deprecated: {name}",
         entity=_ENT.ENUM,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_last_member_value_changed",
@@ -262,6 +262,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "are encouraged to migrate to the stable name.",
         description_template="Experimental {detail} '{old}' graduated to stable name '{new}'; experimental alias retained.",
         entity=_ENT.TYPE,
+        entity_from_field="detail",
         operation=_OP.ADDED,
     ),
     _E(
@@ -277,6 +278,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "users see whether a replacement was published.",
         description_template="Experimental {detail} '{old}' was removed and no {detail} with leaf '{name}' was published at a stable namespace in the new headers.",
         entity=_ENT.TYPE,
+        entity_from_field="detail",
         operation=_OP.REMOVED,
     ),
     _E(
@@ -359,7 +361,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "left indeterminate.)",
         description_template="Field lost its default initializer: {name}::{detail}",
         entity=_ENT.TYPE,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_deprecated_added",
@@ -375,7 +377,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "previously clean build into a failing one.",
         description_template="Field marked deprecated: {name}::{detail} ({new})",
         entity=_ENT.TYPE,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_deprecated_removed",
@@ -384,7 +386,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "warning stops, with no effect on the field's layout.",
         description_template="Field no longer marked deprecated: {name}::{detail}",
         entity=_ENT.TYPE,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_lost_const",
@@ -937,7 +939,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "previously clean build into a failing one.",
         description_template="Type marked deprecated: {name} ({detail})",
         entity=_ENT.TYPE,
-        operation=_OP.ADDED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_deprecated_removed",
@@ -946,7 +948,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "warning stops, with no effect on the type's ABI.",
         description_template="Type no longer marked deprecated: {name}",
         entity=_ENT.TYPE,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_field_added",

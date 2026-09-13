@@ -128,15 +128,19 @@ class _AllSuppression:
 
 
 class TestReporterShowOnly:
-    def test_check_element_exact_match(self) -> None:
-        # Line 171: an exact element token (not a prefix) matches.
+    def test_check_element_matches_the_declared_entity(self) -> None:
+        # Plan slice 7o: the element filter reads the kind's declared
+        # ``ChangeEntity``. This test previously named ``anon_field_changed``
+        # as a "functions" match, which was true only of the superseded
+        # name-based exact-match list -- that kind reports an anonymous
+        # member of a matched *record* and is declared TYPE.
         from abicheck.reporter import ShowOnlyFilter
 
         filt = ShowOnlyFilter.parse("functions")
-        # ``anon_field_changed`` is in the exact-match list for "functions".
-        assert filt._check_element("anon_field_changed") is True
-        # A kind that is neither a prefix nor an exact match returns False.
-        assert filt._check_element("soname_changed") is False
+        assert filt._check_element(None, "func_removed") is True
+        # A type-entity kind and a binary-entity kind both miss.
+        assert filt._check_element(None, "anon_field_changed") is False
+        assert filt._check_element(None, "soname_changed") is False
 
     def test_parse_skips_empty_tokens(self) -> None:
         # Line 105: empty token after split is skipped.

@@ -183,6 +183,23 @@ class ChangeKindMeta:
     # overrides``, whose six-value legacy state is exactly that shape).
     entity: ChangeEntity | None = field(default=None, kw_only=True)
     operation: ChangeOperation | None = field(default=None, kw_only=True)
+    # The one escape hatch for a *polymorphic* kind -- one a detector emits
+    # for more than one entity type, where no single declared ``entity`` can
+    # be right for every finding. ``EXPERIMENTAL_GRADUATED`` and
+    # ``EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`` are emitted by
+    # ``diff_namespaces`` for both functions and types (Codex review, PR
+    # #1284): declaring either as ``TYPE`` excluded a graduated *function*
+    # from ``--view show=functions`` and serialized a wrong ``entity``.
+    #
+    # Names the ``Change`` attribute whose value spells the entity for this
+    # finding (a ``ChangeEntity`` value such as ``"function"``). Resolution
+    # stays a *single* registration -- the polymorphism is declared here,
+    # beside the fallback, not in a second table the reporter maintains.
+    # ``entity`` remains mandatory and is what a finding falls back to when
+    # the named field is absent or does not spell a known entity (a
+    # hand-built ``Change``), so the filter never loses a finding to an
+    # unresolvable dimension.
+    entity_from_field: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
@@ -675,6 +692,16 @@ class ChangeKindRegistry:
         """
         e = self._entries.get(kind_value)
         return e.entity if e is not None else None
+
+    def entity_from_field_for(self, kind_value: str) -> str | None:
+        """The ``Change`` attribute stating this kind's per-finding entity.
+
+        ``None`` for every kind whose declared :meth:`entity_for` is the
+        whole answer, which is all but the polymorphic handful -- see
+        ``ChangeKindMeta.entity_from_field``.
+        """
+        e = self._entries.get(kind_value)
+        return e.entity_from_field if e is not None else None
 
     def operation_for(self, kind_value: str) -> ChangeOperation | None:
         """The declared display *operation* for a kind, or ``None`` if unknown."""

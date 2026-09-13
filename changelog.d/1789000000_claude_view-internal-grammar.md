@@ -19,7 +19,19 @@
   matched no element at all for 238 of the 407 kinds, so
   `--view show=functions,variables,types,enums,elf` hid 58% of the catalog;
   the element vocabulary also gains `build`, `source` and `analysis` tokens
-  for the dimensions that table could not express.
+  for the dimensions that table could not express. A kind a detector emits
+  for more than one entity type resolves its entity per *finding*
+  (`ChangeKindMeta.entity_from_field`, declared on the same single
+  registration), so a graduated experimental **function** is no longer
+  reported and filtered as a type.
+
+- **An attribute transition is a modification, not an addition.** A kind
+  reporting that a persisting declaration gained or lost `[[deprecated]]`,
+  an `override` specifier or a field default initializer now carries
+  `operation: modified` -- `--view show=added` no longer lists functions
+  that were merely annotated, and `show=changed` no longer hides them.
+  `func_export_added`/`var_export_added` stay additions: there a symbol
+  genuinely appears in the export table.
 
 ### Removed
 

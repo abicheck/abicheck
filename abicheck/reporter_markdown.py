@@ -194,6 +194,38 @@ def entity_for_kind(kind_val: str) -> str | None:
     return entity.value if entity is not None else None
 
 
+def entity_for_change(change: object, kind_val: str) -> str | None:
+    """The display entity for one *finding*, not merely for its kind.
+
+    Identical to :func:`entity_for_kind` for every kind whose entity is a
+    property of the kind itself. For a *polymorphic* kind -- one a detector
+    emits for more than one entity type -- the catalog declares which of the
+    finding's own attributes states the concrete entity
+    (``ChangeKindMeta.entity_from_field``), and this reads it. Both
+    ``experimental_graduated`` and
+    ``experimental_removed_without_replacement`` are emitted for functions
+    and types alike, so declaring either statically excluded a graduated
+    *function* from ``--view show=functions`` and serialized a wrong
+    ``entity`` (Codex review, PR #1284).
+
+    Falls back to the declared entity whenever the named field is absent or
+    does not spell a known :class:`ChangeEntity` -- an unresolvable
+    dimension would drop the finding from every element filter, which is a
+    worse failure than a coarse one.
+    """
+    declared = entity_for_kind(kind_val)
+    field_name = REGISTRY.entity_from_field_for(kind_val)
+    if field_name is None:
+        return declared
+    stated = getattr(change, field_name, None)
+    if not isinstance(stated, str):
+        return declared
+    try:
+        return ChangeEntity(stated).value
+    except ValueError:
+        return declared
+
+
 def operation_for_kind(kind_val: str) -> str:
     """Classify a ``ChangeKind.value`` into "added"/"removed"/"modified".
 
@@ -300,16 +332,18 @@ class ShowOnlyFilter:
         }.get(eff)
         return label in self.severities
 
-    def _check_element(self, kind_val: str) -> bool:
-        """Return True if *kind_val* matches the element filter.
+    def _check_element(self, change: object, kind_val: str) -> bool:
+        """Return True if *change* matches the element filter.
 
         Plan slice 7o: resolves through the change catalog's own declared
-        :class:`ChangeEntity` (:func:`entity_for_kind`), not through a
-        second interpretation of the kind's *name*.
+        :class:`ChangeEntity` (:func:`entity_for_change`), not through a
+        second interpretation of the kind's *name*. Takes the whole finding
+        rather than its kind because a polymorphic kind's entity is a
+        property of the finding, not of the kind.
         """
         if not self.elements:
             return True
-        entity = entity_for_kind(kind_val)
+        entity = entity_for_change(change, kind_val)
         if entity is None:
             return False
         return any(
@@ -341,7 +375,7 @@ class ShowOnlyFilter:
         """Return True if *change* passes this filter."""
         if not self._check_severity(change, policy, kind_sets, policy_file, today):
             return False
-        if not self._check_element(change.kind.value):
+        if not self._check_element(change, change.kind.value):
             return False
         return self._check_action(change.kind.value, self.actions)
 

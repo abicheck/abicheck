@@ -91,6 +91,7 @@ from .reporter_markdown import (
     _section_severity_label as _section_severity_label,
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
     apply_show_only as apply_show_only,
+    entity_for_change as entity_for_change,
     entity_for_kind as entity_for_kind,
     operation_for_kind as operation_for_kind,
     parse_show_only_groups as parse_show_only_groups,
@@ -1430,7 +1431,7 @@ def _change_to_dict(
         d["surface_facts"] = dict(surface_facts)
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
-        d["entity"] = entity_for_kind(kind.value)
+        d["entity"] = entity_for_change(c, kind.value)
         d["finding_id"] = _finding_id(c)
         # Backend-independent sibling of finding_id (schema 2.36).
         from .finding_identity import report_canonical_finding_id

@@ -177,8 +177,15 @@ _SUPPORTED_FORMATS = frozenset(
 #: longer a reason to make one (see :func:`~abicheck.demangle.demangle_text`:
 #: a demangled name carries its exact mangled spelling with it, and every
 #: machine projection carries both names).
+#: ``"md"`` is here because it is a real alias ``render_output`` accepts and
+#: routes to the identical Markdown projection (``_PROJECTORS``), not a
+#: near-miss spelling -- omitting it made the same rendering demangle under
+#: one of its two documented names and not the other (Codex review, PR
+#: #1284). Any alias added to ``_PROJECTORS`` for a human format belongs
+#: here too; ``tests/test_view_internal_grammar.py`` asserts that every
+#: format aliasing a human projector resolves the same way its target does.
 HUMAN_FORMATS: frozenset[str] = frozenset(
-    {"markdown", "review", "html", "text", ONELINE_FORMAT}
+    {"markdown", "md", "review", "html", "text", ONELINE_FORMAT}
 )
 
 
