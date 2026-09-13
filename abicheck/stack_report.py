@@ -31,6 +31,7 @@ from .binder import SymbolBinding
 from .checker_types import Change
 from .report.render_json import render_json
 from .report.stack import (
+    DEFAULTED_ROOT_NOTE,
     bindings_summary as _bindings_summary,
     compute_stack_report_document,
 )
@@ -169,8 +170,10 @@ def stack_to_markdown(result: StackCheckResult) -> str:
         lines += [
             "## Environments",
             "",
-            f"- **Baseline**: `{result.baseline_env}`",
-            f"- **Candidate**: `{result.candidate_env}`",
+            f"- **Baseline**: `{result.baseline_env}`"
+            + (f" ({DEFAULTED_ROOT_NOTE})" if result.baseline_env_defaulted else ""),
+            f"- **Candidate**: `{result.candidate_env}`"
+            + (f" ({DEFAULTED_ROOT_NOTE})" if result.candidate_env_defaulted else ""),
             "",
         ]
 

@@ -85,6 +85,15 @@ class StackCheckResult:
     # sibling library gaining/losing the export, interposition drift).
     binding_changes: list[Change] = field(default_factory=list)
     risk_score: str = "low"  # "high", "medium", "low"
+    #: Whether each environment root was *defaulted* rather than chosen by
+    #: the caller (`one-comparison-product.md` Phase 7l's `deps` item). An
+    #: unspecified `--sysroot`/`--old-root`/`--new-root` means "this host's
+    #: own filesystem", which is a fallback, not a deployment environment
+    #: someone selected -- and `/` rendered beside an explicitly named image
+    #: root reads identically to one. Every projection that states the root
+    #: states this beside it; nothing about the analysis changes.
+    baseline_env_defaulted: bool = False
+    candidate_env_defaulted: bool = False
 
 
 def _compute_loadability(
@@ -311,6 +320,9 @@ def check_stack(
     candidate_root: Path,
     ld_library_path: str = "",
     search_paths: list[Path] | None = None,
+    *,
+    baseline_root_defaulted: bool = False,
+    candidate_root_defaulted: bool = False,
 ) -> StackCheckResult:
     """Compare a binary's full dependency stack across two environments.
 
@@ -320,6 +332,11 @@ def check_stack(
         candidate_root: Sysroot for the candidate environment.
         ld_library_path: Simulated LD_LIBRARY_PATH (applied to both).
         search_paths: Additional search directories.
+        baseline_root_defaulted: True when *baseline_root* is this host's
+            own `/` because the caller named no root, not because it chose
+            one. Recorded on the result and stated in every projection --
+            see `StackCheckResult.baseline_env_defaulted`.
+        candidate_root_defaulted: The same, for *candidate_root*.
 
     Returns:
         A StackCheckResult with loadability/ABI verdicts and per-library changes.
@@ -372,6 +389,8 @@ def check_stack(
         stack_changes=stack_changes,
         binding_changes=binding_changes,
         risk_score=risk_score,
+        baseline_env_defaulted=baseline_root_defaulted,
+        candidate_env_defaulted=candidate_root_defaulted,
     )
 
 
@@ -413,8 +432,13 @@ def check_single_env(
 
     return StackCheckResult(
         root_binary=str(binary),
-        baseline_env=str(sysroot or ""),
-        candidate_env=str(sysroot or ""),
+        # No `--sysroot` means the host's own root, not "no environment":
+        # reporting it as `/` with `*_defaulted` set says which it is,
+        # where the former empty string said neither.
+        baseline_env=str(sysroot) if sysroot is not None else "/",
+        candidate_env=str(sysroot) if sysroot is not None else "/",
+        baseline_env_defaulted=sysroot is None,
+        candidate_env_defaulted=sysroot is None,
         loadability=loadability,
         abi_risk=StackVerdict.PASS,
         baseline_graph=graph,

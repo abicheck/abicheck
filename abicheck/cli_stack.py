@@ -29,12 +29,14 @@ import sys
 from pathlib import Path
 
 import click
+from click.core import ParameterSource
 
 from .cli import main
 from .cli_options import export_options, verbose_option
 from .cli_resolve import _detect_binary_format
 from .frontends.cli.options.export import ExportSet, reject_dry_run_with_exports
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
+from .report.stack import DEFAULTED_ROOT_NOTE, environment_root_label
 from .stack_checker import under_sysroot
 
 
@@ -128,7 +130,7 @@ def deps_tree_cmd(
         dry_result.add(
             "Inputs",
             f"binary: {binary} (detected format: {fmt_detected})",
-            f"sysroot: {sysroot}" if sysroot else "sysroot: (none)",
+            f"sysroot: {sysroot}" if sysroot else f"sysroot: / ({DEFAULTED_ROOT_NOTE})",
         )
         dry_result.add(
             "Build/source inputs",
@@ -214,7 +216,9 @@ def deps_tree_cmd(
     "incompatible with any -o export to a file.",
 )
 @verbose_option
+@click.pass_context
 def deps_compare_cmd(
+    ctx: click.Context,
     binary: Path,
     old_root: Path,
     new_root: Path,
@@ -252,6 +256,14 @@ def deps_compare_cmd(
     reject_dry_run_with_exports(dry_run, exports)
     _setup_verbosity(verbose)
 
+    # `/` is the default for both roots, and in a report it reads exactly
+    # like an image root someone picked. Click knows which it was; ask it,
+    # rather than comparing the value against `/` (an explicit
+    # `--old-root /` is a deliberate choice and must not be labelled a
+    # fallback).
+    old_root_defaulted = ctx.get_parameter_source("old_root") == ParameterSource.DEFAULT
+    new_root_defaulted = ctx.get_parameter_source("new_root") == ParameterSource.DEFAULT
+
     # Guard against accidental no-op comparisons.
     if old_root.resolve() == new_root.resolve():
         raise click.UsageError(
@@ -279,8 +291,8 @@ def deps_compare_cmd(
         dry_result.add(
             "Inputs",
             f"binary: {binary}",
-            f"old-root: {old_root}",
-            f"new-root: {new_root}",
+            f"old-root: {environment_root_label(str(old_root), old_root_defaulted)}",
+            f"new-root: {environment_root_label(str(new_root), new_root_defaulted)}",
         )
         dry_result.add(
             "Build/source inputs",
@@ -311,6 +323,8 @@ def deps_compare_cmd(
         candidate_root=new_root,
         ld_library_path=ld_library_path,
         search_paths=list(search_paths) or None,
+        baseline_root_defaulted=old_root_defaulted,
+        candidate_root_defaulted=new_root_defaulted,
     )
 
     def _render(fmt: str) -> str:

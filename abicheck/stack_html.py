@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 # Shared page chrome (document frame, embedded stylesheet, footer).
 from .html_template import render_document, render_footer
+from .report.stack import DEFAULTED_ROOT_NOTE
 
 _STACK_VERDICT_STYLE = {
     "pass": ("#1b5e20", "#c8e6c9"),
@@ -74,8 +75,20 @@ def stack_to_html(result: StackCheckResult) -> str:
         and result.baseline_env != result.candidate_env
     ):
         summary_rows += [
-            f"<tr><th>Baseline env</th><td><code>{h(result.baseline_env)}</code></td></tr>",
-            f"<tr><th>Candidate env</th><td><code>{h(result.candidate_env)}</code></td></tr>",
+            f"<tr><th>Baseline env</th><td><code>{h(result.baseline_env)}</code>"
+            + (
+                f" <em>({h(DEFAULTED_ROOT_NOTE)})</em>"
+                if result.baseline_env_defaulted
+                else ""
+            )
+            + "</td></tr>",
+            f"<tr><th>Candidate env</th><td><code>{h(result.candidate_env)}</code>"
+            + (
+                f" <em>({h(DEFAULTED_ROOT_NOTE)})</em>"
+                if result.candidate_env_defaulted
+                else ""
+            )
+            + "</td></tr>",
         ]
 
     summary_html = "\n".join(summary_rows)

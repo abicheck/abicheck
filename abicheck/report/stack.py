@@ -102,6 +102,24 @@ def bindings_summary(bindings: list[SymbolBinding]) -> dict[str, int]:
     return summary
 
 
+#: Stated wherever a `deps` projection prints an environment root that the
+#: caller never named (`one-comparison-product.md` Phase 7l). `/` on its own
+#: is indistinguishable from a deliberately chosen deployment root, which is
+#: the whole defect: the analysis is unchanged, what it was run *against*
+#: was a fallback, and the report has to say so.
+DEFAULTED_ROOT_NOTE = (
+    "defaulted -- the current host filesystem, not a chosen deployment "
+    "environment"
+)
+
+
+def environment_root_label(path: str, defaulted: bool) -> str:
+    """*path* as a projection should show it, annotated when it was
+    defaulted rather than chosen. One helper so the JSON, Markdown and HTML
+    projections cannot disagree about when the note applies."""
+    return f"{path} ({DEFAULTED_ROOT_NOTE})" if defaulted else path
+
+
 def compute_stack_report_mapping(result: StackCheckResult) -> dict[str, object]:
     """The plain, JSON-safe mapping `deps compare`/`deps tree` report as
     JSON -- unchanged from `stack_report.stack_to_json`'s pre-convergence
@@ -111,6 +129,13 @@ def compute_stack_report_mapping(result: StackCheckResult) -> dict[str, object]:
         "root_binary": result.root_binary,
         "baseline_env": result.baseline_env,
         "candidate_env": result.candidate_env,
+        # A consumer reading `baseline_env: "/"` cannot otherwise tell a
+        # deliberately chosen host-root comparison from one that simply had
+        # no root named. Always emitted (not only when true), so its absence
+        # can never be read as "not defaulted" by a report this tool did not
+        # produce.
+        "baseline_env_defaulted": result.baseline_env_defaulted,
+        "candidate_env_defaulted": result.candidate_env_defaulted,
         "verdict": {
             "loadability": result.loadability.value,
             "abi_risk": result.abi_risk.value,
