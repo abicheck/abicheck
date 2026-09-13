@@ -172,7 +172,7 @@ def test_parse_descriptor_accepts_an_abicc_fragment(tmp_path: Path) -> None:
 
     desc = parse_descriptor(d)
     assert desc.version == "1.0"
-    assert [str(p) for p in desc.libs] == ["/usr/lib/libx.so"]
+    assert [str(p) for p in desc.libs] == [str(descriptor_absolute("/usr/lib/libx.so"))]
 
 
 def test_parse_descriptor_fragment_with_xml_declaration(tmp_path: Path) -> None:
