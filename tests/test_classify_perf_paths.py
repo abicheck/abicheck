@@ -554,3 +554,92 @@ class TestModelRingIsClassified:
         assert not classify.changed_files_are_perf_sensitive(
             ["abicheck/modelling_helpers.py", "abicheck/errors.py"]
         )
+
+
+class TestDerivedFromRealImports:
+    """The classifier's set is checked against `dumper.py`'s own imports.
+
+    A hand-listed set goes stale silently, which is how it came to cover
+    `pe_metadata`/`macho_metadata` but not `elf_metadata` -- the first thing an
+    ELF dump calls, and the format the full-CLI fixture is built in. So the
+    expectation is *derived* here, including the function-local (lazy) imports
+    that the earlier module-scope-only derivation could not see.
+    """
+
+    @staticmethod
+    def _dumper_source() -> str:
+        root = _PATH.resolve().parent.parent
+        return (root / "abicheck" / "dumper.py").read_text(encoding="utf-8")
+
+    def test_every_parser_dumper_imports_is_covered(self):
+        # Matches both `from .x import y` at module scope and the indented, lazy
+        # form inside a function (`    from .elf_metadata import ...`), which is
+        # how dumper.py reaches most of the parsers.
+        source = self._dumper_source()
+        targets = set(re.findall(r"from \.((?:extract\.)?[a-z0-9_]+) import", source))
+        parsers = {
+            t
+            for t in targets
+            if t.endswith(("_metadata", "_parser", "_utils", "_snapshot"))
+            or t.startswith(("dwarf", "elf", "pe_", "macho", "pdb", "btf", "ctf"))
+        }
+        assert parsers, "dumper.py must import at least one parser module"
+        uncovered = sorted(
+            t
+            for t in parsers
+            if not classify.changed_files_are_perf_sensitive(
+                [f"abicheck/{t.replace('.', '/')}.py"]
+            )
+        )
+        assert uncovered == [], uncovered
+
+    def test_the_derivation_sees_lazy_function_local_imports(self):
+        # Guard on the test itself: the previous version's regex only matched
+        # module-scope imports, so it reported full coverage while every lazily
+        # imported parser was unclassified. `elf_metadata` is imported lazily
+        # inside `_dump_elf`, so finding it proves the regex reaches that form.
+        source = self._dumper_source()
+        targets = set(re.findall(r"from \.((?:extract\.)?[a-z0-9_]+) import", source))
+        assert "elf_metadata" in targets, sorted(targets)[:20]
+        assert re.search(r"^\s+from \.elf_metadata import", source, re.M), (
+            "elf_metadata should be a lazy, indented import in dumper.py"
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "scripts/check_l2_cli_perf.py",
+            "scripts/l2_cli_validation.py",
+            "scripts/l2_cli_gating.py",
+            "scripts/l2_cli_fixture.py",
+            "scripts/perf_receipt.py",
+            "scripts/perf_measurement.py",
+            "scripts/perf_baseline.py",
+            "scripts/check_header_graph_perf.py",
+        ],
+    )
+    def test_every_harness_module_is_perf_sensitive(self, path):
+        # A harness split that moves validation or gating into an unclassified
+        # file stops a PR weakening it from being measured at all.
+        assert classify.changed_files_are_perf_sensitive([path])
+
+    def test_every_module_the_harness_imports_is_covered(self):
+        root = _PATH.resolve().parent.parent
+        source = (root / "scripts" / "check_l2_cli_perf.py").read_text(encoding="utf-8")
+        siblings = set(re.findall(r"^(?:from|import) ([a-z0-9_]+)", source, re.M))
+        local = sorted(
+            name for name in siblings if (root / "scripts" / f"{name}.py").is_file()
+        )
+        assert local, "the harness imports at least one sibling script"
+        uncovered = [
+            name
+            for name in local
+            if not classify.changed_files_are_perf_sensitive([f"scripts/{name}.py"])
+        ]
+        assert uncovered == [], uncovered
+
+    def test_an_unrelated_script_is_not_swept_in(self):
+        # Vacuity guard: `scripts/l2_cli_*.py` must not behave like `scripts/*`.
+        assert not classify.changed_files_are_perf_sensitive(
+            ["scripts/gen_cli_reference.py", "scripts/check_fp_rate.py"]
+        )

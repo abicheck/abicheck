@@ -784,7 +784,8 @@ jobs:
         run: |
           set -euo pipefail
           # Availability only -- this job never builds oneDAL/SVS/PVXS. It
-          # records, per profile, MEASURED / BLOCKED-with-a-reason / NOT_RUN, so
+          # records, per profile, MEASURED / PARTIAL-with-the-per-library-split /
+          # BLOCKED-with-a-reason / NOT_RUN, so
           # a coverage gap is visible as a gap rather than as silence. A real
           # profile run is a separate, manually-prepared job: see
           # docs/contribute/performance.md.

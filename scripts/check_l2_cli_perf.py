@@ -308,12 +308,14 @@ def _check_extraction(
     if expectation == "forbidden":
         return _no_native_invocation_problems(run)
     if expectation in ("one_side", "both_sides"):
-        return _live_extraction_problems(observed, expectation, one_side=one_side)
+        return _live_extraction_problems(
+            observed, expectation, one_side=one_side, run=run
+        )
     return []
 
 
 def _live_extraction_problems(
-    observed: int, expectation: str, *, one_side: int | None
+    observed: int, expectation: str, *, one_side: int | None, run: CommandRun
 ) -> list[str]:
     """The two live-operand contracts: a lower bound always, an upper bound when calibrated.
 
@@ -328,8 +330,9 @@ def _live_extraction_problems(
         subject = "the live side" if sides == 1 else "neither operand"
         verb = "was never extracted" if sides == 1 else "was extracted"
         return [f"zero header extractions: {subject} {verb}"]
-    if one_side is None:
-        return []
+    problems = _include_pass_problems(run, sides)
+    if problems or one_side is None:
+        return problems
     if sides == 1 and observed > one_side:
         return [
             f"{observed} header extraction(s) observed, but one side costs "
@@ -341,6 +344,35 @@ def _live_extraction_problems(
             f"{observed} header extraction(s) observed, expected at least "
             f"{one_side * 2} for two live operands (one side costs "
             f"{one_side}, calibrated from a setup dump)"
+        ]
+    return []
+
+
+def _include_pass_problems(run: CommandRun, sides: int) -> list[str]:
+    """A live L2 run must also have run its include-graph pass, once per side.
+
+    Header-AST extraction is not the whole of the measured L2 work: the compare
+    path also runs an always-on `clang -M` include/dependency pass, which the spy
+    classifies as ``include_pass``. Checking only ``header_extraction`` let a
+    regression that stops running that pass read as a *performance improvement* --
+    the run is shorter, the evidence depth still resolves to ``headers``, and the
+    deliberate break is still found, so nothing else notices (Codex review).
+
+    The bound is one pass per live side, which is what every observed run does:
+    a one-side scenario reports 1, a both-sides scenario 2, and the count scales
+    with the header count above that (8 headers x 2 sides -> 16, 32 -> 64). So it
+    is a floor derived from observation rather than a guess, and it is
+    deliberately not an equality: how many passes the product *should* run per
+    side is its business, while running none is the regression.
+    """
+    observed = (run.native_invocations or {}).get("include_pass")
+    if observed is None:
+        return []
+    if observed < sides:
+        return [
+            f"{observed} include/dependency pass(es) observed for {sides} live "
+            f"side(s), expected at least one each -- the include-graph pass did "
+            "not run, so the run is shorter by skipping measured L2 work"
         ]
     return []
 
@@ -1370,15 +1402,21 @@ def _blank_receipt(scenario: Scenario) -> dict[str, Any]:
 
 @dataclass
 class _ScenarioArea:
-    """One scenario's throwaway directories, and the environment they imply.
+    """One scenario's throwaway directories, its spy, and the executor they imply.
 
     Exists so `run_scenario` states the measurement rather than the bookkeeping:
     the paths are fixed by convention, the per-scenario cache root is what makes
     "cold application cache" true at all, and `XDG_CACHE_HOME` is the same
     variable `dumper_cache._cache_path` honors.
+
+    The spy lives here rather than beside it because the two are inseparable: the
+    environment a measured step runs under is the cache root *and* the shim
+    directory together, and carrying them as loose values is how a run ends up
+    observed by one and not isolated by the other.
     """
 
     root: Path
+    install_spy: bool = True
 
     def __post_init__(self) -> None:
         self.build_root = self.root / "fixture"
@@ -1386,11 +1424,35 @@ class _ScenarioArea:
         self.cache_root = self.root / "cache"
         self.work.mkdir(parents=True, exist_ok=True)
         self.cache_root.mkdir(parents=True, exist_ok=True)
+        self.spy = NativeInvocationSpy(self.root / "spy")
+        if self.install_spy:
+            self.spy.install()
 
-    def env(self, spy: NativeInvocationSpy | None) -> dict[str, str]:
+    @property
+    def active_spy(self) -> NativeInvocationSpy | None:
+        """The spy, or ``None`` under ``--no-spy`` -- never a shimless spy object.
+
+        ``--no-spy`` never created the shim directory, so handing the object on
+        would make every later ``reset()`` raise ``FileNotFoundError``. That is
+        exactly how the flag used to be unusable: its whole purpose is to run the
+        lane without the spy, and it could not.
+        """
+        return self.spy if self.install_spy else None
+
+    def env(self) -> dict[str, str]:
         base = dict(os.environ)
         base["XDG_CACHE_HOME"] = str(self.cache_root)
+        spy = self.active_spy
         return spy.env(base) if spy is not None else base
+
+    def executor(self, *, timeout: float, rss_interval: float) -> _StepExecutor:
+        return _StepExecutor(
+            work=self.work,
+            env=self.env(),
+            timeout=timeout,
+            rss_interval=rss_interval,
+            spy=self.active_spy,
+        )
 
 
 def run_scenario(
@@ -1404,27 +1466,16 @@ def run_scenario(
     """Build, prepare, measure and validate one scenario. Returns its receipt."""
     result = _blank_receipt(scenario)
     with tempfile.TemporaryDirectory(prefix="l2cli_") as tmp:
-        area = _ScenarioArea(Path(tmp))
-        work, cache_root = area.work, area.cache_root
-        spy = NativeInvocationSpy(area.root / "spy")
-        if keep_spy:
-            spy.install()
-        result["spy_shimmed_tools"] = list(spy.shimmed)
+        area = _ScenarioArea(Path(tmp), install_spy=keep_spy)
+        work = area.work
+        result["spy_shimmed_tools"] = list(area.spy.shimmed)
 
         fixture, build_rows = _build_fixture_for(scenario, area.build_root)
         result.update(build_rows)
         if fixture is None:
             return result
 
-        env = area.env(spy if keep_spy else None)
-
-        execute = _StepExecutor(
-            work=work,
-            env=env,
-            timeout=timeout,
-            rss_interval=rss_interval,
-            spy=spy if keep_spy else None,
-        )
+        execute = area.executor(timeout=timeout, rss_interval=rss_interval)
 
         # Untimed setup (pre-dumping a stored operand, etc.).
         setup_rows, setup_failure = _run_setup_steps(
@@ -1447,7 +1498,7 @@ def run_scenario(
             runs=runs,
             scenario=scenario,
             fixture=fixture,
-            cache_root=cache_root,
+            cache_root=area.cache_root,
             timeout=timeout,
             one_side=one_side if keep_spy else None,
             check_extraction=keep_spy,

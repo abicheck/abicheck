@@ -117,8 +117,20 @@ class RealProfile:
     #: what produces the two artifacts a temporal comparison needs -- a profile
     #: with an empty list here can only ever build one side.
     per_side_commands: tuple[str, ...] = ()
-    #: Tools that must be present, by name on PATH.
+    #: Tools that must be present, by name on PATH, for ANY measurement of this
+    #: profile. A tool only one header/compile context needs belongs in
+    #: ``context_tools`` instead -- see that field for why the distinction is not
+    #: cosmetic.
     required_tools: tuple[str, ...] = ()
+    #: Extra tools a single ``LibraryTarget.context`` needs, keyed by that label.
+    #:
+    #: The distinction this field exists for: oneDAL's two DPC++ libraries need
+    #: ``icpx`` and its three host libraries do not, so listing ``icpx`` among
+    #: `required_tools` made a host-only machine report the WHOLE profile
+    #: ``BLOCKED`` -- making the profile's own documented behaviour (measure the
+    #: host libraries, report only the DPC++ ones blocked) unreachable, and hiding
+    #: usable coverage from the periodic availability artifact (Codex review).
+    context_tools: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: Approximate resource needs, so a lane can decline before starting.
     approx_build_minutes: int = 0
     approx_disk_gb: int = 0
@@ -207,7 +219,10 @@ ONEDAL = RealProfile(
         ". /opt/intel/oneapi/setvars.sh && cd {root} && "
         "make -f makefile daal oneapi_c PLAT=lnx32e -j$(nproc)",
     ),
-    required_tools=("git", "make", "g++", "icpx"),
+    required_tools=("git", "make", "g++"),
+    # `icpx` gates only the DPC++ context. A host-only machine can still measure
+    # the three host libraries, which is what this profile's notes describe.
+    context_tools={"dpcpp": ("icpx",)},
     approx_build_minutes=120,
     approx_disk_gb=25,
     scenarios=("temporal",),
@@ -490,6 +505,26 @@ def missing_tools(profile: RealProfile) -> list[str]:
     return [tool for tool in profile.required_tools if shutil.which(tool) is None]
 
 
+def blocked_contexts(profile: RealProfile) -> dict[str, list[str]]:
+    """Each header/compile context this host cannot build, and what it is missing.
+
+    Per context, not per profile: a tool that only one context needs must not
+    block the contexts that do not need it (see ``RealProfile.context_tools``).
+    """
+    blocked: dict[str, list[str]] = {}
+    for context, tools in profile.context_tools.items():
+        absent = [tool for tool in tools if shutil.which(tool) is None]
+        if absent:
+            blocked[context] = absent
+    return blocked
+
+
+def measurable_libraries(profile: RealProfile) -> tuple[LibraryTarget, ...]:
+    """The in-scope libraries whose own context can actually be built here."""
+    unavailable = set(blocked_contexts(profile))
+    return tuple(lib for lib in profile.l2_libraries if lib.context not in unavailable)
+
+
 def toolchain_identity(profile: RealProfile) -> dict[str, str | None]:
     """Resolved version of every required tool, for the receipt.
 
@@ -528,6 +563,10 @@ class ProfileStatus:
     reason: str | None = None
     missing_tools: list[str] = field(default_factory=list)
     toolchain: dict[str, str | None] = field(default_factory=dict)
+    #: Under ``PARTIAL``: which in-scope libraries this host can and cannot
+    #: measure, and what each blocked context is missing. Empty otherwise.
+    measurable_libraries: list[str] = field(default_factory=list)
+    blocked_libraries: dict[str, list[str]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -536,7 +575,63 @@ class ProfileStatus:
             "reason": self.reason,
             "missing_tools": self.missing_tools,
             "toolchain": self.toolchain,
+            "measurable_libraries": self.measurable_libraries,
+            "blocked_libraries": self.blocked_libraries,
         }
+
+
+def _partial_status(profile: RealProfile) -> ProfileStatus | None:
+    """``PARTIAL`` when some contexts are unbuildable but others still are.
+
+    Returns ``None`` when every context is available (the ordinary case) and a
+    ``BLOCKED`` status when *no* in-scope library survives -- a profile whose
+    every context is missing a tool is blocked for a concrete reason, not
+    partially measurable.
+
+    This exists because a profile-wide tool list collapsed a real distinction: a
+    host without ``icpx`` cannot build oneDAL's two DPC++ libraries and can build
+    its three host ones, and reporting the whole profile ``BLOCKED`` both
+    contradicted the profile's own documented behaviour and hid usable coverage
+    from the availability artifact. The status vocabulary exists to tell apart
+    "this host cannot", "nobody asked", and now "this host can do part of it" --
+    collapsing the third into the first is the same class of dishonesty as
+    substituting a synthetic number.
+    """
+    blocked = blocked_contexts(profile)
+    if not blocked:
+        return None
+    measurable = measurable_libraries(profile)
+    blocked_libs = {
+        lib.name: blocked[lib.context]
+        for lib in profile.l2_libraries
+        if lib.context in blocked
+    }
+    if not measurable:
+        return ProfileStatus(
+            profile.id,
+            "BLOCKED",
+            reason=(
+                f"every in-scope library's context is unbuildable here: {blocked} "
+                "-- no part of this profile can be measured"
+            ),
+            missing_tools=sorted(
+                {tool for tools in blocked.values() for tool in tools}
+            ),
+            blocked_libraries=blocked_libs,
+        )
+    return ProfileStatus(
+        profile.id,
+        "PARTIAL",
+        reason=(
+            f"{len(measurable)} of {len(profile.l2_libraries)} in-scope "
+            f"librar(ies) are measurable here; context(s) {sorted(blocked)} are "
+            f"missing {blocked} so their librar(ies) are not"
+        ),
+        missing_tools=sorted({tool for tools in blocked.values() for tool in tools}),
+        toolchain=toolchain_identity(profile),
+        measurable_libraries=[lib.name for lib in measurable],
+        blocked_libraries=blocked_libs,
+    )
 
 
 def resolve_status(
@@ -544,11 +639,12 @@ def resolve_status(
 ) -> ProfileStatus:
     """Decide whether *profile* can be measured here, and say why if not.
 
-    Never returns a substitute. The three outcomes are measure it, ``BLOCKED``
-    with a reason, or ``NOT_RUN`` because nobody asked -- and the reason text is
-    the deliverable for the latter two, since a profile reported as merely
-    "skipped" tells a reader nothing about whether the coverage gap is
-    environmental or a decision.
+    Never returns a substitute. The outcomes are measure it, ``PARTIAL`` (some
+    header/compile contexts are unbuildable here and others are -- see
+    :func:`_partial_status`), ``BLOCKED`` with a reason, or ``NOT_RUN`` because
+    nobody asked; and the reason text is the deliverable for the negative ones,
+    since a profile reported as merely "skipped" tells a reader nothing about
+    whether the coverage gap is environmental or a decision.
     """
     if not requested:
         return ProfileStatus(
@@ -589,6 +685,11 @@ def resolve_status(
             ),
             missing_tools=absent,
         )
+    # The per-context check runs AFTER the prepared-tree check, by the same rule
+    # the placeholder check follows before the tool probe: name the blocker the
+    # caller actually hits first. A host with the right compilers but no prepared
+    # tree is blocked on the tree, and reporting `PARTIAL` for it would describe a
+    # coverage split that nothing could act on yet.
     if prepared_root is None or not prepared_root.is_dir():
         return ProfileStatus(
             profile.id,
@@ -599,6 +700,9 @@ def resolve_status(
             ),
             toolchain=toolchain_identity(profile),
         )
+    partial = _partial_status(profile)
+    if partial is not None:
+        return partial
     return ProfileStatus(profile.id, "MEASURED", toolchain=toolchain_identity(profile))
 
 

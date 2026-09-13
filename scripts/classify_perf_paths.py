@@ -119,12 +119,38 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/storage/snapshot_encode.py",
     "abicheck/storage/snapshot_decode_declarations.py",
     "abicheck/storage/snapshot_reliability_flags.py",
+    # Every flat binary/debug parser `dumper.py` calls, not just the two that
+    # happened to be listed: `parse_elf_metadata` is the first thing an ELF dump
+    # does and `dwarf_*` is what an L1 fallback reads, so an ELF/DWARF parsing
+    # regression skipped every perf job -- including the full-CLI L2 gate, whose
+    # fixture is an ELF workload (Codex review). Derived set, checked by
+    # `test_every_parser_dumper_imports_is_covered`.
+    "abicheck/elf_metadata.py",
     "abicheck/pe_metadata.py",
     "abicheck/macho_metadata.py",
+    "abicheck/dwarf_metadata.py",
+    "abicheck/dwarf_advanced.py",
+    "abicheck/dwarf_unified.py",
+    "abicheck/dwarf_snapshot.py",
+    "abicheck/dwarf_utils.py",
+    # Binary file helpers `dumper.py` reaches for on every artifact it opens;
+    # surfaced by the derived test rather than by inspection.
+    "abicheck/binary_utils.py",
     "abicheck/dumper.py",
     "abicheck/dwarf_presence.py",
     "abicheck/service.py",
     "scripts/benchmark_scaling.py",
+    # The harnesses themselves, by prefix rather than by name: the full-CLI
+    # harness has already been split twice under the file-size cap
+    # (`l2_cli_validation.py`, `l2_cli_gating.py`), and a split that moves the
+    # validation or gating logic out of a classified file and into an
+    # unclassified one silently stops a PR weakening it from being measured.
+    "scripts/l2_cli_*.py",
+    "scripts/check_l2_cli_perf.py",
+    "scripts/check_header_graph_perf.py",
+    "scripts/perf_measurement.py",
+    "scripts/perf_baseline.py",
+    "scripts/perf_receipt.py",
     "tests/test_performance.py",
     "tests/test_perf_dump_scaling.py",
     "tests/test_benchmark_scaling.py",

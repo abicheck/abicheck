@@ -453,7 +453,7 @@ They are **periodic/manual only** — an ordinary PR must never download and bui
 oneDAL (~120 build-minutes, ~25 GB).
 
 The rule the module exists to enforce: **an unavailable profile is reported
-`BLOCKED`/`NOT_RUN` with a concrete reason, never silently replaced by a
+`PARTIAL`/`BLOCKED`/`NOT_RUN` with a concrete reason, never silently replaced by a
 synthetic substitute, and a synthetic number is never published under a real
 project's name.** Three further constraints it encodes:
 

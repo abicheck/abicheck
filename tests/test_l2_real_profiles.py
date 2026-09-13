@@ -29,6 +29,7 @@ worth more guarding than the arithmetic is.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import os
 import subprocess
@@ -590,3 +591,124 @@ class TestPrepareScriptUsesAbsoluteWorktreePaths:
         assert proc.returncode == 0, proc.stderr
         assert (src / "mytree").is_dir(), "git resolved it against the repo dir"
         assert not (caller / "mytree").exists(), "and not against the caller's cwd"
+
+
+class TestPartialCoverageSurvivesAMissingContextTool:
+    """A tool only one header/compile context needs must not block the others.
+
+    oneDAL's two DPC++ libraries need `icpx`; its three host libraries do not.
+    Listing `icpx` among the profile-wide `required_tools` made a host-only
+    machine report the *whole* profile `BLOCKED` — which contradicted the
+    profile's own documented behaviour (measure the host libraries, report only
+    the DPC++ ones blocked) and hid usable coverage from the availability
+    artifact. The status vocabulary exists to tell "this host cannot" from
+    "nobody asked"; collapsing "this host can do part of it" into the first is
+    the same class of dishonesty as publishing a synthetic substitute.
+    """
+
+    def test_icpx_is_not_a_profile_wide_requirement(self):
+        assert "icpx" not in profiles.ONEDAL.required_tools
+        assert profiles.ONEDAL.context_tools.get("dpcpp") == ("icpx",)
+
+    def test_a_missing_context_tool_blocks_only_its_own_libraries(self, monkeypatch):
+        monkeypatch.setattr(
+            profiles.shutil,
+            "which",
+            lambda tool: None if tool == "icpx" else "/usr/bin",
+        )
+        blocked = profiles.blocked_contexts(profiles.ONEDAL)
+        assert blocked == {"dpcpp": ["icpx"]}
+        measurable = [
+            lib.name for lib in profiles.measurable_libraries(profiles.ONEDAL)
+        ]
+        assert measurable == ["onedal_core", "onedal", "onedal_parameters"]
+
+    def test_the_status_is_partial_not_blocked(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            profiles.shutil,
+            "which",
+            lambda tool: None if tool == "icpx" else "/usr/bin",
+        )
+        status = profiles.resolve_status(
+            profiles.ONEDAL, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "PARTIAL", status.reason
+        # The split is in the receipt, not only in prose: a reader must be able to
+        # see which libraries the number covers.
+        assert len(status.measurable_libraries) == 3
+        assert set(status.blocked_libraries) == {
+            "onedal_dpc",
+            "onedal_parameters_dpc",
+        }
+        assert status.missing_tools == ["icpx"]
+
+    def test_every_context_missing_a_tool_is_blocked_not_partial(
+        self, monkeypatch, tmp_path
+    ):
+        # "Partially measurable" must not absorb the case where nothing is.
+        # `RealProfile` is frozen, so this builds a real variant rather than
+        # mutating the shipped one -- which also keeps the shipped profile honest
+        # for every other test in this module.
+        variant = dataclasses.replace(
+            profiles.ONEDAL,
+            context_tools={"host": ("nonexistent-host-cc",), "dpcpp": ("icpx",)},
+        )
+        monkeypatch.setattr(
+            profiles.shutil,
+            "which",
+            lambda tool: (
+                None if tool in ("icpx", "nonexistent-host-cc") else "/usr/bin"
+            ),
+        )
+        status = profiles.resolve_status(
+            variant, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "BLOCKED", status.reason
+        assert "no part of this profile can be measured" in status.reason
+
+    def test_a_complete_toolchain_still_reports_measured(self, monkeypatch, tmp_path):
+        # Vacuity guard: PARTIAL must not be the answer whenever context_tools is
+        # non-empty.
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: "/usr/bin/" + tool)
+        status = profiles.resolve_status(
+            profiles.ONEDAL, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "MEASURED", status.reason
+        assert status.measurable_libraries == []
+
+    def test_a_missing_profile_wide_tool_still_blocks_everything(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            profiles.shutil, "which", lambda tool: None if tool == "git" else "/usr/bin"
+        )
+        status = profiles.resolve_status(
+            profiles.ONEDAL, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "BLOCKED"
+        assert status.missing_tools == ["git"]
+
+    def test_the_prepared_tree_blocker_is_named_before_the_context_split(
+        self, monkeypatch
+    ):
+        # Same rule the placeholder check follows before the tool probe: name the
+        # blocker the caller actually hits first. A PARTIAL result for a host with
+        # no prepared tree describes a coverage split nothing could act on.
+        monkeypatch.setattr(
+            profiles.shutil,
+            "which",
+            lambda tool: None if tool == "icpx" else "/usr/bin",
+        )
+        status = profiles.resolve_status(
+            profiles.ONEDAL, prepared_root=None, requested=True
+        )
+        assert status.status == "BLOCKED"
+        assert "no prepared build tree" in status.reason
+
+    @pytest.mark.parametrize("profile_id", ["onedal", "svs", "pvxs"])
+    def test_every_context_tool_belongs_to_a_real_context(self, profile_id):
+        # A context_tools key naming no library's context gates nothing, which
+        # would be an inert declaration reading as a real restriction.
+        profile = profiles.PROFILES[profile_id]
+        contexts = {lib.context for lib in profile.l2_libraries}
+        assert set(profile.context_tools) <= contexts, profile.context_tools

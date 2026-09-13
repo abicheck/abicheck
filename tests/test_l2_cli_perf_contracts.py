@@ -688,3 +688,75 @@ class TestAStepMustProduceItsOwnOutput:
             timed=False,
         )
         assert not stale.exists(), "the stale output survived the run"
+
+
+class TestLiveRunsMustRunTheIncludeGraphPass:
+    """Header-AST extraction is not the whole of the measured L2 work.
+
+    The compare path also runs an always-on `clang -M` include/dependency pass.
+    Checking only `header_extraction` let a regression that stops running it read
+    as a *performance improvement*: the run is shorter, the evidence depth still
+    resolves to `headers`, and the deliberate break is still found, so nothing
+    else notices. The floor is one pass per live side, which is what every
+    observed run does — and the count scales above that with header count
+    (8 headers × 2 sides → 16, 32 → 64), so it is derived from measurement.
+    """
+
+    @staticmethod
+    def _run_with(extraction: int, include: int) -> object:
+        return _run({"header_extraction": extraction, "include_pass": include})
+
+    @pytest.mark.parametrize("contract,sides", [("one_side", 1), ("both_sides", 2)])
+    def test_no_include_pass_fails_even_though_extraction_succeeded(
+        self, contract, sides
+    ):
+        problems = harness._check_extraction(
+            self._run_with(2 * sides, 0), contract, one_side=2
+        )
+        assert problems, (contract, sides)
+        assert "include-graph pass did not run" in problems[0]
+
+    def test_one_pass_for_two_sides_fails(self):
+        # The half-regression: the pass still runs, but only for one operand.
+        problems = harness._check_extraction(
+            self._run_with(4, 1), "both_sides", one_side=2
+        )
+        assert problems and "1 include" in problems[0]
+
+    @pytest.mark.parametrize(
+        "contract,sides,include", [("one_side", 1, 1), ("both_sides", 2, 2)]
+    )
+    def test_the_observed_floor_passes(self, contract, sides, include):
+        assert (
+            harness._check_extraction(
+                self._run_with(2 * sides, include), contract, one_side=2
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize("include", [2, 16, 64])
+    def test_more_passes_than_the_floor_pass(self, include):
+        # Not an equality: how many passes the product runs per side is its
+        # business; running none is the regression. 16 and 64 are the real counts
+        # observed for the 8- and 32-header extended scenarios.
+        assert (
+            harness._check_extraction(
+                self._run_with(4, include), "both_sides", one_side=2
+            )
+            == []
+        )
+
+    def test_a_forbidden_path_is_unaffected(self):
+        # A stored/stored run legitimately reports zero include passes, and the
+        # new floor must not turn that into a failure.
+        counts = {k: 0 for k in receipt_mod.INVOCATION_KINDS}
+        assert harness._check_extraction(_run(counts), "forbidden", one_side=2) == []
+
+    def test_an_unobserved_counter_does_not_fabricate_a_failure(self):
+        # With --no-spy there are no counters at all; absent is not zero.
+        assert (
+            harness._check_extraction(
+                _run({"header_extraction": 2}), "one_side", one_side=2
+            )
+            == []
+        )
