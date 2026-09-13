@@ -124,9 +124,121 @@ def test_cache_directories_do_not_accumulate_in_pytest_basetemp(
 
     # And basetemp itself carries no per-test cache entry at all, however many
     # tests have run before this one.
-    assert [p.name for p in basetemp.iterdir() if p.name.startswith("snapshot_cache-")] == []
+    assert [
+        p.name for p in basetemp.iterdir() if p.name.startswith("snapshot_cache-")
+    ] == []
 
     # The bucket is shared, the directories in it are not: this occurrence's
     # directory is distinct from every earlier one even though they are
     # siblings now.
     assert cache_dir not in _SEEN
+
+
+class TestTheAllocatorSurvivesItsDirectoryTreeVanishing:
+    """The allocator recovers whatever was removed under it, not just the bucket.
+
+    The failure this closes was suite-wide and badly disguised. `_isolate_snapshot_cache`
+    is autouse, so a single transient deletion under pytest's temp tree made
+    *every remaining test in that worker* error with a `FileNotFoundError`
+    naming a different freshly-generated bucket each time -- 20,867 errors on
+    one Linux lane and 29,164 on another (run 34729579282), plus the same
+    signature in a container where an unrelated process was pruning `/tmp`.
+    The bucket's own `is_dir()` check handled the bucket going away and not its
+    parent, so re-allocation failed on the missing parent forever after.
+
+    The invariant is stated over *which part of the tree was removed* rather
+    than against the one observed deletion, because the deleter is not the
+    bug: pytest's retention policy, a tmp reaper, a sandbox cleanup and a stray
+    `rmtree` all arrive here identically, and a test pinned to one of them
+    would leave the others open.
+    """
+
+    @staticmethod
+    def _allocate(basetemp: Path) -> Path:
+        """One allocation through the real allocator, with a real factory."""
+        import conftest
+
+        return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
+
+    @pytest.mark.parametrize(
+        "remove",
+        ["the bucket only", "the basetemp", "the whole tree above it"],
+        ids=["bucket", "basetemp", "ancestor"],
+    )
+    def test_allocation_recovers_after_a_deletion(
+        self, tmp_path: Path, remove: str
+    ) -> None:
+        import shutil
+
+        root = tmp_path / "root"
+        basetemp = root / "pytest-0" / "popen-gw0"
+        basetemp.mkdir(parents=True)
+
+        first = self._allocate(basetemp)
+        assert first.is_dir()
+
+        target = {
+            "the bucket only": first,
+            "the basetemp": basetemp,
+            "the whole tree above it": root,
+        }[remove]
+        shutil.rmtree(target)
+
+        second = self._allocate(basetemp)
+        assert second.is_dir(), f"no recovery after removing {remove}"
+        assert second != first, "a recovered bucket must be a fresh directory"
+        assert not any(second.iterdir()), "a recovered bucket must be empty"
+
+    def test_the_deletion_really_breaks_the_unfixed_allocator(
+        self, tmp_path: Path
+    ) -> None:
+        """Vacuity guard: the `basetemp` case must be unrecoverable without the fix.
+
+        Without it the test above could pass because the deletion was harmless
+        rather than because the allocator heals. This reproduces the pre-fix
+        allocator verbatim and requires it to fail.
+        """
+        import shutil
+        import tempfile
+
+        basetemp = tmp_path / "pytest-0" / "popen-gw0"
+        basetemp.mkdir(parents=True)
+
+        def unfixed() -> Path:
+            # The allocator as it was: no parent recreation.
+            return Path(tempfile.mkdtemp(prefix="snapshot-caches-", dir=basetemp))
+
+        unfixed()
+        shutil.rmtree(basetemp)
+        with pytest.raises(FileNotFoundError):
+            unfixed()
+
+    def test_repeated_allocation_without_deletion_reuses_one_bucket(
+        self, tmp_path: Path
+    ) -> None:
+        """And the fix must not turn every call into a new bucket.
+
+        The per-process bucket is the whole point of the allocator (it keeps
+        pytest's numbered allocator off a directory with thousands of siblings),
+        so a `mkdir`-always version that forgot the cache would be a silent
+        performance regression rather than a visible failure.
+        """
+        basetemp = tmp_path / "pytest-0" / "popen-gw0"
+        basetemp.mkdir(parents=True)
+        assert self._allocate(basetemp) == self._allocate(basetemp)
+
+
+class _FactoryStub:
+    """The one method `_snapshot_cache_bucket` uses off `pytest.TempPathFactory`.
+
+    A stub rather than a real factory because the test needs to *choose* the
+    basetemp in order to delete it, and deleting the session's real basetemp
+    would take the rest of the run with it -- which is the very failure under
+    test.
+    """
+
+    def __init__(self, basetemp: Path) -> None:
+        self._basetemp = basetemp
+
+    def getbasetemp(self) -> Path:
+        return self._basetemp

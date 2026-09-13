@@ -83,10 +83,28 @@ def _snapshot_cache_bucket(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
     Allocated once per process (each xdist worker has its own basetemp, so the
     key keeps a worker from ever reading another's entry).
+
+    **Self-healing, because this fixture is autouse.** The bucket's own
+    `is_dir()` check was not enough: if the worker's *basetemp* goes away, the
+    re-allocation below raises `FileNotFoundError` on the missing parent, and
+    since every test enters through this fixture, one transient deletion turns
+    into an error for every remaining test in that worker -- each reporting a
+    different freshly-generated bucket name, which is what made the real
+    failure so hard to read. That is not hypothetical: two Linux unit lanes
+    failed with 20,867 and 29,164 such errors (run 34729579282), and the same
+    signature appeared in a container where an unrelated process was pruning
+    `/tmp`. Recreating the parent makes the recovery independent of *what*
+    removed the tree, which is the only version of this fix that closes the
+    class: pytest's own retention policy, a tmp reaper, a sandbox cleanup and a
+    stray `rmtree` all present identically here.
     """
     basetemp = tmp_path_factory.getbasetemp()
     bucket = _SNAPSHOT_CACHE_BUCKETS.get(basetemp)
     if bucket is None or not bucket.is_dir():
+        # `exist_ok` rather than a prior existence check: the point is to be
+        # correct whether or not the tree is there, and a check-then-create
+        # would reintroduce the same window this is fixing.
+        basetemp.mkdir(parents=True, exist_ok=True)
         bucket = Path(tempfile.mkdtemp(prefix="snapshot-caches-", dir=basetemp))
         _SNAPSHOT_CACHE_BUCKETS[basetemp] = bucket
     return bucket
