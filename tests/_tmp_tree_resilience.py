@@ -91,6 +91,28 @@ def _lost(env_files: Sequence[Path], missing: Path) -> AssertionError:
     )
 
 
+def require_workspace(directory: Path) -> None:
+    """Fail unless *directory* is still there, rather than creating it.
+
+    For a callback that runs a step *inside* a caller-populated directory. A
+    plain ``mkdir(exist_ok=True)`` there looks harmless and is not: if a reaper
+    took the directory, the seeded fixtures went with it, and the step then
+    runs in an empty one -- a step that does not happen to need what was lost
+    exits 0 and returns plausible output for a workspace that no longer exists
+    (Codex review, PR #1292, reproduced with a seeded file removed at exactly
+    that boundary). This is the same judgement `_fixtures_intact` makes for the
+    environment files, at the one other place a directory could be fabricated.
+    """
+    if not directory.is_dir():
+        raise AssertionError(
+            f"{directory} is gone before the step could run in it, so the "
+            "fixtures seeded there are gone too. Creating it again would run "
+            "the step against an empty directory and return output for a "
+            f"workspace that no longer exists. Tree state, outermost path "
+            f"first:\n  {describe_tree(directory)}"
+        )
+
+
 def run_writing_env_files(
     env_files: Sequence[Path], run: Callable[[], T], *, retry: bool = False
 ) -> tuple[T, list[bytes]]:

@@ -45,7 +45,7 @@ from typing import Any
 
 import pytest
 import yaml
-from _tmp_tree_resilience import run_writing_env_file
+from _tmp_tree_resilience import require_workspace, run_writing_env_file
 
 #: Distinguishes the per-invocation step-body script files `run_step` writes,
 #: so two calls sharing one tmp_path never race on the same name.
@@ -421,14 +421,17 @@ def run_step(
     require_bash()
 
     def _run() -> subprocess.CompletedProcess[str]:
-        # Inside the retry, not before it: `run_writing_env_file` rebuilds the
-        # tree under `$GITHUB_OUTPUT` before each attempt, and the step body,
-        # the workspace it runs in and `$RUNNER_TEMP` all live in that same
-        # tree -- whatever removed one removed them beside it.
-        workspace.mkdir(parents=True, exist_ok=True)
-        (workspace / "_runner_temp").mkdir(parents=True, exist_ok=True)
+        # The workspace is deliberately NOT created here, on any attempt. If it
+        # is gone, `make_workspace`'s seeded files went with it, and a `mkdir`
+        # would hand the step an empty checkout: a step that does not happen to
+        # need the lost fixtures then exits 0 and returns plausible outputs for
+        # a workspace that no longer exists (Codex review, PR #1292, reproduced
+        # with a seeded `seed.txt` removed at this boundary). The helper's own
+        # fixture-integrity check refuses that before the step ever runs; this
+        # callback must not undo it.
+        require_workspace(workspace)
+        (workspace / "_runner_temp").mkdir(exist_ok=True)
         body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
-        body.parent.mkdir(parents=True, exist_ok=True)
         body.write_bytes(step["run"].encode("utf-8"))
         # Git Bash wants forward slashes, but a backslash is a legal *filename*
         # character on POSIX, so rewriting one unconditionally would corrupt a real
