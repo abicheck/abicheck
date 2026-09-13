@@ -239,6 +239,12 @@ def test_deleted_member_is_not_treated_as_a_definition(kind):
 
 
 def test_plain_declaration_is_never_inline():
+    """The resting case, plus two malformed nodes that must not raise.
+
+    A node with no `inner` at all, and one whose `inner` is `None` rather
+    than a list, both reach this predicate from real clang output for a
+    declaration with no body.
+    """
     assert is_effectively_inline(_node("FunctionDecl"), ()) is False
     assert is_effectively_inline({"kind": "FunctionDecl"}, ()) is False
     # Missing/garbage `inner` must not raise.
