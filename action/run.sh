@@ -114,6 +114,21 @@ _error_annotation() {
   printf '%s\n' "::error::$(_sanitize_annotation "$1")"
 }
 
+# The `::warning::`/`::notice::` counterparts. Same contract, and they exist
+# for the same reason: the value a message carries is frequently
+# caller-controlled, directly (`INPUT_*`) or through one of this script's
+# own aliases for them (`MODE`, `FORMAT`, ...), and an alias is exactly as
+# attacker-controlled as the input it was copied from (Codex review, which
+# forged an `::add-mask::` command through `INPUT_MODE` after the first
+# round hardened only the literal `${INPUT_...}` sites).
+_warning_annotation() {
+  printf '%s\n' "::warning::$(_sanitize_annotation "$1")"
+}
+
+_notice_annotation() {
+  printf '%s\n' "::notice::$(_sanitize_annotation "$1")"
+}
+
 _mktemp_canonical() {
   if ! _is_path_already_qualified "$1"; then
     printf '%s\n' "$PWD/$1"
@@ -259,7 +274,7 @@ add_flag_shlex_split() {
     # context.
     if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* \
           || "$value" == *'*'* || "$value" == *'?'* || "$value" == *'['* ]]; then
-      echo "::error::$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
+      _error_annotation "$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
       exit 1
     fi
     add_flag "$flag" "$value"
@@ -291,7 +306,7 @@ for tok in split_gcc_options(sys.stdin.read()):
   # an invalid configuration must not produce an apparently-successful
   # comparison under the wrong macros/include paths.
   if [[ $py_exit -ne 0 ]]; then
-    echo "::error::$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
+    _error_annotation "$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
     exit 1
   fi
   while IFS= read -r item; do
@@ -604,7 +619,7 @@ _merge_config_overlay_with_discovered_project_config() {
     # guard above: silently falling back to "just the overlay" here would
     # reintroduce the exact config-dropping bug this function exists to fix,
     # on precisely the runners least able to detect it.
-    echo "::error::mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
+    _error_annotation "mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
     # $out_path (the caller's already-created overlay, e.g.
     # $_COMPILE_CONTEXT_CONFIG_OVERLAY/$_RELEASE_TOPOLOGY_CONFIG_OVERLAY) is
     # named directly here rather than through a global -- this function is
@@ -1137,7 +1152,7 @@ PYEOF
   # or missing overlay file and proceeding as if the merge had succeeded.
   if [[ $_merge_status -ne 0 ]]; then
     if [[ "$merge_mode" == "explicit" ]]; then
-      echo "::error::failed to merge this Action's synthesized config overlay with the explicit build-config ${base_source} (see the error above). Refusing to silently proceed."
+      _error_annotation "failed to merge this Action's synthesized config overlay with the explicit build-config ${base_source} (see the error above). Refusing to silently proceed."
     else
       echo "::error::failed to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (see the error above). Refusing to silently proceed."
     fi
@@ -1385,7 +1400,7 @@ add_compile_context_flags() {
       # committed into the checkout could execute during a bare
       # same-directory `python3`'s own interpreter startup, before this
       # script's body runs).
-      echo "::error::mode: ${MODE} needs a working Python interpreter on PATH to synthesize the compile: config overlay from this Action's cross-compilation inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+      _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to synthesize the compile: config overlay from this Action's cross-compilation inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
       exit 1
     fi
     # The eight raw input values are passed on stdin, NUL-separated, not as
@@ -1511,7 +1526,7 @@ PYEOF
     local _compile_context_overlay_rc=$?
     rm -f "$_compile_context_helper_py"
     if [[ "$_compile_context_overlay_rc" -ne 0 || -z "$_compile_overlay_json" ]]; then
-      echo "::error::mode: ${MODE} could not synthesize the compile: config block from the ast-frontend/gcc-*/sysroot/nostdinc${include_lang:+/lang} inputs (interpreter exit ${_compile_context_overlay_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
+      _error_annotation "mode: ${MODE} could not synthesize the compile: config block from the ast-frontend/gcc-*/sysroot/nostdinc${include_lang:+/lang} inputs (interpreter exit ${_compile_context_overlay_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
       exit 1
     fi
     _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
@@ -1659,7 +1674,7 @@ add_release_topology_config_flags() {
     # fork-controlled `sitecustomize.py` committed into the checkout could
     # execute during a bare same-directory `python3`'s own interpreter
     # startup, before this script's body runs).
-    echo "::error::mode: ${MODE} needs a working Python interpreter on PATH to synthesize the release:/gate: config overlay from this Action's release-topology inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+    _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to synthesize the release:/gate: config overlay from this Action's release-topology inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
     exit 1
   fi
   local _release_overlay_json
@@ -1946,7 +1961,7 @@ for param in node.params:
 _require_cli_value_options_or_fail() {
   [[ "${_CLI_VALUE_OPTIONS_DERIVED:-false}" == "true" ]] && return 0
   [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
-  echo "::error::extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
+  _error_annotation "extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
   exit 1
 }
 
@@ -2561,7 +2576,7 @@ if [[ -n "$_PY_BIN" ]] \
   && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c "import abicheck") >/dev/null 2>&1; then
   _PY_BIN_HAS_ABICHECK="true"
 elif [[ -n "$_PY_BIN" ]]; then
-  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
+  _warning_annotation "resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
 fi
 
 # Derive the value-taking CLI options for this run's command ONCE, here, now
@@ -2711,10 +2726,10 @@ _substitute_literal() {
 _baseline_unavailable() {
   local message="$1"
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
-    echo "::warning::$message (continuing: --dry-run performs no analysis and never exits nonzero for an unresolved baseline)"
+    _warning_annotation "$message (continuing: --dry-run performs no analysis and never exits nonzero for an unresolved baseline)"
     return 0
   fi
-  echo "::error::$message"
+  _error_annotation "$message"
   exit 1
 }
 
@@ -3005,7 +3020,7 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
   # here, at the source, fixes every path derived from it without touching
   # each call site individually.
   if ! BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd); then
-    echo "::error::failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
+    _error_annotation "failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
     exit 1
   fi
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
@@ -3608,7 +3623,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   # anything else (sarif), not a silent fallback.
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
-    echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
+    _error_annotation "mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
@@ -3640,7 +3655,7 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   # anything else (sarif), not a silent fallback.
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
-    echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
+    _error_annotation "mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
@@ -3658,7 +3673,7 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   fi
 
 else
-  echo "::error::Unknown mode '$MODE'. Use 'compare', 'dump', 'deps-tree', or 'deps-compare'."
+  _error_annotation "Unknown mode '$MODE'. Use 'compare', 'dump', 'deps-tree', or 'deps-compare'."
   exit 1
 fi
 
@@ -4611,7 +4626,7 @@ _reject_unusable_report() {
       ;;
     ""|absent|unreadable)
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is missing or unreadable -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+      _error_annotation "abicheck exited 0, but the JSON report this run requested at ${_where} is missing or unreadable -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
       ;;
     stale)
       # Not a corruption: a readable document that this invocation did not
@@ -4621,7 +4636,7 @@ _reject_unusable_report() {
       # run's own result is the forgery the fingerprint bookkeeping exists to
       # prevent.
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is unchanged since before the run -- so this invocation never wrote it and its contents are some earlier run's, not this one's. This step will not report a result from it."
+      _error_annotation "abicheck exited 0, but the JSON report this run requested at ${_where} is unchanged since before the run -- so this invocation never wrote it and its contents are some earlier run's, not this one's. This step will not report a result from it."
       ;;
     empty)
       # `{}` is a *known* artifact rather than a corruption -- a PR-comment
@@ -4629,7 +4644,7 @@ _reject_unusable_report() {
       # it gets its own message rather than being lumped in above. It is still
       # not a result.
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested at ${_where} is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
+      _error_annotation "abicheck exited 0, but the JSON report requested at ${_where} is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
       ;;
     no_result)
       # Parsed, non-empty, and still carries no abicheck result -- a
@@ -4638,11 +4653,11 @@ _reject_unusable_report() {
       # would misdescribe a document that read perfectly well and simply
       # answers nothing (Codex review, P2).
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, and the JSON report requested at ${_where} parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
+      _error_annotation "abicheck exited 0, and the JSON report requested at ${_where} parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
       ;;
     *)
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} could not be read (${_validity}) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
+      _error_annotation "abicheck exited 0, but the JSON report this run requested at ${_where} could not be read (${_validity}) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
       ;;
   esac
   return 1
@@ -4734,7 +4749,7 @@ _resolve_clean_exit_verdict() {
       _reject_unusable_report "$_dest_validity" "$_dest" || return
       if _assurance_axis_contradictory_at "$_dest"; then
         VERDICT="REPORT_UNREADABLE"
-        echo "::error::abicheck exited 0, but the JSON report requested at $(_sanitize_annotation "$_dest") reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        _error_annotation "abicheck exited 0, but the JSON report requested at ${_dest} reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
         return
       fi
     done <<<"$(_caller_json_destinations)"
@@ -4822,7 +4837,7 @@ _resolve_clean_exit_verdict() {
         ;;
       *)
         VERDICT="ERROR"
-        echo "::error::abicheck exited 0, but its JSON report reports an operational outcome rather than a compatibility one (${_operational}): a crash, an artifact this build cannot analyze, or a member whose capture failed. No compatibility claim was established for this run, so this step will not report one, and this is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+        _error_annotation "abicheck exited 0, but its JSON report reports an operational outcome rather than a compatibility one (${_operational}): a crash, an artifact this build cannot analyze, or a member whose capture failed. No compatibility claim was established for this run, so this step will not report one, and this is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
         ;;
     esac
     return
@@ -4839,7 +4854,7 @@ _resolve_clean_exit_verdict() {
   if [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]]; then
     VERDICT="$_v"
     ADVISORY_BREAK=true
-    echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+    _notice_annotation "abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
   elif [[ "$_v" == "COMPATIBLE_WITH_RISK" ]]; then
     # R1 (CLI-audit): exit 0 was previously hard-mapped to VERDICT=COMPATIBLE
     # unconditionally, only escalating when the report said BREAKING/
@@ -5004,7 +5019,7 @@ _escalate_verdict_to_report() {
   # overwrote them with COMPATIBLE, which is the opposite of the point.
   [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]] || return 0
   if (( $(_verdict_rank "$_v") > $(_verdict_rank "$VERDICT") )); then
-    echo "::notice::abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
+    _notice_annotation "abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
     GATE_TIER="$VERDICT"
     VERDICT="$_v"
   fi
@@ -5014,7 +5029,7 @@ if [[ "$MODE" == "deps-compare" ]]; then
   # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
   if _is_cli_error; then
     VERDICT="ERROR"
-    echo "::error::abicheck deps-compare failed due to a CLI error (exit code $ABICHECK_EXIT)."
+    _error_annotation "abicheck deps-compare failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
@@ -5028,7 +5043,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   # deps-tree exit codes: 0=OK, 1=missing deps/symbols
   if _is_cli_error; then
     VERDICT="ERROR"
-    echo "::error::abicheck deps-tree failed due to a CLI error (exit code $ABICHECK_EXIT)."
+    _error_annotation "abicheck deps-tree failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
@@ -5045,9 +5060,9 @@ elif [[ "$MODE" == "dump" ]]; then
   else
     VERDICT="ERROR"
     if _is_cli_error; then
-      echo "::error::abicheck dump failed due to a CLI argument or configuration error (exit code $ABICHECK_EXIT)."
+      _error_annotation "abicheck dump failed due to a CLI argument or configuration error (exit code $ABICHECK_EXIT)."
     else
-      echo "::error::abicheck dump failed (exit code $ABICHECK_EXIT)."
+      _error_annotation "abicheck dump failed (exit code $ABICHECK_EXIT)."
     fi
   fi
 
@@ -5185,7 +5200,7 @@ else
         # false (Codex review), so it takes the non-waivable ERROR path.
         if _op=$(_operational_failure_status); then
           VERDICT="ERROR"
-          echo "::error::abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+          _error_annotation "abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
         else
           VERDICT="BREAKING"
         fi
@@ -5909,7 +5924,7 @@ _post_pr_comment() {
         echo "abicheck: updated sticky comment $existing_id."
         return 0
       fi
-      echo "::warning::abicheck: could not update comment $existing_id; posting a new one."
+      _warning_annotation "abicheck: could not update comment $existing_id; posting a new one."
     fi
   fi
 
@@ -5936,7 +5951,7 @@ if [[ "$VERDICT" == "REPORT_UNREADABLE" ]]; then
   FINAL_EXIT=1
 
 elif [[ "$VERDICT" == "ERROR" ]]; then
-  echo "::error::abicheck failed with exit code $ABICHECK_EXIT"
+  _error_annotation "abicheck failed with exit code $ABICHECK_EXIT"
   FINAL_EXIT=1
 
 elif [[ "$MODE" == "deps-compare" || "$MODE" == "deps-tree" ]]; then

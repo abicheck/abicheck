@@ -118,6 +118,14 @@ _SITES = {
         "INPUT_NEW_LIBRARY": "libfoo.so",
         "INPUT_OLD_LIBRARY": "libold.so",
     },
+    # Aliases count as caller-controlled: `run.sh` copies `INPUT_MODE` into
+    # `MODE` and `INPUT_FORMAT` into `FORMAT`, and an alias is exactly as
+    # attacker-controlled as the input it was copied from. Hardening only
+    # the literal `${INPUT_...}` sites left these forging commands (Codex
+    # review) -- `INPUT_MODE=$'bad\n::add-mask::secret'` really did emit an
+    # `::add-mask::` line of its own.
+    "INPUT_MODE": {"INPUT_NEW_LIBRARY": "libfoo.so"},
+    "INPUT_FORMAT": {"INPUT_MODE": "deps-tree", "INPUT_NEW_LIBRARY": "libfoo.so"},
     "INPUT_BASELINE_GENERATION": {
         "INPUT_MODE": "compare",
         "INPUT_NEW_LIBRARY": "libfoo.so",
@@ -254,23 +262,51 @@ def test_backslash_escapes_stay_inert_under_xpg_echo(payload: str) -> None:
     )
 
 
-def test_no_run_sh_annotation_interpolates_an_input_unsanitized() -> None:
-    """The exhaustiveness half: a *new* interpolating site added later must
-    route through the helper too.
+def test_no_run_sh_annotation_interpolates_anything_unsanitized() -> None:
+    """The exhaustiveness half: no annotation may interpolate *any* value
+    without routing through a sanitizing helper.
 
-    A static scan, deliberately paired with the executing tests above rather
+    Deliberately name-independent. The first version of this scan matched
+    `${INPUT_...}` specifically, which missed the aliases `run.sh` copies
+    those inputs into -- `MODE`, `FORMAT` -- and three annotations
+    interpolating them stayed vulnerable while the suite was green (Codex
+    review). Enumerating which variables are "caller-controlled" is the
+    mistake: an alias, a derived path, a value read from a report are all
+    reachable by some input, so the invariant is simply that an annotation
+    carrying data goes through the helper.
+
+    Static, and deliberately paired with the executing sweeps above rather
     than replacing them -- text alone is what #705 asserted and #758 had to
-    fix. Its job is only to catch the site the sweep does not know about
-    yet, since the sweep can only cover invocations someone has mapped.
+    fix. Its job is to catch the site nobody has written an invocation for
+    yet.
     """
     offenders = [
-        line.strip()
-        for line in RUN_SH.read_text(encoding="utf-8").splitlines()
-        if re.search(r'echo\s+"::(error|warning|notice)::.*\$\{INPUT_', line)
+        f"{number}: {line.strip()}"
+        for number, line in enumerate(
+            RUN_SH.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if re.search(r'echo\s+"::(error|warning|notice)::[^"]*\$', line)
     ]
     assert not offenders, (
-        "these action/run.sh annotations interpolate a workflow-controlled "
-        "INPUT_* value with a bare `echo`, so a value carrying a newline "
-        "forges a workflow command -- emit them with `_error_annotation` "
+        "these action/run.sh annotations interpolate a value with a bare "
+        "`echo`, so a value carrying a newline forges a workflow command "
+        "and a literal `\\n` does the same under `xpg_echo` -- emit them "
+        "with `_error_annotation`/`_warning_annotation`/`_notice_annotation` "
         "instead:\n" + "\n".join(offenders)
+    )
+
+
+def test_the_annotation_helpers_are_the_only_emitters_left() -> None:
+    """Vacuity guard on the scan above: it can only be meaningful while the
+    helpers actually exist and are used. If someone inlined them away, the
+    regex would find nothing and report success over a file with no
+    sanitizing at all.
+    """
+    text = RUN_SH.read_text(encoding="utf-8")
+    for helper in ("_error_annotation", "_warning_annotation", "_notice_annotation"):
+        assert f"{helper}() {{" in text, f"{helper} is gone from run.sh"
+    assert text.count("_error_annotation ") >= 20, (
+        "far fewer _error_annotation call sites than expected -- if the "
+        "annotations were reverted to bare `echo`, the scan above would pass "
+        "only because its regex no longer matches anything meaningful."
     )

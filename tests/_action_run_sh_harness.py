@@ -52,6 +52,34 @@ RUN_SH = ACTION_DIR / "run.sh"
 #
 # Omitting this marker is what turned the windows-latest unit lane red on this
 # PR: the sibling module documented the pitfall and this one did not copy it.
+#: Marker bounds for `run.sh`'s annotation helpers, so a test that extracts
+#: only a *fragment* of the script can still define them.
+_ANNOTATION_HELPERS_START = "_sanitize_annotation() {"
+_ANNOTATION_HELPERS_END = "\n_mktemp_canonical()"
+
+
+def annotation_helpers_source() -> str:
+    """`_sanitize_annotation` plus the `_error`/`_warning`/`_notice`
+    annotation emitters, extracted verbatim from `run.sh`.
+
+    Several modules here run a *region* of `run.sh` rather than the whole
+    file, and every annotation in the script now routes through these
+    helpers (they are what stops an input value forging a workflow command
+    -- see `test_action_run_sh_injection.py`). An extracted region that
+    does not define them degrades to `_error_annotation: command not found`,
+    which prints nothing to stdout and makes the region's real error
+    messages vanish -- exactly the silent degradation the sibling
+    `_path_qualified_helper_source()` already exists to prevent.
+
+    Extracted rather than restated so it cannot drift from the real
+    implementation.
+    """
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_ANNOTATION_HELPERS_START)
+    end = text.index(_ANNOTATION_HELPERS_END, start)
+    return text[start:end]
+
+
 pytestmark = pytest.mark.skipif(
     os.name == "nt" or not RUN_SH.is_file() or shutil.which("bash") is None,
     reason="needs a POSIX shell that can exec a shebang script from PATH",
