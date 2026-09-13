@@ -155,7 +155,7 @@ gate with `aggregate`. The fold has to know which reports it *expected*:
 # one --build-output per contract profile the checks: block names
 abicheck project plan .abicheck.yml \
   --build-output linux-gcc=abicheck-build/linux-gcc -o plan.json
-abicheck aggregate reports/ --run-plan plan.json
+abicheck aggregate reports/ --manifest plan.json
 ```
 
 The plan resolves every `checks:` entry against each named profile's
@@ -163,8 +163,10 @@ build output, which is why it needs one `--build-output` per profile: a
 profile with no build output cannot resolve a check, and a plan that
 resolves no check at all exits 1 rather than emitting an empty target set
 that would let the fold pass having checked nothing (`--allow-empty` is the
-deliberate opt-in for a bootstrap run). Without a declared target set — `--run-plan` from the project plan (the
-declarative form), or a hand-written `--manifest` — a missing report and an
+deliberate opt-in for a bootstrap run). Without a declared target set — one `--manifest`, holding either the
+project plan's own `run-plan.json` (the declarative form) or a hand-written
+expected-target manifest; `aggregate` recognizes which from the document's
+own schema — a missing report and an
 intentionally absent one look identical, so a bare `aggregate reports/`
 exits 64 rather than guess; `--discovered-only` is the explicit opt-out
 that gates on whatever is present. A report that never arrived must be a

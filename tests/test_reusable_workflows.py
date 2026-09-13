@@ -480,9 +480,11 @@ class TestCheckProjectMatrixWiring:
 class TestCheckProjectAggregateManifestProjection:
     """ADR-047 §5's required sub-task: aggregate matches reports by each
     check's own check_id, not the bare target name -- via `abicheck
-    aggregate --run-plan run-plan.json`, which projects run-plan.json to
-    the expected-target set internally (ADR-054), no separate projection
-    step or intermediate manifest file."""
+    aggregate --manifest run-plan.json`, which recognizes the run-plan by
+    its own schema and projects it to the expected-target set internally
+    (ADR-054; plan slice 7q folded the separate --run-plan flag into
+    --manifest), no separate projection step or intermediate manifest
+    file."""
 
     def test_aggregate_command_consumes_run_plan_directly(self) -> None:
         data = _load(CHECK_PROJECT)
@@ -493,7 +495,10 @@ class TestCheckProjectAggregateManifestProjection:
         )
         aggregate_step = next(s for s in steps if s.get("name") == "Run aggregate")
         run = aggregate_step["run"]
-        assert "--run-plan run-plan.json" in run
+        assert "--manifest run-plan.json" in run
+        # The retired spelling would exit 64 at this step, so it is not a
+        # cosmetic difference the workflow may drift back to.
+        assert "--run-plan" not in run
         assert "aggregate-manifest.json" not in run
 
 

@@ -251,10 +251,26 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
     ),
     (
         "aggregate --expect/--optional/--report-prefix (the expected-target"
-        " set is declared by --manifest or --run-plan, or waived with"
-        " --discovered-only; the report-filename prefix is fixed)",
+        " set is declared by --manifest, or waived with --discovered-only;"
+        " the report-filename prefix is fixed)",
         ("--report-prefix", "--expect", "--optional"),
         frozenset({"AGENTS.md"}),
+    ),
+    (
+        "aggregate --run-plan (one-comparison-product.md slice 7q: a run plan"
+        " is a second schema for --manifest's own input, and --manifest now"
+        " recognizes it from the document's own content -- `aggregate"
+        " --manifest run-plan.json`)",
+        ("--run-plan",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                # Documents the fold itself, pointing a reader at --manifest.
+                "reference/run-plan-schema.md",
+                "use/aggregate-reports.md",
+            }
+        ),
     ),
     (
         "the four per-category --severity-<category> flags (hidden duplicates"

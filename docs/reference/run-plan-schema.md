@@ -207,7 +207,7 @@ aggregate:
 
 Both sub-keys are independently optional; only present when at least one was
 set. A plan generated from a `CONFIG` with no `aggregate: gate:` block (or
-neither sub-key set) omits `gate` entirely, and `aggregate --run-plan` then
+neither sub-key set) omits `gate` entirely, and `aggregate --manifest` then
 applies the hard-coded default policy, same as before this option existed.
 There is no per-invocation CLI override — `project plan`'s former
 `--gate-missing-required`/`--gate-unexpected-target` flags were removed (no
@@ -221,7 +221,7 @@ hard-coded default policy — exactly the version-skew inversion
 `aggregate_manifest_version`'s `2.0` bump (see
 [Aggregate Reports](../use/aggregate-reports.md)) exists to prevent, just one
 layer up, in the *persisted* `run-plan.json` artifact rather than only in the
-manifest `aggregate --run-plan` projects from it in memory. A plan with no
+manifest `aggregate --manifest` projects from it in memory. A plan with no
 `gate` keeps the unchanged `v1` schema string — the bump is additive-only,
 scoped to this one capability. A `gate` block paired with a declared `v1`
 schema, a missing `schema` field, or an unrecognized/malformed `schema`
@@ -247,10 +247,12 @@ profile's `abicheck-build-<profile>/` directory (containing
 | `64` | Usage error — `CONFIG` or a `--build-output` value is unreadable, or `CONFIG` fails `project validate`. |
 
 ```bash
-abicheck aggregate REPORTS_DIR --run-plan RUN_PLAN_JSON [...]
+abicheck aggregate REPORTS_DIR --manifest RUN_PLAN_JSON [...]
 ```
 
-`aggregate --run-plan` (ADR-054) projects `run-plan.json` down to the
+`aggregate --manifest` (ADR-054; plan slice 7q folded the former separate
+run-plan flag into it, recognizing the plan by its own `schema` rather than
+by its filename) projects `run-plan.json` down to the
 expected-target set internally — `abicheck aggregate --manifest`'s
 `{"targets": [{"id", "required"}]}` wire shape (ADR-047 §5's required
 sub-task) — using each check's own `check_id` as the expected target id,

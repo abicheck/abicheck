@@ -98,10 +98,10 @@ Three jobs, always in this order:
    (`if: always()`) — uploads the resulting report under
    `<report-artifact-prefix><check_id>`.
 3. **`aggregate`** (`needs: [plan, check]`, **`if: always()`**) — downloads
-   every report artifact and runs `abicheck aggregate reports --run-plan
-   run-plan.json ...`, which projects `run-plan.json` to the expected-target
-   set internally (no separate projection step or intermediate manifest
-   file, ADR-054).
+   every report artifact and runs `abicheck aggregate reports --manifest
+   run-plan.json ...`, which recognizes the run-plan by its own schema and
+   projects it to the expected-target set internally (no separate projection
+   step or intermediate manifest file, ADR-054).
 
 ### The two required `if: always()` placements
 

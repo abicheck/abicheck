@@ -23,11 +23,11 @@ name: 'abicheck check-project'
 #             can fail this matrix job even though it already wrote a report,
 #             and a later step in a failed job is skipped by default unless
 #             it too carries an always-on condition.
-#   aggregate Runs `abicheck aggregate --run-plan run-plan.json` over every
-#             downloaded report -- `--run-plan` projects run-plan.json to the
-#             expected-target set internally (using each check's own
-#             check_id, ADR-047 §5's required sub-task), no separate
-#             projection step. Runs with if: always() (never a bare needs: with no
+#   aggregate Runs `abicheck aggregate --manifest run-plan.json` over every
+#             downloaded report -- `--manifest` recognizes the run-plan by its
+#             own schema and projects it to the expected-target set internally
+#             (using each check's own check_id, ADR-047 §5's required
+#             sub-task), no separate projection step. Runs with if: always() (never a bare needs: with no
 #             if:) -- plain needs: semantics skip a dependent job when any
 #             matrix leg fails, and a skipped job reports success, which
 #             would silently green a branch-protection-required status past
@@ -1327,17 +1327,19 @@ jobs:
         id: aggregate
         shell: bash
         run: |
-          # --run-plan projects run-plan.json to the expected-target set
-          # internally (ADR-054) -- no separate `run-plan to-aggregate-
-          # manifest` step needed. The gate policy (CONFIG's own
+          # --manifest takes run-plan.json directly: `aggregate` recognizes
+          # the run-plan schema from the document's own content and projects
+          # it to the expected-target set internally (ADR-054; plan slice 7q
+          # folded the separate run-plan flag into --manifest) -- no
+          # separate `run-plan to-aggregate-manifest` step needed. The gate policy (CONFIG's own
           # `aggregate: gate:` block) rides inside run-plan.json itself
           # (CLI cleanup phase two, PR 2 -- see the "Generate run-plan.json"
           # step above), not as CLI flags here.
           set +e
-          abicheck aggregate reports --run-plan run-plan.json \
+          abicheck aggregate reports --manifest run-plan.json \
             -o json=aggregate-result.json
           code=$?
-          abicheck aggregate reports --run-plan run-plan.json \
+          abicheck aggregate reports --manifest run-plan.json \
             -o text=-
           echo "exit-code=$code" >> "$GITHUB_OUTPUT"
           exit $code
