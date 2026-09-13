@@ -141,7 +141,18 @@ def render_pattern_modulations(result: DiffResult) -> str:
         if isinstance(edges, list):
             for e in edges:
                 lines.append(f"      · {e}")
-    return "\n".join(lines)
+    # One pass over the finished section, not per row: this is human-facing
+    # output, and plan slice 7o made demangling automatic for human output
+    # rather than a flag -- so leaving the raw mangled symbol here meant the
+    # same run's report showed `lib::gone(int) [_ZN3lib4goneEi]` while this
+    # ledger showed only the mangled spelling, with no surviving control to
+    # make them agree (Codex review, PR #1284). Whole-text so the matched
+    # edges demangle too, and so the shared cache is consulted once for the
+    # section instead of once per row. No table-pipe escaping: this is plain
+    # stderr text, not a Markdown table.
+    from .demangle import demangle_text
+
+    return demangle_text("\n".join(lines))
 
 
 def echo_pattern_modulations(result: DiffResult) -> None:

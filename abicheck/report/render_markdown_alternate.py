@@ -71,6 +71,9 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .pattern_modulations_markdown import (
+    render_pattern_modulations_from_mapping,
+)
 from .render_markdown import (
     OutOfSurfaceNote,
     RecommendationSection,
@@ -267,6 +270,13 @@ def build_root_cause_document(
     d: dict[str, Any] = {
         **preamble,
         "report_mode": "root-cause",
+        # This builder assembles its own document rather than reusing
+        # `build_report_document`'s, so a field carried there is not carried
+        # here for free -- which is why `--view root-cause` rendered an
+        # accepted result naming neither the rule that demoted its findings
+        # nor the reason (Codex review, PR #1284). Same key and same rows as
+        # the full document, so the two projections cannot disagree.
+        "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
         "severity_summary": (
             asdict(
                 rm.compute_severity_summary(
@@ -345,6 +355,14 @@ def render_root_cause_document(doc: ReportDocument) -> str:
     )
     if d["show_impact"]:
         lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
+    # ADR-067: a rule that demoted a breaking finding is a disposition, so it
+    # is disclosed in *this* document too, not only the full one. The
+    # canonical `ReportDocument` has carried `pattern_modulations` all along
+    # -- only this projection was missing, so `--view root-cause` rendered an
+    # accepted result naming neither the rule nor its reason (Codex review,
+    # PR #1284). Same row renderer the full document uses, so the two cannot
+    # disagree about a modulation's columns.
+    lines += render_pattern_modulations_from_mapping(d.get("pattern_modulations"))
     lines += render_footer()
     # New defect 5 fix: every Markdown report format must end with a
     # trailing newline (POSIX text-file convention), matching

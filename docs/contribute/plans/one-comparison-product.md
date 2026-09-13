@@ -2101,6 +2101,35 @@ mechanism* first and an option count second:
   pass against a fixed expected string, because "fixed here, missed there" is
   precisely how this reached a third round.
 
+  **Round 17, and what the repetition is actually telling us.** Two findings:
+  the ADR-027 modulation ledger was missing from `--view root-cause` and the
+  `-o review=...` digest, and the stderr ledger still printed raw mangled
+  symbols. Both confirmed by rendering, then fixed. The P1 had *two*
+  independent causes behind one symptom -- `build_root_cause_document`
+  assembles its own `ReportDocument` and never populated the field, while the
+  review digest carried it and lost it in the mapping round trip its own
+  document boundary performs -- so fixing either alone would have left the
+  other silent, and each is mutation-checked separately for that reason.
+
+  This is the fifth round in which the same disposition was found half-wired
+  in one more output (full Markdown, release JSON, release Markdown,
+  root-cause, review, stderr). The honest reading is not that each was an
+  oversight but that *disclosure has no single choke point*: each output
+  builds its own document, so "the ledger is disclosed" is a claim that has
+  to be made once per projection and can only be checked by rendering. The
+  tests are now grouped by that claim rather than by renderer
+  (`tests/test_pattern_modulation_disclosure.py`), which is the closest thing
+  to a choke point available without collapsing the builders themselves --
+  a larger change than this slice should make.
+
+  Two structural fixes came out of the same round rather than baseline
+  raises. `report/review_digest_document.py` takes the digest's builder,
+  mapping reader and renderer out of `render_markdown_document.py` (which
+  carries a no_growth baseline, and had already separated them with a section
+  rule); keeping the three halves in one file is also the point, since a
+  field added to `ReviewDigest` but not written *and* read by the round trip
+  is silently dropped, which is precisely how this defect arose.
+
   The surviving parsing primitive gets the treatment AGENTS.md requires:
   `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
   states `parse_view_tokens`'s contract as invariants — last mode wins under

@@ -1631,6 +1631,7 @@ def compute_review_digest(
         ),
         surface_changes=compute_surface_changes(result, findings),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
+        pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
     )
 
 

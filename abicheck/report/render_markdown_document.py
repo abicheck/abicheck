@@ -85,7 +85,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
-from typing import Any, cast
+from typing import Any
 
 # ADR-063 T10: static now that `reporter_markdown.py` no longer imports
 # anything from this module (see this module's own docstring) -- the
@@ -113,7 +113,6 @@ from .render_markdown import (
     EnvironmentDriftEntry,
     EnvironmentDriftSection,
     HeadlineTable,
-    ImpactedSymbol,
     ImpactRootEntry,
     ImpactTable,
     LibraryFilesSection,
@@ -121,7 +120,6 @@ from .render_markdown import (
     PolicySection,
     RecommendationSection,
     RedundancyNote,
-    ReviewDigest,
     RttiNote,
     SeverityRow,
     SeveritySummary,
@@ -137,10 +135,13 @@ from .render_markdown import (
     render_policy_section,
     render_recommendation_section,
     render_redundancy_note,
-    render_review_digest,
     render_rtti_note,
     render_severity_summary,
     render_suppression_note,
+)
+from .review_digest_document import (
+    build_review_digest_document as build_review_digest_document,
+    render_review_digest_document as render_review_digest_document,
 )
 from .surface_changes import (
     SurfaceChangeSection,
@@ -195,129 +196,6 @@ def _resolve_displayed_changes(
         }
         changes = rm._suppress_dangling_correlation_notes(changes)
     return changes, show_only_note
-
-
-def build_review_digest_document(
-    result: Any,
-    *,
-    severity_config: Any = None,
-    report_document: ReportDocument | None = None,
-    envelope: ReportEnvelope | None = None,
-) -> ReportDocument:
-    """The ``-o review=...`` digest as a ``ReportDocument``.
-
-    *severity_config* is forwarded to :func:`~abicheck.reporter_markdown.
-    compute_review_digest` unchanged -- see that function's own docstring
-    for what it drives (the merge-effect phrase).
-
-    *report_document* (ADR-061 gap C), when given, is the one canonical
-    ``report_mode="full"`` document ``report.build.build_report_document``
-    already built for this render -- ``service_render.render_output``'s
-    ``review`` branch builds it once and threads it down through
-    ``to_review_digest``. Its ``disposition_audit`` field is reused verbatim
-    here instead of a second, independently-resolved call to
-    ``compute_disposition_audit`` (the same ledger, the same arguments --
-    calling it twice cannot disagree, but building through the one shared
-    choke point is the point of this closure, not just its safety). A direct
-    caller with no such document (an existing Tier-2/test call site) keeps
-    the prior behaviour by passing nothing.
-
-    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
-    document belongs to. Beyond supplying the document, it carries the
-    already-resolved per-finding verdicts the digest's "impacted symbols"
-    list used to re-resolve through its own ``report_findings_for`` call --
-    the same canonical primitive, but a second resolution of a decision this
-    render had already made -- and its already-resolved ``GateDecision``,
-    which the merge-effect phrase now projects instead of a second
-    ``compute_exit_code`` call of its own (CodeRabbit review).
-    """
-    shared_document = resolved_document(envelope, report_document)
-    shared_disposition_audit = (
-        DispositionAudit.from_dict(
-            cast("Mapping[str, Any]", shared_document.to_mapping()["disposition_audit"])
-        )
-        if shared_document is not None
-        else None
-    )
-    digest = _reporter_markdown().compute_review_digest(
-        result,
-        severity_config=severity_config,
-        disposition_audit=shared_disposition_audit,
-        findings=None if envelope is None else envelope.findings,
-        gate=None if envelope is None else envelope.gate,
-    )
-    d: dict[str, object] = {
-        "library": digest.library,
-        "old_version": digest.old_version,
-        "new_version": digest.new_version,
-        "verdict_emoji": digest.verdict_emoji,
-        "verdict_label": digest.verdict_label,
-        "effect": digest.effect,
-        "manual_review_banner": digest.manual_review_banner,
-        "coverage_warnings": list(digest.coverage_warnings),
-        "additions_label": digest.additions_label,
-        "breaking_count": digest.breaking_count,
-        "source_breaks_count": digest.source_breaks_count,
-        "risk_count": digest.risk_count,
-        "additions_count": digest.additions_count,
-        "quality_issues_count": digest.quality_issues_count,
-        "scoped": digest.scoped,
-        "out_of_surface_count": digest.out_of_surface_count,
-        "bump_value": digest.bump_value,
-        "soname_value": digest.soname_value,
-        "impacted": [{"symbol": s.symbol, "kind": s.kind} for s in digest.impacted],
-        "disposition_audit": (
-            None
-            if digest.disposition_audit is None
-            else digest.disposition_audit.to_dict()
-        ),
-        "surface_changes": (
-            None if digest.surface_changes is None else digest.surface_changes.to_dict()
-        ),
-        "env_matrix_source_sha256": digest.env_matrix_source_sha256,
-    }
-    return ReportDocument.from_mapping(d)
-
-
-def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
-    impacted = tuple(ImpactedSymbol(**item) for item in d["impacted"])
-    return ReviewDigest(
-        library=d["library"],
-        old_version=d["old_version"],
-        new_version=d["new_version"],
-        verdict_emoji=d["verdict_emoji"],
-        verdict_label=d["verdict_label"],
-        effect=d["effect"],
-        manual_review_banner=d["manual_review_banner"],
-        coverage_warnings=tuple(d["coverage_warnings"]),
-        additions_label=d["additions_label"],
-        breaking_count=d["breaking_count"],
-        source_breaks_count=d["source_breaks_count"],
-        risk_count=d["risk_count"],
-        additions_count=d["additions_count"],
-        quality_issues_count=d.get("quality_issues_count", 0),
-        scoped=d["scoped"],
-        out_of_surface_count=d["out_of_surface_count"],
-        bump_value=d["bump_value"],
-        soname_value=d["soname_value"],
-        impacted=impacted,
-        disposition_audit=(
-            None
-            if d.get("disposition_audit") is None
-            else DispositionAudit.from_dict(d["disposition_audit"])
-        ),
-        surface_changes=(
-            None
-            if d.get("surface_changes") is None
-            else SurfaceChangeSection.from_dict(d["surface_changes"])
-        ),
-        env_matrix_source_sha256=d.get("env_matrix_source_sha256"),
-    )
-
-
-def render_review_digest_document(doc: ReportDocument) -> str:
-    """Project a review-digest ``ReportDocument`` to its Markdown text."""
-    return render_review_digest(_review_digest_from_mapping(doc.to_mapping()))
 
 
 # ---------------------------------------------------------------------------

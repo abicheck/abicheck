@@ -229,3 +229,13 @@
   symbol only becomes `Foo::operator|(Foo const&)` during that pass, so the
   pipe lands inside a row that was already built and correctly escaped, and a
   GFM parser read a fourth column in a three-column table.
+
+- **Every human output explains a pattern modulation, not just the full report.**
+  `--view root-cause` and `-o review=...` both rendered an accepted result
+  naming neither the rule that demoted the findings nor its reason, for two
+  different reasons: the root-cause builder assembles its own document and
+  never carried the field, and the review digest carried it but lost it in the
+  mapping round trip its document boundary performs. The stderr ledger now
+  demangles too -- it was the last human output still printing raw mangled
+  symbols after the demangling controls were retired, so a run's report and its
+  own terminal output disagreed with no surviving flag to reconcile them.

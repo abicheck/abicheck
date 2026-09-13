@@ -700,6 +700,12 @@ class ReviewDigest:
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
     quality_issues_count: int = 0  #: non-addition compatible findings, own row
     env_matrix_source_sha256: str | None = None
+    #: ADR-067: the rules that reclassified findings, as
+    #: `PatternModulation.to_dict()` rows. The digest is the summary a
+    #: reviewer approves a merge from, so an accepted result may not omit
+    #: why it was accepted -- the same reason `disposition_audit` is here.
+    #: Empty for every run with ADR-027's opt-in `--pattern-verdicts` off.
+    pattern_modulations: tuple[Any, ...] = ()
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -756,6 +762,16 @@ def render_review_digest(digest: ReviewDigest) -> str:
     if digest.disposition_audit is not None:
         lines += ["**Disposition audit:**", ""]
         lines += render_disposition_audit_lines(digest.disposition_audit)
+    if digest.pattern_modulations:
+        from .pattern_modulations_markdown import (
+            render_pattern_modulations_from_mapping,
+        )
+
+        lines += ["**Pattern-modulated findings:**"]
+        lines += render_pattern_modulations_from_mapping(
+            digest.pattern_modulations, include_heading=False
+        )
+        lines.append("")
     if digest.surface_changes is not None and digest.surface_changes.total:
         lines += render_surface_changes_lines(digest.surface_changes)  # workstream G
 
