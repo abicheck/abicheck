@@ -339,8 +339,15 @@ STEPS: tuple[Step, ...] = (
             "auto",
             "--dist",
             "worksteal",
+            "-q",
+            "-r",
+            "fE",
             "--cov=abicheck",
-            "--cov-report=term-missing",
+            # term:skip-covered, not term-missing: the fully-covered modules
+            # are the bulk of that table and carry no information a reader
+            # acts on. The xml/gate side is unchanged -- every module is
+            # still measured, and the 95% floor is still enforced.
+            "--cov-report=term:skip-covered",
             "--cov-fail-under=95",
         ),
         frozenset({PR, FULL}),
