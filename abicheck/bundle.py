@@ -257,7 +257,7 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     intra-bundle break going unreported for exactly the case this function
     exists to catch).
     """
-    stored = {name: path for name, path in libraries.items() if path.is_dir()}
+    stored = {name: path for name, path in libraries.items() if _is_stored_member(path)}
     if not stored:
         return build_bundle_snapshot(libraries)
 
@@ -270,9 +270,21 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
         if elf is None:
             continue
         metadata[name] = elf
-        real_filename, aliases, alias_nodes_so_far = _stored_library_identity(
-            path, alias_nodes_so_far
-        )
+        # `_stored_library_identity` reads a directory-backed package's own
+        # `ArtifactRef.native_identity`; a file-backed stored snapshot has no
+        # such ref document, so its real filename/aliases are simply not
+        # recorded evidence -- the same "a stored package produced by
+        # something else may not carry it" degrade that function already
+        # documents, not a new failure mode. `ElfMetadata.soname` (which a
+        # file-backed member does carry) stays available to
+        # `_detect_soname_skew`; only its no-`DT_SONAME` filename fallback is
+        # unavailable for this operand shape.
+        if path.is_dir():
+            real_filename, aliases, alias_nodes_so_far = _stored_library_identity(
+                path, alias_nodes_so_far
+            )
+        else:
+            real_filename, aliases = None, ()
         if real_filename is not None:
             stored_paths[name] = real_filename
         if aliases:
@@ -312,9 +324,126 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     )
 
 
+#: Bytes sniffed when classifying an uncompressed stored snapshot document.
+#: Only the first non-whitespace byte is consulted; the rest is slack for
+#: leading whitespace a hand-formatted document may carry.
+_STORED_SNAPSHOT_SNIFF_BYTES = 64
+
+
+def _looks_like_stored_snapshot_file(path: Path) -> bool:
+    """Whether *path* is a regular file holding a stored snapshot document.
+
+    Detection is by *content* -- zstd/gzip magic, or a plain file whose
+    first non-whitespace byte opens a JSON object -- never by filename
+    suffix, matching `snapshot_io.detect_compression_from_bytes`'s own
+    "never trusts a filename" rule and `_path_looks_like_elf`'s magic sniff.
+
+    This exists because `build_bundle_snapshot_mixed`'s stored-member split
+    originally recognised only *directory*-backed packages
+    (`materialize_release_variant_artifacts` output). A loose
+    `.abicheck.json`/`.json.zst` snapshot -- the operand shape a plain
+    `abicheck dump` produces, and the one a "just point compare at a
+    directory of snapshots" release invocation actually supplies -- is
+    neither a directory nor ELF, so it fell through to
+    `build_bundle_snapshot` and was dropped there as "not ELF". That
+    silently emptied the OLD-side bundle graph: every cross-DSO check
+    (provider migration, intra-dependency removal, SONAME skew) then
+    degraded to "every library in this release is new", which scores as a
+    *compatible* bundle verdict -- precisely the silent-pass failure
+    `build_bundle_snapshot_mixed` exists to prevent, reintroduced through
+    the one stored operand shape that split did not cover.
+    """
+    from .errors import SnapshotError
+    from .snapshot_io import SnapshotCompression, detect_snapshot_compression
+
+    try:
+        if not path.is_file():
+            return False
+    except OSError:  # pragma: no cover - stat failure on a live path
+        return False
+    if _path_looks_like_elf(path):
+        return False
+    try:
+        if detect_snapshot_compression(path) is not SnapshotCompression.NONE:
+            return True
+        with open(path, "rb") as f:
+            prefix = f.read(_STORED_SNAPSHOT_SNIFF_BYTES)
+    except (OSError, SnapshotError):
+        return False
+    return prefix.lstrip()[:1] == b"{"
+
+
+def _is_stored_member(path: Path) -> bool:
+    """Whether *path* is a stored-snapshot member rather than a live binary
+    -- a directory-backed `ProjectSnapshot` package, or a file-backed
+    snapshot document (`_looks_like_stored_snapshot_file`)."""
+    try:
+        if path.is_dir():
+            return True
+    except OSError:  # pragma: no cover - stat failure on a live path
+        return False
+    return _looks_like_stored_snapshot_file(path)
+
+
+def _stored_file_elf_metadata(path: Path) -> ElfMetadata | None:
+    """`_stored_elf_metadata`'s file-backed half: the `ElfMetadata` of a
+    loose stored snapshot document.
+
+    Reads through `snapshot_io.read_snapshot_text` (the canonical storage
+    envelope reader -- plain/gzip/zstd by magic bytes, with the
+    decompression-bomb limits applied) and decodes the one `elf` section via
+    the same dependency-free `snapshot_platform_blocks.elf_from_dict` the
+    directory-backed half uses, so neither half reaches `serialization.py`
+    and the `bundle -> serialization -> bundle_facts -> bundle` cycle that
+    function's own docstring describes stays closed.
+
+    The ADR-062/063 Phase 8 sectioned envelope is unwrapped first: that is
+    the on-disk default for every snapshot written since, so reading
+    `document["elf"]` without unwrapping would find nothing and report every
+    modern snapshot as "no ELF metadata present".
+
+    Returns `None` -- never raises -- for anything that doesn't parse,
+    matching the sibling half's (and `build_bundle_snapshot`'s) own
+    "unresolvable member is skipped, not fatal" contract.
+    """
+    import json
+
+    from .snapshot_io import read_snapshot_text
+    from .snapshot_platform_blocks import elf_from_dict
+    from .storage.sectioned_document import (
+        from_sectioned_document,
+        is_sectioned_document,
+    )
+
+    try:
+        document = json.loads(read_snapshot_text(path))
+        if not isinstance(document, dict):
+            log.debug("bundle: stored snapshot %s is not a JSON object", path)
+            return None
+        if is_sectioned_document(document):
+            document = from_sectioned_document(document)
+        elf_data = document.get("elf")
+        if not isinstance(elf_data, dict):
+            # `debug`, not `warning`, and deliberately so: bundle analysis is
+            # ELF-only by design (ADR-018/ADR-023), so a header-only snapshot
+            # carrying no `elf` section is an ordinary, expected operand --
+            # the identical case the directory-backed half logs at `debug`.
+            # Warning here put a line on stdout for every member of an
+            # ordinary header-only release directory, which corrupts
+            # `-o json=-` output (tests/test_cli_compare_release_view.py).
+            log.debug("bundle: stored snapshot %s has no ELF metadata", path)
+            return None
+        schema_version = int(document.get("schema_version", 1))
+        return cast("ElfMetadata", elf_from_dict(elf_data, schema_version))
+    except Exception as exc:
+        log.warning("bundle: failed to resolve stored snapshot %s: %s", path, exc)
+        return None
+
+
 def _stored_elf_metadata(path: Path) -> ElfMetadata | None:
-    """*path*'s own `ElfMetadata`, read directly from its materialized
-    single-artifact `ProjectSnapshot` sub-package document.
+    """*path*'s own `ElfMetadata`, read directly from the stored document it
+    names -- a materialized single-artifact `ProjectSnapshot` sub-package
+    directory, or (via `_stored_file_elf_metadata`) a loose snapshot file.
 
     Deliberately **not** `workflows.input_resolution.resolve_input` (the
     general dispatcher every other "turn a path into a snapshot" call site
@@ -347,6 +476,9 @@ def _stored_elf_metadata(path: Path) -> ElfMetadata | None:
     """
     from .project_snapshot_legacy import read_legacy_snapshot_document
     from .snapshot_platform_blocks import elf_from_dict
+
+    if not path.is_dir():
+        return _stored_file_elf_metadata(path)
 
     try:
         document = read_legacy_snapshot_document(path)
