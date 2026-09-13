@@ -653,6 +653,38 @@ STEPS: tuple[Step, ...] = (
         description="Header-graph attach-cost trend measurement (G31 Phase D, report-only)",
     ),
     Step(
+        # The full-CLI L2 lane, same report-only shape and for the same reason
+        # as header-graph-perf above: the PR-vs-base half needs two checkouts
+        # and two venvs in one run, which a single verify.py Step cannot
+        # express, so performance.yml's l2-cli-perf job owns that half. This
+        # step closes the other gap -- without it, `verify.py --profile full`
+        # could not run the full-CLI harness at all, and a contributor would
+        # have no local command that exercises it.
+        #
+        # --repeat 1, not the CI lane's 3: a local full-profile run wants to
+        # know the harness works and every scenario still validates, not a
+        # publishable median. The correctness assertions (real L2 depth, the
+        # graph passes, the expected findings, the compiler-free stored path)
+        # are per-repeat, so they are fully exercised at 1.
+        #
+        # --require-toolchain for the same reason the step has a precondition:
+        # the precondition decides whether the step runs at all, and once it
+        # does run, a mid-run toolchain problem must fail rather than narrow
+        # the suite and still report OK.
+        "l2-cli-perf",
+        _pyscript(
+            "scripts/check_l2_cli_perf.py",
+            "--suite",
+            "pr",
+            "--repeat",
+            "1",
+            "--require-toolchain",
+        ),
+        frozenset({FULL}),
+        precondition=_need_linux_and_all_bins("clang", "clang++", "g++", "castxml"),
+        description="Full-CLI L2 scenario suite (six supported forms, report-only)",
+    ),
+    Step(
         # The build/source workflow produces the fixed artifact immediately
         # before invoking this catalog step. Keeping the checker here makes
         # the local full-profile command and the required CI proof use the

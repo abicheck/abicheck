@@ -43,6 +43,12 @@ hg_gate = importlib.util.module_from_spec(_spec)
 sys.modules["check_header_graph_perf"] = hg_gate
 _spec.loader.exec_module(hg_gate)
 
+# Re-exported by the gate module's own sys.path bootstrap; imported here under
+# their real names so these tests construct the same objects production does
+# rather than a lookalike.
+GateThreshold = hg_gate.GateThreshold
+is_gateable = hg_gate.is_gateable
+
 
 def _have(tool: str) -> bool:
     return shutil.which(tool) is not None
@@ -68,110 +74,452 @@ class TestSyntheticFixtureGeneration:
         assert "namespace hgperf" in header
 
 
-class TestCheckRegressions:
-    def _point(self, size: int, attach_ms: float, backend: str = "clang") -> dict:
-        return {
-            "size": size,
-            "backend": backend,
-            "baseline_ms": 100.0,
+_ALL = hg_gate.METRICS
+
+
+def _th(tolerance: float = 0.5, min_delta: float = 0.0) -> dict:
+    """A uniform ``GateThreshold`` for every metric, for the logic tests below."""
+    return {m: GateThreshold(tolerance, min_delta) for m in _ALL}
+
+
+def _base(
+    size: int = 10,
+    backend: str = "clang",
+    *,
+    dump_ms: float = 100.0,
+    attach_ms: float = 20.0,
+    total_ms: float = 121.0,
+) -> dict:
+    return {
+        (size, backend): {
+            "dump_ms": dump_ms,
             "attach_ms": attach_ms,
+            "total_ms": total_ms,
         }
+    }
 
-    def test_no_regression_within_tolerance(self):
-        points = [self._point(10, 15.0)]
-        baseline = {(10, "clang"): 14.0}
-        assert hg_gate.check_regressions(points, baseline, 0.5) == []
 
-    def test_regression_beyond_tolerance_reported(self):
-        points = [self._point(10, 30.0)]
-        baseline = {(10, "clang"): 10.0}
-        failures = hg_gate.check_regressions(points, baseline, 0.5)
-        assert len(failures) == 1
-        assert "size=10" in failures[0]
-        assert "backend=clang" in failures[0]
+def _pt(
+    size: int = 10,
+    backend: str = "clang",
+    *,
+    dump_ms: float = 100.0,
+    attach_ms: float = 20.0,
+    total_ms: float = 121.0,
+) -> dict:
+    return {
+        "size": size,
+        "backend": backend,
+        "dump_ms": dump_ms,
+        "attach_ms": attach_ms,
+        "total_ms": total_ms,
+    }
 
-    def test_missing_baseline_entry_is_not_a_failure(self):
-        points = [self._point(999, 30.0)]
-        baseline = {(10, "clang"): 10.0}
-        assert hg_gate.check_regressions(points, baseline, 0.5) == []
+
+def _metrics_in(failures: list[str]) -> set[str]:
+    """Which metric each failure message names.
+
+    Asserted on rather than a bare failure count, because "one metric
+    regressed" and "the *right* metric regressed" are different claims, and
+    only the second one is what gating three phases separately buys.
+    """
+    return {m for m in _ALL for f in failures if f" {m} " in f}
+
+
+class TestPerPhaseGating:
+    """The three phases are gated independently — the core Phase-2 fix.
+
+    Deliberately driven by *constructed numeric inputs* rather than by real
+    slow code: a ``time.sleep``-based "regression" would make these tests both
+    slow and flaky, and would test the clock rather than the threshold
+    algebra. The live end-to-end path has its own coverage in
+    ``TestLiveMeasurement``; what needs to be exact here is which gate fires
+    for which shape of slowdown.
+    """
+
+    def test_clean_run_fails_nothing(self):
+        assert (
+            hg_gate.check_regressions(
+                [_pt(dump_ms=105.0, attach_ms=21.0, total_ms=127.0)], _base(), _th()
+            )
+            == []
+        )
+
+    def test_dump_only_slowdown_is_caught(self):
+        # THE regression the original attach-only gate could not see: the
+        # primary header-AST extraction pass doubles, attach is untouched.
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=200.0, attach_ms=20.0, total_ms=221.0)], _base(), _th()
+        )
+        assert "dump_ms" in _metrics_in(failures)
+
+    def test_dump_only_slowdown_does_not_implicate_attach(self):
+        # The diagnostic half of the same claim: a dump regression must not be
+        # reported as an attach regression, or the metric split buys nothing.
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=200.0, attach_ms=20.0, total_ms=221.0)], _base(), _th()
+        )
+        assert "attach_ms" not in _metrics_in(failures)
+
+    def test_attach_only_slowdown_is_caught_and_scoped(self):
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=100.0, attach_ms=40.0, total_ms=141.0)], _base(), _th()
+        )
+        assert _metrics_in(failures) == {"attach_ms"}
+
+    def test_total_only_slowdown_is_caught(self):
+        # Neither phase's own median moved beyond tolerance, yet the whole
+        # window did. Physically this is time spent between the phases (or a
+        # harness that stopped accounting for part of its own work); either
+        # way, a gate on the two phases alone would report a clean pass.
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=100.0, attach_ms=20.0, total_ms=300.0)], _base(), _th()
+        )
+        assert _metrics_in(failures) == {"total_ms"}
+
+    def test_every_metric_can_fail_at_once(self):
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=500.0, attach_ms=500.0, total_ms=1000.0)], _base(), _th()
+        )
+        assert _metrics_in(failures) == set(_ALL)
+
+    def test_a_metric_excluded_from_thresholds_is_not_gated(self):
+        # --metrics must really narrow the gate, and must narrow only what it
+        # names: dump regresses hugely but is not selected.
+        only_attach = {"attach_ms": GateThreshold(0.5, 0.0)}
+        assert (
+            hg_gate.check_regressions(
+                [_pt(dump_ms=900.0, attach_ms=20.0, total_ms=921.0)],
+                _base(),
+                only_attach,
+            )
+            == []
+        )
 
     def test_exactly_at_tolerance_boundary_passes(self):
-        points = [self._point(10, 15.0)]
-        baseline = {(10, "clang"): 10.0}  # 15.0 == 10.0 * 1.5, not strictly greater
-        assert hg_gate.check_regressions(points, baseline, 0.5) == []
+        # 150.0 == 100.0 * 1.5 exactly, not strictly greater.
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=150.0, attach_ms=20.0, total_ms=121.0)], _base(), _th()
+        )
+        assert "dump_ms" not in _metrics_in(failures)
 
-    def test_zero_baseline_is_skipped_not_a_false_regression(self):
-        points = [self._point(10, 5.0)]
-        baseline = {(10, "clang"): 0.0}
-        assert hg_gate.check_regressions(points, baseline, 0.5) == []
+    def test_absolute_floor_protects_a_tiny_baseline(self):
+        # attach doubles 2.0 -> 4.0: a 100% relative regression, but 2ms of it.
+        base = _base(attach_ms=2.0)
+        assert (
+            hg_gate.check_regressions(
+                [_pt(attach_ms=4.0)],
+                base,
+                {m: GateThreshold(0.5, 10.0) for m in _ALL},
+            )
+            == []
+        )
+
+    def test_per_metric_thresholds_are_applied_independently(self):
+        # dump gets a loose threshold, attach a strict one; both grow 60%.
+        mixed = {
+            "dump_ms": GateThreshold(1.0, 0.0),
+            "attach_ms": GateThreshold(0.1, 0.0),
+        }
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=160.0, attach_ms=32.0)], _base(), mixed
+        )
+        assert _metrics_in(failures) == {"attach_ms"}
+
+    def test_failure_message_states_the_threshold_that_judged_it(self):
+        # A gate failure a reader cannot trace back to its own threshold is the
+        # other half of the invisible-threshold defect this phase fixes.
+        failures = hg_gate.check_regressions(
+            [_pt(dump_ms=400.0)],
+            _base(),
+            {"dump_ms": GateThreshold(0.25, 3.0, source="metric_override")},
+        )
+        assert len(failures) == 1
+        assert "tolerance=0.25" in failures[0]
+        assert "min_delta_ms=3.0" in failures[0]
+        assert "source=metric_override" in failures[0]
+
+    def test_missing_baseline_entry_is_not_a_failure(self):
+        assert hg_gate.check_regressions([_pt(size=999)], _base(10), _th()) == []
 
     def test_backends_are_distinct_baseline_keys(self):
         # A castxml-backend point must never be gated against a clang-backend
         # baseline entry for the same size (their costs are structurally
         # different — see the module docstring).
-        points = [self._point(10, 30.0, backend="castxml")]
-        baseline = {(10, "clang"): 10.0}
-        assert hg_gate.check_regressions(points, baseline, 0.5) == []
+        assert (
+            hg_gate.check_regressions(
+                [_pt(backend="castxml", dump_ms=900.0)], _base(10, "clang"), _th()
+            )
+            == []
+        )
+
+
+class TestNonGateableValuesCannotSilentlyPass:
+    """A poisoned number must read as *ungated*, never as a pass.
+
+    ``current > base + allowed`` is ``False`` whenever either side is ``NaN``,
+    and ``base=inf`` makes the allowance infinite. Both are values
+    ``json.load`` accepts and round-trips, so a hand-edited or
+    partially-written report could previously neuter this gate while it still
+    printed ``OK``. These tests pin the *direction* of the failure: the metric
+    drops out of the gated set and is reported, rather than passing.
+    """
+
+    @pytest.mark.parametrize(
+        "bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0]
+    )
+    def test_a_bad_baseline_value_is_not_gated(self, bad):
+        base = {(10, "clang"): {"dump_ms": bad, "attach_ms": 20.0, "total_ms": 121.0}}
+        assert hg_gate.gateable_metrics(_pt(), base) == ["attach_ms", "total_ms"]
+
+    @pytest.mark.parametrize(
+        "bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0]
+    )
+    def test_a_bad_measured_value_is_not_gated(self, bad):
+        assert hg_gate.gateable_metrics(_pt(dump_ms=bad), _base()) == [
+            "attach_ms",
+            "total_ms",
+        ]
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_a_bad_value_never_produces_a_pass_verdict(self, bad):
+        # The real hazard, stated directly: an enormous measured value against
+        # a NaN baseline must not come back as "no failures, all good".
+        base = {(10, "clang"): {"dump_ms": bad, "attach_ms": 20.0, "total_ms": 121.0}}
+        assert hg_gate.check_regressions([_pt(dump_ms=1e9)], base, _th()) == []
+        assert any(
+            "dump_ms" in u for u in hg_gate.ungated_metrics([_pt(dump_ms=1e9)], base)
+        )
+
+    def test_a_missing_measured_metric_is_reported_not_gated(self):
+        point = {"size": 10, "backend": "clang", "attach_ms": 20.0, "total_ms": 121.0}
+        assert hg_gate.gateable_metrics(point, _base()) == ["attach_ms", "total_ms"]
+        reported = hg_gate.ungated_metrics([point], _base())
+        assert any("metric=dump_ms" in r for r in reported)
+
+    def test_a_non_numeric_value_is_rejected(self):
+        # A string where a float belongs (a hand-edited report) must not raise
+        # a TypeError mid-gate either -- it is simply not gateable.
+        base = {
+            (10, "clang"): {"dump_ms": "fast", "attach_ms": 20.0, "total_ms": 121.0}
+        }
+        assert "dump_ms" not in hg_gate.gateable_metrics(_pt(), base)
+
+    def test_a_bool_is_not_a_measurement(self):
+        # `True == 1` in Python, so a bare numeric check would accept it.
+        assert not is_gateable(True)
+
+
+class TestUngatedMetrics:
+    def test_a_fully_covered_point_reports_nothing(self):
+        assert hg_gate.ungated_metrics([_pt()], _base()) == []
+
+    def test_an_absent_point_reports_every_metric_with_that_reason(self):
+        reported = hg_gate.ungated_metrics([_pt(size=999)], _base(10))
+        assert len(reported) == len(_ALL)
+        assert all("no baseline entry" in r for r in reported)
+
+    def test_a_legacy_baseline_reports_only_the_metric_it_lacks(self):
+        # The cross-version case the CI regression lane really hits.
+        legacy = {(10, "clang"): {"dump_ms": 100.0, "attach_ms": 20.0}}
+        reported = hg_gate.ungated_metrics([_pt()], legacy)
+        assert [r.split("metric=")[1].split(":")[0] for r in reported] == ["total_ms"]
 
 
 class TestLoadBaseline:
-    def test_round_trips_points_shape(self, tmp_path):
+    def test_round_trips_all_three_metrics(self, tmp_path):
         report = tmp_path / "report.json"
         report.write_text(
             json.dumps(
-                {"points": [{"size": 10, "backend": "clang", "attach_ms": 12.3}]}
+                {
+                    "points": [
+                        {
+                            "size": 10,
+                            "backend": "clang",
+                            "dump_ms": 100.0,
+                            "attach_ms": 12.3,
+                            "total_ms": 113.0,
+                        }
+                    ]
+                }
             )
         )
-        assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
+        assert hg_gate._load_baseline(report) == {
+            (10, "clang"): {"dump_ms": 100.0, "attach_ms": 12.3, "total_ms": 113.0}
+        }
 
     def test_accepts_bare_list_shape(self, tmp_path):
         report = tmp_path / "report.json"
         report.write_text(
             json.dumps([{"size": 10, "backend": "clang", "attach_ms": 12.3}])
         )
-        assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
+        assert hg_gate._load_baseline(report) == {(10, "clang"): {"attach_ms": 12.3}}
 
     def test_missing_backend_field_defaults_to_clang(self, tmp_path):
         # Back-compat with the earlier single-backend report shape.
         report = tmp_path / "report.json"
         report.write_text(json.dumps([{"size": 10, "attach_ms": 12.3}]))
-        assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
+        assert hg_gate._load_baseline(report) == {(10, "clang"): {"attach_ms": 12.3}}
+
+    def test_legacy_baseline_ms_is_read_as_dump_ms(self, tmp_path):
+        # The schema-1 shape the PR-vs-base CI lane measures the *base* branch
+        # with. Renaming the field must not silently stop gating the dump
+        # phase for the one commit that does the rename.
+        report = tmp_path / "report.json"
+        report.write_text(
+            json.dumps([{"size": 10, "baseline_ms": 100.0, "attach_ms": 12.3}])
+        )
+        assert hg_gate._load_baseline(report) == {
+            (10, "clang"): {"dump_ms": 100.0, "attach_ms": 12.3}
+        }
+
+    def test_total_ms_is_never_reconstructed_from_a_legacy_report(self):
+        # The specific wrong arithmetic total_ms exists to avoid: a schema-1
+        # report genuinely never measured the joint window, so it must read as
+        # absent rather than as dump+attach.
+        assert "total_ms" not in hg_gate.LEGACY_METRIC_ALIASES
+
+    def test_a_real_metric_wins_over_its_legacy_alias(self, tmp_path):
+        report = tmp_path / "report.json"
+        report.write_text(
+            json.dumps([{"size": 10, "dump_ms": 7.0, "baseline_ms": 999.0}])
+        )
+        assert hg_gate._load_baseline(report)[(10, "clang")]["dump_ms"] == 7.0
+
+    @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+    def test_non_finite_json_literals_are_dropped(self, tmp_path, literal):
+        report = tmp_path / "report.json"
+        report.write_text(
+            '{"points": [{"size": 10, "backend": "clang", "dump_ms": '
+            + literal
+            + ', "attach_ms": 20.0, "total_ms": 121.0}]}'
+        )
+        loaded = hg_gate._load_baseline(report)
+        assert "dump_ms" not in loaded[(10, "clang")]
+        assert loaded[(10, "clang")]["attach_ms"] == 20.0
 
 
 class TestMatchedPoints:
-    def _point(self, size: int, backend: str = "clang") -> dict:
-        return {
-            "size": size,
-            "backend": backend,
-            "baseline_ms": 100.0,
-            "attach_ms": 5.0,
-        }
-
-    def test_matches_when_key_present_in_baseline(self):
-        points = [self._point(10)]
-        baseline = {(10, "clang"): 4.0}
-        assert hg_gate.matched_points(points, baseline) == points
+    def test_matches_when_a_metric_is_gateable(self):
+        points = [_pt()]
+        assert hg_gate.matched_points(points, _base()) == points
 
     def test_no_match_when_baseline_covers_different_sizes(self):
         # Regression guard: a baseline generated for size 999 must not
         # silently "pass" a run measuring the default 25/100/400 sweep.
-        points = [self._point(10), self._point(20)]
-        baseline = {(999, "clang"): 4.0}
-        assert hg_gate.matched_points(points, baseline) == []
+        points = [_pt(10), _pt(20)]
+        assert hg_gate.matched_points(points, _base(999)) == []
 
     def test_partial_match_returns_only_matched_subset(self):
-        points = [self._point(10), self._point(20)]
-        baseline = {(10, "clang"): 4.0}
-        assert hg_gate.matched_points(points, baseline) == [points[0]]
+        points = [_pt(10), _pt(20)]
+        assert hg_gate.matched_points(points, _base(10)) == [points[0]]
 
-    def test_non_positive_baseline_entry_is_not_counted_as_matched(self):
-        # matched_points must agree with check_regressions' own "base is
-        # None or base <= 0" skip -- otherwise main()'s final "N checked"
-        # count would include a point check_regressions never actually
-        # gated (CodeRabbit review).
-        points = [self._point(10)]
-        baseline = {(10, "clang"): 0.0}
-        assert hg_gate.matched_points(points, baseline) == []
+    def test_a_point_with_no_gateable_metric_is_not_matched(self):
+        # matched_points must agree with check_regressions' own skip
+        # conditions -- otherwise main()'s final "N checked" count would
+        # include a point check_regressions never actually gated.
+        base = {
+            (10, "clang"): {"dump_ms": 0.0, "attach_ms": -1.0, "total_ms": float("nan")}
+        }
+        assert hg_gate.matched_points([_pt()], base) == []
+
+    def test_matching_honors_the_selected_metric_subset(self):
+        # Present in the baseline, but not for the one metric being gated.
+        legacy = {(10, "clang"): {"dump_ms": 100.0, "attach_ms": 20.0}}
+        assert hg_gate.matched_points([_pt()], legacy, ("total_ms",)) == []
+        assert hg_gate.matched_points([_pt()], legacy, ("dump_ms",)) == [_pt()]
+
+
+class TestResolveThresholds:
+    """Effective thresholds must be derivable, complete, and reportable."""
+
+    def _args(self, argv: list[str]):
+        return hg_gate.parse_args(argv)
+
+    def test_default_applies_to_every_metric(self):
+        resolved = hg_gate.resolve_thresholds(self._args([]))
+        assert set(resolved) == set(_ALL)
+        assert all(
+            t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE for t in resolved.values()
+        )
+
+    def test_an_explicit_cli_tolerance_is_marked_explicit(self):
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-tolerance", "0.1"])
+        )
+        assert {t.source for t in resolved.values()} == {"explicit"}
+        assert all(t.tolerance == 0.1 for t in resolved.values())
+
+    def test_a_per_metric_override_only_touches_that_metric(self):
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-tolerance-attach", "0.05"])
+        )
+        assert resolved["attach_ms"].tolerance == 0.05
+        assert resolved["attach_ms"].source == "metric_override"
+        assert resolved["dump_ms"].tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE
+        assert resolved["total_ms"].source == "default"
+
+    def test_a_per_metric_min_delta_override_keeps_the_shared_tolerance(self):
+        resolved = hg_gate.resolve_thresholds(
+            self._args(
+                ["--regress-tolerance", "0.2", "--regress-min-delta-ms-total", "50"]
+            )
+        )
+        assert resolved["total_ms"].tolerance == 0.2
+        assert resolved["total_ms"].min_delta == 50.0
+
+    def test_metrics_selection_narrows_what_is_resolved(self):
+        resolved = hg_gate.resolve_thresholds(self._args(["--metrics", "attach_ms"]))
+        assert set(resolved) == {"attach_ms"}
+
+    def test_every_resolved_threshold_is_serializable_for_the_receipt(self):
+        for metric, t in hg_gate.resolve_thresholds(self._args([])).items():
+            assert set(t.as_dict()) == {"tolerance", "min_delta", "source"}, metric
+
+    # --- provenance: `source` tracks the statement, never a value comparison ---
+
+    def test_a_min_delta_only_caller_is_recorded_as_explicit(self):
+        # The CI job's own spelling. Deriving `source` from args.regress_tolerance
+        # alone labelled this "default", so the receipt named the wrong origin for
+        # the floor that actually gated the run.
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-min-delta-ms", "30"])
+        )
+        assert {t.source for t in resolved.values()} == {"explicit"}
+        assert all(t.min_delta == 30.0 for t in resolved.values())
+
+    def test_a_stated_default_equal_tolerance_is_recorded_as_explicit(self):
+        # The other direction a value comparison gets wrong: the caller stated
+        # the number, and it happens to equal the module default.
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-tolerance", str(hg_gate.DEFAULT_REGRESS_TOLERANCE)])
+        )
+        assert {t.source for t in resolved.values()} == {"explicit"}
+
+    @pytest.mark.parametrize(
+        "argv,expected",
+        [
+            ([], "default"),
+            (["--regress-tolerance", "0.1"], "explicit"),
+            (["--regress-min-delta-ms", "30"], "explicit"),
+            (["--regress-tolerance", "0"], "explicit"),
+            (["--regress-min-delta-ms", "0"], "explicit"),
+            (["--regress-tolerance", "0.5", "--regress-min-delta-ms", "0"], "explicit"),
+        ],
+    )
+    def test_source_over_the_whole_flag_domain(self, argv, expected):
+        # Exhaustive over the small domain rather than one example each: the two
+        # flags x {absent, stated-default, stated-other} is the whole space, and
+        # both zero cases are exactly the ones a falsy-value test would miss.
+        resolved = hg_gate.resolve_thresholds(self._args(argv))
+        assert {t.source for t in resolved.values()} == {expected}, argv
+
+    def test_the_resolved_values_still_fall_back_to_the_module_defaults(self):
+        # Defaulting the flags to None must not leave the threshold itself None.
+        resolved = hg_gate.resolve_thresholds(self._args([]))
+        for t in resolved.values():
+            assert t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE
+            assert t.min_delta == hg_gate.DEFAULT_REGRESS_MIN_DELTA_MS
 
 
 class TestMainEntryPoint:
@@ -192,7 +540,13 @@ class TestMainEntryPoint:
             hg_gate,
             "measure",
             lambda sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False: [
-                {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
+                {
+                    "size": s,
+                    "backend": "clang",
+                    "dump_ms": 10.0,
+                    "attach_ms": 5.0,
+                    "total_ms": 15.0,
+                }
                 for s in sizes
             ],
         )
@@ -206,7 +560,7 @@ class TestMainEntryPoint:
         out = capsys.readouterr().out
         assert rc == 1
         assert "FAIL" in out
-        assert "no entry matching" in out
+        assert "no gateable entry" in out
 
     def test_measure_runs_under_a_redirected_xdg_cache_home(
         self, monkeypatch, tmp_path
@@ -439,10 +793,16 @@ class TestFiniteNonnegativeFloat:
         # it, check_regressions() itself silently accepts an arbitrarily
         # regressed measurement under a nan/inf tolerance.
         points = [{"size": 10, "backend": "clang", "attach_ms": 1000.0}]
-        baseline = {(10, "clang"): 10.0}
-        assert hg_gate.check_regressions(points, baseline, float("nan")) == []
-        assert hg_gate.check_regressions(points, baseline, float("inf")) == []
-        assert hg_gate.check_regressions(points, baseline, 0.5) != []
+        baseline = {(10, "clang"): {"attach_ms": 10.0}}
+
+        def gate(tolerance: float) -> list[str]:
+            return hg_gate.check_regressions(
+                points, baseline, {"attach_ms": GateThreshold(tolerance, 0.0)}
+            )
+
+        assert gate(float("nan")) == []
+        assert gate(float("inf")) == []
+        assert gate(0.5) != []
 
 
 class TestRequireRealAstAttach:
@@ -594,8 +954,18 @@ class TestLiveMeasurement:
         result = results[0]
         assert result["size"] == 5
         assert result["backend"] == "clang"
-        assert result["baseline_ms"] > 0
-        assert result["attach_ms"] > 0
+        # Every gated metric, not just one: this test is the only live proof that
+        # a real measurement populates each of them, and it kept asserting the
+        # pre-rename `baseline_ms` after the three-metric split because it only
+        # runs in the integration lane (Codex-style miss: a `-m "not
+        # integration"` sweep cannot see it).
+        for metric in hg_gate.METRICS:
+            assert result[metric] > 0, metric
+            assert result[f"{metric}_samples"], metric
+        # total_ms is the whole window, so it cannot be smaller than either
+        # phase it contains -- a real invariant the arithmetic must satisfy.
+        assert result["total_ms"] >= result["dump_ms"]
+        assert result["total_ms"] >= result["attach_ms"]
 
     def test_resolve_includes_infers_the_headers_own_directory(self, tmp_path):
         header = tmp_path / "api.h"

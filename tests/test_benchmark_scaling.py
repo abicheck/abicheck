@@ -9,6 +9,7 @@ The script is loaded by path because ``scripts/`` is not an installed package.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -311,3 +312,177 @@ def test_regress_flags_accept_finite_nonnegative_values() -> None:
     )
     assert args.regress_tolerance == pytest.approx(0.15)
     assert args.regress_min_delta_seconds == pytest.approx(0.1)
+
+
+# ── Threshold precedence (the indefinite-exception fix) ───────────────────────
+class TestScenarioThresholdPrecedence:
+    """A built-in per-scenario allowance may never outrank an explicit request.
+
+    The defect: ``Scenario.regress_tolerance`` was consulted *first*, so a
+    scenario carrying a built-in ``1.3`` ran at 1.3 even when the caller
+    passed ``--regress-tolerance 0.1``, and the run still printed ``OK`` with
+    nothing in its output revealing which number had actually judged it.
+
+    Driven by constructed numbers rather than real timings on purpose: what
+    needs pinning is the precedence algebra and its reported provenance, not
+    how long serialization takes.
+    """
+
+    def _resolve(self, **kw):
+        kw.setdefault("scenario", "serialize")
+        kw.setdefault("default_tolerance", 0.5)
+        kw.setdefault("default_min_delta", 0.0)
+        kw.setdefault("cli_tolerance", None)
+        kw.setdefault("cli_min_delta", None)
+        return perf_baseline.resolve_scenario_threshold(**kw)
+
+    def test_explicit_cli_tolerance_beats_a_builtin_exception(self):
+        resolved = self._resolve(cli_tolerance=0.1, spec_tolerance=1.3)
+        assert resolved.tolerance == 0.1
+        assert resolved.source == "explicit"
+
+    def test_explicit_cli_min_delta_beats_a_builtin_exception(self):
+        resolved = self._resolve(cli_min_delta=0.2, spec_min_delta=5.0)
+        assert resolved.min_delta == 0.2
+        assert resolved.source == "explicit"
+
+    def test_stating_only_a_tolerance_still_marks_the_whole_threshold_explicit(self):
+        # The provenance label describes the decision, not one field: a reader
+        # must not have to guess whether the min_delta half was also overridden.
+        resolved = self._resolve(cli_tolerance=0.1, spec_min_delta=5.0)
+        assert resolved.source == "explicit"
+        assert resolved.min_delta == 5.0  # the spec value, since none was stated
+
+    def test_a_builtin_exception_applies_when_nothing_was_stated(self):
+        resolved = self._resolve(spec_tolerance=1.3)
+        assert resolved.tolerance == 1.3
+        assert resolved.source == "scenario_default:serialize"
+
+    def test_the_source_label_names_the_scenario_it_came_from(self):
+        # So a receipt reader can tell which scenario's exception is in play.
+        assert self._resolve(
+            scenario="report_html", spec_tolerance=2.0
+        ).source.endswith("report_html")
+
+    def test_the_plain_default_is_labelled_as_such(self):
+        resolved = self._resolve()
+        assert (resolved.tolerance, resolved.min_delta, resolved.source) == (
+            0.5,
+            0.0,
+            "default",
+        )
+
+    def test_a_zero_explicit_tolerance_is_honored_not_treated_as_absent(self):
+        # `0.0` is falsy; an `or`-based fallback would silently discard the
+        # strictest possible request. This is the exact shape of bug the
+        # None-sentinel design exists to prevent.
+        resolved = self._resolve(cli_tolerance=0.0, spec_tolerance=1.3)
+        assert resolved.tolerance == 0.0
+        assert resolved.source == "explicit"
+
+    def test_no_scenario_ships_an_indefinite_tolerance_exception(self):
+        # The registry-level half: the `serialize` scenario's permanent 130%
+        # allowance for an already-completed one-time data-model cost is gone.
+        # An exception added later is not forbidden -- but it must be a
+        # deliberate, reviewed edit that trips this test, not something that
+        # can drift in unnoticed.
+        assert {
+            name: spec.regress_tolerance
+            for name, spec in bench.SCENARIOS.items()
+            if spec.regress_tolerance is not None
+        } == {}
+
+
+class TestApplyRegressionGateRecordsItsThreshold:
+    """The resolved threshold must reach the report, not just the comparison."""
+
+    def test_the_effective_threshold_is_recorded(self):
+        record: dict = {}
+        perf_baseline.apply_regression_gate(
+            [bench.Point(1000, 0.1, 1000)],
+            "serialize",
+            {("serialize", 1000): 0.1},
+            cli_tolerance=0.25,
+            cli_min_delta=None,
+            record_into=record,
+        )
+        assert record["effective_threshold"] == {
+            "tolerance": 0.25,
+            "min_delta": 0.0,
+            "source": "explicit",
+        }
+
+    def test_it_gates_on_the_threshold_it_recorded(self):
+        # The invariant that makes recording worth anything: the number in the
+        # receipt is the number that judged the run. A 0.1 tolerance must fail
+        # a 0.4s-vs-0.2s point, and the receipt must say 0.1.
+        record: dict = {}
+        failures = perf_baseline.apply_regression_gate(
+            [bench.Point(1000, 0.4, 1000)],
+            "serialize",
+            {("serialize", 1000): 0.2},
+            cli_tolerance=0.1,
+            cli_min_delta=None,
+            spec_tolerance=1.3,  # the old exception, which must not apply
+            record_into=record,
+        )
+        assert failures, "an explicit strict tolerance must still gate"
+        assert record["effective_threshold"]["tolerance"] == 0.1
+
+    def test_recording_is_optional(self):
+        assert (
+            perf_baseline.apply_regression_gate(
+                [bench.Point(1000, 0.1, 1000)],
+                "serialize",
+                {("serialize", 1000): 0.1},
+                cli_tolerance=None,
+                cli_min_delta=None,
+            )
+            == []
+        )
+
+
+class TestStatedOrDefault:
+    """``value or default`` is wrong for a threshold, because ``0.0`` is falsy.
+
+    ``--regress-tolerance 0`` took the 0.5 default in the one place that
+    *printed* the tolerance while ``apply_regression_gate`` correctly gated at
+    ``0.0``, so the printed number contradicted the number that judged the run --
+    the same class of defect this branch removed from the per-scenario override.
+    """
+
+    @pytest.mark.parametrize("value", [0.0, 0, 0.1, 1.0, 99.0])
+    def test_any_stated_value_including_zero_survives(self, value):
+        assert perf_baseline.stated_or_default(value, 0.5) == value
+
+    def test_only_none_falls_back(self):
+        assert perf_baseline.stated_or_default(None, 0.5) == 0.5
+
+    def test_load_baseline_prints_the_stated_zero_not_the_default(
+        self, tmp_path, capsys
+    ):
+        report = tmp_path / "base.json"
+        report.write_text(
+            json.dumps(
+                {"scenarios": {"s": {"points": [{"size": 10, "seconds": 1.0}]}}}
+            ),
+            encoding="utf-8",
+        )
+        perf_baseline.load_baseline(report, 0.0)
+        printed = capsys.readouterr().out
+        assert "tolerance 0%" in printed, printed
+        assert "50%" not in printed
+
+    def test_load_baseline_prints_the_default_when_unstated(self, tmp_path, capsys):
+        report = tmp_path / "base.json"
+        report.write_text(
+            json.dumps(
+                {"scenarios": {"s": {"points": [{"size": 10, "seconds": 1.0}]}}}
+            ),
+            encoding="utf-8",
+        )
+        perf_baseline.load_baseline(report, None)
+        out = capsys.readouterr().out
+        assert (
+            f"tolerance {perf_baseline.DEFAULT_REGRESS_TOLERANCE * 100:.0f}%" in out
+        ), out

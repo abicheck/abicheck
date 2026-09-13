@@ -163,3 +163,116 @@ def finite_nonnegative_float_arg(value: str) -> float:
             f"must be a finite, non-negative number, got {value!r}"
         )
     return parsed
+
+
+def finite_positive_float_arg(value: str) -> float:
+    """``argparse`` ``type=`` for a *duration* or *interval* option: reject zero too.
+
+    A sibling of :func:`finite_nonnegative_float_arg`, separate because the two
+    families differ on exactly one value. Zero is meaningful for a regression
+    floor (it means "pure percentage tolerance"); for a duration it is a
+    silently-broken configuration in both of the places it is used:
+
+    * ``--timeout-seconds 0`` makes every still-running step instantly timed
+      out, so the run produces no measurement at all while looking like a
+      normal failure;
+    * ``--rss-interval-seconds 0`` turns the sampler's ``wait(interval)`` into a
+      busy loop that burns a core continuously and, in doing so, perturbs the
+      very timings it is attached to.
+
+    Neither is something a caller can want, so both are a usage error at parse
+    time rather than a run that misreports what it did.
+    """
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite, positive number, got {value!r}"
+        )
+    return parsed
+
+
+@dataclass(frozen=True)
+class GateThreshold:
+    """One metric's resolved regression threshold, as reported in a receipt.
+
+    Kept as a value object rather than two loose floats so a report can state
+    the *effective* threshold that actually gated a metric. A gate whose
+    thresholds are only implied by CLI defaults (or, worse, silently replaced
+    by a per-scenario/per-metric exception) cannot be audited from its own
+    output -- which is exactly how ``benchmark_scaling.py``'s indefinite
+    ``serialize`` ``regress_tolerance=1.3`` override stayed invisible to every
+    reader of its JSON report for as long as it did.
+
+    ``source`` names where the two numbers came from (``"default"``,
+    ``"explicit"``, ``"metric_override"``, ...) so "the strict value I passed
+    was honored" is checkable rather than assumed.
+    """
+
+    tolerance: float
+    min_delta: float
+    source: str = "default"
+
+    def allowed_delta(self, base: float) -> float:
+        """The absolute delta over *base* this threshold permits."""
+        return combined_regression_threshold(base, self.tolerance, self.min_delta)
+
+    def as_dict(self) -> dict[str, float | str]:
+        return {
+            "tolerance": self.tolerance,
+            "min_delta": self.min_delta,
+            "source": self.source,
+        }
+
+
+def resolve_threshold(
+    *,
+    default: GateThreshold,
+    explicit_tolerance: float | None = None,
+    explicit_min_delta: float | None = None,
+) -> GateThreshold:
+    """Fold an optional per-metric override onto *default*.
+
+    The override is *narrowing only in provenance*, never in authority: a
+    value the caller stated explicitly always wins, and the returned
+    ``source`` records that it did. This is the opposite of the precedence
+    bug this module's sibling gates shipped with -- a built-in per-scenario
+    exception that outranked an explicitly-requested stricter threshold, so
+    ``--regress-tolerance 0.1`` silently ran at 1.3 and the run still printed
+    ``OK``. Only a caller-stated value may relax or tighten a default here;
+    a built-in exception has to go through the same door, under its own
+    ``source`` label, and is therefore visible in the receipt.
+    """
+    if explicit_tolerance is None and explicit_min_delta is None:
+        return default
+    return GateThreshold(
+        tolerance=(
+            default.tolerance if explicit_tolerance is None else explicit_tolerance
+        ),
+        min_delta=(
+            default.min_delta if explicit_min_delta is None else explicit_min_delta
+        ),
+        source="metric_override",
+    )
+
+
+def is_gateable(value: object) -> bool:
+    """True when *value* is a real, finite, strictly-positive measurement.
+
+    Every regression gate in this repository compares ``current > base +
+    allowed``. That comparison is ``False`` for a ``nan`` on *either* side and
+    for ``base = inf``, so a single non-finite number anywhere in a baseline
+    or a sample set turns the gate into an unconditional pass while it still
+    prints ``OK`` -- the exact silent-pass shape
+    :func:`finite_nonnegative_float_arg` rejects for the *threshold* inputs,
+    applied to the *measured* inputs too. ``0`` and negatives are excluded as
+    well: neither is a plausible wall-clock duration, and a zero baseline
+    makes every relative threshold vacuous.
+
+    Deliberately a positive predicate ("this number may be gated on") rather
+    than a ``reject_bad()`` validator, so a caller must name what it does
+    with the rejects -- skip-and-report, or fail -- instead of a bare
+    exception deciding that for it.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value) and value > 0

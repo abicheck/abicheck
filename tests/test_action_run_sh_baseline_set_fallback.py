@@ -51,6 +51,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -88,7 +89,13 @@ def _baseline_region() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start)
-    return _path_qualified_helper_source() + "\n" + text[start:end]
+    return (
+        annotation_helpers_source()
+        + "\n"
+        + _path_qualified_helper_source()
+        + "\n"
+        + text[start:end]
+    )
 
 
 def _make_tar_zst(archive_path: Path, src_dir: Path) -> None:

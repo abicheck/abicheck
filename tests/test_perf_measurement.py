@@ -146,3 +146,76 @@ class TestFiniteNonnegativeFloatArg:
 
         with pytest.raises(argparse.ArgumentTypeError):
             pm.finite_nonnegative_float_arg("-0.1")
+
+
+class TestGateThreshold:
+    def test_allowed_delta_takes_the_larger_floor(self) -> None:
+        assert pm.GateThreshold(0.5, 10.0).allowed_delta(100.0) == 50.0
+        assert pm.GateThreshold(0.5, 10.0).allowed_delta(2.0) == 10.0
+
+    def test_as_dict_carries_the_provenance(self) -> None:
+        assert pm.GateThreshold(0.5, 1.0, source="explicit").as_dict() == {
+            "tolerance": 0.5,
+            "min_delta": 1.0,
+            "source": "explicit",
+        }
+
+
+class TestResolveThreshold:
+    def test_no_override_returns_the_default_unchanged(self) -> None:
+        default = pm.GateThreshold(0.5, 1.0, source="default")
+        assert pm.resolve_threshold(default=default) is default
+
+    def test_a_tolerance_override_keeps_the_default_min_delta(self) -> None:
+        resolved = pm.resolve_threshold(
+            default=pm.GateThreshold(0.5, 1.0), explicit_tolerance=0.2
+        )
+        assert (resolved.tolerance, resolved.min_delta) == (0.2, 1.0)
+        assert resolved.source == "metric_override"
+
+    def test_a_min_delta_override_keeps_the_default_tolerance(self) -> None:
+        resolved = pm.resolve_threshold(
+            default=pm.GateThreshold(0.5, 1.0), explicit_min_delta=9.0
+        )
+        assert (resolved.tolerance, resolved.min_delta) == (0.5, 9.0)
+
+    def test_a_zero_override_is_honored_not_read_as_absent(self) -> None:
+        # `0.0` is falsy: an `or`-based fallback would discard the strictest
+        # possible request, which is the one a caller most needs honored.
+        resolved = pm.resolve_threshold(
+            default=pm.GateThreshold(0.5, 1.0), explicit_tolerance=0.0
+        )
+        assert resolved.tolerance == 0.0
+
+
+class TestIsGateable:
+    @pytest.mark.parametrize("good", [1, 1.0, 0.001, 1e9])
+    def test_accepts_a_real_positive_measurement(self, good) -> None:
+        assert pm.is_gateable(good)
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            0,
+            0.0,
+            -1.0,
+            None,
+            "5",
+            [5],
+            True,
+            False,
+        ],
+    )
+    def test_rejects_everything_a_gate_cannot_compare(self, bad) -> None:
+        assert not pm.is_gateable(bad)
+
+    def test_a_nan_makes_the_gate_comparison_vacuous(self) -> None:
+        # Why this predicate exists, stated as the arithmetic rather than as
+        # prose: every gate in this repo asks `current > base + allowed`, and
+        # that is False for a NaN on either side no matter how large the real
+        # regression was.
+        assert not (1e9 > float("nan") + 0.0)
+        assert not (float("nan") > 1.0 + 0.0)

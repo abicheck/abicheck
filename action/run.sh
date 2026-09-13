@@ -96,6 +96,51 @@ _sanitize_annotation() {
   printf '%s' "${1//%/%25}" | tr '\r\n' '  '
 }
 
+# Emit one `::error::` annotation whose message may contain workflow-
+# controlled input, the way `validate-inputs.sh`'s own `_fail` does.
+#
+# Two things matter and both are load-bearing (bug class
+# `trust_boundary.shell_workflow_injection`, the one
+# `tests/test_action_validate_inputs_injection.py` already covers for the
+# validator). A GitHub annotation is line-delimited, so a value carrying a
+# newline ends the annotation and everything after it is parsed as a *new*
+# workflow command -- `_sanitize_annotation` collapses CR/LF and escapes
+# `%` so a percent-encoded break cannot be decoded back into one. And the
+# emit itself is `printf '%s\n'`, never `echo`: a value spelling a literal
+# `\n` is inert under a plain `echo` but becomes a real line under one with
+# `xpg_echo` enabled, which is a build-time default on some bash builds and
+# reachable through `BASHOPTS`/`BASH_ENV`.
+_error_annotation() {
+  printf '%s\n' "::error::$(_sanitize_annotation "$1")"
+}
+
+# The `::warning::`/`::notice::` counterparts. Same contract, and they exist
+# for the same reason: the value a message carries is frequently
+# caller-controlled, directly (`INPUT_*`) or through one of this script's
+# own aliases for them (`MODE`, `FORMAT`, ...), and an alias is exactly as
+# attacker-controlled as the input it was copied from (Codex review, which
+# forged an `::add-mask::` command through `INPUT_MODE` after the first
+# round hardened only the literal `${INPUT_...}` sites).
+_warning_annotation() {
+  printf '%s\n' "::warning::$(_sanitize_annotation "$1")"
+}
+
+_notice_annotation() {
+  printf '%s\n' "::notice::$(_sanitize_annotation "$1")"
+}
+
+# `::group::` is a workflow command like any other, and its title is just as
+# frequently caller-controlled -- a baseline asset name built from
+# `baseline-profile`, the resolved `$MODE`, an `abi-baseline` tag. A newline
+# in one ends the group command and the runner parses the next line as a
+# command of its own: `baseline-profile: $'p\n::add-mask::SECRET'` really did
+# emit a standalone `::add-mask::` line while the error annotation beside it
+# was correctly sanitized (Codex review). The class is "workflow command
+# carrying data", not "error, warning or notice".
+_group_start() {
+  printf '%s\n' "::group::$(_sanitize_annotation "$1")"
+}
+
 _mktemp_canonical() {
   if ! _is_path_already_qualified "$1"; then
     printf '%s\n' "$PWD/$1"
@@ -241,7 +286,7 @@ add_flag_shlex_split() {
     # context.
     if [[ "$value" == *'"'* || "$value" == *"'"* || "$value" == *'\'* \
           || "$value" == *'*'* || "$value" == *'?'* || "$value" == *'['* ]]; then
-      echo "::error::$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
+      _error_annotation "$flag value '$value' contains quoting/escaping or glob metacharacters that require abicheck's own parser to interpret correctly, but no working Python interpreter with abicheck importable is available on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to fall back to plain whitespace splitting, which would silently produce a different, wrong compile context (and, for glob metacharacters, could expand based on files present in the analyzed checkout)."
       exit 1
     fi
     add_flag "$flag" "$value"
@@ -273,7 +318,7 @@ for tok in split_gcc_options(sys.stdin.read()):
   # an invalid configuration must not produce an apparently-successful
   # comparison under the wrong macros/include paths.
   if [[ $py_exit -ne 0 ]]; then
-    echo "::error::$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
+    _error_annotation "$flag value '$value' could not be parsed (malformed quoting/escaping, e.g. an unbalanced quote) -- refusing to silently drop or corrupt the requested compiler options."
     exit 1
   fi
   while IFS= read -r item; do
@@ -586,7 +631,7 @@ _merge_config_overlay_with_discovered_project_config() {
     # guard above: silently falling back to "just the overlay" here would
     # reintroduce the exact config-dropping bug this function exists to fix,
     # on precisely the runners least able to detect it.
-    echo "::error::mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
+    _error_annotation "mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
     # $out_path (the caller's already-created overlay, e.g.
     # $_COMPILE_CONTEXT_CONFIG_OVERLAY/$_RELEASE_TOPOLOGY_CONFIG_OVERLAY) is
     # named directly here rather than through a global -- this function is
@@ -1119,7 +1164,7 @@ PYEOF
   # or missing overlay file and proceeding as if the merge had succeeded.
   if [[ $_merge_status -ne 0 ]]; then
     if [[ "$merge_mode" == "explicit" ]]; then
-      echo "::error::failed to merge this Action's synthesized config overlay with the explicit build-config ${base_source} (see the error above). Refusing to silently proceed."
+      _error_annotation "failed to merge this Action's synthesized config overlay with the explicit build-config ${base_source} (see the error above). Refusing to silently proceed."
     else
       echo "::error::failed to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (see the error above). Refusing to silently proceed."
     fi
@@ -1367,7 +1412,7 @@ add_compile_context_flags() {
       # committed into the checkout could execute during a bare
       # same-directory `python3`'s own interpreter startup, before this
       # script's body runs).
-      echo "::error::mode: ${MODE} needs a working Python interpreter on PATH to synthesize the compile: config overlay from this Action's cross-compilation inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+      _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to synthesize the compile: config overlay from this Action's cross-compilation inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
       exit 1
     fi
     # The eight raw input values are passed on stdin, NUL-separated, not as
@@ -1493,7 +1538,7 @@ PYEOF
     local _compile_context_overlay_rc=$?
     rm -f "$_compile_context_helper_py"
     if [[ "$_compile_context_overlay_rc" -ne 0 || -z "$_compile_overlay_json" ]]; then
-      echo "::error::mode: ${MODE} could not synthesize the compile: config block from the ast-frontend/gcc-*/sysroot/nostdinc${include_lang:+/lang} inputs (interpreter exit ${_compile_context_overlay_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
+      _error_annotation "mode: ${MODE} could not synthesize the compile: config block from the ast-frontend/gcc-*/sysroot/nostdinc${include_lang:+/lang} inputs (interpreter exit ${_compile_context_overlay_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
       exit 1
     fi
     _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
@@ -1641,7 +1686,7 @@ add_release_topology_config_flags() {
     # fork-controlled `sitecustomize.py` committed into the checkout could
     # execute during a bare same-directory `python3`'s own interpreter
     # startup, before this script's body runs).
-    echo "::error::mode: ${MODE} needs a working Python interpreter on PATH to synthesize the release:/gate: config overlay from this Action's release-topology inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+    _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to synthesize the release:/gate: config overlay from this Action's release-topology inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
     exit 1
   fi
   local _release_overlay_json
@@ -1742,6 +1787,23 @@ _is_release_style_operand() {
   # `$_PY_SAFE_DIR`/cleared-`PYTHONPATH` isolation as every other
   # abicheck-importing call here, for the same sys.path reason.
   if [[ "${_PY_BIN_HAS_ABICHECK:-false}" == "true" && -n "${_PY_SAFE_DIR:-}" && -n "${_PY_BIN:-}" ]]; then
+    # Anchor the operand BEFORE the `cd`. `old-library`/`new-library` are
+    # normally relative to the workflow directory, and the probe runs from
+    # `$_PY_SAFE_DIR` -- so a bare `Path(sys.argv[1])` there would stat a
+    # nonexistent path under the temp dir, answer "not a package", and skip
+    # the package-only inputs for an operand `compare` does fan out
+    # (Codex review, PR #1259). `$_PY_SAFE_DIR` exists to keep the
+    # untrusted checkout off `sys.path`, not to relocate the operand.
+    # Which spellings must NOT be prefixed is `_is_path_already_qualified`'s
+    # question, not a second regex's: it covers UNC (`\\server\share`),
+    # root-relative (`\pkg`) and drive-relative (`C:pkg`) forms this call
+    # site would otherwise mangle, and it gates every Windows-only form on
+    # actually running on Windows, so a POSIX file literally named `C:pkg`
+    # still anchors (Codex and CodeRabbit review, PR #1261).
+    local _probe_path="$path"
+    if ! _is_path_already_qualified "$_probe_path"; then
+      _probe_path="$PWD/$_probe_path"
+    fi
     local _probe_rc=0
     # shellcheck disable=SC2016  # the inline script is deliberately unexpanded.
     (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
@@ -1751,7 +1813,7 @@ from pathlib import Path
 from abicheck.package import is_package
 
 raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
-' "$path") || _probe_rc=$?
+' "$_probe_path") || _probe_rc=$?
     [[ "$_probe_rc" -eq 0 ]] && return 0
     [[ "$_probe_rc" -eq 3 ]] && return 1
   fi
@@ -1928,7 +1990,7 @@ for param in node.params:
 _require_cli_value_options_or_fail() {
   [[ "${_CLI_VALUE_OPTIONS_DERIVED:-false}" == "true" ]] && return 0
   [[ -z "${INPUT_EXTRA_ARGS:-}" ]] && return 0
-  echo "::error::extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
+  _error_annotation "extra-args is set, but this step cannot determine which abicheck CLI options take a value, so it cannot tell a real flag in extra-args from another option's literal value (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'; it must be able to import abicheck). Guessing is not safe: treating every token as opaque would misread 'extra-args: --version --dry-run' -- which the CLI accepts as --version's own value -- as a real --dry-run, then skip this step's output/sidecar injection while a full comparison ran, silently producing no report. Install abicheck into the interpreter that 'command -v python3' resolves on this runner, or remove extra-args." >&2
   exit 1
 }
 
@@ -2543,7 +2605,7 @@ if [[ -n "$_PY_BIN" ]] \
   && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c "import abicheck") >/dev/null 2>&1; then
   _PY_BIN_HAS_ABICHECK="true"
 elif [[ -n "$_PY_BIN" ]]; then
-  echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
+  _warning_annotation "resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
 fi
 
 # Derive the value-taking CLI options for this run's command ONCE, here, now
@@ -2580,11 +2642,18 @@ if [[ -n "${INPUT_AGAINST:-}" ]]; then
   echo "::error::against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
   exit 1
 fi
-if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+# A retired boolean-shaped input is refused for *any* value other than its
+# `false` default. Composite-action inputs are untyped strings, so
+# `audit: yes`, `estimate: 1` or `audit: TRUE` are all a workflow explicitly
+# asking for the retired behaviour -- and a guard matching only the exact
+# string "true" let every other spelling through preflight and into a
+# silently narrower run (Codex review). `require-complete-analysis` below
+# already had this shape; these two did not.
+if [[ -n "${INPUT_ESTIMATE:-}" && "${INPUT_ESTIMATE}" != "false" ]]; then
   echo "::error::estimate is no longer supported (it applied only to the now-removed mode: scan, as a dry-run alias). Set dry-run: 'true' instead, which applies to every mode."
   exit 1
 fi
-if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
+if [[ -n "${INPUT_AUDIT:-}" && "${INPUT_AUDIT}" != "false" ]]; then
   echo "::error::audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
   exit 1
 fi
@@ -2632,6 +2701,27 @@ if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
   exit 1
 fi
 
+# require-complete-analysis: RETIRED (rulings.py deferred-option followup --
+# hard removal, no deprecation window). The CLI's own
+# --require-complete-analysis flag is gone entirely (config-only now,
+# .abicheck.yml's assurance.require_complete); validate-inputs.sh already
+# rejects a non-empty/false input before this step ever runs, so this is
+# defense in depth for anyone invoking run.sh directly (same rationale as
+# every other pre-validated guard in this file).
+#
+# Checked here, before the mode dispatch, rather than inside the compare
+# branch where it used to live: retirement is a property of the input, not
+# of which branch happens to run (the ordering rule
+# `tests/test_action_run_contract.py` states for the other tombstones), and
+# `validate-inputs.sh` rejects this one on every mode. Buried in the compare
+# arm, the "defense in depth for anyone invoking run.sh directly" the
+# comment above claims was true only for `mode: compare` -- a direct
+# `mode: dump` run with the input set proceeded to analyse (Codex review).
+if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+  _error_annotation "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+  exit 1
+fi
+
 # Replaces every literal (non-glob) occurrence of $2 in $1 with $3, via
 # prefix/suffix parameter-expansion pattern REMOVAL (`%%`/`#`) plus plain
 # string concatenation for the inserted text -- NOT
@@ -2672,10 +2762,10 @@ _substitute_literal() {
 _baseline_unavailable() {
   local message="$1"
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
-    echo "::warning::$message (continuing: --dry-run performs no analysis and never exits nonzero for an unresolved baseline)"
+    _warning_annotation "$message (continuing: --dry-run performs no analysis and never exits nonzero for an unresolved baseline)"
     return 0
   fi
-  echo "::error::$message"
+  _error_annotation "$message"
   exit 1
 }
 
@@ -2740,7 +2830,7 @@ _try_baseline_set_fallback() {
   # this composite Action installs no jq (self-hosted runners need not
   # have it either; see $_PY_BIN's own "Python, not jq" precedent further
   # down this file).
-  echo "::group::Fetch release-contract baseline-set '$asset_name'"
+  _group_start "Fetch release-contract baseline-set '$asset_name'"
   local set_download_dir="$BASELINE_DIR/baseline-set-download"
   mkdir -p "$set_download_dir"
   local assets_json=""
@@ -2922,11 +3012,11 @@ print("snapshot_path=" + snapshot_path)
 # in its place (Codex review).
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
 if [[ -n "${INPUT_BASELINE_PROFILE:-}" && -z "${INPUT_BASELINE_TARGET:-}" ]]; then
-  echo "::error::baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  _error_annotation "baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
   exit 1
 fi
 if [[ -n "${INPUT_BASELINE_TARGET:-}" && -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
-  echo "::error::baseline-target is set ('${INPUT_BASELINE_TARGET}') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
+  _error_annotation "baseline-target is set ('${INPUT_BASELINE_TARGET}') but baseline-profile is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
   exit 1
 fi
 if [[ ( -n "${INPUT_BASELINE_PROFILE:-}" || -n "${INPUT_BASELINE_TARGET:-}" ) && -z "$ABI_BASELINE" ]]; then
@@ -2944,7 +3034,7 @@ fi
 case "${INPUT_BASELINE_GENERATION:-}" in
   '') ;;
   *[!0-9]*)
-    echo "::error::baseline-generation '${INPUT_BASELINE_GENERATION}' is not a non-negative integer."
+    _error_annotation "baseline-generation '${INPUT_BASELINE_GENERATION}' is not a non-negative integer."
     exit 1
     ;;
   [0-9]*) ;;
@@ -2966,7 +3056,7 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
   # here, at the source, fixes every path derived from it without touching
   # each call site individually.
   if ! BASELINE_DIR=$(cd "$BASELINE_DIR" && pwd); then
-    echo "::error::failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
+    _error_annotation "failed to canonicalize the baseline working directory '$BASELINE_DIR' -- refusing to continue with an unresolved path."
     exit 1
   fi
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
@@ -3020,7 +3110,7 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
       echo "::endgroup::"
     else
       # Treat as a tag name
-      echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
+      _group_start "Fetch ABI baseline from release $ABI_BASELINE"
       if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} "${_ABI_JSON_PATTERNS[@]}" -D "$BASELINE_DIR"; then
         # See the latest-release branch's identical comment above.
         if [[ -z "${INPUT_BASELINE_PROFILE:-}" ]]; then
@@ -3082,7 +3172,7 @@ if [[ "$MODE" == "dump" ]]; then
     # dependency install; re-checked here for anyone invoking run.sh
     # directly (e.g. tests) without that step.
     if _is_release_style_operand "${INPUT_NEW_LIBRARY}"; then
-      echo "::error::mode: dump does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY}') — dump snapshots exactly one library. Dump each library individually, or use mode: compare with a directory/package operand instead."
+      _error_annotation "mode: dump does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY}') — dump snapshots exactly one library. Dump each library individually, or use mode: compare with a directory/package operand instead."
       exit 1
     fi
     CMD+=("${INPUT_NEW_LIBRARY}")
@@ -3206,7 +3296,7 @@ elif [[ "$MODE" == "compare" ]]; then
   CMD+=(compare)
   if [[ "$_NO_BASELINE" == "true" ]]; then
     if _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-      echo "::error::mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY:-}') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
+      _error_annotation "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY:-}') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
       exit 1
     fi
     CMD+=(--no-baseline "${INPUT_NEW_LIBRARY:?new-library is required for an audit-only compare (old-library/abi-baseline both omitted)}")
@@ -3508,18 +3598,6 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--budget" "${INPUT_BUDGET:-}"
   fi
 
-  # require-complete-analysis: RETIRED (rulings.py deferred-option followup
-  # -- hard removal, no deprecation window). The CLI's own
-  # --require-complete-analysis flag is gone entirely (config-only now,
-  # .abicheck.yml's assurance.require_complete); validate-inputs.sh already
-  # rejects a non-empty/false input before this step ever runs, so this is
-  # defense in depth for anyone invoking run.sh directly (same rationale as
-  # every other pre-validated guard in this file).
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
-    echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
-    exit 1
-  fi
-
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
     add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
@@ -3581,7 +3659,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   # anything else (sarif), not a silent fallback.
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
-    echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
+    _error_annotation "mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
@@ -3613,7 +3691,7 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   # anything else (sarif), not a silent fallback.
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
-    echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
+    _error_annotation "mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
   if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
@@ -3631,7 +3709,7 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   fi
 
 else
-  echo "::error::Unknown mode '$MODE'. Use 'compare', 'dump', 'deps-tree', or 'deps-compare'."
+  _error_annotation "Unknown mode '$MODE'. Use 'compare', 'dump', 'deps-tree', or 'deps-compare'."
   exit 1
 fi
 
@@ -3682,7 +3760,7 @@ _EFFECTIVE_FORMAT="$(_effective_format)"
 # path `abicheck` will actually write, not the superseded input value.
 _EFFECTIVE_OUTPUT_FILE="$(_effective_output_file)"
 
-echo "::group::abicheck $MODE"
+_group_start "abicheck $MODE"
 printf '%s\n' "Command: $(_sanitize_annotation "${CMD[*]}")"
 echo ""
 
@@ -4584,7 +4662,7 @@ _reject_unusable_report() {
       ;;
     ""|absent|unreadable)
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is missing or unreadable -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
+      _error_annotation "abicheck exited 0, but the JSON report this run requested at ${_where} is missing or unreadable -- so nothing read this run's result, and this step will not report one. Check for a killed step, a full disk, or an output path another process removed or truncated."
       ;;
     stale)
       # Not a corruption: a readable document that this invocation did not
@@ -4594,7 +4672,7 @@ _reject_unusable_report() {
       # run's own result is the forgery the fingerprint bookkeeping exists to
       # prevent.
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} is unchanged since before the run -- so this invocation never wrote it and its contents are some earlier run's, not this one's. This step will not report a result from it."
+      _error_annotation "abicheck exited 0, but the JSON report this run requested at ${_where} is unchanged since before the run -- so this invocation never wrote it and its contents are some earlier run's, not this one's. This step will not report a result from it."
       ;;
     empty)
       # `{}` is a *known* artifact rather than a corruption -- a PR-comment
@@ -4602,7 +4680,7 @@ _reject_unusable_report() {
       # it gets its own message rather than being lumped in above. It is still
       # not a result.
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report requested at ${_where} is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
+      _error_annotation "abicheck exited 0, but the JSON report requested at ${_where} is an empty object, carrying no verdict, no findings and no gate -- so nothing read this run's result. This usually means the report was never written and a placeholder was read in its place."
       ;;
     no_result)
       # Parsed, non-empty, and still carries no abicheck result -- a
@@ -4611,11 +4689,11 @@ _reject_unusable_report() {
       # would misdescribe a document that read perfectly well and simply
       # answers nothing (Codex review, P2).
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, and the JSON report requested at ${_where} parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
+      _error_annotation "abicheck exited 0, and the JSON report requested at ${_where} parsed cleanly but carries no abicheck result -- no verdict, no run_outcome, no findings. So nothing read this run's result, and this step will not report one. Check whether another tool wrote to that path, or whether the write was interrupted."
       ;;
     *)
       VERDICT="REPORT_UNREADABLE"
-      echo "::error::abicheck exited 0, but the JSON report this run requested at ${_where} could not be read (${_validity}) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
+      _error_annotation "abicheck exited 0, but the JSON report this run requested at ${_where} could not be read (${_validity}) -- so nothing read this run's result, and this step will not report one. Check for a failed/killed step, a full disk, or an output path another process overwrote."
       ;;
   esac
   return 1
@@ -4707,7 +4785,7 @@ _resolve_clean_exit_verdict() {
       _reject_unusable_report "$_dest_validity" "$_dest" || return
       if _assurance_axis_contradictory_at "$_dest"; then
         VERDICT="REPORT_UNREADABLE"
-        echo "::error::abicheck exited 0, but the JSON report requested at $(_sanitize_annotation "$_dest") reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
+        _error_annotation "abicheck exited 0, but the JSON report requested at ${_dest} reports an analysis_assurance block and omits the analysis_assurance_exit_contribution it owes -- so whether the analysis-assurance gate fired cannot be established from it. That is an invalid report, not a passing assurance check, and this step will not report a compatibility result from it."
         return
       fi
     done <<<"$(_caller_json_destinations)"
@@ -4795,7 +4873,7 @@ _resolve_clean_exit_verdict() {
         ;;
       *)
         VERDICT="ERROR"
-        echo "::error::abicheck exited 0, but its JSON report reports an operational outcome rather than a compatibility one (${_operational}): a crash, an artifact this build cannot analyze, or a member whose capture failed. No compatibility claim was established for this run, so this step will not report one, and this is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+        _error_annotation "abicheck exited 0, but its JSON report reports an operational outcome rather than a compatibility one (${_operational}): a crash, an artifact this build cannot analyze, or a member whose capture failed. No compatibility claim was established for this run, so this step will not report one, and this is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
         ;;
     esac
     return
@@ -4812,7 +4890,7 @@ _resolve_clean_exit_verdict() {
   if [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]]; then
     VERDICT="$_v"
     ADVISORY_BREAK=true
-    echo "::notice::abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
+    _notice_annotation "abicheck reports $_v, but the configured severity policy resolved this run to exit 0 — the step is not failed. Raise the category to \`error\` to gate on it."
   elif [[ "$_v" == "COMPATIBLE_WITH_RISK" ]]; then
     # R1 (CLI-audit): exit 0 was previously hard-mapped to VERDICT=COMPATIBLE
     # unconditionally, only escalating when the report said BREAKING/
@@ -4977,7 +5055,7 @@ _escalate_verdict_to_report() {
   # overwrote them with COMPATIBLE, which is the opposite of the point.
   [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]] || return 0
   if (( $(_verdict_rank "$_v") > $(_verdict_rank "$VERDICT") )); then
-    echo "::notice::abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
+    _notice_annotation "abicheck's report records $_v while the severity policy resolved this run to exit ${ABICHECK_EXIT} (gated as ${VERDICT}); publishing the report's verdict. The step still gates at ${VERDICT}."
     GATE_TIER="$VERDICT"
     VERDICT="$_v"
   fi
@@ -4987,7 +5065,7 @@ if [[ "$MODE" == "deps-compare" ]]; then
   # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
   if _is_cli_error; then
     VERDICT="ERROR"
-    echo "::error::abicheck deps-compare failed due to a CLI error (exit code $ABICHECK_EXIT)."
+    _error_annotation "abicheck deps-compare failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
@@ -5001,7 +5079,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   # deps-tree exit codes: 0=OK, 1=missing deps/symbols
   if _is_cli_error; then
     VERDICT="ERROR"
-    echo "::error::abicheck deps-tree failed due to a CLI error (exit code $ABICHECK_EXIT)."
+    _error_annotation "abicheck deps-tree failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
@@ -5018,9 +5096,9 @@ elif [[ "$MODE" == "dump" ]]; then
   else
     VERDICT="ERROR"
     if _is_cli_error; then
-      echo "::error::abicheck dump failed due to a CLI argument or configuration error (exit code $ABICHECK_EXIT)."
+      _error_annotation "abicheck dump failed due to a CLI argument or configuration error (exit code $ABICHECK_EXIT)."
     else
-      echo "::error::abicheck dump failed (exit code $ABICHECK_EXIT)."
+      _error_annotation "abicheck dump failed (exit code $ABICHECK_EXIT)."
     fi
   fi
 
@@ -5158,7 +5236,7 @@ else
         # false (Codex review), so it takes the non-waivable ERROR path.
         if _op=$(_operational_failure_status); then
           VERDICT="ERROR"
-          echo "::error::abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+          _error_annotation "abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
         else
           VERDICT="BREAKING"
         fi
@@ -5882,7 +5960,7 @@ _post_pr_comment() {
         echo "abicheck: updated sticky comment $existing_id."
         return 0
       fi
-      echo "::warning::abicheck: could not update comment $existing_id; posting a new one."
+      _warning_annotation "abicheck: could not update comment $existing_id; posting a new one."
     fi
   fi
 
@@ -5909,7 +5987,7 @@ if [[ "$VERDICT" == "REPORT_UNREADABLE" ]]; then
   FINAL_EXIT=1
 
 elif [[ "$VERDICT" == "ERROR" ]]; then
-  echo "::error::abicheck failed with exit code $ABICHECK_EXIT"
+  _error_annotation "abicheck failed with exit code $ABICHECK_EXIT"
   FINAL_EXIT=1
 
 elif [[ "$MODE" == "deps-compare" || "$MODE" == "deps-tree" ]]; then

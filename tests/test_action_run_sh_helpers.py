@@ -57,8 +57,6 @@ from pathlib import Path
 import pytest
 from _package_fixtures import (
     _make_conda_v2,
-    _make_deb,
-    _make_rpm,
     _make_tar_mode,
     _make_wheel,
     _write_zstd_tar,
@@ -221,49 +219,23 @@ def _bash_ansi_c_quote(value: str) -> str:
     return "$'" + "".join(out) + "'"
 
 
-def _isolated_interpreter_has_abicheck() -> bool:
-    """Can `_is_release_style_operand`'s own probe import abicheck?
-
-    That probe deliberately runs `cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN"
-    -c 'from abicheck.package import is_package'`, so it reaches an
-    *installed* abicheck only -- a bare checkout on `sys.path` via the CWD is
-    exactly what the isolation drops. When the import fails the probe cannot
-    answer, and `run.sh` falls back to its own suffix table by design, which
-    is documented degraded behaviour rather than a bug.
-
-    Reproduced with a pip-less venv: the same empty `.rpm` reads as
-    release-style `True` under an interpreter without abicheck and `False`
-    under one with it. So a test asserting the *content*-routed answer has to
-    establish that content routing is actually active first -- the harness
-    cannot supply it the way `_cli_introspection_prelude` supplies the three
-    introspection variables, because clearing `PYTHONPATH` and leaving the
-    CWD is the behaviour under test (Codex review, PR #1270, reproduced).
-    """
-    try:
-        result = subprocess.run(
-            [sys.executable, "-I", "-c", "from abicheck.package import is_package"],
-            capture_output=True,
-            text=True,
-            cwd=tempfile.gettempdir(),
-            env={
-                k: v
-                for k, v in os.environ.items()
-                if k not in ("PYTHONPATH", "PYTHONHOME")
-            },
-        )
-    except OSError:
-        return False
-    return result.returncode == 0
-
-
-def _run_predicate(call: str) -> bool:
+def _run_predicate(call: str, *, abicheck_available: bool = True) -> bool:
     """Source the real helper functions and evaluate a boolean-returning call
     (e.g. an ``_is_release_style_operand "path"`` invocation), returning
-    whether it exited zero (true) or non-zero (false)."""
+    whether it exited zero (true) or non-zero (false).
+
+    *abicheck_available* selects which half of `_is_release_style_operand`
+    answers: the default runs the real probe against the installed abicheck
+    (plan Phase 7n made `is_package()` content-based, and `run.sh` derives
+    from it rather than keeping a copy), while ``False`` forces the
+    suffix/magic fallback that `validate-inputs.sh`'s genuinely pre-install
+    position still uses. Both are real code paths, so both are addressable.
+    """
     require_bash()
     script = (
         _helpers_region()
         + _cli_introspection_prelude()
+        + ("" if abicheck_available else "\n_PY_BIN_HAS_ABICHECK=false\n")
         + f"\nif {call}; then exit 0; else exit 1; fi\n"
     )
     with tempfile.NamedTemporaryFile(
@@ -443,6 +415,36 @@ class TestAddSidedScalarFlag:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+def _real_package(tmp_path: Path, suffix: str) -> Path:
+    """A file at ``libfoo<suffix>`` whose *content* is that format.
+
+    One place, so the sweep above cannot drift into fake fixtures again.
+    """
+    target = tmp_path / f"libfoo{suffix}"
+    if suffix == ".rpm":
+        target.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 64)
+    elif suffix == ".deb":
+        target.write_bytes(b"!<arch>\n" + b"\x00" * 64)
+    elif suffix == ".conda":
+        _make_conda_v2(target, {})
+    elif suffix == ".whl":
+        _make_wheel(target, {"foo/__init__.py": b""})
+    elif suffix == ".tar.zst":
+        _write_zstd_tar(target)
+    else:
+        _make_tar_mode(
+            target,
+            {
+                ".tar": "w",
+                ".tar.gz": "w:gz",
+                ".tgz": "w:gz",
+                ".tar.xz": "w:xz",
+                ".tar.bz2": "w:bz2",
+            }[suffix],
+        )
+    return target
+
+
 class TestIsReleaseStyleOperand:
     """``compare`` mode now skips its --write optimization for
     directory/package operands, since the release fan-out engine rejects
@@ -464,66 +466,54 @@ class TestIsReleaseStyleOperand:
         f.write_text("{}", encoding="utf-8")
         assert not _run_predicate(f'_is_release_style_operand "{f}"')
 
-    # Each supported container, built as content its own extractor really
-    # recognises. These cases wrote a ZERO-BYTE file and asserted the suffix
-    # alone made it release-style, which stopped being true when plan Phase
-    # 7n made every `abicheck.package` extractor route on content: an empty
-    # `libfoo.rpm` is now definitively *not* a package, so `is_package()`
-    # answers False, the probe exits 3 ("definitely not"), and the suffix
-    # table below is never consulted. `tests/_package_fixtures.py` is the
-    # shared owner of these builders and its own docstring names this exact
-    # trap; `test_package.py` and `test_evidence_transport_roles.py` were
-    # migrated onto it when 7n landed and this module was missed.
     @pytest.mark.parametrize(
-        ("suffix", "build"),
+        "suffix",
         [
-            (".rpm", _make_rpm),
-            (".deb", _make_deb),
-            (".tar", lambda p: _make_tar_mode(p, "w")),
-            (".tar.gz", lambda p: _make_tar_mode(p, "w:gz")),
-            (".tar.xz", lambda p: _make_tar_mode(p, "w:xz")),
-            (".tar.bz2", lambda p: _make_tar_mode(p, "w:bz2")),
-            (".tar.zst", _write_zstd_tar),
-            (".tgz", lambda p: _make_tar_mode(p, "w:gz")),
-            (".conda", lambda p: _make_conda_v2(p, {})),
-            (".whl", lambda p: _make_wheel(p, {})),
+            ".rpm",
+            ".deb",
+            ".tar",
+            ".tar.gz",
+            ".tar.xz",
+            ".tar.bz2",
+            ".tar.zst",
+            ".tgz",
+            ".conda",
+            ".whl",
         ],
     )
-    def test_package_formats_are_release_style(self, tmp_path, suffix, build) -> None:
-        f = tmp_path / f"libfoo{suffix}"
-        build(f)
-        assert _run_predicate(f'_is_release_style_operand "{f}"')
+    def test_real_packages_are_release_style(self, tmp_path, suffix) -> None:
+        """Every supported format, with content that really is that format.
 
-    def test_real_package_is_detected_whatever_its_extension_case(
+        These fixtures were empty files carrying a package suffix, which
+        stopped being release operands when plan Phase 7n made `is_package()`
+        content-based and `run.sh` started deriving from it: a zero-byte
+        `libfoo.rpm` is not a package, and `compare` would not fan it out
+        either. Asserting otherwise pinned the old suffix table, not the
+        behaviour (found by the full suite after PR #1259 merged).
+
+        These operands carry conventional suffixes *and* real content, so
+        either half of the predicate answers yes and this sweep does not
+        distinguish them -- deliberately: its subject is format coverage.
+        Which half answers is pinned in
+        `tests/test_action_release_operand_detection.py`, over
+        nonconventional names, and by the fallback test below.
+        """
+        assert _run_predicate(
+            f'_is_release_style_operand "{_real_package(tmp_path, suffix)}"'
+        )
+
+    def test_the_fallback_matches_an_extension_case_insensitively(
         self, tmp_path
     ) -> None:
-        # Originally "extension matched case-insensitively", asserting an
-        # empty `libfoo.RPM`. Under content routing the *name* carries no
-        # weight at all, so the case-folding of the suffix is no longer the
-        # property under test -- name-independence is, and an uppercase
-        # extension is one instance of it (the two sibling
-        # `*_detected_by_magic_bytes` tests cover the extensionless case).
-        f = _make_rpm(tmp_path / "libfoo.RPM")
-        assert _run_predicate(f'_is_release_style_operand "{f}"')
-
-    @pytest.mark.skipif(
-        not _isolated_interpreter_has_abicheck(),
-        reason=(
-            "the content-routed probe cannot import abicheck under this "
-            "interpreter's isolation, so run.sh uses its documented suffix "
-            "fallback and an empty .rpm legitimately reads as release-style"
-        ),
-    )
-    def test_package_suffix_alone_is_not_release_style(self, tmp_path) -> None:
-        # The converse, and the reason the cases above had to change: a
-        # zero-byte file wearing a package suffix must NOT read as a package,
-        # or `run.sh` would forward the package-only inputs for an operand
-        # `compare` then refuses. Pins the 7n contract from the other side so
-        # a regression to name-based detection fails here rather than
-        # silently making the tests above pass for the wrong reason.
-        f = tmp_path / "libfoo.rpm"
-        f.write_text("", encoding="utf-8")
-        assert not _run_predicate(f'_is_release_style_operand "{f}"')
+        """Lowercasing is a property of the *fallback* table, so this pins it
+        there. With the probe active the suffix is not consulted at all, and
+        an assertion through that path would pass without exercising the
+        `tr '[:upper:]' '[:lower:]'` it claims to test."""
+        f = tmp_path / "libfoo.RPM"
+        f.write_bytes(b"")
+        assert _run_predicate(
+            f'_is_release_style_operand "{f}"', abicheck_available=False
+        )
 
     def test_missing_path_is_not_release_style(self) -> None:
         # A nonexistent path isn't a directory and doesn't match a package
