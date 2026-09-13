@@ -114,6 +114,7 @@ def resolve_no_baseline_candidate(
     path: Path,
     *,
     headers: list[Path] | None = None,
+    exclude_headers: tuple[str, ...] = (),
     includes: list[Path] | None = None,
     lang: str = "c++",
     lang_explicit: bool = False,
@@ -172,6 +173,7 @@ def resolve_no_baseline_candidate(
     side = InputSpec.of(
         path,
         headers=headers or [],
+        exclude_headers=exclude_headers,
         includes=includes or [],
         version=version,
         sources=sources,

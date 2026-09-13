@@ -235,7 +235,11 @@ def _qualified_name_for_change(
     ``VAR_ACCESS_CHANGED``, ...), not just additions/removals, the same way
     it already did for functions (Codex review).
     """
-    if c.kind in (ChangeKind.FUNC_ADDED, ChangeKind.VAR_ADDED):
+    if c.kind in (
+        ChangeKind.FUNC_ADDED,
+        ChangeKind.FUNC_ADDED_ELF_ONLY,
+        ChangeKind.VAR_ADDED,
+    ):
         return new_qualified.get(c.symbol)
     if c.kind in (
         ChangeKind.FUNC_REMOVED,
@@ -734,6 +738,7 @@ _ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_REMOVED,
         ChangeKind.FUNC_ADDED,
+        ChangeKind.FUNC_ADDED_ELF_ONLY,
         ChangeKind.FUNC_REMOVED_ELF_ONLY,
         ChangeKind.VAR_REMOVED,
         ChangeKind.VAR_ADDED,
@@ -1590,7 +1595,7 @@ def _deduplicate_cross_detector(
 
     Categories:
     - "func_removal": FUNC_REMOVED, FUNC_REMOVED_ELF_ONLY
-    - "func_addition": FUNC_ADDED
+    - "func_addition": FUNC_ADDED, FUNC_ADDED_ELF_ONLY
     - "var_removal": VAR_REMOVED
     - "var_addition": VAR_ADDED
     - "enum_member_removed"/"enum_member_value_changed"/
@@ -1617,6 +1622,11 @@ def _deduplicate_cross_detector(
         ChangeKind.FUNC_REMOVED: "func_removal",
         ChangeKind.FUNC_REMOVED_ELF_ONLY: "func_removal",
         ChangeKind.FUNC_ADDED: "func_addition",
+        # Same category as `FUNC_ADDED`, mirroring the `func_removal` pair
+        # above: the two are the same observation at two evidence tiers, so a
+        # symbol that somehow reached both detectors must dedup to one
+        # finding rather than be counted as two additions.
+        ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
         ChangeKind.VAR_REMOVED: "var_removal",
         ChangeKind.VAR_ADDED: "var_addition",
         # Version node removal and version definition removal both fire for

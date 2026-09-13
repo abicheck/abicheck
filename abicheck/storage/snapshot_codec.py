@@ -532,6 +532,10 @@ def decode_snapshot(
         # key (every pre-v44 snapshot) loads as False, same as every other
         # additive boolean field.
         header_only=bool(d.get("header_only", False)),
+        # Schema v47 -- see AbiSnapshot.excluded_header_patterns. Absent on
+        # every pre-v47 snapshot, which loads as "no exclusions", matching
+        # what every such snapshot actually was: the flag did not exist.
+        excluded_header_patterns=tuple(d.get("excluded_header_patterns") or ()),
         language_profile=d.get("language_profile"),
         scope_fallback=d.get("scope_fallback"),
         dependency_info=dep_info,

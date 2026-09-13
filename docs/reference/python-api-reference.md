@@ -131,6 +131,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 |---|---|---|
 | `path` | `Path \| None` | *(required)* |
 | `headers` | `tuple[Path, ...]` | `()` |
+| `exclude_headers` | `tuple[str, ...]` | `()` |
 | `includes` | `tuple[Path, ...]` | `()` |
 | `version` | `str` | `''` |
 | `pdb` | `Path \| None` | `None` |
@@ -387,27 +388,6 @@ Auto-detect input type and return an ABI snapshot.
 | `includes` | `list[Path] \| None` | `None` |
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
-| *(keyword-only below)* | | |
-| `lang_explicit` | `bool` | `False` |
-| `is_elf` | `bool \| None` | `None` |
-| `pdb_path` | `Path \| None` | `None` |
-| `dwarf_only` | `bool` | `False` |
-| `debug_roots` | `list[Path] \| None` | `None` |
-| `enable_debuginfod` | `bool` | `False` |
-| `debuginfod_url` | `str \| None` | `None` |
-| `debug_format` | `str \| None` | `None` |
-| `symbols_only` | `bool` | `False` |
-| `debug_presence_only` | `bool` | `False` |
-| `public_headers` | `list[Path] \| None` | `None` |
-| `public_header_dirs` | `list[Path] \| None` | `None` |
-| `follow_linker_scripts` | `bool` | `True` |
-| `header_backend` | `str` | `'auto'` |
-| `compile` | `CompileContext \| None` | `None` |
-| `notify` | `Callable[[str], None] \| None` | `None` |
-| `include_labels` | `dict[Path, str] \| None` | `None` |
-| `dump_manifest` | `DumpManifest \| None` | `None` |
-| `include_dependencies` | `bool` | `False` |
-| `public_include_search_dirs` | `list[Path] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 

@@ -936,7 +936,7 @@ class TestVnumOverride:
             AbiSnapshot(library="libfoo.so", version="2.0"),
         ]
         monkeypatch.setattr(
-            "abicheck.compat.cli._load_descriptor_or_dump",
+            "abicheck.compat.run_inputs._load_descriptor_or_dump",
             lambda *_a, **_k: snaps.pop(0),
         )
 

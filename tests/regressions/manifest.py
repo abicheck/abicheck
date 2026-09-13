@@ -155,6 +155,56 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="detector.diff_confirmation_precondition",
+        invariant=(
+            "A finding whose kind asserts a *diff-confirmed* regression -- it "
+            "is BREAKING, and its description states what will now fail -- is "
+            "emitted only when the OLD side positively carries the state the "
+            "regression is a loss of. Absence of the thing on the NEW side is "
+            "half the claim; a detector that reports on the NEW side alone "
+            "reports every always-absent input as a fresh regression. The "
+            "precondition is a guard on emission, never one input among "
+            "several to a suppression heuristic that an unrelated guard can "
+            "keep from ever being consulted. Where the OLD side does not "
+            "establish it, the observation is either suppressed or emitted "
+            "under a kind that claims no diff confirmation (RISK), never "
+            "under the confirmed one."
+        ),
+        fixed_by=(1283,),
+        seed_tests=("tests/test_bundle.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Registered from a real false positive on Intel MKL: "
+                    "`bundle_intra_dep_removed` reported 293 removals -- "
+                    "`fflush`, `sincos`, `MPI_Finalize` -- for a conda-forge "
+                    "2026.0.0 -> 2026.1.0 pair whose ground truth (nm) is +1 "
+                    "symbol, -0, turning a compatible release into exit 4. "
+                    "The detector did compute `ever_provided_in_bundle`, but "
+                    "only read it inside an allow-list branch gated on a "
+                    "non-empty `extra_needed`; every MKL library carries zero "
+                    "DT_NEEDED, so the branch was never entered and the "
+                    "precondition was never consulted. Nine of the kind's own "
+                    "tests passed throughout, because each used "
+                    "`compare_bundle(new, new, ...)` as shorthand for "
+                    "'nothing exports this symbol' -- asserting that a bundle "
+                    "compared against *itself* reports removals. Seeded with "
+                    "a batched grid over DT_NEEDED shape x versioned x "
+                    "allow-listed symbol name, in both directions (never "
+                    "reported without an OLD provider; still reported with "
+                    "one), the self-comparison metamorphic invariant, and an "
+                    "end-to-end `-nostdlib` reproduction through the real "
+                    "CLI. What is not covered: the other detectors whose "
+                    "kinds carry the same diff-confirmed claim have not been "
+                    "audited against this invariant one by one, and there is "
+                    "no mechanical check that a BREAKING kind's emission site "
+                    "reads an OLD-side fact at all."
+                ),
+                reference="PR #1283",
+            ),
+        ),
+    ),
+    BugClass(
         id="policy.public_surface_reachability",
         invariant=(
             "A declaration's public/private classification is a function "

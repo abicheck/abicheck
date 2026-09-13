@@ -244,6 +244,14 @@ class DispositionLedger:
             dedupe_key=dedupe_key,
         )
 
+    def extend_records(self, records: Iterable[DispositionRecord]) -> None:
+        """Append already-built records, bypassing the identity keying.
+
+        For :mod:`policy.disposition_merge` only -- see that module for why
+        :meth:`record` cannot do this and why the result is read-only.
+        """
+        self._records.extend(records)
+
     # -- querying ------------------------------------------------------
 
     @property

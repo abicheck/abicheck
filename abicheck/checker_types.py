@@ -458,6 +458,17 @@ class Change:
     # the finding. Appended last, keyword-only, like `demangled_symbol`.
     surface_facts: dict[str, str] | None = field(default=None, kw_only=True)
 
+    #: Which library produced this finding, when the run compared more than
+    #: one. ``None`` for every single-library comparison, where the enclosing
+    #: ``DiffResult.library`` already answers it unambiguously.
+    #:
+    #: Set only by ``compat.multi_library.merge_results``. Merging N results
+    #: concatenates bare ``Change`` objects and replaces the one library
+    #: identifier with a label like ``"2 libraries"``, so without this a
+    #: reader cannot tell which DSO a removal came from, and the same symbol
+    #: removed from two of them is indistinguishable (Codex review).
+    library: str | None = field(default=None, kw_only=True)
+
 
 @dataclass
 class LibraryMetadata:

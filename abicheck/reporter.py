@@ -43,6 +43,7 @@ from .policy.gate_decision import gate_decision_for_result
 from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
 )
+from .report.change_operation import operation_for_kind as operation_for_kind
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
@@ -94,7 +95,6 @@ from .reporter_markdown import (
     _section_severity_label as _section_severity_label,
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
     apply_show_only as apply_show_only,
-    operation_for_kind as operation_for_kind,
     parse_show_only_groups as parse_show_only_groups,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
@@ -421,6 +421,7 @@ def _to_json_leaf(
             "kind": c.kind.value,
             "symbol": c.symbol,
             "description": c.description,
+            **({"library": c.library} if c.library else {}),
             "severity": _effective_severity_label(
                 c,
                 eff_sets,
@@ -1619,6 +1620,13 @@ def _change_to_dict(
     }
     if reclassified_by:
         d["reclassified_by"] = reclassified_by
+    # Which library produced this finding, present only when the run compared
+    # more than one (`compat check` over a multi-library descriptor). Omitted
+    # otherwise, where the report's own top-level `library` already answers
+    # it -- so every single-library report is byte-identical to before.
+    finding_library = getattr(c, "library", None)
+    if finding_library:
+        d["library"] = finding_library
     # Two per-declaration blocks, omitted when absent (see their own field
     # docs on Change): `demangled_symbol`, a readable name for a finding whose
     # old-side declaration is export-table-only (`symbol`/`old_value` stay raw

@@ -69,18 +69,11 @@ emitted, and unknown internal failures use fallback code 10.
 
 The `-strict` promotion (API_BREAK → exit 1) also matches.
 
-### 2. XML Descriptor Input Format (MOSTLY COMPATIBLE)
+### 2. XML Descriptor Input Format (COMPATIBLE)
 
-`abicheck` accepts ABICC-style descriptor fields, but currently requires a
-well-formed XML document with a single root element (for example
-`<descriptor>...</descriptor>`).
+`abicheck` accepts both descriptor shapes ABICC accepts.
 
-ABICC pipelines sometimes use descriptor *fragments* such as sibling
-`<version>`, `<headers>`, `<libs>` tags without a wrapper root. Those fragment
-files are not parseable XML documents and are rejected by `abicheck` with an
-XML parse error.
-
-Supported descriptor shape in `abicheck`:
+A well-formed document with a single root element:
 ```xml
 <descriptor>
 <version>2025.0</version>
@@ -89,15 +82,42 @@ Supported descriptor shape in `abicheck`:
 </descriptor>
 ```
 
-abicheck correctly supports:
+and ABICC's own rootless *fragment* — sibling tags with no wrapper root,
+which is what real ABICC pipelines generate:
+```xml
+<version>2025.0</version>
+<headers>/path/to/include/</headers>
+<libs>/path/to/libfoo.so</libs>
+```
+
+A fragment is retried once wrapped in a synthetic root, still parsed through
+`defusedxml`, so the XXE protections are identical on either path. A leading
+`<?xml ?>` declaration on a fragment is handled. A file that is malformed for
+a reason wrapping cannot explain away (an unclosed tag) is still rejected,
+with the document-level error.
+
+abicheck supports:
 - Multiple `<headers>` and `<libs>` elements
+- **Directory** values for `<headers>` and `<libs>`, expanded to the headers
+  and shared objects beneath them — ABICC's ordinary usage
+- A descriptor naming **multiple libraries**: they are paired across the two
+  sides (by filename, then by version-insensitive stem so a SONAME bump still
+  pairs) and each pair is compared, with the results merged into one verdict.
+  A library present on only one side is reported as a coverage warning, never
+  as a removal — a descriptor's `<libs>` list is a selection, not an inventory
+- The narrowing elements `<skip_headers>`, `<skip_including>`,
+  `<skip_namespaces>`, `<skip_symbols>`, `<skip_types>` and `<skip_constants>`
+- The compile elements `<include_paths>`, `<add_include_paths>`, `<defines>`
+  and `<gcc_options>`
 - `{RELPATH}` macro substitution
 - XXE-safe parsing (improvement over ABICC)
 
-Migration note:
-- If existing ABICC jobs generate fragment-style descriptor files, add a
-  one-time normalization step to wrap those tags in a root element before
-  running `abicheck compat`.
+Elements abicheck does **not** act on (`<skip_libs>`, `<search_headers>`,
+`<search_libs>`, `<tools>`, `<cross_prefix>`, `<include_preamble>`,
+`<libs_depend>`, `<opencl>`) and any unrecognised element produce a warning
+naming the element. They are not silently ignored: a declared rule that has
+no effect, on a run that still reports a confident verdict, is worse than one
+that is rejected.
 
 ### 3. CLI Flag Acceptance (FULL PARITY)
 

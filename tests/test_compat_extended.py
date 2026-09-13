@@ -37,12 +37,14 @@ from abicheck.compat.cli import (
     _build_skip_suppression,
     _build_whitelist_suppression,
     _limit_affected_changes,
-    _load_descriptor_or_dump,
-    _parse_compat_descriptors,
     _resolve_headers_from_list,
     _setup_logging,
     _warn_stub_flags,
     _write_affected_list,
+)
+from abicheck.compat.run_inputs import (
+    _load_descriptor_or_dump,
+    _parse_compat_descriptors,
 )
 from abicheck.html_report import generate_html_report
 from abicheck.model import AbiSnapshot, Function, Visibility

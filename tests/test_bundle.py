@@ -7,7 +7,9 @@ examples/case90-93 fixtures live in tests/test_bundle_examples.py.
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -87,6 +89,55 @@ def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
         metadata=libraries,
         resolution=graph,
     )
+
+
+def _removal_pair(
+    libraries: dict[str, ElfMetadata],
+    *,
+    provider: str,
+    symbol: str,
+    version: str = "",
+    provider_old_soname: str | None = None,
+    old_needed: dict[str, list[str]] | None = None,
+) -> tuple[BundleSnapshot, BundleSnapshot]:
+    """An (old, new) pair in which *provider* exported *symbol* and no longer does.
+
+    ``bundle_intra_dep_removed`` is defined as a *diff-confirmed* removal, so
+    a fixture that exercises it has to contain one. Several tests below used
+    ``compare_bundle(new, new, ...)`` as a shortcut for "nothing in the
+    bundle exports this symbol" -- which asserted that comparing a bundle
+    against *itself* reports a removed dependency, and is the shape that let
+    Intel MKL's 293 never-in-bundle libc/MPI imports read as removals of a
+    release that removed nothing. Each such fixture is rebuilt through this
+    helper so it constructs the scenario its own docstring already described.
+
+    *libraries* is the NEW side, exactly as each test already spells it. OLD
+    is derived from it by giving *provider* an additional export of *symbol*
+    (optionally under *version*, and optionally under a pre-bump
+    *provider_old_soname*), so the consumer genuinely reached an in-bundle
+    provider before and does not after. *old_needed* additionally restores a
+    consumer's OLD ``DT_NEEDED`` edges, for the refactors that dropped the
+    edge and the export together -- without it such a consumer never reached
+    the provider in OLD either, and the pair states a different scenario than
+    the test describes.
+    """
+    old_provider = libraries[provider]
+    old_libraries = dict(libraries)
+    for lib, needed in (old_needed or {}).items():
+        old_libraries[lib] = dataclasses.replace(
+            old_libraries[lib], needed=list(needed)
+        )
+    old_libraries[provider] = dataclasses.replace(
+        old_provider,
+        soname=(
+            old_provider.soname if provider_old_soname is None else provider_old_soname
+        ),
+        symbols=[
+            *old_provider.symbols,
+            ElfSymbol(name=symbol, visibility="default", version=version),
+        ],
+    )
+    return _snapshot(old_libraries), _snapshot(libraries)
 
 
 def _write_elf_shared_object_stub(path: Path) -> None:
@@ -314,17 +365,23 @@ class TestIntraDepRemoved:
         A prior revision gated this allow-list match on the symbol *also*
         looking system-shaped, which made --bundle-system-providers inert
         for exactly this case."""
-        new = _snapshot(
+        old, new = _removal_pair(
             {
+                # The in-bundle provider that dropped the export -- without
+                # one there is no removal for the allow-list to suppress.
+                "libacme_core.so": _meta(soname="libacme_core.so.1"),
                 "libfoo.so": _meta(
                     soname="libfoo.so.1",
                     needed=["libacme_math.so.2"],
                     imports=["acme_custom_op"],
                 ),
-            }
+            },
+            provider="libacme_core.so",
+            symbol="acme_custom_op",
+            old_needed={"libfoo.so": ["libacme_core.so.1"]},
         )
         # Without the allow-list entry: real, reportable finding.
-        without_extra = compare_bundle(new, new, per_library_results=[])
+        without_extra = compare_bundle(old, new, per_library_results=[])
         assert any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
             and f.symbol == "acme_custom_op"
@@ -332,7 +389,7 @@ class TestIntraDepRemoved:
         )
         # With the exact soname allow-listed: finding must be suppressed.
         with_extra = compare_bundle(
-            new,
+            old,
             new,
             per_library_results=[],
             system_providers=["libacme_math.so.2"],
@@ -378,17 +435,21 @@ class TestIntraDepRemoved:
         version-*generic* entry (`libmkl_core`/`libmkl_core.so`, no numeric
         major) matching any real runtime version, not for treating two
         different, explicitly-pinned majors as interchangeable."""
-        new = _snapshot(
+        old, new = _removal_pair(
             {
+                "libvendor_core.so": _meta(soname="libvendor_core.so.1"),
                 "libfoo.so": _meta(
                     soname="libfoo.so.1",
                     needed=["libvendor.so.2"],
                     imports=["vendor_custom_op"],
                 ),
-            }
+            },
+            provider="libvendor_core.so",
+            symbol="vendor_custom_op",
+            old_needed={"libfoo.so": ["libvendor_core.so.1"]},
         )
         with_extra = compare_bundle(
-            new,
+            old,
             new,
             per_library_results=[],
             system_providers=["libvendor.so.1"],
@@ -407,7 +468,7 @@ class TestIntraDepRemoved:
         # it. The unresolved import remains in .dynsym; the bundle layer
         # must still flag it (the system-symbol allow-list separately
         # filters out genuinely-external imports).
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.1"),  # provider gone
                 "libalgo.so": _meta(
@@ -415,9 +476,14 @@ class TestIntraDepRemoved:
                     needed=[],  # DT_NEEDED stripped too
                     imports=["onedal_internal_op"],  # not a system symbol
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="onedal_internal_op",
+            # The refactor this test describes dropped the DT_NEEDED edge
+            # *and* the export, so OLD is the release that still had both.
+            old_needed={"libalgo.so": ["libcore.so.1"]},
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -674,7 +740,7 @@ class TestIntraDepRemoved:
     def test_unversioned_internal_sibling_import_still_fires(self) -> None:
         # The flip side of the version filter: an *unversioned* import that no
         # sibling provides is still a dropped intra-bundle dependency.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
                 "libalgo.so": _meta(
@@ -682,9 +748,11 @@ class TestIntraDepRemoved:
                     needed=["libcore.so.1"],
                     imports=["onedal_internal_op"],  # version="" → internal
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="onedal_internal_op",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -721,7 +789,7 @@ class TestIntraDepRemoved:
         # Contrast with the previous test: when the required version resolves
         # against an *intra-bundle* sibling soname but that sibling no longer
         # exports the symbol, it IS a dropped intra-bundle dependency.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(
                     soname="libcore.so.1", exports=["dummy"]
@@ -733,9 +801,12 @@ class TestIntraDepRemoved:
                     import_versions={"core_op": "LIBCORE_1.0"},
                     versions_required={"libcore.so.1": ["LIBCORE_1.0"]},
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="LIBCORE_1.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -749,7 +820,7 @@ class TestIntraDepRemoved:
         # unique: the same label ("FOO_1.0") can be required from both an
         # intra-bundle sibling and an external soname. Provider evidence is
         # then ambiguous and must NOT suppress the dropped-sibling finding.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(
                     soname="libcore.so.1", exports=["dummy"]
@@ -766,9 +837,12 @@ class TestIntraDepRemoved:
                         "libthirdparty.so.2": ["FOO_1.0"],
                     },
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="FOO_1.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -785,7 +859,7 @@ class TestIntraDepRemoved:
         # the bundle still contains libcore.so (filename-stem match), so the
         # versioned import must NOT be treated as external — the release will
         # fail to load and bundle_intra_dep_removed must fire.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.2", exports=["other_op"]),
                 "libalgo.so": _meta(
@@ -795,9 +869,15 @@ class TestIntraDepRemoved:
                     import_versions={"core_op": "LIBCORE_1.0"},
                     versions_required={"libcore.so.1": ["LIBCORE_1.0"]},
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="LIBCORE_1.0",
+            # OLD is the pre-bump release: libcore.so still advertised
+            # libcore.so.1, the soname the surviving sibling still NEEDs.
+            provider_old_soname="libcore.so.1",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -814,7 +894,7 @@ class TestIntraDepRemoved:
         # drops the export the sibling is unresolved at load — provider
         # evidence must win over the system-version-namespace shortcut, which
         # would otherwise classify GOMP_parallel@GOMP_4.0 as external.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libgomp.so": _meta(soname="libgomp.so.1", exports=["other_gomp"]),
                 "libalgo.so": _meta(
@@ -824,9 +904,12 @@ class TestIntraDepRemoved:
                     import_versions={"GOMP_parallel": "GOMP_4.0"},
                     versions_required={"libgomp.so.1": ["GOMP_4.0"]},
                 ),
-            }
+            },
+            provider="libgomp.so",
+            symbol="GOMP_parallel",
+            version="GOMP_4.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -862,7 +945,7 @@ class TestIntraDepRemoved:
         # verneed provider (ElfImport.version_soname) must resolve each import
         # independently: the bundled core_op (dropped) fires, while the genuinely
         # external tp_init must NOT be reported as bundle_intra_dep_removed.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(
                     soname="libcore.so.1", exports=["dummy"]
@@ -881,9 +964,12 @@ class TestIntraDepRemoved:
                         "libthirdparty.so.2": ["FOO_1.0"],
                     },
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="FOO_1.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = {
             f.symbol
             for f in result.bundle_findings
@@ -2981,7 +3067,7 @@ class TestArtifactSetDiscovery:
 class TestVerdictAggregation:
     def test_bundle_verdict_promotes_aggregate(self) -> None:
         # All per-library diffs are NO_CHANGE; bundle finding alone forces BREAKING.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.1", exports=["x"]),
                 "libalgo.so": _meta(
@@ -2989,9 +3075,11 @@ class TestVerdictAggregation:
                     needed=["libcore.so.1"],
                     imports=["x", "missing_sym"],
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="missing_sym",
         )
-        result = compare_bundle(new, new, [])
+        result = compare_bundle(old, new, [])
         # The bundle layer should flag missing_sym as removed.
         assert result.bundle_verdict == Verdict.BREAKING
         assert result.verdict == Verdict.BREAKING
@@ -3355,7 +3443,6 @@ def _build_tiny_so(release_dir: Path, name: str, src: str) -> Path:
     unavailable on the runner.
     """
     import shutil
-    import subprocess
 
     gcc = shutil.which("gcc")
     if gcc is None:
@@ -3496,7 +3583,6 @@ class TestCompareReleaseBundleE2E:
         # per-library and bundle-level result with no Click, no subprocess,
         # no directory-mode `compare` invocation.
         import shutil
-        import subprocess
 
         from abicheck.product_baseline import compare_product_directories
 
@@ -3800,7 +3886,6 @@ class TestCompareReleaseBundleE2E:
         cohort detector sees the on-disk versioned name. Skips on missing gcc.
         """
         import shutil
-        import subprocess
 
         gcc = shutil.which("gcc")
         if gcc is None:
