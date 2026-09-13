@@ -9,8 +9,9 @@
   which clang emits as a plain `FunctionDecl` under a `FriendDecl` rather than
   a member node); a member of an **unnamed** record (`typedef struct { … } W;`,
   whose scope the parser spells `Anonymous(kind="struct")`, never `Record`);
-  and a body written as a **function-try-block** (`void f() try { … } catch
-  (...) { … }`, emitted as a `CXXTryStmt`). The castxml backend reported every
+  and a body clang wraps in a node of its own — a **function-try-block**
+  (`void f() try { … } catch (...) { … }`, a `CXXTryStmt`) or a **coroutine**
+  (`Task f() { co_return; }`, a `CoroutineBodyStmt`). The castxml backend reported every
   one of them as inline, so the two disagreed on the same declaration while
   `scripts/backend_capabilities.py` claimed full parity for the fact.
 

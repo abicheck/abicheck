@@ -118,21 +118,36 @@ def encloses_class_scope(scope_path: ScopePath) -> bool:
     )
 
 
-#: Clang statement kinds that are a function *body*. Closed by the grammar,
-#: not a heuristic: C++ [dcl.fct.def.general] gives ``function-body`` as either
-#: a (ctor-initializer'd) compound-statement or a **function-try-block** --
-#: ``void f() try { … } catch (...) { … }``, which clang emits as a
-#: ``CXXTryStmt`` with no ``CompoundStmt`` of its own at this level. The
-#: remaining two productions, ``= default`` and ``= delete``, carry no body
-#: node at all and are handled separately by :func:`is_effectively_inline`.
-_FUNCTION_BODY_KINDS = frozenset({"CompoundStmt", "CXXTryStmt"})
+#: Direct children of a function node that are *not* its body. Everything else
+#: a function node carries is one of these: parameters, a constructor's
+#: member-init list, attributes (``OverrideAttr``, ``DeprecatedAttr``, ...),
+#: template arguments, doc comments.
+#:
+#: The body is identified by *exclusion* rather than by enumerating body kinds,
+#: which was the previous approach and was wrong. It listed ``CompoundStmt``
+#: and ``CXXTryStmt`` and called that closed, citing C++
+#: [dcl.fct.def.general]'s ``function-body`` production -- but that grammar
+#: describes the *language*, and this predicate reads clang's *AST*, which is
+#: free to wrap a body in a node of its own. It does exactly that for a
+#: coroutine: ``Task f() { co_return; }`` has a lone ``CoroutineBodyStmt``
+#: child (verified against a real clang dump), so the enumeration reported an
+#: in-class coroutine as non-inline and resurrected the false
+#: ``public_not_exported`` this module exists to prevent.
+#:
+#: A body is a statement, and in clang's JSON every statement kind ends in
+#: ``Stmt``; none of the non-body children above do. So the rule is "a direct
+#: child whose kind ends in ``Stmt``", which needs no update the next time
+#: clang introduces a body wrapper.
+_NON_BODY_CHILD_SUFFIXES = ("Decl", "Attr", "Initializer", "Comment", "Argument")
 
 
 def _has_body(node: dict[str, Any]) -> bool:
     """Whether *node* carries a real function body in its ``inner`` list."""
     inner = node.get("inner") or []
     return any(
-        isinstance(child, dict) and child.get("kind") in _FUNCTION_BODY_KINDS
+        isinstance(child, dict)
+        and isinstance(child.get("kind"), str)
+        and child["kind"].endswith("Stmt")
         for child in inner
     )
 

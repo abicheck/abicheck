@@ -92,7 +92,8 @@ def _node(kind, **attrs):
     node = {"kind": kind, "name": "f"}
     body = attrs.pop("body", False)
     if body:
-        tail = _TRY_BODY if body == "try" else _BODY
+        kind_by_alias = {"try": "CXXTryStmt", "coro": "CoroutineBodyStmt"}
+        tail = {"kind": kind_by_alias.get(body, "CompoundStmt"), "inner": []}
         node["inner"] = [{"kind": "ParmVarDecl"}, tail]
     node.update(attrs)
     return node
@@ -173,6 +174,52 @@ def test_function_try_block_body_counts_as_a_definition(kind):
     assert is_effectively_inline(_node(kind, body="try"), _RECORD) is True
     # Still bounded by scope: the same node out of line is not inline.
     assert is_effectively_inline(_node(kind, body="try"), ()) is False
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_coroutine_body_counts_as_a_definition(kind):
+    """`Task f() { co_return; }` -- clang wraps a coroutine body in a
+    `CoroutineBodyStmt` with no `CompoundStmt` at this level.
+
+    This is why body detection is by *exclusion* now. An earlier revision
+    enumerated `{CompoundStmt, CXXTryStmt}` and called it closed, citing the
+    C++ grammar's `function-body` production -- but that grammar describes the
+    language, while this predicate reads clang's AST, which is free to wrap a
+    body in a node of its own. castxml reports the coroutine inline.
+    """
+    assert is_effectively_inline(_node(kind, body="coro"), _RECORD) is True
+    assert is_effectively_inline(_node(kind, body="coro"), ()) is False
+
+
+@pytest.mark.parametrize(
+    "body_kind",
+    ["CompoundStmt", "CXXTryStmt", "CoroutineBodyStmt", "SomeFutureBodyStmt"],
+)
+def test_any_statement_child_is_a_body(body_kind):
+    """The generalization itself, including a kind clang does not emit today.
+
+    A body is a statement, and every clang statement kind ends in `Stmt`; the
+    non-body children a function node carries (parameters, member-init lists,
+    attributes, doc comments) never do. Stating it over a made-up
+    `SomeFutureBodyStmt` is the point -- the rule must not need editing the
+    next time clang introduces a wrapper, which is exactly what the previous
+    enumeration did need.
+    """
+    node = {"kind": "CXXMethodDecl", "name": "f", "inner": [{"kind": body_kind}]}
+    assert is_effectively_inline(node, _RECORD) is True
+
+
+@pytest.mark.parametrize(
+    "child_kind",
+    ["ParmVarDecl", "CXXCtorInitializer", "OverrideAttr", "FullComment"],
+)
+def test_non_statement_children_are_not_bodies(child_kind):
+    """The other half: the real non-body children must not read as a body, or
+    every *declaration* would become inline and the export obligation would
+    stop existing.
+    """
+    node = {"kind": "CXXMethodDecl", "name": "f", "inner": [{"kind": child_kind}]}
+    assert is_effectively_inline(node, _RECORD) is False
 
 
 @pytest.mark.parametrize("kind", _MEMBER_KINDS)
@@ -310,7 +357,7 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
         ((), _NAMESPACE, _RECORD, _NESTED, _ANON_RECORD, _ANON_NAMESPACE),
         (None, True),
         (None, True),
-        (False, True, "try"),
+        (False, True, "try", "coro"),
         (None, "default", "deleted"),
         (False, True),
     )
@@ -334,7 +381,17 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
 
 _CORPUS = """
 #pragma once
+#include <coroutine>
 namespace lib {
+struct Task {
+  struct promise_type {
+    Task get_return_object() { return {}; }
+    std::suspend_never initial_suspend() { return {}; }
+    std::suspend_never final_suspend() noexcept { return {}; }
+    void return_void() {}
+    void unhandled_exception() {}
+  };
+};
 class W {
 public:
   constexpr W(bool b) : v_(b) {}
@@ -342,6 +399,8 @@ public:
   int get() const { return v_; }
   int get_ref() const noexcept { return v_; }
   void try_body() try { } catch (...) { }
+  Task coro_body() { co_return; }
+  Task coro_declared();
   W() = default;
   ~W() = default;
   W(const W&) = default;
@@ -447,7 +506,17 @@ def test_two_backends_agree_on_is_inline_for_every_shared_declaration(tmp_path):
     def index(functions):
         out: dict[str, set[bool]] = {}
         for fn in functions:
-            if fn.mangled and fn.mangled.startswith("_Z"):
+            # Scoped to the corpus's own `namespace lib` (`3lib` in Itanium
+            # encoding). `#include <coroutine>` drags libstdc++'s
+            # `std::coroutine_handle` members in, and the two backends
+            # genuinely disagree on those template members -- a pre-existing
+            # divergence in *system-header template* handling that has nothing
+            # to do with this predicate. Judging declarations this corpus did
+            # not write would make the test about that instead.
+            # `startswith`, not `in`: `std::coroutine_handle<lib::Task::
+            # promise_type>` *contains* `3lib` as a template argument while
+            # being declared in `std`. The enclosing scope is what decides.
+            if fn.mangled and fn.mangled.startswith(("_ZN3lib", "_ZNK3lib")):
                 out.setdefault(fn.mangled, set()).add(fn.is_inline)
         return out
 
