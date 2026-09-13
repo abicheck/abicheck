@@ -55,6 +55,21 @@ inputs:
   depth:
     description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
     required: false
+  build-config:
+    description: >
+      Path to the project config (`.abicheck.yml`) passed as `--config` to
+      every library's dump call, the same input `actions/check-target`
+      already takes. Without it, a baseline-set was dumped under abicheck's
+      built-in defaults while the candidate side was analyzed under the
+      project's own config -- so any config key that changes what a dump
+      *extracts* (the `scope:`/`extraction:` families) made the two sides
+      structurally non-comparable, with nothing in either artifact saying
+      so. Passed verbatim; an explicit `--config` is a deliberate operator
+      signal, so an unreadable/malformed path fails the run rather than
+      falling back to auto-discovery. Omit to keep the previous behavior
+      (dump's own auto-discovery from the working directory).
+    required: false
+    default: ''
   baseline-generation:
     description: >
       Scanner-compatibility generation to record in the manifest (a
@@ -185,6 +200,7 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_DEPTH: ${{ inputs.depth }}
+        INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_GENERATOR_GIT_SHA: ${{ inputs.generator-git-sha }}
         INPUT_GENERATOR_ACTION_REF: ${{ inputs.generator-action-ref }}

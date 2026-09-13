@@ -92,11 +92,15 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
 from .diff_symbols_variables import (
     _check_variable_alignment,
     _is_access_narrowing,
+    _observed_exports,
+    _var_added,
+    _var_removed,
     _without_top_level_const,
     var_access_changes,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
+    VARIABLE_SYMBOL_TYPES,
     exported_symbol_names,
     is_abi_relevant_elf_symbol,
 )
@@ -832,6 +836,7 @@ def _match_old_function(
     elf_only_mode: bool,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
+    old_exported_symbols: frozenset[str] = frozenset(),
 ) -> list[Change]:
     """Classify a single old function: matched by mangled, extern-C fallback, or removed.
 
@@ -891,6 +896,17 @@ def _match_old_function(
         matched_by_name.add(f_old.name)
         return result
 
+    # A declaration that is still there on the NEW side and only left the
+    # *compared surface* because this run established less contract evidence
+    # for that side is an evidence gap, not a removal -- see
+    # `export_transition.surface_exit_is_evidence_gap`.
+    if _export_transition.surface_exit_is_evidence_gap(
+        f_old,
+        f_new_all,
+        old_exported_symbols=old_exported_symbols,
+        key=mangled,
+    ):
+        return []
     return [_check_removed_function(mangled, f_old, new_all, elf_only_mode)]
 
 
@@ -972,6 +988,10 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # data-model-dependent integer ABI-equivalence checks below.
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
+    # Computed once per comparison, not per declaration: the removal path
+    # cross-checks each candidate against the OLD artifact's own export
+    # table (see `_match_old_function`'s `old_exported_symbols`).
+    _old_exported_functions = _observed_exports(old, FUNCTION_SYMBOL_TYPES)
     old_map = _public_functions(old)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``_public_functions`` returns -- so every loop below is
@@ -1029,6 +1049,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 elf_only_mode,
                 params_unconfirmed,
                 is_llp64,
+                old_exported_symbols=_old_exported_functions,
             )
         )
 
@@ -1269,33 +1290,6 @@ def _check_variable(
     )
 
 
-def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
-    return [
-        make_change(
-            ChangeKind.VAR_REMOVED,
-            symbol=mangled,
-            name=v_old.name,
-            # See Change.symbol_binding's docstring — None when not captured.
-            symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
-            entity_id=v_old.entity_id,
-            demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
-            # See _check_removed_function's identical stamp.
-            surface_facts=surface_fact_summary(v_old),
-        )
-    ]
-
-
-def _var_added(mangled: str, v_new: Variable) -> list[Change]:
-    return [
-        make_change(
-            ChangeKind.VAR_ADDED,
-            symbol=mangled,
-            name=v_new.name,
-            entity_id=v_new.entity_id,
-        )
-    ]
-
-
 @registry.detector("variables")
 def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Diff public variables, joined through the shared identity index.
@@ -1312,13 +1306,16 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     and one ambiguity contract.
     """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
+    _old_exported_variables = _observed_exports(old, VARIABLE_SYMBOL_TYPES)
     old_vars = _public_variables(old)
     new_vars_index = SymbolIdentityIndex.for_variables(_public_variables(new))
     _prewarm_elf_only_demangling(old_vars, new_vars_index)
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
-        on_removed=_var_removed,
+        on_removed=lambda m, v: _var_removed(
+            m, v, new.variable_map, _old_exported_variables
+        ),
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
             m, o, n, cv_facts_reliable=cv_facts_reliable

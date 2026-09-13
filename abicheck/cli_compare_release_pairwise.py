@@ -63,7 +63,7 @@ if TYPE_CHECKING:
     from .workflows.gate import SeverityConfig
 
 
-def _release_job_mem_budget_gib() -> float:
+def _release_job_mem_budget_gib(depth: str | None = None) -> float:
     """Per-worker RAM budget (GiB) for the release-fan-out memory cap (R3,
     CLI-audit) -- see :mod:`abicheck.workflows.release_jobs`'s own docstring
     for the full "why". A thin wrapper (not a direct call site) purely so a
@@ -72,17 +72,17 @@ def _release_job_mem_budget_gib() -> float:
     """
     from .workflows.release_jobs import release_job_mem_budget_gib
 
-    return release_job_mem_budget_gib()
+    return release_job_mem_budget_gib(depth)
 
 
-def _release_jobs_mem_cap() -> int | None:
+def _release_jobs_mem_cap(depth: str | None = None) -> int | None:
     """Max release-fan-out workers that fit in available RAM, or ``None``
     when RAM can't be read -- see :func:`_release_job_mem_budget_gib`'s
     docstring for why this is a thin wrapper.
     """
     from .workflows.release_jobs import release_jobs_mem_cap
 
-    return release_jobs_mem_cap()
+    return release_jobs_mem_cap(depth)
 
 
 _CompareReleaseCommonArgs = tuple[
@@ -743,11 +743,11 @@ def _compare_release_libraries(
 
     effective_jobs = jobs if jobs > 0 else (_os.cpu_count() or 1)
     if jobs <= 0:
-        mem_cap = _release_jobs_mem_cap()
+        mem_cap = _release_jobs_mem_cap(depth)
         if mem_cap is not None and mem_cap < effective_jobs:
             click.echo(
                 f"Note: parallel release workers reduced {effective_jobs} -> "
-                f"{mem_cap} to fit available memory (~{_release_job_mem_budget_gib():.1f} "
+                f"{mem_cap} to fit available memory (~{_release_job_mem_budget_gib(depth):.1f} "
                 "GiB/worker budget, each holding up to two full snapshots resident); "
                 "set ABICHECK_RELEASE_JOB_MEM_GIB to tune the per-worker budget.",
                 err=True,

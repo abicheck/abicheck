@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import SnapshotError
+from .storage.env_limits import env_byte_limit
 from .storage.zstd_frame_guard import (
     read_past_leading_skippable_frames,
     skip_leading_skippable_frames,
@@ -159,28 +160,29 @@ def _zstd_max_window_size_bytes(zstandard: Any) -> int:
     return 1 << log
 
 
+# The decompression-bomb ceilings. Both are *public*, documented operator
+# knobs (`docs/reference/environment.md`): a real bundle member's
+# snapshot can legitimately exceed the default, and until this was public the
+# only way to raise it was the private, undocumented underscore spelling --
+# which callers found and used anyway, with no contract attached. The
+# underscore spellings stay honored, and take precedence when both are set,
+# so an existing script/CI job that already sets one is unaffected.
+MAX_DECODED_BYTES_ENV = "ABICHECK_SNAPSHOT_MAX_DECODED_BYTES"
+MAX_STORED_BYTES_ENV = "ABICHECK_SNAPSHOT_MAX_STORED_BYTES"
 _MAX_DECODED_BYTES_ENV = "_ABICHECK_SNAPSHOT_MAX_DECODED_BYTES"
 _MAX_STORED_BYTES_ENV = "_ABICHECK_SNAPSHOT_MAX_STORED_BYTES"
 
 
 def _max_decoded_bytes() -> int:
-    override = os.environ.get(_MAX_DECODED_BYTES_ENV)
-    if override:
-        try:
-            return int(override)
-        except ValueError:
-            pass
-    return DEFAULT_MAX_DECODED_BYTES
+    return env_byte_limit(
+        (_MAX_DECODED_BYTES_ENV, MAX_DECODED_BYTES_ENV), DEFAULT_MAX_DECODED_BYTES
+    )
 
 
 def _max_stored_bytes() -> int:
-    override = os.environ.get(_MAX_STORED_BYTES_ENV)
-    if override:
-        try:
-            return int(override)
-        except ValueError:
-            pass
-    return DEFAULT_MAX_STORED_BYTES
+    return env_byte_limit(
+        (_MAX_STORED_BYTES_ENV, MAX_STORED_BYTES_ENV), DEFAULT_MAX_STORED_BYTES
+    )
 
 
 # Deterministic compression settings (Section 6). Fixed, project-owned —

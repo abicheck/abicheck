@@ -86,7 +86,9 @@ class TestCompareReleaseLibrariesMemoryClamp:
 
     def test_auto_jobs_are_reduced_to_fit_memory(self, monkeypatch, capsys) -> None:
         monkeypatch.setattr("os.cpu_count", lambda: 64)
-        monkeypatch.setattr(release_pairwise, "_release_jobs_mem_cap", lambda: 2)
+        monkeypatch.setattr(
+            release_pairwise, "_release_jobs_mem_cap", lambda depth=None: 2
+        )
         captured_jobs: list[int] = []
 
         def _fake_sequential(matched_keys, common_args):
@@ -113,7 +115,9 @@ class TestCompareReleaseLibrariesMemoryClamp:
         assert "reduced 64 -> 2" in capsys.readouterr().err
 
     def test_explicit_jobs_are_never_clamped(self, monkeypatch, capsys) -> None:
-        monkeypatch.setattr(release_pairwise, "_release_jobs_mem_cap", lambda: 1)
+        monkeypatch.setattr(
+            release_pairwise, "_release_jobs_mem_cap", lambda depth=None: 1
+        )
         captured_jobs: list[int] = []
 
         def _fake_parallel(matched_keys, common_args, old_map, max_workers):

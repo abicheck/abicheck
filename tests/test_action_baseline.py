@@ -91,6 +91,39 @@ def _compile_shared_lib(src_text: str, out: Path) -> None:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
+class TestBuildConfigInput:
+    """`build-config` is declared, forwarded, and validated before any dump.
+
+    Without it a baseline-set was dumped under abicheck's built-in defaults
+    while the candidate side ran under the project's own config -- an
+    asymmetry with nothing in either artifact recording it.
+    """
+
+    def test_action_declares_the_input_and_passes_it_to_the_script(self) -> None:
+        action_yml = (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
+        assert "build-config:" in action_yml
+        assert "INPUT_BUILD_CONFIG: ${{ inputs.build-config }}" in action_yml
+
+    def test_the_script_forwards_it_as_config(self) -> None:
+        run_sh = RUN_SH.read_text(encoding="utf-8")
+        assert 'CMD+=(--config "$BUILD_CONFIG")' in run_sh
+
+    def test_an_unreadable_path_fails_before_any_dump(self, tmp_path: Path) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps([{"name": "foo", "artifact": "a.so"}]),
+                "INPUT_BUILD_CONFIG": str(tmp_path / "nope.yml"),
+            },
+            tmp_path,
+        )
+        assert result.returncode != 0
+        assert "build-config" in result.stdout + result.stderr
+        # Before any dump: the artifact does not exist either, and the
+        # config error is what the run reports.
+        assert "does not exist or is not readable" in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 class TestValidationInputRejected:
     def test_unknown_validation_value_fails(self, tmp_path: Path) -> None:
         result, _ = _run_action(

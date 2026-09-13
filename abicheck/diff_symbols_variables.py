@@ -26,10 +26,17 @@ import re
 from typing import Any
 
 from .checker_types import Change
+from .compare import export_transition as _export_transition
+from .compare.elf_only_demangle import (
+    elf_only_demangled_name as _elf_only_demangled_name,
+)
 from .compare.fact_comparison import compare_facts
 from .diff_helpers import make_change
-from .model import AccessLevel, Variable
+from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
+from .elf_symbol_filter import exported_symbol_names
+from .model import AbiSnapshot, AccessLevel, Variable
 from .model.change_catalog.kinds import ChangeKind
+from .model.surface_facts import surface_fact_summary
 from .name_classification import _find_matching_close
 
 
@@ -314,3 +321,70 @@ def _without_top_level_const(canonical_type: str) -> str:
         return _strip_trailing_declarator_const(canonical_type)
     stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
     return _TRAILING_CONST_RE.sub("", stripped)
+
+
+def _var_removed(
+    mangled: str,
+    v_old: Variable,
+    new_all: dict[str, Variable] | None = None,
+    old_exported_symbols: frozenset[str] = frozenset(),
+) -> list[Change]:
+    """A public variable with no peer in the NEW side's public surface.
+
+    *new_all* is the NEW side's FULL variable map (not just its public
+    surface): a variable still declared there, which left the compared
+    surface only because this run established less contract evidence for
+    that side, is an evidence gap rather than a removal -- see
+    ``export_transition.surface_exit_is_evidence_gap``. Defaulted so a
+    caller with no full map behaves exactly as before.
+    """
+    if new_all is not None and _export_transition.surface_exit_is_evidence_gap(
+        v_old,
+        new_all.get(mangled),
+        old_exported_symbols=old_exported_symbols,
+        key=mangled,
+    ):
+        return []
+    return [
+        make_change(
+            ChangeKind.VAR_REMOVED,
+            symbol=mangled,
+            name=v_old.name,
+            # See Change.symbol_binding's docstring — None when not captured.
+            symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
+            entity_id=v_old.entity_id,
+            demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
+            # See _check_removed_function's identical stamp.
+            surface_facts=surface_fact_summary(v_old),
+        )
+    ]
+
+
+def _var_added(mangled: str, v_new: Variable) -> list[Change]:
+    return [
+        make_change(
+            ChangeKind.VAR_ADDED,
+            symbol=mangled,
+            name=v_new.name,
+            entity_id=v_new.entity_id,
+        )
+    ]
+
+
+def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> frozenset[str]:
+    """The names *snap*'s own export table carries (empty when it has none).
+
+    The removal paths cross-check against this rather than trusting a
+    declaration's own, possibly legacy-bridged, ``binary_exported`` fact --
+    see ``export_transition.surface_exit_is_evidence_gap``.
+    """
+    return frozenset(
+        exported_symbol_names(
+            getattr(snap, "elf", None),
+            types,
+            abi_relevant_only=True,
+            filter_transitive_runtime_symbols=(
+                _should_filter_transitive_runtime_symbols(snap)
+            ),
+        )
+    )
