@@ -9284,44 +9284,64 @@ ordinary public-header addition refused the entire comparison —
 verdict, and no findings on any axis, the binary's own exported-symbol
 identity included.
 
-**What was fixed:** the *disposition*, not the extraction fact. An
-order-preserving insertion of headers the scope fingerprint independently
-confirms as new is now a non-fatal `ComparabilityMismatch` (`fatal=False`,
-`comparability_profile._declared_header_insertion_mismatch`): the comparison
-runs and the residual risk is recorded as a bounded assurance reduction on
-the `declaration`/`layout` dimensions, per the product rule "weaker evidence
-narrows conclusions". Nothing is hidden — the reason reaches
-`coverage_warnings` and the per-dimension breakdown reaches
-`DiffResult.comparability_assurance`.
+**What was fixed, in two rounds.** The first round changed the
+*disposition*: an order-preserving insertion of headers the scope
+fingerprint independently confirms as new became a non-fatal
+`ComparabilityMismatch` (`fatal=False`) whose residual risk was recorded as
+a bounded assurance reduction on the `declaration`/`layout` dimensions. That
+removed the refusal but kept pricing the insertion — and the price is real:
+`AnalysisAssurance.status` reads `partial`, which `assurance.require_complete`
+gates on, so a project running that (correct, unweakened) setting still
+failed on an ordinary public-header addition, now with
+"extraction contexts were not provably identical" instead of a refusal.
 
-**What remains open:** the sequential aggregate TU itself. An insertion
-genuinely does change later headers' parse context, so the bounded outcome
-is honest rather than merely convenient, and a real *reorder* of existing
-headers is still a hard refusal because nothing in the declared surface
-explains it. Parsing each declared header in an independently scoped TU
-would make declared order non-load-bearing outright — a reorder would then
-be comparable at full assurance too, and this whole carve-out family could
-retire — but that is a dumper change carrying a per-header TU cost, and it
-was deliberately not attempted alongside the disposition fix.
-`--diagnostic-comparison` is explicitly **not** the answer to any of this:
-it downgrades assurance wholesale instead of resolving the extraction
-question.
+The second round removed the price, because the hazard it named is not one
+this contract prices anywhere else:
 
-**A second residual, on the bounded path itself** (Codex review, PR #1274):
-a bounded run's findings are scored by ordinary compatibility policy.
-`comparability_assurance` marks `declaration`/`layout` unverified, but no
-per-finding assurance wiring exists yet — ADR-050 E-S2 explicitly defers
-"consuming this into the diff pipeline's own per-finding assurance" to a
-later slice — so if an inserted header's macros or pragmas *did* hide a
-later declaration, the resulting finding would score a normal verdict
-rather than being held back as resting on unverified evidence.
+* A declared header's **content** is not part of `profile_fingerprint` at
+  all — `comparability_fields._header_identities` keys a header by its
+  root-relative path, never its bytes. So an existing `data.h` that gains a
+  `#define` or a `#pragma pack` between two versions changes the parse
+  context of every header after it and is compared at **full** assurance,
+  by design: the declared surface's content is the subject of the
+  comparison, not evidence about the extraction environment. Adding those
+  same declarations as a new file is the same fact in a different shape.
+* The added header's position is an incidental product of the project's
+  discovered, sorted public-header set. Pricing it makes assurance depend
+  on the new header's spelling — `json.h` costs assurance, `zzz.h` does
+  not, for the same library change.
+* The scope axis already treats the identical addition as ordinary
+  evolution at full assurance (`_scope_field_is_additive_superset`), and
+  the trailing-append waiver already accepts the added header's own parse.
 
-Two things bound that, and they are why the bounded disposition is still
-the better one. It can never become a silent clean pass: the reduction is
-recorded in `coverage_warnings`, in `comparability_assurance`, and in
-`AnalysisAssurance.status == "partial"` — which `assurance.require_complete`
-gates on. And the pre-change behavior for the same input was a hard
-`ProfileMismatchError` (exit 16), which also failed the run, so no
-invocation that previously passed can now fail; what changed is that a
-*correct* addition now gets a verdict instead of a refusal. Closing the
-residual needs per-finding dimension attribution, not a change here.
+So the `header_sequence` carve-out is now stated over
+`comparability_sequences._header_sequence_is_scope_confirmed_growth` — the
+union of the append and insertion shapes — and scope-confirmed growth is
+waived outright wherever the new header sorts.
+`comparability_profile._declared_header_insertion_mismatch` and
+`inserted_header_entries` were deleted rather than left as a second,
+unreachable path. The non-fatal (`fatal=False`) machinery itself stays:
+it expresses a general rule, has no producer today, and
+`analysis_assurance_comparability.py` remains the (still correct) bridge
+that stops a bounded run from reporting `complete`.
+
+**What still refuses, unchanged:** a reorder of an *existing* declared
+header, growth whose extra entries the declared surface does not confirm as
+new (e.g. a header fed to the L2 frontend on the new side only, whose
+content the old snapshot never parsed), a duplicate/sentinel/undecodable
+sequence, and any other diverging profile field riding alongside the
+addition — compiler family or version, target triple, pointer width,
+endianness, ABI dialect, language standard, macro ops, pass-through flags,
+or an unexplained `include_sequence` (a changed `-I` topology, which decides
+which dependency header an `#include` resolves to). The carve-out only ever
+removes `header_sequence` from the working set, so that safety property is
+structural rather than a list to keep in sync.
+
+**What remains open:** the sequential aggregate TU itself. Parsing each
+declared header in an independently scoped TU would make declared order
+non-load-bearing outright — a *reorder* would then be comparable too, and
+this whole carve-out family could retire — but that is a dumper change
+carrying a per-header TU cost, and it was deliberately not attempted
+alongside either disposition fix. `--diagnostic-comparison` is explicitly
+**not** the answer to any of this: it downgrades assurance wholesale
+instead of resolving the extraction question.
